@@ -1,0 +1,60 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# .NET build output
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+artifacts/
+TestResults/
+
+# C and C++ build output
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+out/
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# NuGet
+packages/
+*.nupkg
+*.snupkg
+
+# Generated recordings and session data
+recordings/
+sessions/
+captures/
+*.wav
+*.flac
+*.mp3
+*.mp4
+*.webm
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pfx
+*.key
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*.tmp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs and crash dumps
+*.log
+*.dmp
+*.dump
