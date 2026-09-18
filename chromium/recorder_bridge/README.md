@@ -20,10 +20,13 @@ renderer processes. The instrumented browser:
 2. Reads the one-line secret bootstrap from inherited standard input.
 3. Authenticates to the recorder and completes clock synchronization.
 4. Copies the child bootstrap into a browser-owned read-only shared-memory
-   region and adds its handle to eligible Windows child launches.
+   region. It publishes only Chromium's opaque serialized handle metadata to
+   the browser process environment so the child-launch hook can cross linked
+   module boundaries without relying on duplicated static storage.
 5. Starts renderer, GPU, and utility process bridge connections using the
    inherited capability. Their command lines contain only shared-memory handle
-   metadata and the non-secret Chromium child process identifier.
+   metadata and the non-secret Chromium child process identifier. The internal
+   metadata environment marker is removed from each child environment.
 6. Authenticates and synchronizes each participating process independently.
 7. Must route browser and child-process evidence through bounded, non-blocking
    queues to `RecorderPipeClient`.

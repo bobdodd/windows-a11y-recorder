@@ -95,6 +95,36 @@ no `authenticationToken` field.
 The generated recording and Chromium binaries are validation artifacts and are
 not committed to the repository.
 
+## Protocol 0.2 child-process validation attempt
+
+After protocol 0.2 and child-process capability propagation were implemented,
+the native Chromium build completed successfully and the focused managed
+receiver suite passed three tests with no failures.
+
+The capture host then launched the instrumented Chromium executable for a
+20-second recording. The finalized session was:
+
+`C:\Users\Public\Documents\A11yRecorderChildProcessTest\20260918-223436-3c3d88aa1c904fadb95a7a49e45754ce`
+
+The session completed with 117 accepted events, zero dropped events, a healthy
+browser collector, and no archive failure. It contained the expected protocol
+0.2 `browser-connected` and `browser-clock-synchronized` records for browser OS
+process 10160. It contained no renderer, GPU, or utility lifecycle records and
+no `browser-connection-rejected` record. No `authenticationToken` field was
+persisted.
+
+This attempt therefore validates the protocol 0.2 browser-process path but does
+not validate child-process capability propagation. Inspection identified that
+the bridge is linked into both `chrome.dll` and `content/browser`, so
+module-local static storage cannot be used as the handoff between browser
+startup and the child-launch hook. The corrective implementation publishes
+only Chromium's opaque shared-memory handle metadata through a browser-process
+environment marker, explicitly inherits the handle at child launch, and
+removes the marker from the child environment. The authentication token
+remains exclusively inside the read-only shared-memory region. A repeated
+native build and live child-process session are required before child
+propagation is considered validated.
+
 ## Scope boundary
 
 This validation proves the browser-process bootstrap, local named-pipe

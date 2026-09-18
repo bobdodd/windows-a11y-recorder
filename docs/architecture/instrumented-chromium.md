@@ -128,13 +128,18 @@ private keys.
 Protocol version 0.2 propagates the recorder capability from the browser to
 eligible renderer, GPU, and utility processes through a browser-owned,
 read-only shared-memory region. Chromium's Windows child-launch path inherits
-the region handle. Child command lines contain only the serialized handle
-metadata and a non-secret Chromium child process identifier, never the pipe
-authentication token. Each participating process maps the region during early
-startup, validates its process type and identifiers, authenticates its own
-named-pipe connection, and establishes an independent clock mapping. Lifecycle
-records correlate the browser instance, OS process ID, browser OS process ID,
-Chromium child process ID, and process type.
+the region handle. Because the bridge is linked into more than one Chromium
+module, the browser publishes Chromium's opaque serialized handle metadata in
+an internal process environment marker rather than relying on module-local
+static storage. The child-launch hook reads that metadata, explicitly inherits
+the handle, and removes the marker from the child environment. Child command
+lines contain only the serialized handle metadata and a non-secret Chromium
+child process identifier, never the pipe authentication token. Each
+participating process maps the region during early startup, validates its
+process type and identifiers, authenticates its own named-pipe connection, and
+establishes an independent clock mapping. Lifecycle records correlate the
+browser instance, OS process ID, browser OS process ID, Chromium child process
+ID, and process type.
 
 The native target depends on Chromium `//base` and must be compiled and tested
 inside a Chromium source checkout. On September 18, 2026, the bridge was

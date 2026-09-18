@@ -3,16 +3,19 @@
 #include <windows.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/containers/span.h"
+#include "base/environment.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/shared_memory_switch.h"
 #include "base/no_destructor.h"
 #include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/win/windows_handle_util.h"
 #include "chromium/recorder_bridge/recorder_protocol.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
 #include "components/version_info/version_info.h"
@@ -53,6 +56,28 @@ bool StoreChildBootstrap(const BootstrapConfiguration& configuration,
   mapped_region.mapping.GetMemoryAsSpan<uint8_t>().copy_from(
       base::as_byte_span(json));
   ChildBootstrapStorage() = std::move(mapped_region.region);
+
+  // recorder_bridge is linked into both chrome.dll and content/browser.
+  // Module-local static storage is therefore not a reliable way to hand the
+  // region to the child-launch hook. Publish only Chromium's opaque serialized
+  // handle metadata through the process environment. The authentication token
+  // remains exclusively inside the read-only shared-memory region.
+  base::CommandLine metadata_command_line(base::CommandLine::NO_PROGRAM);
+  base::LaunchOptions metadata_launch_options;
+  base::shared_memory::SharedMemorySwitch bootstrap_switch(
+      kChildBootstrapHandleSwitch, 0, 0);
+  bootstrap_switch.AddToLaunchParameters(
+      ChildBootstrapStorage(), &metadata_command_line,
+      &metadata_launch_options);
+  const std::string metadata = metadata_command_line.GetSwitchValueASCII(
+      kChildBootstrapHandleSwitch);
+  if (metadata.empty() ||
+      !base::Environment::Create()->SetVar(
+          kChildBootstrapMetadataEnvironment, metadata)) {
+    ChildBootstrapStorage() = base::ReadOnlySharedMemoryRegion();
+    *error = "Could not publish the child recorder bootstrap metadata.";
+    return false;
+  }
   return true;
 }
 
@@ -95,6 +120,8 @@ bool InitializeProcessBridge(std::string* error) {
       command_line.GetSwitchValueASCII(switches::kProcessType);
   if (process_type.empty()) {
     if (!command_line.HasSwitch(kBootstrapSwitch)) {
+      base::Environment::Create()->UnSetVar(
+          kChildBootstrapMetadataEnvironment);
       return true;
     }
     if (command_line.GetSwitchValueASCII(kBootstrapSwitch) !=
@@ -162,8 +189,10 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
   }
   error->clear();
 
-  const base::ReadOnlySharedMemoryRegion& region = ChildBootstrapStorage();
-  if (!region.IsValid()) {
+  const std::optional<std::string> metadata =
+      base::Environment::Create()->GetVar(
+          kChildBootstrapMetadataEnvironment);
+  if (!metadata.has_value()) {
     return true;
   }
   const std::string process_type =
@@ -180,9 +209,26 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
     return false;
   }
 
-  base::shared_memory::SharedMemorySwitch bootstrap_switch(
-      kChildBootstrapHandleSwitch, 0, 0);
-  bootstrap_switch.AddToLaunchParameters(region, command_line, launch_options);
+  const size_t first_separator = metadata->find(',');
+  uint32_t handle_value = 0;
+  if (first_separator == std::string::npos ||
+      metadata->compare(first_separator, 3, ",i,") != 0 ||
+      !base::StringToUint(
+          std::string_view(*metadata).substr(0, first_separator),
+          &handle_value) ||
+      handle_value == 0) {
+    *error = "Child recorder bootstrap handle metadata was invalid.";
+    return false;
+  }
+  if (launch_options->elevated) {
+    *error = "Recorder bootstrap does not support elevated child processes.";
+    return false;
+  }
+
+  launch_options->handles_to_inherit.push_back(
+      base::win::Uint32ToHandle(handle_value));
+  launch_options->environment[kChildBootstrapMetadataEnvironmentWide] = L"";
+  command_line->AppendSwitchASCII(kChildBootstrapHandleSwitch, *metadata);
   command_line->AppendSwitchASCII(kChildProcessIdSwitch,
                                   base::NumberToString(child_process_id));
   return true;

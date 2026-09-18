@@ -19,6 +19,10 @@ from the product version.
 - Advanced the browser evidence protocol to version 0.2.
 - Restricted accepted browser evidence connections to the browser, renderer,
   GPU, and utility process types with required process correlation metadata.
+- Replaced the child-launch handoff's module-local static dependency with a
+  browser-process metadata marker so `chrome.dll` and `content/browser` share
+  the same read-only shared-memory capability. The marker contains no
+  authentication token and is removed from child environments.
 
 ## 0.1.0 - 2026-09-18
 

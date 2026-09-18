@@ -139,6 +139,9 @@ Controls:
   it only to eligible Chromium children through inherited read-only shared
   memory. Never place the authentication token in a command-line argument,
   environment variable, or file.
+- Permit only opaque shared-memory handle metadata in the browser process
+  environment when crossing Chromium linked-module boundaries. Remove that
+  internal marker from every launched child environment.
 - Require child connections to report an allowed process type, the browser OS
   process ID, and a positive Chromium child process ID.
 - Include protocol version, connection identifier, command identifier, and monotonic sequence.
