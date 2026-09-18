@@ -5,6 +5,9 @@ namespace Recorder.Collectors.Browser;
 
 public sealed class ChromiumLauncher : IAsyncDisposable
 {
+    public const string LogFileEnvironmentVariable =
+        "A11Y_RECORDER_CHROMIUM_LOG_FILE";
+
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
@@ -38,7 +41,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         var startInfo = CreateStartInfo(
             executablePath,
             profileDirectory,
-            startUrl);
+            startUrl,
+            Environment.GetEnvironmentVariable(LogFileEnvironmentVariable));
         var process = Process.Start(startInfo) ??
             throw new InvalidOperationException(
                 "Instrumented Chromium did not start.");
@@ -70,7 +74,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
     public static ProcessStartInfo CreateStartInfo(
         string executablePath,
         string profileDirectory,
-        string? startUrl)
+        string? startUrl,
+        string? diagnosticLogPath = null)
     {
         var result = new ProcessStartInfo
         {
@@ -87,6 +92,17 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         result.ArgumentList.Add("--no-first-run");
         result.ArgumentList.Add("--no-default-browser-check");
         result.ArgumentList.Add("--disable-background-mode");
+        if (!string.IsNullOrWhiteSpace(diagnosticLogPath))
+        {
+            var fullLogPath = Path.GetFullPath(diagnosticLogPath);
+            var logDirectory = Path.GetDirectoryName(fullLogPath);
+            if (!string.IsNullOrEmpty(logDirectory))
+            {
+                Directory.CreateDirectory(logDirectory);
+            }
+            result.ArgumentList.Add("--enable-logging");
+            result.ArgumentList.Add($"--log-file={fullLogPath}");
+        }
         if (!string.IsNullOrWhiteSpace(startUrl))
         {
             result.ArgumentList.Add(startUrl);

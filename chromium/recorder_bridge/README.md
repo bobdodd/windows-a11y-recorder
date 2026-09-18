@@ -37,6 +37,13 @@ child-process capability distribution, per-process authentication and clock
 synchronization, framing, and evidence serialization. Blink evidence hooks are
 the next implementation slice.
 
+For an explicit local diagnostic run, set
+`A11Y_RECORDER_CHROMIUM_LOG_FILE` to an absolute file path before starting the
+capture host. The launcher then adds Chromium's `--enable-logging` and
+`--log-file` switches. This option is disabled by default because Chromium logs
+can contain tested URLs and other local browsing details. Diagnostic logs are
+not session evidence and must not contain the recorder authentication token.
+
 For each accepted connection, the recorder persists two records on the
 `browser.lifecycle` channel:
 

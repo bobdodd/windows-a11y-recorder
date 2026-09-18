@@ -183,6 +183,10 @@ During those states:
 - The app does not check for updates.
 - The app does not load remote images, fonts, help, or web content.
 - Session names, device data, diagnostics, and crash details remain local.
+- Opt-in Chromium diagnostic logging is disabled by default. When enabled
+  through `A11Y_RECORDER_CHROMIUM_LOG_FILE`, the resulting local file may
+  contain tested URLs and browsing details, is not session evidence, and must
+  be handled as sensitive diagnostic data.
 - Recording remains functional with the network disconnected.
 
 Post-capture upload is outside the capture workflow. It requires an explicit export, an identified destination, and a separate user action.

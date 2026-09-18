@@ -40,4 +40,37 @@ public sealed class ChromiumLauncherTests
                 "token",
                 StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void ExplicitDiagnosticLogPathEnablesChromiumFileLogging()
+    {
+        var executable = Path.Combine(
+            Path.GetTempPath(),
+            "browser",
+            "chrome.exe");
+        var profile = Path.Combine(
+            Path.GetTempPath(),
+            "profiles",
+            "session-1");
+        var logPath = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-diagnostics",
+            "chromium.log");
+
+        var startInfo = ChromiumLauncher.CreateStartInfo(
+            executable,
+            profile,
+            "about:blank",
+            logPath);
+
+        Assert.Contains("--enable-logging", startInfo.ArgumentList);
+        Assert.Contains(
+            $"--log-file={Path.GetFullPath(logPath)}",
+            startInfo.ArgumentList);
+        Assert.DoesNotContain(
+            startInfo.ArgumentList,
+            argument => argument.Contains(
+                "authentication",
+                StringComparison.OrdinalIgnoreCase));
+    }
 }

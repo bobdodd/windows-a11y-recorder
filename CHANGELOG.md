@@ -23,6 +23,9 @@ from the product version.
   browser-process metadata marker so `chrome.dll` and `content/browser` share
   the same read-only shared-memory capability. The marker contains no
   authentication token and is removed from child environments.
+- Added opt-in Chromium file logging through
+  `A11Y_RECORDER_CHROMIUM_LOG_FILE` for diagnosing early browser and child
+  process startup failures.
 
 ## 0.1.0 - 2026-09-18
 
