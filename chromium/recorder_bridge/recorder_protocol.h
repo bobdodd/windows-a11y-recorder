@@ -3,14 +3,16 @@
 
 #include <stdint.h>
 
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include "base/values.h"
 #include "base/win/scoped_handle.h"
 
 namespace a11y_recorder {
 
-inline constexpr char kProtocolVersion[] = "0.1";
+inline constexpr char kProtocolVersion[] = "0.2";
 inline constexpr uint32_t kDefaultMaximumMessageBytes = 4 * 1024 * 1024;
 
 struct BootstrapConfiguration {
@@ -19,7 +21,17 @@ struct BootstrapConfiguration {
   std::string authentication_token;
   std::string browser_instance_id;
   uint32_t maximum_message_bytes = kDefaultMaximumMessageBytes;
+  std::optional<int> parent_process_id;
+  std::optional<int> child_process_id;
 };
+
+bool ParseBootstrapConfiguration(std::string_view json,
+                                 BootstrapConfiguration* configuration,
+                                 std::string* error);
+
+bool SerializeBootstrapConfiguration(
+    const BootstrapConfiguration& configuration, std::string* json,
+    std::string* error);
 
 // Reads the single JSON bootstrap line written to inherited standard input by
 // Recorder.App. The authentication token is never passed in argv or written to
@@ -38,12 +50,9 @@ class RecorderPipeClient {
                              const std::string& chromium_version,
                              std::string* error);
 
-  bool SendEvidence(int64_t browser_timestamp_ticks,
-                    std::string channel,
-                    std::string event_type,
-                    base::DictValue payload,
-                    base::ListValue quality_flags,
-                    std::string* error);
+  bool SendEvidence(int64_t browser_timestamp_ticks, std::string channel,
+                    std::string event_type, base::DictValue payload,
+                    base::ListValue quality_flags, std::string* error);
 
   bool connected() const { return pipe_.is_valid(); }
 

@@ -16,7 +16,9 @@ class IntegrateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             delegate = root / "chrome_main_delegate.cc"
-            build = root / "BUILD.gn"
+            chrome_build = root / "chrome_BUILD.gn"
+            child_launcher = root / "child_process_launcher_helper_win.cc"
+            content_build = root / "content_browser_BUILD.gn"
             delegate.write_text(
                 '#include "chrome/app/chrome_main_delegate.h"\n'
                 "\n"
@@ -27,7 +29,7 @@ class IntegrateTests(unittest.TestCase):
                 "}\n",
                 encoding="utf-8",
             )
-            build.write_text(
+            chrome_build.write_text(
                 'static_library("test_support") {\n'
                 "  sources = [\n"
                 '    "chrome_main_delegate.cc",\n'
@@ -50,21 +52,66 @@ class IntegrateTests(unittest.TestCase):
                 "}\n",
                 encoding="utf-8",
             )
+            child_launcher.write_text(
+                '#include "content/browser/child_process_launcher_helper.h"\n'
+                "\n"
+                "bool ChildProcessLauncherHelper::"
+                "BeforeLaunchOnLauncherThread(\n"
+                "    FileMappedForLaunch& files_to_register,\n"
+                "    base::LaunchOptions* options) {\n"
+                "  CHECK(CurrentlyOnProcessLauncherTaskRunner());\n"
+                "  CHECK_EQ(options->elevated, "
+                "delegate_->ShouldLaunchElevated());\n"
+                "  if (!options->elevated) {\n"
+                "    PrepareChild();\n"
+                "  }\n"
+                "  return true;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            content_build.write_text(
+                'source_set("browser") {\n'
+                "  if (is_win) {\n"
+                "    sources += [\n"
+                '      "child_process_launcher_helper_win.cc",\n'
+                "    ]\n"
+                "    deps += [\n"
+                '      "//components/app_launch_prefetch",\n'
+                "    ]\n"
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
 
             INTEGRATE.patch_main_delegate(delegate)
-            INTEGRATE.patch_build(build)
+            INTEGRATE.patch_chrome_build(chrome_build)
+            INTEGRATE.patch_child_launcher(child_launcher)
+            INTEGRATE.patch_content_browser_build(content_build)
             first_delegate = delegate.read_text(encoding="utf-8")
-            first_build = build.read_text(encoding="utf-8")
+            first_chrome_build = chrome_build.read_text(encoding="utf-8")
+            first_child_launcher = child_launcher.read_text(encoding="utf-8")
+            first_content_build = content_build.read_text(encoding="utf-8")
 
             INTEGRATE.patch_main_delegate(delegate)
-            INTEGRATE.patch_build(build)
+            INTEGRATE.patch_chrome_build(chrome_build)
+            INTEGRATE.patch_child_launcher(child_launcher)
+            INTEGRATE.patch_content_browser_build(content_build)
 
             self.assertEqual(
                 first_delegate, delegate.read_text(encoding="utf-8")
             )
-            self.assertEqual(first_build, build.read_text(encoding="utf-8"))
             self.assertEqual(
-                1, first_delegate.count("InitializeBrowserProcessBridge")
+                first_chrome_build, chrome_build.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                first_child_launcher,
+                child_launcher.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                first_content_build, content_build.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                1, first_delegate.count("InitializeProcessBridge")
             )
             self.assertIn(
                 '#if BUILDFLAG(IS_WIN)\n'
@@ -73,11 +120,23 @@ class IntegrateTests(unittest.TestCase):
                 first_delegate,
             )
             self.assertIn(
-                '      "//chromium/recorder_bridge",\n', first_build
+                '      "//chromium/recorder_bridge",\n', first_chrome_build
             )
             self.assertNotIn(
                 '    "//chromium/recorder_bridge",\n',
-                first_build.split('if (is_win) {', 1)[0],
+                first_chrome_build.split('if (is_win) {', 1)[0],
+            )
+            self.assertIn(
+                "AppendRecorderBootstrapToChildProcess",
+                first_child_launcher,
+            )
+            self.assertIn(
+                "child_process_id().value()",
+                first_child_launcher,
+            )
+            self.assertIn(
+                '      "//chromium/recorder_bridge",\n',
+                first_content_build,
             )
 
 

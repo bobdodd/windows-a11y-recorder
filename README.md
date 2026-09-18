@@ -72,10 +72,13 @@ Completed:
 3. Build the core recorder and accessible synchronized timeline viewer.
 4. Implement and validate the authenticated recorder-to-Chromium browser
    process connection and clock synchronization.
+5. Implement recorder capability propagation, independent authentication, and
+   clock synchronization for Chromium renderer, GPU, and utility processes.
 
 Remaining:
 
-1. Distribute scoped capabilities to Chromium child processes.
+1. Validate child-process capability propagation on the reference Chromium
+   Windows build.
 2. Add Blink and browser-process evidence hooks for listeners, dispatch,
    default actions, timers, cookies, DOM, accessibility, network, and
    rendering.

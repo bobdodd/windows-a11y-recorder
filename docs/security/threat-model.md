@@ -135,6 +135,12 @@ Controls:
 - Verify the child process image path and expected signer.
 - Restrict named-pipe access to the current user and expected process.
 - Authenticate each launch with a random, short-lived secret.
+- Deliver the browser bootstrap through inherited standard input and propagate
+  it only to eligible Chromium children through inherited read-only shared
+  memory. Never place the authentication token in a command-line argument,
+  environment variable, or file.
+- Require child connections to report an allowed process type, the browser OS
+  process ID, and a positive Chromium child process ID.
 - Include protocol version, connection identifier, command identifier, and monotonic sequence.
 - Reject replayed, oversized, out-of-order, and unknown messages.
 

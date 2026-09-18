@@ -125,6 +125,17 @@ launcher also removes inherited environment variables whose names indicate
 tokens, secrets, passwords, authorization data, API keys, access keys, or
 private keys.
 
+Protocol version 0.2 propagates the recorder capability from the browser to
+eligible renderer, GPU, and utility processes through a browser-owned,
+read-only shared-memory region. Chromium's Windows child-launch path inherits
+the region handle. Child command lines contain only the serialized handle
+metadata and a non-secret Chromium child process identifier, never the pipe
+authentication token. Each participating process maps the region during early
+startup, validates its process type and identifiers, authenticates its own
+named-pipe connection, and establishes an independent clock mapping. Lifecycle
+records correlate the browser instance, OS process ID, browser OS process ID,
+Chromium child process ID, and process type.
+
 The native target depends on Chromium `//base` and must be compiled and tested
 inside a Chromium source checkout. On September 18, 2026, the bridge was
 compiled into Chromium 156.0.8065.0 on the reference Windows platform. The
@@ -141,6 +152,9 @@ Successful connections are persisted on the `browser.lifecycle` channel:
   authentication token are validated.
 - `browser-clock-synchronized` is emitted only after the clock exchange
   completes and the recorder sends `ready`.
+- Child-process hello messages are accepted only for renderer, GPU, and utility
+  process types and must include positive browser parent and Chromium child
+  process identifiers.
 - Neither record contains the authentication token.
 - A failed authentication or handshake produces
   `browser-connection-rejected` instead of a successful lifecycle sequence.

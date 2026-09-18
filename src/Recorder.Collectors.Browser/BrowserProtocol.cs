@@ -127,7 +127,9 @@ internal sealed record BrowserHelloMessage(
     int ProcessId,
     string ProcessType,
     string ChromiumVersion,
-    string MonotonicFrequency);
+    string MonotonicFrequency,
+    int? ParentProcessId,
+    int? ChildProcessId);
 
 internal sealed record BrowserClockSyncResponse(
     string Kind,

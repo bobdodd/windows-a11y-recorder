@@ -9,13 +9,13 @@
 #include <string_view>
 #include <utility>
 
+#include "base/check.h"
+#include "base/containers/span.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/check.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/containers/span.h"
-#include "base/numerics/safe_conversions.h"
 
 namespace a11y_recorder {
 namespace {
@@ -64,10 +64,8 @@ int64_t QueryMonotonicFrequency() {
   return value.QuadPart;
 }
 
-bool RequireString(const base::DictValue& value,
-                   std::string_view name,
-                   std::string* output,
-                   std::string* error) {
+bool RequireString(const base::DictValue& value, std::string_view name,
+                   std::string* output, std::string* error) {
   const std::string* item = value.FindString(name);
   if (!item || item->empty()) {
     *error = "Missing or empty bootstrap field: " + std::string(name);
@@ -79,19 +77,15 @@ bool RequireString(const base::DictValue& value,
 
 }  // namespace
 
-bool ReadBootstrapFromStandardInput(BootstrapConfiguration* configuration,
-                                    std::string* error) {
+bool ParseBootstrapConfiguration(std::string_view json,
+                                 BootstrapConfiguration* configuration,
+                                 std::string* error) {
   if (!configuration || !error) {
     return false;
   }
 
-  std::string line;
-  if (!std::getline(std::cin, line) || line.empty()) {
-    *error = "Recorder bootstrap was not available on standard input.";
-    return false;
-  }
-
-  std::optional<base::Value> parsed = base::JSONReader::Read(line, base::JSON_PARSE_RFC);
+  std::optional<base::Value> parsed =
+      base::JSONReader::Read(json, base::JSON_PARSE_RFC);
   if (!parsed || !parsed->is_dict()) {
     *error = "Recorder bootstrap was not a JSON object.";
     return false;
@@ -100,8 +94,8 @@ bool ReadBootstrapFromStandardInput(BootstrapConfiguration* configuration,
   const base::DictValue& value = parsed->GetDict();
   const std::string* kind = value.FindString("kind");
   if (!kind || *kind != "a11y-recorder-bootstrap" ||
-      !RequireString(value, "protocolVersion",
-                     &configuration->protocol_version, error) ||
+      !RequireString(value, "protocolVersion", &configuration->protocol_version,
+                     error) ||
       !RequireString(value, "pipeName", &configuration->pipe_name, error) ||
       !RequireString(value, "authenticationToken",
                      &configuration->authentication_token, error) ||
@@ -119,11 +113,53 @@ bool ReadBootstrapFromStandardInput(BootstrapConfiguration* configuration,
     return false;
   }
   configuration->maximum_message_bytes = static_cast<uint32_t>(*maximum);
+  configuration->parent_process_id = value.FindInt("parentProcessId");
+  configuration->child_process_id = value.FindInt("childProcessId");
   if (configuration->protocol_version != kProtocolVersion) {
     *error = "Recorder protocol version is not supported.";
     return false;
   }
   return true;
+}
+
+bool SerializeBootstrapConfiguration(
+    const BootstrapConfiguration& configuration, std::string* json,
+    std::string* error) {
+  if (!json || !error) {
+    return false;
+  }
+
+  base::DictValue value;
+  value.Set("kind", "a11y-recorder-bootstrap");
+  value.Set("protocolVersion", configuration.protocol_version);
+  value.Set("pipeName", configuration.pipe_name);
+  value.Set("authenticationToken", configuration.authentication_token);
+  value.Set("browserInstanceId", configuration.browser_instance_id);
+  value.Set("maximumMessageBytes",
+            static_cast<int>(configuration.maximum_message_bytes));
+  if (configuration.parent_process_id) {
+    value.Set("parentProcessId", *configuration.parent_process_id);
+  }
+  if (configuration.child_process_id) {
+    value.Set("childProcessId", *configuration.child_process_id);
+  }
+  if (!base::JSONWriter::Write(value, json)) {
+    *error = "Recorder bootstrap could not be serialized.";
+    return false;
+  }
+  return true;
+}
+
+bool ReadBootstrapFromStandardInput(BootstrapConfiguration* configuration,
+                                    std::string* error) {
+  std::string line;
+  if (!std::getline(std::cin, line) || line.empty()) {
+    if (error) {
+      *error = "Recorder bootstrap was not available on standard input.";
+    }
+    return false;
+  }
+  return ParseBootstrapConfiguration(line, configuration, error);
 }
 
 RecorderPipeClient::RecorderPipeClient(BootstrapConfiguration configuration)
@@ -132,8 +168,7 @@ RecorderPipeClient::RecorderPipeClient(BootstrapConfiguration configuration)
 RecorderPipeClient::~RecorderPipeClient() = default;
 
 bool RecorderPipeClient::ConnectAndSynchronize(
-    const std::string& process_type,
-    const std::string& chromium_version,
+    const std::string& process_type, const std::string& chromium_version,
     std::string* error) {
   const std::wstring path =
       L"\\\\.\\pipe\\" + base::UTF8ToWide(configuration_.pipe_name);
@@ -153,6 +188,12 @@ bool RecorderPipeClient::ConnectAndSynchronize(
   hello.Set("processId", static_cast<int>(::GetCurrentProcessId()));
   hello.Set("processType", process_type);
   hello.Set("chromiumVersion", chromium_version);
+  if (configuration_.parent_process_id) {
+    hello.Set("parentProcessId", *configuration_.parent_process_id);
+  }
+  if (configuration_.child_process_id) {
+    hello.Set("childProcessId", *configuration_.child_process_id);
+  }
   hello.Set("monotonicFrequency",
             base::NumberToString(QueryMonotonicFrequency()));
   if (!WriteMessage(std::move(hello), error)) {
@@ -175,8 +216,7 @@ bool RecorderPipeClient::ConnectAndSynchronize(
   response.Set("kind", "clock-sync-response");
   response.Set("requestId", *request_id);
   response.Set("browserReceiveTicks", base::NumberToString(receive_ticks));
-  response.Set("browserSendTicks",
-               base::NumberToString(QueryMonotonicTicks()));
+  response.Set("browserSendTicks", base::NumberToString(QueryMonotonicTicks()));
   if (!WriteMessage(std::move(response), error)) {
     return false;
   }
@@ -223,10 +263,8 @@ bool RecorderPipeClient::WriteMessage(base::DictValue message,
 
   const uint32_t length = static_cast<uint32_t>(json.size());
   std::array<uint8_t, 4> header = {
-      static_cast<uint8_t>(length),
-      static_cast<uint8_t>(length >> 8),
-      static_cast<uint8_t>(length >> 16),
-      static_cast<uint8_t>(length >> 24)};
+      static_cast<uint8_t>(length), static_cast<uint8_t>(length >> 8),
+      static_cast<uint8_t>(length >> 16), static_cast<uint8_t>(length >> 24)};
   if (!WriteExact(pipe_.get(), base::span(header)) ||
       !WriteExact(pipe_.get(), base::as_byte_span(json))) {
     *error = "Browser evidence pipe write failed.";
@@ -256,7 +294,8 @@ bool RecorderPipeClient::ReadMessage(base::DictValue* message,
     *error = "Browser evidence pipe ended inside a message.";
     return false;
   }
-  std::optional<base::Value> parsed = base::JSONReader::Read(json, base::JSON_PARSE_RFC);
+  std::optional<base::Value> parsed =
+      base::JSONReader::Read(json, base::JSON_PARSE_RFC);
   if (!parsed || !parsed->is_dict()) {
     *error = "Recorder message was not a JSON object.";
     return false;

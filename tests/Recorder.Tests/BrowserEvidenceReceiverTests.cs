@@ -60,7 +60,9 @@ public sealed class BrowserEvidenceReceiverTests
                 processId = 1234,
                 processType = "renderer",
                 chromiumVersion = "test",
-                monotonicFrequency = "1000000"
+                monotonicFrequency = "1000000",
+                parentProcessId = 1000,
+                childProcessId = 17
             });
         using var request = await ReadFrameAsync(client);
         var requestId = request.RootElement
@@ -103,6 +105,12 @@ public sealed class BrowserEvidenceReceiverTests
         Assert.Equal(
             "test",
             connected.Payload.GetProperty("chromiumVersion").GetString());
+        Assert.Equal(
+            1000,
+            connected.Payload.GetProperty("parentProcessId").GetInt32());
+        Assert.Equal(
+            17,
+            connected.Payload.GetProperty("childProcessId").GetInt32());
         Assert.False(
             connected.Payload.TryGetProperty("authenticationToken", out _));
 
@@ -229,6 +237,73 @@ public sealed class BrowserEvidenceReceiverTests
                 browserInstanceId = "browser-1",
                 processId = 1234,
                 processType = "browser",
+                chromiumVersion = "test",
+                monotonicFrequency = "1000000"
+            });
+
+        var rejected = await sink.WaitForRecordAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(BrowserEvidenceEventTypes.Omission, rejected.EventType);
+        Assert.Equal(
+            "browser-connection-rejected",
+            rejected.Payload.GetProperty("reason").GetString());
+        Assert.Equal(CollectorHealthState.Degraded, receiver.HealthState);
+
+        var stopped = await receiver.StopAsync(
+            new SessionBoundary(
+                clock.GetElapsedNanoseconds(),
+                DateTimeOffset.UtcNow),
+            TestContext.Current.CancellationToken);
+        Assert.True(stopped.Accepted);
+    }
+
+    [Fact]
+    public async Task RejectsChildWithoutProcessCorrelationIdentifiers()
+    {
+        var options = new BrowserEvidenceReceiverOptions
+        {
+            PipeName = $"recorder-browser-test-{Guid.NewGuid():N}",
+            AuthenticationToken = "test-authentication-token",
+            BrowserInstanceId = "browser-1",
+            MaximumMessageBytes = 64 * 1024
+        };
+        var clock = new TestSessionClock();
+        var sink = new TestEventSink();
+        await using var receiver = new BrowserEvidenceReceiver(options);
+        var context = new CollectorInitializationContext(
+            "test-session",
+            Path.GetTempPath(),
+            clock,
+            sink);
+
+        await receiver.InitializeAsync(
+            context,
+            TestContext.Current.CancellationToken);
+        await receiver.StartAsync(
+            new SessionBoundary(
+                clock.GetElapsedNanoseconds(),
+                DateTimeOffset.UtcNow),
+            TestContext.Current.CancellationToken);
+
+        await using var client = new NamedPipeClientStream(
+            ".",
+            options.PipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous);
+        await client.ConnectAsync(
+            5_000,
+            TestContext.Current.CancellationToken);
+        await WriteFrameAsync(
+            client,
+            new
+            {
+                kind = "hello",
+                protocolVersion = BrowserEvidenceProtocol.CurrentVersion,
+                authenticationToken = options.AuthenticationToken,
+                browserInstanceId = "browser-1",
+                processId = 1234,
+                processType = "renderer",
                 chromiumVersion = "test",
                 monotonicFrequency = "1000000"
             });

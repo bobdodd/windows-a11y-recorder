@@ -276,7 +276,9 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                             browserInstanceId = hello.BrowserInstanceId,
                             processId = hello.ProcessId,
                             processType = hello.ProcessType,
-                            chromiumVersion = hello.ChromiumVersion
+                            chromiumVersion = hello.ChromiumVersion,
+                            parentProcessId = hello.ParentProcessId,
+                            childProcessId = hello.ChildProcessId
                         });
                     var mapper = await SynchronizeClockAsync(
                         pipe,
@@ -290,6 +292,8 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                             browserInstanceId = hello.BrowserInstanceId,
                             processId = hello.ProcessId,
                             processType = hello.ProcessType,
+                            parentProcessId = hello.ParentProcessId,
+                            childProcessId = hello.ChildProcessId,
                             clockMappingId =
                                 $"chromium:{hello.BrowserInstanceId}:" +
                                 $"{hello.ProcessId}",
@@ -322,7 +326,14 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
             string.IsNullOrWhiteSpace(hello.BrowserInstanceId) ||
             hello.BrowserInstanceId != _options.BrowserInstanceId ||
             hello.ProcessId <= 0 ||
-            string.IsNullOrWhiteSpace(hello.ProcessType) ||
+            hello.ProcessType is not (
+                "browser" or "renderer" or "gpu-process" or "utility") ||
+            (hello.ProcessType == "browser" &&
+                (hello.ParentProcessId is not null ||
+                    hello.ChildProcessId is not null)) ||
+            (hello.ProcessType != "browser" &&
+                (hello.ParentProcessId is null or <= 0 ||
+                    hello.ChildProcessId is null or <= 0)) ||
             !TryReadPositiveInt64(hello.MonotonicFrequency, out _))
         {
             throw new InvalidDataException("Invalid browser hello message.");

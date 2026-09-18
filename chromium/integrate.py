@@ -11,6 +11,9 @@ from pathlib import Path
 
 BRIDGE_DEP = '"//chromium/recorder_bridge",'
 BRIDGE_INCLUDE = '#include "chromium/recorder_bridge/browser_bridge.h"'
+CHILD_LAUNCHER_INCLUDE = (
+    '#include "chromium/recorder_bridge/browser_bridge.h"'
+)
 BRIDGE_INCLUDE_BLOCK = f"""\
 #if BUILDFLAG(IS_WIN)
 {BRIDGE_INCLUDE}
@@ -19,13 +22,23 @@ BRIDGE_INCLUDE_BLOCK = f"""\
 HOOK = """\
 #if BUILDFLAG(IS_WIN)
   std::string recorder_bridge_error;
-  if (!a11y_recorder::InitializeBrowserProcessBridge(
+  if (!a11y_recorder::InitializeProcessBridge(
           &recorder_bridge_error)) {
     LOG(ERROR) << "Windows A11y Recorder bridge failed: "
                << recorder_bridge_error;
     return content::RESULT_CODE_NORMAL_EXIT;
   }
 #endif
+"""
+CHILD_LAUNCHER_HOOK = """\
+  std::string recorder_bridge_error;
+  if (!a11y_recorder::AppendRecorderBootstrapToChildProcess(
+          command_line(), options, child_process_id().value(),
+          &recorder_bridge_error)) {
+    LOG(ERROR) << "Windows A11y Recorder child bootstrap failed: "
+               << recorder_bridge_error;
+    return false;
+  }
 """
 
 
@@ -40,6 +53,9 @@ def replace_once(text: str, old: str, new: str, path: Path) -> str:
 
 def patch_main_delegate(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        "InitializeBrowserProcessBridge", "InitializeProcessBridge"
+    )
     if BRIDGE_INCLUDE not in text:
         text = replace_once(
             text,
@@ -49,7 +65,7 @@ def patch_main_delegate(path: Path) -> None:
             path,
         )
 
-    if "InitializeBrowserProcessBridge" not in text.replace(
+    if "InitializeProcessBridge" not in text.replace(
         BRIDGE_INCLUDE, ""
     ):
         function = (
@@ -59,7 +75,7 @@ def patch_main_delegate(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def patch_build(path: Path) -> None:
+def patch_chrome_build(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     if BRIDGE_DEP in text:
         return
@@ -88,6 +104,67 @@ def patch_build(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def patch_child_launcher(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if CHILD_LAUNCHER_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "content/browser/child_process_launcher_helper.h"\n',
+            '#include "content/browser/child_process_launcher_helper.h"\n'
+            f"{CHILD_LAUNCHER_INCLUDE}\n",
+            path,
+        )
+
+    if "AppendRecorderBootstrapToChildProcess" not in text:
+        function = (
+            "bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread("
+        )
+        function_index = text.find(function)
+        if function_index < 0:
+            raise RuntimeError(
+                f"{path}: child launch preparation function not found"
+            )
+        anchor = "  if (!options->elevated) {"
+        anchor_index = text.find(anchor, function_index)
+        function_end = text.find("\n}\n", function_index)
+        if anchor_index < 0 or (
+            function_end >= 0 and anchor_index > function_end
+        ):
+            raise RuntimeError(
+                f"{path}: child launch preparation anchor not found"
+            )
+        text = (
+            text[:anchor_index]
+            + CHILD_LAUNCHER_HOOK
+            + text[anchor_index:]
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_content_browser_build(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BRIDGE_DEP in text:
+        return
+
+    source = '      "child_process_launcher_helper_win.cc",'
+    source_index = text.find(source)
+    if source_index < 0:
+        raise RuntimeError(f"{path}: Windows child launcher source not found")
+    windows_block = text.rfind("  if (is_win) {", 0, source_index)
+    deps = text.find("    deps += [\n", source_index)
+    block_end = text.find("\n  }\n", source_index)
+    if windows_block < 0 or deps < 0 or (
+        block_end >= 0 and deps > block_end
+    ):
+        raise RuntimeError(f"{path}: Windows browser deps list not found")
+
+    opening = "    deps += [\n"
+    text = text[:deps] + text[deps:].replace(
+        opening, opening + f"      {BRIDGE_DEP}\n", 1
+    )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -107,7 +184,11 @@ def main() -> int:
     shutil.copytree(bridge_source, bridge_destination)
 
     patch_main_delegate(source / "chrome" / "app" / "chrome_main_delegate.cc")
-    patch_build(source / "chrome" / "BUILD.gn")
+    patch_chrome_build(source / "chrome" / "BUILD.gn")
+    patch_child_launcher(
+        source / "content" / "browser" / "child_process_launcher_helper_win.cc"
+    )
+    patch_content_browser_build(source / "content" / "browser" / "BUILD.gn")
     print(f"Recorder bridge installed in {source}")
     return 0
 

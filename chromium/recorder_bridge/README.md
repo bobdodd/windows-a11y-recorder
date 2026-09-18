@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.1` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.2` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -11,24 +11,28 @@ Run the integration and build from a Windows PowerShell prompt:
 ```
 
 The integration script copies this directory into the checkout, adds it to the
-`chrome_main_delegate` target, and initializes the connection from
-`ChromeMainDelegate::BasicStartupComplete`. That occurs before normal browser
-startup can launch renderer processes. The instrumented browser:
+`chrome_main_delegate` and Windows `content/browser` targets, and initializes
+the connection from `ChromeMainDelegate::BasicStartupComplete`. The browser
+process completes its recorder connection before normal startup can launch
+renderer processes. The instrumented browser:
 
 1. Recognizes `--a11y-recorder-bootstrap=stdin`.
 2. Reads the one-line secret bootstrap from inherited standard input.
 3. Authenticates to the recorder and completes clock synchronization.
-4. Must next distribute the non-secret pipe identity and a short-lived child
-   capability to instrumented child processes through Chromium IPC. Do not copy
-   the root authentication token into child command lines.
-5. Must route browser and child-process evidence through bounded, non-blocking
+4. Copies the child bootstrap into a browser-owned read-only shared-memory
+   region and adds its handle to eligible Windows child launches.
+5. Starts renderer, GPU, and utility process bridge connections using the
+   inherited capability. Their command lines contain only shared-memory handle
+   metadata and the non-secret Chromium child process identifier.
+6. Authenticates and synchronizes each participating process independently.
+7. Must route browser and child-process evidence through bounded, non-blocking
    queues to `RecorderPipeClient`.
-6. Must report queue overflow and disconnected intervals as omission records.
+8. Must report queue overflow and disconnected intervals as omission records.
 
 The current code implements and integrates the browser-process bootstrap,
-authenticated connection, clock synchronization, framing, and evidence
-serialization. Child capability distribution and Blink evidence hooks are the
-next implementation slice.
+child-process capability distribution, per-process authentication and clock
+synchronization, framing, and evidence serialization. Blink evidence hooks are
+the next implementation slice.
 
 For each accepted connection, the recorder persists two records on the
 `browser.lifecycle` channel:
@@ -39,8 +43,9 @@ For each accepted connection, the recorder persists two records on the
    recorder has sent the ready message.
 
 The connection record contains protocol, browser-instance, process, and
-Chromium-version metadata. It never contains the authentication token. The
-clock record contains the mapping identifier, browser monotonic frequency, and
-estimated uncertainty in nanoseconds. A failed authentication or handshake
-produces `browser-connection-rejected` instead of either successful lifecycle
-record.
+Chromium-version metadata. Child records also contain the browser OS process ID
+and Chromium child process ID. No lifecycle record contains the authentication
+token. The clock record contains the mapping identifier, Chromium monotonic
+frequency, and estimated uncertainty in nanoseconds. A failed authentication or
+handshake produces `browser-connection-rejected` instead of either successful
+lifecycle record.

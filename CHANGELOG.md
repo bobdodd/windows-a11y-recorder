@@ -4,6 +4,22 @@ This project uses semantic version numbers for product releases. Protocol and
 archive schema versions are compatibility contracts and advance independently
 from the product version.
 
+## Unreleased
+
+### Added
+
+- Browser-to-child recorder capability propagation for renderer, GPU, and
+  utility processes using inherited read-only shared memory.
+- Independent child-process authentication and clock synchronization.
+- Browser parent process and Chromium child process identifiers in lifecycle
+  evidence.
+
+### Changed
+
+- Advanced the browser evidence protocol to version 0.2.
+- Restricted accepted browser evidence connections to the browser, renderer,
+  GPU, and utility process types with required process correlation metadata.
+
 ## 0.1.0 - 2026-09-18
 
 The first development baseline of the Windows Accessibility Session Recorder.
