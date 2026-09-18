@@ -6,7 +6,13 @@ The project is intended to produce one standalone application that works with NV
 
 ## Status
 
-This repository contains a working technical prototype. The managed solution
+The first development baseline is
+[`v0.1.0`](https://github.com/bobdodd/windows-a11y-recorder/releases/tag/v0.1.0).
+It is a source release for research and continued development, not an
+end-user production release. See the [changelog](CHANGELOG.md) for the
+baseline scope and known limitations.
+
+The repository contains a working technical prototype. The managed solution
 currently implements:
 
 - A shared session clock, append-only event writer, manifest finalization, and
@@ -105,6 +111,7 @@ The setup script checks out Chromium, applies the recorder bridge, generates
 
 ## Documentation
 
+- [Release changelog](CHANGELOG.md)
 - [Prototype plan](docs/prototype-plan.md)
 - [Recommended Windows implementation stack](docs/architecture/windows-implementation-stack.md)
 - [Instrumented Chromium architecture](docs/architecture/instrumented-chromium.md)

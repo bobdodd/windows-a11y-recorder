@@ -1,6 +1,10 @@
 <Project>
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Product>Windows Accessibility Session Recorder</Product>
+    <RepositoryUrl>https://github.com/bobdodd/windows-a11y-recorder</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
