@@ -2,6 +2,7 @@
 #define WINDOWS_A11Y_RECORDER_CHROMIUM_RECORDER_BRIDGE_BROWSER_BRIDGE_H_
 
 #include <string>
+#include <string_view>
 
 namespace base {
 class CommandLine;
@@ -25,6 +26,10 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
                                            base::LaunchOptions* launch_options,
                                            int child_process_id,
                                            std::string* error);
+
+// Appends a non-secret startup diagnostic when the opt-in bridge log
+// environment variable is present. This works before Chromium logging starts.
+void WriteRecorderBridgeDiagnostic(std::string_view message);
 
 // Returns the connected client for the current process, or nullptr when
 // Chromium was not launched by the recorder.

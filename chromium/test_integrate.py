@@ -114,6 +114,10 @@ class IntegrateTests(unittest.TestCase):
                 1, first_delegate.count("InitializeProcessBridge")
             )
             self.assertIn(
+                "Recorder process bridge initialization failed:",
+                first_delegate,
+            )
+            self.assertIn(
                 '#if BUILDFLAG(IS_WIN)\n'
                 '#include "chromium/recorder_bridge/browser_bridge.h"\n'
                 "#endif\n",
@@ -128,6 +132,10 @@ class IntegrateTests(unittest.TestCase):
             )
             self.assertIn(
                 "AppendRecorderBootstrapToChildProcess",
+                first_child_launcher,
+            )
+            self.assertIn(
+                "Recorder child bootstrap attachment failed:",
                 first_child_launcher,
             )
             self.assertIn(

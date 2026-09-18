@@ -24,6 +24,9 @@ HOOK = """\
   std::string recorder_bridge_error;
   if (!a11y_recorder::InitializeProcessBridge(
           &recorder_bridge_error)) {
+    a11y_recorder::WriteRecorderBridgeDiagnostic(
+        "Recorder process bridge initialization failed: " +
+        recorder_bridge_error);
     LOG(ERROR) << "Windows A11y Recorder bridge failed: "
                << recorder_bridge_error;
     return content::RESULT_CODE_NORMAL_EXIT;
@@ -35,6 +38,9 @@ CHILD_LAUNCHER_HOOK = """\
   if (!a11y_recorder::AppendRecorderBootstrapToChildProcess(
           command_line(), options, child_process_id().value(),
           &recorder_bridge_error)) {
+    a11y_recorder::WriteRecorderBridgeDiagnostic(
+        "Recorder child bootstrap attachment failed: " +
+        recorder_bridge_error);
     LOG(ERROR) << "Windows A11y Recorder child bootstrap failed: "
                << recorder_bridge_error;
     return false;

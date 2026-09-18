@@ -26,6 +26,9 @@ from the product version.
 - Added opt-in Chromium file logging through
   `A11Y_RECORDER_CHROMIUM_LOG_FILE` for diagnosing early browser and child
   process startup failures.
+- Added opt-in native bridge tracing through
+  `A11Y_RECORDER_BRIDGE_LOG_FILE` for failures that occur before Chromium's
+  normal logging system is initialized.
 
 ## 0.1.0 - 2026-09-18
 

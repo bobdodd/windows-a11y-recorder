@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,6 +24,33 @@
 
 namespace a11y_recorder {
 namespace {
+
+void WriteDiagnosticLine(std::string_view message) {
+  std::array<wchar_t, 32768> path = {};
+  const DWORD path_length = ::GetEnvironmentVariableW(
+      kBridgeLogFileEnvironmentWide, path.data(),
+      static_cast<DWORD>(path.size()));
+  if (path_length == 0 || path_length >= path.size()) {
+    return;
+  }
+
+  HANDLE file = ::CreateFileW(
+      path.data(), FILE_APPEND_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return;
+  }
+
+  const std::string line =
+      "pid=" + base::NumberToString(::GetCurrentProcessId()) +
+      " ticks=" + base::NumberToString(::GetTickCount64()) + " " +
+      std::string(message) + "\r\n";
+  DWORD written = 0;
+  ::WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
+              nullptr);
+  ::CloseHandle(file);
+}
 
 std::unique_ptr<RecorderPipeClient>& ProcessClientStorage() {
   static base::NoDestructor<std::unique_ptr<RecorderPipeClient>> client;
@@ -102,6 +130,10 @@ bool ReadChildBootstrap(const base::CommandLine& command_line,
 
 }  // namespace
 
+void WriteRecorderBridgeDiagnostic(std::string_view message) {
+  WriteDiagnosticLine(message);
+}
+
 bool InitializeProcessBridge(std::string* error) {
   if (!error) {
     return false;
@@ -177,6 +209,8 @@ bool InitializeProcessBridge(std::string* error) {
     return false;
   }
   ProcessClientStorage() = std::move(client);
+  WriteDiagnosticLine("Recorder process bridge initialized for " +
+                      process_type + ".");
   return true;
 }
 
@@ -231,6 +265,9 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
   command_line->AppendSwitchASCII(kChildBootstrapHandleSwitch, *metadata);
   command_line->AppendSwitchASCII(kChildProcessIdSwitch,
                                   base::NumberToString(child_process_id));
+  WriteDiagnosticLine(
+      "Attached recorder bootstrap to " + process_type +
+      " child " + base::NumberToString(child_process_id) + ".");
   return true;
 }
 
