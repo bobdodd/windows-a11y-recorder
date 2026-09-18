@@ -1,0 +1,477 @@
+<Window x:Class="Recorder.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Recorder.App"
+        Title="Windows Accessibility Recorder"
+        Width="1280"
+        Height="800"
+        MinWidth="960"
+        MinHeight="640"
+        WindowState="Maximized"
+        WindowStartupLocation="CenterScreen"
+        Background="#171614"
+        Foreground="#CDCCCA">
+  <Window.Resources>
+    <SolidColorBrush x:Key="PanelBackground" Color="#1C1B19" />
+    <SolidColorBrush x:Key="PanelBorder" Color="#393836" />
+    <SolidColorBrush x:Key="MutedText" Color="#A09F9B" />
+    <Style TargetType="GroupBox">
+      <Setter Property="BorderBrush" Value="{StaticResource PanelBorder}" />
+      <Setter Property="Foreground" Value="#CDCCCA" />
+    </Style>
+    <Style TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#CDCCCA" />
+    </Style>
+    <Style TargetType="Label">
+      <Setter Property="Foreground" Value="#CDCCCA" />
+    </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Foreground" Value="#CDCCCA" />
+      <Setter Property="Margin" Value="0,4" />
+      <Setter Property="MinHeight" Value="24" />
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="340" MinWidth="300" MaxWidth="440" />
+      <ColumnDefinition Width="5" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+
+    <Border Grid.Column="0"
+            Background="{StaticResource PanelBackground}"
+            BorderBrush="{StaticResource PanelBorder}"
+            BorderThickness="0,0,1,0">
+      <Grid Margin="18">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,14">
+          <TextBlock FontSize="22"
+                     FontWeight="SemiBold"
+                     Text="Accessibility Recorder" />
+          <TextBlock Margin="0,4,0,0"
+                     Foreground="{StaticResource MutedText}"
+                     TextWrapping="Wrap"
+                     Text="Capture a session or open an existing recording." />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+          <StackPanel>
+            <Button x:Name="OpenRecordingButton"
+                    Margin="0,0,0,14"
+                    HorizontalContentAlignment="Center"
+                    Content="_Open recording..."
+                    Click="OpenRecordingButton_Click" />
+
+            <GroupBox Header="Capture channels" Padding="10" Margin="0,0,0,12">
+              <StackPanel>
+                <CheckBox x:Name="InputCheckBox"
+                          IsChecked="True"
+                          Content="_Keyboard and mouse input" />
+                <CheckBox x:Name="AutomationCheckBox"
+                          IsChecked="True"
+                          Content="_UI Automation events" />
+                <CheckBox x:Name="WindowCheckBox"
+                          IsChecked="True"
+                          Content="_Foreground window changes" />
+                <CheckBox x:Name="FramesCheckBox"
+                          IsChecked="True"
+                          Content="_Desktop frames" />
+                <CheckBox x:Name="MicrophoneCheckBox"
+                          Content="_Microphone audio"
+                          AutomationProperties.HelpText="Records speech and other sound from the default microphone." />
+                <CheckBox x:Name="SystemAudioCheckBox"
+                          Content="System _audio"
+                          AutomationProperties.HelpText="Records audio rendered through the default Windows playback device, including screen reader speech." />
+              </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="Playback event filters"
+                      Padding="10"
+                      Margin="0,0,0,12">
+              <StackPanel>
+                <UniformGrid Columns="2">
+                  <CheckBox x:Name="FilterKeyboardCheckBox"
+                            IsChecked="True"
+                            Content="_Keyboard"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterMouseCheckBox"
+                            IsChecked="True"
+                            Content="_Mouse"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterAutomationCheckBox"
+                            IsChecked="True"
+                            Content="_UI Automation"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterWindowCheckBox"
+                            IsChecked="True"
+                            Content="_Window"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterFramesCheckBox"
+                            IsChecked="True"
+                            Content="_Frames"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterMicrophoneCheckBox"
+                            IsChecked="True"
+                            Content="M_icrophone"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterSystemAudioCheckBox"
+                            IsChecked="True"
+                            Content="System _audio"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterMarkersCheckBox"
+                            IsChecked="True"
+                            Content="Mar_kers"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterOtherCheckBox"
+                            IsChecked="True"
+                            Content="_Other"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                </UniformGrid>
+                <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
+                  <Button Margin="0,0,8,0"
+                          Content="Select _all"
+                          Click="SelectAllFiltersButton_Click" />
+                  <Button Content="_Clear all"
+                          Click="ClearAllFiltersButton_Click" />
+                </StackPanel>
+                <TextBlock x:Name="FilterSummaryTextBlock"
+                           Margin="0,6,0,0"
+                           Foreground="{StaticResource MutedText}"
+                           Text="No recording loaded."
+                           AutomationProperties.LiveSetting="Polite" />
+              </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="Storage" Padding="10" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBox x:Name="OutputRootTextBox"
+                         Margin="0,0,0,8"
+                         AutomationProperties.Name="Session output folder" />
+                <Button x:Name="BrowseButton"
+                        HorizontalAlignment="Left"
+                        Content="_Browse..."
+                        Click="BrowseButton_Click" />
+              </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="Session marker" Padding="10" Margin="0,0,0,12">
+              <StackPanel>
+                <Label Target="{Binding ElementName=MarkerNoteTextBox}"
+                       Content="Optional marker _note:" />
+                <TextBox x:Name="MarkerNoteTextBox"
+                         Margin="0,0,0,8" />
+                <Button x:Name="MarkerButton"
+                        HorizontalAlignment="Left"
+                        Content="Add mark_er"
+                        IsEnabled="False"
+                        Click="MarkerButton_Click" />
+              </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="Current session" Padding="10">
+              <StackPanel>
+                <TextBlock x:Name="StatusTextBlock"
+                           FontWeight="SemiBold"
+                           Text="Ready to record."
+                           TextWrapping="Wrap"
+                           AutomationProperties.LiveSetting="Polite" />
+                <TextBlock x:Name="DurationTextBlock"
+                           Margin="0,6,0,0"
+                           Text="Duration: 00:00:00" />
+                <TextBlock x:Name="EvidenceTextBlock"
+                           Margin="0,4,0,0"
+                           Text="Events: 0 accepted, 0 dropped" />
+                <TextBlock Margin="0,8,0,2" Text="Collector status:" />
+                <ListBox x:Name="CollectorStatusListBox"
+                         MaxHeight="110"
+                         Background="#201F1D"
+                         Foreground="#CDCCCA"
+                         BorderBrush="{StaticResource PanelBorder}"
+                         AutomationProperties.Name="Collector status"
+                         IsTabStop="True" />
+                <TextBlock Margin="0,8,0,2" Text="Session folder:" />
+                <TextBox x:Name="SessionFolderTextBox"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         AutomationProperties.Name="Current session folder" />
+                <Button x:Name="OpenFolderButton"
+                        Margin="0,8,0,0"
+                        HorizontalAlignment="Left"
+                        Content="_Open session folder"
+                        IsEnabled="False"
+                        Click="OpenFolderButton_Click" />
+              </StackPanel>
+            </GroupBox>
+          </StackPanel>
+        </ScrollViewer>
+
+        <Grid Grid.Row="2" Margin="0,14,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Button x:Name="StartButton"
+                  Grid.Column="0"
+                  Margin="0,0,5,0"
+                  Content="_Start recording"
+                  Click="StartButton_Click" />
+          <Button x:Name="StopButton"
+                  Grid.Column="1"
+                  Margin="5,0,0,0"
+                  Content="S_top recording"
+                  IsEnabled="False"
+                  Click="StopButton_Click" />
+        </Grid>
+      </Grid>
+    </Border>
+
+    <GridSplitter Grid.Column="1"
+                  Width="5"
+                  HorizontalAlignment="Stretch"
+                  Background="#393836"
+                  ResizeDirection="Columns"
+                  ResizeBehavior="PreviousAndNext"
+                  AutomationProperties.Name="Resize recorder controls and playback" />
+
+    <Grid Grid.Column="2" Margin="16">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <Border Grid.Row="0"
+              Background="Black"
+              BorderBrush="{StaticResource PanelBorder}"
+              BorderThickness="1">
+        <Grid>
+          <Image x:Name="VideoImage"
+                 Stretch="Uniform"
+                 SnapsToDevicePixels="True"
+                 AutomationProperties.Name="Recorded desktop video frame" />
+          <TextBlock x:Name="VideoPlaceholderTextBlock"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     Foreground="#A09F9B"
+                     FontSize="18"
+                     Text="Open a recording to begin playback." />
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="1" Margin="0,12,0,8">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid Grid.Row="0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <Button x:Name="PreviousFrameButton"
+                  Grid.Column="0"
+                  Margin="0,0,8,0"
+                  Content="Previous _frame"
+                  IsEnabled="False"
+                  Click="PreviousFrameButton_Click" />
+          <Button x:Name="PlayPauseButton"
+                  Grid.Column="1"
+                  Margin="0,0,8,0"
+                  MinWidth="90"
+                  Content="_Play"
+                  IsEnabled="False"
+                  Click="PlayPauseButton_Click" />
+          <Button x:Name="NextFrameButton"
+                  Grid.Column="2"
+                  Margin="0,0,12,0"
+                  Content="_Next frame"
+                  IsEnabled="False"
+                  Click="NextFrameButton_Click" />
+          <Slider x:Name="PlaybackSlider"
+                  Grid.Column="3"
+                  VerticalAlignment="Center"
+                  Minimum="0"
+                  Maximum="1"
+                  IsEnabled="False"
+                  IsMoveToPointEnabled="True"
+                  ValueChanged="PlaybackSlider_ValueChanged"
+                  AutomationProperties.Name="Recording position" />
+          <TextBlock x:Name="PlaybackTimeTextBlock"
+                     Grid.Column="4"
+                     Margin="12,0,0,0"
+                     VerticalAlignment="Center"
+                     FontFamily="Consolas"
+                     Text="00:00:00.000 / 00:00:00.000"
+                     AutomationProperties.LiveSetting="Off" />
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="0,10,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="160" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="28" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="160" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <Label Grid.Column="0"
+                 Padding="0,0,8,0"
+                 VerticalContentAlignment="Center"
+                 Target="{Binding ElementName=MicrophoneVolumeSlider}"
+                 Content="_Microphone:" />
+          <Slider x:Name="MicrophoneVolumeSlider"
+                  Grid.Column="1"
+                  Minimum="-36"
+                  Maximum="0"
+                  Value="0"
+                  TickFrequency="3"
+                  IsSnapToTickEnabled="True"
+                  ValueChanged="AudioVolumeSlider_ValueChanged"
+                  AutomationProperties.Name="Microphone playback gain" />
+          <TextBlock x:Name="MicrophoneVolumeTextBlock"
+                     Grid.Column="2"
+                     Margin="8,0,0,0"
+                     MinWidth="52"
+                     VerticalAlignment="Center"
+                     Text="0 dB" />
+          <Label Grid.Column="4"
+                 Padding="0,0,8,0"
+                 VerticalContentAlignment="Center"
+                 Target="{Binding ElementName=SystemAudioVolumeSlider}"
+                 Content="S_ystem audio:" />
+          <Slider x:Name="SystemAudioVolumeSlider"
+                  Grid.Column="5"
+                  Minimum="-36"
+                  Maximum="0"
+                  Value="0"
+                  TickFrequency="3"
+                  IsSnapToTickEnabled="True"
+                  ValueChanged="AudioVolumeSlider_ValueChanged"
+                  AutomationProperties.Name="System audio playback gain" />
+          <TextBlock x:Name="SystemAudioVolumeTextBlock"
+                     Grid.Column="6"
+                     Margin="8,0,0,0"
+                     MinWidth="52"
+                     VerticalAlignment="Center"
+                     Text="0 dB" />
+        </Grid>
+      </Grid>
+
+      <Grid Grid.Row="2">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="96" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Border Grid.Row="0"
+                BorderBrush="{StaticResource PanelBorder}"
+                BorderThickness="1"
+                AutomationProperties.Name="Session event timeline">
+          <local:SessionTimelineControl x:Name="TimelineControl"
+                                        SelectedEventChanged="TimelineControl_SelectedEventChanged"
+                                        AutomationProperties.Name="Selectable session event timeline"
+                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End while focused, to inspect captured values." />
+        </Border>
+        <Grid Grid.Row="1" Margin="0,8,0,4">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="180" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <Label Grid.Column="0"
+                 Padding="0,0,8,0"
+                 VerticalContentAlignment="Center"
+                 Target="{Binding ElementName=TimelineZoomSlider}"
+                 Content="Timeline _zoom:" />
+          <Slider x:Name="TimelineZoomSlider"
+                  Grid.Column="1"
+                  Minimum="1"
+                  Maximum="32"
+                  Value="1"
+                  TickFrequency="1"
+                  IsSnapToTickEnabled="True"
+                  IsEnabled="False"
+                  ValueChanged="TimelineZoomSlider_ValueChanged"
+                  AutomationProperties.Name="Timeline zoom" />
+          <TextBlock x:Name="TimelineZoomTextBlock"
+                     Grid.Column="2"
+                     Margin="8,0,12,0"
+                     MinWidth="32"
+                     VerticalAlignment="Center"
+                     Text="1×" />
+          <Button x:Name="FitTimelineButton"
+                  Grid.Column="3"
+                  Content="_Fit"
+                  IsEnabled="False"
+                  Click="FitTimelineButton_Click" />
+        </Grid>
+        <ScrollBar x:Name="TimelinePanScrollBar"
+                   Grid.Row="2"
+                   Orientation="Horizontal"
+                   Minimum="0"
+                   Maximum="0"
+                   Value="0"
+                   IsEnabled="False"
+                   ValueChanged="TimelinePanScrollBar_ValueChanged"
+                   AutomationProperties.Name="Timeline visible range start" />
+      </Grid>
+
+      <GroupBox Grid.Row="3"
+                Margin="0,8,0,0"
+                Padding="8"
+                Header="Selected event values">
+        <TextBox x:Name="EventDetailsTextBox"
+                 MinHeight="90"
+                 MaxHeight="180"
+                 IsReadOnly="True"
+                 AcceptsReturn="True"
+                 TextWrapping="NoWrap"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Auto"
+                 FontFamily="Consolas"
+                 AutomationProperties.Name="Selected event values"
+                 Text="Select an event in the timeline to inspect its complete recorded values." />
+      </GroupBox>
+
+      <Grid Grid.Row="4" Margin="0,8,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock x:Name="PlaybackStatusTextBlock"
+                   Grid.Column="0"
+                   Foreground="{StaticResource MutedText}"
+                   Text="No recording loaded."
+                   TextTrimming="CharacterEllipsis"
+                   AutomationProperties.LiveSetting="Polite" />
+        <TextBlock Grid.Column="1"
+                   Foreground="{StaticResource MutedText}"
+                   Text="Keyboard | Mouse | UIA | Window | Frames | Mic | System audio" />
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

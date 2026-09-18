@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore managed dependencies
+        run: dotnet restore .\windows-a11y-recorder.slnx
+
+      - name: Build managed solution
+        run: dotnet build .\windows-a11y-recorder.slnx --configuration Release --no-restore
+
+      - name: Run managed tests
+        run: dotnet test .\tests\Recorder.Tests\Recorder.Tests.csproj --configuration Release --no-build
+
+      - name: Test Chromium integration script
+        run: python .\chromium\test_integrate.py

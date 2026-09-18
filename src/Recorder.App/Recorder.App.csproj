@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Recorder.Coordinator/Recorder.Coordinator.csproj" />
+    <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
+    <ProjectReference Include="../Recorder.WindowsCapture/Recorder.WindowsCapture.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+</Project>

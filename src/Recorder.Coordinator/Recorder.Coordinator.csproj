@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
+    <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
+  </ItemGroup>
+</Project>

@@ -6,11 +6,11 @@ This plan defines a Windows-first prototype for recording accessibility and usab
 
 The application will capture raw evidence during a session. Analysis performed afterward will use that evidence to infer how the participant interacted with the screen reader, browser, and tested interface. The system will preserve the distinction between direct observations and behavioral interpretations.
 
-This platform recorder is the foundation for later browser instrumentation. Evidence from real recordings will determine whether the browser layer should be a conventional extension, a native companion, an instrumented Chromium distribution, or a combination.
+The platform recorder is the foundation for a bundled instrumented Chromium distribution. Browser source instrumentation is required because complete listener registration, dispatch, default-action, and timer evidence is not available through a conventional extension or public browser API.
 
 ## Primary recommendation
 
-Build a standalone Windows recorder before modifying Chromium or developing a browser extension. The first version should capture:
+Build the standalone Windows recorder first, then integrate the instrumented Chromium build into the same product. The platform recorder should capture:
 
 - Raw keyboard input.
 - Raw mouse input.
@@ -33,12 +33,12 @@ The recorder should produce an open, versioned session archive and a basic timel
 
 The participant or auditor should install and run one application. The application may use internal worker processes or modular collectors, but these implementation details must not create additional installation or configuration steps.
 
-The first prototype must not require:
+The product must not require:
 
 - A screen-reader add-on.
 - A browser extension.
-- A modified browser.
 - Python or Selenium.
+- WebDriver or another external browser-control process.
 - A remote control service.
 - Manual configuration inside NVDA, JAWS, or Narrator.
 - Administrator privileges for ordinary recording.
@@ -90,13 +90,15 @@ The recorder should default to:
 
 ### Included
 
-- Windows 11 desktop.
+- Windows 10 and Windows 11 x64 desktops.
 - NVDA, JAWS, and Narrator as target screen readers.
 - Chromium-based browsers as initial test applications.
 - Full-display and selected-window recording.
 - Keyboard and conventional mouse capture.
 - Microphone, process-specific playback, and system playback capture.
 - UI Automation observation.
+- A bundled instrumented Chromium build for browser tests.
+- Browser listener, dispatch, default-action, timer, DOM, accessibility, cookie, network, and rendering evidence.
 - An append-only event archive.
 - A basic timeline viewer.
 
@@ -113,10 +115,6 @@ The recorder should default to:
 
 ### Excluded from the first prototype
 
-- Browser DOM or source capture.
-- Browser network capture.
-- Browser accessibility-tree capture through CDP.
-- Browser source-code modifications.
 - Automated behavioral scoring.
 - Automated accessibility conformance findings.
 - Cloud upload or collaborative review.
@@ -579,31 +577,24 @@ Decision:
 - Add a narrowly scoped native component if justified.
 - Declare unsupported cases where capture would require unsafe or brittle techniques.
 
-### Browser decision study
+### Instrumented Chromium
 
-Use completed sessions to identify questions the platform recorder cannot answer. Classify each missing signal:
+The browser layer is a required product component. Public browser APIs and CDP may still be used where they provide stable observations, but they are not the authority for event-handler or dispatch evidence.
 
-- Page-delivered DOM input.
-- Exact DOM target.
-- Original and live page source.
-- Rendered layout and styles.
-- Browser accessibility tree.
-- Network resources.
-- Browser pre-dispatch input.
-- Browser chrome interaction.
-- Compositor output.
+Chromium instrumentation must record:
 
-Choose the least invasive browser approach that closes the demonstrated gaps:
+- Listener registration and removal, including `addEventListener`, inline attributes, `on*` properties, native Blink listeners, listener options, execution world, target identity, and script location.
+- Input dispatch paths, including original target, composed path, phase, listeners considered, listeners invoked, listener completion, propagation stops, cancellation, and browser default action.
+- Timer registration, requested delay, actual firing time, cancellation, nesting, throttling, page lifecycle state, and callback location for timeouts, intervals, animation frames, and browser-scheduled tasks that can alter the tested experience.
+- DOM, computed style, layout, rendered frame, and browser accessibility-tree state at correlated checkpoints.
+- Cookie reads, writes, deletes, sends, receives, and blocks with cookie names and attributes but not values.
+- Network request and response metadata without authorization values, request bodies, or response bodies.
+- Navigation, frame, renderer, process, page-lifecycle, compositor, and browser-chrome context needed to correlate the evidence.
+- Explicit omissions whenever an internal path cannot be observed or a record is dropped.
 
-| Need | Likely approach |
-| --- | --- |
-| DOM events, snapshots, network, and accessibility tree | Browser extension using `chrome.debugger` and CDP |
-| Reliable local streaming and storage | Native host or built-in browser component |
-| Browser pre-dispatch input and browser chrome | Chromium modification |
-| Exact compositor and browser-process correlation | Chromium modification |
-| Ordinary page behavior only | Extension or content instrumentation |
+This evidence is needed to identify cases such as a pointer-activated element with no equivalent keyboard path, an interactive element that cannot receive focus, a key event that is intercepted before activation, a default action that is cancelled, or a timeout that changes the interface before a participant can complete a task.
 
-Do not begin a Chromium fork until this decision study identifies at least one required signal that cannot be collected reliably by the platform recorder and extension approach.
+The browser writes versioned evidence records through an authenticated local protocol to the recorder. It does not expose a remote debugging endpoint as the product integration boundary. Browser records map onto the same monotonic session clock as Windows input, UI Automation, video, and audio.
 
 ## Validation scenarios
 
@@ -684,7 +675,7 @@ The platform prototype is successful when:
 - The viewer exposes evidence and omissions clearly.
 - Raw evidence remains immutable.
 - Inferences are labelled and linked to evidence.
-- A real-session gap report identifies the next browser instrumentation requirements.
+- Browser-internal evidence is captured by the bundled instrumented Chromium build without an extension or external driver.
 
 ## Immediate next actions
 
@@ -696,14 +687,15 @@ The platform prototype is successful when:
 6. Finalize the archive schema from the observed data.
 7. Build the core recorder and timeline viewer.
 8. Run the shared validation scenarios.
-9. Produce the browser gap report.
-10. Select the smallest browser integration that addresses the demonstrated gaps.
+9. Define and implement the versioned Chromium evidence protocol.
+10. Add Chromium source hooks for listeners, dispatch, default actions, timers, cookies, DOM, accessibility, network, and rendering.
+11. Package the instrumented browser with the recorder and run the shared validation scenarios.
 
 ## Review decisions
 
 The following decisions should be confirmed before implementation:
 
-- Minimum supported Windows release.
+- Exact Windows 10 edition and servicing expectations beyond the Windows 10 22H2 compatibility baseline.
 - Initial screen-reader and synthesizer version matrix.
 - Full-display versus selected-window default.
 - Whether raw input is system-wide or restricted to selected target processes.
@@ -716,4 +708,4 @@ The following decisions should be confirmed before implementation:
 - Required support for braille-only and speech-disabled sessions.
 - Touch and precision-touchpad hardware available for testing.
 
-This plan deliberately defers the browser architecture decision. The first implementation should establish a trustworthy, screen-reader-independent Windows evidence record. Real recordings will then show which browser-level signals are necessary and whether they justify an extension, a native bridge, or a Chromium modification.
+The browser architecture decision is complete. The Windows evidence record remains screen-reader-independent, and browser testing uses a bundled instrumented Chromium build connected through a private local evidence protocol.

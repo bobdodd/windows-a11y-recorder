@@ -1,0 +1,19 @@
+<Solution>
+  <Project Path="src/Recorder.Collectors.Audio/Recorder.Collectors.Audio.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/Recorder.Collectors.Browser/Recorder.Collectors.Browser.csproj" />
+    <Project Path="src/Recorder.App/Recorder.App.csproj" />
+    <Project Path="src/Recorder.Coordinator/Recorder.Coordinator.csproj" />
+    <Project Path="src/Recorder.WindowsCapture/Recorder.WindowsCapture.csproj" />
+    <Project Path="src/Recorder.Contracts/Recorder.Contracts.csproj" />
+    <Project Path="src/Recorder.Session/Recorder.Session.csproj" />
+    <Project Path="src/Recorder.Collectors.Input/Recorder.Collectors.Input.csproj" />
+    <Project Path="src/Recorder.Collectors.Automation/Recorder.Collectors.Automation.csproj" />
+    <Project Path="src/Recorder.Collectors.Windowing/Recorder.Collectors.Windowing.csproj" />
+    <Project Path="src/Recorder.Collectors.Graphics/Recorder.Collectors.Graphics.csproj" />
+    <Project Path="src/Recorder.CaptureHost/Recorder.CaptureHost.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Recorder.Tests/Recorder.Tests.csproj" />
+  </Folder>
+</Solution>

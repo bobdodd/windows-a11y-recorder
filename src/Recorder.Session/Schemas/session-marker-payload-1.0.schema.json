@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.windows-a11y-recorder.local/session-marker-payload-1.0.schema.json",
+  "title": "Session marker payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["note"],
+  "properties": {
+    "note": { "type": ["string", "null"] }
+  }
+}

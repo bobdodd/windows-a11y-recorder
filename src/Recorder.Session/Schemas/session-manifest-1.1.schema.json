@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.windows-a11y-recorder.local/session-manifest-1.1.schema.json",
+  "title": "Windows Accessibility Recorder session manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "sessionId",
+    "status",
+    "startedUtc",
+    "endedUtc",
+    "durationNanoseconds",
+    "clockFrequency",
+    "clockOriginTimestamp",
+    "operatingSystem",
+    "runtime",
+    "architecture",
+    "configuration",
+    "collectors",
+    "artifacts",
+    "acceptedEventCount",
+    "droppedEventCount",
+    "failure"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["starting", "recording", "completed", "failed"] },
+    "startedUtc": { "type": "string", "format": "date-time" },
+    "endedUtc": { "type": ["string", "null"], "format": "date-time" },
+    "durationNanoseconds": { "type": ["integer", "null"], "minimum": 0 },
+    "clockFrequency": { "type": "integer", "minimum": 1 },
+    "clockOriginTimestamp": { "type": "integer", "minimum": 0 },
+    "operatingSystem": { "type": "string", "minLength": 1 },
+    "runtime": { "type": "string", "minLength": 1 },
+    "architecture": { "type": "string", "minLength": 1 },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captureKeyboardAndMouse",
+        "captureUiAutomation",
+        "captureForegroundWindow",
+        "captureDesktopFrames",
+        "framesPerSecond",
+        "captureMicrophone",
+        "captureSystemAudio"
+      ],
+      "properties": {
+        "captureKeyboardAndMouse": { "type": "boolean" },
+        "captureUiAutomation": { "type": "boolean" },
+        "captureForegroundWindow": { "type": "boolean" },
+        "captureDesktopFrames": { "type": "boolean" },
+        "framesPerSecond": { "type": "integer", "minimum": 1 },
+        "captureMicrophone": { "type": "boolean" },
+        "captureSystemAudio": { "type": "boolean" }
+      }
+    },
+    "collectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "collectorType",
+          "implementation",
+          "implementationVersion",
+          "channels",
+          "captureMethod",
+          "capability",
+          "limitations",
+          "lifecycle",
+          "health"
+        ],
+        "properties": {
+          "collectorType": { "type": "string", "minLength": 1 },
+          "implementation": { "type": "string", "minLength": 1 },
+          "implementationVersion": { "type": "string", "minLength": 1 },
+          "channels": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "captureMethod": { "type": "string", "minLength": 1 },
+          "capability": { "type": ["string", "null"] },
+          "limitations": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "lifecycle": { "type": "string", "minLength": 1 },
+          "health": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sizeBytes", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "sizeBytes": { "type": "integer", "minimum": 0 },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "acceptedEventCount": { "type": "integer", "minimum": 0 },
+    "droppedEventCount": { "type": "integer", "minimum": 0 },
+    "failure": { "type": ["string", "null"] }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": { "enum": ["completed", "failed"] }
+        }
+      },
+      "then": {
+        "properties": {
+          "endedUtc": { "type": "string", "format": "date-time" },
+          "durationNanoseconds": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  ]
+}

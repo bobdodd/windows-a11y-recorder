@@ -1,0 +1,17 @@
+assert(is_win)
+
+source_set("recorder_bridge") {
+  sources = [
+    "browser_bridge.cc",
+    "browser_bridge.h",
+    "recorder_protocol.cc",
+    "recorder_protocol.h",
+    "recorder_switches.h",
+  ]
+
+  deps = [
+    "//base",
+    "//components/version_info",
+    "//content/public/common",
+  ]
+}

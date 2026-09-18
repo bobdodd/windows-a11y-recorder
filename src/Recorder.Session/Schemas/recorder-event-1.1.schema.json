@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.windows-a11y-recorder.local/recorder-event-1.1.schema.json",
+  "title": "Windows Accessibility Recorder evidence event envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "evidenceClass",
+    "sessionId",
+    "collectorType",
+    "collectorInstanceId",
+    "producerVersion",
+    "channel",
+    "captureMethod",
+    "sequence",
+    "monotonicNanoseconds",
+    "clockMappingId",
+    "nativeTimestamp",
+    "timestampUncertaintyNanoseconds",
+    "observedUtc",
+    "eventType",
+    "payload",
+    "qualityFlags",
+    "relatedEvidenceIds",
+    "analysis"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "eventId": { "type": "string", "minLength": 1 },
+    "evidenceClass": {
+      "enum": ["observed", "derived", "inferred", "unknown"]
+    },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "collectorType": { "type": "string", "minLength": 1 },
+    "collectorInstanceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "producerVersion": { "type": "string", "minLength": 1 },
+    "channel": { "type": "string", "minLength": 1 },
+    "captureMethod": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "monotonicNanoseconds": { "type": "integer", "minimum": 0 },
+    "clockMappingId": { "type": "string", "minLength": 1 },
+    "nativeTimestamp": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain", "value", "unit"],
+          "properties": {
+            "domain": { "type": "string", "minLength": 1 },
+            "value": { "type": "integer" },
+            "unit": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "timestampUncertaintyNanoseconds": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "observedUtc": { "type": "string", "format": "date-time" },
+    "eventType": { "type": "string", "minLength": 1 },
+    "payload": {},
+    "qualityFlags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "relatedEvidenceIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "analysis": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/analysisProvenance" }
+      ]
+    }
+  },
+  "$defs": {
+    "analysisProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analyzer",
+        "analyzerVersion",
+        "method",
+        "confidenceCategory",
+        "competingInterpretations",
+        "insufficientEvidenceReason"
+      ],
+      "properties": {
+        "analyzer": { "type": "string", "minLength": 1 },
+        "analyzerVersion": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1 },
+        "confidenceCategory": {
+          "type": ["string", "null"],
+          "enum": ["low", "medium", "high", null]
+        },
+        "competingInterpretations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "insufficientEvidenceReason": {
+          "type": ["string", "null"],
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "evidenceClass": { "const": "observed" } },
+        "required": ["evidenceClass"]
+      },
+      "then": {
+        "properties": {
+          "analysis": { "type": "null" },
+          "relatedEvidenceIds": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidenceClass": {
+            "enum": ["derived", "inferred", "unknown"]
+          }
+        },
+        "required": ["evidenceClass"]
+      },
+      "then": {
+        "properties": {
+          "analysis": { "$ref": "#/$defs/analysisProvenance" },
+          "relatedEvidenceIds": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "evidenceClass": { "const": "inferred" } },
+        "required": ["evidenceClass"]
+      },
+      "then": {
+        "properties": {
+          "analysis": {
+            "allOf": [
+              { "$ref": "#/$defs/analysisProvenance" },
+              {
+                "properties": {
+                  "confidenceCategory": {
+                    "enum": ["low", "medium", "high"]
+                  },
+                  "insufficientEvidenceReason": { "type": "null" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "evidenceClass": { "const": "derived" } },
+        "required": ["evidenceClass"]
+      },
+      "then": {
+        "properties": {
+          "analysis": {
+            "allOf": [
+              { "$ref": "#/$defs/analysisProvenance" },
+              {
+                "properties": {
+                  "confidenceCategory": { "type": "null" },
+                  "insufficientEvidenceReason": { "type": "null" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "evidenceClass": { "const": "unknown" } },
+        "required": ["evidenceClass"]
+      },
+      "then": {
+        "properties": {
+          "analysis": {
+            "allOf": [
+              { "$ref": "#/$defs/analysisProvenance" },
+              {
+                "properties": {
+                  "confidenceCategory": { "type": "null" },
+                  "insufficientEvidenceReason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

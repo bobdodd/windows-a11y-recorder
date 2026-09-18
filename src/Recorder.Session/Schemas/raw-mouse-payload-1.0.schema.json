@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.windows-a11y-recorder.local/raw-mouse-payload-1.0.schema.json",
+  "title": "Windows Raw Input mouse payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deviceHandle",
+    "movementMode",
+    "deltaX",
+    "deltaY",
+    "buttonFlags",
+    "buttonData",
+    "rawButtons",
+    "extraInformation",
+    "cursorX",
+    "cursorY",
+    "foregroundProcessId"
+  ],
+  "properties": {
+    "deviceHandle": { "type": "integer" },
+    "movementMode": { "enum": ["absolute", "relative"] },
+    "deltaX": { "type": "integer" },
+    "deltaY": { "type": "integer" },
+    "buttonFlags": { "type": "integer", "minimum": 0 },
+    "buttonData": { "type": "integer", "minimum": 0 },
+    "rawButtons": { "type": "integer", "minimum": 0 },
+    "extraInformation": { "type": "integer", "minimum": 0 },
+    "cursorX": { "type": "integer" },
+    "cursorY": { "type": "integer" },
+    "foregroundProcessId": { "type": "integer", "minimum": 0 }
+  }
+}

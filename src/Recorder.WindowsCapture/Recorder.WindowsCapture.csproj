@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Recorder.Collectors.Browser/Recorder.Collectors.Browser.csproj" />
+    <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
+    <ProjectReference Include="../Recorder.Coordinator/Recorder.Coordinator.csproj" />
+    <ProjectReference Include="../Recorder.Collectors.Input/Recorder.Collectors.Input.csproj" />
+    <ProjectReference Include="../Recorder.Collectors.Automation/Recorder.Collectors.Automation.csproj" />
+    <ProjectReference Include="../Recorder.Collectors.Windowing/Recorder.Collectors.Windowing.csproj" />
+    <ProjectReference Include="../Recorder.Collectors.Graphics/Recorder.Collectors.Graphics.csproj" />
+    <ProjectReference Include="../Recorder.Collectors.Audio/Recorder.Collectors.Audio.csproj" />
+  </ItemGroup>
+</Project>

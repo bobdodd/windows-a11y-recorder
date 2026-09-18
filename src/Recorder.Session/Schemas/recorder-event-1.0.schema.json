@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.windows-a11y-recorder.local/recorder-event-1.0.schema.json",
+  "title": "Windows Accessibility Recorder event envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "sessionId",
+    "collectorType",
+    "collectorInstanceId",
+    "channel",
+    "captureMethod",
+    "sequence",
+    "monotonicNanoseconds",
+    "observedUtc",
+    "eventType",
+    "payload",
+    "qualityFlags"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "collectorType": { "type": "string", "minLength": 1 },
+    "collectorInstanceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "channel": { "type": "string", "minLength": 1 },
+    "captureMethod": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "monotonicNanoseconds": { "type": "integer", "minimum": 0 },
+    "observedUtc": { "type": "string", "format": "date-time" },
+    "eventType": { "type": "string", "minLength": 1 },
+    "payload": {},
+    "qualityFlags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  }
+}

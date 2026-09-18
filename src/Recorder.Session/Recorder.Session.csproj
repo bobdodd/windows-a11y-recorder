@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Schemas\*.schema.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

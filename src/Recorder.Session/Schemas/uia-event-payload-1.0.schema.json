@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.windows-a11y-recorder.local/uia-event-payload-1.0.schema.json",
+  "title": "Windows UI Automation event payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "changeType", "runtimeId", "newValue", "element"],
+  "properties": {
+    "eventId": { "type": "string", "minLength": 1 },
+    "changeType": { "type": ["string", "null"] },
+    "runtimeId": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        { "type": "null" }
+      ]
+    },
+    "newValue": { "type": ["string", "null"] },
+    "element": { "$ref": "#/$defs/element" }
+  },
+  "$defs": {
+    "rectangle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 }
+      }
+    },
+    "element": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processId",
+        "nativeWindowHandle",
+        "automationId",
+        "name",
+        "className",
+        "frameworkId",
+        "controlType",
+        "localizedControlType",
+        "hasKeyboardFocus",
+        "isKeyboardFocusable",
+        "isEnabled",
+        "isOffscreen",
+        "boundingRectangle",
+        "qualityFlags"
+      ],
+      "properties": {
+        "processId": { "type": ["integer", "null"] },
+        "nativeWindowHandle": { "type": ["integer", "null"] },
+        "automationId": { "type": ["string", "null"] },
+        "name": { "type": ["string", "null"] },
+        "className": { "type": ["string", "null"] },
+        "frameworkId": { "type": ["string", "null"] },
+        "controlType": { "type": ["string", "null"] },
+        "localizedControlType": { "type": ["string", "null"] },
+        "hasKeyboardFocus": { "type": ["boolean", "null"] },
+        "isKeyboardFocusable": { "type": ["boolean", "null"] },
+        "isEnabled": { "type": ["boolean", "null"] },
+        "isOffscreen": { "type": ["boolean", "null"] },
+        "boundingRectangle": {
+          "anyOf": [
+            { "$ref": "#/$defs/rectangle" },
+            { "type": "null" }
+          ]
+        },
+        "qualityFlags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

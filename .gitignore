@@ -23,6 +23,10 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 
+# Python generated files
+__pycache__/
+*.py[cod]
+
 # NuGet
 packages/
 *.nupkg

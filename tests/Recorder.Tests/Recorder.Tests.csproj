@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Recorder.Contracts/Recorder.Contracts.csproj" />
+    <ProjectReference Include="../../src/Recorder.Session/Recorder.Session.csproj" />
+    <ProjectReference Include="../../src/Recorder.Coordinator/Recorder.Coordinator.csproj" />
+    <ProjectReference Include="../../src/Recorder.Collectors.Browser/Recorder.Collectors.Browser.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.windows-a11y-recorder.local/audio-event-payload-1.0.schema.json",
+  "title": "Audio event payloads",
+  "oneOf": [
+    { "$ref": "#/$defs/stream" },
+    { "$ref": "#/$defs/buffer" },
+    { "$ref": "#/$defs/error" }
+  ],
+  "$defs": {
+    "safePath": {
+      "type": "string",
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\\\]+$"
+    },
+    "streamName": {
+      "enum": ["microphone", "system"]
+    },
+    "format": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "encoding",
+        "sampleRate",
+        "channels",
+        "bitsPerSample",
+        "blockAlign",
+        "averageBytesPerSecond"
+      ],
+      "properties": {
+        "encoding": { "type": "string", "minLength": 1 },
+        "sampleRate": { "type": "integer", "minimum": 1 },
+        "channels": { "type": "integer", "minimum": 1 },
+        "bitsPerSample": { "type": "integer", "minimum": 1 },
+        "blockAlign": { "type": "integer", "minimum": 1 },
+        "averageBytesPerSecond": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stream",
+        "path",
+        "device",
+        "format",
+        "dataBytes",
+        "buffersObserved",
+        "buffersDropped"
+      ],
+      "properties": {
+        "stream": { "$ref": "#/$defs/streamName" },
+        "path": { "$ref": "#/$defs/safePath" },
+        "device": { "type": "string", "minLength": 1 },
+        "endpointVolumeScalar": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "format": { "$ref": "#/$defs/format" },
+        "dataBytes": { "type": "integer", "minimum": 0 },
+        "buffersObserved": { "type": "integer", "minimum": 0 },
+        "buffersDropped": { "type": "integer", "minimum": 0 },
+        "peakAmplitude": { "type": ["number", "null"], "minimum": 0 },
+        "peakDbfs": { "type": ["number", "null"] },
+        "rmsAmplitude": { "type": ["number", "null"], "minimum": 0 },
+        "rmsDbfs": { "type": ["number", "null"] }
+      }
+    },
+    "buffer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stream",
+        "path",
+        "bufferSequence",
+        "dataByteOffset",
+        "byteLength",
+        "sampleFrames",
+        "durationNanoseconds",
+        "estimatedFirstSampleMonotonicNanoseconds",
+        "callbackMonotonicNanoseconds"
+      ],
+      "properties": {
+        "stream": { "$ref": "#/$defs/streamName" },
+        "path": { "$ref": "#/$defs/safePath" },
+        "bufferSequence": { "type": "integer", "minimum": 0 },
+        "dataByteOffset": { "type": "integer", "minimum": 0 },
+        "byteLength": { "type": "integer", "minimum": 0 },
+        "sampleFrames": { "type": "integer", "minimum": 0 },
+        "durationNanoseconds": { "type": "integer", "minimum": 0 },
+        "estimatedFirstSampleMonotonicNanoseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "callbackMonotonicNanoseconds": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stream", "errorType", "message"],
+      "properties": {
+        "stream": { "$ref": "#/$defs/streamName" },
+        "errorType": { "type": ["string", "null"] },
+        "message": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

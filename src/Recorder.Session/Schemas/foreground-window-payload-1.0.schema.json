@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.windows-a11y-recorder.local/foreground-window-payload-1.0.schema.json",
+  "title": "Foreground window payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reason",
+    "eventThreadId",
+    "nativeEventTimeMilliseconds",
+    "windowHandle",
+    "processId",
+    "threadId",
+    "processName",
+    "processPath",
+    "title",
+    "className",
+    "isVisible",
+    "isMinimized",
+    "isMaximized",
+    "isCloaked",
+    "dpi",
+    "bounds",
+    "monitor"
+  ],
+  "properties": {
+    "reason": { "type": "string", "minLength": 1 },
+    "eventThreadId": { "type": ["integer", "null"], "minimum": 0 },
+    "nativeEventTimeMilliseconds": { "type": ["integer", "null"], "minimum": 0 },
+    "windowHandle": { "type": "integer" },
+    "processId": { "type": "integer", "minimum": 0 },
+    "threadId": { "type": "integer", "minimum": 0 },
+    "processName": { "type": ["string", "null"] },
+    "processPath": { "type": ["string", "null"] },
+    "title": { "type": ["string", "null"] },
+    "className": { "type": ["string", "null"] },
+    "isVisible": { "type": "boolean" },
+    "isMinimized": { "type": "boolean" },
+    "isMaximized": { "type": "boolean" },
+    "isCloaked": { "type": ["boolean", "null"] },
+    "dpi": { "type": ["integer", "null"], "minimum": 0 },
+    "bounds": {
+      "anyOf": [
+        { "$ref": "#/$defs/rectangle" },
+        { "type": "null" }
+      ]
+    },
+    "monitor": {
+      "anyOf": [
+        { "$ref": "#/$defs/monitor" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "$defs": {
+    "rectangle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "monitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deviceName", "bounds", "workArea", "isPrimary"],
+      "properties": {
+        "deviceName": { "type": "string", "minLength": 1 },
+        "bounds": { "$ref": "#/$defs/rectangle" },
+        "workArea": { "$ref": "#/$defs/rectangle" },
+        "isPrimary": { "type": "boolean" }
+      }
+    }
+  }
+}
