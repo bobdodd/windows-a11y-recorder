@@ -47,8 +47,8 @@ not session evidence and must not contain the recorder authentication token.
 For failures that occur before Chromium logging is initialized, set
 `A11Y_RECORDER_BRIDGE_LOG_FILE` to an absolute file path. The native bridge
 appends only process identifiers, monotonic tick values, bootstrap attachment
-stages, and internal error text. It never writes bootstrap contents, pipe
-names, authentication tokens, command lines, URLs, or page data.
+stages, child process types, and internal error text. It never writes bootstrap
+contents, pipe names, authentication tokens, command lines, URLs, or page data.
 
 For each accepted connection, the recorder persists two records on the
 `browser.lifecycle` channel:

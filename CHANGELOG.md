@@ -28,7 +28,8 @@ from the product version.
   process startup failures.
 - Added opt-in native bridge tracing through
   `A11Y_RECORDER_BRIDGE_LOG_FILE` for failures that occur before Chromium's
-  normal logging system is initialized.
+  normal logging system is initialized, including child-launch hook entry and
+  early-return diagnostics.
 
 ## 0.1.0 - 2026-09-18
 

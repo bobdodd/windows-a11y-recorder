@@ -219,19 +219,31 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
                                            int child_process_id,
                                            std::string* error) {
   if (!command_line || !launch_options || !error || child_process_id <= 0) {
+    WriteDiagnosticLine(
+        "Recorder child bootstrap received invalid launch arguments.");
     return false;
   }
   error->clear();
+
+  const std::string process_type =
+      command_line->GetSwitchValueASCII(switches::kProcessType);
+  WriteDiagnosticLine(
+      "Recorder child bootstrap hook entered for " +
+      (process_type.empty() ? std::string("<empty>") : process_type) +
+      " child " + base::NumberToString(child_process_id) + ".");
 
   const std::optional<std::string> metadata =
       base::Environment::Create()->GetVar(
           kChildBootstrapMetadataEnvironment);
   if (!metadata.has_value()) {
+    WriteDiagnosticLine(
+        "Recorder child bootstrap metadata was unavailable.");
     return true;
   }
-  const std::string process_type =
-      command_line->GetSwitchValueASCII(switches::kProcessType);
   if (!IsSupportedChildProcess(process_type)) {
+    WriteDiagnosticLine(
+        "Recorder child bootstrap skipped unsupported process type " +
+        (process_type.empty() ? std::string("<empty>") : process_type) + ".");
     return true;
   }
   if (command_line->HasSwitch(kChildBootstrapHandleSwitch)) {

@@ -189,8 +189,9 @@ During those states:
   be handled as sensitive diagnostic data.
 - Opt-in early native bridge tracing through
   `A11Y_RECORDER_BRIDGE_LOG_FILE` records only process identifiers, monotonic
-  tick values, startup stages, and internal errors. It must never include
-  bootstrap contents, pipe names, authentication tokens, URLs, or page data.
+  tick values, startup stages, child process types, and internal errors. It
+  must never include bootstrap contents, pipe names, authentication tokens,
+  command lines, URLs, or page data.
 - Recording remains functional with the network disconnected.
 
 Post-capture upload is outside the capture workflow. It requires an explicit export, an identified destination, and a separate user action.
