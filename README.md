@@ -33,22 +33,15 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Renderer capability propagation and six narrow Blink evidence slices were
+Renderer capability propagation and seven narrow Blink evidence slices were
 validated end to end on the reference Windows platform on September 19, 2026.
 The latest validated archive contained listener lifecycle, dispatch lifecycle,
 the ordered Node propagation path, current targets, listener phases,
 cumulative propagation-stop state, Node default-event-handler decisions, and
-window timeout, interval, and animation-frame lifecycles. It passed structural
-validation across 1,594 events and 81 artifacts and recorded no network-service
-crashes. See the
-[Blink animation-frame validation record](docs/validation/blink-animation-frames-2026-09-19.md).
-
-A seventh slice now implements protocol 0.7 idle-callback evidence for
-accepted `requestIdleCallback` schedules, callback entry with the observed
-`didTimeout` value, and explicit `cancelIdleCallback` cancellation. Its
-archive, integration, and deterministic fixture tests are complete. It remains
-an implemented, unvalidated slice until the reference Windows build and
-capture procedure succeeds.
+window timeout, interval, animation-frame, and idle-callback lifecycles. It
+passed structural validation across 629 events and 81 artifacts and recorded
+no network-service crashes. See the
+[Blink idle-callback validation record](docs/validation/blink-idle-callbacks-2026-09-19.md).
 
 ## Project goals
 
@@ -101,18 +94,18 @@ Completed:
 11. Record and validate accepted web-exposed `requestAnimationFrame`
     schedules, callback entry, and explicit `cancelAnimationFrame`
     cancellation with process-local correlation.
+12. Record and validate accepted web-exposed `requestIdleCallback` schedules,
+    callback entry with `didTimeout`, and explicit `cancelIdleCallback`
+    cancellation with process-local correlation.
 
 Remaining:
 
-1. Validate accepted web-exposed `requestIdleCallback` schedules, callback
-   entry with `didTimeout`, and explicit `cancelIdleCallback` cancellation on
-   the reference Windows build.
-2. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
+1. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
    dispatch paths, timer throttling, cookies, DOM,
    accessibility, network, and rendering.
-3. Record representative NVDA, JAWS, and Narrator sessions.
-4. Add evidence correlation and screen-reader behavior analysis.
-5. Investigate touch and gesture coverage on representative hardware.
+2. Record representative NVDA, JAWS, and Narrator sessions.
+3. Add evidence correlation and screen-reader behavior analysis.
+4. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 

@@ -109,6 +109,10 @@ from the product version.
   reference Windows platform with 1,594 events, 81 artifacts, one fired
   callback, one explicitly cancelled callback, and zero network-service
   crashes.
+- Validated protocol 0.7 web-exposed idle-callback evidence end to end on the
+  reference Windows platform with 629 events, 81 artifacts, one timed-out
+  callback entry, one explicitly cancelled callback, and zero network-service
+  crashes.
 - Replaced the animation-frame callback hook's formatting-sensitive DevTools
   trace anchor with a callback-invocation anchor and regression coverage for
   current and older Chromium source shapes.

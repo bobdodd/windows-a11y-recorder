@@ -15,8 +15,7 @@ interval cancellation.
 The sixth implemented slice records web-exposed animation-frame scheduling,
 callback entry, and explicit cancellation.
 The seventh implemented slice records web-exposed idle-callback scheduling,
-callback entry with `didTimeout`, and explicit cancellation. This seventh
-slice remains pending reference Windows validation.
+callback entry with `didTimeout`, and explicit cancellation.
 It does not claim complete listener or dispatch coverage.
 
 ## Implemented hooks
@@ -568,12 +567,53 @@ the validated scope. The
 [dated validation record](blink-animation-frames-2026-09-19.md) documents the
 environment, defects found, evidence, and limits.
 
-## Idle-callback validation state
+## Idle-callback validation result
 
-Protocol 0.7 idle-callback instrumentation, archive validation, deterministic
-fixture coverage, integration regression tests, and evidence-verifier
-assertions are implemented. The slice is not yet described as validated.
-Completion requires the reference Windows procedure to build Chromium, pass
-the managed test suite, capture two accepted idle-callback schedules, correlate
-one timed-out callback entry and one explicit cancellation, validate the
-archive, and report zero network-service crashes.
+The web-exposed idle-callback slice completed the reference Windows procedure
+on September 19, 2026, using repository commit `86a26f8`. The complete script
+exited with code 0 after:
+
+- Passing six Chromium integration tests.
+- Building the protocol 0.7 instrumented Chromium executable.
+- Passing the managed recorder test suite.
+- Connecting the instrumented renderer through the authenticated pipe.
+- Correlating two accepted callback schedules with one timed-out callback
+  entry and one explicit cancellation.
+- Validating the completed archive.
+- Confirming that Chromium reported no network-service crashes.
+
+The validated session is:
+
+`C:\\Users\\Public\\Documents\\A11yRecorderBlinkValidation\\20260919-193958-7d487516d0e24b03b39c08895f682175`
+
+The final validation summary reported:
+
+- `ScheduledIdleCallbacks=2`
+- `FiredIdleCallbacks=1`
+- `CancelledIdleCallbacks=1`
+- `FiredIdleCallbackDidTimeout=True`
+- `FiredIdleCallbackId=timer-4`
+- `CancelledIdleCallbackId=timer-3`
+- `RendererProcessId=21476`
+- `DocumentId=dom-document-3`
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=629`
+- `ARTIFACTS_VALIDATED=81`
+- `NETWORK_SERVICE_CRASHES=0`
+- `VALIDATION_EXIT_CODE=0`
+
+The fired schedule and callback-entry records share one process-local timer
+identifier. The cancelled schedule and explicit-cancellation records share a
+second identifier. Correlation also requires the browser instance, renderer
+process, document, and timer kind.
+
+This result validates accepted scheduling, timed-out callback entry, and
+explicit cancellation for the deterministic web-exposed idle-callback
+fixture. A `timer-fired` record proves callback entry and records Blink's
+`didTimeout` value. It does not prove callback completion or resulting browser
+or document-state changes. Idle callbacks without timeout options,
+execution-context destruction, worker scheduling, throttling, page lifecycle
+state, callback source location, sustained high-volume operation, and omission
+handling under backpressure remain outside the validated scope. The
+[dated validation record](blink-idle-callbacks-2026-09-19.md) documents the
+environment, evidence, and limits.
