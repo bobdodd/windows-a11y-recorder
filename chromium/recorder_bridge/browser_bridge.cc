@@ -207,20 +207,31 @@ bool StoreChildBootstrap(const BootstrapConfiguration& configuration,
 bool ReadChildBootstrap(const base::CommandLine& command_line,
                         BootstrapConfiguration* configuration,
                         std::string* error) {
+  WriteDiagnosticLine("Reading inherited child recorder bootstrap.");
   auto region = base::shared_memory::ReadOnlySharedMemoryRegionFrom(
       command_line.GetSwitchValueASCII(kChildBootstrapHandleSwitch));
   if (!region.has_value() || !region->IsValid()) {
     *error = "The inherited child recorder bootstrap was invalid.";
+    WriteDiagnosticLine(*error);
     return false;
   }
+  WriteDiagnosticLine("Inherited child recorder bootstrap handle is valid.");
   base::ReadOnlySharedMemoryMapping mapping = region->Map();
   if (!mapping.IsValid()) {
     *error = "The inherited child recorder bootstrap could not be mapped.";
+    WriteDiagnosticLine(*error);
     return false;
   }
+  WriteDiagnosticLine("Inherited child recorder bootstrap was mapped.");
   const auto chars = base::as_chars(mapping.GetMemoryAsSpan<uint8_t>());
-  return ParseBootstrapConfiguration(
-      std::string_view(chars.data(), chars.size()), configuration, error);
+  if (!ParseBootstrapConfiguration(
+          std::string_view(chars.data(), chars.size()), configuration, error)) {
+    WriteDiagnosticLine("Inherited child recorder bootstrap parsing failed: " +
+                        *error);
+    return false;
+  }
+  WriteDiagnosticLine("Inherited child recorder bootstrap was parsed.");
+  return true;
 }
 
 }  // namespace
@@ -277,6 +288,8 @@ bool InitializeProcessBridge(std::string* error) {
     process_type = "browser";
   } else {
     if (!command_line.HasSwitch(kChildBootstrapHandleSwitch)) {
+      WriteDiagnosticLine(
+          "Recorder child process did not receive a bootstrap handle.");
       return true;
     }
     if (!IsSupportedChildProcess(process_type)) {
@@ -285,6 +298,7 @@ bool InitializeProcessBridge(std::string* error) {
       return false;
     }
     if (!ReadChildBootstrap(command_line, &configuration, error)) {
+      WriteDiagnosticLine("Recorder child bootstrap read failed: " + *error);
       return false;
     }
     if (!configuration.parent_process_id ||
@@ -303,11 +317,16 @@ bool InitializeProcessBridge(std::string* error) {
       return false;
     }
     configuration.child_process_id = child_process_id;
+    WriteDiagnosticLine(
+        "Recorder child process metadata validation completed.");
   }
 
   auto client = std::make_unique<RecorderPipeClient>(std::move(configuration));
+  WriteDiagnosticLine("Recorder process bridge is connecting to the pipe.");
   if (!client->ConnectAndSynchronize(
           process_type, std::string(version_info::GetVersionNumber()), error)) {
+    WriteDiagnosticLine("Recorder process bridge pipe connection failed: " +
+                        *error);
     return false;
   }
   ProcessClientStorage() = std::move(client);
