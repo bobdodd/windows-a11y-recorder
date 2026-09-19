@@ -532,11 +532,32 @@ BLINK_THROTTLER_OWNER_DECLARATION = """\
 class MainThreadTaskQueue;
 """
 BLINK_THROTTLER_CONSTRUCTOR_DECLARATION = """\
+  TaskQueueThrottler(base::sequence_manager::TaskQueue* task_queue,
+                     const base::TickClock* tick_clock);
+  TaskQueueThrottler(MainThreadTaskQueue* owner,
+                     base::sequence_manager::TaskQueue* task_queue,
+                     const base::TickClock* tick_clock);
+"""
+LEGACY_BLINK_THROTTLER_OWNER_CONSTRUCTOR_DECLARATION = """\
   TaskQueueThrottler(MainThreadTaskQueue* owner,
                      base::sequence_manager::TaskQueue* task_queue,
                      const base::TickClock* tick_clock);
 """
 BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION = """\
+TaskQueueThrottler::TaskQueueThrottler(
+    base::sequence_manager::TaskQueue* task_queue,
+    const base::TickClock* tick_clock)
+    : task_queue_(task_queue), tick_clock_(tick_clock) {}
+
+TaskQueueThrottler::TaskQueueThrottler(
+    MainThreadTaskQueue* owner,
+    base::sequence_manager::TaskQueue* task_queue,
+    const base::TickClock* tick_clock)
+    : owner_(owner->AsWeakPtr()),
+      task_queue_(task_queue),
+      tick_clock_(tick_clock) {}
+"""
+LEGACY_BLINK_THROTTLER_WEAK_CONSTRUCTOR_IMPLEMENTATION = """\
 TaskQueueThrottler::TaskQueueThrottler(
     MainThreadTaskQueue* owner,
     base::sequence_manager::TaskQueue* task_queue,
@@ -1325,12 +1346,20 @@ def patch_blink_task_queue_throttler_header(path: Path) -> None:
                      const base::TickClock* tick_clock);
 """
     if BLINK_THROTTLER_CONSTRUCTOR_DECLARATION not in text:
-        text = replace_once(
-            text,
-            old_constructor,
-            BLINK_THROTTLER_CONSTRUCTOR_DECLARATION,
-            path,
-        )
+        if LEGACY_BLINK_THROTTLER_OWNER_CONSTRUCTOR_DECLARATION in text:
+            text = replace_once(
+                text,
+                LEGACY_BLINK_THROTTLER_OWNER_CONSTRUCTOR_DECLARATION,
+                BLINK_THROTTLER_CONSTRUCTOR_DECLARATION,
+                path,
+            )
+        else:
+            text = replace_once(
+                text,
+                old_constructor,
+                BLINK_THROTTLER_CONSTRUCTOR_DECLARATION,
+                path,
+            )
     if BLINK_THROTTLER_OWNER_MEMBER not in text:
         if LEGACY_BLINK_THROTTLER_OWNER_MEMBER in text:
             text = replace_once(
@@ -1377,6 +1406,13 @@ TaskQueueThrottler::TaskQueueThrottler(
             text = replace_once(
                 text,
                 LEGACY_BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+                BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+                path,
+            )
+        elif LEGACY_BLINK_THROTTLER_WEAK_CONSTRUCTOR_IMPLEMENTATION in text:
+            text = replace_once(
+                text,
+                LEGACY_BLINK_THROTTLER_WEAK_CONSTRUCTOR_IMPLEMENTATION,
                 BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
                 path,
             )

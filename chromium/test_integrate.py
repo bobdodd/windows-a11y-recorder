@@ -1042,6 +1042,11 @@ class IntegrateTests(unittest.TestCase):
                 first[throttler_h],
             )
             self.assertIn("owner_(owner->AsWeakPtr())", first[throttler_cc])
+            self.assertIn(
+                "TaskQueueThrottler(\n"
+                "    base::sequence_manager::TaskQueue* task_queue,",
+                first[throttler_cc],
+            )
 
             throttler_h.write_text(
                 first[throttler_h]
@@ -1055,7 +1060,7 @@ class IntegrateTests(unittest.TestCase):
             throttler_cc.write_text(
                 first[throttler_cc].replace(
                     INTEGRATE.BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
-                    INTEGRATE.LEGACY_BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+                    INTEGRATE.LEGACY_BLINK_THROTTLER_WEAK_CONSTRUCTOR_IMPLEMENTATION,
                 ),
                 encoding="utf-8",
             )
