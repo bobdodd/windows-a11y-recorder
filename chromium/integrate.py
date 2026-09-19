@@ -14,6 +14,11 @@ BRIDGE_INCLUDE = '#include "chromium/recorder_bridge/browser_bridge.h"'
 CHILD_LAUNCHER_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
 )
+CHILD_LAUNCHER_INCLUDE_BLOCK = f"""\
+#if BUILDFLAG(IS_WIN)
+{CHILD_LAUNCHER_INCLUDE}
+#endif
+"""
 BRIDGE_INCLUDE_BLOCK = f"""\
 #if BUILDFLAG(IS_WIN)
 {BRIDGE_INCLUDE}
@@ -33,7 +38,7 @@ HOOK = """\
   }
 #endif
 """
-CHILD_LAUNCHER_HOOK = """\
+LEGACY_CHILD_LAUNCHER_HOOK = """\
   std::string recorder_bridge_error;
   if (!a11y_recorder::AppendRecorderBootstrapToChildProcess(
           command_line(), options, child_process_id().value(),
@@ -45,6 +50,10 @@ CHILD_LAUNCHER_HOOK = """\
                << recorder_bridge_error;
     return false;
   }
+"""
+CHILD_LAUNCHER_HOOK = f"""\
+#if BUILDFLAG(IS_WIN)
+{LEGACY_CHILD_LAUNCHER_HOOK}#endif
 """
 
 
@@ -110,6 +119,13 @@ def patch_chrome_build(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def remove_legacy_child_launcher_hook(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(f"{CHILD_LAUNCHER_INCLUDE}\n", "")
+    text = text.replace(LEGACY_CHILD_LAUNCHER_HOOK, "")
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def patch_child_launcher(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     if CHILD_LAUNCHER_INCLUDE not in text:
@@ -117,27 +133,28 @@ def patch_child_launcher(path: Path) -> None:
             text,
             '#include "content/browser/child_process_launcher_helper.h"\n',
             '#include "content/browser/child_process_launcher_helper.h"\n'
-            f"{CHILD_LAUNCHER_INCLUDE}\n",
+            f"{CHILD_LAUNCHER_INCLUDE_BLOCK}",
             path,
         )
 
     if "AppendRecorderBootstrapToChildProcess" not in text:
-        function = (
-            "bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread("
-        )
+        function = "void ChildProcessLauncherHelper::LaunchOnLauncherThread()"
         function_index = text.find(function)
         if function_index < 0:
             raise RuntimeError(
-                f"{path}: child launch preparation function not found"
+                f"{path}: shared child launch function not found"
             )
-        anchor = "  if (!options->elevated) {"
+        anchor = (
+            "  if (BeforeLaunchOnLauncherThread("
+            "*files_to_register, options_ptr)) {"
+        )
         anchor_index = text.find(anchor, function_index)
         function_end = text.find("\n}\n", function_index)
         if anchor_index < 0 or (
             function_end >= 0 and anchor_index > function_end
         ):
             raise RuntimeError(
-                f"{path}: child launch preparation anchor not found"
+                f"{path}: shared child launch anchor not found"
             )
         text = (
             text[:anchor_index]
@@ -191,8 +208,11 @@ def main() -> int:
 
     patch_main_delegate(source / "chrome" / "app" / "chrome_main_delegate.cc")
     patch_chrome_build(source / "chrome" / "BUILD.gn")
-    patch_child_launcher(
+    remove_legacy_child_launcher_hook(
         source / "content" / "browser" / "child_process_launcher_helper_win.cc"
+    )
+    patch_child_launcher(
+        source / "content" / "browser" / "child_process_launcher_helper.cc"
     )
     patch_content_browser_build(source / "content" / "browser" / "BUILD.gn")
     print(f"Recorder bridge installed in {source}")

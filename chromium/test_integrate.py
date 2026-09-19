@@ -17,7 +17,10 @@ class IntegrateTests(unittest.TestCase):
             root = Path(directory)
             delegate = root / "chrome_main_delegate.cc"
             chrome_build = root / "chrome_BUILD.gn"
-            child_launcher = root / "child_process_launcher_helper_win.cc"
+            child_launcher = root / "child_process_launcher_helper.cc"
+            windows_child_launcher = (
+                root / "child_process_launcher_helper_win.cc"
+            )
             content_build = root / "content_browser_BUILD.gn"
             delegate.write_text(
                 '#include "chrome/app/chrome_main_delegate.h"\n'
@@ -55,16 +58,32 @@ class IntegrateTests(unittest.TestCase):
             child_launcher.write_text(
                 '#include "content/browser/child_process_launcher_helper.h"\n'
                 "\n"
+                "void ChildProcessLauncherHelper::"
+                "LaunchOnLauncherThread() {\n"
+                "  std::unique_ptr<FileMappedForLaunch> "
+                "files_to_register = GetFilesToMap();\n"
+                "  std::optional<base::LaunchOptions> options;\n"
+                "  base::LaunchOptions* options_ptr = nullptr;\n"
+                "  if (IsUsingLaunchOptions()) {\n"
+                "    options.emplace();\n"
+                "    options_ptr = &*options;\n"
+                "  }\n"
+                "  if (BeforeLaunchOnLauncherThread("
+                "*files_to_register, options_ptr)) {\n"
+                "    LaunchProcessOnLauncherThread();\n"
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            windows_child_launcher.write_text(
+                '#include "content/browser/child_process_launcher_helper.h"\n'
+                f"{INTEGRATE.CHILD_LAUNCHER_INCLUDE}\n"
+                "\n"
                 "bool ChildProcessLauncherHelper::"
                 "BeforeLaunchOnLauncherThread(\n"
                 "    FileMappedForLaunch& files_to_register,\n"
                 "    base::LaunchOptions* options) {\n"
-                "  CHECK(CurrentlyOnProcessLauncherTaskRunner());\n"
-                "  CHECK_EQ(options->elevated, "
-                "delegate_->ShouldLaunchElevated());\n"
-                "  if (!options->elevated) {\n"
-                "    PrepareChild();\n"
-                "  }\n"
+                f"{INTEGRATE.LEGACY_CHILD_LAUNCHER_HOOK}"
                 "  return true;\n"
                 "}\n",
                 encoding="utf-8",
@@ -85,15 +104,24 @@ class IntegrateTests(unittest.TestCase):
 
             INTEGRATE.patch_main_delegate(delegate)
             INTEGRATE.patch_chrome_build(chrome_build)
+            INTEGRATE.remove_legacy_child_launcher_hook(
+                windows_child_launcher
+            )
             INTEGRATE.patch_child_launcher(child_launcher)
             INTEGRATE.patch_content_browser_build(content_build)
             first_delegate = delegate.read_text(encoding="utf-8")
             first_chrome_build = chrome_build.read_text(encoding="utf-8")
             first_child_launcher = child_launcher.read_text(encoding="utf-8")
+            first_windows_child_launcher = (
+                windows_child_launcher.read_text(encoding="utf-8")
+            )
             first_content_build = content_build.read_text(encoding="utf-8")
 
             INTEGRATE.patch_main_delegate(delegate)
             INTEGRATE.patch_chrome_build(chrome_build)
+            INTEGRATE.remove_legacy_child_launcher_hook(
+                windows_child_launcher
+            )
             INTEGRATE.patch_child_launcher(child_launcher)
             INTEGRATE.patch_content_browser_build(content_build)
 
@@ -106,6 +134,10 @@ class IntegrateTests(unittest.TestCase):
             self.assertEqual(
                 first_child_launcher,
                 child_launcher.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                first_windows_child_launcher,
+                windows_child_launcher.read_text(encoding="utf-8"),
             )
             self.assertEqual(
                 first_content_build, content_build.read_text(encoding="utf-8")
@@ -141,6 +173,14 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn(
                 "child_process_id().value()",
                 first_child_launcher,
+            )
+            self.assertNotIn(
+                "AppendRecorderBootstrapToChildProcess",
+                first_windows_child_launcher,
+            )
+            self.assertNotIn(
+                INTEGRATE.CHILD_LAUNCHER_INCLUDE,
+                first_windows_child_launcher,
             )
             self.assertIn(
                 '      "//chromium/recorder_bridge",\n',

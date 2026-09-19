@@ -30,6 +30,8 @@ from the product version.
   `A11Y_RECORDER_BRIDGE_LOG_FILE` for failures that occur before Chromium's
   normal logging system is initialized, including child-launch hook entry and
   early-return diagnostics.
+- Moved Windows child bootstrap attachment to Chromium's shared child-launch
+  sequence and made integration remove the obsolete platform-local hook.
 
 ## 0.1.0 - 2026-09-18
 

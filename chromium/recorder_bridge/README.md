@@ -14,7 +14,10 @@ The integration script copies this directory into the checkout, adds it to the
 `chrome_main_delegate` and Windows `content/browser` targets, and initializes
 the connection from `ChromeMainDelegate::BasicStartupComplete`. The browser
 process completes its recorder connection before normal startup can launch
-renderer processes. The instrumented browser:
+renderer processes. Child bootstrap attachment runs in Chromium's shared
+`LaunchOnLauncherThread` sequence immediately before platform-specific launch
+preparation. The integration script removes the obsolete Windows-local hook
+when updating an existing checkout. The instrumented browser:
 
 1. Recognizes `--a11y-recorder-bootstrap=stdin`.
 2. Reads the one-line secret bootstrap from inherited standard input.
