@@ -33,15 +33,15 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Renderer capability propagation and five narrow Blink evidence slices were
+Renderer capability propagation and six narrow Blink evidence slices were
 validated end to end on the reference Windows platform on September 19, 2026.
 The latest validated archive contained listener lifecycle, dispatch lifecycle,
 the ordered Node propagation path, current targets, listener phases,
 cumulative propagation-stop state, Node default-event-handler decisions, and
-window timeout and interval lifecycles. It passed structural validation across
-632 events and 81 artifacts, dropped no records, and recorded no
-network-service crashes. See the
-[Blink DOM timer validation record](docs/validation/blink-dom-timers-2026-09-19.md).
+window timeout, interval, and animation-frame lifecycles. It passed structural
+validation across 1,594 events and 81 artifacts and recorded no network-service
+crashes. See the
+[Blink animation-frame validation record](docs/validation/blink-animation-frames-2026-09-19.md).
 
 ## Project goals
 
@@ -91,15 +91,9 @@ Completed:
    unobserved browser or document effects.
 10. Record and validate accepted window timeout and interval schedules,
     callback entry, and explicit cancellation with process-local correlation.
-
-In progress:
-
-1. Record web-exposed `requestAnimationFrame` scheduling, callback entry, and
-   explicit `cancelAnimationFrame` cancellation. The protocol 0.6 bridge,
-   Chromium hooks, deterministic fixture, archive contract test, and
-   verification assertions are implemented. The reference Windows
-   build-and-capture run is still required before this slice is marked
-   validated.
+11. Record and validate accepted web-exposed `requestAnimationFrame`
+    schedules, callback entry, and explicit `cancelAnimationFrame`
+    cancellation with process-local correlation.
 
 Remaining:
 

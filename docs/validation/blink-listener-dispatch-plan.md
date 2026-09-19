@@ -489,9 +489,52 @@ context-destruction cancellation remain outside the validated scope. The
 [dated validation record](blink-dom-timers-2026-09-19.md) documents the
 environment, defects found, evidence, and limits.
 
-## Animation-frame implementation state
+## Animation-frame validation result
 
-The protocol 0.6 bridge, Chromium integration hook, deterministic fixture,
-archive contract test, and end-to-end assertions are implemented. The
-reference Windows Chromium build and capture have not yet passed, so
-animation-frame evidence must not be described as validated.
+The web-exposed animation-frame slice completed the reference Windows
+procedure on September 19, 2026, using repository commit `a66142e`. The
+complete script exited with code 0 after:
+
+- Passing five Chromium integration tests.
+- Building the protocol 0.6 instrumented Chromium executable.
+- Passing the managed recorder test suite.
+- Connecting the instrumented renderer through the authenticated pipe.
+- Correlating two accepted callback schedules with one callback entry and one
+  explicit cancellation.
+- Validating the completed archive.
+- Confirming that Chromium reported no network-service crashes.
+
+The validated session is:
+
+`C:\\Users\\Public\\Documents\\A11yRecorderBlinkValidation\\20260919-184823-de48e2b9fa7c474da0a7e4945824538d`
+
+The final validation summary reported:
+
+- `ScheduledAnimationFrames=2`
+- `FiredAnimationFrames=1`
+- `CancelledAnimationFrames=1`
+- `FiredAnimationFrameId=timer-2`
+- `CancelledAnimationFrameId=timer-1`
+- `RendererProcessId=20040`
+- `DocumentId=dom-document-3`
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=1594`
+- `ARTIFACTS_VALIDATED=81`
+- `NETWORK_SERVICE_CRASHES=0`
+- `VALIDATION_EXIT_CODE=0`
+
+The fired schedule and callback-entry records share one process-local timer
+identifier. The cancelled schedule and explicit-cancellation records share a
+second identifier. Correlation also requires the browser instance, renderer
+process, and timer kind.
+
+This result validates accepted scheduling, callback entry, and explicit
+cancellation for the deterministic web-exposed animation-frame fixture. A
+`timer-fired` record proves callback entry, not callback completion, frame
+presentation, or resulting browser or document-state changes. Internal Blink
+callbacks, execution-context destruction, idle callbacks, worker scheduling,
+throttling, page lifecycle state, callback source location, sustained
+high-volume operation, and omission handling under backpressure remain outside
+the validated scope. The
+[dated validation record](blink-animation-frames-2026-09-19.md) documents the
+environment, defects found, evidence, and limits.
