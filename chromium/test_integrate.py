@@ -234,7 +234,19 @@ class IntegrateTests(unittest.TestCase):
                 "      timeout_id_, timeout, single_shot);\n"
                 "}\n"
                 "\n"
+                "void DOMTimer::Stop() {\n"
+                "  if (action_) {\n"
+                "    const bool is_interval = RepeatInterval().has_value();\n"
+                "\n"
+                "    action_->Dispose();\n"
+                "  }\n"
+                "}\n"
+                "\n"
                 "void DOMTimer::Fired() {\n"
+                "  ExecutionContext* context = GetExecutionContext();\n"
+                "  DEVTOOLS_TIMELINE_TRACE_EVENT(\n"
+                '      "TimerFire", inspector_timer_fire_event::Data, context, '
+                "timeout_id_);\n"
                 "  const bool is_interval = RepeatInterval().has_value();\n"
                 "\n"
                 "  action_->Execute(context);\n"
@@ -456,6 +468,12 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn("RecordBlinkTimerScheduled", first_dom_timer)
             self.assertIn("RecordBlinkTimerFired", first_dom_timer)
             self.assertIn("RecordBlinkTimerCancelled", first_dom_timer)
+            self.assertEqual(
+                2,
+                first_dom_timer.count(
+                    "const bool is_interval = RepeatInterval().has_value();"
+                ),
+            )
             self.assertLess(
                 first_dom_timer.index("RecordBlinkTimerScheduled"),
                 first_dom_timer.index('"TimerInstall"'),
@@ -463,6 +481,10 @@ class IntegrateTests(unittest.TestCase):
             self.assertLess(
                 first_dom_timer.index("RecordBlinkTimerFired"),
                 first_dom_timer.index("action_->Execute(context);"),
+            )
+            self.assertGreater(
+                first_dom_timer.index("RecordBlinkTimerFired"),
+                first_dom_timer.index('"TimerFire"'),
             )
             self.assertEqual(
                 1,

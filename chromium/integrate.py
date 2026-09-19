@@ -676,6 +676,9 @@ def patch_blink_dom_timer(path: Path) -> None:
         )
     if "RecordBlinkTimerFired" not in text:
         anchor = (
+            "  DEVTOOLS_TIMELINE_TRACE_EVENT(\n"
+            '      "TimerFire", inspector_timer_fire_event::Data, context, '
+            "timeout_id_);\n"
             "  const bool is_interval = RepeatInterval().has_value();\n\n"
         )
         text = replace_once(
