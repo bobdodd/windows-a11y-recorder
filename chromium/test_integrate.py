@@ -133,6 +133,15 @@ class IntegrateTests(unittest.TestCase):
                 "}\n",
                 encoding="utf-8",
             )
+            event_dispatcher.write_text(
+                event_dispatcher.read_text(encoding="utf-8")
+                + "\n"
+                + "inline void EventDispatcher::DispatchEventPostProcess() {\n"
+                + "  event_->SetTarget("
+                + "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
+                + "}\n",
+                encoding="utf-8",
+            )
             blink_build.write_text(
                 'component("core") {\n'
                 '  output_name = "blink_core"\n'
@@ -257,6 +266,12 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn(
                 "RecordBlinkDispatchStarted",
                 first_event_dispatcher,
+            )
+            self.assertEqual(
+                1,
+                first_event_dispatcher.count(
+                    "RecordBlinkDispatchStarted"
+                ),
             )
             self.assertIn(
                 'payload.Set("phase", "none");',

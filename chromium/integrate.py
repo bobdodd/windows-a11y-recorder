@@ -271,11 +271,17 @@ def patch_blink_event_dispatcher(path: Path) -> None:
         anchor = (
             "  event_->SetTarget("
             "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
+            "#if DCHECK_IS_ON()\n"
         )
         text = replace_once(
             text,
             anchor,
-            f"{anchor}{BLINK_DISPATCH_HOOK}",
+            (
+                "  event_->SetTarget("
+                "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
+                f"{BLINK_DISPATCH_HOOK}"
+                "#if DCHECK_IS_ON()\n"
+            ),
             path,
         )
     path.write_text(text, encoding="utf-8", newline="\n")
