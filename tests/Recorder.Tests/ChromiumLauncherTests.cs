@@ -1,4 +1,5 @@
 using Recorder.Collectors.Browser;
+using Recorder.Contracts;
 
 namespace Recorder.Tests;
 
