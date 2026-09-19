@@ -8,6 +8,13 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.7 evidence for accepted web-exposed
+  `requestIdleCallback` schedules, callback entry with the observed
+  `IdleDeadline.didTimeout` value, and explicit `cancelIdleCallback`
+  cancellation.
+- Added deterministic idle-callback fixture coverage, archive contract
+  coverage, idempotent Chromium integration tests, and end-to-end verification
+  assertions for one timed-out callback and one explicitly cancelled callback.
 - Added protocol 0.6 evidence for accepted web-exposed
   `requestAnimationFrame` schedules, callback entry, and explicit
   `cancelAnimationFrame` cancellation.
@@ -85,6 +92,8 @@ from the product version.
   default-event-handler decision evidence.
 - Advanced the browser evidence protocol to version 0.5 for correlated window
   DOM timer lifecycle evidence and nullable throttling state.
+- Advanced the browser evidence protocol to version 0.7 for correlated
+  web-exposed idle-callback lifecycle evidence and nullable `didTimeout`.
 - Preserved propagation flags observed during listener execution because Blink
   may clear them before the dispatch-completion hook runs.
 - Validated the propagation slice end to end on the reference Windows platform

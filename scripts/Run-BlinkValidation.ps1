@@ -165,6 +165,12 @@ $integratedFiles = @(
         )
     ),
     (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\scheduler\" +
+            "scripted_idle_task_controller.cc"
+        )
+    ),
+    (
         Join-Path $chromiumSource "third_party\blink\renderer\core\BUILD.gn"
     )
 )

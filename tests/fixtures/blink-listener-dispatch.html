@@ -60,6 +60,17 @@
     window.requestAnimationFrame((timestamp) => {
       status.dataset.animationFrameTimestamp = String(timestamp);
     });
+    const cancelledIdleCallbackId = window.requestIdleCallback(() => {
+      status.dataset.cancelledIdleCallbackRan = "true";
+    }, { timeout: 5000 });
+    window.cancelIdleCallback(cancelledIdleCallbackId);
+    window.requestIdleCallback((deadline) => {
+      status.dataset.idleCallbackDidTimeout = String(deadline.didTimeout);
+    }, { timeout: 1 });
+    const idleTimeoutDeadline = performance.now() + 100;
+    while (performance.now() < idleTimeoutDeadline) {
+      // Keep the main thread busy so the 1 ms idle callback times out.
+    }
     let intervalTicks = 0;
     const intervalId = window.setInterval(() => {
       intervalTicks += 1;

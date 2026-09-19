@@ -43,6 +43,13 @@ validation across 1,594 events and 81 artifacts and recorded no network-service
 crashes. See the
 [Blink animation-frame validation record](docs/validation/blink-animation-frames-2026-09-19.md).
 
+A seventh slice now implements protocol 0.7 idle-callback evidence for
+accepted `requestIdleCallback` schedules, callback entry with the observed
+`didTimeout` value, and explicit `cancelIdleCallback` cancellation. Its
+archive, integration, and deterministic fixture tests are complete. It remains
+an implemented, unvalidated slice until the reference Windows build and
+capture procedure succeeds.
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.
@@ -97,12 +104,15 @@ Completed:
 
 Remaining:
 
-1. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
-   dispatch paths, idle callbacks, timer throttling, cookies, DOM,
+1. Validate accepted web-exposed `requestIdleCallback` schedules, callback
+   entry with `didTimeout`, and explicit `cancelIdleCallback` cancellation on
+   the reference Windows build.
+2. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
+   dispatch paths, timer throttling, cookies, DOM,
    accessibility, network, and rendering.
-2. Record representative NVDA, JAWS, and Narrator sessions.
-3. Add evidence correlation and screen-reader behavior analysis.
-4. Investigate touch and gesture coverage on representative hardware.
+3. Record representative NVDA, JAWS, and Narrator sessions.
+4. Add evidence correlation and screen-reader behavior analysis.
+5. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 

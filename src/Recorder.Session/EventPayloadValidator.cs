@@ -491,7 +491,8 @@ internal static class EventPayloadValidator
                 NullableBoolean("throttled"),
                 RequiredString("pageLifecycleState"),
                 NullableObject("callbackLocation"),
-                NullableString("cancellationReason")
+                NullableString("cancellationReason"),
+                OptionalNullableBoolean("didTimeout")
             ],
             issues,
             line);
@@ -885,6 +886,9 @@ internal static class EventPayloadValidator
 
     private static PropertyRule NullableBoolean(string name) =>
         new(name, true, true, IsBoolean, "must be a boolean or null");
+
+    private static PropertyRule OptionalNullableBoolean(string name) =>
+        new(name, false, true, IsBoolean, "must be a boolean or null");
 
     private static PropertyRule RequiredObject(string name) =>
         new(

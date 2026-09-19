@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines the first six Blink evidence implementation slices and
+This document defines the first seven Blink evidence implementation slices and
 the Windows validation required before any can be described as complete.
 The first validated slice records accepted Node listener registrations and the
 start of Node event dispatches. The second implemented slice correlates
@@ -14,6 +14,9 @@ window `setTimeout` and `setInterval` scheduling, callback entry, and explicit
 interval cancellation.
 The sixth implemented slice records web-exposed animation-frame scheduling,
 callback entry, and explicit cancellation.
+The seventh implemented slice records web-exposed idle-callback scheduling,
+callback entry with `didTimeout`, and explicit cancellation. This seventh
+slice remains pending reference Windows validation.
 It does not claim complete listener or dispatch coverage.
 
 ## Implemented hooks
@@ -162,6 +165,25 @@ claim callback completion, frame presentation, or resulting page effects.
 Internal Blink callbacks and implicit removal caused by execution-context
 destruction are not reported by this slice.
 
+### Idle-callback lifecycle
+
+The seventh slice patches
+`third_party/blink/renderer/core/scheduler/scripted_idle_task_controller.cc`.
+It records web-exposed callbacks after Blink assigns a positive callback
+identifier and posts the idle and timeout tasks. A stable, process-local timer
+identifier correlates:
+
+- `timer-scheduled`, with timer kind `idle-callback` and the requested timeout
+  when one was supplied.
+- `timer-fired`, immediately before Blink enters the JavaScript callback, with
+  the observed `IdleDeadline.didTimeout` value.
+- `timer-cancelled`, when `cancelIdleCallback` removes a live callback.
+
+Delay fields are null when the timeout option is omitted. Nesting level is zero.
+Callback entry does not claim callback completion or resulting page effects.
+Implicit removal caused by execution-context destruction is not reported by
+this slice.
+
 ## Component boundary
 
 The recorder bridge is a Chromium component with exported entry points. This
@@ -182,6 +204,9 @@ high-volume event classes.
 listeners on `#propagation-root` and two listeners on `#pointer-only`. It
 installs a 125-millisecond interval that clears itself after one callback, then
 requests two animation-frame callbacks, explicitly cancels one, and invokes
+two idle callbacks, explicitly cancels the 5,000-millisecond callback, and
+keeps the main thread busy long enough for the 1-millisecond callback to enter
+with `didTimeout` true. It then invokes
 `HTMLElement.click()` from a 250-millisecond timeout. The target
 listeners call `preventDefault()`, remove the named listener, and call
 `stopPropagation()`. The expanded fixture must produce:
@@ -215,6 +240,10 @@ listeners call `preventDefault()`, remove the named listener, and call
 - Exactly one correlated animation-frame callback entry.
 - Exactly one distinct correlated cancellation with reason
   `explicit-cancel-animation-frame`.
+- Two `idle-callback` schedules with timeout values 1 and 5,000 milliseconds.
+- Exactly one correlated idle-callback entry whose `didTimeout` value is true.
+- Exactly one distinct correlated cancellation with reason
+  `explicit-cancel-idle-callback`.
 - Renderer process context and stable non-empty listener and dispatch
   identifiers across the lifecycle, plus stable non-empty timer identifiers
   across each timer lifecycle.
@@ -538,3 +567,13 @@ high-volume operation, and omission handling under backpressure remain outside
 the validated scope. The
 [dated validation record](blink-animation-frames-2026-09-19.md) documents the
 environment, defects found, evidence, and limits.
+
+## Idle-callback validation state
+
+Protocol 0.7 idle-callback instrumentation, archive validation, deterministic
+fixture coverage, integration regression tests, and evidence-verifier
+assertions are implemented. The slice is not yet described as validated.
+Completion requires the reference Windows procedure to build Chromium, pass
+the managed test suite, capture two accepted idle-callback schedules, correlate
+one timed-out callback entry and one explicit cancellation, validate the
+archive, and report zero network-service crashes.

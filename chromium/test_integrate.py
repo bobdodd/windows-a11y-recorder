@@ -12,6 +12,60 @@ SPEC.loader.exec_module(INTEGRATE)
 
 
 class IntegrateTests(unittest.TestCase):
+    def test_patches_current_idle_callback_shape_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "scripted_idle_task_controller.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/core/scheduler/'
+                'scripted_idle_task_controller.h"\n'
+                "\n"
+                "ScriptedIdleTaskController::CallbackId\n"
+                "ScriptedIdleTaskController::RegisterCallback(\n"
+                "    IdleTask* idle_task,\n"
+                "    const IdleRequestOptions* options) {\n"
+                "  CallbackId id = NextCallbackId();\n"
+                "  uint32_t timeout_millis = options->timeout();\n"
+                "  PostSchedulerIdleAndTimeoutTasks(id, timeout_millis);\n"
+                "  return id;\n"
+                "}\n"
+                "\n"
+                "void ScriptedIdleTaskController::CancelCallback(CallbackId id) {\n"
+                "  CHECK(IsValidCallbackId(id));\n"
+                "\n"
+                "  RemoveIdleTask(id);\n"
+                "}\n"
+                "\n"
+                "void ScriptedIdleTaskController::RunIdleTask(\n"
+                "    CallbackId id,\n"
+                "    base::TimeTicks deadline,\n"
+                "    IdleDeadline::CallbackType callback_type) {\n"
+                "  auto idle_task_iter = idle_tasks_.find(id);\n"
+                "  IdleTask* idle_task = idle_task_iter->value;\n"
+                "  bool cross_origin_isolated_capability = true;\n"
+                "  idle_task->invoke(MakeGarbageCollected<IdleDeadline>(\n"
+                "      deadline, cross_origin_isolated_capability, "
+                "callback_type));\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_blink_idle_callbacks(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_idle_callbacks(path)
+
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                1, first.count("RecordBlinkIdleCallbackScheduled")
+            )
+            self.assertEqual(
+                1, first.count("RecordBlinkIdleCallbackCancelled")
+            )
+            self.assertEqual(1, first.count("RecordBlinkIdleCallbackFired"))
+            self.assertLess(
+                first.index("RecordBlinkIdleCallbackFired"),
+                first.index("idle_task->invoke"),
+            )
+
     def test_patches_legacy_animation_frame_invocation_shape(self):
         with tempfile.TemporaryDirectory() as directory:
             path = (

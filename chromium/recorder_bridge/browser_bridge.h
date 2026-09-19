@@ -161,6 +161,25 @@ void RecordBlinkAnimationFrameFired(uintptr_t callback_identity);
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity);
 
+// Records an accepted web-exposed requestIdleCallback registration and its
+// requested timeout. A zero timeout means no positive timeout was requested.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkIdleCallbackScheduled(uintptr_t callback_identity,
+                                      int document_node_id,
+                                      int callback_id,
+                                      bool has_timeout,
+                                      double timeout_milliseconds);
+
+// Records entry into a previously scheduled idle callback and whether Blink
+// invoked it because its timeout elapsed. This does not imply completion.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkIdleCallbackFired(uintptr_t callback_identity,
+                                  bool did_timeout);
+
+// Records explicit cancelIdleCallback removal of a live callback.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity);
+
 // Records the final dispatch result and releases the active dispatch identity.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

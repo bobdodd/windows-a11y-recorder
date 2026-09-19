@@ -328,6 +328,29 @@ BLINK_ANIMATION_FRAME_FIRED_HOOK = """\
     a11y_recorder::RecordBlinkAnimationFrameFired(
         reinterpret_cast<uintptr_t>(callback.Get()));
 """
+BLINK_IDLE_CALLBACK_SCHEDULED_HOOK = """\
+  if (auto* recorder_window =
+          DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
+    if (Document* recorder_document = recorder_window->document()) {
+      a11y_recorder::RecordBlinkIdleCallbackScheduled(
+          reinterpret_cast<uintptr_t>(idle_task),
+          recorder_document->GetDomNodeId(), id, options->hasTimeout(),
+          timeout_millis);
+    }
+  }
+"""
+BLINK_IDLE_CALLBACK_CANCELLED_HOOK = """\
+  auto recorder_idle_task = idle_tasks_.find(id);
+  if (recorder_idle_task != idle_tasks_.end()) {
+    a11y_recorder::RecordBlinkIdleCallbackCancelled(
+        reinterpret_cast<uintptr_t>(recorder_idle_task->value.Get()));
+  }
+"""
+BLINK_IDLE_CALLBACK_FIRED_HOOK = """\
+  a11y_recorder::RecordBlinkIdleCallbackFired(
+      reinterpret_cast<uintptr_t>(idle_task),
+      callback_type == IdleDeadline::CallbackType::kCalledByTimeout);
+"""
 
 
 def replace_once(text: str, old: str, new: str, path: Path) -> str:
@@ -851,6 +874,79 @@ def patch_blink_animation_frame_callbacks(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def patch_blink_idle_callbacks(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_BRIDGE_INCLUDE not in text:
+        header = (
+            '#include "third_party/blink/renderer/core/scheduler/'
+            'scripted_idle_task_controller.h"\n'
+        )
+        text = replace_once(
+            text,
+            header,
+            header
+            + f"{BLINK_BRIDGE_INCLUDE}\n"
+            + '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            + '#include "third_party/blink/renderer/core/frame/'
+            'local_dom_window.h"\n',
+            path,
+        )
+    if "RecordBlinkIdleCallbackScheduled" not in text:
+        function = "ScriptedIdleTaskController::RegisterCallback("
+        function_index = text.find(function)
+        if function_index < 0:
+            raise RuntimeError(f"{path}: RegisterCallback function not found")
+        anchor = "  PostSchedulerIdleAndTimeoutTasks(id, timeout_millis);\n"
+        anchor_index = text.find(anchor, function_index)
+        if anchor_index < 0:
+            raise RuntimeError(
+                f"{path}: idle callback scheduling anchor not found"
+            )
+        insertion_index = anchor_index + len(anchor)
+        text = (
+            text[:insertion_index]
+            + f"{BLINK_IDLE_CALLBACK_SCHEDULED_HOOK}\n"
+            + text[insertion_index:]
+        )
+    if "RecordBlinkIdleCallbackCancelled" not in text:
+        function = "void ScriptedIdleTaskController::CancelCallback("
+        function_index = text.find(function)
+        if function_index < 0:
+            raise RuntimeError(f"{path}: CancelCallback function not found")
+        anchor = "  CHECK(IsValidCallbackId(id));\n\n"
+        anchor_index = text.find(anchor, function_index)
+        if anchor_index < 0:
+            raise RuntimeError(
+                f"{path}: idle callback cancellation anchor not found"
+            )
+        insertion_index = anchor_index + len(anchor)
+        text = (
+            text[:insertion_index]
+            + f"{BLINK_IDLE_CALLBACK_CANCELLED_HOOK}\n"
+            + text[insertion_index:]
+        )
+    if "RecordBlinkIdleCallbackFired" not in text:
+        function = "void ScriptedIdleTaskController::RunIdleTask("
+        function_index = text.find(function)
+        if function_index < 0:
+            raise RuntimeError(f"{path}: RunIdleTask function not found")
+        anchor = (
+            "  idle_task->invoke(MakeGarbageCollected<IdleDeadline>(\n"
+            "      deadline, cross_origin_isolated_capability, callback_type));\n"
+        )
+        anchor_index = text.find(anchor, function_index)
+        if anchor_index < 0:
+            raise RuntimeError(
+                f"{path}: idle callback invocation anchor not found"
+            )
+        text = (
+            text[:anchor_index]
+            + f"{BLINK_IDLE_CALLBACK_FIRED_HOOK}\n"
+            + text[anchor_index:]
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def patch_blink_core_build(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     if BLINK_CORE_DEP in text:
@@ -936,6 +1032,15 @@ def main() -> int:
         / "core"
         / "dom"
         / "frame_request_callback_collection.cc"
+    )
+    patch_blink_idle_callbacks(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "scheduler"
+        / "scripted_idle_task_controller.cc"
     )
     patch_blink_core_build(
         source / "third_party" / "blink" / "renderer" / "core" / "BUILD.gn"

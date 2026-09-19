@@ -146,6 +146,19 @@ $animationFrameScheduleCandidates = @(
             $_.payload.nestingLevel -eq 0
         }
 )
+$idleCallbackScheduleCandidates = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-scheduled" -and
+            $_.payload.timerKind -eq "idle-callback" -and
+            $_.payload.requestedDelayMilliseconds -in @(1, 5000) -and
+            $_.payload.effectiveDelayMilliseconds -eq
+                $_.payload.requestedDelayMilliseconds -and
+            $_.payload.nestingLevel -eq 0 -and
+            $null -eq $_.payload.didTimeout
+        }
+)
 
 if ($rendererConnections.Count -lt 1) {
     throw "No instrumented Chromium renderer connected to the recorder."
@@ -199,6 +212,23 @@ if ($scheduledAnimationFrames.Count -ne 2) {
     throw (
         "The fixture did not produce exactly two animation-frame schedules; " +
         "observed $($scheduledAnimationFrames.Count)."
+    )
+}
+$scheduledIdleCallbacks = @(
+    $idleCallbackScheduleCandidates |
+        Where-Object {
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq
+                $listener.context.processId -and
+            $_.payload.context.documentId -eq
+                $listener.context.documentId
+        }
+)
+if ($scheduledIdleCallbacks.Count -ne 2) {
+    throw (
+        "The fixture did not produce exactly two idle-callback schedules; " +
+        "observed $($scheduledIdleCallbacks.Count)."
     )
 }
 
@@ -273,6 +303,41 @@ $cancelledAnimationFrames = @(
                 "explicit-cancel-animation-frame"
         }
 )
+$firedIdleCallbacks = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-fired" -and
+            $_.payload.timerKind -eq "idle-callback" -and
+            $_.payload.requestedDelayMilliseconds -eq 1 -and
+            $_.payload.timerId -in @(
+                $scheduledIdleCallbacks |
+                    ForEach-Object { $_.payload.timerId }
+            ) -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId -and
+            $_.payload.didTimeout -eq $true -and
+            $null -eq $_.payload.cancellationReason
+        }
+)
+$cancelledIdleCallbacks = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-cancelled" -and
+            $_.payload.timerKind -eq "idle-callback" -and
+            $_.payload.requestedDelayMilliseconds -eq 5000 -and
+            $_.payload.timerId -in @(
+                $scheduledIdleCallbacks |
+                    ForEach-Object { $_.payload.timerId }
+            ) -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId -and
+            $_.payload.cancellationReason -eq
+                "explicit-cancel-idle-callback" -and
+            $null -eq $_.payload.didTimeout
+        }
+)
 if ($firedTimeouts.Count -ne 1) {
     throw "The fixture timeout did not produce exactly one correlated firing."
 }
@@ -293,6 +358,24 @@ if ($cancelledAnimationFrames.Count -ne 1) {
         "The fixture did not produce exactly one correlated " +
         "cancelAnimationFrame record."
     )
+}
+if ($firedIdleCallbacks.Count -ne 1) {
+    throw (
+        "The fixture did not produce exactly one timed-out idle-callback " +
+        "entry."
+    )
+}
+if ($cancelledIdleCallbacks.Count -ne 1) {
+    throw (
+        "The fixture did not produce exactly one correlated " +
+        "cancelIdleCallback record."
+    )
+}
+if (
+    $firedIdleCallbacks[0].payload.timerId -eq
+    $cancelledIdleCallbacks[0].payload.timerId
+) {
+    throw "The fired and cancelled idle-callback identities were not distinct."
 }
 if (
     $firedAnimationFrames[0].payload.timerId -eq
@@ -321,6 +404,28 @@ if (
     $cancelledAnimationFrameSchedule.monotonicNanoseconds
 ) {
     throw "The animation-frame callback was cancelled before it was scheduled."
+}
+$firedIdleCallbackSchedule = $scheduledIdleCallbacks |
+    Where-Object {
+        $_.payload.timerId -eq $firedIdleCallbacks[0].payload.timerId
+    } |
+    Select-Object -First 1
+$cancelledIdleCallbackSchedule = $scheduledIdleCallbacks |
+    Where-Object {
+        $_.payload.timerId -eq $cancelledIdleCallbacks[0].payload.timerId
+    } |
+    Select-Object -First 1
+if (
+    $firedIdleCallbacks[0].monotonicNanoseconds -lt
+    $firedIdleCallbackSchedule.monotonicNanoseconds
+) {
+    throw "The idle callback entered before it was scheduled."
+}
+if (
+    $cancelledIdleCallbacks[0].monotonicNanoseconds -lt
+    $cancelledIdleCallbackSchedule.monotonicNanoseconds
+) {
+    throw "The idle callback was cancelled before it was scheduled."
 }
 if (
     $firedTimeouts[0].monotonicNanoseconds -lt
@@ -482,10 +587,16 @@ if (-not $completion.propagationStopped) {
     ScheduledAnimationFrames = $scheduledAnimationFrames.Count
     FiredAnimationFrames = $firedAnimationFrames.Count
     CancelledAnimationFrames = $cancelledAnimationFrames.Count
+    ScheduledIdleCallbacks = $scheduledIdleCallbacks.Count
+    FiredIdleCallbacks = $firedIdleCallbacks.Count
+    CancelledIdleCallbacks = $cancelledIdleCallbacks.Count
+    FiredIdleCallbackDidTimeout = $firedIdleCallbacks[0].payload.didTimeout
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId
     FiredAnimationFrameId = $firedAnimationFrames[0].payload.timerId
     CancelledAnimationFrameId = $cancelledAnimationFrames[0].payload.timerId
+    FiredIdleCallbackId = $firedIdleCallbacks[0].payload.timerId
+    CancelledIdleCallbackId = $cancelledIdleCallbacks[0].payload.timerId
     RendererProcessId = $listener.context.processId
     DocumentId = $listener.context.documentId
     TargetNodeId = $listener.target.nodeId
@@ -500,6 +611,6 @@ if (-not $completion.propagationStopped) {
 } | Format-List
 
 Write-Host (
-    "Blink propagation, listener, default-handler, DOM timer, and " +
-    "animation-frame evidence verified."
+    "Blink propagation, listener, default-handler, DOM timer, " +
+    "animation-frame, and idle-callback evidence verified."
 )

@@ -483,7 +483,8 @@ public sealed class SessionArchiveValidatorTests
                 throttled = (bool?)null,
                 pageLifecycleState = "unknown",
                 callbackLocation = (object?)null,
-                cancellationReason = (string?)null
+                cancellationReason = (string?)null,
+                didTimeout = (bool?)null
             });
         var fired = CreateEvent(
             1,
@@ -501,7 +502,78 @@ public sealed class SessionArchiveValidatorTests
                 throttled = (bool?)null,
                 pageLifecycleState = "unknown",
                 callbackLocation = (object?)null,
-                cancellationReason = (string?)null
+                cancellationReason = (string?)null,
+                didTimeout = (bool?)null
+            });
+        var directory = await CreateArchiveAsync([scheduled, fired]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AcceptsInstrumentedBrowserIdleCallbackEvidence()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null
+        };
+        var scheduled = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Timer,
+            BrowserEvidenceEventTypes.TimerScheduled,
+            new
+            {
+                context,
+                timerId = "timer-1",
+                timerKind = "idle-callback",
+                requestedDelayMilliseconds = 50.0,
+                effectiveDelayMilliseconds = 50.0,
+                nestingLevel = 0,
+                throttled = (bool?)null,
+                pageLifecycleState = "unknown",
+                callbackLocation = (object?)null,
+                cancellationReason = (string?)null,
+                didTimeout = (bool?)null
+            });
+        var fired = CreateEvent(
+            1,
+            150,
+            BrowserEvidenceChannels.Timer,
+            BrowserEvidenceEventTypes.TimerFired,
+            new
+            {
+                context,
+                timerId = "timer-1",
+                timerKind = "idle-callback",
+                requestedDelayMilliseconds = 50.0,
+                effectiveDelayMilliseconds = 50.0,
+                nestingLevel = 0,
+                throttled = (bool?)null,
+                pageLifecycleState = "unknown",
+                callbackLocation = (object?)null,
+                cancellationReason = (string?)null,
+                didTimeout = true
             });
         var directory = await CreateArchiveAsync([scheduled, fired]);
 
