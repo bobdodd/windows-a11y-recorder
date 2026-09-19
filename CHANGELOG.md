@@ -16,6 +16,11 @@ from the product version.
   [scheduler decision evidence model](docs/architecture/scheduler-decision-evidence-model.md).
 - Preserved timer `throttled` values as null because protocol 0.9 does not
   claim task-to-timer causality.
+- Validated protocol 0.9 scheduler-decision evidence end to end on the
+  reference Windows platform. The validated archive accepted 658 events and
+  81 artifacts, recorded a `frame-throttleable` queue decision with
+  `background-intensive` throttling at the `task-queue-throttler` boundary,
+  dropped no records, and reported no network-service crashes.
 - Added protocol 0.7 evidence for accepted web-exposed
   `requestIdleCallback` schedules, callback entry with the observed
   `IdleDeadline.didTimeout` value, and explicit `cancelIdleCallback`

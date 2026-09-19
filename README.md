@@ -33,18 +33,19 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Renderer capability propagation and eight narrow Blink evidence slices were
+Renderer capability propagation and nine narrow Blink evidence slices were
 validated end to end on the reference Windows platform on September 19, 2026.
 The latest validated archive contained listener lifecycle, dispatch lifecycle,
 the ordered Node propagation path, current targets, listener phases,
 cumulative propagation-stop state, Node default-event-handler decisions, and
 window timeout, interval, animation-frame, and idle-callback lifecycles. DOM
 timer records also preserved the observed page lifecycle state across a
-visible-to-hidden transition. The latest validated archive passed structural
-validation across 657 events and 81 artifacts and recorded no network-service
-crashes. Protocol 0.9 scheduler-decision instrumentation is implemented but
-still requires reference Windows validation. See the
-[Blink page-lifecycle validation record](docs/validation/blink-page-lifecycle-2026-09-19.md).
+visible-to-hidden transition. Protocol 0.9 additionally recorded an
+authoritative task-queue wake-up deferral for the `frame-throttleable` queue
+with Blink's `background-intensive` classification. The latest validated
+archive passed structural validation across 658 events and 81 artifacts and
+recorded no network-service crashes. See the
+[Blink scheduler-decision validation record](docs/validation/blink-scheduler-decisions-2026-09-19.md).
 
 ## Project goals
 
