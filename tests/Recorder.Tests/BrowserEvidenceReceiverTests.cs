@@ -1,8 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
-using System.Security.AccessControl;
-using System.Security.Principal;
 using System.Text.Json;
 using System.Threading.Channels;
 using Recorder.Collectors.Browser;
@@ -12,8 +10,6 @@ namespace Recorder.Tests;
 
 public sealed class BrowserEvidenceReceiverTests
 {
-    private const AceType SystemMandatoryLabelAceType = (AceType)0x11;
-
     [Fact]
     public void PipeSecuritySupportsChromiumLockdownWithoutMachineWideAccess()
     {
@@ -22,33 +18,16 @@ public sealed class BrowserEvidenceReceiverTests
             return;
         }
 
-        var security = BrowserEvidencePipeFactory.CreateSecurity();
-        var descriptor = new RawSecurityDescriptor(
-            security.GetSecurityDescriptorBinaryForm(),
-            0);
-        var allowedSids = descriptor.DiscretionaryAcl!
-            .OfType<CommonAce>()
-            .Where(ace => ace.AceType == AceType.AccessAllowed)
-            .Select(ace => ace.SecurityIdentifier.Value)
-            .ToArray();
+        var descriptor =
+            BrowserEvidencePipeFactory.CreateSecurityDescriptorSddl();
 
         Assert.Contains(
-            BrowserEvidencePipeFactory.GetCurrentSessionSid().Value,
-            allowedSids);
-        Assert.Contains("S-1-0-0", allowedSids);
-        Assert.DoesNotContain(
-            new SecurityIdentifier(
-                WellKnownSidType.WorldSid,
-                null).Value,
-            allowedSids);
-
-        var mandatoryLabel = Assert.Single(
-            descriptor.SystemAcl!.OfType<CommonAce>());
-        Assert.Equal(SystemMandatoryLabelAceType, mandatoryLabel.AceType);
-        Assert.Equal(
-            "S-1-16-0",
-            mandatoryLabel.SecurityIdentifier.Value);
-        Assert.Equal(1, mandatoryLabel.AccessMask);
+            $"(A;;GRGW;;;" +
+            $"{BrowserEvidencePipeFactory.GetCurrentSessionSid().Value})",
+            descriptor);
+        Assert.Contains("(A;;GRGW;;;S-1-0-0)", descriptor);
+        Assert.Contains("S:(ML;;;;;S-1-16-0)", descriptor);
+        Assert.DoesNotContain("S-1-1-0", descriptor);
     }
 
     [Fact]

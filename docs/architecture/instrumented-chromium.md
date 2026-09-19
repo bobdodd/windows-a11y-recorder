@@ -152,10 +152,11 @@ ID, and process type.
 
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
-therefore creates each browser-evidence pipe with an explicit security
-descriptor. Its protected DACL grants duplex access only to the current logon
-SID and Chromium's `S-1-0-0` lockdown restricting SID. Its mandatory label is
-untrusted integrity, `S-1-16-0`, so an untrusted renderer can write to it.
+therefore creates each browser-evidence pipe through the native
+`CreateNamedPipe` API with an explicit self-relative security descriptor. Its
+protected DACL grants duplex access only to the current logon SID and
+Chromium's `S-1-0-0` lockdown restricting SID. Its mandatory label is untrusted
+integrity, `S-1-16-0`, so an untrusted renderer can write to it.
 If a noninteractive Windows token has no logon SID, the descriptor uses that
 token's current-user SID instead.
 The pipe name remains unpredictable, and every process must still authenticate
