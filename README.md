@@ -33,14 +33,15 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Renderer capability propagation and four narrow Blink evidence slices were
+Renderer capability propagation and five narrow Blink evidence slices were
 validated end to end on the reference Windows platform on September 19, 2026.
 The latest validated archive contained listener lifecycle, dispatch lifecycle,
 the ordered Node propagation path, current targets, listener phases,
-cumulative propagation-stop state, and Node default-event-handler decisions.
-It passed structural validation across 597 events and 81 artifacts, dropped no
-records, and recorded no network-service crashes. See the
-[Blink evidence validation plan](docs/validation/blink-listener-dispatch-plan.md).
+cumulative propagation-stop state, Node default-event-handler decisions, and
+window timeout and interval lifecycles. It passed structural validation across
+632 events and 81 artifacts, dropped no records, and recorded no
+network-service crashes. See the
+[Blink DOM timer validation record](docs/validation/blink-dom-timers-2026-09-19.md).
 
 ## Project goals
 
@@ -88,11 +89,14 @@ Completed:
    listener's current target and phase, and cumulative propagation-stop state.
 9. Record and validate Node default-event-handler decisions without claiming
    unobserved browser or document effects.
+10. Record and validate accepted window timeout and interval schedules,
+    callback entry, and explicit cancellation with process-local correlation.
 
 Remaining:
 
 1. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
-   dispatch paths, timers, cookies, DOM, accessibility, network, and rendering.
+   dispatch paths, animation frames, idle callbacks, timer throttling, cookies,
+   DOM, accessibility, network, and rendering.
 2. Record representative NVDA, JAWS, and Narrator sessions.
 3. Add evidence correlation and screen-reader behavior analysis.
 4. Investigate touch and gesture coverage on representative hardware.
@@ -144,7 +148,8 @@ The setup script checks out Chromium, applies the recorder bridge, generates
 - [Threat model](docs/security/threat-model.md)
 - [Privacy and data-handling policy](docs/security/privacy-and-data-handling-policy.md)
 - [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md)
-- [Blink listener and dispatch validation plan](docs/validation/blink-listener-dispatch-plan.md)
+- [Blink evidence validation plan](docs/validation/blink-listener-dispatch-plan.md)
+- [Blink DOM timer validation record](docs/validation/blink-dom-timers-2026-09-19.md)
 
 ## Repository visibility
 

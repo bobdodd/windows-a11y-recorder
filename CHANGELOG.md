@@ -84,6 +84,9 @@ from the product version.
 - Validated protocol 0.4 default-event-handler evidence end to end on the
   reference Windows platform with 597 events, 81 artifacts, zero dropped
   records, and zero network-service crashes.
+- Validated protocol 0.5 window timeout and interval evidence end to end on the
+  reference Windows platform with 632 events, 81 artifacts, zero dropped
+  records, and zero network-service crashes.
 
 ## 0.1.0 - 2026-09-18
 

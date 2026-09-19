@@ -415,3 +415,51 @@ prove a visible browser or document-state change. Window and other non-Node
 targets, shadow-adjusted targets, closed shadow roots, timers, cookies, DOM or
 accessibility snapshots, network evidence, compositor evidence, and rendering
 evidence remain outside the validated scope.
+
+## DOM timer validation result
+
+The window timeout and interval slice completed the reference Windows
+procedure on September 19, 2026, using repository commit `d68be02`. The
+complete script exited with code 0 after:
+
+- Passing the Chromium integration tests.
+- Building the protocol 0.5 instrumented Chromium executable.
+- Passing the managed recorder test suite.
+- Connecting the instrumented renderer through the authenticated pipe.
+- Correlating one 250-millisecond timeout schedule with one callback entry.
+- Correlating one 125-millisecond interval schedule with one callback entry
+  and one later explicit cancellation.
+- Validating the completed archive.
+- Confirming that Chromium reported no network-service crashes.
+
+The validated session is:
+
+`C:\\Users\\Public\\Documents\\A11yRecorderBlinkValidation\\20260919-182516-118b0821a08e4cda839c646d10f74202`
+
+The final validation summary reported:
+
+- `ScheduledTimeouts=1`
+- `FiredTimeouts=1`
+- `ScheduledIntervals=1`
+- `FiredIntervals=1`
+- `CancelledIntervals=1`
+- `TimeoutTimerId=timer-2`
+- `IntervalTimerId=timer-1`
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=632`
+- `ARTIFACTS_VALIDATED=81`
+- `NETWORK_SERVICE_CRASHES=0`
+- `VALIDATION_EXIT_CODE=0`
+
+The capture host accepted 632 records and dropped none. Archive validator
+version 1.2 reported no issues. Timer correlation includes browser instance,
+renderer process, timer kind, and timer ID because timer identifiers are
+process-local.
+
+This result validates accepted scheduling, callback entry, and explicit
+interval cancellation for the deterministic window-timer fixture. Callback
+completion, callback effects, worker timers, animation frames, idle callbacks,
+throttling, page lifecycle state, callback source location, and
+context-destruction cancellation remain outside the validated scope. The
+[dated validation record](blink-dom-timers-2026-09-19.md) documents the
+environment, defects found, evidence, and limits.
