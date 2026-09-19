@@ -55,6 +55,9 @@ public sealed class ChromiumLauncherTests
         Assert.Contains(
             "--a11y-recorder-bootstrap=stdin",
             startInfo.ArgumentList);
+        Assert.DoesNotContain(
+            "--do-not-de-elevate",
+            startInfo.ArgumentList);
         Assert.Contains(
             $"--user-data-dir={Path.GetFullPath(profile)}",
             startInfo.ArgumentList);

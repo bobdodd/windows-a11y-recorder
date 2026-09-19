@@ -139,6 +139,9 @@ Controls:
   it only to eligible Chromium children through inherited read-only shared
   memory. Never place the authentication token in a command-line argument,
   environment variable, or file.
+- Reject browser launch when the recorder process is elevated. Do not suppress
+  Chromium's normal de-elevation behavior because an instrumented web browser
+  must not retain administrator rights.
 - Permit only opaque shared-memory handle metadata in the browser process
   environment when crossing Chromium linked-module boundaries. Remove that
   internal marker from every launched child environment.

@@ -16,6 +16,10 @@ from the product version.
 
 ### Changed
 
+- Browser launch now rejects an elevated recorder process with an actionable
+  diagnostic. This preserves Chromium's least-privilege boundary and avoids
+  losing the inherited standard-input bootstrap during Chromium's Windows
+  de-elevation relaunch.
 - Browser launch now fails with Chromium's exit code when the process
   terminates during the startup-stability window instead of leaving the
   browser collector incorrectly marked healthy.

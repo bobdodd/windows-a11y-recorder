@@ -125,6 +125,15 @@ launcher also removes inherited environment variables whose names indicate
 tokens, secrets, passwords, authorization data, API keys, access keys, or
 private keys.
 
+The recorder and instrumented browser must run without administrator
+elevation. On Windows, Chromium relaunches an elevated browser process at
+standard user integrity. That relaunch breaks the inherited standard-input
+bootstrap boundary and leaves the original elevated process with a normal exit
+code. The managed launcher therefore rejects an elevated recorder process with
+an actionable diagnostic. It does not add Chromium's
+`--do-not-de-elevate` switch because retaining administrator rights in a web
+browser would violate the product's least-privilege requirement.
+
 Protocol version 0.2 propagates the recorder capability from the browser to
 eligible renderer, GPU, and utility processes through a browser-owned,
 read-only shared-memory region. Chromium's Windows child-launch path inherits

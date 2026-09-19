@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Principal;
 using System.Text.Json;
 
 namespace Recorder.Collectors.Browser;
@@ -37,6 +38,13 @@ public sealed class ChromiumLauncher : IAsyncDisposable
             throw new FileNotFoundException(
                 "The bundled instrumented Chromium executable was not found.",
                 executablePath);
+        }
+        if (IsCurrentProcessElevated())
+        {
+            throw new InvalidOperationException(
+                "Instrumented Chromium cannot be launched from an elevated " +
+                "recorder process. Start Windows A11y Recorder from a " +
+                "standard, non-administrator Windows session.");
         }
 
         Directory.CreateDirectory(profileDirectory);
@@ -161,6 +169,18 @@ public sealed class ChromiumLauncher : IAsyncDisposable
                 startInfo.Environment.Remove(name);
             }
         }
+    }
+
+    private static bool IsCurrentProcessElevated()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        using var identity = WindowsIdentity.GetCurrent();
+        return new WindowsPrincipal(identity).IsInRole(
+            WindowsBuiltInRole.Administrator);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
