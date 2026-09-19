@@ -12,6 +12,46 @@ SPEC.loader.exec_module(INTEGRATE)
 
 
 class IntegrateTests(unittest.TestCase):
+    def test_patches_legacy_animation_frame_invocation_shape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = (
+                Path(directory)
+                / "frame_request_callback_collection.cc"
+            )
+            path.write_text(
+                '#include "third_party/blink/renderer/core/dom/'
+                'frame_request_callback_collection.h"\n'
+                f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                "\n"
+                "void RecordBlinkAnimationFrameScheduled() {}\n"
+                "void RecordBlinkAnimationFrameCancelled() {}\n"
+                "\n"
+                "void FrameRequestCallbackCollection::"
+                "ExecuteFrameCallbacksImpl(\n"
+                "    CallbackList& callbacks_to_invoke,\n"
+                "    double high_res_now_ms,\n"
+                "    double high_res_now_ms_legacy) {\n"
+                "  for (const auto& callback : callbacks_to_invoke) {\n"
+                "    if (callback->IsCancelled()) {\n"
+                "      continue;\n"
+                "    }\n"
+                "    callback->Invoke(high_res_now_ms);\n"
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_blink_animation_frame_callbacks(path)
+            result = path.read_text(encoding="utf-8")
+
+            self.assertEqual(
+                1, result.count("RecordBlinkAnimationFrameFired")
+            )
+            self.assertLess(
+                result.index("RecordBlinkAnimationFrameFired"),
+                result.index("callback->Invoke(high_res_now_ms);"),
+            )
+
     def test_patches_current_chromium_shapes_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -304,7 +344,11 @@ class IntegrateTests(unittest.TestCase):
                 '        "FireAnimationFrame", '
                 "inspector_animation_frame_event::Data,\n"
                 "        context_, callback->Id());\n"
-                "    callback->Invoke(high_res_now_ms);\n"
+                "    if (callback->GetUseLegacyTimeBase()) {\n"
+                "      callback->Invoke(high_res_now_ms_legacy);\n"
+                "    } else {\n"
+                "      callback->Invoke(high_res_now_ms);\n"
+                "    }\n"
                 "  }\n"
                 "}\n",
                 encoding="utf-8",
@@ -575,7 +619,9 @@ class IntegrateTests(unittest.TestCase):
                 first_animation_frames.index(
                     "RecordBlinkAnimationFrameFired"
                 ),
-                first_animation_frames.index('"FireAnimationFrame"'),
+                first_animation_frames.index(
+                    "if (callback->GetUseLegacyTimeBase())"
+                ),
             )
             self.assertEqual(
                 1,

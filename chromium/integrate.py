@@ -820,16 +820,29 @@ def patch_blink_animation_frame_callbacks(path: Path) -> None:
             raise RuntimeError(
                 f"{path}: ExecuteFrameCallbacksImpl function not found"
             )
-        anchor = (
-            "    DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT(\n"
-            '        "FireAnimationFrame", '
-            "inspector_animation_frame_event::Data,\n"
+        next_function_index = text.find(
+            "\nvoid FrameRequestCallbackCollection::", function_index + 1
         )
-        anchor_index = text.find(anchor, function_index)
-        if anchor_index < 0:
-            raise RuntimeError(
-                f"{path}: ExecuteFrameCallbacksImpl trace anchor not found"
+        function_end = (
+            next_function_index
+            if next_function_index >= 0
+            else len(text)
+        )
+        function_text = text[function_index:function_end]
+        anchor = "    if (callback->GetUseLegacyTimeBase()) {\n"
+        anchor_offset = function_text.find(anchor)
+        if anchor_offset < 0:
+            legacy_anchor = (
+                "    callback->Invoke(high_res_now_ms);\n"
             )
+            if function_text.count(legacy_anchor) != 1:
+                raise RuntimeError(
+                    f"{path}: ExecuteFrameCallbacksImpl invocation anchor "
+                    "not found"
+                )
+            anchor = legacy_anchor
+            anchor_offset = function_text.find(anchor)
+        anchor_index = function_index + anchor_offset
         text = (
             text[:anchor_index]
             + f"{BLINK_ANIMATION_FRAME_FIRED_HOOK}\n"
