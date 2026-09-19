@@ -81,13 +81,8 @@ Completed:
    processes remain excluded until they have dedicated evidence hooks.
 6. Build and validate the initial Blink Node listener-registration and
    dispatch-start hooks on the reference Chromium Windows build.
-
-In progress:
-
-1. Correlate Node listener removal and invocation with dispatch completion.
-   The hooks, deterministic fixture, archive contract test, and verification
-   assertions are implemented. The reference Windows build-and-capture run is
-   still required before this slice is marked complete.
+7. Correlate and validate Node listener removal and invocation with dispatch
+   completion on the reference Chromium Windows build.
 
 Remaining:
 

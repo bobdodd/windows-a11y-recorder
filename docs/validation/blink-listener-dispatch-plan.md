@@ -177,9 +177,47 @@ implemented evidence hooks.
 This result validates the initial Blink listener-registration and
 dispatch-start slice.
 
+## Correlated lifecycle validation result
+
 The correlated listener-removal, listener-invocation, and dispatch-completion
-slice is implemented in the repository but has not yet completed the reference
-Windows build-and-capture procedure. Until that run succeeds, those records
-must not be described as validated. Complete composed paths, default actions,
-timers, cookies, DOM or accessibility snapshots, network evidence, compositor
-evidence, and rendering evidence also remain unvalidated.
+slice completed the reference Windows procedure on September 19, 2026, using
+repository commit `1d8d8ae`. The complete script exited with code 0 after:
+
+- Passing the Chromium integration tests.
+- Building the instrumented Chromium executable.
+- Passing the managed recorder test suite.
+- Connecting the instrumented renderer through the authenticated pipe.
+- Correlating the fixture's listener registration, removal, and invocation by
+  one stable listener identifier.
+- Correlating dispatch start, listener invocation, and dispatch completion by
+  one stable dispatch identifier.
+- Verifying the `at-target` invocation phase, the callback's
+  `preventDefault()` result, and the `canceled-by-event-handler` outcome.
+- Validating the completed archive.
+- Confirming that Chromium reported no network-service crashes.
+
+The validated session is:
+
+`C:\Users\Public\Documents\A11yRecorderBlinkValidation\20260919-151419-5b0096dbccf84166812e7635f9043246`
+
+The final validation summary reported:
+
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=478`
+- `ARTIFACTS_VALIDATED=81`
+- `NETWORK_SERVICE_CRASHES=0`
+- `VALIDATION_EXIT_CODE=0`
+
+Two failed candidate builds exposed installer compatibility defects before the
+successful run. The first retained the eight-argument listener-registration
+call from the previously integrated slice while replacing the bridge header
+with its new nine-argument declaration. The installer now migrates existing
+listener-registration and dispatch-start hooks. The second used `.Get()` on
+Blink's raw `Event*`; the final hook uses the pointer directly and migrates the
+invalid installed form. Integration tests cover both upgrade paths.
+
+This result validates listener removal, listener invocation, and dispatch
+completion for the deterministic Node fixture. Complete composed paths,
+default-action detail, timers, cookies, DOM or accessibility snapshots,
+network evidence, compositor evidence, and rendering evidence remain
+unvalidated.
