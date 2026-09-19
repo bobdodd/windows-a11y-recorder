@@ -13,12 +13,8 @@ inline constexpr char kChildBootstrapMetadataEnvironment[] =
     "A11Y_RECORDER_CHILD_BOOTSTRAP_METADATA";
 inline constexpr wchar_t kChildBootstrapMetadataEnvironmentWide[] =
     L"A11Y_RECORDER_CHILD_BOOTSTRAP_METADATA";
-inline constexpr char kBridgeLogFileEnvironment[] =
-    "A11Y_RECORDER_BRIDGE_LOG_FILE";
 inline constexpr wchar_t kBridgeLogFileEnvironmentWide[] =
     L"A11Y_RECORDER_BRIDGE_LOG_FILE";
-inline constexpr char kBridgeLogFileSwitch[] =
-    "a11y-recorder-bridge-log-file";
 
 // These values mirror Chromium's public process command-line contract. Keeping
 // them here prevents the bridge component, which is also consumed by Blink

@@ -116,6 +116,7 @@ New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 $outputRoot = (Resolve-Path -LiteralPath $OutputRoot).Path
 $fixtureUri = [Uri]::new($fixture).AbsoluteUri
 $bridgeLog = Join-Path $outputRoot "bridge-startup.log"
+$chromiumLog = Join-Path $outputRoot "chromium.log"
 
 Invoke-Checked "Testing the Chromium integration script" {
     & $python $integrationTests
@@ -188,8 +189,11 @@ $sessionsBefore = @(
 )
 
 Remove-Item -LiteralPath $bridgeLog -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $chromiumLog -Force -ErrorAction SilentlyContinue
 $previousBridgeLog = $env:A11Y_RECORDER_BRIDGE_LOG_FILE
+$previousChromiumLog = $env:A11Y_RECORDER_CHROMIUM_LOG_FILE
 $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $bridgeLog
+$env:A11Y_RECORDER_CHROMIUM_LOG_FILE = $chromiumLog
 try {
     Invoke-Checked "Capturing the deterministic Blink fixture" {
         & $dotnet run `
@@ -210,6 +214,14 @@ finally {
     }
     else {
         $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $previousBridgeLog
+    }
+    if ($null -eq $previousChromiumLog) {
+        Remove-Item `
+            Env:A11Y_RECORDER_CHROMIUM_LOG_FILE `
+            -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:A11Y_RECORDER_CHROMIUM_LOG_FILE = $previousChromiumLog
     }
 }
 
@@ -246,12 +258,17 @@ catch {
         Write-Host "`nNative recorder bridge trace:"
         Get-Content -LiteralPath $bridgeLog
     }
+    if (Test-Path -LiteralPath $chromiumLog -PathType Leaf) {
+        Write-Host "`nChromium log tail:"
+        Get-Content -LiteralPath $chromiumLog -Tail 250
+    }
     throw
 }
 
 Write-Host "`nBlink validation completed successfully."
 Write-Host "SESSION_PATH=$($session.FullName)"
 Write-Host "BRIDGE_LOG=$bridgeLog"
+Write-Host "CHROMIUM_LOG=$chromiumLog"
 Write-Host "ARCHIVE_VALID=$($validation.isValid)"
 Write-Host "EVENTS_VALIDATED=$($validation.eventsValidated)"
 Write-Host "ARTIFACTS_VALIDATED=$($validation.artifactsValidated)"

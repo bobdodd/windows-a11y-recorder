@@ -12,7 +12,7 @@
 #include "base/command_line.h"
 #include "base/containers/span.h"
 #include "base/environment.h"
-#include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/shared_memory_switch.h"
 #include "base/no_destructor.h"
@@ -32,21 +32,12 @@ void WriteDiagnosticLine(std::string_view message) {
   const DWORD path_length =
       ::GetEnvironmentVariableW(kBridgeLogFileEnvironmentWide, path.data(),
                                 static_cast<DWORD>(path.size()));
-  std::wstring diagnostic_path;
-  if (path_length > 0 && path_length < path.size()) {
-    diagnostic_path.assign(path.data(), path_length);
-  } else {
-    diagnostic_path =
-        base::CommandLine::ForCurrentProcess()
-            ->GetSwitchValuePath(kBridgeLogFileSwitch)
-            .value();
-  }
-  if (diagnostic_path.empty()) {
+  if (path_length == 0 || path_length >= path.size()) {
     return;
   }
 
   HANDLE file =
-      ::CreateFileW(diagnostic_path.c_str(), FILE_APPEND_DATA,
+      ::CreateFileW(path.data(), FILE_APPEND_DATA,
                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                     nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
@@ -240,6 +231,9 @@ bool InitializeProcessBridge(std::string* error) {
            ? std::string("browser")
            : command_line_process_type) +
       ".");
+  LOG(INFO) << "Windows A11y Recorder bridge initialization entered for "
+            << (command_line_process_type.empty() ? "browser"
+                                                  : command_line_process_type);
   if (ProcessClientStorage()) {
     *error = "The recorder bridge was initialized more than once.";
     return false;
@@ -369,13 +363,6 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
   launch_options->handles_to_inherit.push_back(
       base::win::Uint32ToHandle(handle_value));
   launch_options->environment[kChildBootstrapMetadataEnvironmentWide] = L"";
-  const std::optional<std::string> diagnostic_path =
-      base::Environment::Create()->GetVar(kBridgeLogFileEnvironment);
-  if (diagnostic_path.has_value() && !diagnostic_path->empty()) {
-    command_line->AppendSwitchPath(
-        kBridgeLogFileSwitch,
-        base::FilePath::FromUTF8Unsafe(*diagnostic_path));
-  }
   command_line->AppendSwitchASCII(kChildBootstrapHandleSwitch, *metadata);
   command_line->AppendSwitchASCII(kChildProcessIdSwitch,
                                   base::NumberToString(child_process_id));

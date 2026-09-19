@@ -52,11 +52,9 @@ For failures that occur before Chromium logging is initialized, set
 appends only process identifiers, monotonic tick values, bootstrap attachment
 stages, child process types, and internal error text. It never writes bootstrap
 contents, pipe names, authentication tokens, command lines, URLs, or page data.
-When attaching a supported child, the browser also copies this non-sensitive
-path to an internal command-line switch. This keeps child startup failures
-observable if Chromium removes the environment variable before initialization.
-The authenticated bootstrap remains exclusively in inherited read-only shared
-memory.
+Sandboxed Chromium children cannot open this diagnostic path directly. Use
+`A11Y_RECORDER_CHROMIUM_LOG_FILE` when child startup errors are required;
+Chromium passes that log to sandboxed children through an inherited handle.
 
 For each accepted connection, the recorder persists two records on the
 `browser.lifecycle` channel:
