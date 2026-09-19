@@ -16,6 +16,9 @@ from the product version.
 
 ### Changed
 
+- Browser launch now fails with Chromium's exit code when the process
+  terminates during the startup-stability window instead of leaving the
+  browser collector incorrectly marked healthy.
 - Advanced the browser evidence protocol to version 0.2.
 - Restricted accepted browser evidence connections to the browser, renderer,
   GPU, and utility process types with required process correlation metadata.

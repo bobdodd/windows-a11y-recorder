@@ -7,6 +7,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
 {
     public const string LogFileEnvironmentVariable =
         "A11Y_RECORDER_CHROMIUM_LOG_FILE";
+    private static readonly TimeSpan StartupStabilityWindow =
+        TimeSpan.FromMilliseconds(500);
 
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
@@ -62,11 +64,42 @@ public sealed class ChromiumLauncher : IAsyncDisposable
                 json.AsMemory(),
                 cancellationToken).ConfigureAwait(false);
             process.StandardInput.Close();
+            await Task.Delay(StartupStabilityWindow, cancellationToken)
+                .ConfigureAwait(false);
+            if (process.HasExited)
+            {
+                throw new InvalidOperationException(
+                    "Instrumented Chromium exited during startup with exit " +
+                    $"code {process.ExitCode}.");
+            }
             return process;
         }
-        catch
+        catch (Exception exception)
         {
+            int? exitCode = null;
+            try
+            {
+                if (process.HasExited)
+                {
+                    exitCode = process.ExitCode;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
             await StopAsync(CancellationToken.None).ConfigureAwait(false);
+            if (exitCode.HasValue &&
+                exception is not OperationCanceledException &&
+                !exception.Message.StartsWith(
+                    "Instrumented Chromium exited during startup with exit ",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Instrumented Chromium exited during startup with exit " +
+                    $"code {exitCode.Value}.",
+                    exception);
+            }
             throw;
         }
     }

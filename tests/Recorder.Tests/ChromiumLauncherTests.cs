@@ -5,6 +5,35 @@ namespace Recorder.Tests;
 public sealed class ChromiumLauncherTests
 {
     [Fact]
+    public async Task LaunchFailsWhenBrowserExitsDuringStartup()
+    {
+        var profile = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-tests",
+            Guid.NewGuid().ToString("N"));
+        var connection = new BrowserEvidenceConnectionInfo(
+            $"unused-{Guid.NewGuid():N}",
+            "test-authentication-token",
+            BrowserEvidenceProtocol.CurrentVersion,
+            Guid.NewGuid().ToString("N"),
+            1024);
+        await using var launcher = new ChromiumLauncher();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => launcher.LaunchAsync(
+                Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                profile,
+                connection,
+                "/c",
+                CancellationToken.None));
+
+        Assert.Contains(
+            "exited during startup with exit code",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LaunchArgumentsContainNoAuthenticationMaterial()
     {
         var executable = Path.Combine(
