@@ -31,7 +31,8 @@ from the product version.
   normal logging system is initialized, including child-launch hook entry and
   early-return diagnostics.
 - Moved Windows child bootstrap attachment to Chromium's shared child-launch
-  sequence and made integration remove the obsolete platform-local hook.
+  sequence and made integration remove both historical forms of the obsolete
+  platform-local hook.
 
 ## 0.1.0 - 2026-09-18
 

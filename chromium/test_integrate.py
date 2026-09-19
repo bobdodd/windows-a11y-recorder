@@ -83,7 +83,7 @@ class IntegrateTests(unittest.TestCase):
                 "BeforeLaunchOnLauncherThread(\n"
                 "    FileMappedForLaunch& files_to_register,\n"
                 "    base::LaunchOptions* options) {\n"
-                f"{INTEGRATE.LEGACY_CHILD_LAUNCHER_HOOK}"
+                f"{INTEGRATE.ORIGINAL_CHILD_LAUNCHER_HOOK}"
                 "  return true;\n"
                 "}\n",
                 encoding="utf-8",
@@ -186,6 +186,38 @@ class IntegrateTests(unittest.TestCase):
                 '      "//chromium/recorder_bridge",\n',
                 first_content_build,
             )
+
+    def test_removes_all_historical_windows_hook_variants(self):
+        for hook in (
+            INTEGRATE.ORIGINAL_CHILD_LAUNCHER_HOOK,
+            INTEGRATE.TRACED_CHILD_LAUNCHER_HOOK,
+        ):
+            with self.subTest(hook=hook):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "child_launcher_win.cc"
+                    path.write_text(
+                        '#include "content/browser/'
+                        'child_process_launcher_helper.h"\n'
+                        f"{INTEGRATE.CHILD_LAUNCHER_INCLUDE}\n"
+                        "\n"
+                        "bool BeforeLaunch() {\n"
+                        f"{hook}"
+                        "  return true;\n"
+                        "}\n",
+                        encoding="utf-8",
+                    )
+
+                    INTEGRATE.remove_legacy_child_launcher_hook(path)
+                    result = path.read_text(encoding="utf-8")
+
+                    self.assertNotIn(
+                        "AppendRecorderBootstrapToChildProcess",
+                        result,
+                    )
+                    self.assertNotIn(
+                        INTEGRATE.CHILD_LAUNCHER_INCLUDE,
+                        result,
+                    )
 
 
 if __name__ == "__main__":
