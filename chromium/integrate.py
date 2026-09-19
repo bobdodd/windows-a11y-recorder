@@ -94,6 +94,38 @@ CHILD_LAUNCHER_HOOK = f"""\
 #if BUILDFLAG(IS_WIN)
 {SHARED_CHILD_LAUNCHER_HOOK}#endif
 """
+LEGACY_CONTENT_NAVIGATION_STARTED_HOOK = """\
+  if (navigation_handle->IsInPrimaryMainFrame()) {
+    a11y_recorder::RecordBrowserNavigationStarted(
+        navigation_handle->GetNavigationId(),
+        navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
+        navigation_handle->GetURL().spec(),
+        navigation_handle->IsRendererInitiated(),
+        navigation_handle->IsSameDocument());
+  }
+"""
+LEGACY_CONTENT_NAVIGATION_COMPLETED_HOOK = """\
+  if (navigation_handle->IsInPrimaryMainFrame()) {
+    int64_t recorder_document_navigation_id = 0;
+    if (navigation_handle->HasCommitted()) {
+      if (RenderFrameHost* recorder_frame =
+              navigation_handle->GetRenderFrameHost()) {
+        recorder_document_navigation_id = recorder_frame->GetNavigationId();
+      }
+    }
+    a11y_recorder::RecordBrowserNavigationCompleted(
+        navigation_handle->GetNavigationId(),
+        navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
+        recorder_document_navigation_id,
+        navigation_handle->GetURL().spec(),
+        navigation_handle->IsRendererInitiated(),
+        navigation_handle->IsSameDocument(),
+        navigation_handle->HasCommitted(),
+        navigation_handle->HasCommitted() &&
+            navigation_handle->IsErrorPage(),
+        navigation_handle->GetNetErrorCode());
+  }
+"""
 CONTENT_NAVIGATION_STARTED_HOOK = """\
   int recorder_page_frame_tree_node_id =
       navigation_handle->GetFrameTreeNodeId().GetUnsafeValue();
@@ -906,6 +938,21 @@ def patch_web_contents_navigation(path: Path) -> None:
             '#include "content/browser/web_contents/web_contents_impl.h"\n',
             '#include "content/browser/web_contents/web_contents_impl.h"\n'
             f"{CONTENT_NAVIGATION_INCLUDE}\n",
+            path,
+        )
+
+    if LEGACY_CONTENT_NAVIGATION_STARTED_HOOK in text:
+        text = replace_once(
+            text,
+            LEGACY_CONTENT_NAVIGATION_STARTED_HOOK,
+            CONTENT_NAVIGATION_STARTED_HOOK,
+            path,
+        )
+    if LEGACY_CONTENT_NAVIGATION_COMPLETED_HOOK in text:
+        text = replace_once(
+            text,
+            LEGACY_CONTENT_NAVIGATION_COMPLETED_HOOK,
+            CONTENT_NAVIGATION_COMPLETED_HOOK,
             path,
         )
 

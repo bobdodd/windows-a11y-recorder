@@ -1159,6 +1159,70 @@ class IntegrateTests(unittest.TestCase):
             )
             self.assertIn(INTEGRATE.CONTENT_NAVIGATION_INCLUDE, first)
 
+    def test_migrates_protocol_010_navigation_hooks_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "web_contents_impl.cc"
+            path.write_text(
+                '#include "content/browser/web_contents/web_contents_impl.h"\n'
+                f"{INTEGRATE.CONTENT_NAVIGATION_INCLUDE}\n"
+                "\n"
+                "void WebContentsImpl::DidStartNavigation(\n"
+                "    NavigationHandle* navigation_handle) {\n"
+                '  TRACE_EVENT1("navigation", '
+                '"WebContentsImpl::DidStartNavigation",\n'
+                '               "navigation_handle", navigation_handle);\n'
+                "  const bool is_in_main_frame = "
+                "navigation_handle->IsInMainFrame();\n"
+                "  const GURL url = navigation_handle->GetURL();\n"
+                "\n"
+                f"{INTEGRATE.LEGACY_CONTENT_NAVIGATION_STARTED_HOOK}\n"
+                "  base::ElapsedTimer duration;\n"
+                "}\n"
+                "\n"
+                "void WebContentsImpl::DidFinishNavigation(\n"
+                "    NavigationHandle* navigation_handle) {\n"
+                '  TRACE_EVENT1("navigation", '
+                '"WebContentsImpl::DidFinishNavigation",\n'
+                '               "navigation_handle", navigation_handle);\n'
+                "\n"
+                f"{INTEGRATE.LEGACY_CONTENT_NAVIGATION_COMPLETED_HOOK}\n"
+                "  observers_.NotifyObservers(\n"
+                "      &WebContentsObserver::DidFinishNavigation,\n"
+                "      navigation_handle);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_web_contents_navigation(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_web_contents_navigation(path)
+
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertNotIn(
+                INTEGRATE.LEGACY_CONTENT_NAVIGATION_STARTED_HOOK,
+                first,
+            )
+            self.assertNotIn(
+                INTEGRATE.LEGACY_CONTENT_NAVIGATION_COMPLETED_HOOK,
+                first,
+            )
+            self.assertEqual(
+                1,
+                first.count("RecordBrowserNavigationStarted"),
+            )
+            self.assertEqual(
+                1,
+                first.count("RecordBrowserNavigationCompleted"),
+            )
+            self.assertIn("recorder_page_frame_tree_node_id", first)
+            self.assertIn("recorder_parent_frame_tree_node_id", first)
+            self.assertIn(
+                "recorder_parent_or_outer_document_frame_tree_node_id",
+                first,
+            )
+            self.assertIn("recorder_frame_type", first)
+            self.assertIn("recorder_primary_page", first)
+
 
 if __name__ == "__main__":
     unittest.main()
