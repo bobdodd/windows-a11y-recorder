@@ -54,7 +54,9 @@ stages, child process types, and internal error text. It never writes bootstrap
 contents, pipe names, authentication tokens, command lines, URLs, or page data.
 Sandboxed Chromium children cannot open this diagnostic path directly. Use
 `A11Y_RECORDER_CHROMIUM_LOG_FILE` when child startup errors are required;
-Chromium passes that log to sandboxed children through an inherited handle.
+Chromium passes that log to sandboxed children through an inherited handle,
+and the bridge can write early initialization diagnostics to that handle before
+Chromium's logging backend starts.
 
 For each accepted connection, the recorder persists two records on the
 `browser.lifecycle` channel:

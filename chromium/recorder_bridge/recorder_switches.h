@@ -23,6 +23,9 @@ inline constexpr char kChromiumProcessTypeSwitch[] = "type";
 inline constexpr char kChromiumRendererProcess[] = "renderer";
 inline constexpr char kChromiumGpuProcess[] = "gpu-process";
 inline constexpr char kChromiumUtilityProcess[] = "utility";
+inline constexpr char kChromiumEnableLoggingSwitch[] = "enable-logging";
+inline constexpr char kChromiumLogFileSwitch[] = "log-file";
+inline constexpr char kChromiumLoggingToHandle[] = "handle";
 
 }  // namespace a11y_recorder
 

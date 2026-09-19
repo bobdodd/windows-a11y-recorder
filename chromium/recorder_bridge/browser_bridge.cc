@@ -12,7 +12,6 @@
 #include "base/command_line.h"
 #include "base/containers/span.h"
 #include "base/environment.h"
-#include "base/logging.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/shared_memory_switch.h"
 #include "base/no_destructor.h"
@@ -32,14 +31,27 @@ void WriteDiagnosticLine(std::string_view message) {
   const DWORD path_length =
       ::GetEnvironmentVariableW(kBridgeLogFileEnvironmentWide, path.data(),
                                 static_cast<DWORD>(path.size()));
-  if (path_length == 0 || path_length >= path.size()) {
-    return;
+  HANDLE file = INVALID_HANDLE_VALUE;
+  bool close_file = false;
+  if (path_length > 0 && path_length < path.size()) {
+    file = ::CreateFileW(
+        path.data(), FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    close_file = file != INVALID_HANDLE_VALUE;
+  } else {
+    const base::CommandLine& command_line =
+        *base::CommandLine::ForCurrentProcess();
+    uint32_t log_handle_value = 0;
+    if (command_line.GetSwitchValueASCII(kChromiumEnableLoggingSwitch) ==
+            kChromiumLoggingToHandle &&
+        base::StringToUint(
+            command_line.GetSwitchValueASCII(kChromiumLogFileSwitch),
+            &log_handle_value) &&
+        log_handle_value != 0) {
+      file = base::win::Uint32ToHandle(log_handle_value);
+    }
   }
-
-  HANDLE file =
-      ::CreateFileW(path.data(), FILE_APPEND_DATA,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
     return;
   }
@@ -51,7 +63,9 @@ void WriteDiagnosticLine(std::string_view message) {
   DWORD written = 0;
   ::WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
               nullptr);
-  ::CloseHandle(file);
+  if (close_file) {
+    ::CloseHandle(file);
+  }
 }
 
 std::unique_ptr<RecorderPipeClient>& ProcessClientStorage() {
@@ -231,9 +245,6 @@ bool InitializeProcessBridge(std::string* error) {
            ? std::string("browser")
            : command_line_process_type) +
       ".");
-  LOG(INFO) << "Windows A11y Recorder bridge initialization entered for "
-            << (command_line_process_type.empty() ? "browser"
-                                                  : command_line_process_type);
   if (ProcessClientStorage()) {
     *error = "The recorder bridge was initialized more than once.";
     return false;
