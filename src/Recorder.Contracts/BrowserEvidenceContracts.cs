@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.4";
+    public const string CurrentVersion = "0.5";
 }
 
 public static class BrowserEvidenceChannels
@@ -92,7 +92,7 @@ public sealed record BrowserTimerPayload(
     double? RequestedDelayMilliseconds,
     double? EffectiveDelayMilliseconds,
     int NestingLevel,
-    bool Throttled,
+    bool? Throttled,
     string PageLifecycleState,
     BrowserScriptLocation? CallbackLocation,
     string? CancellationReason);

@@ -488,7 +488,7 @@ internal static class EventPayloadValidator
                 RequiredNullableNumber("requestedDelayMilliseconds", nonnegative: true),
                 RequiredNullableNumber("effectiveDelayMilliseconds", nonnegative: true),
                 RequiredInteger("nestingLevel", nonnegative: true),
-                RequiredBoolean("throttled"),
+                NullableBoolean("throttled"),
                 RequiredString("pageLifecycleState"),
                 NullableObject("callbackLocation"),
                 NullableString("cancellationReason")

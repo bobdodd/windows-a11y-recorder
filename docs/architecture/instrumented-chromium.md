@@ -164,6 +164,20 @@ ineligible untrusted event. An invocation record describes entry into Blink's
 handler boundary and does not by itself claim a resulting visible state
 change. Live 0.4 connections require an exact protocol-version match.
 
+Protocol version 0.5 adds correlated lifecycle evidence for window
+`setTimeout` and `setInterval` timers. A stable process-local timer identifier
+relates the accepted schedule to callback entry and, for a live interval, an
+explicit `clearTimeout` or `clearInterval` cancellation. Scheduling evidence
+records the accepted requested delay, Blink's effective delay, and nesting
+level. The timer event timestamp is the observed callback-entry time; it does
+not claim callback completion or resulting page effects. Throttling is null,
+page lifecycle state is `unknown`, and callback location is null until those
+facts have dedicated instrumentation. Implicit one-shot retirement and
+execution-context destruction are not reported as explicit cancellation.
+Animation frames, idle callbacks, worker timers, and browser-process task
+scheduling remain outside this slice. Live 0.5 connections require an exact
+protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native
@@ -205,7 +219,8 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 1. Implement browser lifecycle, process identity, IPC authentication, clock mapping, and omission records.
 2. Instrument listener registration and removal.
 3. Instrument dispatch phases, listener invocation, propagation control, cancellation, and default actions.
-4. Instrument timeout, interval, animation-frame, idle-callback, and lifecycle throttling.
+4. Instrument timeout and interval lifecycle evidence, followed by
+   animation-frame, idle-callback, and lifecycle-throttling evidence.
 5. Add document, DOM, style, layout, accessibility, and rendered-frame checkpoints.
 6. Add cookie operations and network metadata with prohibited values removed at source.
 7. Add browser-chrome and compositor correlation needed by test scenarios.

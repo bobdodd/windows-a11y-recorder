@@ -1,15 +1,17 @@
-# Blink Listener and Dispatch Validation Plan
+# Blink Evidence Validation Plan
 
 ## Purpose
 
-This document defines the first four Blink evidence implementation slices and
+This document defines the first five Blink evidence implementation slices and
 the Windows validation required before any can be described as complete.
 The first validated slice records accepted Node listener registrations and the
 start of Node event dispatches. The second implemented slice correlates
 listener removal and invocation with dispatch completion. The third implemented
 slice records the ordered Node path and each invoked listener's current target.
 The fourth implemented slice records decisions at Blink's Node
-`DefaultEventHandler` boundary.
+`DefaultEventHandler` boundary. The fifth implemented slice records correlated
+window `setTimeout` and `setInterval` scheduling, callback entry, and explicit
+interval cancellation.
 It does not claim complete listener or dispatch coverage.
 
 ## Implemented hooks
@@ -115,6 +117,31 @@ correlated `dispatch-completed` outcome of
 `canceled-by-default-event-handler` provides separate evidence that Blink
 marked the event handled during default processing.
 
+### DOM timer lifecycle
+
+The fifth slice patches
+`third_party/blink/renderer/core/scheduler/dom_timer.cc`. It records a timer
+only after Blink assigns a positive timeout identifier and accepts the
+schedule. A stable, process-local timer identifier correlates:
+
+- `timer-scheduled`, with the timer kind, accepted requested delay, effective
+  delay, and nesting level.
+- `timer-fired`, immediately before Blink enters the JavaScript callback.
+- `timer-cancelled`, when `clearTimeout` or `clearInterval` removes a live
+  timer.
+
+The event timestamp on `timer-fired` is the observed callback-entry time.
+Neither this record nor a later cancellation claims that the callback
+completed or changed browser or document state. A one-shot timeout is retired
+from the bridge when it fires and does not produce a cancellation record.
+Context destruction is also not represented as explicit cancellation.
+
+This increment covers window timers only. It does not cover worker timers,
+animation frames, idle callbacks, or browser-process task scheduling.
+Throttling remains null, page lifecycle state is `unknown`, and callback
+location remains null so the archive does not infer facts that the hook does
+not observe.
+
 ## Component boundary
 
 The recorder bridge is a Chromium component with exported entry points. This
@@ -133,8 +160,9 @@ high-volume event classes.
 
 `tests/fixtures/blink-listener-dispatch.html` installs capture and bubble
 listeners on `#propagation-root` and two listeners on `#pointer-only`. It
-invokes `HTMLElement.click()` after 250 milliseconds. The target listeners
-call `preventDefault()`, remove the named listener, and call
+installs a 125-millisecond interval that clears itself after one callback, then
+invokes `HTMLElement.click()` from a 250-millisecond timeout. The target
+listeners call `preventDefault()`, remove the named listener, and call
 `stopPropagation()`. The expanded fixture must produce:
 
 - At least one `browser.listener` `listener-registered` record for the
@@ -156,8 +184,15 @@ call `preventDefault()`, remove the named listener, and call
 - A `default-action` record showing that Blink invoked the default handler for
   `#default-action-link`, followed by a correlated completion with outcome
   `canceled-by-default-event-handler`.
+- One scheduled 250-millisecond timeout and exactly one correlated callback
+  entry for its stable timer identifier.
+- One scheduled 125-millisecond interval, exactly one correlated callback
+  entry, and one later `explicit-clear` cancellation for its stable timer
+  identifier.
+- No cancellation record for the one-shot timeout.
 - Renderer process context and stable non-empty listener and dispatch
-  identifiers across the lifecycle.
+  identifiers across the lifecycle, plus stable non-empty timer identifiers
+  across each timer lifecycle.
 
 Because `HTMLElement.click()` dispatches a synthetic event, the expected
 `trusted` value is false.

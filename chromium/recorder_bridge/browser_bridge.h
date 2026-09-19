@@ -123,6 +123,27 @@ void RecordBlinkDefaultAction(uintptr_t event_identity,
                               bool propagation_stopped,
                               bool immediate_propagation_stopped);
 
+// Records an accepted window setTimeout or setInterval after Blink assigns its
+// timeout ID and applies delay clamping. Unknown scheduler throttling and page
+// lifecycle state are represented explicitly in the payload.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkTimerScheduled(uintptr_t timer_identity,
+                               int document_node_id,
+                               int timeout_id,
+                               bool repeating,
+                               double requested_delay_milliseconds,
+                               double effective_delay_milliseconds,
+                               int nesting_level);
+
+// Records callback entry for a previously scheduled DOM timer. The evidence
+// timestamp is the observed firing time; it does not imply callback completion.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkTimerFired(uintptr_t timer_identity, bool repeating);
+
+// Records explicit clearTimeout or clearInterval removal of a live DOM timer.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkTimerCancelled(uintptr_t timer_identity);
+
 // Records the final dispatch result and releases the active dispatch identity.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

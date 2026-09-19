@@ -154,6 +154,11 @@ $integratedFiles = @(
         )
     ),
     (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\scheduler\dom_timer.cc"
+        )
+    ),
+    (
         Join-Path $chromiumSource "third_party\blink\renderer\core\BUILD.gn"
     )
 )

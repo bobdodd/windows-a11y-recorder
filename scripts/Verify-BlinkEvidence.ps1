@@ -113,6 +113,28 @@ $handledDefaultActionCompletions = @(
         }
 )
 
+$scheduledTimeouts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-scheduled" -and
+            $_.payload.timerKind -eq "timeout" -and
+            $_.payload.requestedDelayMilliseconds -eq 250 -and
+            $_.payload.effectiveDelayMilliseconds -eq 250
+        }
+)
+
+$scheduledIntervals = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-scheduled" -and
+            $_.payload.timerKind -eq "interval" -and
+            $_.payload.requestedDelayMilliseconds -eq 125 -and
+            $_.payload.effectiveDelayMilliseconds -eq 125
+        }
+)
+
 if ($rendererConnections.Count -lt 1) {
     throw "No instrumented Chromium renderer connected to the recorder."
 }
@@ -142,6 +164,67 @@ if ($handledDefaultActionCompletions.Count -lt 1) {
         "The #default-action-link dispatch did not complete as handled by " +
         "a default event handler."
     )
+}
+if ($scheduledTimeouts.Count -lt 1) {
+    throw "The fixture's 250 ms timeout was not recorded as scheduled."
+}
+if ($scheduledIntervals.Count -lt 1) {
+    throw "The fixture's 125 ms interval was not recorded as scheduled."
+}
+
+$scheduledTimeout = $scheduledTimeouts[0]
+$scheduledInterval = $scheduledIntervals[0]
+$firedTimeouts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-fired" -and
+            $_.payload.timerId -eq $scheduledTimeout.payload.timerId
+        }
+)
+$firedIntervals = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-fired" -and
+            $_.payload.timerId -eq $scheduledInterval.payload.timerId
+        }
+)
+$cancelledIntervals = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-cancelled" -and
+            $_.payload.timerId -eq $scheduledInterval.payload.timerId -and
+            $_.payload.cancellationReason -eq "explicit-clear"
+        }
+)
+if ($firedTimeouts.Count -ne 1) {
+    throw "The fixture timeout did not produce exactly one correlated firing."
+}
+if ($firedIntervals.Count -ne 1) {
+    throw "The fixture interval did not produce exactly one correlated firing."
+}
+if ($cancelledIntervals.Count -ne 1) {
+    throw "The fixture interval did not produce one explicit cancellation."
+}
+if (
+    $firedTimeouts[0].monotonicNanoseconds -lt
+    $scheduledTimeout.monotonicNanoseconds
+) {
+    throw "The fixture timeout fired before its scheduling record."
+}
+if (
+    $firedIntervals[0].monotonicNanoseconds -lt
+    $scheduledInterval.monotonicNanoseconds
+) {
+    throw "The fixture interval fired before its scheduling record."
+}
+if (
+    $cancelledIntervals[0].monotonicNanoseconds -lt
+    $firedIntervals[0].monotonicNanoseconds
+) {
+    throw "The fixture interval was cancelled before its firing record."
 }
 
 $listener = $listeners[0].payload
@@ -278,6 +361,13 @@ if (-not $completion.propagationStopped) {
     SuppressedDefaultActions = $suppressedDefaultActions.Count
     InvokedDefaultActions = $invokedDefaultActions.Count
     HandledDefaultActionCompletions = $handledDefaultActionCompletions.Count
+    ScheduledTimeouts = $scheduledTimeouts.Count
+    FiredTimeouts = $firedTimeouts.Count
+    ScheduledIntervals = $scheduledIntervals.Count
+    FiredIntervals = $firedIntervals.Count
+    CancelledIntervals = $cancelledIntervals.Count
+    TimeoutTimerId = $scheduledTimeout.payload.timerId
+    IntervalTimerId = $scheduledInterval.payload.timerId
     RendererProcessId = $listener.context.processId
     DocumentId = $listener.context.documentId
     TargetNodeId = $listener.target.nodeId
@@ -292,5 +382,6 @@ if (-not $completion.propagationStopped) {
 } | Format-List
 
 Write-Host (
-    "Blink propagation, listener, and default-handler evidence verified."
+    "Blink propagation, listener, default-handler, and DOM timer evidence " +
+    "verified."
 )

@@ -84,6 +84,7 @@ struct EvidenceIdentityStorage {
   base::Lock lock;
   uint64_t next_listener_id = 1;
   uint64_t next_dispatch_id = 1;
+  uint64_t next_timer_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
 
   struct NodeState {
@@ -110,8 +111,17 @@ struct EvidenceIdentityStorage {
     std::string listener_id;
     NodeState current_target;
   };
+  struct TimerState {
+    std::string timer_id;
+    int document_node_id;
+    std::string timer_kind;
+    double requested_delay_milliseconds;
+    double effective_delay_milliseconds;
+    int nesting_level;
+  };
   std::unordered_map<uintptr_t, DispatchState> dispatches;
   std::unordered_map<uintptr_t, InvocationState> active_invocations;
+  std::unordered_map<uintptr_t, TimerState> timers;
 };
 
 EvidenceIdentityStorage& EvidenceIdentities() {
@@ -293,6 +303,52 @@ std::optional<EvidenceIdentityStorage::InvocationState> TakeActiveInvocation(
   return invocation;
 }
 
+EvidenceIdentityStorage::TimerState RegisterTimerIdentity(
+    uintptr_t timer_identity,
+    int document_node_id,
+    bool repeating,
+    double requested_delay_milliseconds,
+    double effective_delay_milliseconds,
+    int nesting_level) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  EvidenceIdentityStorage::TimerState state{
+      .timer_id =
+          "timer-" + base::NumberToString(identities.next_timer_id++),
+      .document_node_id = document_node_id,
+      .timer_kind = repeating ? "interval" : "timeout",
+      .requested_delay_milliseconds = requested_delay_milliseconds,
+      .effective_delay_milliseconds = effective_delay_milliseconds,
+      .nesting_level = nesting_level,
+  };
+  identities.timers.insert_or_assign(timer_identity, state);
+  return state;
+}
+
+std::optional<EvidenceIdentityStorage::TimerState> FindTimerIdentity(
+    uintptr_t timer_identity) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.timers.find(timer_identity);
+  if (found == identities.timers.end()) {
+    return std::nullopt;
+  }
+  return found->second;
+}
+
+std::optional<EvidenceIdentityStorage::TimerState> TakeTimerIdentity(
+    uintptr_t timer_identity) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.timers.find(timer_identity);
+  if (found == identities.timers.end()) {
+    return std::nullopt;
+  }
+  EvidenceIdentityStorage::TimerState state = std::move(found->second);
+  identities.timers.erase(found);
+  return state;
+}
+
 std::string EventPhaseName(int event_phase) {
   switch (event_phase) {
     case 1:
@@ -409,6 +465,30 @@ base::DictValue CreateDispatchPayload(
     payload.Set("outcome", std::move(*outcome));
   } else {
     payload.Set("outcome", base::Value());
+  }
+  return payload;
+}
+
+base::DictValue CreateTimerPayload(
+    const RecorderPipeClient& client,
+    const EvidenceIdentityStorage::TimerState& state,
+    std::optional<std::string> cancellation_reason) {
+  base::DictValue payload;
+  payload.Set("context", CreateContext(client, state.document_node_id));
+  payload.Set("timerId", state.timer_id);
+  payload.Set("timerKind", state.timer_kind);
+  payload.Set("requestedDelayMilliseconds",
+              state.requested_delay_milliseconds);
+  payload.Set("effectiveDelayMilliseconds",
+              state.effective_delay_milliseconds);
+  payload.Set("nestingLevel", state.nesting_level);
+  payload.Set("throttled", base::Value());
+  payload.Set("pageLifecycleState", "unknown");
+  payload.Set("callbackLocation", base::Value());
+  if (cancellation_reason) {
+    payload.Set("cancellationReason", std::move(*cancellation_reason));
+  } else {
+    payload.Set("cancellationReason", base::Value());
   }
   return payload;
 }
@@ -841,6 +921,62 @@ void RecordBlinkDefaultAction(uintptr_t event_identity,
       DefaultActionOutcomeName(outcome), &current_target,
       std::string("blink-default-event-handler"));
   SendBlinkEvidence("browser.dispatch", "default-action", std::move(payload));
+}
+
+void RecordBlinkTimerScheduled(uintptr_t timer_identity,
+                               int document_node_id,
+                               int timeout_id,
+                               bool repeating,
+                               double requested_delay_milliseconds,
+                               double effective_delay_milliseconds,
+                               int nesting_level) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || timer_identity == 0 || document_node_id <= 0 ||
+      timeout_id <= 0 || requested_delay_milliseconds < 0 ||
+      effective_delay_milliseconds < 0 || nesting_level < 0) {
+    return;
+  }
+
+  EvidenceIdentityStorage::TimerState state = RegisterTimerIdentity(
+      timer_identity, document_node_id, repeating,
+      requested_delay_milliseconds, effective_delay_milliseconds,
+      nesting_level);
+  base::DictValue payload =
+      CreateTimerPayload(*client, state, std::nullopt);
+  SendBlinkEvidence("browser.timer", "timer-scheduled", std::move(payload));
+}
+
+void RecordBlinkTimerFired(uintptr_t timer_identity, bool repeating) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || timer_identity == 0) {
+    return;
+  }
+
+  std::optional<EvidenceIdentityStorage::TimerState> state =
+      repeating ? FindTimerIdentity(timer_identity)
+                : TakeTimerIdentity(timer_identity);
+  if (!state) {
+    return;
+  }
+  base::DictValue payload =
+      CreateTimerPayload(*client, *state, std::nullopt);
+  SendBlinkEvidence("browser.timer", "timer-fired", std::move(payload));
+}
+
+void RecordBlinkTimerCancelled(uintptr_t timer_identity) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || timer_identity == 0) {
+    return;
+  }
+
+  std::optional<EvidenceIdentityStorage::TimerState> state =
+      TakeTimerIdentity(timer_identity);
+  if (!state) {
+    return;
+  }
+  base::DictValue payload =
+      CreateTimerPayload(*client, *state, std::string("explicit-clear"));
+  SendBlinkEvidence("browser.timer", "timer-cancelled", std::move(payload));
 }
 
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

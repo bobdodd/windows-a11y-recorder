@@ -24,6 +24,10 @@ from the product version.
 - Correlated Blink Node default-event-handler evidence that distinguishes
   handler invocation from event-handler suppression, prior handling, and
   ineligible untrusted events without claiming a visible browser effect.
+- Correlated Blink window timeout and interval evidence for accepted
+  scheduling, callback entry, and explicit cancellation, with stable timer
+  identifiers and conservative unknown values for unobserved throttling,
+  lifecycle state, and callback location.
 - A deterministic listener and dispatch fixture plus an archive evidence
   verifier for Windows validation.
 
@@ -70,6 +74,8 @@ from the product version.
   and populated `composedPath` evidence.
 - Advanced the browser evidence protocol to version 0.4 for strict
   default-event-handler decision evidence.
+- Advanced the browser evidence protocol to version 0.5 for correlated window
+  DOM timer lifecycle evidence and nullable throttling state.
 - Preserved propagation flags observed during listener execution because Blink
   may clear them before the dispatch-completion hook runs.
 - Validated the propagation slice end to end on the reference Windows platform

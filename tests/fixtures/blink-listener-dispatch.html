@@ -53,6 +53,12 @@
     });
 
     status.textContent = "Fixture listener registered.";
+    let intervalTicks = 0;
+    const intervalId = window.setInterval(() => {
+      intervalTicks += 1;
+      status.dataset.intervalTicks = String(intervalTicks);
+      window.clearInterval(intervalId);
+    }, 125);
     window.setTimeout(() => {
       target.click();
       defaultActionLink.click();

@@ -385,6 +385,74 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsInstrumentedBrowserTimerEvidence()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null
+        };
+        var scheduled = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Timer,
+            BrowserEvidenceEventTypes.TimerScheduled,
+            new
+            {
+                context,
+                timerId = "timer-1",
+                timerKind = "timeout",
+                requestedDelayMilliseconds = 250.0,
+                effectiveDelayMilliseconds = 250.0,
+                nestingLevel = 1,
+                throttled = (bool?)null,
+                pageLifecycleState = "unknown",
+                callbackLocation = (object?)null,
+                cancellationReason = (string?)null
+            });
+        var fired = CreateEvent(
+            1,
+            350,
+            BrowserEvidenceChannels.Timer,
+            BrowserEvidenceEventTypes.TimerFired,
+            new
+            {
+                context,
+                timerId = "timer-1",
+                timerKind = "timeout",
+                requestedDelayMilliseconds = 250.0,
+                effectiveDelayMilliseconds = 250.0,
+                nestingLevel = 1,
+                throttled = (bool?)null,
+                pageLifecycleState = "unknown",
+                callbackLocation = (object?)null,
+                cancellationReason = (string?)null
+            });
+        var directory = await CreateArchiveAsync([scheduled, fired]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
     {
         var context = new

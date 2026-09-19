@@ -278,6 +278,32 @@ BLINK_DEFAULT_ACTION_SUPPRESSED_HOOK = """\
         event_->PropagationStopped(),
         event_->ImmediatePropagationStopped());
 """
+BLINK_TIMER_REQUESTED_DELAY_HOOK = """\
+  const base::TimeDelta recorder_requested_timeout =
+      std::max(timeout, base::TimeDelta());
+"""
+BLINK_TIMER_SCHEDULED_HOOK = """\
+  if (auto* recorder_window = DynamicTo<LocalDOMWindow>(context)) {
+    if (Document* recorder_document = recorder_window->document()) {
+      a11y_recorder::RecordBlinkTimerScheduled(
+          reinterpret_cast<uintptr_t>(this),
+          recorder_document->GetDomNodeId(),
+          timeout_id_,
+          !single_shot,
+          recorder_requested_timeout.InMillisecondsF(),
+          timeout.InMillisecondsF(),
+          nesting_level_);
+    }
+  }
+"""
+BLINK_TIMER_CANCELLED_HOOK = """\
+    a11y_recorder::RecordBlinkTimerCancelled(
+        reinterpret_cast<uintptr_t>(timer));
+"""
+BLINK_TIMER_FIRED_HOOK = """\
+  a11y_recorder::RecordBlinkTimerFired(
+      reinterpret_cast<uintptr_t>(this), is_interval);
+"""
 
 
 def replace_once(text: str, old: str, new: str, path: Path) -> str:
@@ -606,6 +632,61 @@ def patch_blink_event_dispatcher(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def patch_blink_dom_timer(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "base/check_deref.h"\n',
+            '#include "base/check_deref.h"\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n"
+            '#include "third_party/blink/renderer/core/dom/document.h"\n',
+            path,
+        )
+    if "recorder_requested_timeout" not in text:
+        anchor = "  DCHECK_GT(timeout_id_, 0);\n\n"
+        text = replace_once(
+            text,
+            anchor,
+            f"{anchor}{BLINK_TIMER_REQUESTED_DELAY_HOOK}\n",
+            path,
+        )
+    if "RecordBlinkTimerScheduled" not in text:
+        anchor = (
+            "  DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT(\n"
+            '      "TimerInstall", inspector_timer_install_event::Data, &context,\n'
+        )
+        text = replace_once(
+            text,
+            anchor,
+            f"{BLINK_TIMER_SCHEDULED_HOOK}\n{anchor}",
+            path,
+        )
+    if "RecordBlinkTimerCancelled" not in text:
+        anchor = (
+            "  if (DOMTimer* timer =\n"
+            "          DOMTimerCoordinator::From(context)."
+            "RemoveTimeoutByID(timeout_id)) {\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            f"{anchor}{BLINK_TIMER_CANCELLED_HOOK}",
+            path,
+        )
+    if "RecordBlinkTimerFired" not in text:
+        anchor = (
+            "  const bool is_interval = RepeatInterval().has_value();\n\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            f"{anchor}{BLINK_TIMER_FIRED_HOOK}\n",
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def patch_blink_core_build(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     if BLINK_CORE_DEP in text:
@@ -673,6 +754,15 @@ def main() -> int:
         / "dom"
         / "events"
         / "event_dispatcher.cc"
+    )
+    patch_blink_dom_timer(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "scheduler"
+        / "dom_timer.cc"
     )
     patch_blink_core_build(
         source / "third_party" / "blink" / "renderer" / "core" / "BUILD.gn"

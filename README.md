@@ -33,14 +33,14 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Renderer capability propagation and three narrow Blink evidence slices were
+Renderer capability propagation and four narrow Blink evidence slices were
 validated end to end on the reference Windows platform on September 19, 2026.
 The latest validated archive contained listener lifecycle, dispatch lifecycle,
-the ordered Node propagation path, current targets, listener phases, and
-cumulative propagation-stop state. It passed structural validation across 476
-events and 81 artifacts, dropped no records, and recorded no network-service
-crashes. See the
-[Blink propagation validation record](docs/validation/blink-propagation-2026-09-19.md).
+the ordered Node propagation path, current targets, listener phases,
+cumulative propagation-stop state, and Node default-event-handler decisions.
+It passed structural validation across 597 events and 81 artifacts, dropped no
+records, and recorded no network-service crashes. See the
+[Blink evidence validation plan](docs/validation/blink-listener-dispatch-plan.md).
 
 ## Project goals
 
@@ -86,12 +86,13 @@ Completed:
    completion on the reference Chromium Windows build.
 8. Record and validate the ordered Blink Node propagation path, each invoked
    listener's current target and phase, and cumulative propagation-stop state.
+9. Record and validate Node default-event-handler decisions without claiming
+   unobserved browser or document effects.
 
 Remaining:
 
 1. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
-   dispatch paths, default actions, timers, cookies, DOM, accessibility,
-   network, and rendering.
+   dispatch paths, timers, cookies, DOM, accessibility, network, and rendering.
 2. Record representative NVDA, JAWS, and Narrator sessions.
 3. Add evidence correlation and screen-reader behavior analysis.
 4. Investigate touch and gesture coverage on representative hardware.

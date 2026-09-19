@@ -24,6 +24,7 @@ class IntegrateTests(unittest.TestCase):
             content_build = root / "content_browser_BUILD.gn"
             event_target = root / "event_target.cc"
             event_dispatcher = root / "event_dispatcher.cc"
+            dom_timer = root / "dom_timer.cc"
             blink_build = root / "blink_core_BUILD.gn"
             delegate.write_text(
                 '#include "chrome/app/chrome_main_delegate.h"\n'
@@ -197,6 +198,49 @@ class IntegrateTests(unittest.TestCase):
                 + "}\n",
                 encoding="utf-8",
             )
+            dom_timer.write_text(
+                '#include "third_party/blink/renderer/core/scheduler/'
+                'dom_timer.h"\n'
+                '#include "base/check_deref.h"\n'
+                "\n"
+                "void DOMTimer::RemoveByID(ExecutionContext& context, "
+                "int timeout_id) {\n"
+                "  if (DOMTimer* timer =\n"
+                "          DOMTimerCoordinator::From(context)."
+                "RemoveTimeoutByID(timeout_id)) {\n"
+                "    timer->SetExecutionContext(nullptr);\n"
+                "  }\n"
+                "}\n"
+                "\n"
+                "DOMTimer::DOMTimer(ExecutionContext& context,\n"
+                "                   ScheduledAction* action,\n"
+                "                   base::TimeDelta timeout,\n"
+                "                   bool single_shot,\n"
+                "                   StackOptions stack_options)\n"
+                "    : timeout_id_(1), nesting_level_(0) {\n"
+                "  DCHECK_GT(timeout_id_, 0);\n"
+                "\n"
+                "  if (timeout.is_negative()) {\n"
+                "    timeout = base::TimeDelta();\n"
+                "  }\n"
+                "  if (single_shot) {\n"
+                "    StartOneShot(timeout, FROM_HERE, true);\n"
+                "  } else {\n"
+                "    StartRepeating(timeout, FROM_HERE, true);\n"
+                "  }\n"
+                "  DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT(\n"
+                '      "TimerInstall", inspector_timer_install_event::Data, '
+                "&context,\n"
+                "      timeout_id_, timeout, single_shot);\n"
+                "}\n"
+                "\n"
+                "void DOMTimer::Fired() {\n"
+                "  const bool is_interval = RepeatInterval().has_value();\n"
+                "\n"
+                "  action_->Execute(context);\n"
+                "}\n",
+                encoding="utf-8",
+            )
             blink_build.write_text(
                 'component("core") {\n'
                 '  output_name = "blink_core"\n'
@@ -216,6 +260,7 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_content_browser_build(content_build)
             INTEGRATE.patch_blink_event_target(event_target)
             INTEGRATE.patch_blink_event_dispatcher(event_dispatcher)
+            INTEGRATE.patch_blink_dom_timer(dom_timer)
             INTEGRATE.patch_blink_core_build(blink_build)
             first_delegate = delegate.read_text(encoding="utf-8")
             first_chrome_build = chrome_build.read_text(encoding="utf-8")
@@ -228,6 +273,7 @@ class IntegrateTests(unittest.TestCase):
             first_event_dispatcher = event_dispatcher.read_text(
                 encoding="utf-8"
             )
+            first_dom_timer = dom_timer.read_text(encoding="utf-8")
             first_blink_build = blink_build.read_text(encoding="utf-8")
 
             INTEGRATE.patch_main_delegate(delegate)
@@ -239,6 +285,7 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_content_browser_build(content_build)
             INTEGRATE.patch_blink_event_target(event_target)
             INTEGRATE.patch_blink_event_dispatcher(event_dispatcher)
+            INTEGRATE.patch_blink_dom_timer(dom_timer)
             INTEGRATE.patch_blink_core_build(blink_build)
 
             self.assertEqual(
@@ -265,6 +312,10 @@ class IntegrateTests(unittest.TestCase):
             self.assertEqual(
                 first_event_dispatcher,
                 event_dispatcher.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                first_dom_timer,
+                dom_timer.read_text(encoding="utf-8"),
             )
             self.assertEqual(
                 first_blink_build,
@@ -402,6 +453,17 @@ class IntegrateTests(unittest.TestCase):
                 first_event_dispatcher,
             )
             self.assertNotIn("event_.Get()", first_event_dispatcher)
+            self.assertIn("RecordBlinkTimerScheduled", first_dom_timer)
+            self.assertIn("RecordBlinkTimerFired", first_dom_timer)
+            self.assertIn("RecordBlinkTimerCancelled", first_dom_timer)
+            self.assertLess(
+                first_dom_timer.index("RecordBlinkTimerScheduled"),
+                first_dom_timer.index('"TimerInstall"'),
+            )
+            self.assertLess(
+                first_dom_timer.index("RecordBlinkTimerFired"),
+                first_dom_timer.index("action_->Execute(context);"),
+            )
             self.assertEqual(
                 1,
                 first_event_dispatcher.count(
