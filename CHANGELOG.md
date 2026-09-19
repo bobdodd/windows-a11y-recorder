@@ -8,6 +8,13 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.6 evidence for accepted web-exposed
+  `requestAnimationFrame` schedules, callback entry, and explicit
+  `cancelAnimationFrame` cancellation.
+- Added deterministic animation-frame fixture coverage, archive contract
+  coverage, idempotent Chromium integration tests, and end-to-end verification
+  assertions for one fired and one cancelled callback.
+
 - Browser-to-child recorder capability propagation for renderer processes
   using inherited read-only shared memory.
 - Independent child-process authentication and clock synchronization.
@@ -33,6 +40,8 @@ from the product version.
 
 ### Changed
 
+- Made timer delay values nullable in the native bridge so animation-frame
+  evidence does not claim a requested or effective delay.
 - Restricted inherited Chromium recorder bootstrap distribution to renderer
   processes. GPU and utility processes are excluded until dedicated evidence
   hooks require them, preventing the recorder from destabilizing Chromium's

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines the first five Blink evidence implementation slices and
+This document defines the first six Blink evidence implementation slices and
 the Windows validation required before any can be described as complete.
 The first validated slice records accepted Node listener registrations and the
 start of Node event dispatches. The second implemented slice correlates
@@ -12,6 +12,8 @@ The fourth implemented slice records decisions at Blink's Node
 `DefaultEventHandler` boundary. The fifth implemented slice records correlated
 window `setTimeout` and `setInterval` scheduling, callback entry, and explicit
 interval cancellation.
+The sixth implemented slice records web-exposed animation-frame scheduling,
+callback entry, and explicit cancellation.
 It does not claim complete listener or dispatch coverage.
 
 ## Implemented hooks
@@ -137,10 +139,28 @@ from the bridge when it fires and does not produce a cancellation record.
 Context destruction is also not represented as explicit cancellation.
 
 This increment covers window timers only. It does not cover worker timers,
-animation frames, idle callbacks, or browser-process task scheduling.
+idle callbacks, or browser-process task scheduling.
 Throttling remains null, page lifecycle state is `unknown`, and callback
 location remains null so the archive does not infer facts that the hook does
 not observe.
+
+### Animation-frame callback lifecycle
+
+The sixth slice patches
+`third_party/blink/renderer/core/dom/frame_request_callback_collection.cc`.
+It records web-exposed callbacks after Blink assigns a positive callback
+identifier and accepts the request. A stable, process-local timer identifier
+correlates:
+
+- `timer-scheduled`, with timer kind `animation-frame`.
+- `timer-fired`, immediately before Blink enters the JavaScript callback.
+- `timer-cancelled`, when `cancelAnimationFrame` removes a live callback.
+
+The delay fields are null and nesting level is zero because
+`requestAnimationFrame` is not a delay-based DOM timer. Callback entry does not
+claim callback completion, frame presentation, or resulting page effects.
+Internal Blink callbacks and implicit removal caused by execution-context
+destruction are not reported by this slice.
 
 ## Component boundary
 
@@ -161,7 +181,8 @@ high-volume event classes.
 `tests/fixtures/blink-listener-dispatch.html` installs capture and bubble
 listeners on `#propagation-root` and two listeners on `#pointer-only`. It
 installs a 125-millisecond interval that clears itself after one callback, then
-invokes `HTMLElement.click()` from a 250-millisecond timeout. The target
+requests two animation-frame callbacks, explicitly cancels one, and invokes
+`HTMLElement.click()` from a 250-millisecond timeout. The target
 listeners call `preventDefault()`, remove the named listener, and call
 `stopPropagation()`. The expanded fixture must produce:
 
@@ -190,6 +211,10 @@ listeners call `preventDefault()`, remove the named listener, and call
   entry, and one later `explicit-clear` cancellation for its stable timer
   identifier.
 - No cancellation record for the one-shot timeout.
+- Two `animation-frame` schedules with null delay values and zero nesting.
+- Exactly one correlated animation-frame callback entry.
+- Exactly one distinct correlated cancellation with reason
+  `explicit-cancel-animation-frame`.
 - Renderer process context and stable non-empty listener and dispatch
   identifiers across the lifecycle, plus stable non-empty timer identifiers
   across each timer lifecycle.
@@ -463,3 +488,10 @@ throttling, page lifecycle state, callback source location, and
 context-destruction cancellation remain outside the validated scope. The
 [dated validation record](blink-dom-timers-2026-09-19.md) documents the
 environment, defects found, evidence, and limits.
+
+## Animation-frame implementation state
+
+The protocol 0.6 bridge, Chromium integration hook, deterministic fixture,
+archive contract test, and end-to-end assertions are implemented. The
+reference Windows Chromium build and capture have not yet passed, so
+animation-frame evidence must not be described as validated.

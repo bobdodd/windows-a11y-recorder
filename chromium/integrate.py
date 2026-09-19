@@ -304,6 +304,30 @@ BLINK_TIMER_FIRED_HOOK = """\
   a11y_recorder::RecordBlinkTimerFired(
       reinterpret_cast<uintptr_t>(this), is_interval);
 """
+BLINK_ANIMATION_FRAME_SCHEDULED_HOOK = """\
+  if (type == FrameCallbackType::kWebExposed) {
+    if (auto* recorder_window =
+            DynamicTo<LocalDOMWindow>(context_.Get())) {
+      if (Document* recorder_document = recorder_window->document()) {
+        a11y_recorder::RecordBlinkAnimationFrameScheduled(
+            reinterpret_cast<uintptr_t>(callback),
+            recorder_document->GetDomNodeId(), id);
+      }
+    }
+  }
+"""
+BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK = """\
+      a11y_recorder::RecordBlinkAnimationFrameCancelled(
+          reinterpret_cast<uintptr_t>(callbacks[i].Get()));
+"""
+BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK = """\
+      a11y_recorder::RecordBlinkAnimationFrameCancelled(
+          reinterpret_cast<uintptr_t>(callback.Get()));
+"""
+BLINK_ANIMATION_FRAME_FIRED_HOOK = """\
+    a11y_recorder::RecordBlinkAnimationFrameFired(
+        reinterpret_cast<uintptr_t>(callback.Get()));
+"""
 
 
 def replace_once(text: str, old: str, new: str, path: Path) -> str:
@@ -698,6 +722,122 @@ def patch_blink_dom_timer(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def patch_blink_animation_frame_callbacks(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_BRIDGE_INCLUDE not in text:
+        header = (
+            '#include "third_party/blink/renderer/core/dom/'
+            'frame_request_callback_collection.h"\n'
+        )
+        text = replace_once(
+            text,
+            header,
+            header
+            + f"{BLINK_BRIDGE_INCLUDE}\n"
+            + '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            + '#include "third_party/blink/renderer/core/frame/'
+            'local_dom_window.h"\n',
+            path,
+        )
+    if "RecordBlinkAnimationFrameScheduled" not in text:
+        function = (
+            "FrameRequestCallbackCollection::RegisterFrameCallback("
+        )
+        function_index = text.find(function)
+        if function_index < 0:
+            raise RuntimeError(
+                f"{path}: RegisterFrameCallback function not found"
+            )
+        anchor = (
+            '  DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT("RequestAnimationFrame",\n'
+        )
+        anchor_index = text.find(anchor, function_index)
+        if anchor_index < 0:
+            raise RuntimeError(
+                f"{path}: RegisterFrameCallback trace anchor not found"
+            )
+        text = (
+            text[:anchor_index]
+            + f"{BLINK_ANIMATION_FRAME_SCHEDULED_HOOK}\n"
+            + text[anchor_index:]
+        )
+    if "RecordBlinkAnimationFrameCancelled" not in text:
+        function = "void FrameRequestCallbackCollection::CancelFrameCallback("
+        function_index = text.find(function)
+        if function_index < 0:
+            raise RuntimeError(
+                f"{path}: CancelFrameCallback function not found"
+            )
+        next_function_index = text.find(
+            "\nvoid FrameRequestCallbackCollection::", function_index + 1
+        )
+        function_text = text[
+            function_index:
+            next_function_index if next_function_index >= 0 else len(text)
+        ]
+        first_anchor = (
+            "      callbacks[i]->async_task_context()->Cancel();\n"
+        )
+        second_anchor = (
+            "      callback->async_task_context()->Cancel();\n"
+        )
+        if function_text.count(first_anchor) != 1:
+            raise RuntimeError(
+                f"{path}: pending animation-frame cancellation anchor "
+                f"count was {function_text.count(first_anchor)}"
+            )
+        if function_text.count(second_anchor) != 1:
+            raise RuntimeError(
+                f"{path}: invoking animation-frame cancellation anchor "
+                f"count was {function_text.count(second_anchor)}"
+            )
+        function_text = function_text.replace(
+            first_anchor,
+            first_anchor + BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK,
+            1,
+        )
+        function_text = function_text.replace(
+            second_anchor,
+            second_anchor + BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK,
+            1,
+        )
+        text = (
+            text[:function_index]
+            + function_text
+            + text[
+                next_function_index
+                if next_function_index >= 0
+                else len(text):
+            ]
+        )
+    if "RecordBlinkAnimationFrameFired" not in text:
+        function = (
+            "void FrameRequestCallbackCollection::"
+            "ExecuteFrameCallbacksImpl("
+        )
+        function_index = text.find(function)
+        if function_index < 0:
+            raise RuntimeError(
+                f"{path}: ExecuteFrameCallbacksImpl function not found"
+            )
+        anchor = (
+            "    DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT(\n"
+            '        "FireAnimationFrame", '
+            "inspector_animation_frame_event::Data,\n"
+        )
+        anchor_index = text.find(anchor, function_index)
+        if anchor_index < 0:
+            raise RuntimeError(
+                f"{path}: ExecuteFrameCallbacksImpl trace anchor not found"
+            )
+        text = (
+            text[:anchor_index]
+            + f"{BLINK_ANIMATION_FRAME_FIRED_HOOK}\n"
+            + text[anchor_index:]
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def patch_blink_core_build(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     if BLINK_CORE_DEP in text:
@@ -774,6 +914,15 @@ def main() -> int:
         / "core"
         / "scheduler"
         / "dom_timer.cc"
+    )
+    patch_blink_animation_frame_callbacks(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "frame_request_callback_collection.cc"
     )
     patch_blink_core_build(
         source / "third_party" / "blink" / "renderer" / "core" / "BUILD.gn"

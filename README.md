@@ -92,11 +92,20 @@ Completed:
 10. Record and validate accepted window timeout and interval schedules,
     callback entry, and explicit cancellation with process-local correlation.
 
+In progress:
+
+1. Record web-exposed `requestAnimationFrame` scheduling, callback entry, and
+   explicit `cancelAnimationFrame` cancellation. The protocol 0.6 bridge,
+   Chromium hooks, deterministic fixture, archive contract test, and
+   verification assertions are implemented. The reference Windows
+   build-and-capture run is still required before this slice is marked
+   validated.
+
 Remaining:
 
 1. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
-   dispatch paths, animation frames, idle callbacks, timer throttling, cookies,
-   DOM, accessibility, network, and rendering.
+   dispatch paths, idle callbacks, timer throttling, cookies, DOM,
+   accessibility, network, and rendering.
 2. Record representative NVDA, JAWS, and Narrator sessions.
 3. Add evidence correlation and screen-reader behavior analysis.
 4. Investigate touch and gesture coverage on representative hardware.

@@ -115,8 +115,8 @@ struct EvidenceIdentityStorage {
     std::string timer_id;
     int document_node_id;
     std::string timer_kind;
-    double requested_delay_milliseconds;
-    double effective_delay_milliseconds;
+    std::optional<double> requested_delay_milliseconds;
+    std::optional<double> effective_delay_milliseconds;
     int nesting_level;
   };
   std::unordered_map<uintptr_t, DispatchState> dispatches;
@@ -306,9 +306,9 @@ std::optional<EvidenceIdentityStorage::InvocationState> TakeActiveInvocation(
 EvidenceIdentityStorage::TimerState RegisterTimerIdentity(
     uintptr_t timer_identity,
     int document_node_id,
-    bool repeating,
-    double requested_delay_milliseconds,
-    double effective_delay_milliseconds,
+    std::string timer_kind,
+    std::optional<double> requested_delay_milliseconds,
+    std::optional<double> effective_delay_milliseconds,
     int nesting_level) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
@@ -316,7 +316,7 @@ EvidenceIdentityStorage::TimerState RegisterTimerIdentity(
       .timer_id =
           "timer-" + base::NumberToString(identities.next_timer_id++),
       .document_node_id = document_node_id,
-      .timer_kind = repeating ? "interval" : "timeout",
+      .timer_kind = std::move(timer_kind),
       .requested_delay_milliseconds = requested_delay_milliseconds,
       .effective_delay_milliseconds = effective_delay_milliseconds,
       .nesting_level = nesting_level,
@@ -477,10 +477,18 @@ base::DictValue CreateTimerPayload(
   payload.Set("context", CreateContext(client, state.document_node_id));
   payload.Set("timerId", state.timer_id);
   payload.Set("timerKind", state.timer_kind);
-  payload.Set("requestedDelayMilliseconds",
-              state.requested_delay_milliseconds);
-  payload.Set("effectiveDelayMilliseconds",
-              state.effective_delay_milliseconds);
+  if (state.requested_delay_milliseconds) {
+    payload.Set("requestedDelayMilliseconds",
+                *state.requested_delay_milliseconds);
+  } else {
+    payload.Set("requestedDelayMilliseconds", base::Value());
+  }
+  if (state.effective_delay_milliseconds) {
+    payload.Set("effectiveDelayMilliseconds",
+                *state.effective_delay_milliseconds);
+  } else {
+    payload.Set("effectiveDelayMilliseconds", base::Value());
+  }
   payload.Set("nestingLevel", state.nesting_level);
   payload.Set("throttled", base::Value());
   payload.Set("pageLifecycleState", "unknown");
@@ -938,7 +946,7 @@ void RecordBlinkTimerScheduled(uintptr_t timer_identity,
   }
 
   EvidenceIdentityStorage::TimerState state = RegisterTimerIdentity(
-      timer_identity, document_node_id, repeating,
+      timer_identity, document_node_id, repeating ? "interval" : "timeout",
       requested_delay_milliseconds, effective_delay_milliseconds,
       nesting_level);
   base::DictValue payload =
@@ -976,6 +984,55 @@ void RecordBlinkTimerCancelled(uintptr_t timer_identity) {
   }
   base::DictValue payload =
       CreateTimerPayload(*client, *state, std::string("explicit-clear"));
+  SendBlinkEvidence("browser.timer", "timer-cancelled", std::move(payload));
+}
+
+void RecordBlinkAnimationFrameScheduled(uintptr_t callback_identity,
+                                        int document_node_id,
+                                        int callback_id) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || callback_identity == 0 || document_node_id <= 0 ||
+      callback_id <= 0) {
+    return;
+  }
+
+  EvidenceIdentityStorage::TimerState state = RegisterTimerIdentity(
+      callback_identity, document_node_id, "animation-frame", std::nullopt,
+      std::nullopt, 0);
+  base::DictValue payload =
+      CreateTimerPayload(*client, state, std::nullopt);
+  SendBlinkEvidence("browser.timer", "timer-scheduled", std::move(payload));
+}
+
+void RecordBlinkAnimationFrameFired(uintptr_t callback_identity) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || callback_identity == 0) {
+    return;
+  }
+
+  std::optional<EvidenceIdentityStorage::TimerState> state =
+      TakeTimerIdentity(callback_identity);
+  if (!state || state->timer_kind != "animation-frame") {
+    return;
+  }
+  base::DictValue payload =
+      CreateTimerPayload(*client, *state, std::nullopt);
+  SendBlinkEvidence("browser.timer", "timer-fired", std::move(payload));
+}
+
+void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || callback_identity == 0) {
+    return;
+  }
+
+  std::optional<EvidenceIdentityStorage::TimerState> state =
+      TakeTimerIdentity(callback_identity);
+  if (!state || state->timer_kind != "animation-frame") {
+    return;
+  }
+  base::DictValue payload = CreateTimerPayload(
+      *client, *state, std::string("explicit-cancel-animation-frame"));
   SendBlinkEvidence("browser.timer", "timer-cancelled", std::move(payload));
 }
 

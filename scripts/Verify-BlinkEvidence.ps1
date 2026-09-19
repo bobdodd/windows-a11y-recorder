@@ -135,6 +135,18 @@ $scheduledIntervals = @(
         }
 )
 
+$animationFrameScheduleCandidates = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-scheduled" -and
+            $_.payload.timerKind -eq "animation-frame" -and
+            $null -eq $_.payload.requestedDelayMilliseconds -and
+            $null -eq $_.payload.effectiveDelayMilliseconds -and
+            $_.payload.nestingLevel -eq 0
+        }
+)
+
 if ($rendererConnections.Count -lt 1) {
     throw "No instrumented Chromium renderer connected to the recorder."
 }
@@ -170,6 +182,24 @@ if ($scheduledTimeouts.Count -lt 1) {
 }
 if ($scheduledIntervals.Count -lt 1) {
     throw "The fixture's 125 ms interval was not recorded as scheduled."
+}
+$listener = $listeners[0].payload
+$scheduledAnimationFrames = @(
+    $animationFrameScheduleCandidates |
+        Where-Object {
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq
+                $listener.context.processId -and
+            $_.payload.context.documentId -eq
+                $listener.context.documentId
+        }
+)
+if ($scheduledAnimationFrames.Count -ne 2) {
+    throw (
+        "The fixture did not produce exactly two animation-frame schedules; " +
+        "observed $($scheduledAnimationFrames.Count)."
+    )
 }
 
 $scheduledTimeout = $scheduledTimeouts[0]
@@ -214,6 +244,35 @@ $cancelledIntervals = @(
             $_.payload.cancellationReason -eq "explicit-clear"
         }
 )
+$animationFrameIds = @(
+    $scheduledAnimationFrames |
+        ForEach-Object { $_.payload.timerId }
+)
+$firedAnimationFrames = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-fired" -and
+            $_.payload.timerKind -eq "animation-frame" -and
+            $_.payload.timerId -in $animationFrameIds -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId -and
+            $null -eq $_.payload.cancellationReason
+        }
+)
+$cancelledAnimationFrames = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-cancelled" -and
+            $_.payload.timerKind -eq "animation-frame" -and
+            $_.payload.timerId -in $animationFrameIds -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId -and
+            $_.payload.cancellationReason -eq
+                "explicit-cancel-animation-frame"
+        }
+)
 if ($firedTimeouts.Count -ne 1) {
     throw "The fixture timeout did not produce exactly one correlated firing."
 }
@@ -222,6 +281,46 @@ if ($firedIntervals.Count -ne 1) {
 }
 if ($cancelledIntervals.Count -ne 1) {
     throw "The fixture interval did not produce one explicit cancellation."
+}
+if ($firedAnimationFrames.Count -ne 1) {
+    throw (
+        "The fixture did not produce exactly one correlated animation-frame " +
+        "callback entry."
+    )
+}
+if ($cancelledAnimationFrames.Count -ne 1) {
+    throw (
+        "The fixture did not produce exactly one correlated " +
+        "cancelAnimationFrame record."
+    )
+}
+if (
+    $firedAnimationFrames[0].payload.timerId -eq
+    $cancelledAnimationFrames[0].payload.timerId
+) {
+    throw "The fired and cancelled animation-frame identities were not distinct."
+}
+$firedAnimationFrameSchedule = $scheduledAnimationFrames |
+    Where-Object {
+        $_.payload.timerId -eq $firedAnimationFrames[0].payload.timerId
+    } |
+    Select-Object -First 1
+$cancelledAnimationFrameSchedule = $scheduledAnimationFrames |
+    Where-Object {
+        $_.payload.timerId -eq $cancelledAnimationFrames[0].payload.timerId
+    } |
+    Select-Object -First 1
+if (
+    $firedAnimationFrames[0].monotonicNanoseconds -lt
+    $firedAnimationFrameSchedule.monotonicNanoseconds
+) {
+    throw "The animation-frame callback entered before it was scheduled."
+}
+if (
+    $cancelledAnimationFrames[0].monotonicNanoseconds -lt
+    $cancelledAnimationFrameSchedule.monotonicNanoseconds
+) {
+    throw "The animation-frame callback was cancelled before it was scheduled."
 }
 if (
     $firedTimeouts[0].monotonicNanoseconds -lt
@@ -242,7 +341,6 @@ if (
     throw "The fixture interval was cancelled before its firing record."
 }
 
-$listener = $listeners[0].payload
 $dispatch = $dispatches[0].payload
 $targetInvocations = @(
     $invocations |
@@ -381,8 +479,13 @@ if (-not $completion.propagationStopped) {
     ScheduledIntervals = $scheduledIntervals.Count
     FiredIntervals = $firedIntervals.Count
     CancelledIntervals = $cancelledIntervals.Count
+    ScheduledAnimationFrames = $scheduledAnimationFrames.Count
+    FiredAnimationFrames = $firedAnimationFrames.Count
+    CancelledAnimationFrames = $cancelledAnimationFrames.Count
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId
+    FiredAnimationFrameId = $firedAnimationFrames[0].payload.timerId
+    CancelledAnimationFrameId = $cancelledAnimationFrames[0].payload.timerId
     RendererProcessId = $listener.context.processId
     DocumentId = $listener.context.documentId
     TargetNodeId = $listener.target.nodeId
@@ -397,6 +500,6 @@ if (-not $completion.propagationStopped) {
 } | Format-List
 
 Write-Host (
-    "Blink propagation, listener, default-handler, and DOM timer evidence " +
-    "verified."
+    "Blink propagation, listener, default-handler, DOM timer, and " +
+    "animation-frame evidence verified."
 )

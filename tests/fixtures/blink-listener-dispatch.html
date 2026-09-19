@@ -53,6 +53,13 @@
     });
 
     status.textContent = "Fixture listener registered.";
+    const cancelledAnimationFrameId = window.requestAnimationFrame(() => {
+      status.dataset.cancelledAnimationFrameRan = "true";
+    });
+    window.cancelAnimationFrame(cancelledAnimationFrameId);
+    window.requestAnimationFrame((timestamp) => {
+      status.dataset.animationFrameTimestamp = String(timestamp);
+    });
     let intervalTicks = 0;
     const intervalId = window.setInterval(() => {
       intervalTicks += 1;

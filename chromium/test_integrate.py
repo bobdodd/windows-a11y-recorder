@@ -25,6 +25,7 @@ class IntegrateTests(unittest.TestCase):
             event_target = root / "event_target.cc"
             event_dispatcher = root / "event_dispatcher.cc"
             dom_timer = root / "dom_timer.cc"
+            animation_frames = root / "frame_request_callback_collection.cc"
             blink_build = root / "blink_core_BUILD.gn"
             delegate.write_text(
                 '#include "chrome/app/chrome_main_delegate.h"\n'
@@ -252,6 +253,62 @@ class IntegrateTests(unittest.TestCase):
                 "}\n",
                 encoding="utf-8",
             )
+            animation_frames.write_text(
+                '#include "third_party/blink/renderer/core/dom/'
+                'frame_request_callback_collection.h"\n'
+                "\n"
+                "FrameRequestCallbackCollection::CallbackId\n"
+                "FrameRequestCallbackCollection::RegisterFrameCallback(\n"
+                "    FrameCallback* callback,\n"
+                "    FrameCallbackType type) {\n"
+                "  CallbackId id = ++next_callback_id_;\n"
+                "  callback->SetId(id);\n"
+                '  DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT("RequestAnimationFrame",\n'
+                "                                         "
+                "inspector_animation_frame_event::Data,\n"
+                "                                         context_, id);\n"
+                "  return id;\n"
+                "}\n"
+                "\n"
+                "void FrameRequestCallbackCollection::CancelFrameCallback(\n"
+                "    CallbackId id,\n"
+                "    FrameCallbackType type) {\n"
+                "  auto& callbacks = frame_callbacks_;\n"
+                "  auto& callbacks_to_invoke = callbacks_to_invoke_;\n"
+                "  for (wtf_size_t i = 0; i < callbacks.size(); ++i) {\n"
+                "    if (callbacks[i]->Id() == id) {\n"
+                "      callbacks[i]->async_task_context()->Cancel();\n"
+                "      callbacks.EraseAt(i);\n"
+                "      return;\n"
+                "    }\n"
+                "  }\n"
+                "  for (const auto& callback : callbacks_to_invoke) {\n"
+                "    if (callback->Id() == id) {\n"
+                "      callback->async_task_context()->Cancel();\n"
+                "      callback->SetIsCancelled(true);\n"
+                "      return;\n"
+                "    }\n"
+                "  }\n"
+                "}\n"
+                "\n"
+                "void FrameRequestCallbackCollection::"
+                "ExecuteFrameCallbacksImpl(\n"
+                "    CallbackList& callbacks_to_invoke,\n"
+                "    double high_res_now_ms,\n"
+                "    double high_res_now_ms_legacy) {\n"
+                "  for (const auto& callback : callbacks_to_invoke) {\n"
+                "    if (callback->IsCancelled()) {\n"
+                "      continue;\n"
+                "    }\n"
+                "    DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT(\n"
+                '        "FireAnimationFrame", '
+                "inspector_animation_frame_event::Data,\n"
+                "        context_, callback->Id());\n"
+                "    callback->Invoke(high_res_now_ms);\n"
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
             blink_build.write_text(
                 'component("core") {\n'
                 '  output_name = "blink_core"\n'
@@ -272,6 +329,9 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_blink_event_target(event_target)
             INTEGRATE.patch_blink_event_dispatcher(event_dispatcher)
             INTEGRATE.patch_blink_dom_timer(dom_timer)
+            INTEGRATE.patch_blink_animation_frame_callbacks(
+                animation_frames
+            )
             INTEGRATE.patch_blink_core_build(blink_build)
             first_delegate = delegate.read_text(encoding="utf-8")
             first_chrome_build = chrome_build.read_text(encoding="utf-8")
@@ -285,6 +345,9 @@ class IntegrateTests(unittest.TestCase):
                 encoding="utf-8"
             )
             first_dom_timer = dom_timer.read_text(encoding="utf-8")
+            first_animation_frames = animation_frames.read_text(
+                encoding="utf-8"
+            )
             first_blink_build = blink_build.read_text(encoding="utf-8")
 
             INTEGRATE.patch_main_delegate(delegate)
@@ -297,6 +360,9 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_blink_event_target(event_target)
             INTEGRATE.patch_blink_event_dispatcher(event_dispatcher)
             INTEGRATE.patch_blink_dom_timer(dom_timer)
+            INTEGRATE.patch_blink_animation_frame_callbacks(
+                animation_frames
+            )
             INTEGRATE.patch_blink_core_build(blink_build)
 
             self.assertEqual(
@@ -327,6 +393,10 @@ class IntegrateTests(unittest.TestCase):
             self.assertEqual(
                 first_dom_timer,
                 dom_timer.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                first_animation_frames,
+                animation_frames.read_text(encoding="utf-8"),
             )
             self.assertEqual(
                 first_blink_build,
@@ -480,6 +550,32 @@ class IntegrateTests(unittest.TestCase):
             self.assertLess(
                 first_dom_timer.index("RecordBlinkTimerFired"),
                 first_dom_timer.index("action_->Execute(context);"),
+            )
+            self.assertIn(
+                "RecordBlinkAnimationFrameScheduled",
+                first_animation_frames,
+            )
+            self.assertEqual(
+                2,
+                first_animation_frames.count(
+                    "RecordBlinkAnimationFrameCancelled"
+                ),
+            )
+            self.assertIn(
+                "RecordBlinkAnimationFrameFired",
+                first_animation_frames,
+            )
+            self.assertLess(
+                first_animation_frames.index(
+                    "RecordBlinkAnimationFrameScheduled"
+                ),
+                first_animation_frames.index('"RequestAnimationFrame"'),
+            )
+            self.assertLess(
+                first_animation_frames.index(
+                    "RecordBlinkAnimationFrameFired"
+                ),
+                first_animation_frames.index('"FireAnimationFrame"'),
             )
             self.assertEqual(
                 1,

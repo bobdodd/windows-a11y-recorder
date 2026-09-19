@@ -144,6 +144,23 @@ void RecordBlinkTimerFired(uintptr_t timer_identity, bool repeating);
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkTimerCancelled(uintptr_t timer_identity);
 
+// Records an accepted web-exposed requestAnimationFrame callback. Delay,
+// nesting, throttling, lifecycle, and source-location facts that are not
+// observed at this boundary remain null or explicitly unknown.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkAnimationFrameScheduled(uintptr_t callback_identity,
+                                        int document_node_id,
+                                        int callback_id);
+
+// Records entry into a previously scheduled web-exposed animation-frame
+// callback. This does not imply callback completion or frame presentation.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkAnimationFrameFired(uintptr_t callback_identity);
+
+// Records explicit cancelAnimationFrame removal of a live callback.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity);
+
 // Records the final dispatch result and releases the active dispatch identity.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

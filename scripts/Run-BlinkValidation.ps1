@@ -159,6 +159,12 @@ $integratedFiles = @(
         )
     ),
     (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\dom\" +
+            "frame_request_callback_collection.cc"
+        )
+    ),
+    (
         Join-Path $chromiumSource "third_party\blink\renderer\core\BUILD.gn"
     )
 )

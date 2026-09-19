@@ -178,6 +178,17 @@ Animation frames, idle callbacks, worker timers, and browser-process task
 scheduling remain outside this slice. Live 0.5 connections require an exact
 protocol-version match.
 
+Protocol version 0.6 adds correlated lifecycle evidence for web-exposed
+`requestAnimationFrame` callbacks. A stable process-local identifier relates
+each accepted callback schedule to either callback entry or an explicit
+`cancelAnimationFrame` cancellation. Delay fields are null and nesting level is
+zero because animation-frame callbacks are not delay-based DOM timers. The
+callback-entry record does not claim callback completion, frame presentation,
+or resulting page effects. Internal Blink frame callbacks, execution-context
+destruction, idle callbacks, worker scheduling, throttling, lifecycle state,
+and callback location remain outside this slice. Live 0.6 connections require
+an exact protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native
@@ -219,8 +230,8 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 1. Implement browser lifecycle, process identity, IPC authentication, clock mapping, and omission records.
 2. Instrument listener registration and removal.
 3. Instrument dispatch phases, listener invocation, propagation control, cancellation, and default actions.
-4. Instrument timeout and interval lifecycle evidence, followed by
-   animation-frame, idle-callback, and lifecycle-throttling evidence.
+4. Instrument timeout, interval, and animation-frame lifecycle evidence,
+   followed by idle-callback and lifecycle-throttling evidence.
 5. Add document, DOM, style, layout, accessibility, and rendered-frame checkpoints.
 6. Add cookie operations and network metadata with prohibited values removed at source.
 7. Add browser-chrome and compositor correlation needed by test scenarios.
