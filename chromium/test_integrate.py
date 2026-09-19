@@ -952,6 +952,7 @@ class IntegrateTests(unittest.TestCase):
             build = root / "BUILD.gn"
 
             throttler_h.write_text(
+                "namespace scheduler {\n\n"
                 "class BudgetPool;\n"
                 "class TaskQueueThrottler {\n"
                 " public:\n"
@@ -959,8 +960,10 @@ class IntegrateTests(unittest.TestCase):
                 "base::sequence_manager::TaskQueue* task_queue,\n"
                 "                     const base::TickClock* tick_clock);\n"
                 " private:\n"
+                "  friend class BudgetPool;\n"
                 "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n"
-                "};\n",
+                "};\n"
+                "}  // namespace scheduler\n",
                 encoding="utf-8",
             )
             throttler_cc.write_text(

@@ -1295,8 +1295,8 @@ def patch_blink_task_queue_throttler_header(path: Path) -> None:
     if BLINK_THROTTLER_OWNER_DECLARATION not in text:
         text = replace_once(
             text,
-            "class BudgetPool;\n",
-            "class BudgetPool;\n"
+            "namespace scheduler {\n\nclass BudgetPool;\n",
+            "namespace scheduler {\n\nclass BudgetPool;\n"
             f"{BLINK_THROTTLER_OWNER_DECLARATION}",
             path,
         )
