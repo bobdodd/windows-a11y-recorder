@@ -343,6 +343,7 @@ class IntegrateTests(unittest.TestCase):
                 "RecordBlinkDispatchCompleted",
                 first_event_dispatcher,
             )
+            self.assertNotIn("event_.Get()", first_event_dispatcher)
             self.assertEqual(
                 1,
                 first_event_dispatcher.count(

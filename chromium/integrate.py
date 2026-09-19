@@ -150,7 +150,7 @@ BLINK_LISTENER_INVOKED_HOOK = """\
 BLINK_DISPATCH_HOOK = """\
   Element* recorder_element = DynamicTo<Element>(*node_);
   a11y_recorder::RecordBlinkDispatchStarted(
-      reinterpret_cast<uintptr_t>(event_.Get()),
+      reinterpret_cast<uintptr_t>(event_),
       node_->GetDocument().GetDomNodeId(),
       node_->GetDomNodeId(),
       event_->type().Utf8().c_str(),
@@ -166,12 +166,12 @@ LEGACY_BLINK_DISPATCH_CALL = """\
 """
 CURRENT_BLINK_DISPATCH_CALL = """\
   a11y_recorder::RecordBlinkDispatchStarted(
-      reinterpret_cast<uintptr_t>(event_.Get()),
+      reinterpret_cast<uintptr_t>(event_),
       node_->GetDocument().GetDomNodeId(),
 """
 BLINK_DISPATCH_COMPLETED_HOOK = """\
   a11y_recorder::RecordBlinkDispatchCompleted(
-      reinterpret_cast<uintptr_t>(event_.Get()),
+      reinterpret_cast<uintptr_t>(event_),
       result == DispatchEventResult::kCanceledByEventHandler
           ? 1
           : result == DispatchEventResult::kCanceledByDefaultEventHandler
@@ -405,6 +405,10 @@ def patch_blink_event_target(path: Path) -> None:
 
 def patch_blink_event_dispatcher(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        "reinterpret_cast<uintptr_t>(event_.Get())",
+        "reinterpret_cast<uintptr_t>(event_)",
+    )
     if BLINK_BRIDGE_INCLUDE not in text:
         text = replace_once(
             text,
