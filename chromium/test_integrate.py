@@ -244,9 +244,8 @@ class IntegrateTests(unittest.TestCase):
                 "\n"
                 "void DOMTimer::Fired() {\n"
                 "  ExecutionContext* context = GetExecutionContext();\n"
-                "  DEVTOOLS_TIMELINE_TRACE_EVENT(\n"
-                '      "TimerFire", inspector_timer_fire_event::Data, context, '
-                "timeout_id_);\n"
+                "  TRACE_EVENT_INSTANT(\n"
+                '      "devtools.timeline", "TimerFire", context, timeout_id_);\n'
                 "  const bool is_interval = RepeatInterval().has_value();\n"
                 "\n"
                 "  action_->Execute(context);\n"
@@ -481,10 +480,6 @@ class IntegrateTests(unittest.TestCase):
             self.assertLess(
                 first_dom_timer.index("RecordBlinkTimerFired"),
                 first_dom_timer.index("action_->Execute(context);"),
-            )
-            self.assertGreater(
-                first_dom_timer.index("RecordBlinkTimerFired"),
-                first_dom_timer.index('"TimerFire"'),
             )
             self.assertEqual(
                 1,

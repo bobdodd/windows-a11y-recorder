@@ -675,17 +675,25 @@ def patch_blink_dom_timer(path: Path) -> None:
             path,
         )
     if "RecordBlinkTimerFired" not in text:
+        function = "void DOMTimer::Fired() {"
+        function_index = text.find(function)
+        if function_index < 0:
+            raise RuntimeError(
+                f"{path}: DOMTimer::Fired function not found"
+            )
         anchor = (
-            "  DEVTOOLS_TIMELINE_TRACE_EVENT(\n"
-            '      "TimerFire", inspector_timer_fire_event::Data, context, '
-            "timeout_id_);\n"
             "  const bool is_interval = RepeatInterval().has_value();\n\n"
         )
-        text = replace_once(
-            text,
-            anchor,
-            f"{anchor}{BLINK_TIMER_FIRED_HOOK}\n",
-            path,
+        anchor_index = text.find(anchor, function_index)
+        if anchor_index < 0:
+            raise RuntimeError(
+                f"{path}: DOMTimer::Fired timer-kind anchor not found"
+            )
+        insertion_index = anchor_index + len(anchor)
+        text = (
+            text[:insertion_index]
+            + f"{BLINK_TIMER_FIRED_HOOK}\n"
+            + text[insertion_index:]
         )
     path.write_text(text, encoding="utf-8", newline="\n")
 
