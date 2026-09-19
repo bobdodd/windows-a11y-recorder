@@ -160,9 +160,7 @@ void SendBlinkEvidence(std::string channel,
 }
 
 bool IsSupportedChildProcess(std::string_view process_type) {
-  return process_type == kChromiumRendererProcess ||
-         process_type == kChromiumGpuProcess ||
-         process_type == kChromiumUtilityProcess;
+  return process_type == kChromiumRendererProcess;
 }
 
 bool StoreChildBootstrap(const BootstrapConfiguration& configuration,

@@ -26,10 +26,12 @@ when updating an existing checkout. The instrumented browser:
    region. It publishes only Chromium's opaque serialized handle metadata to
    the browser process environment so the child-launch hook can cross linked
    module boundaries without relying on duplicated static storage.
-5. Starts renderer, GPU, and utility process bridge connections using the
-   inherited capability. Their command lines contain only shared-memory handle
-   metadata and the non-secret Chromium child process identifier. The internal
-   metadata environment marker is removed from each child environment.
+5. Starts renderer process bridge connections using the inherited capability.
+   GPU and utility processes are deliberately excluded because the current
+   evidence hooks run only in Blink renderers. Renderer command lines contain
+   only shared-memory handle metadata and the non-secret Chromium child process
+   identifier. The internal metadata environment marker is removed from each
+   child environment.
 6. Authenticates and synchronizes each participating process independently.
 7. Must route browser and child-process evidence through bounded, non-blocking
    queues to `RecorderPipeClient`.

@@ -360,6 +360,18 @@ class IntegrateTests(unittest.TestCase):
                 patched.count("AppendRecorderBootstrapToChildProcess"),
             )
 
+    def test_native_bridge_distributes_bootstrap_only_to_renderers(self):
+        bridge = (
+            Path(__file__).parent / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+        supported_processes = bridge.split(
+            "bool IsSupportedChildProcess", 1
+        )[1].split("}", 1)[0]
+
+        self.assertIn("kChromiumRendererProcess", supported_processes)
+        self.assertNotIn("kChromiumGpuProcess", supported_processes)
+        self.assertNotIn("kChromiumUtilityProcess", supported_processes)
+
 
 if __name__ == "__main__":
     unittest.main()

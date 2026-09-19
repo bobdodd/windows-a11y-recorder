@@ -322,8 +322,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
             string.IsNullOrWhiteSpace(hello.BrowserInstanceId) ||
             hello.BrowserInstanceId != _options.BrowserInstanceId ||
             hello.ProcessId <= 0 ||
-            hello.ProcessType is not (
-                "browser" or "renderer" or "gpu-process" or "utility") ||
+            hello.ProcessType is not ("browser" or "renderer") ||
             (hello.ProcessType == "browser" &&
                 (hello.ParentProcessId is not null ||
                     hello.ChildProcessId is not null)) ||

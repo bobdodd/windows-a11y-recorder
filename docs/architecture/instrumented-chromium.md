@@ -135,10 +135,12 @@ an actionable diagnostic. It does not add Chromium's
 browser would violate the product's least-privilege requirement.
 
 Protocol version 0.2 propagates the recorder capability from the browser to
-eligible renderer, GPU, and utility processes through a browser-owned,
-read-only shared-memory region. Chromium's Windows child-launch path inherits
-the region handle. Because the bridge is linked into more than one Chromium
-module, the browser publishes Chromium's opaque serialized handle metadata in
+eligible renderer processes through a browser-owned, read-only shared-memory
+region. GPU and utility processes are deliberately excluded because the
+current evidence hooks run only in Blink renderers. Chromium's Windows
+child-launch path inherits the region handle. Because the bridge is linked
+into more than one Chromium module, the browser publishes Chromium's opaque
+serialized handle metadata in
 an internal process environment marker rather than relying on module-local
 static storage. The child-launch hook reads that metadata, explicitly inherits
 the handle, and removes the marker from the child environment. Child command
@@ -180,9 +182,8 @@ Successful connections are persisted on the `browser.lifecycle` channel:
   authentication token are validated.
 - `browser-clock-synchronized` is emitted only after the clock exchange
   completes and the recorder sends `ready`.
-- Child-process hello messages are accepted only for renderer, GPU, and utility
-  process types and must include positive browser parent and Chromium child
-  process identifiers.
+- Child-process hello messages are accepted only for renderer processes and
+  must include positive browser parent and Chromium child process identifiers.
 - Neither record contains the authentication token.
 - A failed authentication or handshake produces
   `browser-connection-rejected` instead of a successful lifecycle sequence.

@@ -8,8 +8,8 @@ from the product version.
 
 ### Added
 
-- Browser-to-child recorder capability propagation for renderer, GPU, and
-  utility processes using inherited read-only shared memory.
+- Browser-to-child recorder capability propagation for renderer processes
+  using inherited read-only shared memory.
 - Independent child-process authentication and clock synchronization.
 - Browser parent process and Chromium child process identifiers in lifecycle
   evidence.
@@ -22,6 +22,13 @@ from the product version.
 
 ### Changed
 
+- Restricted inherited Chromium recorder bootstrap distribution to renderer
+  processes. GPU and utility processes are excluded until dedicated evidence
+  hooks require them, preventing the recorder from destabilizing Chromium's
+  network-service utility process.
+- Made deterministic Blink validation fail explicitly if Chromium reports a
+  network-service crash, and allowed 15 seconds by default for clean browser
+  startup and fixture dispatch.
 - Browser launch now rejects an elevated recorder process with an actionable
   diagnostic. This preserves Chromium's least-privilege boundary and avoids
   losing the inherited standard-input bootstrap during Chromium's Windows
@@ -30,8 +37,8 @@ from the product version.
   terminates during the startup-stability window instead of leaving the
   browser collector incorrectly marked healthy.
 - Advanced the browser evidence protocol to version 0.2.
-- Restricted accepted browser evidence connections to the browser, renderer,
-  GPU, and utility process types with required process correlation metadata.
+- Restricted accepted browser evidence connections to browser and renderer
+  process types with required process correlation metadata.
 - Replaced the child-launch handoff's module-local static dependency with a
   browser-process metadata marker so `chrome.dll` and `content/browser` share
   the same read-only shared-memory capability. The marker contains no

@@ -16,7 +16,7 @@ param(
     ),
 
     [ValidateRange(5, 300)]
-    [int] $DurationSeconds = 10
+    [int] $DurationSeconds = 15
 )
 
 $ErrorActionPreference = "Stop"
@@ -265,6 +265,19 @@ catch {
     throw
 }
 
+$networkServiceCrashes = @(
+    Select-String `
+        -LiteralPath $chromiumLog `
+        -Pattern "Network service crashed or was terminated" `
+        -ErrorAction SilentlyContinue
+).Count
+if ($networkServiceCrashes -gt 0) {
+    throw (
+        "Chromium reported $networkServiceCrashes network-service crash(es). " +
+        "The recorder must not destabilize unrelated utility processes."
+    )
+}
+
 Write-Host "`nBlink validation completed successfully."
 Write-Host "SESSION_PATH=$($session.FullName)"
 Write-Host "BRIDGE_LOG=$bridgeLog"
@@ -272,3 +285,4 @@ Write-Host "CHROMIUM_LOG=$chromiumLog"
 Write-Host "ARCHIVE_VALID=$($validation.isValid)"
 Write-Host "EVENTS_VALIDATED=$($validation.eventsValidated)"
 Write-Host "ARTIFACTS_VALIDATED=$($validation.artifactsValidated)"
+Write-Host "NETWORK_SERVICE_CRASHES=$networkServiceCrashes"

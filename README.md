@@ -76,7 +76,8 @@ Completed:
 4. Implement and validate the authenticated recorder-to-Chromium browser
    process connection and clock synchronization.
 5. Implement recorder capability propagation, independent authentication, and
-   clock synchronization for Chromium renderer, GPU, and utility processes.
+   clock synchronization for Chromium renderer processes. GPU and utility
+   processes remain excluded until they have dedicated evidence hooks.
 
 Remaining:
 

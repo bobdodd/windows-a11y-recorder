@@ -109,9 +109,10 @@ repository development environment. The instrumented Chromium build and all
 
 The first live fixture runs established the following child-bootstrap facts:
 
-- The browser hook entered for renderer, GPU, and utility launches and attached
-  a bootstrap region to each eligible child.
-- Renderer and utility children entered bridge initialization.
+- The browser hook entered for renderer launches and attached a bootstrap
+  region to each eligible child. GPU and utility launches are now deliberately
+  skipped because they have no evidence hooks.
+- Renderer children entered bridge initialization.
 - Each observed child received a valid inherited region handle, mapped the
   region, parsed the bootstrap, and passed process metadata validation.
 - Each observed child then failed while opening the recorder named pipe.
