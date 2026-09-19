@@ -157,9 +157,14 @@ $integratedFiles = @(
 )
 $integratedFiles += Get-ChildItem -LiteralPath (
     Join-Path $chromiumSource "chromium\recorder_bridge"
-) -File -Recurse
+) -File -Recurse |
+    Select-Object -ExpandProperty FullName
 $integratedFiles | ForEach-Object {
-    (Get-Item -LiteralPath $_).LastWriteTime = $now
+    $integratedPath = [string] $_
+    if (-not (Test-Path -LiteralPath $integratedPath -PathType Leaf)) {
+        throw "Integrated file not found: $integratedPath"
+    }
+    (Get-Item -LiteralPath $integratedPath).LastWriteTime = $now
 }
 
 Invoke-Checked "Building instrumented Chromium" {
