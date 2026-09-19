@@ -321,7 +321,62 @@ it with any state still present when dispatch returns.
 
 This result validates ordered Node paths, Node current targets, capture and
 at-target phases, stopped ancestor bubbling, and cumulative propagation state
-for the deterministic light-DOM fixture. Window and other non-Node targets,
-shadow-adjusted targets, closed shadow roots, default-action detail, timers,
-cookies, DOM or accessibility snapshots, network evidence, compositor
-evidence, and rendering evidence remain outside the validated scope.
+for the deterministic light-DOM fixture. At this point, Window and other
+non-Node targets, shadow-adjusted targets, closed shadow roots, default-action
+detail, timers, cookies, DOM or accessibility snapshots, network evidence,
+compositor evidence, and rendering evidence remained outside the validated
+scope.
+
+## Default-action validation result
+
+The Node default-event-handler slice completed the reference Windows procedure
+on September 19, 2026, using repository commit `b808dcd`. The complete script
+exited with code 0 after:
+
+- Passing the Chromium integration tests.
+- Building the protocol 0.4 instrumented Chromium executable.
+- Passing the managed recorder test suite.
+- Connecting the instrumented renderer through the authenticated pipe.
+- Recording one `suppressed-by-event-handler` default-action decision for
+  `#pointer-only` after its click listener called `preventDefault()`.
+- Recording one `invoked` default-action decision for
+  `#default-action-link`.
+- Correlating the invoked decision with a `dispatch-completed` outcome of
+  `canceled-by-default-event-handler`.
+- Validating the completed archive.
+- Confirming that Chromium reported no network-service crashes.
+
+The validated session is:
+
+`C:\Users\Public\Documents\A11yRecorderBlinkValidation\20260919-175746-0c49590d41c0426aaf239e0a0a0c20f9`
+
+The final validation summary reported:
+
+- `ListenerRecords=2`
+- `DispatchRecords=1`
+- `InvocationRecords=3`
+- `CompletionRecords=1`
+- `RemovalRecords=1`
+- `SuppressedDefaultActions=1`
+- `InvokedDefaultActions=1`
+- `HandledDefaultActionCompletions=1`
+- `ComposedPathNodes=5`
+- `RootCaptureInvocations=1`
+- `RootBubbleInvocations=0`
+- `DispatchOutcome=canceled-by-event-handler`
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=597`
+- `ARTIFACTS_VALIDATED=81`
+- `NETWORK_SERVICE_CRASHES=0`
+- `VALIDATION_EXIT_CODE=0`
+
+The capture host accepted 597 records and dropped none. The archive validator
+reported no issues.
+
+This result validates correlated Blink Node default-event-handler decisions for
+the deterministic light-DOM fixture. An `invoked` record proves that Blink
+entered the identified Node's `DefaultEventHandler`; it does not by itself
+prove a visible browser or document-state change. Window and other non-Node
+targets, shadow-adjusted targets, closed shadow roots, timers, cookies, DOM or
+accessibility snapshots, network evidence, compositor evidence, and rendering
+evidence remain outside the validated scope.
