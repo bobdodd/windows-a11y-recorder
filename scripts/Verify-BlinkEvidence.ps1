@@ -18,6 +18,15 @@ $records = @(
         ForEach-Object { $_ | ConvertFrom-Json }
 )
 
+$rendererConnections = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.lifecycle" -and
+            $_.eventType -eq "browser-connected" -and
+            $_.payload.processType -eq "renderer"
+        }
+)
+
 $listeners = @(
     $records |
         Where-Object {
@@ -38,6 +47,9 @@ $dispatches = @(
         }
 )
 
+if ($rendererConnections.Count -lt 1) {
+    throw "No instrumented Chromium renderer connected to the recorder."
+}
 if ($listeners.Count -lt 1) {
     throw "No click listener registration was recorded for #pointer-only."
 }

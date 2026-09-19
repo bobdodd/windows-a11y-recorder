@@ -115,6 +115,7 @@ foreach ($requiredPath in @(
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 $outputRoot = (Resolve-Path -LiteralPath $OutputRoot).Path
 $fixtureUri = [Uri]::new($fixture).AbsoluteUri
+$bridgeLog = Join-Path $outputRoot "bridge-startup.log"
 
 Invoke-Checked "Testing the Chromium integration script" {
     & $python $integrationTests
@@ -186,15 +187,30 @@ $sessionsBefore = @(
         Select-Object -ExpandProperty FullName
 )
 
-Invoke-Checked "Capturing the deterministic Blink fixture" {
-    & $dotnet run `
-        --project $captureProject `
-        --configuration Release `
-        -- `
-        --output $outputRoot `
-        --duration-seconds $DurationSeconds `
-        --browser-path $browser `
-        --browser-url $fixtureUri
+Remove-Item -LiteralPath $bridgeLog -Force -ErrorAction SilentlyContinue
+$previousBridgeLog = $env:A11Y_RECORDER_BRIDGE_LOG_FILE
+$env:A11Y_RECORDER_BRIDGE_LOG_FILE = $bridgeLog
+try {
+    Invoke-Checked "Capturing the deterministic Blink fixture" {
+        & $dotnet run `
+            --project $captureProject `
+            --configuration Release `
+            -- `
+            --output $outputRoot `
+            --duration-seconds $DurationSeconds `
+            --browser-path $browser `
+            --browser-url $fixtureUri
+    }
+}
+finally {
+    if ($null -eq $previousBridgeLog) {
+        Remove-Item `
+            Env:A11Y_RECORDER_BRIDGE_LOG_FILE `
+            -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $previousBridgeLog
+    }
 }
 
 $session = Get-ChildItem -LiteralPath $outputRoot -Directory |
@@ -222,10 +238,20 @@ if (-not $validation.isValid) {
     throw "Archive validation failed: $($errors -join '; ')"
 }
 
-& $verifier -SessionPath $session.FullName
+try {
+    & $verifier -SessionPath $session.FullName
+}
+catch {
+    if (Test-Path -LiteralPath $bridgeLog -PathType Leaf) {
+        Write-Host "`nNative recorder bridge trace:"
+        Get-Content -LiteralPath $bridgeLog
+    }
+    throw
+}
 
 Write-Host "`nBlink validation completed successfully."
 Write-Host "SESSION_PATH=$($session.FullName)"
+Write-Host "BRIDGE_LOG=$bridgeLog"
 Write-Host "ARCHIVE_VALID=$($validation.isValid)"
 Write-Host "EVENTS_VALIDATED=$($validation.eventsValidated)"
 Write-Host "ARTIFACTS_VALIDATED=$($validation.artifactsValidated)"
