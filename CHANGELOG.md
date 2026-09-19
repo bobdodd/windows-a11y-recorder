@@ -17,6 +17,10 @@ from the product version.
   passive, and once options.
 - Initial Blink dispatch-start evidence with stable document and node
   references.
+- Correlated listener-removal, listener-invocation, and dispatch-completion
+  evidence with stable listener and dispatch identifiers.
+- Ordered Blink Node propagation paths, listener current targets and phases,
+  and cumulative propagation-stop state.
 - A deterministic listener and dispatch fixture plus an archive evidence
   verifier for Windows validation.
 
@@ -59,6 +63,13 @@ from the product version.
 - Converted the native recorder bridge to an exported Chromium component so
   renderer startup and Blink core share one process-local client.
 - Serialized evidence-pipe writes within each Chromium process.
+- Advanced the browser evidence protocol to version 0.3 for `currentTarget`
+  and populated `composedPath` evidence.
+- Preserved propagation flags observed during listener execution because Blink
+  may clear them before the dispatch-completion hook runs.
+- Validated the propagation slice end to end on the reference Windows platform
+  with 476 events, 81 artifacts, zero dropped records, and zero network-service
+  crashes.
 
 ## 0.1.0 - 2026-09-18
 

@@ -151,7 +151,10 @@ sandbox boundary, protocol framing, per-process clock synchronization,
 lifecycle evidence, initial Blink Node listener-registration evidence, initial
 dispatch-start evidence, session finalization, and archive validation.
 
-They do not prove listener removal, listener invocation, complete composed
-paths, default actions, timer instrumentation, DOM or accessibility snapshots,
-cookie operations, network evidence, compositor evidence, or rendering
-evidence. Those remain explicit future stages.
+This connection record did not originally prove listener removal, listener
+invocation, complete composed paths, or propagation behavior. Those capabilities
+were subsequently validated on September 19, 2026, as documented in the
+[Blink propagation validation record](blink-propagation-2026-09-19.md).
+Default actions, timer instrumentation, DOM or accessibility snapshots, cookie
+operations, network evidence, compositor evidence, and rendering evidence
+remain explicit future stages.

@@ -33,13 +33,14 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Renderer capability propagation and the first narrow Blink slice were
+Renderer capability propagation and three narrow Blink evidence slices were
 validated end to end on the reference Windows platform on September 19, 2026.
-The validated archive contained the deterministic fixture's listener
-registration and dispatch start, passed structural validation across 371
-events and 81 artifacts, and recorded no network-service crashes. The scope,
-procedure, and evidence are documented in the
-[Blink listener and dispatch validation plan](docs/validation/blink-listener-dispatch-plan.md).
+The latest validated archive contained listener lifecycle, dispatch lifecycle,
+the ordered Node propagation path, current targets, listener phases, and
+cumulative propagation-stop state. It passed structural validation across 476
+events and 81 artifacts, dropped no records, and recorded no network-service
+crashes. See the
+[Blink propagation validation record](docs/validation/blink-propagation-2026-09-19.md).
 
 ## Project goals
 
@@ -83,13 +84,8 @@ Completed:
    dispatch-start hooks on the reference Chromium Windows build.
 7. Correlate and validate Node listener removal and invocation with dispatch
    completion on the reference Chromium Windows build.
-
-In progress:
-
-1. Record the ordered Blink Node propagation path, each invoked listener's
-   current target and phase, and final propagation-stop state. The
-   implementation and deterministic validation fixture are complete; validation
-   against the reference Chromium Windows build remains.
+8. Record and validate the ordered Blink Node propagation path, each invoked
+   listener's current target and phase, and cumulative propagation-stop state.
 
 Remaining:
 

@@ -234,7 +234,68 @@ Blink's raw `Event*`; the final hook uses the pointer directly and migrates the
 invalid installed form. Integration tests cover both upgrade paths.
 
 This result validates listener removal, listener invocation, and dispatch
-completion for the deterministic Node fixture. Complete composed paths,
-default-action detail, timers, cookies, DOM or accessibility snapshots,
-network evidence, compositor evidence, and rendering evidence remain
+completion for the deterministic Node fixture. At this point, complete composed
+paths, default-action detail, timers, cookies, DOM or accessibility snapshots,
+network evidence, compositor evidence, and rendering evidence remained
 unvalidated.
+
+## Propagation-path validation result
+
+The ordered Node propagation-path slice completed the reference Windows
+procedure on September 19, 2026, using repository commit `8e3bacc`. The
+complete script exited with code 0 after:
+
+- Passing the Chromium integration tests.
+- Building the instrumented Chromium executable.
+- Passing the managed recorder test suite.
+- Connecting the instrumented renderer through the authenticated pipe.
+- Recording a five-Node composed path beginning with `#pointer-only` and
+  containing `#propagation-root`.
+- Recording one capturing invocation on `#propagation-root`.
+- Recording three relevant invocations in total, including two at-target
+  invocations on `#pointer-only`.
+- Confirming that `stopPropagation()` prevented the ancestor bubble listener
+  from running.
+- Preserving cumulative propagation-stop state in the correlated
+  `dispatch-completed` record.
+- Validating the completed archive.
+- Confirming that Chromium reported no network-service crashes.
+
+The validated session is:
+
+`C:\Users\Public\Documents\A11yRecorderBlinkValidation\20260919-173036-d2ebf59aabe7413d93a32cbb72b7be96`
+
+The final validation summary reported:
+
+- `ListenerRecords=2`
+- `DispatchRecords=1`
+- `InvocationRecords=3`
+- `CompletionRecords=1`
+- `RemovalRecords=1`
+- `ComposedPathNodes=5`
+- `RootCaptureInvocations=1`
+- `RootBubbleInvocations=0`
+- `DispatchOutcome=canceled-by-event-handler`
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=476`
+- `ARTIFACTS_VALIDATED=81`
+- `NETWORK_SERVICE_CRASHES=0`
+- `VALIDATION_EXIT_CODE=0`
+
+The capture host accepted 476 records and dropped none. The archive validator,
+version 1.2, reported no issues.
+
+The first propagation candidate correctly recorded
+`propagationStopped=true` after the second target listener and correctly
+omitted the ancestor bubble invocation. Blink cleared the propagation flag
+before the dispatch-completion hook ran, however, so the initial completion
+record incorrectly contained `propagationStopped=false`. Commit `8e3bacc`
+preserves the cumulative state observed after listener callbacks and combines
+it with any state still present when dispatch returns.
+
+This result validates ordered Node paths, Node current targets, capture and
+at-target phases, stopped ancestor bubbling, and cumulative propagation state
+for the deterministic light-DOM fixture. Window and other non-Node targets,
+shadow-adjusted targets, closed shadow roots, default-action detail, timers,
+cookies, DOM or accessibility snapshots, network evidence, compositor
+evidence, and rendering evidence remain outside the validated scope.
