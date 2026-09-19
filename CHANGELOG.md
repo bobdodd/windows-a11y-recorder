@@ -8,6 +8,12 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.11 frame and page identity for all navigation boundaries,
+  including explicit Chromium frame type, primary-page membership, root page
+  identity, direct parent identity, and parent-or-outer-document identity.
+- Added a deterministic same-origin child-frame fixture, strict relationship
+  validation, integration coverage, and an explicit
+  [frame and page identity evidence model](docs/architecture/frame-and-page-identity-evidence-model.md).
 - Added protocol 0.10 `browser.navigation` evidence for primary-main-frame
   navigation starts and completions at Chromium's browser-process
   `WebContentsImpl` boundaries.
@@ -123,6 +129,8 @@ from the product version.
   scheduler wake-up deferral evidence.
 - Advanced the browser evidence protocol to version 0.10 for browser-process
   navigation and committed-document identity evidence.
+- Advanced the browser evidence protocol to version 0.11 for subframe and
+  non-primary page identity.
 - Preserved propagation flags observed during listener execution because Blink
   may clear them before the dispatch-completion hook runs.
 - Validated the propagation slice end to end on the reference Windows platform

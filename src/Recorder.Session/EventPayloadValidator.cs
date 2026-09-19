@@ -621,6 +621,16 @@ internal static class EventPayloadValidator
             payload,
             [
                 RequiredObject("context"),
+                NullableString("parentFrameId"),
+                NullableString("parentOrOuterDocumentFrameId"),
+                RequiredEnum(
+                    "frameType",
+                    "subframe",
+                    "primary-main-frame",
+                    "prerender-main-frame",
+                    "fenced-frame-root",
+                    "guest-main-frame"),
+                RequiredBoolean("primaryPage"),
                 RequiredString("navigationId"),
                 RequiredString("url"),
                 RequiredEnum(
@@ -650,6 +660,109 @@ internal static class EventPayloadValidator
             line);
         ValidateBrowserContextProperty(payload, issues, line);
 
+        var frameType = ReadString(payload, "frameType");
+        var parentFrameId = ReadString(payload, "parentFrameId");
+        var parentOrOuterDocumentFrameId =
+            ReadString(payload, "parentOrOuterDocumentFrameId");
+        var primaryPage = payload.TryGetProperty(
+            "primaryPage",
+            out var primaryPageValue) &&
+            primaryPageValue.ValueKind == JsonValueKind.True;
+        if (frameType == "subframe" &&
+            (parentFrameId is null ||
+             parentOrOuterDocumentFrameId != parentFrameId))
+        {
+            AddError(
+                issues,
+                "browser-navigation-subframe-parent-mismatch",
+                "events.ndjson#/payload/parentFrameId",
+                "A subframe must identify the same direct parent and owning document frame.",
+                line);
+        }
+
+        if (frameType != "subframe" && parentFrameId is not null)
+        {
+            AddError(
+                issues,
+                "browser-navigation-main-frame-parent-present",
+                "events.ndjson#/payload/parentFrameId",
+                "A main frame must not identify a direct parent frame.",
+                line);
+        }
+
+        if (frameType == "primary-main-frame" && !primaryPage)
+        {
+            AddError(
+                issues,
+                "browser-navigation-primary-page-mismatch",
+                "events.ndjson#/payload/primaryPage",
+                "A primary main frame must belong to the primary page.",
+                line);
+        }
+
+        if (payload.TryGetProperty("context", out var context) &&
+            context.ValueKind == JsonValueKind.Object)
+        {
+            var pageId = ReadString(context, "pageId");
+            var frameId = ReadString(context, "frameId");
+            var documentId = ReadString(context, "documentId");
+            if (ReadString(context, "processType") != "browser" ||
+                pageId is null ||
+                frameId is null)
+            {
+                AddError(
+                    issues,
+                    "browser-navigation-context-invalid",
+                    "events.ndjson#/payload/context",
+                    "Navigation evidence must have browser-process provenance and page and frame identities.",
+                    line);
+            }
+
+            if (frameType == "subframe" && pageId == frameId)
+            {
+                AddError(
+                    issues,
+                    "browser-navigation-subframe-page-mismatch",
+                    "events.ndjson#/payload/context/pageId",
+                    "A subframe must have distinct page and frame identities.",
+                    line);
+            }
+
+            if (frameType != "subframe" && pageId != frameId)
+            {
+                AddError(
+                    issues,
+                    "browser-navigation-main-frame-page-mismatch",
+                    "events.ndjson#/payload/context/pageId",
+                    "A main frame must identify the root of its own page.",
+                    line);
+            }
+
+            var committed = payload.TryGetProperty(
+                "committed",
+                out var contextCommittedValue) &&
+                contextCommittedValue.ValueKind == JsonValueKind.True;
+            if ((!completed || !committed) && documentId is not null)
+            {
+                AddError(
+                    issues,
+                    "browser-navigation-document-before-commit",
+                    "events.ndjson#/payload/context/documentId",
+                    "Document identity must be null before commit and after an uncommitted completion.",
+                    line);
+            }
+
+            if (completed && committed && documentId is null)
+            {
+                AddError(
+                    issues,
+                    "browser-navigation-committed-document-missing",
+                    "events.ndjson#/payload/context/documentId",
+                    "A committed navigation must identify its resulting document.",
+                    line);
+            }
+        }
+
         var sameDocument = payload.TryGetProperty(
             "sameDocument",
             out var sameDocumentValue) &&
@@ -677,6 +790,28 @@ internal static class EventPayloadValidator
                 "events.ndjson#/payload/outcome",
                 "An uncommitted navigation must have outcome not-committed.",
                 line);
+        }
+
+        if (completed &&
+            payload.TryGetProperty("committed", out committedValue) &&
+            committedValue.ValueKind == JsonValueKind.True)
+        {
+            var errorPage = payload.TryGetProperty(
+                "errorPage",
+                out var errorPageValue) &&
+                errorPageValue.ValueKind == JsonValueKind.True;
+            var expectedOutcome = errorPage
+                ? "committed-error-page"
+                : "committed";
+            if (ReadString(payload, "outcome") != expectedOutcome)
+            {
+                AddError(
+                    issues,
+                    "browser-navigation-outcome-mismatch",
+                    "events.ndjson#/payload/outcome",
+                    $"A committed navigation must have outcome {expectedOutcome}.",
+                    line);
+            }
         }
     }
 

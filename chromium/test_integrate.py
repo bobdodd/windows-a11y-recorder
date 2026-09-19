@@ -1093,7 +1093,7 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_blink_frame_scheduler_header(frame_h)
             self.assertEqual(first[frame_h], frame_h.read_text())
 
-    def test_patches_primary_navigation_boundaries_idempotently(self):
+    def test_patches_navigation_boundaries_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "web_contents_impl.cc"
             path.write_text(
@@ -1141,10 +1141,20 @@ class IntegrateTests(unittest.TestCase):
                 "GetFrameTreeNodeId().GetUnsafeValue()",
                 first,
             )
+            self.assertIn("GetParentFrame()", first)
+            self.assertIn("GetParentFrameOrOuterDocument()", first)
+            self.assertIn("GetMainFrame()", first)
+            self.assertIn("FrameType::kPrerenderMainFrame", first)
+            self.assertIn("FrameType::kFencedFrameRoot", first)
+            self.assertIn("FrameType::kGuestMainFrame", first)
+            self.assertNotIn(
+                "if (navigation_handle->IsInPrimaryMainFrame())",
+                first,
+            )
             self.assertNotIn("reinterpret_cast<uintptr_t>(this)", first)
             self.assertIn(
                 "navigation_handle->HasCommitted() &&\n"
-                "            navigation_handle->IsErrorPage()",
+                "          navigation_handle->IsErrorPage()",
                 first,
             )
             self.assertIn(INTEGRATE.CONTENT_NAVIGATION_INCLUDE, first)

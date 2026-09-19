@@ -658,11 +658,15 @@ public sealed class SessionArchiveValidatorTests
                     processType = "browser",
                     profileId = (string?)null,
                     browserContextId = (string?)null,
-                    pageId = "primary-page-12",
+                    pageId = "page-12",
                     frameId = "frame-12",
                     documentId = "document-navigation-40",
                     executionWorldId = (string?)null
                 },
+                parentFrameId = (string?)null,
+                parentOrOuterDocumentFrameId = (string?)null,
+                frameType = "primary-main-frame",
+                primaryPage = true,
                 navigationId = "navigation-41",
                 url = "file:///fixture.html#same-document-navigation",
                 navigationKind = "same-document",
@@ -683,6 +687,63 @@ public sealed class SessionArchiveValidatorTests
 
             Assert.True(result.IsValid);
             Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsSubframeNavigationWithoutParentIdentity()
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Navigation,
+            BrowserEvidenceEventTypes.NavigationCompleted,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 1200,
+                    processType = "browser",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = "page-12",
+                    frameId = "frame-13",
+                    documentId = "document-navigation-40",
+                    executionWorldId = (string?)null
+                },
+                parentFrameId = (string?)null,
+                parentOrOuterDocumentFrameId = (string?)null,
+                frameType = "subframe",
+                primaryPage = true,
+                navigationId = "navigation-40",
+                url = "file:///blink-subframe.html",
+                navigationKind = "cross-document",
+                rendererInitiated = false,
+                sameDocument = false,
+                committed = true,
+                errorPage = false,
+                netErrorCode = 0,
+                outcome = "committed"
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code ==
+                    "browser-navigation-subframe-parent-mismatch");
         }
         finally
         {

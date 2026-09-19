@@ -235,6 +235,17 @@ presented state. The complete identity and correlation rules are defined in the
 [navigation and document identity evidence model](navigation-document-identity-evidence-model.md).
 Live 0.10 connections require an exact protocol-version match.
 
+Protocol version 0.11 extends navigation evidence to subframes and non-primary
+main frames. Each record identifies the target frame type, whether it belongs
+to the primary page, the root page identity, the direct parent frame when one
+exists, and the parent or outer document across embedded frame-tree
+boundaries. The deterministic fixture validates a same-origin child frame in
+the primary page. Prerender, fenced-frame, guest-page, nested-frame, and
+cross-origin execution remain outside the validated fixture scope. The
+complete rules are defined in the
+[frame and page identity evidence model](frame-and-page-identity-evidence-model.md).
+Live 0.11 connections require an exact protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native

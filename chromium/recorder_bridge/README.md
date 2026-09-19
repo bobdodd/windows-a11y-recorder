@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.10` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.11` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -48,6 +48,9 @@ and authoritative task-queue wake-up deferral decisions.
 The browser process also records primary-main-frame navigation starts and
 completions with stable page, frame, navigation, and committed-document
 identifiers.
+Protocol 0.11 extends those navigation records to subframes and non-primary
+main-frame types, including primary-page membership, root page identity, and
+direct parent or outer-document relationships.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

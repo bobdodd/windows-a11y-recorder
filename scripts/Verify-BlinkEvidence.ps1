@@ -32,7 +32,9 @@ $navigationStarts = @(
         Where-Object {
             $_.channel -eq "browser.navigation" -and
             $_.eventType -eq "navigation-started" -and
-            $_.payload.url -like "*blink-listener-dispatch.html*"
+            $_.payload.url -like "*blink-listener-dispatch.html*" -and
+            $_.payload.frameType -eq "primary-main-frame" -and
+            $_.payload.primaryPage -eq $true
         }
 )
 
@@ -42,6 +44,35 @@ $navigationCompletions = @(
             $_.channel -eq "browser.navigation" -and
             $_.eventType -eq "navigation-completed" -and
             $_.payload.url -like "*blink-listener-dispatch.html*" -and
+            $_.payload.frameType -eq "primary-main-frame" -and
+            $_.payload.primaryPage -eq $true -and
+            $_.payload.committed -eq $true -and
+            $_.payload.errorPage -eq $false -and
+            $_.payload.outcome -eq "committed"
+        }
+)
+
+$subframeNavigationStarts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.navigation" -and
+            $_.eventType -eq "navigation-started" -and
+            $_.payload.url -like "*blink-subframe.html*" -and
+            $_.payload.frameType -eq "subframe" -and
+            $_.payload.primaryPage -eq $true
+        }
+)
+
+$subframeNavigationCompletions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.navigation" -and
+            $_.eventType -eq "navigation-completed" -and
+            $_.payload.url -like "*blink-subframe.html*" -and
+            $_.payload.frameType -eq "subframe" -and
+            $_.payload.primaryPage -eq $true -and
+            $_.payload.navigationKind -eq "cross-document" -and
+            $_.payload.sameDocument -eq $false -and
             $_.payload.committed -eq $true -and
             $_.payload.errorPage -eq $false -and
             $_.payload.outcome -eq "committed"
@@ -236,6 +267,12 @@ if ($navigationStarts.Count -lt 2) {
 }
 if ($navigationCompletions.Count -lt 2) {
     throw "The fixture did not produce cross- and same-document navigation commits."
+}
+if ($subframeNavigationStarts.Count -lt 1) {
+    throw "The fixture did not produce a child-frame navigation start."
+}
+if ($subframeNavigationCompletions.Count -lt 1) {
+    throw "The fixture did not produce a child-frame navigation commit."
 }
 if ($listeners.Count -lt 1) {
     throw "No click listener registration was recorded for #pointer-only."
@@ -828,6 +865,56 @@ if (
     throw "Distinct fixture navigations reused one navigation identifier."
 }
 
+$subframeNavigation = $subframeNavigationCompletions[0]
+$matchingSubframeStart = $subframeNavigationStarts |
+    Where-Object {
+        $_.payload.navigationId -eq
+            $subframeNavigation.payload.navigationId -and
+        $_.payload.context.pageId -eq
+            $subframeNavigation.payload.context.pageId -and
+        $_.payload.context.frameId -eq
+            $subframeNavigation.payload.context.frameId
+    } |
+    Select-Object -First 1
+if (-not $matchingSubframeStart) {
+    throw "The child-frame navigation has no correlated start record."
+}
+if (
+    $matchingSubframeStart.monotonicNanoseconds -gt
+    $subframeNavigation.monotonicNanoseconds
+) {
+    throw "The child-frame navigation completion preceded its start record."
+}
+if (
+    $subframeNavigation.payload.context.pageId -ne
+    $crossDocumentNavigation.payload.context.pageId
+) {
+    throw "The child frame did not retain the primary page identity."
+}
+if (
+    $subframeNavigation.payload.context.frameId -eq
+    $crossDocumentNavigation.payload.context.frameId
+) {
+    throw "The child frame reused the primary main-frame identity."
+}
+if (
+    $subframeNavigation.payload.parentFrameId -ne
+        $crossDocumentNavigation.payload.context.frameId -or
+    $subframeNavigation.payload.parentOrOuterDocumentFrameId -ne
+        $crossDocumentNavigation.payload.context.frameId
+) {
+    throw "The child frame did not identify the primary frame as its owner."
+}
+if (
+    [string]::IsNullOrWhiteSpace(
+        $subframeNavigation.payload.context.documentId
+    ) -or
+    $subframeNavigation.payload.context.documentId -eq
+        $crossDocumentNavigation.payload.context.documentId
+) {
+    throw "The child frame did not receive a distinct document identity."
+}
+
 [pscustomobject]@{
     SessionPath = (Resolve-Path -LiteralPath $SessionPath).Path
     ListenerRecords = $listeners.Count
@@ -868,6 +955,8 @@ if (
         $rendererSchedulerDeferrals[0].payload.decisionBoundary
     NavigationStarts = $navigationStarts.Count
     NavigationCompletions = $navigationCompletions.Count
+    SubframeNavigationStarts = $subframeNavigationStarts.Count
+    SubframeNavigationCompletions = $subframeNavigationCompletions.Count
     PageId = $crossDocumentNavigation.payload.context.pageId
     FrameId = $crossDocumentNavigation.payload.context.frameId
     NavigationDocumentId =
@@ -876,6 +965,10 @@ if (
         $crossDocumentNavigation.payload.navigationId
     SameDocumentNavigationId =
         $sameDocumentNavigation.payload.navigationId
+    SubframeNavigationId = $subframeNavigation.payload.navigationId
+    SubframeFrameId = $subframeNavigation.payload.context.frameId
+    SubframeDocumentId = $subframeNavigation.payload.context.documentId
+    SubframeParentFrameId = $subframeNavigation.payload.parentFrameId
     HiddenTimeoutTimerId = $scheduledHiddenTimeout.payload.timerId
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId
@@ -899,5 +992,5 @@ if (
 Write-Host (
     "Blink propagation, listener, default-handler, DOM timer, " +
     "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
-    "and navigation-identity evidence verified."
+    "and frame/page navigation-identity evidence verified."
 )

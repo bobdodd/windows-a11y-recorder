@@ -160,11 +160,12 @@ base::DictValue CreateContext(const RecorderPipeClient& client,
 
 base::DictValue CreateNavigationContext(
     const RecorderPipeClient& client,
+    int page_frame_tree_node_id,
     int frame_tree_node_id,
     int64_t document_navigation_id) {
   base::DictValue context = CreateContext(client, 0);
   context.Set("pageId",
-              "primary-page-" + base::NumberToString(frame_tree_node_id));
+              "page-" + base::NumberToString(page_frame_tree_node_id));
   context.Set("frameId",
               "frame-" + base::NumberToString(frame_tree_node_id));
   if (document_navigation_id > 0) {
@@ -179,15 +180,37 @@ base::DictValue CreateNavigationContext(
 base::DictValue CreateNavigationPayload(
     const RecorderPipeClient& client,
     int64_t navigation_id,
+    int page_frame_tree_node_id,
     int frame_tree_node_id,
+    int parent_frame_tree_node_id,
+    int parent_or_outer_document_frame_tree_node_id,
+    std::string frame_type,
+    bool primary_page,
     int64_t document_navigation_id,
     std::string url,
     bool renderer_initiated,
     bool same_document) {
   base::DictValue payload;
   payload.Set("context",
-              CreateNavigationContext(client, frame_tree_node_id,
+              CreateNavigationContext(client, page_frame_tree_node_id,
+                                      frame_tree_node_id,
                                       document_navigation_id));
+  payload.Set(
+      "parentFrameId",
+      parent_frame_tree_node_id >= 0
+          ? base::Value("frame-" +
+                        base::NumberToString(parent_frame_tree_node_id))
+          : base::Value());
+  payload.Set(
+      "parentOrOuterDocumentFrameId",
+      parent_or_outer_document_frame_tree_node_id >= 0
+          ? base::Value(
+                "frame-" +
+                base::NumberToString(
+                    parent_or_outer_document_frame_tree_node_id))
+          : base::Value());
+  payload.Set("frameType", std::move(frame_type));
+  payload.Set("primaryPage", primary_page);
   payload.Set("navigationId",
               "navigation-" + base::NumberToString(navigation_id));
   payload.Set("url", std::move(url));
@@ -1270,17 +1293,25 @@ void RecordBlinkSchedulerWakeUpDeferred(
 }
 
 void RecordBrowserNavigationStarted(int64_t navigation_id,
+                                    int page_frame_tree_node_id,
                                     int frame_tree_node_id,
+                                    int parent_frame_tree_node_id,
+                                    int parent_or_outer_document_frame_tree_node_id,
+                                    std::string frame_type,
+                                    bool primary_page,
                                     std::string url,
                                     bool renderer_initiated,
                                     bool same_document) {
   RecorderPipeClient* client = GetProcessRecorderClient();
-  if (!client || navigation_id <= 0 || frame_tree_node_id < 0 || url.empty()) {
+  if (!client || navigation_id <= 0 || page_frame_tree_node_id < 0 ||
+      frame_tree_node_id < 0 || url.empty()) {
     return;
   }
 
   base::DictValue payload = CreateNavigationPayload(
-      *client, navigation_id, frame_tree_node_id, 0, std::move(url),
+      *client, navigation_id, page_frame_tree_node_id, frame_tree_node_id,
+      parent_frame_tree_node_id, parent_or_outer_document_frame_tree_node_id,
+      std::move(frame_type), primary_page, 0, std::move(url),
       renderer_initiated, same_document);
   payload.Set("committed", base::Value());
   payload.Set("errorPage", base::Value());
@@ -1291,7 +1322,12 @@ void RecordBrowserNavigationStarted(int64_t navigation_id,
 }
 
 void RecordBrowserNavigationCompleted(int64_t navigation_id,
+                                      int page_frame_tree_node_id,
                                       int frame_tree_node_id,
+                                      int parent_frame_tree_node_id,
+                                      int parent_or_outer_document_frame_tree_node_id,
+                                      std::string frame_type,
+                                      bool primary_page,
                                       int64_t document_navigation_id,
                                       std::string url,
                                       bool renderer_initiated,
@@ -1300,12 +1336,15 @@ void RecordBrowserNavigationCompleted(int64_t navigation_id,
                                       bool error_page,
                                       int net_error_code) {
   RecorderPipeClient* client = GetProcessRecorderClient();
-  if (!client || navigation_id <= 0 || frame_tree_node_id < 0 || url.empty()) {
+  if (!client || navigation_id <= 0 || page_frame_tree_node_id < 0 ||
+      frame_tree_node_id < 0 || url.empty()) {
     return;
   }
 
   base::DictValue payload = CreateNavigationPayload(
-      *client, navigation_id, frame_tree_node_id,
+      *client, navigation_id, page_frame_tree_node_id, frame_tree_node_id,
+      parent_frame_tree_node_id, parent_or_outer_document_frame_tree_node_id,
+      std::move(frame_type), primary_page,
       committed ? document_navigation_id : 0, std::move(url),
       renderer_initiated, same_document);
   payload.Set("committed", committed);

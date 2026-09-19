@@ -95,36 +95,120 @@ CHILD_LAUNCHER_HOOK = f"""\
 {SHARED_CHILD_LAUNCHER_HOOK}#endif
 """
 CONTENT_NAVIGATION_STARTED_HOOK = """\
-  if (navigation_handle->IsInPrimaryMainFrame()) {
-    a11y_recorder::RecordBrowserNavigationStarted(
-        navigation_handle->GetNavigationId(),
-        navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
-        navigation_handle->GetURL().spec(),
-        navigation_handle->IsRendererInitiated(),
-        navigation_handle->IsSameDocument());
+  int recorder_page_frame_tree_node_id =
+      navigation_handle->GetFrameTreeNodeId().GetUnsafeValue();
+  int recorder_parent_frame_tree_node_id = -1;
+  int recorder_parent_or_outer_document_frame_tree_node_id = -1;
+  const char* recorder_frame_type = "subframe";
+  switch (navigation_handle->GetNavigatingFrameType()) {
+    case FrameType::kSubframe:
+      recorder_frame_type = "subframe";
+      break;
+    case FrameType::kPrimaryMainFrame:
+      recorder_frame_type = "primary-main-frame";
+      break;
+    case FrameType::kPrerenderMainFrame:
+      recorder_frame_type = "prerender-main-frame";
+      break;
+    case FrameType::kFencedFrameRoot:
+      recorder_frame_type = "fenced-frame-root";
+      break;
+    case FrameType::kGuestMainFrame:
+      recorder_frame_type = "guest-main-frame";
+      break;
   }
+  bool recorder_primary_page = navigation_handle->IsInPrimaryMainFrame();
+  if (RenderFrameHost* recorder_parent =
+          navigation_handle->GetParentFrame()) {
+    recorder_parent_frame_tree_node_id =
+        recorder_parent->GetFrameTreeNodeId().GetUnsafeValue();
+    if (RenderFrameHost* recorder_main_frame =
+            recorder_parent->GetMainFrame()) {
+      recorder_page_frame_tree_node_id =
+          recorder_main_frame->GetFrameTreeNodeId().GetUnsafeValue();
+      recorder_primary_page = recorder_main_frame->IsInPrimaryMainFrame();
+    }
+  }
+  if (RenderFrameHost* recorder_owner =
+          navigation_handle->GetParentFrameOrOuterDocument()) {
+    recorder_parent_or_outer_document_frame_tree_node_id =
+        recorder_owner->GetFrameTreeNodeId().GetUnsafeValue();
+  }
+  a11y_recorder::RecordBrowserNavigationStarted(
+      navigation_handle->GetNavigationId(),
+      recorder_page_frame_tree_node_id,
+      navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
+      recorder_parent_frame_tree_node_id,
+      recorder_parent_or_outer_document_frame_tree_node_id,
+      recorder_frame_type,
+      recorder_primary_page,
+      navigation_handle->GetURL().spec(),
+      navigation_handle->IsRendererInitiated(),
+      navigation_handle->IsSameDocument());
 """
 CONTENT_NAVIGATION_COMPLETED_HOOK = """\
-  if (navigation_handle->IsInPrimaryMainFrame()) {
-    int64_t recorder_document_navigation_id = 0;
-    if (navigation_handle->HasCommitted()) {
-      if (RenderFrameHost* recorder_frame =
-              navigation_handle->GetRenderFrameHost()) {
-        recorder_document_navigation_id = recorder_frame->GetNavigationId();
-      }
-    }
-    a11y_recorder::RecordBrowserNavigationCompleted(
-        navigation_handle->GetNavigationId(),
-        navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
-        recorder_document_navigation_id,
-        navigation_handle->GetURL().spec(),
-        navigation_handle->IsRendererInitiated(),
-        navigation_handle->IsSameDocument(),
-        navigation_handle->HasCommitted(),
-        navigation_handle->HasCommitted() &&
-            navigation_handle->IsErrorPage(),
-        navigation_handle->GetNetErrorCode());
+  int recorder_page_frame_tree_node_id =
+      navigation_handle->GetFrameTreeNodeId().GetUnsafeValue();
+  int recorder_parent_frame_tree_node_id = -1;
+  int recorder_parent_or_outer_document_frame_tree_node_id = -1;
+  const char* recorder_frame_type = "subframe";
+  switch (navigation_handle->GetNavigatingFrameType()) {
+    case FrameType::kSubframe:
+      recorder_frame_type = "subframe";
+      break;
+    case FrameType::kPrimaryMainFrame:
+      recorder_frame_type = "primary-main-frame";
+      break;
+    case FrameType::kPrerenderMainFrame:
+      recorder_frame_type = "prerender-main-frame";
+      break;
+    case FrameType::kFencedFrameRoot:
+      recorder_frame_type = "fenced-frame-root";
+      break;
+    case FrameType::kGuestMainFrame:
+      recorder_frame_type = "guest-main-frame";
+      break;
   }
+  bool recorder_primary_page = navigation_handle->IsInPrimaryMainFrame();
+  if (RenderFrameHost* recorder_parent =
+          navigation_handle->GetParentFrame()) {
+    recorder_parent_frame_tree_node_id =
+        recorder_parent->GetFrameTreeNodeId().GetUnsafeValue();
+    if (RenderFrameHost* recorder_main_frame =
+            recorder_parent->GetMainFrame()) {
+      recorder_page_frame_tree_node_id =
+          recorder_main_frame->GetFrameTreeNodeId().GetUnsafeValue();
+      recorder_primary_page = recorder_main_frame->IsInPrimaryMainFrame();
+    }
+  }
+  if (RenderFrameHost* recorder_owner =
+          navigation_handle->GetParentFrameOrOuterDocument()) {
+    recorder_parent_or_outer_document_frame_tree_node_id =
+        recorder_owner->GetFrameTreeNodeId().GetUnsafeValue();
+  }
+  int64_t recorder_document_navigation_id = 0;
+  if (navigation_handle->HasCommitted()) {
+    if (RenderFrameHost* recorder_frame =
+            navigation_handle->GetRenderFrameHost()) {
+      recorder_document_navigation_id = recorder_frame->GetNavigationId();
+    }
+  }
+  a11y_recorder::RecordBrowserNavigationCompleted(
+      navigation_handle->GetNavigationId(),
+      recorder_page_frame_tree_node_id,
+      navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
+      recorder_parent_frame_tree_node_id,
+      recorder_parent_or_outer_document_frame_tree_node_id,
+      recorder_frame_type,
+      recorder_primary_page,
+      recorder_document_navigation_id,
+      navigation_handle->GetURL().spec(),
+      navigation_handle->IsRendererInitiated(),
+      navigation_handle->IsSameDocument(),
+      navigation_handle->HasCommitted(),
+      navigation_handle->HasCommitted() &&
+          navigation_handle->IsErrorPage(),
+      navigation_handle->GetNetErrorCode());
 """
 BLINK_LISTENER_HOOK = """\
     if (Node* recorder_target = ToNode()) {

@@ -57,6 +57,15 @@ recorded no network-service crashes. See the
 and the
 [navigation and document identity evidence model](docs/architecture/navigation-document-identity-evidence-model.md).
 
+Protocol 0.11 is implemented and ready for reference-platform validation. It
+extends navigation evidence to child frames and non-primary page types with
+explicit frame classification, primary-page membership, root page identity,
+direct parent identity, and parent-or-outer-document identity. The deterministic
+fixture validates one same-origin child frame while leaving prerender,
+fenced-frame, guest-page, nested-frame, and cross-origin execution outside the
+validated scope. See the
+[frame and page identity evidence model](docs/architecture/frame-and-page-identity-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.

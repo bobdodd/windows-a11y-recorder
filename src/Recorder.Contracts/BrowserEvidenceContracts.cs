@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.10";
+    public const string CurrentVersion = "0.11";
 }
 
 public static class BrowserEvidenceChannels
@@ -117,6 +117,10 @@ public sealed record BrowserSchedulerPayload(
 
 public sealed record BrowserNavigationPayload(
     BrowserContext Context,
+    string? ParentFrameId,
+    string? ParentOrOuterDocumentFrameId,
+    string FrameType,
+    bool PrimaryPage,
     string NavigationId,
     string Url,
     string NavigationKind,
