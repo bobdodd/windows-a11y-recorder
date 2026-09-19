@@ -226,6 +226,58 @@ BLINK_DISPATCH_COMPLETED_HOOK = """\
       event_->PropagationStopped(),
       event_->ImmediatePropagationStopped());
 """
+BLINK_DEFAULT_ACTION_TARGET_HOOK = """\
+    Element* recorder_default_target_element = DynamicTo<Element>(*node_);
+    a11y_recorder::RecordBlinkDefaultAction(
+        reinterpret_cast<uintptr_t>(event_),
+        node_->GetDocument().GetDomNodeId(),
+        node_->GetDomNodeId(),
+        node_->nodeName().Utf8().c_str(),
+        recorder_default_target_element
+            ? recorder_default_target_element->GetIdAttribute().Utf8().c_str()
+            : "",
+        0,
+        event_->defaultPrevented(),
+        event_->PropagationStopped(),
+        event_->ImmediatePropagationStopped());
+"""
+BLINK_DEFAULT_ACTION_ANCESTOR_HOOK = """\
+        Node& recorder_default_ancestor =
+            event_->GetEventPath()[i].GetNode();
+        Element* recorder_default_ancestor_element =
+            DynamicTo<Element>(recorder_default_ancestor);
+        a11y_recorder::RecordBlinkDefaultAction(
+            reinterpret_cast<uintptr_t>(event_),
+            recorder_default_ancestor.GetDocument().GetDomNodeId(),
+            recorder_default_ancestor.GetDomNodeId(),
+            recorder_default_ancestor.nodeName().Utf8().c_str(),
+            recorder_default_ancestor_element
+                ? recorder_default_ancestor_element->GetIdAttribute()
+                      .Utf8()
+                      .c_str()
+                : "",
+            0,
+            event_->defaultPrevented(),
+            event_->PropagationStopped(),
+            event_->ImmediatePropagationStopped());
+"""
+BLINK_DEFAULT_ACTION_SUPPRESSED_HOOK = """\
+    Element* recorder_default_suppressed_element = DynamicTo<Element>(*node_);
+    a11y_recorder::RecordBlinkDefaultAction(
+        reinterpret_cast<uintptr_t>(event_),
+        node_->GetDocument().GetDomNodeId(),
+        node_->GetDomNodeId(),
+        node_->nodeName().Utf8().c_str(),
+        recorder_default_suppressed_element
+            ? recorder_default_suppressed_element->GetIdAttribute()
+                  .Utf8()
+                  .c_str()
+            : "",
+        event_->defaultPrevented() ? 1 : event_->DefaultHandled() ? 2 : 3,
+        event_->defaultPrevented(),
+        event_->PropagationStopped(),
+        event_->ImmediatePropagationStopped());
+"""
 
 
 def replace_once(text: str, old: str, new: str, path: Path) -> str:
@@ -517,6 +569,37 @@ def patch_blink_event_dispatcher(path: Path) -> None:
                 f"{BLINK_DISPATCH_COMPLETED_HOOK}"
                 "\n"
                 "  return result;\n"
+            ),
+            path,
+        )
+    if "recorder_default_target_element" not in text:
+        anchor = "    node_->DefaultEventHandler(*event_);\n"
+        text = replace_once(
+            text,
+            anchor,
+            f"{BLINK_DEFAULT_ACTION_TARGET_HOOK}{anchor}",
+            path,
+        )
+    if "recorder_default_ancestor_element" not in text:
+        anchor = (
+            "        event_->GetEventPath()[i].GetNode()."
+            "DefaultEventHandler(*event_);\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            f"{BLINK_DEFAULT_ACTION_ANCESTOR_HOOK}{anchor}",
+            path,
+        )
+    if "recorder_default_suppressed_element" not in text:
+        anchor = "  } else {\n#if BUILDFLAG(IS_MAC)\n"
+        text = replace_once(
+            text,
+            anchor,
+            (
+                "  } else {\n"
+                f"{BLINK_DEFAULT_ACTION_SUPPRESSED_HOOK}"
+                "#if BUILDFLAG(IS_MAC)\n"
             ),
             path,
         )

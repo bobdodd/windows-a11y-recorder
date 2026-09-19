@@ -10,9 +10,14 @@
   <div id="propagation-root">
     <div id="pointer-only">Pointer-only activation target</div>
   </div>
+  <a id="default-action-link" href="#default-action-result">
+    Default-action target
+  </a>
+  <div id="default-action-result">Default-action destination</div>
   <script>
     const target = document.getElementById("pointer-only");
     const propagationRoot = document.getElementById("propagation-root");
+    const defaultActionLink = document.getElementById("default-action-link");
     const status = document.getElementById("status");
     const invocationOrder = [];
 
@@ -48,7 +53,10 @@
     });
 
     status.textContent = "Fixture listener registered.";
-    window.setTimeout(() => target.click(), 250);
+    window.setTimeout(() => {
+      target.click();
+      defaultActionLink.click();
+    }, 250);
   </script>
 </body>
 </html>

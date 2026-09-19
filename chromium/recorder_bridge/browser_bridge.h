@@ -109,6 +109,20 @@ void RecordBlinkListenerInvoked(uintptr_t event_identity,
                                 bool propagation_stopped,
                                 bool immediate_propagation_stopped);
 
+// Records Blink's decision at the Node default-event-handler boundary. An
+// invoked record means Blink entered DefaultEventHandler for the identified
+// Node; it does not by itself assert that the handler changed browser state.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDefaultAction(uintptr_t event_identity,
+                              int current_document_node_id,
+                              int current_target_node_id,
+                              std::string current_target_tag_name,
+                              std::string current_target_element_id,
+                              int outcome,
+                              bool default_prevented,
+                              bool propagation_stopped,
+                              bool immediate_propagation_stopped);
+
 // Records the final dispatch result and releases the active dispatch identity.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

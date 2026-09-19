@@ -319,6 +319,19 @@ std::string DispatchOutcomeName(int dispatch_result) {
   }
 }
 
+std::string DefaultActionOutcomeName(int outcome) {
+  switch (outcome) {
+    case 1:
+      return "suppressed-by-event-handler";
+    case 2:
+      return "already-handled";
+    case 3:
+      return "ineligible-untrusted-event";
+    default:
+      return "invoked";
+  }
+}
+
 base::DictValue CreateListenerPayload(
     const RecorderPipeClient& client,
     std::string listener_id,
@@ -354,7 +367,8 @@ base::DictValue CreateDispatchPayload(
     bool propagation_stopped,
     bool immediate_propagation_stopped,
     std::optional<std::string> outcome,
-    const EvidenceIdentityStorage::NodeState* current_target = nullptr) {
+    const EvidenceIdentityStorage::NodeState* current_target = nullptr,
+    std::optional<std::string> default_action = std::nullopt) {
   base::DictValue payload;
   payload.Set("context", CreateContext(client, state.document_node_id));
   payload.Set("dispatchId", state.dispatch_id);
@@ -386,7 +400,11 @@ base::DictValue CreateDispatchPayload(
   payload.Set("defaultPrevented", default_prevented);
   payload.Set("propagationStopped", propagation_stopped);
   payload.Set("immediatePropagationStopped", immediate_propagation_stopped);
-  payload.Set("defaultAction", base::Value());
+  if (default_action) {
+    payload.Set("defaultAction", std::move(*default_action));
+  } else {
+    payload.Set("defaultAction", base::Value());
+  }
   if (outcome) {
     payload.Set("outcome", std::move(*outcome));
   } else {
@@ -790,6 +808,39 @@ void RecordBlinkListenerInvoked(uintptr_t event_identity,
       std::nullopt, &invocation->current_target);
   SendBlinkEvidence("browser.dispatch", "listener-invoked",
                     std::move(payload));
+}
+
+void RecordBlinkDefaultAction(uintptr_t event_identity,
+                              int current_document_node_id,
+                              int current_target_node_id,
+                              std::string current_target_tag_name,
+                              std::string current_target_element_id,
+                              int outcome,
+                              bool default_prevented,
+                              bool propagation_stopped,
+                              bool immediate_propagation_stopped) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  std::optional<EvidenceIdentityStorage::DispatchState> state =
+      ObserveDispatchState(event_identity, default_prevented,
+                           propagation_stopped,
+                           immediate_propagation_stopped);
+  if (!client || !state || current_document_node_id <= 0 ||
+      current_target_node_id <= 0) {
+    return;
+  }
+
+  EvidenceIdentityStorage::NodeState current_target{
+      .document_node_id = current_document_node_id,
+      .node_id = current_target_node_id,
+      .tag_name = std::move(current_target_tag_name),
+      .element_id = std::move(current_target_element_id),
+  };
+  base::DictValue payload = CreateDispatchPayload(
+      *client, *state, std::nullopt, "none", default_prevented,
+      propagation_stopped, immediate_propagation_stopped,
+      DefaultActionOutcomeName(outcome), &current_target,
+      std::string("blink-default-event-handler"));
+  SendBlinkEvidence("browser.dispatch", "default-action", std::move(payload));
 }
 
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

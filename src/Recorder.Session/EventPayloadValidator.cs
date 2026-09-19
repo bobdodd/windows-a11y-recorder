@@ -96,8 +96,18 @@ internal static class EventPayloadValidator
             case ("browser.dispatch", "dispatch-started"):
             case ("browser.dispatch", "listener-invoked"):
             case ("browser.dispatch", "dispatch-completed"):
+                ValidateBrowserDispatch(
+                    payload,
+                    issues,
+                    lineNumber,
+                    requireDefaultAction: false);
+                break;
             case ("browser.dispatch", "default-action"):
-                ValidateBrowserDispatch(payload, issues, lineNumber);
+                ValidateBrowserDispatch(
+                    payload,
+                    issues,
+                    lineNumber,
+                    requireDefaultAction: true);
                 break;
             case ("browser.timer", "timer-scheduled"):
             case ("browser.timer", "timer-fired"):
@@ -416,7 +426,8 @@ internal static class EventPayloadValidator
     private static void ValidateBrowserDispatch(
         JsonElement payload,
         ICollection<ArchiveValidationIssue> issues,
-        long line)
+        long line,
+        bool requireDefaultAction)
     {
         ValidateShape(
             payload,
@@ -432,9 +443,22 @@ internal static class EventPayloadValidator
                 RequiredBoolean("defaultPrevented"),
                 RequiredBoolean("propagationStopped"),
                 RequiredBoolean("immediatePropagationStopped"),
-                NullableString("defaultAction"),
-                NullableString("outcome"),
-                OptionalNullableObject("currentTarget")
+                requireDefaultAction
+                    ? RequiredEnum(
+                        "defaultAction",
+                        "blink-default-event-handler")
+                    : NullableString("defaultAction"),
+                requireDefaultAction
+                    ? RequiredEnum(
+                        "outcome",
+                        "invoked",
+                        "suppressed-by-event-handler",
+                        "already-handled",
+                        "ineligible-untrusted-event")
+                    : NullableString("outcome"),
+                requireDefaultAction
+                    ? RequiredObject("currentTarget")
+                    : OptionalNullableObject("currentTarget")
             ],
             issues,
             line);

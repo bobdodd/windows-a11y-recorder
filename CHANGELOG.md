@@ -21,6 +21,9 @@ from the product version.
   evidence with stable listener and dispatch identifiers.
 - Ordered Blink Node propagation paths, listener current targets and phases,
   and cumulative propagation-stop state.
+- Correlated Blink Node default-event-handler evidence that distinguishes
+  handler invocation from event-handler suppression, prior handling, and
+  ineligible untrusted events without claiming a visible browser effect.
 - A deterministic listener and dispatch fixture plus an archive evidence
   verifier for Windows validation.
 
@@ -65,6 +68,8 @@ from the product version.
 - Serialized evidence-pipe writes within each Chromium process.
 - Advanced the browser evidence protocol to version 0.3 for `currentTarget`
   and populated `composedPath` evidence.
+- Advanced the browser evidence protocol to version 0.4 for strict
+  default-event-handler decision evidence.
 - Preserved propagation flags observed during listener execution because Blink
   may clear them before the dispatch-completion hook runs.
 - Validated the propagation slice end to end on the reference Windows platform

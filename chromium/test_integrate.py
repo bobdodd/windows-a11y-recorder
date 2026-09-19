@@ -172,8 +172,28 @@ class IntegrateTests(unittest.TestCase):
                 event_dispatcher.read_text(encoding="utf-8")
                 + "\n"
                 + "inline void EventDispatcher::DispatchEventPostProcess() {\n"
-                + "  event_->SetTarget("
-                + "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
+                + "  bool is_trusted_or_click = true;\n"
+                + "  if (!event_->defaultPrevented() && "
+                + "!event_->DefaultHandled() &&\n"
+                + "      is_trusted_or_click) {\n"
+                + "    node_->DefaultEventHandler(*event_);\n"
+                + "    if (!event_->DefaultHandled() && "
+                + "!event_->defaultPrevented() &&\n"
+                + "        event_->bubbles()) {\n"
+                + "      wtf_size_t size = event_->GetEventPath().size();\n"
+                + "      for (wtf_size_t i = 1; i < size; ++i) {\n"
+                + "        event_->GetEventPath()[i].GetNode()."
+                + "DefaultEventHandler(*event_);\n"
+                + "        if (event_->DefaultHandled() || "
+                + "event_->defaultPrevented()) {\n"
+                + "          break;\n"
+                + "        }\n"
+                + "      }\n"
+                + "    }\n"
+                + "  } else {\n"
+                + "#if BUILDFLAG(IS_MAC)\n"
+                + "#endif\n"
+                + "  }\n"
                 + "}\n",
                 encoding="utf-8",
             )
@@ -349,6 +369,36 @@ class IntegrateTests(unittest.TestCase):
             )
             self.assertIn(
                 "CompleteBlinkDispatchStart",
+                first_event_dispatcher,
+            )
+            self.assertIn(
+                "RecordBlinkDefaultAction",
+                first_event_dispatcher,
+            )
+            self.assertEqual(
+                3,
+                first_event_dispatcher.count("RecordBlinkDefaultAction"),
+            )
+            self.assertLess(
+                first_event_dispatcher.index(
+                    "recorder_default_target_element"
+                ),
+                first_event_dispatcher.index(
+                    "    node_->DefaultEventHandler(*event_);"
+                ),
+            )
+            self.assertLess(
+                first_event_dispatcher.index(
+                    "recorder_default_ancestor_element"
+                ),
+                first_event_dispatcher.index(
+                    "        event_->GetEventPath()[i].GetNode()."
+                    "DefaultEventHandler(*event_);"
+                ),
+            )
+            self.assertIn(
+                "event_->defaultPrevented() ? 1 : "
+                "event_->DefaultHandled() ? 2 : 3",
                 first_event_dispatcher,
             )
             self.assertNotIn("event_.Get()", first_event_dispatcher)

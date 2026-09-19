@@ -77,6 +77,42 @@ $removals = @(
         }
 )
 
+$suppressedDefaultActions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.eventType -eq "default-action" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.originalTarget.elementId -eq "pointer-only" -and
+            $_.payload.defaultAction -eq "blink-default-event-handler" -and
+            $_.payload.outcome -eq "suppressed-by-event-handler"
+        }
+)
+
+$invokedDefaultActions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.eventType -eq "default-action" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.originalTarget.elementId -eq "default-action-link" -and
+            $_.payload.currentTarget.elementId -eq "default-action-link" -and
+            $_.payload.defaultAction -eq "blink-default-event-handler" -and
+            $_.payload.outcome -eq "invoked"
+        }
+)
+
+$handledDefaultActionCompletions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.eventType -eq "dispatch-completed" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.originalTarget.elementId -eq "default-action-link" -and
+            $_.payload.outcome -eq "canceled-by-default-event-handler"
+        }
+)
+
 if ($rendererConnections.Count -lt 1) {
     throw "No instrumented Chromium renderer connected to the recorder."
 }
@@ -94,6 +130,18 @@ if ($completions.Count -lt 1) {
 }
 if ($removals.Count -lt 1) {
     throw "No click listener removal was recorded for #pointer-only."
+}
+if ($suppressedDefaultActions.Count -lt 1) {
+    throw "No suppressed default handler was recorded for #pointer-only."
+}
+if ($invokedDefaultActions.Count -lt 1) {
+    throw "No invoked default handler was recorded for #default-action-link."
+}
+if ($handledDefaultActionCompletions.Count -lt 1) {
+    throw (
+        "The #default-action-link dispatch did not complete as handled by " +
+        "a default event handler."
+    )
 }
 
 $listener = $listeners[0].payload
@@ -227,6 +275,9 @@ if (-not $completion.propagationStopped) {
     InvocationRecords = $invocations.Count
     CompletionRecords = $completions.Count
     RemovalRecords = $removals.Count
+    SuppressedDefaultActions = $suppressedDefaultActions.Count
+    InvokedDefaultActions = $invokedDefaultActions.Count
+    HandledDefaultActionCompletions = $handledDefaultActionCompletions.Count
     RendererProcessId = $listener.context.processId
     DocumentId = $listener.context.documentId
     TargetNodeId = $listener.target.nodeId
@@ -240,4 +291,6 @@ if (-not $completion.propagationStopped) {
     DispatchOutcome = $completion.outcome
 } | Format-List
 
-Write-Host "Blink propagation path and listener evidence verified."
+Write-Host (
+    "Blink propagation, listener, and default-handler evidence verified."
+)

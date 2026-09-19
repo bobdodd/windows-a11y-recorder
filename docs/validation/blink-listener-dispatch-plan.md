@@ -2,12 +2,14 @@
 
 ## Purpose
 
-This document defines the first three Blink evidence implementation slices and
+This document defines the first four Blink evidence implementation slices and
 the Windows validation required before any can be described as complete.
 The first validated slice records accepted Node listener registrations and the
 start of Node event dispatches. The second implemented slice correlates
 listener removal and invocation with dispatch completion. The third implemented
 slice records the ordered Node path and each invoked listener's current target.
+The fourth implemented slice records decisions at Blink's Node
+`DefaultEventHandler` boundary.
 It does not claim complete listener or dispatch coverage.
 
 ## Implemented hooks
@@ -91,8 +93,27 @@ of these outcomes:
 - `canceled-by-default-event-handler`
 - `canceled-before-dispatch`
 
-Full retargeted paths, default-action detail, callback timing, and omission
-handling for bridge backpressure remain outstanding.
+Full retargeted paths, callback timing, and omission handling for bridge
+backpressure remain outstanding.
+
+### Default-event-handler decisions
+
+The fourth slice instruments the gate around Blink's Node
+`DefaultEventHandler` calls in `EventDispatcher::DispatchEventPostProcess`.
+Each `default-action` record uses the active dispatch identifier and records
+the Node whose handler is involved. Its `defaultAction` value is
+`blink-default-event-handler`, and its outcome is one of:
+
+- `invoked`
+- `suppressed-by-event-handler`
+- `already-handled`
+- `ineligible-untrusted-event`
+
+`invoked` means Blink entered `DefaultEventHandler` for that Node. It does not
+by itself assert that the handler changed browser or document state. A
+correlated `dispatch-completed` outcome of
+`canceled-by-default-event-handler` provides separate evidence that Blink
+marked the event handled during default processing.
 
 ## Component boundary
 
@@ -130,6 +151,11 @@ call `preventDefault()`, remove the named listener, and call
 - A capturing invocation whose current target is `#propagation-root`.
 - At-target invocations whose current target is `#pointer-only`.
 - No bubbling invocation for `#propagation-root` after propagation is stopped.
+- A `default-action` record showing that `preventDefault()` suppressed the
+  default handler for `#pointer-only`.
+- A `default-action` record showing that Blink invoked the default handler for
+  `#default-action-link`, followed by a correlated completion with outcome
+  `canceled-by-default-event-handler`.
 - Renderer process context and stable non-empty listener and dispatch
   identifiers across the lifecycle.
 

@@ -157,6 +157,13 @@ ordered Node `composedPath` captured from Blink's dispatch path. Receivers
 continue to accept archived 0.2 dispatch payloads that omit `currentTarget`,
 but live 0.3 connections require an exact protocol-version match.
 
+Protocol version 0.4 adds correlated Node default-event-handler decisions.
+The renderer records whether Blink invoked the Node handler, suppressed it
+after `preventDefault()`, found the event already handled, or rejected an
+ineligible untrusted event. An invocation record describes entry into Blink's
+handler boundary and does not by itself claim a resulting visible state
+change. Live 0.4 connections require an exact protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native
