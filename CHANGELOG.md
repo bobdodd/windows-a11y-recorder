@@ -16,6 +16,10 @@ from the product version.
 - Added a deterministic same-document fixture, strict archive validation,
   idempotent Chromium integration coverage, and an explicit
   [navigation and document identity evidence model](docs/architecture/navigation-document-identity-evidence-model.md).
+- Validated protocol 0.10 end to end on the reference Windows platform across
+  1,860 events and 81 artifacts with no network-service crashes. The run
+  preserved page, frame, and committed-document identity while assigning
+  distinct navigation identities to cross-document and same-document commits.
 - Added protocol 0.9 `browser.scheduler` evidence for authoritative
   task-queue wake-up deferral decisions at Blink's task-queue throttler
   boundary.
