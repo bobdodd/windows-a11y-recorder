@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.9";
+    public const string CurrentVersion = "0.10";
 }
 
 public static class BrowserEvidenceChannels
@@ -12,6 +12,7 @@ public static class BrowserEvidenceChannels
     public const string Dispatch = "browser.dispatch";
     public const string Timer = "browser.timer";
     public const string Scheduler = "browser.scheduler";
+    public const string Navigation = "browser.navigation";
     public const string Cookie = "browser.cookie";
 }
 
@@ -29,6 +30,8 @@ public static class BrowserEvidenceEventTypes
     public const string TimerFired = "timer-fired";
     public const string TimerCancelled = "timer-cancelled";
     public const string WakeUpDeferred = "wake-up-deferred";
+    public const string NavigationStarted = "navigation-started";
+    public const string NavigationCompleted = "navigation-completed";
     public const string CookieOperation = "cookie-operation";
     public const string Omission = "collector-omission";
 }
@@ -111,6 +114,18 @@ public sealed record BrowserSchedulerPayload(
     bool HasReadyTask,
     string BlockType,
     string DecisionBoundary);
+
+public sealed record BrowserNavigationPayload(
+    BrowserContext Context,
+    string NavigationId,
+    string Url,
+    string NavigationKind,
+    bool RendererInitiated,
+    bool SameDocument,
+    bool? Committed,
+    bool? ErrorPage,
+    int? NetErrorCode,
+    string? Outcome);
 
 public sealed record BrowserCookieOperationPayload(
     BrowserContext Context,

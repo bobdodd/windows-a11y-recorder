@@ -23,6 +23,9 @@ BLINK_SCHEDULER_DEP = '    "//chromium/recorder_bridge",'
 CHILD_LAUNCHER_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
 )
+CONTENT_NAVIGATION_INCLUDE = (
+    '#include "chromium/recorder_bridge/browser_bridge.h"'
+)
 CHILD_LAUNCHER_INCLUDE_BLOCK = f"""\
 #if BUILDFLAG(IS_WIN)
 {CHILD_LAUNCHER_INCLUDE}
@@ -90,6 +93,38 @@ LEGACY_SHARED_CHILD_LAUNCHER_HOOK = f"""\
 CHILD_LAUNCHER_HOOK = f"""\
 #if BUILDFLAG(IS_WIN)
 {SHARED_CHILD_LAUNCHER_HOOK}#endif
+"""
+CONTENT_NAVIGATION_STARTED_HOOK = """\
+  if (navigation_handle->IsInPrimaryMainFrame()) {
+    a11y_recorder::RecordBrowserNavigationStarted(
+        navigation_handle->GetNavigationId(),
+        navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
+        navigation_handle->GetURL().spec(),
+        navigation_handle->IsRendererInitiated(),
+        navigation_handle->IsSameDocument());
+  }
+"""
+CONTENT_NAVIGATION_COMPLETED_HOOK = """\
+  if (navigation_handle->IsInPrimaryMainFrame()) {
+    int64_t recorder_document_navigation_id = 0;
+    if (navigation_handle->HasCommitted()) {
+      if (RenderFrameHost* recorder_frame =
+              navigation_handle->GetRenderFrameHost()) {
+        recorder_document_navigation_id = recorder_frame->GetNavigationId();
+      }
+    }
+    a11y_recorder::RecordBrowserNavigationCompleted(
+        navigation_handle->GetNavigationId(),
+        navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
+        recorder_document_navigation_id,
+        navigation_handle->GetURL().spec(),
+        navigation_handle->IsRendererInitiated(),
+        navigation_handle->IsSameDocument(),
+        navigation_handle->HasCommitted(),
+        navigation_handle->HasCommitted() &&
+            navigation_handle->IsErrorPage(),
+        navigation_handle->GetNetErrorCode());
+  }
 """
 BLINK_LISTENER_HOOK = """\
     if (Node* recorder_target = ToNode()) {
@@ -776,6 +811,45 @@ def patch_content_browser_build(path: Path) -> None:
     text = text[:deps] + text[deps:].replace(
         opening, opening + f"      {BRIDGE_DEP}\n", 1
     )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_web_contents_navigation(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if CONTENT_NAVIGATION_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "content/browser/web_contents/web_contents_impl.h"\n',
+            '#include "content/browser/web_contents/web_contents_impl.h"\n'
+            f"{CONTENT_NAVIGATION_INCLUDE}\n",
+            path,
+        )
+
+    if "RecordBrowserNavigationStarted" not in text:
+        start_anchor = (
+            "  const GURL url = navigation_handle->GetURL();\n\n"
+            "  base::ElapsedTimer duration;\n"
+        )
+        text = replace_once(
+            text,
+            start_anchor,
+            "  const GURL url = navigation_handle->GetURL();\n\n"
+            f"{CONTENT_NAVIGATION_STARTED_HOOK}\n"
+            "  base::ElapsedTimer duration;\n",
+            path,
+        )
+
+    if "RecordBrowserNavigationCompleted" not in text:
+        finish_anchor = (
+            '  TRACE_EVENT1("navigation", "WebContentsImpl::DidFinishNavigation",\n'
+            '               "navigation_handle", navigation_handle);\n\n'
+        )
+        text = replace_once(
+            text,
+            finish_anchor,
+            finish_anchor + CONTENT_NAVIGATION_COMPLETED_HOOK + "\n",
+            path,
+        )
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
@@ -1538,6 +1612,13 @@ def main() -> int:
         source / "content" / "browser" / "child_process_launcher_helper.cc"
     )
     patch_content_browser_build(source / "content" / "browser" / "BUILD.gn")
+    patch_web_contents_navigation(
+        source
+        / "content"
+        / "browser"
+        / "web_contents"
+        / "web_contents_impl.cc"
+    )
     patch_blink_event_target(
         source
         / "third_party"

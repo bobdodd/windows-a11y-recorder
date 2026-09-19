@@ -1093,6 +1093,62 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_blink_frame_scheduler_header(frame_h)
             self.assertEqual(first[frame_h], frame_h.read_text())
 
+    def test_patches_primary_navigation_boundaries_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "web_contents_impl.cc"
+            path.write_text(
+                '#include "content/browser/web_contents/web_contents_impl.h"\n'
+                "\n"
+                "void WebContentsImpl::DidStartNavigation(\n"
+                "    NavigationHandle* navigation_handle) {\n"
+                '  TRACE_EVENT1("navigation", '
+                '"WebContentsImpl::DidStartNavigation",\n'
+                '               "navigation_handle", navigation_handle);\n'
+                "  const bool is_in_main_frame = "
+                "navigation_handle->IsInMainFrame();\n"
+                "  const GURL url = navigation_handle->GetURL();\n"
+                "\n"
+                "  base::ElapsedTimer duration;\n"
+                "}\n"
+                "\n"
+                "void WebContentsImpl::DidFinishNavigation(\n"
+                "    NavigationHandle* navigation_handle) {\n"
+                '  TRACE_EVENT1("navigation", '
+                '"WebContentsImpl::DidFinishNavigation",\n'
+                '               "navigation_handle", navigation_handle);\n'
+                "\n"
+                "  observers_.NotifyObservers(\n"
+                "      &WebContentsObserver::DidFinishNavigation,\n"
+                "      navigation_handle);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_web_contents_navigation(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_web_contents_navigation(path)
+
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                1,
+                first.count("RecordBrowserNavigationStarted"),
+            )
+            self.assertEqual(
+                1,
+                first.count("RecordBrowserNavigationCompleted"),
+            )
+            self.assertIn(
+                "GetFrameTreeNodeId().GetUnsafeValue()",
+                first,
+            )
+            self.assertNotIn("reinterpret_cast<uintptr_t>(this)", first)
+            self.assertIn(
+                "navigation_handle->HasCommitted() &&\n"
+                "            navigation_handle->IsErrorPage()",
+                first,
+            )
+            self.assertIn(INTEGRATE.CONTENT_NAVIGATION_INCLUDE, first)
+
 
 if __name__ == "__main__":
     unittest.main()

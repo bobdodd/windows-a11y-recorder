@@ -158,6 +158,46 @@ base::DictValue CreateContext(const RecorderPipeClient& client,
   return context;
 }
 
+base::DictValue CreateNavigationContext(
+    const RecorderPipeClient& client,
+    int frame_tree_node_id,
+    int64_t document_navigation_id) {
+  base::DictValue context = CreateContext(client, 0);
+  context.Set("pageId",
+              "primary-page-" + base::NumberToString(frame_tree_node_id));
+  context.Set("frameId",
+              "frame-" + base::NumberToString(frame_tree_node_id));
+  if (document_navigation_id > 0) {
+    context.Set(
+        "documentId",
+        "document-navigation-" +
+            base::NumberToString(document_navigation_id));
+  }
+  return context;
+}
+
+base::DictValue CreateNavigationPayload(
+    const RecorderPipeClient& client,
+    int64_t navigation_id,
+    int frame_tree_node_id,
+    int64_t document_navigation_id,
+    std::string url,
+    bool renderer_initiated,
+    bool same_document) {
+  base::DictValue payload;
+  payload.Set("context",
+              CreateNavigationContext(client, frame_tree_node_id,
+                                      document_navigation_id));
+  payload.Set("navigationId",
+              "navigation-" + base::NumberToString(navigation_id));
+  payload.Set("url", std::move(url));
+  payload.Set("navigationKind",
+              same_document ? "same-document" : "cross-document");
+  payload.Set("rendererInitiated", renderer_initiated);
+  payload.Set("sameDocument", same_document);
+  return payload;
+}
+
 base::DictValue CreateNode(int document_node_id,
                            int target_node_id,
                            std::string target_tag_name,
@@ -1226,6 +1266,56 @@ void RecordBlinkSchedulerWakeUpDeferred(
   payload.Set("blockType", SchedulerBlockTypeName(block_type));
   payload.Set("decisionBoundary", "task-queue-throttler");
   SendBlinkEvidence("browser.scheduler", "wake-up-deferred",
+                    std::move(payload));
+}
+
+void RecordBrowserNavigationStarted(int64_t navigation_id,
+                                    int frame_tree_node_id,
+                                    std::string url,
+                                    bool renderer_initiated,
+                                    bool same_document) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || navigation_id <= 0 || frame_tree_node_id < 0 || url.empty()) {
+    return;
+  }
+
+  base::DictValue payload = CreateNavigationPayload(
+      *client, navigation_id, frame_tree_node_id, 0, std::move(url),
+      renderer_initiated, same_document);
+  payload.Set("committed", base::Value());
+  payload.Set("errorPage", base::Value());
+  payload.Set("netErrorCode", base::Value());
+  payload.Set("outcome", base::Value());
+  SendBlinkEvidence("browser.navigation", "navigation-started",
+                    std::move(payload));
+}
+
+void RecordBrowserNavigationCompleted(int64_t navigation_id,
+                                      int frame_tree_node_id,
+                                      int64_t document_navigation_id,
+                                      std::string url,
+                                      bool renderer_initiated,
+                                      bool same_document,
+                                      bool committed,
+                                      bool error_page,
+                                      int net_error_code) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || navigation_id <= 0 || frame_tree_node_id < 0 || url.empty()) {
+    return;
+  }
+
+  base::DictValue payload = CreateNavigationPayload(
+      *client, navigation_id, frame_tree_node_id,
+      committed ? document_navigation_id : 0, std::move(url),
+      renderer_initiated, same_document);
+  payload.Set("committed", committed);
+  payload.Set("errorPage", error_page);
+  payload.Set("netErrorCode", net_error_code);
+  payload.Set("outcome", !committed
+                             ? "not-committed"
+                             : error_page ? "committed-error-page"
+                                          : "committed");
+  SendBlinkEvidence("browser.navigation", "navigation-completed",
                     std::move(payload));
 }
 

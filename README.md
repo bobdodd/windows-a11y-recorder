@@ -47,6 +47,13 @@ archive passed structural validation across 658 events and 81 artifacts and
 recorded no network-service crashes. See the
 [Blink scheduler-decision validation record](docs/validation/blink-scheduler-decisions-2026-09-19.md).
 
+Protocol 0.10 is implemented and ready for reference-platform validation. It
+adds browser-process evidence for primary-main-frame navigation starts and
+completions, with stable page, frame, navigation, and committed-document
+identity across cross-document and same-document commits. The model and its
+limits are documented in the
+[navigation and document identity evidence model](docs/architecture/navigation-document-identity-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.

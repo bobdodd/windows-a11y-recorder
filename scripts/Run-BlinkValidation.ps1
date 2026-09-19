@@ -154,6 +154,11 @@ $integratedFiles = @(
     (Join-Path $chromiumSource "content\browser\BUILD.gn"),
     (
         Join-Path $chromiumSource (
+            "content\browser\web_contents\web_contents_impl.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
             "third_party\blink\renderer\core\dom\events\event_target.cc"
         )
     ),

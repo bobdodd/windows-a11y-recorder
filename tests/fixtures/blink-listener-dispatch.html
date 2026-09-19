@@ -102,6 +102,11 @@
     window.setTimeout(() => {
       target.click();
       defaultActionLink.click();
+      window.history.pushState(
+        { fixture: "same-document" },
+        "",
+        "#same-document-navigation"
+      );
     }, 250);
   </script>
 </body>

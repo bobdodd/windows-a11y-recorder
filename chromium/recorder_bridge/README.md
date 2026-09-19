@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.9` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.10` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -45,6 +45,9 @@ phases and current targets, Node default-event-handler decisions, window
 `setTimeout`, `setInterval`, web-exposed `requestAnimationFrame` and
 `requestIdleCallback` lifecycles, page-lifecycle state at callback boundaries,
 and authoritative task-queue wake-up deferral decisions.
+The browser process also records primary-main-frame navigation starts and
+completions with stable page, frame, navigation, and committed-document
+identifiers.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

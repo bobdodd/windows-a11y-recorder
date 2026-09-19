@@ -202,6 +202,28 @@ void RecordBlinkSchedulerWakeUpDeferred(
     bool has_ready_task,
     int block_type);
 
+// Records a primary-main-frame navigation boundary in the browser process.
+// Page and frame identifiers remain stable across same-document navigations.
+// A committed document identifier comes from the RenderFrameHost navigation
+// that created that document and is absent before commit.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserNavigationStarted(int64_t navigation_id,
+                                    int frame_tree_node_id,
+                                    std::string url,
+                                    bool renderer_initiated,
+                                    bool same_document);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserNavigationCompleted(int64_t navigation_id,
+                                      int frame_tree_node_id,
+                                      int64_t document_navigation_id,
+                                      std::string url,
+                                      bool renderer_initiated,
+                                      bool same_document,
+                                      bool committed,
+                                      bool error_page,
+                                      int net_error_code);
+
 // Records the final dispatch result and releases the active dispatch identity.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

@@ -27,6 +27,27 @@ $rendererConnections = @(
         }
 )
 
+$navigationStarts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.navigation" -and
+            $_.eventType -eq "navigation-started" -and
+            $_.payload.url -like "*blink-listener-dispatch.html*"
+        }
+)
+
+$navigationCompletions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.navigation" -and
+            $_.eventType -eq "navigation-completed" -and
+            $_.payload.url -like "*blink-listener-dispatch.html*" -and
+            $_.payload.committed -eq $true -and
+            $_.payload.errorPage -eq $false -and
+            $_.payload.outcome -eq "committed"
+        }
+)
+
 $listeners = @(
     $records |
         Where-Object {
@@ -209,6 +230,12 @@ $idleCallbackScheduleCandidates = @(
 
 if ($rendererConnections.Count -lt 1) {
     throw "No instrumented Chromium renderer connected to the recorder."
+}
+if ($navigationStarts.Count -lt 2) {
+    throw "The fixture did not produce cross- and same-document navigation starts."
+}
+if ($navigationCompletions.Count -lt 2) {
+    throw "The fixture did not produce cross- and same-document navigation commits."
 }
 if ($listeners.Count -lt 1) {
     throw "No click listener registration was recorded for #pointer-only."
@@ -732,6 +759,75 @@ if (-not $completion.propagationStopped) {
     throw "The completed dispatch did not preserve stopPropagation()."
 }
 
+$crossDocumentNavigation = $navigationCompletions |
+    Where-Object {
+        $_.payload.navigationKind -eq "cross-document" -and
+        $_.payload.sameDocument -eq $false
+    } |
+    Select-Object -First 1
+$sameDocumentNavigation = $navigationCompletions |
+    Where-Object {
+        $_.payload.navigationKind -eq "same-document" -and
+        $_.payload.sameDocument -eq $true
+    } |
+    Select-Object -First 1
+if (-not $crossDocumentNavigation) {
+    throw "No committed cross-document fixture navigation was recorded."
+}
+if (-not $sameDocumentNavigation) {
+    throw "No committed same-document fixture navigation was recorded."
+}
+foreach ($navigation in @(
+        $crossDocumentNavigation,
+        $sameDocumentNavigation
+    )) {
+    $matchingStart = $navigationStarts |
+        Where-Object {
+            $_.payload.navigationId -eq $navigation.payload.navigationId -and
+            $_.payload.context.pageId -eq $navigation.payload.context.pageId -and
+            $_.payload.context.frameId -eq $navigation.payload.context.frameId
+        } |
+        Select-Object -First 1
+    if (-not $matchingStart) {
+        throw "A committed navigation has no correlated start record."
+    }
+    if (
+        $matchingStart.monotonicNanoseconds -gt
+        $navigation.monotonicNanoseconds
+    ) {
+        throw "A navigation completion preceded its start record."
+    }
+}
+if (
+    $crossDocumentNavigation.payload.context.processType -ne "browser" -or
+    $sameDocumentNavigation.payload.context.processType -ne "browser"
+) {
+    throw "Navigation evidence did not originate in the browser process."
+}
+if (
+    $crossDocumentNavigation.payload.context.pageId -ne
+    $sameDocumentNavigation.payload.context.pageId -or
+    $crossDocumentNavigation.payload.context.frameId -ne
+    $sameDocumentNavigation.payload.context.frameId
+) {
+    throw "The fixture navigation records did not preserve page and frame identity."
+}
+if (
+    [string]::IsNullOrWhiteSpace(
+        $crossDocumentNavigation.payload.context.documentId
+    ) -or
+    $crossDocumentNavigation.payload.context.documentId -ne
+    $sameDocumentNavigation.payload.context.documentId
+) {
+    throw "Same-document navigation did not preserve committed document identity."
+}
+if (
+    $crossDocumentNavigation.payload.navigationId -eq
+    $sameDocumentNavigation.payload.navigationId
+) {
+    throw "Distinct fixture navigations reused one navigation identifier."
+}
+
 [pscustomobject]@{
     SessionPath = (Resolve-Path -LiteralPath $SessionPath).Path
     ListenerRecords = $listeners.Count
@@ -770,6 +866,16 @@ if (-not $completion.propagationStopped) {
         $rendererSchedulerDeferrals[0].payload.throttlingType
     SchedulerDecisionBoundary =
         $rendererSchedulerDeferrals[0].payload.decisionBoundary
+    NavigationStarts = $navigationStarts.Count
+    NavigationCompletions = $navigationCompletions.Count
+    PageId = $crossDocumentNavigation.payload.context.pageId
+    FrameId = $crossDocumentNavigation.payload.context.frameId
+    NavigationDocumentId =
+        $crossDocumentNavigation.payload.context.documentId
+    CrossDocumentNavigationId =
+        $crossDocumentNavigation.payload.navigationId
+    SameDocumentNavigationId =
+        $sameDocumentNavigation.payload.navigationId
     HiddenTimeoutTimerId = $scheduledHiddenTimeout.payload.timerId
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId
@@ -793,5 +899,5 @@ if (-not $completion.propagationStopped) {
 Write-Host (
     "Blink propagation, listener, default-handler, DOM timer, " +
     "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
-    "evidence verified."
+    "and navigation-identity evidence verified."
 )

@@ -8,6 +8,14 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.10 `browser.navigation` evidence for primary-main-frame
+  navigation starts and completions at Chromium's browser-process
+  `WebContentsImpl` boundaries.
+- Added stable page, frame, navigation, and committed-document correlation,
+  including explicit cross-document and same-document classification.
+- Added a deterministic same-document fixture, strict archive validation,
+  idempotent Chromium integration coverage, and an explicit
+  [navigation and document identity evidence model](docs/architecture/navigation-document-identity-evidence-model.md).
 - Added protocol 0.9 `browser.scheduler` evidence for authoritative
   task-queue wake-up deferral decisions at Blink's task-queue throttler
   boundary.
@@ -109,6 +117,8 @@ from the product version.
   web-exposed idle-callback lifecycle evidence and nullable `didTimeout`.
 - Advanced the browser evidence protocol to version 0.9 for queue-level
   scheduler wake-up deferral evidence.
+- Advanced the browser evidence protocol to version 0.10 for browser-process
+  navigation and committed-document identity evidence.
 - Preserved propagation flags observed during listener execution because Blink
   may clear them before the dispatch-completion hook runs.
 - Validated the propagation slice end to end on the reference Windows platform

@@ -223,6 +223,18 @@ The complete claim and correlation rules are defined in the
 [scheduler decision evidence model](scheduler-decision-evidence-model.md).
 Live 0.9 connections require an exact protocol-version match.
 
+Protocol version 0.10 adds primary-main-frame navigation start and completion
+evidence from Chromium's browser-process `WebContentsImpl` boundaries. Records
+preserve stable page and frame identity, a unique navigation identity, and the
+committed document identity supplied by `RenderFrameHost`. Same-document
+navigations receive a new navigation ID while preserving the document ID.
+Completion records distinguish successful commits, committed error pages, and
+uncommitted attempts. This evidence does not claim that a navigation produced
+a distinct view, changed the DOM or accessibility tree, or reached a loaded or
+presented state. The complete identity and correlation rules are defined in the
+[navigation and document identity evidence model](navigation-document-identity-evidence-model.md).
+Live 0.10 connections require an exact protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native

@@ -19,6 +19,7 @@ internal static class EventPayloadValidator
         "browser.dispatch",
         "browser.timer",
         "browser.scheduler",
+        "browser.navigation",
         "browser.cookie"
     ];
 
@@ -118,6 +119,20 @@ internal static class EventPayloadValidator
             case ("browser.scheduler", "wake-up-deferred"):
                 ValidateBrowserScheduler(payload, issues, lineNumber);
                 break;
+            case ("browser.navigation", "navigation-started"):
+                ValidateBrowserNavigation(
+                    payload,
+                    issues,
+                    lineNumber,
+                    completed: false);
+                break;
+            case ("browser.navigation", "navigation-completed"):
+                ValidateBrowserNavigation(
+                    payload,
+                    issues,
+                    lineNumber,
+                    completed: true);
+                break;
             case ("browser.cookie", "cookie-operation"):
                 ValidateBrowserCookie(payload, issues, lineNumber);
                 break;
@@ -130,6 +145,7 @@ internal static class EventPayloadValidator
             case ("browser.dispatch", "collector-omission"):
             case ("browser.timer", "collector-omission"):
             case ("browser.scheduler", "collector-omission"):
+            case ("browser.navigation", "collector-omission"):
             case ("browser.cookie", "collector-omission"):
                 ValidateOmission(payload, issues, lineNumber);
                 break;
@@ -593,6 +609,75 @@ internal static class EventPayloadValidator
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
+    }
+
+    private static void ValidateBrowserNavigation(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line,
+        bool completed)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("navigationId"),
+                RequiredString("url"),
+                RequiredEnum(
+                    "navigationKind",
+                    "cross-document",
+                    "same-document"),
+                RequiredBoolean("rendererInitiated"),
+                RequiredBoolean("sameDocument"),
+                completed
+                    ? RequiredBoolean("committed")
+                    : NullableBoolean("committed"),
+                completed
+                    ? RequiredBoolean("errorPage")
+                    : NullableBoolean("errorPage"),
+                completed
+                    ? RequiredInteger("netErrorCode")
+                    : NullableInteger("netErrorCode"),
+                completed
+                    ? RequiredEnum(
+                        "outcome",
+                        "committed",
+                        "committed-error-page",
+                        "not-committed")
+                    : NullableString("outcome")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+
+        var sameDocument = payload.TryGetProperty(
+            "sameDocument",
+            out var sameDocumentValue) &&
+            sameDocumentValue.ValueKind == JsonValueKind.True;
+        var navigationKind = ReadString(payload, "navigationKind");
+        if ((sameDocument && navigationKind != "same-document") ||
+            (!sameDocument && navigationKind != "cross-document"))
+        {
+            AddError(
+                issues,
+                "browser-navigation-kind-mismatch",
+                "events.ndjson#/payload/navigationKind",
+                "navigationKind must agree with sameDocument.",
+                line);
+        }
+
+        if (completed &&
+            payload.TryGetProperty("committed", out var committedValue) &&
+            committedValue.ValueKind == JsonValueKind.False &&
+            ReadString(payload, "outcome") != "not-committed")
+        {
+            AddError(
+                issues,
+                "browser-navigation-outcome-mismatch",
+                "events.ndjson#/payload/outcome",
+                "An uncommitted navigation must have outcome not-committed.",
+                line);
+        }
     }
 
     private static void ValidateBrowserContextProperty(
