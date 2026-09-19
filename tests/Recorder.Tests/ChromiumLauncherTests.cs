@@ -18,7 +18,7 @@ public sealed class ChromiumLauncherTests
             BrowserEvidenceProtocol.CurrentVersion,
             Guid.NewGuid().ToString("N"),
             1024);
-        await using var launcher = new ChromiumLauncher();
+        await using var launcher = new ChromiumLauncher(() => false);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => launcher.LaunchAsync(
@@ -32,6 +32,37 @@ public sealed class ChromiumLauncherTests
             "exited during startup with exit code",
             exception.Message,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LaunchRejectsElevatedRecorderProcess()
+    {
+        var executable = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        var profile = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-tests",
+            Guid.NewGuid().ToString("N"));
+        var connection = new BrowserEvidenceConnectionInfo(
+            $"unused-{Guid.NewGuid():N}",
+            "test-authentication-token",
+            BrowserEvidenceProtocol.CurrentVersion,
+            Guid.NewGuid().ToString("N"),
+            1024);
+        await using var launcher = new ChromiumLauncher(() => true);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => launcher.LaunchAsync(
+                executable,
+                profile,
+                connection,
+                "/c",
+                CancellationToken.None));
+
+        Assert.Contains(
+            "standard, non-administrator Windows session",
+            exception.Message,
+            StringComparison.Ordinal);
+        Assert.Null(launcher.Process);
     }
 
     [Fact]

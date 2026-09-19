@@ -14,7 +14,19 @@ public sealed class ChromiumLauncher : IAsyncDisposable
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
+    private readonly Func<bool> _isCurrentProcessElevated;
     private Process? _process;
+
+    public ChromiumLauncher()
+        : this(IsCurrentProcessElevated)
+    {
+    }
+
+    internal ChromiumLauncher(Func<bool> isCurrentProcessElevated)
+    {
+        ArgumentNullException.ThrowIfNull(isCurrentProcessElevated);
+        _isCurrentProcessElevated = isCurrentProcessElevated;
+    }
 
     public Process? Process => _process;
 
@@ -39,7 +51,7 @@ public sealed class ChromiumLauncher : IAsyncDisposable
                 "The bundled instrumented Chromium executable was not found.",
                 executablePath);
         }
-        if (IsCurrentProcessElevated())
+        if (_isCurrentProcessElevated())
         {
             throw new InvalidOperationException(
                 "Instrumented Chromium cannot be launched from an elevated " +

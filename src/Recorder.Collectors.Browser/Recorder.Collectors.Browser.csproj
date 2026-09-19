@@ -2,4 +2,7 @@
   <ItemGroup>
     <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Recorder.Tests" />
+  </ItemGroup>
 </Project>
