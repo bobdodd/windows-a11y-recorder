@@ -593,6 +593,55 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsInstrumentedBrowserSchedulerDecisionEvidence()
+    {
+        var deferred = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Scheduler,
+            BrowserEvidenceEventTypes.WakeUpDeferred,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 1200,
+                    processType = "renderer",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = (string?)null,
+                    frameId = (string?)null,
+                    documentId = (string?)null,
+                    executionWorldId = (string?)null
+                },
+                queueName = "frame-throttleable",
+                queueType = 12,
+                throttlingType = "background",
+                desiredWakeUpTicks = "123456000",
+                allowedWakeUpTicks = "124000000",
+                deferralMilliseconds = 544.0,
+                hasReadyTask = false,
+                blockType = "all-tasks",
+                decisionBoundary = "task-queue-throttler"
+            });
+        var directory = await CreateArchiveAsync([deferred]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
     {
         var context = new

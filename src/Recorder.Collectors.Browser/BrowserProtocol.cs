@@ -81,6 +81,9 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.TimerFired or
                 BrowserEvidenceEventTypes.TimerCancelled) =>
                 payload.Deserialize<BrowserTimerPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Scheduler,
+                BrowserEvidenceEventTypes.WakeUpDeferred) =>
+                payload.Deserialize<BrowserSchedulerPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Cookie,
                 BrowserEvidenceEventTypes.CookieOperation) =>
                 payload.Deserialize<BrowserCookieOperationPayload>(JsonOptions) as object,

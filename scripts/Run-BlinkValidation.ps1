@@ -181,6 +181,35 @@ $integratedFiles = @(
     ),
     (
         Join-Path $chromiumSource "third_party\blink\renderer\core\BUILD.gn"
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\platform\scheduler\common\" +
+            "throttling\task_queue_throttler.h"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\platform\scheduler\common\" +
+            "throttling\task_queue_throttler.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\platform\scheduler\main_thread\" +
+            "main_thread_task_queue.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\platform\scheduler\main_thread\" +
+            "frame_scheduler_impl.h"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\platform\scheduler\BUILD.gn"
+        )
     )
 )
 $integratedFiles += Get-ChildItem -LiteralPath (

@@ -18,6 +18,7 @@ internal static class EventPayloadValidator
         "browser.listener",
         "browser.dispatch",
         "browser.timer",
+        "browser.scheduler",
         "browser.cookie"
     ];
 
@@ -114,6 +115,9 @@ internal static class EventPayloadValidator
             case ("browser.timer", "timer-cancelled"):
                 ValidateBrowserTimer(payload, issues, lineNumber);
                 break;
+            case ("browser.scheduler", "wake-up-deferred"):
+                ValidateBrowserScheduler(payload, issues, lineNumber);
+                break;
             case ("browser.cookie", "cookie-operation"):
                 ValidateBrowserCookie(payload, issues, lineNumber);
                 break;
@@ -125,6 +129,7 @@ internal static class EventPayloadValidator
             case ("browser.listener", "collector-omission"):
             case ("browser.dispatch", "collector-omission"):
             case ("browser.timer", "collector-omission"):
+            case ("browser.scheduler", "collector-omission"):
             case ("browser.cookie", "collector-omission"):
                 ValidateOmission(payload, issues, lineNumber);
                 break;
@@ -509,6 +514,54 @@ internal static class EventPayloadValidator
             "callbackLocation");
     }
 
+    private static void ValidateBrowserScheduler(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("queueName"),
+                RequiredInteger("queueType", nonnegative: true),
+                RequiredEnum(
+                    "throttlingType",
+                    "foreground-unimportant",
+                    "background",
+                    "background-intensive"),
+                RequiredString("desiredWakeUpTicks"),
+                RequiredString("allowedWakeUpTicks"),
+                RequiredNumber("deferralMilliseconds", positive: true),
+                RequiredBoolean("hasReadyTask"),
+                RequiredEnum(
+                    "blockType",
+                    "all-tasks",
+                    "new-tasks-only"),
+                RequiredEnum(
+                    "decisionBoundary",
+                    "task-queue-throttler")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+
+        var desiredText = ReadString(payload, "desiredWakeUpTicks");
+        var allowedText = ReadString(payload, "allowedWakeUpTicks");
+        if (!long.TryParse(desiredText, out var desired) ||
+            !long.TryParse(allowedText, out var allowed) ||
+            desired < 0 ||
+            allowed <= desired)
+        {
+            AddError(
+                issues,
+                "browser-scheduler-wake-up-order-invalid",
+                "events.ndjson#/payload",
+                "Scheduler wake-up ticks must be nonnegative decimal integers with allowedWakeUpTicks greater than desiredWakeUpTicks.",
+                line);
+        }
+    }
+
     private static void ValidateBrowserCookie(
         JsonElement payload,
         ICollection<ArchiveValidationIssue> issues,
@@ -843,7 +896,8 @@ internal static class EventPayloadValidator
 
     private static PropertyRule RequiredNumber(
         string name,
-        bool nonnegative = false) =>
+        bool nonnegative = false,
+        bool positive = false) =>
         new(
             name,
             true,
@@ -851,8 +905,11 @@ internal static class EventPayloadValidator
             value => value.ValueKind == JsonValueKind.Number &&
                 value.TryGetDouble(out var number) &&
                 double.IsFinite(number) &&
-                (!nonnegative || number >= 0),
-            nonnegative
+                (!nonnegative || number >= 0) &&
+                (!positive || number > 0),
+            positive
+                ? "must be a finite positive number"
+                : nonnegative
                     ? "must be a finite nonnegative number"
                     : "must be a finite number");
 

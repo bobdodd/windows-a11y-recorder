@@ -190,6 +190,18 @@ COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
                                       int page_lifecycle_state);
 
+// Records an authoritative task-queue scheduler decision only when the final
+// allowed wake-up is later than the desired wake-up. This queue boundary does
+// not identify an individual DOM timer or document.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkSchedulerWakeUpDeferred(
+    int queue_type,
+    int throttling_type,
+    int64_t desired_wake_up_microseconds,
+    int64_t allowed_wake_up_microseconds,
+    bool has_ready_task,
+    int block_type);
+
 // Records the final dispatch result and releases the active dispatch identity.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

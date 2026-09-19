@@ -35,6 +35,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                 BrowserEvidenceChannels.Listener,
                 BrowserEvidenceChannels.Dispatch,
                 BrowserEvidenceChannels.Timer,
+                BrowserEvidenceChannels.Scheduler,
                 BrowserEvidenceChannels.Cookie
             ],
             "instrumented-chromium-local-ipc");

@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.8` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.9` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -41,15 +41,17 @@ The current code implements and integrates the browser-process bootstrap,
 child-process capability distribution, per-process authentication and clock
 synchronization, framing, and evidence serialization. Blink hooks record Node
 listener lifecycles, dispatch lifecycles, ordered Node event paths, listener
-phases and current targets, Node default-event-handler decisions, and window
-`setTimeout`, `setInterval`, and web-exposed `requestAnimationFrame`
-lifecycles.
+phases and current targets, Node default-event-handler decisions, window
+`setTimeout`, `setInterval`, web-exposed `requestAnimationFrame` and
+`requestIdleCallback` lifecycles, page-lifecycle state at callback boundaries,
+and authoritative task-queue wake-up deferral decisions.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It
-does not claim callback completion, page effects, frame presentation,
-throttling, lifecycle state, source location, worker timers, or idle
-callbacks.
+does not claim callback completion, page effects, frame presentation, source
+location, worker timers, or task-to-timer scheduler correlation. Timer
+`throttled` values remain null. Queue-level deferral evidence is emitted
+separately on `browser.scheduler`.
 
 For an explicit local diagnostic run, set
 `A11Y_RECORDER_CHROMIUM_LOG_FILE` to an absolute file path before starting the

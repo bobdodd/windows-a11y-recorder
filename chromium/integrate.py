@@ -19,6 +19,7 @@ BLINK_DOCUMENT_INCLUDE = (
 )
 BLINK_PAGE_INCLUDE = '#include "third_party/blink/renderer/core/page/page.h"'
 BLINK_CORE_DEP = '    "//chromium/recorder_bridge",'
+BLINK_SCHEDULER_DEP = '    "//chromium/recorder_bridge",'
 CHILD_LAUNCHER_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
 )
@@ -526,6 +527,61 @@ BLINK_IDLE_CALLBACK_FIRED_HOOK = """\
           recorder_page_lifecycle_state);
     }
   }
+"""
+BLINK_THROTTLER_OWNER_DECLARATION = """\
+class MainThreadTaskQueue;
+"""
+BLINK_THROTTLER_CONSTRUCTOR_DECLARATION = """\
+  TaskQueueThrottler(MainThreadTaskQueue* owner,
+                     base::sequence_manager::TaskQueue* task_queue,
+                     const base::TickClock* tick_clock);
+"""
+BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION = """\
+TaskQueueThrottler::TaskQueueThrottler(
+    MainThreadTaskQueue* owner,
+    base::sequence_manager::TaskQueue* task_queue,
+    const base::TickClock* tick_clock)
+    : owner_(owner), task_queue_(task_queue), tick_clock_(tick_clock) {}
+"""
+BLINK_THROTTLER_OWNER_MEMBER = """\
+  const raw_ptr<MainThreadTaskQueue> owner_;
+"""
+BLINK_MAIN_THREAD_QUEUE_CONSTRUCTION = """\
+      throttler_.emplace(this, task_queue_.get(),
+                         main_thread_scheduler_->GetTickClock());
+"""
+BLINK_FRAME_THROTTLING_ACCESSOR = """\
+  int RecorderThrottlingType() const {
+    return static_cast<int>(throttling_type_);
+  }
+"""
+BLINK_SCHEDULER_DECISION_HOOK = """\
+  std::optional<base::sequence_manager::WakeUp> allowed_wake_up =
+      GetNextAllowedWakeUpImpl(lazy_now, next_desired_wake_up,
+                               has_ready_task);
+  base::TimeTicks desired_wake_up;
+  if (has_ready_task) {
+    desired_wake_up = lazy_now->Now();
+  } else if (next_desired_wake_up.has_value()) {
+    desired_wake_up =
+        std::max(next_desired_wake_up->time, lazy_now->Now());
+  }
+  if (owner_ && !desired_wake_up.is_null() &&
+      allowed_wake_up.has_value() &&
+      allowed_wake_up->time > desired_wake_up) {
+    FrameSchedulerImpl* frame_scheduler = owner_->GetFrameScheduler();
+    std::optional<QueueBlockType> block_type =
+        GetBlockType(desired_wake_up);
+    if (frame_scheduler && block_type.has_value()) {
+      a11y_recorder::RecordBlinkSchedulerWakeUpDeferred(
+          static_cast<int>(owner_->queue_type()),
+          frame_scheduler->RecorderThrottlingType(),
+          desired_wake_up.since_origin().InMicroseconds(),
+          allowed_wake_up->time.since_origin().InMicroseconds(),
+          has_ready_task, static_cast<int>(*block_type));
+    }
+  }
+  return allowed_wake_up;
 """
 
 
@@ -1234,6 +1290,132 @@ def patch_blink_core_build(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def patch_blink_task_queue_throttler_header(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_THROTTLER_OWNER_DECLARATION not in text:
+        text = replace_once(
+            text,
+            "class BudgetPool;\n",
+            "class BudgetPool;\n"
+            f"{BLINK_THROTTLER_OWNER_DECLARATION}",
+            path,
+        )
+    old_constructor = """\
+  TaskQueueThrottler(base::sequence_manager::TaskQueue* task_queue,
+                     const base::TickClock* tick_clock);
+"""
+    if BLINK_THROTTLER_CONSTRUCTOR_DECLARATION not in text:
+        text = replace_once(
+            text,
+            old_constructor,
+            BLINK_THROTTLER_CONSTRUCTOR_DECLARATION,
+            path,
+        )
+    if BLINK_THROTTLER_OWNER_MEMBER not in text:
+        text = replace_once(
+            text,
+            "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n",
+            f"{BLINK_THROTTLER_OWNER_MEMBER}"
+            "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n",
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_blink_task_queue_throttler(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    includes = (
+        f"{BLINK_BRIDGE_INCLUDE}\n"
+        '#include "third_party/blink/renderer/platform/scheduler/main_thread/'
+        'frame_scheduler_impl.h"\n'
+        '#include "third_party/blink/renderer/platform/scheduler/main_thread/'
+        'main_thread_task_queue.h"\n'
+    )
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "base/check_op.h"\n',
+            '#include "base/check_op.h"\n' + includes,
+            path,
+        )
+    old_constructor = """\
+TaskQueueThrottler::TaskQueueThrottler(
+    base::sequence_manager::TaskQueue* task_queue,
+    const base::TickClock* tick_clock)
+    : task_queue_(task_queue), tick_clock_(tick_clock) {}
+"""
+    if BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION not in text:
+        text = replace_once(
+            text,
+            old_constructor,
+            BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+            path,
+        )
+    old_return = """\
+  return GetNextAllowedWakeUpImpl(lazy_now, next_desired_wake_up,
+                                  has_ready_task);
+"""
+    if "RecordBlinkSchedulerWakeUpDeferred" not in text.replace(
+        BLINK_BRIDGE_INCLUDE, ""
+    ):
+        text = replace_once(
+            text,
+            old_return,
+            BLINK_SCHEDULER_DECISION_HOOK,
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_blink_main_thread_task_queue(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    old_construction = """\
+      throttler_.emplace(task_queue_.get(),
+                         main_thread_scheduler_->GetTickClock());
+"""
+    if BLINK_MAIN_THREAD_QUEUE_CONSTRUCTION not in text:
+        text = replace_once(
+            text,
+            old_construction,
+            BLINK_MAIN_THREAD_QUEUE_CONSTRUCTION,
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_blink_frame_scheduler_header(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_FRAME_THROTTLING_ACCESSOR in text:
+        return
+    anchor = "  void UpdatePolicy();\n"
+    text = replace_once(
+        text,
+        anchor,
+        anchor + "\n" + BLINK_FRAME_THROTTLING_ACCESSOR,
+        path,
+    )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_blink_scheduler_build(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_SCHEDULER_DEP in text:
+        return
+    target = 'blink_platform_sources("scheduler") {'
+    target_index = text.find(target)
+    if target_index < 0:
+        raise RuntimeError(f"{path}: Blink scheduler target not found")
+    target_end = text.find("\n}", target_index)
+    deps = text.find("  deps = [\n", target_index)
+    if deps < 0 or (target_end >= 0 and deps > target_end):
+        raise RuntimeError(f"{path}: Blink scheduler deps list not found")
+    opening = "  deps = [\n"
+    text = text[:deps] + text[deps:].replace(
+        opening, opening + f"{BLINK_SCHEDULER_DEP}\n", 1
+    )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1311,6 +1493,23 @@ def main() -> int:
     patch_blink_core_build(
         source / "third_party" / "blink" / "renderer" / "core" / "BUILD.gn"
     )
+    scheduler = (
+        source / "third_party" / "blink" / "renderer" / "platform"
+        / "scheduler"
+    )
+    patch_blink_task_queue_throttler_header(
+        scheduler / "common" / "throttling" / "task_queue_throttler.h"
+    )
+    patch_blink_task_queue_throttler(
+        scheduler / "common" / "throttling" / "task_queue_throttler.cc"
+    )
+    patch_blink_main_thread_task_queue(
+        scheduler / "main_thread" / "main_thread_task_queue.cc"
+    )
+    patch_blink_frame_scheduler_header(
+        scheduler / "main_thread" / "frame_scheduler_impl.h"
+    )
+    patch_blink_scheduler_build(scheduler / "BUILD.gn")
     print(f"Recorder bridge installed in {source}")
     return 0
 

@@ -8,6 +8,14 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.9 `browser.scheduler` evidence for authoritative
+  task-queue wake-up deferral decisions at Blink's task-queue throttler
+  boundary.
+- Added a deterministic hidden-page scheduler fixture, archive contract
+  coverage, idempotent Chromium integration tests, and an explicit
+  [scheduler decision evidence model](docs/architecture/scheduler-decision-evidence-model.md).
+- Preserved timer `throttled` values as null because protocol 0.9 does not
+  claim task-to-timer causality.
 - Added protocol 0.7 evidence for accepted web-exposed
   `requestIdleCallback` schedules, callback entry with the observed
   `IdleDeadline.didTimeout` value, and explicit `cancelIdleCallback`
@@ -94,6 +102,8 @@ from the product version.
   DOM timer lifecycle evidence and nullable throttling state.
 - Advanced the browser evidence protocol to version 0.7 for correlated
   web-exposed idle-callback lifecycle evidence and nullable `didTimeout`.
+- Advanced the browser evidence protocol to version 0.9 for queue-level
+  scheduler wake-up deferral evidence.
 - Preserved propagation flags observed during listener execution because Blink
   may clear them before the dispatch-completion hook runs.
 - Validated the propagation slice end to end on the reference Windows platform

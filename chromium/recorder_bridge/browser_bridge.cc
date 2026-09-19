@@ -149,7 +149,11 @@ base::DictValue CreateContext(const RecorderPipeClient& client,
   context.Set("browserContextId", base::Value());
   context.Set("pageId", base::Value());
   context.Set("frameId", base::Value());
-  context.Set("documentId", DocumentId(document_node_id));
+  if (document_node_id > 0) {
+    context.Set("documentId", DocumentId(document_node_id));
+  } else {
+    context.Set("documentId", base::Value());
+  }
   context.Set("executionWorldId", base::Value());
   return context;
 }
@@ -399,6 +403,64 @@ std::string PageLifecycleStateName(int page_lifecycle_state) {
     default:
       return "unknown";
   }
+}
+
+std::string SchedulerQueueName(int queue_type) {
+  switch (queue_type) {
+    case 0:
+      return "control";
+    case 1:
+      return "default";
+    case 5:
+      return "frame-loading";
+    case 8:
+      return "compositor";
+    case 9:
+      return "idle";
+    case 12:
+      return "frame-throttleable";
+    case 13:
+      return "frame-deferrable";
+    case 14:
+      return "frame-pausable";
+    case 15:
+      return "frame-unpausable";
+    case 16:
+      return "v8";
+    case 18:
+      return "input";
+    case 19:
+      return "detached";
+    case 24:
+      return "web-scheduling";
+    case 25:
+      return "non-waking";
+    case 26:
+      return "ipc-tracking-for-cached-pages";
+    case 27:
+      return "v8-user-visible";
+    case 28:
+      return "v8-best-effort";
+    default:
+      return "other";
+  }
+}
+
+std::string SchedulerThrottlingTypeName(int throttling_type) {
+  switch (throttling_type) {
+    case 1:
+      return "foreground-unimportant";
+    case 2:
+      return "background";
+    case 3:
+      return "background-intensive";
+    default:
+      return "none";
+  }
+}
+
+std::string SchedulerBlockTypeName(int block_type) {
+  return block_type == 0 ? "all-tasks" : "new-tasks-only";
 }
 
 base::DictValue CreateListenerPayload(
@@ -1128,6 +1190,43 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
       *client, *state, std::string("explicit-cancel-idle-callback"),
       std::nullopt, page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-cancelled", std::move(payload));
+}
+
+void RecordBlinkSchedulerWakeUpDeferred(
+    int queue_type,
+    int throttling_type,
+    int64_t desired_wake_up_microseconds,
+    int64_t allowed_wake_up_microseconds,
+    bool has_ready_task,
+    int block_type) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || desired_wake_up_microseconds < 0 ||
+      allowed_wake_up_microseconds <= desired_wake_up_microseconds ||
+      throttling_type < 1 || throttling_type > 3 ||
+      block_type < 0 || block_type > 1) {
+    return;
+  }
+
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("queueName", SchedulerQueueName(queue_type));
+  payload.Set("queueType", queue_type);
+  payload.Set("throttlingType",
+              SchedulerThrottlingTypeName(throttling_type));
+  payload.Set("desiredWakeUpTicks",
+              base::NumberToString(desired_wake_up_microseconds));
+  payload.Set("allowedWakeUpTicks",
+              base::NumberToString(allowed_wake_up_microseconds));
+  payload.Set(
+      "deferralMilliseconds",
+      static_cast<double>(allowed_wake_up_microseconds -
+                          desired_wake_up_microseconds) /
+          1000.0);
+  payload.Set("hasReadyTask", has_ready_task);
+  payload.Set("blockType", SchedulerBlockTypeName(block_type));
+  payload.Set("decisionBoundary", "task-queue-throttler");
+  SendBlinkEvidence("browser.scheduler", "wake-up-deferred",
+                    std::move(payload));
 }
 
 void RecordBlinkDispatchCompleted(uintptr_t event_identity,

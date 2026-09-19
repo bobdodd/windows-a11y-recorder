@@ -40,8 +40,10 @@ the ordered Node propagation path, current targets, listener phases,
 cumulative propagation-stop state, Node default-event-handler decisions, and
 window timeout, interval, animation-frame, and idle-callback lifecycles. DOM
 timer records also preserved the observed page lifecycle state across a
-visible-to-hidden transition. The archive passed structural validation across
-657 events and 81 artifacts and recorded no network-service crashes. See the
+visible-to-hidden transition. The latest validated archive passed structural
+validation across 657 events and 81 artifacts and recorded no network-service
+crashes. Protocol 0.9 scheduler-decision instrumentation is implemented but
+still requires reference Windows validation. See the
 [Blink page-lifecycle validation record](docs/validation/blink-page-lifecycle-2026-09-19.md).
 
 ## Project goals

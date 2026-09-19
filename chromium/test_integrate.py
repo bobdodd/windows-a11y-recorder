@@ -942,6 +942,94 @@ class IntegrateTests(unittest.TestCase):
         self.assertNotIn("kChromiumGpuProcess", supported_processes)
         self.assertNotIn("kChromiumUtilityProcess", supported_processes)
 
+    def test_patches_scheduler_decision_boundary_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            throttler_h = root / "task_queue_throttler.h"
+            throttler_cc = root / "task_queue_throttler.cc"
+            queue_cc = root / "main_thread_task_queue.cc"
+            frame_h = root / "frame_scheduler_impl.h"
+            build = root / "BUILD.gn"
+
+            throttler_h.write_text(
+                "class BudgetPool;\n"
+                "class TaskQueueThrottler {\n"
+                " public:\n"
+                "  TaskQueueThrottler("
+                "base::sequence_manager::TaskQueue* task_queue,\n"
+                "                     const base::TickClock* tick_clock);\n"
+                " private:\n"
+                "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n"
+                "};\n",
+                encoding="utf-8",
+            )
+            throttler_cc.write_text(
+                '#include "base/check_op.h"\n'
+                "TaskQueueThrottler::TaskQueueThrottler(\n"
+                "    base::sequence_manager::TaskQueue* task_queue,\n"
+                "    const base::TickClock* tick_clock)\n"
+                "    : task_queue_(task_queue), tick_clock_(tick_clock) {}\n"
+                "std::optional<base::sequence_manager::WakeUp>\n"
+                "TaskQueueThrottler::GetNextAllowedWakeUp(\n"
+                "    LazyNow* lazy_now,\n"
+                "    std::optional<base::sequence_manager::WakeUp> "
+                "next_desired_wake_up,\n"
+                "    bool has_ready_task) {\n"
+                "  return GetNextAllowedWakeUpImpl(lazy_now, "
+                "next_desired_wake_up,\n"
+                "                                  has_ready_task);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            queue_cc.write_text(
+                "if (params.queue_traits.can_be_throttled) {\n"
+                "      throttler_.emplace(task_queue_.get(),\n"
+                "                         "
+                "main_thread_scheduler_->GetTickClock());\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            frame_h.write_text(
+                "class FrameSchedulerImpl {\n"
+                "  void UpdatePolicy();\n"
+                "};\n",
+                encoding="utf-8",
+            )
+            build.write_text(
+                'blink_platform_sources("scheduler") {\n'
+                "  deps = [\n"
+                '    "//base",\n'
+                "  ]\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            patchers = (
+                (INTEGRATE.patch_blink_task_queue_throttler_header, throttler_h),
+                (INTEGRATE.patch_blink_task_queue_throttler, throttler_cc),
+                (INTEGRATE.patch_blink_main_thread_task_queue, queue_cc),
+                (INTEGRATE.patch_blink_frame_scheduler_header, frame_h),
+                (INTEGRATE.patch_blink_scheduler_build, build),
+            )
+            for patcher, path in patchers:
+                patcher(path)
+            first = {path: path.read_text(encoding="utf-8") for _, path in patchers}
+            for patcher, path in patchers:
+                patcher(path)
+                self.assertEqual(first[path], path.read_text(encoding="utf-8"))
+
+            self.assertEqual(
+                1,
+                first[throttler_cc].count(
+                    "RecordBlinkSchedulerWakeUpDeferred"
+                ),
+            )
+            self.assertIn("throttler_.emplace(this,", first[queue_cc])
+            self.assertIn(
+                INTEGRATE.BLINK_SCHEDULER_DEP,
+                first[build],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

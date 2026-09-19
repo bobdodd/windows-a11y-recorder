@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.8";
+    public const string CurrentVersion = "0.9";
 }
 
 public static class BrowserEvidenceChannels
@@ -11,6 +11,7 @@ public static class BrowserEvidenceChannels
     public const string Listener = "browser.listener";
     public const string Dispatch = "browser.dispatch";
     public const string Timer = "browser.timer";
+    public const string Scheduler = "browser.scheduler";
     public const string Cookie = "browser.cookie";
 }
 
@@ -27,6 +28,7 @@ public static class BrowserEvidenceEventTypes
     public const string TimerScheduled = "timer-scheduled";
     public const string TimerFired = "timer-fired";
     public const string TimerCancelled = "timer-cancelled";
+    public const string WakeUpDeferred = "wake-up-deferred";
     public const string CookieOperation = "cookie-operation";
     public const string Omission = "collector-omission";
 }
@@ -97,6 +99,18 @@ public sealed record BrowserTimerPayload(
     BrowserScriptLocation? CallbackLocation,
     string? CancellationReason,
     bool? DidTimeout);
+
+public sealed record BrowserSchedulerPayload(
+    BrowserContext Context,
+    string QueueName,
+    int QueueType,
+    string ThrottlingType,
+    string DesiredWakeUpTicks,
+    string AllowedWakeUpTicks,
+    double DeferralMilliseconds,
+    bool HasReadyTask,
+    string BlockType,
+    string DecisionBoundary);
 
 public sealed record BrowserCookieOperationPayload(
     BrowserContext Context,

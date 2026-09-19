@@ -211,6 +211,18 @@ Worker scheduling, callback location, queue delay, execution duration, and
 implicit cancellation remain outside this slice. Live 0.8 connections require
 an exact protocol-version match.
 
+Protocol version 0.9 adds authoritative queue-level wake-up deferral evidence
+from Blink's `TaskQueueThrottler::GetNextAllowedWakeUp()` boundary. A
+`browser.scheduler` `wake-up-deferred` record preserves the queue
+classification, scheduler throttling type, desired and allowed wake-ups,
+positive deferral, ready-task state, and block type. The record is
+renderer-process scoped because this scheduler boundary has no document or DOM
+timer identity. Timer `throttled` fields therefore remain null, and nearby
+timer and scheduler records must not be treated as a causal one-to-one match.
+The complete claim and correlation rules are defined in the
+[scheduler decision evidence model](scheduler-decision-evidence-model.md).
+Live 0.9 connections require an exact protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native

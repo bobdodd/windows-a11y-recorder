@@ -21,6 +21,18 @@
     const status = document.getElementById("status");
     const invocationOrder = [];
 
+    document.addEventListener("visibilitychange", () => {
+      if (
+        document.visibilityState === "hidden" &&
+        status.dataset.hiddenTimeoutScheduled !== "true"
+      ) {
+        status.dataset.hiddenTimeoutScheduled = "true";
+        window.setTimeout(() => {
+          status.dataset.hiddenTimeoutFired = document.visibilityState;
+        }, 25);
+      }
+    });
+
     propagationRoot.addEventListener(
       "click",
       () => invocationOrder.push("root-capture"),

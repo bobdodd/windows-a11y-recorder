@@ -154,6 +154,33 @@ $scheduledLifecycleIntervals = @(
             $_.payload.effectiveDelayMilliseconds -eq 5000
         }
 )
+$scheduledHiddenTimeouts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-scheduled" -and
+            $_.payload.timerKind -eq "timeout" -and
+            $_.payload.requestedDelayMilliseconds -eq 25 -and
+            $_.payload.effectiveDelayMilliseconds -eq 25 -and
+            $_.payload.pageLifecycleState -eq "hidden" -and
+            $null -eq $_.payload.throttled
+        }
+)
+$schedulerDeferrals = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.scheduler" -and
+            $_.eventType -eq "wake-up-deferred" -and
+            $_.payload.queueName -eq "frame-throttleable" -and
+            $_.payload.throttlingType -in @(
+                "background",
+                "background-intensive"
+            ) -and
+            $_.payload.deferralMilliseconds -gt 0 -and
+            $_.payload.blockType -in @("all-tasks", "new-tasks-only") -and
+            $_.payload.decisionBoundary -eq "task-queue-throttler"
+        }
+)
 
 $animationFrameScheduleCandidates = @(
     $records |
@@ -221,6 +248,12 @@ if ($scheduledLifecycleTimeouts.Count -ne 1) {
 }
 if ($scheduledLifecycleIntervals.Count -ne 1) {
     throw "The fixture's 5-second lifecycle interval was not recorded once."
+}
+if ($scheduledHiddenTimeouts.Count -ne 1) {
+    throw "The fixture's hidden-page 25 ms timeout was not recorded once."
+}
+if ($schedulerDeferrals.Count -lt 1) {
+    throw "No authoritative frame-throttleable wake-up deferral was recorded."
 }
 $listener = $listeners[0].payload
 $scheduledAnimationFrames = @(
@@ -327,6 +360,21 @@ $cancelledLifecycleIntervals = @(
             $_.payload.cancellationReason -eq "explicit-clear"
         }
 )
+$scheduledHiddenTimeout = $scheduledHiddenTimeouts[0]
+$firedHiddenTimeouts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-fired" -and
+            $_.payload.timerId -eq
+                $scheduledHiddenTimeout.payload.timerId -and
+            $_.payload.timerKind -eq "timeout" -and
+            $_.payload.context.processId -eq
+                $scheduledHiddenTimeout.payload.context.processId -and
+            $_.payload.pageLifecycleState -eq "hidden" -and
+            $null -eq $_.payload.throttled
+        }
+)
 $animationFrameIds = @(
     $scheduledAnimationFrames |
         ForEach-Object { $_.payload.timerId }
@@ -405,6 +453,33 @@ if ($firedLifecycleTimeouts.Count -ne 1) {
 }
 if ($cancelledLifecycleIntervals.Count -ne 1) {
     throw "The lifecycle interval did not produce one correlated cancellation."
+}
+if ($firedHiddenTimeouts.Count -ne 1) {
+    throw "The hidden-page timeout did not produce one correlated firing."
+}
+$rendererSchedulerDeferrals = @(
+    $schedulerDeferrals |
+        Where-Object {
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.processType -eq "renderer" -and
+            $null -eq $_.payload.context.documentId
+        }
+)
+if ($rendererSchedulerDeferrals.Count -lt 1) {
+    throw "No scheduler deferral was recorded in the fixture renderer."
+}
+foreach ($schedulerDeferral in $rendererSchedulerDeferrals) {
+    $desired = [Int64]::Parse(
+        [string] $schedulerDeferral.payload.desiredWakeUpTicks
+    )
+    $allowed = [Int64]::Parse(
+        [string] $schedulerDeferral.payload.allowedWakeUpTicks
+    )
+    if ($allowed -le $desired) {
+        throw "A scheduler deferral did not advance the allowed wake-up."
+    }
 }
 if ($scheduledLifecycleTimeout.payload.pageLifecycleState -ne "visible") {
     throw (
@@ -689,6 +764,13 @@ if (-not $completion.propagationStopped) {
         $cancelledLifecycleIntervals[0].payload.pageLifecycleState
     LifecycleThrottlingObserved =
         $firedLifecycleTimeouts[0].payload.throttled
+    SchedulerDeferrals = $rendererSchedulerDeferrals.Count
+    SchedulerQueueName = $rendererSchedulerDeferrals[0].payload.queueName
+    SchedulerThrottlingType =
+        $rendererSchedulerDeferrals[0].payload.throttlingType
+    SchedulerDecisionBoundary =
+        $rendererSchedulerDeferrals[0].payload.decisionBoundary
+    HiddenTimeoutTimerId = $scheduledHiddenTimeout.payload.timerId
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId
     FiredAnimationFrameId = $firedAnimationFrames[0].payload.timerId
@@ -710,5 +792,6 @@ if (-not $completion.propagationStopped) {
 
 Write-Host (
     "Blink propagation, listener, default-handler, DOM timer, " +
-    "animation-frame, idle-callback, and page-lifecycle evidence verified."
+    "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
+    "evidence verified."
 )
