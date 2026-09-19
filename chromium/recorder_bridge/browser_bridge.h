@@ -133,16 +133,20 @@ void RecordBlinkTimerScheduled(uintptr_t timer_identity,
                                bool repeating,
                                double requested_delay_milliseconds,
                                double effective_delay_milliseconds,
-                               int nesting_level);
+                               int nesting_level,
+                               int page_lifecycle_state);
 
 // Records callback entry for a previously scheduled DOM timer. The evidence
 // timestamp is the observed firing time; it does not imply callback completion.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
-void RecordBlinkTimerFired(uintptr_t timer_identity, bool repeating);
+void RecordBlinkTimerFired(uintptr_t timer_identity,
+                           bool repeating,
+                           int page_lifecycle_state);
 
 // Records explicit clearTimeout or clearInterval removal of a live DOM timer.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
-void RecordBlinkTimerCancelled(uintptr_t timer_identity);
+void RecordBlinkTimerCancelled(uintptr_t timer_identity,
+                               int page_lifecycle_state);
 
 // Records an accepted web-exposed requestAnimationFrame callback. Delay,
 // nesting, throttling, lifecycle, and source-location facts that are not
@@ -150,16 +154,19 @@ void RecordBlinkTimerCancelled(uintptr_t timer_identity);
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkAnimationFrameScheduled(uintptr_t callback_identity,
                                         int document_node_id,
-                                        int callback_id);
+                                        int callback_id,
+                                        int page_lifecycle_state);
 
 // Records entry into a previously scheduled web-exposed animation-frame
 // callback. This does not imply callback completion or frame presentation.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
-void RecordBlinkAnimationFrameFired(uintptr_t callback_identity);
+void RecordBlinkAnimationFrameFired(uintptr_t callback_identity,
+                                    int page_lifecycle_state);
 
 // Records explicit cancelAnimationFrame removal of a live callback.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
-void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity);
+void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity,
+                                        int page_lifecycle_state);
 
 // Records an accepted web-exposed requestIdleCallback registration and its
 // requested timeout. A zero timeout means no positive timeout was requested.
@@ -168,17 +175,20 @@ void RecordBlinkIdleCallbackScheduled(uintptr_t callback_identity,
                                       int document_node_id,
                                       int callback_id,
                                       bool has_timeout,
-                                      double timeout_milliseconds);
+                                      double timeout_milliseconds,
+                                      int page_lifecycle_state);
 
 // Records entry into a previously scheduled idle callback and whether Blink
 // invoked it because its timeout elapsed. This does not imply completion.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkIdleCallbackFired(uintptr_t callback_identity,
-                                  bool did_timeout);
+                                  bool did_timeout,
+                                  int page_lifecycle_state);
 
 // Records explicit cancelIdleCallback removal of a live callback.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
-void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity);
+void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
+                                      int page_lifecycle_state);
 
 // Records the final dispatch result and releases the active dispatch identity.
 COMPONENT_EXPORT(RECORDER_BRIDGE)

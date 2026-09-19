@@ -12,6 +12,128 @@ SPEC.loader.exec_module(INTEGRATE)
 
 
 class IntegrateTests(unittest.TestCase):
+    def test_upgrades_legacy_scheduling_hooks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = (
+                (
+                    root / "dom_timer.cc",
+                    INTEGRATE.patch_blink_dom_timer,
+                    (
+                        (
+                            INTEGRATE.BLINK_TIMER_SCHEDULED_HOOK,
+                            INTEGRATE.LEGACY_BLINK_TIMER_SCHEDULED_HOOK,
+                        ),
+                        (
+                            INTEGRATE.BLINK_TIMER_CANCELLED_HOOK,
+                            INTEGRATE.LEGACY_BLINK_TIMER_CANCELLED_HOOK,
+                        ),
+                        (
+                            INTEGRATE.BLINK_TIMER_FIRED_HOOK,
+                            INTEGRATE.LEGACY_BLINK_TIMER_FIRED_HOOK,
+                        ),
+                    ),
+                ),
+                (
+                    root / "frame_request_callback_collection.cc",
+                    INTEGRATE.patch_blink_animation_frame_callbacks,
+                    (
+                        (
+                            INTEGRATE.BLINK_ANIMATION_FRAME_SCHEDULED_HOOK,
+                            INTEGRATE.LEGACY_BLINK_ANIMATION_FRAME_SCHEDULED_HOOK,
+                        ),
+                        (
+                            INTEGRATE.BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK,
+                            INTEGRATE.LEGACY_BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK,
+                        ),
+                        (
+                            INTEGRATE.BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK,
+                            INTEGRATE.LEGACY_BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK,
+                        ),
+                        (
+                            INTEGRATE.BLINK_ANIMATION_FRAME_FIRED_HOOK,
+                            INTEGRATE.LEGACY_BLINK_ANIMATION_FRAME_FIRED_HOOK,
+                        ),
+                    ),
+                ),
+                (
+                    root / "scripted_idle_task_controller.cc",
+                    INTEGRATE.patch_blink_idle_callbacks,
+                    (
+                        (
+                            INTEGRATE.BLINK_IDLE_CALLBACK_SCHEDULED_HOOK,
+                            INTEGRATE.LEGACY_BLINK_IDLE_CALLBACK_SCHEDULED_HOOK,
+                        ),
+                        (
+                            INTEGRATE.BLINK_IDLE_CALLBACK_CANCELLED_HOOK,
+                            INTEGRATE.LEGACY_BLINK_IDLE_CALLBACK_CANCELLED_HOOK,
+                        ),
+                        (
+                            INTEGRATE.BLINK_IDLE_CALLBACK_FIRED_HOOK,
+                            INTEGRATE.LEGACY_BLINK_IDLE_CALLBACK_FIRED_HOOK,
+                        ),
+                    ),
+                ),
+            )
+
+            fixtures = self._current_scheduling_fixtures(root)
+            for path, patcher, replacements in cases:
+                current = fixtures[path]
+                legacy = current.replace(f"{INTEGRATE.BLINK_PAGE_INCLUDE}\n", "")
+                for current_hook, legacy_hook in replacements:
+                    legacy = legacy.replace(current_hook, legacy_hook, 1)
+                path.write_text(legacy, encoding="utf-8")
+
+                patcher(path)
+                upgraded = path.read_text(encoding="utf-8")
+                self.assertEqual(current, upgraded)
+                patcher(path)
+                self.assertEqual(upgraded, path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _current_scheduling_fixtures(root):
+        fixtures = {}
+        for name, hooks in (
+            (
+                "dom_timer.cc",
+                (
+                    INTEGRATE.BLINK_TIMER_SCHEDULED_HOOK,
+                    INTEGRATE.BLINK_TIMER_CANCELLED_HOOK,
+                    INTEGRATE.BLINK_TIMER_FIRED_HOOK,
+                ),
+            ),
+            (
+                "frame_request_callback_collection.cc",
+                (
+                    INTEGRATE.BLINK_ANIMATION_FRAME_SCHEDULED_HOOK,
+                    INTEGRATE.BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK,
+                    INTEGRATE.BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK,
+                    INTEGRATE.BLINK_ANIMATION_FRAME_FIRED_HOOK,
+                ),
+            ),
+            (
+                "scripted_idle_task_controller.cc",
+                (
+                    INTEGRATE.BLINK_IDLE_CALLBACK_SCHEDULED_HOOK,
+                    INTEGRATE.BLINK_IDLE_CALLBACK_CANCELLED_HOOK,
+                    INTEGRATE.BLINK_IDLE_CALLBACK_FIRED_HOOK,
+                ),
+            ),
+        ):
+            path = root / name
+            fixtures[path] = (
+                f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                f"{INTEGRATE.BLINK_DOCUMENT_INCLUDE}\n"
+                '#include "third_party/blink/renderer/core/page/page.h"\n'
+                + (
+                    f"{INTEGRATE.BLINK_TIMER_REQUESTED_DELAY_HOOK}\n"
+                    if name == "dom_timer.cc"
+                    else ""
+                )
+                + "\n".join(hooks)
+            )
+        return fixtures
+
     def test_patches_current_idle_callback_shape_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "scripted_idle_task_controller.cc"
@@ -76,6 +198,8 @@ class IntegrateTests(unittest.TestCase):
                 '#include "third_party/blink/renderer/core/dom/'
                 'frame_request_callback_collection.h"\n'
                 f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                f"{INTEGRATE.BLINK_DOCUMENT_INCLUDE}\n"
+                f"{INTEGRATE.BLINK_PAGE_INCLUDE}\n"
                 "\n"
                 "void RecordBlinkAnimationFrameScheduled() {}\n"
                 "void RecordBlinkAnimationFrameCancelled() {}\n"

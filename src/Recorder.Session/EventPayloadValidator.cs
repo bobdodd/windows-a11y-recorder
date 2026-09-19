@@ -489,7 +489,12 @@ internal static class EventPayloadValidator
                 RequiredNullableNumber("effectiveDelayMilliseconds", nonnegative: true),
                 RequiredInteger("nestingLevel", nonnegative: true),
                 NullableBoolean("throttled"),
-                RequiredString("pageLifecycleState"),
+                RequiredEnum(
+                    "pageLifecycleState",
+                    "unknown",
+                    "visible",
+                    "hidden",
+                    "frozen"),
                 NullableObject("callbackLocation"),
                 NullableString("cancellationReason"),
                 OptionalNullableBoolean("didTimeout")

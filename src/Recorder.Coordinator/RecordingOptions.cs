@@ -15,6 +15,7 @@ public sealed record RecordingOptions
     public bool CaptureBrowserEvidence { get; init; }
     public string? ChromiumExecutablePath { get; init; }
     public string? BrowserStartUrl { get; init; }
+    public int? BrowserRemoteDebuggingPort { get; init; }
 }
 
 public enum RecordingSessionState

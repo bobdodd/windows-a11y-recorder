@@ -54,7 +54,8 @@ public static class WindowsCollectorFactory
                             AppContext.BaseDirectory,
                             "browser",
                             "chrome.exe"),
-                    StartUrl = options.BrowserStartUrl
+                    StartUrl = options.BrowserStartUrl,
+                    RemoteDebuggingPort = options.BrowserRemoteDebuggingPort
                 }));
         }
 

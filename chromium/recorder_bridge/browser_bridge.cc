@@ -388,6 +388,19 @@ std::string DefaultActionOutcomeName(int outcome) {
   }
 }
 
+std::string PageLifecycleStateName(int page_lifecycle_state) {
+  switch (page_lifecycle_state) {
+    case 1:
+      return "visible";
+    case 2:
+      return "hidden";
+    case 3:
+      return "frozen";
+    default:
+      return "unknown";
+  }
+}
+
 base::DictValue CreateListenerPayload(
     const RecorderPipeClient& client,
     std::string listener_id,
@@ -473,7 +486,8 @@ base::DictValue CreateTimerPayload(
     const RecorderPipeClient& client,
     const EvidenceIdentityStorage::TimerState& state,
     std::optional<std::string> cancellation_reason,
-    std::optional<bool> did_timeout = std::nullopt) {
+    std::optional<bool> did_timeout,
+    int page_lifecycle_state) {
   base::DictValue payload;
   payload.Set("context", CreateContext(client, state.document_node_id));
   payload.Set("timerId", state.timer_id);
@@ -492,7 +506,8 @@ base::DictValue CreateTimerPayload(
   }
   payload.Set("nestingLevel", state.nesting_level);
   payload.Set("throttled", base::Value());
-  payload.Set("pageLifecycleState", "unknown");
+  payload.Set("pageLifecycleState",
+              PageLifecycleStateName(page_lifecycle_state));
   payload.Set("callbackLocation", base::Value());
   if (cancellation_reason) {
     payload.Set("cancellationReason", std::move(*cancellation_reason));
@@ -943,7 +958,8 @@ void RecordBlinkTimerScheduled(uintptr_t timer_identity,
                                bool repeating,
                                double requested_delay_milliseconds,
                                double effective_delay_milliseconds,
-                               int nesting_level) {
+                               int nesting_level,
+                               int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || timer_identity == 0 || document_node_id <= 0 ||
       timeout_id <= 0 || requested_delay_milliseconds < 0 ||
@@ -956,11 +972,14 @@ void RecordBlinkTimerScheduled(uintptr_t timer_identity,
       requested_delay_milliseconds, effective_delay_milliseconds,
       nesting_level);
   base::DictValue payload =
-      CreateTimerPayload(*client, state, std::nullopt);
+      CreateTimerPayload(*client, state, std::nullopt, std::nullopt,
+                         page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-scheduled", std::move(payload));
 }
 
-void RecordBlinkTimerFired(uintptr_t timer_identity, bool repeating) {
+void RecordBlinkTimerFired(uintptr_t timer_identity,
+                           bool repeating,
+                           int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || timer_identity == 0) {
     return;
@@ -973,11 +992,13 @@ void RecordBlinkTimerFired(uintptr_t timer_identity, bool repeating) {
     return;
   }
   base::DictValue payload =
-      CreateTimerPayload(*client, *state, std::nullopt);
+      CreateTimerPayload(*client, *state, std::nullopt, std::nullopt,
+                         page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-fired", std::move(payload));
 }
 
-void RecordBlinkTimerCancelled(uintptr_t timer_identity) {
+void RecordBlinkTimerCancelled(uintptr_t timer_identity,
+                               int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || timer_identity == 0) {
     return;
@@ -989,13 +1010,15 @@ void RecordBlinkTimerCancelled(uintptr_t timer_identity) {
     return;
   }
   base::DictValue payload =
-      CreateTimerPayload(*client, *state, std::string("explicit-clear"));
+      CreateTimerPayload(*client, *state, std::string("explicit-clear"),
+                         std::nullopt, page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-cancelled", std::move(payload));
 }
 
 void RecordBlinkAnimationFrameScheduled(uintptr_t callback_identity,
                                         int document_node_id,
-                                        int callback_id) {
+                                        int callback_id,
+                                        int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0 || document_node_id <= 0 ||
       callback_id <= 0) {
@@ -1006,11 +1029,13 @@ void RecordBlinkAnimationFrameScheduled(uintptr_t callback_identity,
       callback_identity, document_node_id, "animation-frame", std::nullopt,
       std::nullopt, 0);
   base::DictValue payload =
-      CreateTimerPayload(*client, state, std::nullopt);
+      CreateTimerPayload(*client, state, std::nullopt, std::nullopt,
+                         page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-scheduled", std::move(payload));
 }
 
-void RecordBlinkAnimationFrameFired(uintptr_t callback_identity) {
+void RecordBlinkAnimationFrameFired(uintptr_t callback_identity,
+                                    int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0) {
     return;
@@ -1022,11 +1047,13 @@ void RecordBlinkAnimationFrameFired(uintptr_t callback_identity) {
     return;
   }
   base::DictValue payload =
-      CreateTimerPayload(*client, *state, std::nullopt);
+      CreateTimerPayload(*client, *state, std::nullopt, std::nullopt,
+                         page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-fired", std::move(payload));
 }
 
-void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity) {
+void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity,
+                                        int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0) {
     return;
@@ -1038,7 +1065,8 @@ void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity) {
     return;
   }
   base::DictValue payload = CreateTimerPayload(
-      *client, *state, std::string("explicit-cancel-animation-frame"));
+      *client, *state, std::string("explicit-cancel-animation-frame"),
+      std::nullopt, page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-cancelled", std::move(payload));
 }
 
@@ -1046,7 +1074,8 @@ void RecordBlinkIdleCallbackScheduled(uintptr_t callback_identity,
                                       int document_node_id,
                                       int callback_id,
                                       bool has_timeout,
-                                      double timeout_milliseconds) {
+                                      double timeout_milliseconds,
+                                      int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0 || document_node_id <= 0 ||
       callback_id <= 0 || timeout_milliseconds < 0) {
@@ -1059,12 +1088,14 @@ void RecordBlinkIdleCallbackScheduled(uintptr_t callback_identity,
       has_timeout ? std::optional<double>(timeout_milliseconds) : std::nullopt,
       0);
   base::DictValue payload =
-      CreateTimerPayload(*client, state, std::nullopt);
+      CreateTimerPayload(*client, state, std::nullopt, std::nullopt,
+                         page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-scheduled", std::move(payload));
 }
 
 void RecordBlinkIdleCallbackFired(uintptr_t callback_identity,
-                                  bool did_timeout) {
+                                  bool did_timeout,
+                                  int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0) {
     return;
@@ -1076,11 +1107,13 @@ void RecordBlinkIdleCallbackFired(uintptr_t callback_identity,
     return;
   }
   base::DictValue payload =
-      CreateTimerPayload(*client, *state, std::nullopt, did_timeout);
+      CreateTimerPayload(*client, *state, std::nullopt, did_timeout,
+                         page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-fired", std::move(payload));
 }
 
-void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity) {
+void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
+                                      int page_lifecycle_state) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0) {
     return;
@@ -1092,7 +1125,8 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity) {
     return;
   }
   base::DictValue payload = CreateTimerPayload(
-      *client, *state, std::string("explicit-cancel-idle-callback"));
+      *client, *state, std::string("explicit-cancel-idle-callback"),
+      std::nullopt, page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-cancelled", std::move(payload));
 }
 

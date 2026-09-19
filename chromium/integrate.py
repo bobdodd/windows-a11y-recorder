@@ -14,6 +14,10 @@ BRIDGE_INCLUDE = '#include "chromium/recorder_bridge/browser_bridge.h"'
 BLINK_BRIDGE_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
 )
+BLINK_DOCUMENT_INCLUDE = (
+    '#include "third_party/blink/renderer/core/dom/document.h"'
+)
+BLINK_PAGE_INCLUDE = '#include "third_party/blink/renderer/core/page/page.h"'
 BLINK_CORE_DEP = '    "//chromium/recorder_bridge",'
 CHILD_LAUNCHER_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
@@ -282,7 +286,7 @@ BLINK_TIMER_REQUESTED_DELAY_HOOK = """\
   const base::TimeDelta recorder_requested_timeout =
       std::max(timeout, base::TimeDelta());
 """
-BLINK_TIMER_SCHEDULED_HOOK = """\
+LEGACY_BLINK_TIMER_SCHEDULED_HOOK = """\
   if (auto* recorder_window = DynamicTo<LocalDOMWindow>(context)) {
     if (Document* recorder_document = recorder_window->document()) {
       a11y_recorder::RecordBlinkTimerScheduled(
@@ -296,15 +300,67 @@ BLINK_TIMER_SCHEDULED_HOOK = """\
     }
   }
 """
-BLINK_TIMER_CANCELLED_HOOK = """\
+BLINK_TIMER_SCHEDULED_HOOK = """\
+  if (auto* recorder_window = DynamicTo<LocalDOMWindow>(context)) {
+    if (Document* recorder_document = recorder_window->document()) {
+      Page* recorder_page = recorder_document->GetPage();
+      const int recorder_page_lifecycle_state =
+          !recorder_page ? 0
+                         : recorder_page->Frozen()
+                               ? 3
+                               : recorder_page->IsPageVisible() ? 1 : 2;
+      a11y_recorder::RecordBlinkTimerScheduled(
+          reinterpret_cast<uintptr_t>(this),
+          recorder_document->GetDomNodeId(),
+          timeout_id_,
+          !single_shot,
+          recorder_requested_timeout.InMillisecondsF(),
+          timeout.InMillisecondsF(),
+          nesting_level_,
+          recorder_page_lifecycle_state);
+    }
+  }
+"""
+LEGACY_BLINK_TIMER_CANCELLED_HOOK = """\
     a11y_recorder::RecordBlinkTimerCancelled(
         reinterpret_cast<uintptr_t>(timer));
 """
-BLINK_TIMER_FIRED_HOOK = """\
+BLINK_TIMER_CANCELLED_HOOK = """\
+    if (auto* recorder_window = DynamicTo<LocalDOMWindow>(context)) {
+      if (Document* recorder_document = recorder_window->document()) {
+        Page* recorder_page = recorder_document->GetPage();
+        const int recorder_page_lifecycle_state =
+            !recorder_page ? 0
+                           : recorder_page->Frozen()
+                                 ? 3
+                                 : recorder_page->IsPageVisible() ? 1 : 2;
+        a11y_recorder::RecordBlinkTimerCancelled(
+            reinterpret_cast<uintptr_t>(timer),
+            recorder_page_lifecycle_state);
+      }
+    }
+"""
+LEGACY_BLINK_TIMER_FIRED_HOOK = """\
   a11y_recorder::RecordBlinkTimerFired(
       reinterpret_cast<uintptr_t>(this), is_interval);
 """
-BLINK_ANIMATION_FRAME_SCHEDULED_HOOK = """\
+BLINK_TIMER_FIRED_HOOK = """\
+  if (auto* recorder_window =
+          DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
+    if (Document* recorder_document = recorder_window->document()) {
+      Page* recorder_page = recorder_document->GetPage();
+      const int recorder_page_lifecycle_state =
+          !recorder_page ? 0
+                         : recorder_page->Frozen()
+                               ? 3
+                               : recorder_page->IsPageVisible() ? 1 : 2;
+      a11y_recorder::RecordBlinkTimerFired(
+          reinterpret_cast<uintptr_t>(this), is_interval,
+          recorder_page_lifecycle_state);
+    }
+  }
+"""
+LEGACY_BLINK_ANIMATION_FRAME_SCHEDULED_HOOK = """\
   if (type == FrameCallbackType::kWebExposed) {
     if (auto* recorder_window =
             DynamicTo<LocalDOMWindow>(context_.Get())) {
@@ -316,19 +372,86 @@ BLINK_ANIMATION_FRAME_SCHEDULED_HOOK = """\
     }
   }
 """
-BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK = """\
+BLINK_ANIMATION_FRAME_SCHEDULED_HOOK = """\
+  if (type == FrameCallbackType::kWebExposed) {
+    if (auto* recorder_window =
+            DynamicTo<LocalDOMWindow>(context_.Get())) {
+      if (Document* recorder_document = recorder_window->document()) {
+        Page* recorder_page = recorder_document->GetPage();
+        const int recorder_page_lifecycle_state =
+            !recorder_page ? 0
+                           : recorder_page->Frozen()
+                                 ? 3
+                                 : recorder_page->IsPageVisible() ? 1 : 2;
+        a11y_recorder::RecordBlinkAnimationFrameScheduled(
+            reinterpret_cast<uintptr_t>(callback),
+            recorder_document->GetDomNodeId(), id,
+            recorder_page_lifecycle_state);
+      }
+    }
+  }
+"""
+LEGACY_BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK = """\
       a11y_recorder::RecordBlinkAnimationFrameCancelled(
           reinterpret_cast<uintptr_t>(callbacks[i].Get()));
 """
-BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK = """\
+BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK = """\
+      if (auto* recorder_window =
+              DynamicTo<LocalDOMWindow>(context_.Get())) {
+        if (Document* recorder_document = recorder_window->document()) {
+          Page* recorder_page = recorder_document->GetPage();
+          const int recorder_page_lifecycle_state =
+              !recorder_page ? 0
+                             : recorder_page->Frozen()
+                                   ? 3
+                                   : recorder_page->IsPageVisible() ? 1 : 2;
+          a11y_recorder::RecordBlinkAnimationFrameCancelled(
+              reinterpret_cast<uintptr_t>(callbacks[i].Get()),
+              recorder_page_lifecycle_state);
+        }
+      }
+"""
+LEGACY_BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK = """\
       a11y_recorder::RecordBlinkAnimationFrameCancelled(
           reinterpret_cast<uintptr_t>(callback.Get()));
 """
-BLINK_ANIMATION_FRAME_FIRED_HOOK = """\
+BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK = """\
+      if (auto* recorder_window =
+              DynamicTo<LocalDOMWindow>(context_.Get())) {
+        if (Document* recorder_document = recorder_window->document()) {
+          Page* recorder_page = recorder_document->GetPage();
+          const int recorder_page_lifecycle_state =
+              !recorder_page ? 0
+                             : recorder_page->Frozen()
+                                   ? 3
+                                   : recorder_page->IsPageVisible() ? 1 : 2;
+          a11y_recorder::RecordBlinkAnimationFrameCancelled(
+              reinterpret_cast<uintptr_t>(callback.Get()),
+              recorder_page_lifecycle_state);
+        }
+      }
+"""
+LEGACY_BLINK_ANIMATION_FRAME_FIRED_HOOK = """\
     a11y_recorder::RecordBlinkAnimationFrameFired(
         reinterpret_cast<uintptr_t>(callback.Get()));
 """
-BLINK_IDLE_CALLBACK_SCHEDULED_HOOK = """\
+BLINK_ANIMATION_FRAME_FIRED_HOOK = """\
+    if (auto* recorder_window =
+            DynamicTo<LocalDOMWindow>(context_.Get())) {
+      if (Document* recorder_document = recorder_window->document()) {
+        Page* recorder_page = recorder_document->GetPage();
+        const int recorder_page_lifecycle_state =
+            !recorder_page ? 0
+                           : recorder_page->Frozen()
+                                 ? 3
+                                 : recorder_page->IsPageVisible() ? 1 : 2;
+        a11y_recorder::RecordBlinkAnimationFrameFired(
+            reinterpret_cast<uintptr_t>(callback.Get()),
+            recorder_page_lifecycle_state);
+      }
+    }
+"""
+LEGACY_BLINK_IDLE_CALLBACK_SCHEDULED_HOOK = """\
   if (auto* recorder_window =
           DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
     if (Document* recorder_document = recorder_window->document()) {
@@ -339,17 +462,70 @@ BLINK_IDLE_CALLBACK_SCHEDULED_HOOK = """\
     }
   }
 """
-BLINK_IDLE_CALLBACK_CANCELLED_HOOK = """\
+BLINK_IDLE_CALLBACK_SCHEDULED_HOOK = """\
+  if (auto* recorder_window =
+          DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
+    if (Document* recorder_document = recorder_window->document()) {
+      Page* recorder_page = recorder_document->GetPage();
+      const int recorder_page_lifecycle_state =
+          !recorder_page ? 0
+                         : recorder_page->Frozen()
+                               ? 3
+                               : recorder_page->IsPageVisible() ? 1 : 2;
+      a11y_recorder::RecordBlinkIdleCallbackScheduled(
+          reinterpret_cast<uintptr_t>(idle_task),
+          recorder_document->GetDomNodeId(), id, options->hasTimeout(),
+          timeout_millis, recorder_page_lifecycle_state);
+    }
+  }
+"""
+LEGACY_BLINK_IDLE_CALLBACK_CANCELLED_HOOK = """\
   auto recorder_idle_task = idle_tasks_.find(id);
   if (recorder_idle_task != idle_tasks_.end()) {
     a11y_recorder::RecordBlinkIdleCallbackCancelled(
         reinterpret_cast<uintptr_t>(recorder_idle_task->value.Get()));
   }
 """
-BLINK_IDLE_CALLBACK_FIRED_HOOK = """\
+BLINK_IDLE_CALLBACK_CANCELLED_HOOK = """\
+  auto recorder_idle_task = idle_tasks_.find(id);
+  if (recorder_idle_task != idle_tasks_.end()) {
+    if (auto* recorder_window =
+            DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
+      if (Document* recorder_document = recorder_window->document()) {
+        Page* recorder_page = recorder_document->GetPage();
+        const int recorder_page_lifecycle_state =
+            !recorder_page ? 0
+                           : recorder_page->Frozen()
+                                 ? 3
+                                 : recorder_page->IsPageVisible() ? 1 : 2;
+        a11y_recorder::RecordBlinkIdleCallbackCancelled(
+            reinterpret_cast<uintptr_t>(recorder_idle_task->value.Get()),
+            recorder_page_lifecycle_state);
+      }
+    }
+  }
+"""
+LEGACY_BLINK_IDLE_CALLBACK_FIRED_HOOK = """\
   a11y_recorder::RecordBlinkIdleCallbackFired(
       reinterpret_cast<uintptr_t>(idle_task),
       callback_type == IdleDeadline::CallbackType::kCalledByTimeout);
+"""
+BLINK_IDLE_CALLBACK_FIRED_HOOK = """\
+  if (auto* recorder_window =
+          DynamicTo<LocalDOMWindow>(GetExecutionContext())) {
+    if (Document* recorder_document = recorder_window->document()) {
+      Page* recorder_page = recorder_document->GetPage();
+      const int recorder_page_lifecycle_state =
+          !recorder_page ? 0
+                         : recorder_page->Frozen()
+                               ? 3
+                               : recorder_page->IsPageVisible() ? 1 : 2;
+      a11y_recorder::RecordBlinkIdleCallbackFired(
+          reinterpret_cast<uintptr_t>(idle_task),
+          callback_type == IdleDeadline::CallbackType::kCalledByTimeout,
+          recorder_page_lifecycle_state);
+    }
+  }
 """
 
 
@@ -360,6 +536,21 @@ def replace_once(text: str, old: str, new: str, path: Path) -> str:
             f"{path}: expected exactly one integration anchor, found {count}"
         )
     return text.replace(old, new, 1)
+
+
+def upgrade_legacy_hooks(
+    text: str, replacements: tuple[tuple[str, str], ...], path: Path
+) -> str:
+    for legacy_hook, current_hook in replacements:
+        count = text.count(legacy_hook)
+        if count > 1:
+            raise RuntimeError(
+                f"{path}: expected at most one legacy integration hook, "
+                f"found {count}"
+            )
+        if count == 1:
+            text = text.replace(legacy_hook, current_hook, 1)
+    return text
 
 
 def patch_main_delegate(path: Path) -> None:
@@ -681,13 +872,32 @@ def patch_blink_event_dispatcher(path: Path) -> None:
 
 def patch_blink_dom_timer(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (LEGACY_BLINK_TIMER_SCHEDULED_HOOK, BLINK_TIMER_SCHEDULED_HOOK),
+            (LEGACY_BLINK_TIMER_CANCELLED_HOOK, BLINK_TIMER_CANCELLED_HOOK),
+            (LEGACY_BLINK_TIMER_FIRED_HOOK, BLINK_TIMER_FIRED_HOOK),
+        ),
+        path,
+    )
     if BLINK_BRIDGE_INCLUDE not in text:
         text = replace_once(
             text,
             '#include "base/check_deref.h"\n',
             '#include "base/check_deref.h"\n'
             f"{BLINK_BRIDGE_INCLUDE}\n"
-            '#include "third_party/blink/renderer/core/dom/document.h"\n',
+            '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            '#include "third_party/blink/renderer/core/frame/'
+            'local_dom_window.h"\n'
+            '#include "third_party/blink/renderer/core/page/page.h"\n',
+            path,
+        )
+    elif BLINK_PAGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            f"{BLINK_DOCUMENT_INCLUDE}\n",
+            f"{BLINK_DOCUMENT_INCLUDE}\n{BLINK_PAGE_INCLUDE}\n",
             path,
         )
     if "recorder_requested_timeout" not in text:
@@ -747,6 +957,28 @@ def patch_blink_dom_timer(path: Path) -> None:
 
 def patch_blink_animation_frame_callbacks(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                LEGACY_BLINK_ANIMATION_FRAME_SCHEDULED_HOOK,
+                BLINK_ANIMATION_FRAME_SCHEDULED_HOOK,
+            ),
+            (
+                LEGACY_BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK,
+                BLINK_ANIMATION_FRAME_CANCELLED_INDEX_HOOK,
+            ),
+            (
+                LEGACY_BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK,
+                BLINK_ANIMATION_FRAME_CANCELLED_CALLBACK_HOOK,
+            ),
+            (
+                LEGACY_BLINK_ANIMATION_FRAME_FIRED_HOOK,
+                BLINK_ANIMATION_FRAME_FIRED_HOOK,
+            ),
+        ),
+        path,
+    )
     if BLINK_BRIDGE_INCLUDE not in text:
         header = (
             '#include "third_party/blink/renderer/core/dom/'
@@ -759,7 +991,15 @@ def patch_blink_animation_frame_callbacks(path: Path) -> None:
             + f"{BLINK_BRIDGE_INCLUDE}\n"
             + '#include "third_party/blink/renderer/core/dom/document.h"\n'
             + '#include "third_party/blink/renderer/core/frame/'
-            'local_dom_window.h"\n',
+            'local_dom_window.h"\n'
+            + '#include "third_party/blink/renderer/core/page/page.h"\n',
+            path,
+        )
+    elif BLINK_PAGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            f"{BLINK_DOCUMENT_INCLUDE}\n",
+            f"{BLINK_DOCUMENT_INCLUDE}\n{BLINK_PAGE_INCLUDE}\n",
             path,
         )
     if "RecordBlinkAnimationFrameScheduled" not in text:
@@ -876,6 +1116,24 @@ def patch_blink_animation_frame_callbacks(path: Path) -> None:
 
 def patch_blink_idle_callbacks(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                LEGACY_BLINK_IDLE_CALLBACK_SCHEDULED_HOOK,
+                BLINK_IDLE_CALLBACK_SCHEDULED_HOOK,
+            ),
+            (
+                LEGACY_BLINK_IDLE_CALLBACK_CANCELLED_HOOK,
+                BLINK_IDLE_CALLBACK_CANCELLED_HOOK,
+            ),
+            (
+                LEGACY_BLINK_IDLE_CALLBACK_FIRED_HOOK,
+                BLINK_IDLE_CALLBACK_FIRED_HOOK,
+            ),
+        ),
+        path,
+    )
     if BLINK_BRIDGE_INCLUDE not in text:
         header = (
             '#include "third_party/blink/renderer/core/scheduler/'
@@ -888,7 +1146,15 @@ def patch_blink_idle_callbacks(path: Path) -> None:
             + f"{BLINK_BRIDGE_INCLUDE}\n"
             + '#include "third_party/blink/renderer/core/dom/document.h"\n'
             + '#include "third_party/blink/renderer/core/frame/'
-            'local_dom_window.h"\n',
+            'local_dom_window.h"\n'
+            + '#include "third_party/blink/renderer/core/page/page.h"\n',
+            path,
+        )
+    elif BLINK_PAGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            f"{BLINK_DOCUMENT_INCLUDE}\n",
+            f"{BLINK_DOCUMENT_INCLUDE}\n{BLINK_PAGE_INCLUDE}\n",
             path,
         )
     if "RecordBlinkIdleCallbackScheduled" not in text:

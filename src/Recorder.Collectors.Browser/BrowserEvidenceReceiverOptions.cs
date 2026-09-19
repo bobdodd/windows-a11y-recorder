@@ -14,6 +14,7 @@ public sealed record BrowserEvidenceReceiverOptions
     public string? ChromiumExecutablePath { get; init; }
     public string? StartUrl { get; init; }
     public string? ProfileDirectory { get; init; }
+    public int? RemoteDebuggingPort { get; init; }
 }
 
 public sealed record BrowserEvidenceConnectionInfo(

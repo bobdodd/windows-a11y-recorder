@@ -122,6 +122,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                     profileDirectory,
                     ConnectionInfo,
                     _options.StartUrl,
+                    _options.RemoteDebuggingPort,
                     cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)

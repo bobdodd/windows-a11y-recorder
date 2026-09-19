@@ -413,7 +413,7 @@ public sealed class SessionArchiveValidatorTests
                 effectiveDelayMilliseconds = 250.0,
                 nestingLevel = 1,
                 throttled = (bool?)null,
-                pageLifecycleState = "unknown",
+                pageLifecycleState = "visible",
                 callbackLocation = (object?)null,
                 cancellationReason = (string?)null
             });
@@ -431,7 +431,7 @@ public sealed class SessionArchiveValidatorTests
                 effectiveDelayMilliseconds = 250.0,
                 nestingLevel = 1,
                 throttled = (bool?)null,
-                pageLifecycleState = "unknown",
+                pageLifecycleState = "hidden",
                 callbackLocation = (object?)null,
                 cancellationReason = (string?)null
             });

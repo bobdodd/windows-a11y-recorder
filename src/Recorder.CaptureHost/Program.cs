@@ -19,6 +19,7 @@ var captureSystemAudio = false;
 var captureBrowserEvidence = false;
 string? chromiumExecutablePath = null;
 string? browserStartUrl = null;
+int? browserRemoteDebuggingPort = null;
 
 for (var index = 0; index < args.Length; index++)
 {
@@ -54,12 +55,20 @@ for (var index = 0; index < args.Length; index++)
             captureBrowserEvidence = true;
             browserStartUrl = args[++index];
             break;
+        case "--browser-remote-debugging-port" when
+            index + 1 < args.Length &&
+            int.TryParse(args[++index], out var port) &&
+            port is > 0 and <= 65535:
+            captureBrowserEvidence = true;
+            browserRemoteDebuggingPort = port;
+            break;
         default:
             Console.Error.WriteLine(
                 "Usage: Recorder.CaptureHost [--output PATH] " +
                 "[--duration-seconds NUMBER] " +
                 "[--audio | --microphone | --system-audio] " +
-                "[--browser] [--browser-path PATH] [--browser-url URL]");
+                "[--browser] [--browser-path PATH] [--browser-url URL] " +
+                "[--browser-remote-debugging-port PORT]");
             return 64;
     }
 }
@@ -73,7 +82,8 @@ try
         CaptureSystemAudio = captureSystemAudio,
         CaptureBrowserEvidence = captureBrowserEvidence,
         ChromiumExecutablePath = chromiumExecutablePath,
-        BrowserStartUrl = browserStartUrl
+        BrowserStartUrl = browserStartUrl,
+        BrowserRemoteDebuggingPort = browserRemoteDebuggingPort
     });
 
     using var stopSignal = new CancellationTokenSource();

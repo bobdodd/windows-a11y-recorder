@@ -35,6 +35,7 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         string profileDirectory,
         BrowserEvidenceConnectionInfo connection,
         string? startUrl,
+        int? remoteDebuggingPort,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
@@ -64,7 +65,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
             executablePath,
             profileDirectory,
             startUrl,
-            Environment.GetEnvironmentVariable(LogFileEnvironmentVariable));
+            Environment.GetEnvironmentVariable(LogFileEnvironmentVariable),
+            remoteDebuggingPort);
         var process = Process.Start(startInfo) ??
             throw new InvalidOperationException(
                 "Instrumented Chromium did not start.");
@@ -128,7 +130,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         string executablePath,
         string profileDirectory,
         string? startUrl,
-        string? diagnosticLogPath = null)
+        string? diagnosticLogPath = null,
+        int? remoteDebuggingPort = null)
     {
         var result = new ProcessStartInfo
         {
@@ -145,6 +148,17 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         result.ArgumentList.Add("--no-first-run");
         result.ArgumentList.Add("--no-default-browser-check");
         result.ArgumentList.Add("--disable-background-mode");
+        if (remoteDebuggingPort is not null)
+        {
+            if (remoteDebuggingPort is <= 0 or > 65535)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(remoteDebuggingPort));
+            }
+            result.ArgumentList.Add("--remote-debugging-address=127.0.0.1");
+            result.ArgumentList.Add(
+                $"--remote-debugging-port={remoteDebuggingPort.Value}");
+        }
         if (!string.IsNullOrWhiteSpace(diagnosticLogPath))
         {
             var fullLogPath = Path.GetFullPath(diagnosticLogPath);

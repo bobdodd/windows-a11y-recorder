@@ -26,6 +26,7 @@ public sealed class ChromiumLauncherTests
                 profile,
                 connection,
                 "/c",
+                remoteDebuggingPort: null,
                 CancellationToken.None));
 
         Assert.Contains(
@@ -56,6 +57,7 @@ public sealed class ChromiumLauncherTests
                 profile,
                 connection,
                 "/c",
+                remoteDebuggingPort: null,
                 CancellationToken.None));
 
         Assert.Contains(
@@ -136,5 +138,31 @@ public sealed class ChromiumLauncherTests
             argument => argument.Contains(
                 "authentication",
                 StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void ExplicitRemoteDebuggingPortIsLoopbackOnly()
+    {
+        var executable = Path.Combine(
+            Path.GetTempPath(),
+            "browser",
+            "chrome.exe");
+        var profile = Path.Combine(
+            Path.GetTempPath(),
+            "profiles",
+            "session-1");
+
+        var startInfo = ChromiumLauncher.CreateStartInfo(
+            executable,
+            profile,
+            "about:blank",
+            remoteDebuggingPort: 9229);
+
+        Assert.Contains(
+            "--remote-debugging-address=127.0.0.1",
+            startInfo.ArgumentList);
+        Assert.Contains(
+            "--remote-debugging-port=9229",
+            startInfo.ArgumentList);
     }
 }

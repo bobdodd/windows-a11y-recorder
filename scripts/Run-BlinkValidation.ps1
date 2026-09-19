@@ -117,6 +117,15 @@ $outputRoot = (Resolve-Path -LiteralPath $OutputRoot).Path
 $fixtureUri = [Uri]::new($fixture).AbsoluteUri
 $bridgeLog = Join-Path $outputRoot "bridge-startup.log"
 $chromiumLog = Join-Path $outputRoot "chromium.log"
+$debugPortListener = [Net.Sockets.TcpListener]::new(
+    [Net.IPAddress]::Loopback,
+    0
+)
+$debugPortListener.Start()
+$debugPort = (
+    [Net.IPEndPoint] $debugPortListener.LocalEndpoint
+).Port
+$debugPortListener.Stop()
 
 Invoke-Checked "Testing the Chromium integration script" {
     & $python $integrationTests
@@ -209,21 +218,114 @@ Remove-Item -LiteralPath $bridgeLog -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $chromiumLog -Force -ErrorAction SilentlyContinue
 $previousBridgeLog = $env:A11Y_RECORDER_BRIDGE_LOG_FILE
 $previousChromiumLog = $env:A11Y_RECORDER_CHROMIUM_LOG_FILE
+$captureJob = $null
 $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $bridgeLog
 $env:A11Y_RECORDER_CHROMIUM_LOG_FILE = $chromiumLog
 try {
-    Invoke-Checked "Capturing the deterministic Blink fixture" {
-        & $dotnet run `
-            --project $captureProject `
+    Write-Host "`n== Capturing the deterministic Blink fixture =="
+    $captureJob = Start-Job -ScriptBlock {
+        param(
+            $Dotnet,
+            $CaptureProject,
+            $OutputRoot,
+            $DurationSeconds,
+            $Browser,
+            $FixtureUri,
+            $DebugPort,
+            $BridgeLog,
+            $ChromiumLog
+        )
+        $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $BridgeLog
+        $env:A11Y_RECORDER_CHROMIUM_LOG_FILE = $ChromiumLog
+        & $Dotnet run `
+            --project $CaptureProject `
             --configuration Release `
             -- `
-            --output $outputRoot `
+            --output $OutputRoot `
             --duration-seconds $DurationSeconds `
-            --browser-path $browser `
-            --browser-url $fixtureUri
+            --browser-path $Browser `
+            --browser-url $FixtureUri `
+            --browser-remote-debugging-port $DebugPort
+        [pscustomobject]@{
+            CaptureExitCode = $LASTEXITCODE
+        }
+    } -ArgumentList @(
+        $dotnet,
+        $captureProject,
+        $outputRoot,
+        $DurationSeconds,
+        $browser,
+        $fixtureUri,
+        $debugPort,
+        $bridgeLog,
+        $chromiumLog
+    )
+
+    $devToolsBase = "http://127.0.0.1:$debugPort"
+    $fixtureTarget = $null
+    $debugDeadline = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $debugDeadline) {
+        if ($captureJob.State -eq "Failed") {
+            break
+        }
+        try {
+            $targets = @(
+                Invoke-RestMethod `
+                    -Uri "$devToolsBase/json/list" `
+                    -TimeoutSec 1
+            )
+            $fixtureTarget = $targets |
+                Where-Object { $_.url -eq $fixtureUri } |
+                Select-Object -First 1
+            if ($fixtureTarget) {
+                break
+            }
+        }
+        catch {
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $fixtureTarget) {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw "The lifecycle fixture did not appear in the DevTools target list."
+    }
+
+    $backgroundTarget = Invoke-RestMethod `
+        -Method Put `
+        -Uri "$devToolsBase/json/new?about%3Ablank" `
+        -TimeoutSec 5
+    Invoke-RestMethod `
+        -Method Put `
+        -Uri "$devToolsBase/json/activate/$($backgroundTarget.id)" `
+        -TimeoutSec 5 |
+        Out-Null
+
+    Wait-Job $captureJob | Out-Null
+    $captureOutput = @(Receive-Job $captureJob)
+    $captureResult = $captureOutput |
+        Where-Object {
+            $_.PSObject.Properties.Name -contains "CaptureExitCode"
+        } |
+        Select-Object -Last 1
+    $captureOutput |
+        Where-Object {
+            $_.PSObject.Properties.Name -notcontains "CaptureExitCode"
+        } |
+        ForEach-Object { Write-Host $_ }
+    if (-not $captureResult) {
+        throw "The capture job did not report an exit code."
+    }
+    if ($captureResult.CaptureExitCode -ne 0) {
+        throw (
+            "Capturing the deterministic Blink fixture failed with exit " +
+            "code $($captureResult.CaptureExitCode)."
+        )
     }
 }
 finally {
+    if ($captureJob) {
+        Remove-Job $captureJob -Force -ErrorAction SilentlyContinue
+    }
     if ($null -eq $previousBridgeLog) {
         Remove-Item `
             Env:A11Y_RECORDER_BRIDGE_LOG_FILE `

@@ -134,6 +134,26 @@ $scheduledIntervals = @(
             $_.payload.effectiveDelayMilliseconds -eq 125
         }
 )
+$scheduledLifecycleTimeouts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-scheduled" -and
+            $_.payload.timerKind -eq "timeout" -and
+            $_.payload.requestedDelayMilliseconds -eq 3000 -and
+            $_.payload.effectiveDelayMilliseconds -eq 3000
+        }
+)
+$scheduledLifecycleIntervals = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-scheduled" -and
+            $_.payload.timerKind -eq "interval" -and
+            $_.payload.requestedDelayMilliseconds -eq 5000 -and
+            $_.payload.effectiveDelayMilliseconds -eq 5000
+        }
+)
 
 $animationFrameScheduleCandidates = @(
     $records |
@@ -195,6 +215,12 @@ if ($scheduledTimeouts.Count -lt 1) {
 }
 if ($scheduledIntervals.Count -lt 1) {
     throw "The fixture's 125 ms interval was not recorded as scheduled."
+}
+if ($scheduledLifecycleTimeouts.Count -ne 1) {
+    throw "The fixture's 3-second lifecycle timeout was not recorded once."
+}
+if ($scheduledLifecycleIntervals.Count -ne 1) {
+    throw "The fixture's 5-second lifecycle interval was not recorded once."
 }
 $listener = $listeners[0].payload
 $scheduledAnimationFrames = @(
@@ -274,6 +300,33 @@ $cancelledIntervals = @(
             $_.payload.cancellationReason -eq "explicit-clear"
         }
 )
+$scheduledLifecycleTimeout = $scheduledLifecycleTimeouts[0]
+$firedLifecycleTimeouts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-fired" -and
+            $_.payload.timerId -eq
+                $scheduledLifecycleTimeout.payload.timerId -and
+            $_.payload.timerKind -eq "timeout" -and
+            $_.payload.context.processId -eq
+                $scheduledLifecycleTimeout.payload.context.processId
+        }
+)
+$scheduledLifecycleInterval = $scheduledLifecycleIntervals[0]
+$cancelledLifecycleIntervals = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.timer" -and
+            $_.eventType -eq "timer-cancelled" -and
+            $_.payload.timerId -eq
+                $scheduledLifecycleInterval.payload.timerId -and
+            $_.payload.timerKind -eq "interval" -and
+            $_.payload.context.processId -eq
+                $scheduledLifecycleInterval.payload.context.processId -and
+            $_.payload.cancellationReason -eq "explicit-clear"
+        }
+)
 $animationFrameIds = @(
     $scheduledAnimationFrames |
         ForEach-Object { $_.payload.timerId }
@@ -346,6 +399,41 @@ if ($firedIntervals.Count -ne 1) {
 }
 if ($cancelledIntervals.Count -ne 1) {
     throw "The fixture interval did not produce one explicit cancellation."
+}
+if ($firedLifecycleTimeouts.Count -ne 1) {
+    throw "The lifecycle timeout did not produce one correlated firing."
+}
+if ($cancelledLifecycleIntervals.Count -ne 1) {
+    throw "The lifecycle interval did not produce one correlated cancellation."
+}
+if ($scheduledLifecycleTimeout.payload.pageLifecycleState -ne "visible") {
+    throw (
+        "The lifecycle timeout was not scheduled while the fixture was visible."
+    )
+}
+if ($firedLifecycleTimeouts[0].payload.pageLifecycleState -ne "hidden") {
+    throw "The lifecycle timeout did not enter while the fixture was hidden."
+}
+if ($scheduledLifecycleInterval.payload.pageLifecycleState -ne "visible") {
+    throw (
+        "The lifecycle interval was not scheduled while the fixture was visible."
+    )
+}
+if ($cancelledLifecycleIntervals[0].payload.pageLifecycleState -ne "hidden") {
+    throw "The lifecycle interval was not cancelled while the fixture was hidden."
+}
+foreach ($lifecycleRecord in @(
+        $scheduledLifecycleTimeout,
+        $firedLifecycleTimeouts[0],
+        $scheduledLifecycleInterval,
+        $cancelledLifecycleIntervals[0]
+    )) {
+    if ($null -ne $lifecycleRecord.payload.throttled) {
+        throw (
+            "Lifecycle evidence inferred throttling without observing a " +
+            "scheduler policy decision."
+        )
+    }
 }
 if ($firedAnimationFrames.Count -ne 1) {
     throw (
@@ -591,6 +679,16 @@ if (-not $completion.propagationStopped) {
     FiredIdleCallbacks = $firedIdleCallbacks.Count
     CancelledIdleCallbacks = $cancelledIdleCallbacks.Count
     FiredIdleCallbackDidTimeout = $firedIdleCallbacks[0].payload.didTimeout
+    LifecycleTimeoutScheduledState =
+        $scheduledLifecycleTimeout.payload.pageLifecycleState
+    LifecycleTimeoutFiredState =
+        $firedLifecycleTimeouts[0].payload.pageLifecycleState
+    LifecycleIntervalScheduledState =
+        $scheduledLifecycleInterval.payload.pageLifecycleState
+    LifecycleIntervalCancelledState =
+        $cancelledLifecycleIntervals[0].payload.pageLifecycleState
+    LifecycleThrottlingObserved =
+        $firedLifecycleTimeouts[0].payload.throttled
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId
     FiredAnimationFrameId = $firedAnimationFrames[0].payload.timerId
@@ -612,5 +710,5 @@ if (-not $completion.propagationStopped) {
 
 Write-Host (
     "Blink propagation, listener, default-handler, DOM timer, " +
-    "animation-frame, and idle-callback evidence verified."
+    "animation-frame, idle-callback, and page-lifecycle evidence verified."
 )

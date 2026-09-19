@@ -78,6 +78,16 @@
       window.clearInterval(intervalId);
     }, 125);
     window.setTimeout(() => {
+      status.dataset.lifecycleTimeoutFired = document.visibilityState;
+    }, 3000);
+    const lifecycleIntervalId = window.setInterval(() => {
+      status.dataset.lifecycleIntervalRan = "true";
+    }, 5000);
+    window.setTimeout(() => {
+      window.clearInterval(lifecycleIntervalId);
+      status.dataset.lifecycleIntervalCancelled = document.visibilityState;
+    }, 3500);
+    window.setTimeout(() => {
       target.click();
       defaultActionLink.click();
     }, 250);
