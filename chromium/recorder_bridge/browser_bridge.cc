@@ -8,6 +8,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "base/check.h"
 #include "base/command_line.h"
@@ -85,6 +86,13 @@ struct EvidenceIdentityStorage {
   uint64_t next_dispatch_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
 
+  struct NodeState {
+    int document_node_id;
+    int node_id;
+    std::string tag_name;
+    std::string element_id;
+  };
+
   struct DispatchState {
     std::string dispatch_id;
     int document_node_id;
@@ -93,9 +101,14 @@ struct EvidenceIdentityStorage {
     std::string target_tag_name;
     std::string target_element_id;
     bool trusted;
+    std::vector<NodeState> composed_path;
+  };
+  struct InvocationState {
+    std::string listener_id;
+    NodeState current_target;
   };
   std::unordered_map<uintptr_t, DispatchState> dispatches;
-  std::unordered_map<uintptr_t, std::string> active_invocations;
+  std::unordered_map<uintptr_t, InvocationState> active_invocations;
 };
 
 EvidenceIdentityStorage& EvidenceIdentities() {
@@ -177,7 +190,7 @@ std::optional<std::string> TakeListenerIdentity(uintptr_t listener_identity) {
   return listener_id;
 }
 
-EvidenceIdentityStorage::DispatchState RegisterDispatchIdentity(
+void RegisterDispatchIdentity(
     uintptr_t event_identity,
     int document_node_id,
     int target_node_id,
@@ -198,7 +211,6 @@ EvidenceIdentityStorage::DispatchState RegisterDispatchIdentity(
       .trusted = trusted,
   };
   identities.dispatches.insert_or_assign(event_identity, state);
-  return state;
 }
 
 std::optional<EvidenceIdentityStorage::DispatchState> FindDispatchIdentity(
@@ -226,23 +238,38 @@ std::optional<EvidenceIdentityStorage::DispatchState> TakeDispatchIdentity(
 }
 
 void RegisterActiveInvocation(uintptr_t event_identity,
-                              std::string listener_id) {
+                              std::string listener_id,
+                              int current_document_node_id,
+                              int current_target_node_id,
+                              std::string current_target_tag_name,
+                              std::string current_target_element_id) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
-  identities.active_invocations.insert_or_assign(event_identity,
-                                                 std::move(listener_id));
+  identities.active_invocations.insert_or_assign(
+      event_identity,
+      EvidenceIdentityStorage::InvocationState{
+          .listener_id = std::move(listener_id),
+          .current_target = EvidenceIdentityStorage::NodeState{
+              .document_node_id = current_document_node_id,
+              .node_id = current_target_node_id,
+              .tag_name = std::move(current_target_tag_name),
+              .element_id = std::move(current_target_element_id),
+          },
+      });
 }
 
-std::optional<std::string> TakeActiveInvocation(uintptr_t event_identity) {
+std::optional<EvidenceIdentityStorage::InvocationState> TakeActiveInvocation(
+    uintptr_t event_identity) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
   auto found = identities.active_invocations.find(event_identity);
   if (found == identities.active_invocations.end()) {
     return std::nullopt;
   }
-  std::string listener_id = std::move(found->second);
+  EvidenceIdentityStorage::InvocationState invocation =
+      std::move(found->second);
   identities.active_invocations.erase(found);
-  return listener_id;
+  return invocation;
 }
 
 std::string EventPhaseName(int event_phase) {
@@ -305,7 +332,8 @@ base::DictValue CreateDispatchPayload(
     bool default_prevented,
     bool propagation_stopped,
     bool immediate_propagation_stopped,
-    std::optional<std::string> outcome) {
+    std::optional<std::string> outcome,
+    const EvidenceIdentityStorage::NodeState* current_target = nullptr) {
   base::DictValue payload;
   payload.Set("context", CreateContext(client, state.document_node_id));
   payload.Set("dispatchId", state.dispatch_id);
@@ -314,7 +342,20 @@ base::DictValue CreateDispatchPayload(
   payload.Set("originalTarget",
               CreateNode(state.document_node_id, state.target_node_id,
                          state.target_tag_name, state.target_element_id));
-  payload.Set("composedPath", base::ListValue());
+  base::ListValue composed_path;
+  for (const auto& node : state.composed_path) {
+    composed_path.Append(CreateNode(node.document_node_id, node.node_id,
+                                    node.tag_name, node.element_id));
+  }
+  payload.Set("composedPath", std::move(composed_path));
+  if (current_target) {
+    payload.Set("currentTarget",
+                CreateNode(current_target->document_node_id,
+                           current_target->node_id, current_target->tag_name,
+                           current_target->element_id));
+  } else {
+    payload.Set("currentTarget", base::Value());
+  }
   payload.Set("phase", std::move(phase));
   if (listener_id) {
     payload.Set("listenerId", std::move(*listener_id));
@@ -651,21 +692,57 @@ void RecordBlinkDispatchStarted(uintptr_t event_identity,
     return;
   }
 
-  EvidenceIdentityStorage::DispatchState state = RegisterDispatchIdentity(
-      event_identity, document_node_id, target_node_id, event_name,
-      target_tag_name, target_element_id, trusted);
-  base::DictValue payload =
-      CreateDispatchPayload(*client, state, std::nullopt, "none", false, false,
-                            false, std::nullopt);
+  RegisterDispatchIdentity(event_identity, document_node_id, target_node_id,
+                           event_name, target_tag_name, target_element_id,
+                           trusted);
+}
+
+void RecordBlinkDispatchPathNode(uintptr_t event_identity,
+                                 int document_node_id,
+                                 int node_id,
+                                 std::string tag_name,
+                                 std::string element_id) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.dispatches.find(event_identity);
+  if (found == identities.dispatches.end() || document_node_id <= 0 ||
+      node_id <= 0) {
+    return;
+  }
+  found->second.composed_path.push_back(
+      {.document_node_id = document_node_id,
+       .node_id = node_id,
+       .tag_name = std::move(tag_name),
+       .element_id = std::move(element_id)});
+}
+
+void CompleteBlinkDispatchStart(uintptr_t event_identity) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  std::optional<EvidenceIdentityStorage::DispatchState> state =
+      FindDispatchIdentity(event_identity);
+  if (!client || !state) {
+    return;
+  }
+  base::DictValue payload = CreateDispatchPayload(
+      *client, *state, std::nullopt, "none", false, false, false,
+      std::nullopt);
   SendBlinkEvidence("browser.dispatch", "dispatch-started", std::move(payload));
 }
 
 void BeginBlinkListenerInvocation(uintptr_t event_identity,
-                                  uintptr_t listener_identity) {
+                                  uintptr_t listener_identity,
+                                  int current_document_node_id,
+                                  int current_target_node_id,
+                                  std::string current_target_tag_name,
+                                  std::string current_target_element_id) {
   std::optional<std::string> listener_id =
       FindListenerIdentity(listener_identity);
-  if (listener_id) {
-    RegisterActiveInvocation(event_identity, std::move(*listener_id));
+  if (listener_id && current_document_node_id > 0 &&
+      current_target_node_id > 0) {
+    RegisterActiveInvocation(
+        event_identity, std::move(*listener_id), current_document_node_id,
+        current_target_node_id, std::move(current_target_tag_name),
+        std::move(current_target_element_id));
   }
 }
 
@@ -677,16 +754,17 @@ void RecordBlinkListenerInvoked(uintptr_t event_identity,
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<EvidenceIdentityStorage::DispatchState> state =
       FindDispatchIdentity(event_identity);
-  std::optional<std::string> listener_id =
+  std::optional<EvidenceIdentityStorage::InvocationState> invocation =
       TakeActiveInvocation(event_identity);
-  if (!client || !state || !listener_id) {
+  if (!client || !state || !invocation) {
     return;
   }
 
   base::DictValue payload = CreateDispatchPayload(
-      *client, *state, std::move(listener_id), EventPhaseName(event_phase),
+      *client, *state, std::move(invocation->listener_id),
+      EventPhaseName(event_phase),
       default_prevented, propagation_stopped, immediate_propagation_stopped,
-      std::nullopt);
+      std::nullopt, &invocation->current_target);
   SendBlinkEvidence("browser.dispatch", "listener-invoked",
                     std::move(payload));
 }

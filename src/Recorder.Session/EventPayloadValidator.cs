@@ -433,12 +433,14 @@ internal static class EventPayloadValidator
                 RequiredBoolean("propagationStopped"),
                 RequiredBoolean("immediatePropagationStopped"),
                 NullableString("defaultAction"),
-                NullableString("outcome")
+                NullableString("outcome"),
+                OptionalNullableObject("currentTarget")
             ],
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
         ValidateBrowserNodeProperty(payload, "originalTarget", issues, line);
+        ValidateBrowserNodeProperty(payload, "currentTarget", issues, line);
         ValidateBrowserNodeArrayProperty(payload, "composedPath", issues, line);
     }
 
@@ -882,6 +884,14 @@ internal static class EventPayloadValidator
         new(
             name,
             true,
+            true,
+            value => value.ValueKind == JsonValueKind.Object,
+            "must be an object or null");
+
+    private static PropertyRule OptionalNullableObject(string name) =>
+        new(
+            name,
+            false,
             true,
             value => value.ValueKind == JsonValueKind.Object,
             "must be an object or null");

@@ -84,11 +84,18 @@ Completed:
 7. Correlate and validate Node listener removal and invocation with dispatch
    completion on the reference Chromium Windows build.
 
+In progress:
+
+1. Record the ordered Blink Node propagation path, each invoked listener's
+   current target and phase, and final propagation-stop state. The
+   implementation and deterministic validation fixture are complete; validation
+   against the reference Chromium Windows build remains.
+
 Remaining:
 
-1. Extend Blink and browser-process evidence to complete dispatch paths,
-   default actions, timers, cookies, DOM, accessibility, network, and
-   rendering.
+1. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
+   dispatch paths, default actions, timers, cookies, DOM, accessibility,
+   network, and rendering.
 2. Record representative NVDA, JAWS, and Narrator sessions.
 3. Add evidence correlation and screen-reader behavior analysis.
 4. Investigate touch and gesture coverage on representative hardware.

@@ -134,7 +134,7 @@ an actionable diagnostic. It does not add Chromium's
 `--do-not-de-elevate` switch because retaining administrator rights in a web
 browser would violate the product's least-privilege requirement.
 
-Protocol version 0.2 propagates the recorder capability from the browser to
+Protocol version 0.3 propagates the recorder capability from the browser to
 eligible renderer processes through a browser-owned, read-only shared-memory
 region. GPU and utility processes are deliberately excluded because the
 current evidence hooks run only in Blink renderers. Chromium's Windows
@@ -151,6 +151,11 @@ process type and identifiers, authenticates its own named-pipe connection, and
 establishes an independent clock mapping. Lifecycle records correlate the
 browser instance, OS process ID, browser OS process ID, Chromium child process
 ID, and process type.
+
+Version 0.3 also adds listener `currentTarget` evidence and populates the
+ordered Node `composedPath` captured from Blink's dispatch path. Receivers
+continue to accept archived 0.2 dispatch payloads that omit `currentTarget`,
+but live 0.3 connections require an exact protocol-version match.
 
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder

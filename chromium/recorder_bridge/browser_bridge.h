@@ -80,10 +80,26 @@ void RecordBlinkDispatchStarted(uintptr_t event_identity,
                                 std::string target_element_id,
                                 bool trusted);
 
+// Adds one Node entry to the active dispatch path, in Blink path order.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDispatchPathNode(uintptr_t event_identity,
+                                 int document_node_id,
+                                 int node_id,
+                                 std::string tag_name,
+                                 std::string element_id);
+
+// Emits dispatch-started after the complete Node path has been accumulated.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void CompleteBlinkDispatchStart(uintptr_t event_identity);
+
 // Preserves listener correlation across a callback that removes itself.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void BeginBlinkListenerInvocation(uintptr_t event_identity,
-                                  uintptr_t listener_identity);
+                                  uintptr_t listener_identity,
+                                  int current_document_node_id,
+                                  int current_target_node_id,
+                                  std::string current_target_tag_name,
+                                  std::string current_target_element_id);
 
 // Records the state immediately after Blink invokes one listener.
 COMPONENT_EXPORT(RECORDER_BRIDGE)

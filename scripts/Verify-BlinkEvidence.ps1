@@ -98,7 +98,44 @@ if ($removals.Count -lt 1) {
 
 $listener = $listeners[0].payload
 $dispatch = $dispatches[0].payload
-$invocation = $invocations[0].payload
+$targetInvocations = @(
+    $invocations |
+        Where-Object {
+            $_.payload.currentTarget.elementId -eq "pointer-only"
+        }
+)
+$rootCaptureInvocations = @(
+    $invocations |
+        Where-Object {
+            $_.payload.currentTarget.elementId -eq "propagation-root" -and
+            $_.payload.phase -eq "capturing"
+        }
+)
+$rootBubbleInvocations = @(
+    $invocations |
+        Where-Object {
+            $_.payload.currentTarget.elementId -eq "propagation-root" -and
+            $_.payload.phase -eq "bubbling"
+        }
+)
+if ($targetInvocations.Count -lt 2) {
+    throw "The target listener invocation sequence is incomplete."
+}
+if ($rootCaptureInvocations.Count -lt 1) {
+    throw "No capturing listener invocation was recorded for #propagation-root."
+}
+if ($rootBubbleInvocations.Count -ne 0) {
+    throw "The ancestor bubble listener ran after propagation was stopped."
+}
+
+$matchingTargetInvocations = @(
+    $targetInvocations |
+        Where-Object { $_.payload.listenerId -eq $listeners[0].payload.listenerId }
+)
+if ($matchingTargetInvocations.Count -lt 1) {
+    throw "No target invocation references the primary registered listener."
+}
+$invocation = $matchingTargetInvocations[0].payload
 $completion = $completions[0].payload
 $removal = $removals[0].payload
 
@@ -147,6 +184,13 @@ if ($removal.listenerId -ne $listener.listenerId) {
 if ($invocation.phase -ne "at-target") {
     throw "The click listener invocation phase was not 'at-target'."
 }
+if ($invocation.currentTarget.elementId -ne "pointer-only") {
+    throw "The target invocation currentTarget is incorrect."
+}
+if ($rootCaptureInvocations[0].payload.currentTarget.elementId -ne
+        "propagation-root") {
+    throw "The capture invocation currentTarget is incorrect."
+}
 if (-not $invocation.defaultPrevented) {
     throw "The invocation did not capture the listener's preventDefault call."
 }
@@ -159,8 +203,21 @@ if (-not $completion.defaultPrevented) {
 if ($removal.target.nodeId -ne $listener.target.nodeId) {
     throw "The removal target does not match the registration target."
 }
-if (@($dispatch.composedPath).Count -ne 0) {
-    throw "The initial dispatch record must not claim a complete composed path."
+$composedPath = @($dispatch.composedPath)
+if ($composedPath.Count -lt 2) {
+    throw "The dispatch composed path does not contain the target and ancestor."
+}
+if ($composedPath[0].elementId -ne "pointer-only") {
+    throw "The composed path does not begin with the original target."
+}
+if (@(
+        $composedPath |
+            Where-Object { $_.elementId -eq "propagation-root" }
+    ).Count -ne 1) {
+    throw "The composed path does not contain #propagation-root exactly once."
+}
+if (-not $completion.propagationStopped) {
+    throw "The completed dispatch did not preserve stopPropagation()."
 }
 
 [pscustomobject]@{
@@ -177,7 +234,10 @@ if (@($dispatch.composedPath).Count -ne 0) {
     DispatchId = $dispatch.dispatchId
     DispatchTrusted = $dispatch.trusted
     InvocationPhase = $invocation.phase
+    ComposedPathNodes = $composedPath.Count
+    RootCaptureInvocations = $rootCaptureInvocations.Count
+    RootBubbleInvocations = $rootBubbleInvocations.Count
     DispatchOutcome = $completion.outcome
 } | Format-List
 
-Write-Host "Blink listener lifecycle and dispatch evidence verified."
+Write-Host "Blink propagation path and listener evidence verified."

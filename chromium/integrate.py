@@ -129,10 +129,25 @@ BLINK_LISTENER_REMOVED_HOOK = """\
         registered_listener->Once());
   }
 """
-BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
+LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
     a11y_recorder::BeginBlinkListenerInvocation(
         reinterpret_cast<uintptr_t>(&event),
         reinterpret_cast<uintptr_t>(registered_listener.Get()));
+"""
+BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
+    if (Node* recorder_current_target = ToNode()) {
+      Element* recorder_current_element =
+          DynamicTo<Element>(recorder_current_target);
+      a11y_recorder::BeginBlinkListenerInvocation(
+          reinterpret_cast<uintptr_t>(&event),
+          reinterpret_cast<uintptr_t>(registered_listener.Get()),
+          recorder_current_target->GetDocument().GetDomNodeId(),
+          recorder_current_target->GetDomNodeId(),
+          recorder_current_target->nodeName().Utf8().c_str(),
+          recorder_current_element
+              ? recorder_current_element->GetIdAttribute().Utf8().c_str()
+              : "");
+    }
 """
 BLINK_LISTENER_INVOKED_HOOK = """\
     a11y_recorder::RecordBlinkListenerInvoked(
@@ -147,6 +162,19 @@ BLINK_LISTENER_INVOKED_HOOK = """\
         event.PropagationStopped(),
         event.ImmediatePropagationStopped());
 """
+LEGACY_BLINK_DISPATCH_HOOK_WITH_IDENTITY = """\
+  Element* recorder_element = DynamicTo<Element>(*node_);
+  a11y_recorder::RecordBlinkDispatchStarted(
+      reinterpret_cast<uintptr_t>(event_),
+      node_->GetDocument().GetDomNodeId(),
+      node_->GetDomNodeId(),
+      event_->type().Utf8().c_str(),
+      node_->nodeName().Utf8().c_str(),
+      recorder_element
+          ? recorder_element->GetIdAttribute().Utf8().c_str()
+          : "",
+      event_->isTrusted());
+"""
 BLINK_DISPATCH_HOOK = """\
   Element* recorder_element = DynamicTo<Element>(*node_);
   a11y_recorder::RecordBlinkDispatchStarted(
@@ -159,6 +187,22 @@ BLINK_DISPATCH_HOOK = """\
           ? recorder_element->GetIdAttribute().Utf8().c_str()
           : "",
       event_->isTrusted());
+  for (const NodeEventContext& recorder_context :
+       event_->GetEventPath().NodeEventContexts()) {
+    Node& recorder_path_node = recorder_context.GetNode();
+    Element* recorder_path_element =
+        DynamicTo<Element>(recorder_path_node);
+    a11y_recorder::RecordBlinkDispatchPathNode(
+        reinterpret_cast<uintptr_t>(event_),
+        recorder_path_node.GetDocument().GetDomNodeId(),
+        recorder_path_node.GetDomNodeId(),
+        recorder_path_node.nodeName().Utf8().c_str(),
+        recorder_path_element
+            ? recorder_path_element->GetIdAttribute().Utf8().c_str()
+            : "");
+  }
+  a11y_recorder::CompleteBlinkDispatchStart(
+      reinterpret_cast<uintptr_t>(event_));
 """
 LEGACY_BLINK_DISPATCH_CALL = """\
   a11y_recorder::RecordBlinkDispatchStarted(
@@ -341,6 +385,13 @@ def patch_blink_event_target(path: Path) -> None:
             CURRENT_BLINK_LISTENER_CALL,
             path,
         )
+    if LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK in text:
+        text = replace_once(
+            text,
+            LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK,
+            BLINK_LISTENER_INVOCATION_STARTED_HOOK,
+            path,
+        )
     if "RecordBlinkListenerRegistered" not in text:
         anchor = "  if (added) {\n    CHECK(registered_listener);\n"
         text = replace_once(
@@ -423,6 +474,16 @@ def patch_blink_event_dispatcher(path: Path) -> None:
             text,
             LEGACY_BLINK_DISPATCH_CALL,
             CURRENT_BLINK_DISPATCH_CALL,
+            path,
+        )
+    if (
+        "CompleteBlinkDispatchStart" not in text
+        and LEGACY_BLINK_DISPATCH_HOOK_WITH_IDENTITY in text
+    ):
+        text = replace_once(
+            text,
+            LEGACY_BLINK_DISPATCH_HOOK_WITH_IDENTITY,
+            BLINK_DISPATCH_HOOK,
             path,
         )
     if "RecordBlinkDispatchStarted" not in text:

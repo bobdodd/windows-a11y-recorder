@@ -343,6 +343,14 @@ class IntegrateTests(unittest.TestCase):
                 "RecordBlinkDispatchCompleted",
                 first_event_dispatcher,
             )
+            self.assertIn(
+                "RecordBlinkDispatchPathNode",
+                first_event_dispatcher,
+            )
+            self.assertIn(
+                "CompleteBlinkDispatchStart",
+                first_event_dispatcher,
+            )
             self.assertNotIn("event_.Get()", first_event_dispatcher)
             self.assertEqual(
                 1,
@@ -351,7 +359,7 @@ class IntegrateTests(unittest.TestCase):
                 ),
             )
             self.assertIn(
-                'CreateDispatchPayload(*client, state, std::nullopt, "none"',
+                'payload.Set("composedPath", std::move(composed_path));',
                 (Path(__file__).parent / "recorder_bridge" / "browser_bridge.cc")
                 .read_text(encoding="utf-8"),
             )
@@ -361,17 +369,23 @@ class IntegrateTests(unittest.TestCase):
             )
 
             event_target.write_text(
-                first_event_target.replace(
+                first_event_target
+                .replace(
                     INTEGRATE.CURRENT_BLINK_LISTENER_CALL,
                     INTEGRATE.LEGACY_BLINK_LISTENER_CALL,
+                    1,
+                )
+                .replace(
+                    INTEGRATE.BLINK_LISTENER_INVOCATION_STARTED_HOOK,
+                    INTEGRATE.LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK,
                     1,
                 ),
                 encoding="utf-8",
             )
             event_dispatcher.write_text(
                 first_event_dispatcher.replace(
-                    INTEGRATE.CURRENT_BLINK_DISPATCH_CALL,
-                    INTEGRATE.LEGACY_BLINK_DISPATCH_CALL,
+                    INTEGRATE.BLINK_DISPATCH_HOOK,
+                    INTEGRATE.LEGACY_BLINK_DISPATCH_HOOK_WITH_IDENTITY,
                     1,
                 ),
                 encoding="utf-8",

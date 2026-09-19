@@ -2,12 +2,13 @@
 
 ## Purpose
 
-This document defines the first two Blink evidence implementation slices and
-the Windows validation required before either can be described as complete.
+This document defines the first three Blink evidence implementation slices and
+the Windows validation required before any can be described as complete.
 The first validated slice records accepted Node listener registrations and the
 start of Node event dispatches. The second implemented slice correlates
-listener removal and invocation with dispatch completion. It does not claim
-complete listener or dispatch coverage.
+listener removal and invocation with dispatch completion. The third implemented
+slice records the ordered Node path and each invoked listener's current target.
+It does not claim complete listener or dispatch coverage.
 
 ## Implemented hooks
 
@@ -43,7 +44,8 @@ allocated at registration. The ordinary Blink listener loop preserves that
 identifier before automatic `once` removal, then emits `listener-invoked`
 after the callback returns.
 
-The invocation record therefore captures the callback's resulting
+The invocation record therefore captures the callback's current target and
+resulting
 `defaultPrevented`, propagation-stopped, and immediate-propagation-stopped
 state. The hook does not yet instrument Blink animation triggers, non-Node
 targets, inline attributes, or event-handler properties.
@@ -65,8 +67,14 @@ The current hook records:
 - The dispatch phase as `none`, because listener-phase processing has not
   started.
 
-The initial composed-path value is empty rather than presenting partial path
-data as complete evidence.
+The third slice traverses Blink's established `NodeEventContexts` before
+capture-phase processing starts. It records those Nodes in Blink path order,
+from the original target through its ancestors. Each listener invocation also
+records the Node on which Blink invoked that listener as `currentTarget`.
+
+This first propagation increment does not yet include Window, non-Node event
+targets, or a separate representation of shadow-adjusted targets. Closed
+shadow-root behavior therefore remains outside the validated claim.
 
 ### Dispatch completion
 
@@ -80,8 +88,8 @@ of these outcomes:
 - `canceled-by-default-event-handler`
 - `canceled-before-dispatch`
 
-Full retargeted and composed paths, default-action detail, callback timing,
-and omission handling for bridge backpressure remain outstanding.
+Full retargeted paths, default-action detail, callback timing, and omission
+handling for bridge backpressure remain outstanding.
 
 ## Component boundary
 
@@ -99,10 +107,11 @@ high-volume event classes.
 
 ## Deterministic fixture
 
-`tests/fixtures/blink-listener-dispatch.html` installs one named click listener
-on `#pointer-only`, invokes `HTMLElement.click()` after 250 milliseconds,
-calls `preventDefault()`, and removes the listener inside the callback. The
-expanded fixture must produce:
+`tests/fixtures/blink-listener-dispatch.html` installs capture and bubble
+listeners on `#propagation-root` and two listeners on `#pointer-only`. It
+invokes `HTMLElement.click()` after 250 milliseconds. The target listeners
+call `preventDefault()`, remove the named listener, and call
+`stopPropagation()`. The expanded fixture must produce:
 
 - At least one `browser.listener` `listener-registered` record for the
   `pointer-only` element and `click` event.
@@ -113,6 +122,11 @@ expanded fixture must produce:
   `defaultPrevented` true.
 - One correlated `dispatch-completed` record with outcome
   `canceled-by-event-handler`.
+- A composed Node path beginning with `#pointer-only` and containing
+  `#propagation-root`.
+- A capturing invocation whose current target is `#propagation-root`.
+- At-target invocations whose current target is `#pointer-only`.
+- No bubbling invocation for `#propagation-root` after propagation is stopped.
 - Renderer process context and stable non-empty listener and dispatch
   identifiers across the lifecycle.
 

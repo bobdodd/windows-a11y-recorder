@@ -368,14 +368,15 @@ public sealed class SessionArchiveValidatorTests
             eventName = "click",
             trusted = false,
             originalTarget = target,
-            composedPath = Array.Empty<object>(),
+            composedPath = new object[] { target },
             phase,
             listenerId,
             defaultPrevented,
             propagationStopped = false,
             immediatePropagationStopped = false,
             defaultAction = (string?)null,
-            outcome
+            outcome,
+            currentTarget = listenerId is null ? null : target
         };
 
         var records = new[]

@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.2";
+    public const string CurrentVersion = "0.3";
 }
 
 public static class BrowserEvidenceChannels
@@ -82,7 +82,8 @@ public sealed record BrowserDispatchPayload(
     bool PropagationStopped,
     bool ImmediatePropagationStopped,
     string? DefaultAction,
-    string? Outcome);
+    string? Outcome,
+    BrowserNodeReference? CurrentTarget = null);
 
 public sealed record BrowserTimerPayload(
     BrowserContext Context,

@@ -7,12 +7,29 @@
 <body>
   <h1>Blink listener and dispatch fixture</h1>
   <p id="status" aria-live="polite">Preparing fixture.</p>
-  <div id="pointer-only">Pointer-only activation target</div>
+  <div id="propagation-root">
+    <div id="pointer-only">Pointer-only activation target</div>
+  </div>
   <script>
     const target = document.getElementById("pointer-only");
+    const propagationRoot = document.getElementById("propagation-root");
     const status = document.getElementById("status");
+    const invocationOrder = [];
+
+    propagationRoot.addEventListener(
+      "click",
+      () => invocationOrder.push("root-capture"),
+      true
+    );
+
+    propagationRoot.addEventListener(
+      "click",
+      () => invocationOrder.push("root-bubble"),
+      false
+    );
 
     function handleClick(event) {
+      invocationOrder.push("target-primary");
       event.preventDefault();
       status.textContent = "Fixture click listener invoked.";
       target.removeEventListener("click", handleClick, false);
@@ -22,6 +39,12 @@
       capture: false,
       passive: false,
       once: false
+    });
+
+    target.addEventListener("click", (event) => {
+      invocationOrder.push("target-stop");
+      event.stopPropagation();
+      status.dataset.invocationOrder = invocationOrder.join(",");
     });
 
     status.textContent = "Fixture listener registered.";
