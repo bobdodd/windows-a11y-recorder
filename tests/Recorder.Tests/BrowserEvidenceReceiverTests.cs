@@ -12,6 +12,8 @@ namespace Recorder.Tests;
 
 public sealed class BrowserEvidenceReceiverTests
 {
+    private const AceType SystemMandatoryLabelAceType = (AceType)0x11;
+
     [Fact]
     public void PipeSecuritySupportsChromiumLockdownWithoutMachineWideAccess()
     {
@@ -42,7 +44,7 @@ public sealed class BrowserEvidenceReceiverTests
 
         var mandatoryLabel = Assert.Single(
             descriptor.SystemAcl!.OfType<CommonAce>());
-        Assert.Equal(AceType.SystemMandatoryLabel, mandatoryLabel.AceType);
+        Assert.Equal(SystemMandatoryLabelAceType, mandatoryLabel.AceType);
         Assert.Equal(
             "S-1-16-0",
             mandatoryLabel.SecurityIdentifier.Value);
