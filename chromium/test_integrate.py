@@ -952,6 +952,7 @@ class IntegrateTests(unittest.TestCase):
             build = root / "BUILD.gn"
 
             throttler_h.write_text(
+                '#include "base/memory/raw_ptr.h"\n'
                 "namespace scheduler {\n\n"
                 "class BudgetPool;\n"
                 "class TaskQueueThrottler {\n"
@@ -1032,6 +1033,36 @@ class IntegrateTests(unittest.TestCase):
                 INTEGRATE.BLINK_SCHEDULER_DEP,
                 first[build],
             )
+            self.assertIn(
+                '#include "base/memory/weak_ptr.h"',
+                first[throttler_h],
+            )
+            self.assertIn(
+                "base::WeakPtr<MainThreadTaskQueue> owner_;",
+                first[throttler_h],
+            )
+            self.assertIn("owner_(owner->AsWeakPtr())", first[throttler_cc])
+
+            throttler_h.write_text(
+                first[throttler_h]
+                .replace('#include "base/memory/weak_ptr.h"\n', "")
+                .replace(
+                    INTEGRATE.BLINK_THROTTLER_OWNER_MEMBER,
+                    INTEGRATE.LEGACY_BLINK_THROTTLER_OWNER_MEMBER,
+                ),
+                encoding="utf-8",
+            )
+            throttler_cc.write_text(
+                first[throttler_cc].replace(
+                    INTEGRATE.BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+                    INTEGRATE.LEGACY_BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+                ),
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_task_queue_throttler_header(throttler_h)
+            INTEGRATE.patch_blink_task_queue_throttler(throttler_cc)
+            self.assertEqual(first[throttler_h], throttler_h.read_text())
+            self.assertEqual(first[throttler_cc], throttler_cc.read_text())
 
 
 if __name__ == "__main__":

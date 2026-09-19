@@ -541,9 +541,21 @@ TaskQueueThrottler::TaskQueueThrottler(
     MainThreadTaskQueue* owner,
     base::sequence_manager::TaskQueue* task_queue,
     const base::TickClock* tick_clock)
+    : owner_(owner->AsWeakPtr()),
+      task_queue_(task_queue),
+      tick_clock_(tick_clock) {}
+"""
+LEGACY_BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION = """\
+TaskQueueThrottler::TaskQueueThrottler(
+    MainThreadTaskQueue* owner,
+    base::sequence_manager::TaskQueue* task_queue,
+    const base::TickClock* tick_clock)
     : owner_(owner), task_queue_(task_queue), tick_clock_(tick_clock) {}
 """
 BLINK_THROTTLER_OWNER_MEMBER = """\
+  base::WeakPtr<MainThreadTaskQueue> owner_;
+"""
+LEGACY_BLINK_THROTTLER_OWNER_MEMBER = """\
   const raw_ptr<MainThreadTaskQueue> owner_;
 """
 BLINK_MAIN_THREAD_QUEUE_CONSTRUCTION = """\
@@ -1292,6 +1304,14 @@ def patch_blink_core_build(path: Path) -> None:
 
 def patch_blink_task_queue_throttler_header(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
+    weak_ptr_include = '#include "base/memory/weak_ptr.h"\n'
+    if weak_ptr_include not in text:
+        text = replace_once(
+            text,
+            '#include "base/memory/raw_ptr.h"\n',
+            '#include "base/memory/raw_ptr.h"\n' + weak_ptr_include,
+            path,
+        )
     if BLINK_THROTTLER_OWNER_DECLARATION not in text:
         text = replace_once(
             text,
@@ -1312,13 +1332,21 @@ def patch_blink_task_queue_throttler_header(path: Path) -> None:
             path,
         )
     if BLINK_THROTTLER_OWNER_MEMBER not in text:
-        text = replace_once(
-            text,
-            "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n",
-            f"{BLINK_THROTTLER_OWNER_MEMBER}"
-            "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n",
-            path,
-        )
+        if LEGACY_BLINK_THROTTLER_OWNER_MEMBER in text:
+            text = replace_once(
+                text,
+                LEGACY_BLINK_THROTTLER_OWNER_MEMBER,
+                BLINK_THROTTLER_OWNER_MEMBER,
+                path,
+            )
+        else:
+            text = replace_once(
+                text,
+                "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n",
+                f"{BLINK_THROTTLER_OWNER_MEMBER}"
+                "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n",
+                path,
+            )
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
@@ -1345,12 +1373,20 @@ TaskQueueThrottler::TaskQueueThrottler(
     : task_queue_(task_queue), tick_clock_(tick_clock) {}
 """
     if BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION not in text:
-        text = replace_once(
-            text,
-            old_constructor,
-            BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
-            path,
-        )
+        if LEGACY_BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION in text:
+            text = replace_once(
+                text,
+                LEGACY_BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+                BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+                path,
+            )
+        else:
+            text = replace_once(
+                text,
+                old_constructor,
+                BLINK_THROTTLER_CONSTRUCTOR_IMPLEMENTATION,
+                path,
+            )
     old_return = """\
   return GetNextAllowedWakeUpImpl(lazy_now, next_desired_wake_up,
                                   has_ready_task);
