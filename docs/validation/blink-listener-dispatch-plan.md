@@ -103,7 +103,31 @@ record.
 ## Current validation state
 
 The Python integration tests and source formatting checks pass in the
-repository development environment. The native Chromium compile and live
-archive assertions for this implementation slice are pending on the reference
-Windows machine. This document must not be converted into a success record
-until those checks pass.
+repository development environment. The instrumented Chromium build and all
+31 managed tests passed on the reference Windows machine on September 19,
+2026.
+
+The first live fixture runs established the following child-bootstrap facts:
+
+- The browser hook entered for renderer, GPU, and utility launches and attached
+  a bootstrap region to each eligible child.
+- Renderer and utility children entered bridge initialization.
+- Each observed child received a valid inherited region handle, mapped the
+  region, parsed the bootstrap, and passed process metadata validation.
+- Each observed child then failed while opening the recorder named pipe.
+
+This localizes the remaining connection failure to Windows named-pipe security,
+not command-line propagation, shared-memory inheritance, bootstrap parsing, or
+process metadata validation. The receiver formerly used the managed
+`CurrentUserOnly` pipe option. That descriptor does not satisfy Chromium's
+restricted-token and untrusted-integrity access checks. The receiver now uses
+an explicit descriptor granting the current logon SID and Chromium lockdown
+restricting SID access, with an untrusted mandatory label. A focused regression
+test verifies those descriptor properties and verifies that the descriptor
+does not grant Everyone access.
+
+The native Chromium compile and final live archive assertions for this pipe
+descriptor change remain pending on the reference Windows machine. This
+document must not be converted into a success record until the deterministic
+fixture produces the required renderer lifecycle, listener, and dispatch
+records and the archive validator passes.

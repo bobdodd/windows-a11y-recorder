@@ -150,6 +150,17 @@ establishes an independent clock mapping. Lifecycle records correlate the
 browser instance, OS process ID, browser OS process ID, Chromium child process
 ID, and process type.
 
+Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
+named pipe created with the managed `CurrentUserOnly` option. The recorder
+therefore creates each browser-evidence pipe with an explicit security
+descriptor. Its protected DACL grants duplex access only to the current logon
+SID and Chromium's `S-1-0-0` lockdown restricting SID. Its mandatory label is
+untrusted integrity, `S-1-16-0`, so an untrusted renderer can write to it.
+The pipe name remains unpredictable, and every process must still authenticate
+with the per-session secret before the receiver accepts or persists evidence.
+The descriptor does not grant access to Everyone, Authenticated Users, or
+other machine sessions.
+
 The native target depends on Chromium `//base` and must be compiled and tested
 inside a Chromium source checkout. On September 18, 2026, the bridge was
 compiled into Chromium 156.0.8065.0 on the reference Windows platform. The

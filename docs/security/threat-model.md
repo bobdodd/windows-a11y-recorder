@@ -104,6 +104,7 @@ Boundary interpretation:
 - User commands cross from human intent into the app and require accessible confirmation.
 - App-to-host messages cross a process boundary and require authentication, authorization, validation, and replay protection.
 - Instrumented Chromium processes cross a process boundary and require per-session authentication, schema validation, bounded messages, clock mapping, and omission reporting.
+- The browser-evidence pipe grants transport access only to the current Windows logon session and Chromium's lockdown restricting SID. An untrusted-integrity label permits sandboxed renderers to connect, but the unpredictable pipe name and per-session authentication token remain required before evidence is accepted.
 - Windows APIs, devices, tested applications, and UI Automation providers cross an untrusted input boundary.
 - Evidence crosses from volatile process memory into encrypted storage.
 - Review and export cross from protected raw evidence into wider human and device access.

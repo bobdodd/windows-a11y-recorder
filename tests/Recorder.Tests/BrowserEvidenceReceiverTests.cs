@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Threading.Channels;
 using Recorder.Collectors.Browser;
@@ -10,6 +12,43 @@ namespace Recorder.Tests;
 
 public sealed class BrowserEvidenceReceiverTests
 {
+    [Fact]
+    public void PipeSecuritySupportsChromiumLockdownWithoutMachineWideAccess()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var security = BrowserEvidencePipeFactory.CreateSecurity();
+        var descriptor = new RawSecurityDescriptor(
+            security.GetSecurityDescriptorBinaryForm(),
+            0);
+        var allowedSids = descriptor.DiscretionaryAcl!
+            .OfType<CommonAce>()
+            .Where(ace => ace.AceType == AceType.AccessAllowed)
+            .Select(ace => ace.SecurityIdentifier.Value)
+            .ToArray();
+
+        Assert.Contains(
+            BrowserEvidencePipeFactory.GetCurrentLogonSid().Value,
+            allowedSids);
+        Assert.Contains("S-1-0-0", allowedSids);
+        Assert.DoesNotContain(
+            new SecurityIdentifier(
+                WellKnownSidType.WorldSid,
+                null).Value,
+            allowedSids);
+
+        var mandatoryLabel = Assert.Single(
+            descriptor.SystemAcl!.OfType<CommonAce>());
+        Assert.Equal(AceType.SystemMandatoryLabel, mandatoryLabel.AceType);
+        Assert.Equal(
+            "S-1-16-0",
+            mandatoryLabel.SecurityIdentifier.Value);
+        Assert.Equal(1, mandatoryLabel.AccessMask);
+    }
+
     [Fact]
     public async Task AuthenticatesSynchronizesAndAcceptsBrowserEvidence()
     {

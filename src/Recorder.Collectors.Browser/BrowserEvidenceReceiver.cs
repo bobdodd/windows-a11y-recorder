@@ -213,12 +213,8 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var pipe = new NamedPipeServerStream(
-                    _options.PipeName,
-                    PipeDirection.InOut,
-                    NamedPipeServerStream.MaxAllowedServerInstances,
-                    PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                var pipe = BrowserEvidencePipeFactory.Create(
+                    _options.PipeName);
                 try
                 {
                     await pipe.WaitForConnectionAsync(cancellationToken)
