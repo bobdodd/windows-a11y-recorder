@@ -39,14 +39,32 @@ function Invoke-Checked {
 }
 
 function Get-PythonCommand {
-    foreach ($candidate in @("python3", "python")) {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DepotToolsPath
+    )
+
+    $candidates = @(
+        (Join-Path $DepotToolsPath "python3.bat"),
+        "python3",
+        "python"
+    )
+    foreach ($candidate in $candidates) {
         $command = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($command) {
-            return $command.Source
+        if (-not $command) {
+            continue
+        }
+
+        & $candidate --version *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return $candidate
         }
     }
 
-    throw "Python was not found. Install Python or add python/python3 to PATH."
+    throw (
+        "Python was not found. The script checked Depot Tools and PATH. " +
+        "Confirm that depot_tools\python3.bat exists."
+    )
 }
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -66,7 +84,7 @@ $chromiumSource = (
 ).Path
 $depotTools = (Resolve-Path -LiteralPath $DepotTools).Path
 $dotnet = (Resolve-Path -LiteralPath $DotnetPath).Path
-$python = Get-PythonCommand
+$python = Get-PythonCommand -DepotToolsPath $depotTools
 $autoninja = Join-Path $depotTools "autoninja.bat"
 $browser = Join-Path $chromiumSource "out\A11yRecorder\chrome.exe"
 $fixture = Join-Path (
