@@ -959,6 +959,23 @@ class IntegrateTests(unittest.TestCase):
             navigation_context,
         )
 
+    def test_validation_waits_for_fixture_lifecycle_readiness(self):
+        root = Path(__file__).parent.parent
+        fixture = (
+            root / "tests" / "fixtures" / "blink-listener-dispatch.html"
+        ).read_text(encoding="utf-8")
+        runner = (
+            root / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+        ready_title = "Blink listener and dispatch fixture ready"
+
+        self.assertIn(f'document.title = "{ready_title}"', fixture)
+        self.assertIn(f'$_.title -eq "{ready_title}"', runner)
+        self.assertLess(
+            fixture.index('document.addEventListener("visibilitychange"'),
+            fixture.index(f'document.title = "{ready_title}"'),
+        )
+
     def test_patches_scheduler_decision_boundary_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -309,7 +309,10 @@ try {
                     -TimeoutSec 1
             )
             $fixtureTarget = $targets |
-                Where-Object { $_.url -eq $fixtureUri } |
+                Where-Object {
+                    $_.url.StartsWith($fixtureUri) -and
+                    $_.title -eq "Blink listener and dispatch fixture ready"
+                } |
                 Select-Object -First 1
             if ($fixtureTarget) {
                 break
@@ -321,7 +324,10 @@ try {
     }
     if (-not $fixtureTarget) {
         Stop-Job $captureJob -ErrorAction SilentlyContinue
-        throw "The lifecycle fixture did not appear in the DevTools target list."
+        throw (
+            "The lifecycle fixture did not report readiness in the DevTools " +
+            "target list."
+        )
     }
 
     $backgroundTarget = Invoke-RestMethod `

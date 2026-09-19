@@ -78,6 +78,9 @@ from the product version.
 
 ### Changed
 
+- Made deterministic lifecycle validation wait for an explicit fixture-ready
+  signal before moving the page into the background, preventing the hidden
+  transition from racing listener registration.
 - Unified protocol 0.11 page and frame identity in the canonical `frame-N`
   namespace. Main-frame records now carry equal `pageId` and `frameId`
   values, while subframe records reuse their root main frame's identity as
