@@ -102,6 +102,9 @@ struct EvidenceIdentityStorage {
     std::string target_element_id;
     bool trusted;
     std::vector<NodeState> composed_path;
+    bool observed_default_prevented = false;
+    bool observed_propagation_stopped = false;
+    bool observed_immediate_propagation_stopped = false;
   };
   struct InvocationState {
     std::string listener_id;
@@ -221,6 +224,24 @@ std::optional<EvidenceIdentityStorage::DispatchState> FindDispatchIdentity(
   if (found == identities.dispatches.end()) {
     return std::nullopt;
   }
+  return found->second;
+}
+
+std::optional<EvidenceIdentityStorage::DispatchState> ObserveDispatchState(
+    uintptr_t event_identity,
+    bool default_prevented,
+    bool propagation_stopped,
+    bool immediate_propagation_stopped) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.dispatches.find(event_identity);
+  if (found == identities.dispatches.end()) {
+    return std::nullopt;
+  }
+  found->second.observed_default_prevented |= default_prevented;
+  found->second.observed_propagation_stopped |= propagation_stopped;
+  found->second.observed_immediate_propagation_stopped |=
+      immediate_propagation_stopped;
   return found->second;
 }
 
@@ -753,7 +774,9 @@ void RecordBlinkListenerInvoked(uintptr_t event_identity,
                                 bool immediate_propagation_stopped) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<EvidenceIdentityStorage::DispatchState> state =
-      FindDispatchIdentity(event_identity);
+      ObserveDispatchState(event_identity, default_prevented,
+                           propagation_stopped,
+                           immediate_propagation_stopped);
   std::optional<EvidenceIdentityStorage::InvocationState> invocation =
       TakeActiveInvocation(event_identity);
   if (!client || !state || !invocation) {
@@ -782,8 +805,11 @@ void RecordBlinkDispatchCompleted(uintptr_t event_identity,
   }
 
   base::DictValue payload = CreateDispatchPayload(
-      *client, *state, std::nullopt, "none", default_prevented,
-      propagation_stopped, immediate_propagation_stopped,
+      *client, *state, std::nullopt, "none",
+      default_prevented || state->observed_default_prevented,
+      propagation_stopped || state->observed_propagation_stopped,
+      immediate_propagation_stopped ||
+          state->observed_immediate_propagation_stopped,
       DispatchOutcomeName(dispatch_result));
   SendBlinkEvidence("browser.dispatch", "dispatch-completed",
                     std::move(payload));

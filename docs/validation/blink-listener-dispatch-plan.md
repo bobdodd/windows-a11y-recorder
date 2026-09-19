@@ -80,7 +80,10 @@ shadow-root behavior therefore remains outside the validated claim.
 
 After Blink calculates its `DispatchEventResult`, the second slice emits
 `dispatch-completed` with the same dispatch identifier as `dispatch-started`.
-The record includes the final default-prevention and propagation state and one
+Blink may clear propagation flags while finishing dispatch. The bridge
+therefore preserves the cumulative default-prevention and propagation state
+observed after each listener and combines it with the state still present when
+dispatch returns. The completion record includes that cumulative state and one
 of these outcomes:
 
 - `not-canceled`

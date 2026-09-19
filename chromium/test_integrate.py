@@ -364,6 +364,16 @@ class IntegrateTests(unittest.TestCase):
                 .read_text(encoding="utf-8"),
             )
             self.assertIn(
+                "observed_propagation_stopped",
+                (Path(__file__).parent / "recorder_bridge" / "browser_bridge.cc")
+                .read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "ObserveDispatchState(event_identity, default_prevented,",
+                (Path(__file__).parent / "recorder_bridge" / "browser_bridge.cc")
+                .read_text(encoding="utf-8"),
+            )
+            self.assertIn(
                 '    "//chromium/recorder_bridge",\n',
                 first_blink_build,
             )
