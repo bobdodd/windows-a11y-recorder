@@ -27,9 +27,9 @@ internal static class BrowserEvidencePipeFactory
 
     internal static PipeSecurity CreateSecurity()
     {
-        var logonSid = GetCurrentLogonSid();
+        var sessionSid = GetCurrentSessionSid();
         var descriptor =
-            $"D:P(A;;GRGW;;;{logonSid.Value})" +
+            $"D:P(A;;GRGW;;;{sessionSid.Value})" +
             $"(A;;GRGW;;;{ChromiumLockdownSid})" +
             $"S:(ML;;NW;;;{UntrustedIntegritySid})";
         var security = new PipeSecurity();
@@ -37,7 +37,7 @@ internal static class BrowserEvidencePipeFactory
         return security;
     }
 
-    internal static SecurityIdentifier GetCurrentLogonSid()
+    internal static SecurityIdentifier GetCurrentSessionSid()
     {
         using var identity = WindowsIdentity.GetCurrent(
             TokenAccessLevels.Query);
@@ -45,7 +45,8 @@ internal static class BrowserEvidencePipeFactory
             .OfType<SecurityIdentifier>()
             .SingleOrDefault(sid => sid.IsWellKnown(
                 WellKnownSidType.LogonIdsSid));
-        return logonSid ?? throw new InvalidOperationException(
-            "The current Windows access token does not contain a logon SID.");
+        return logonSid ?? identity.User ??
+            throw new InvalidOperationException(
+                "The current Windows access token has no session identity.");
     }
 }

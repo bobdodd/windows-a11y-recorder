@@ -156,6 +156,8 @@ therefore creates each browser-evidence pipe with an explicit security
 descriptor. Its protected DACL grants duplex access only to the current logon
 SID and Chromium's `S-1-0-0` lockdown restricting SID. Its mandatory label is
 untrusted integrity, `S-1-16-0`, so an untrusted renderer can write to it.
+If a noninteractive Windows token has no logon SID, the descriptor uses that
+token's current-user SID instead.
 The pipe name remains unpredictable, and every process must still authenticate
 with the per-session secret before the receiver accepts or persists evidence.
 The descriptor does not grant access to Everyone, Authenticated Users, or

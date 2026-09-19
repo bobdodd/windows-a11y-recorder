@@ -33,7 +33,7 @@ public sealed class BrowserEvidenceReceiverTests
             .ToArray();
 
         Assert.Contains(
-            BrowserEvidencePipeFactory.GetCurrentLogonSid().Value,
+            BrowserEvidencePipeFactory.GetCurrentSessionSid().Value,
             allowedSids);
         Assert.Contains("S-1-0-0", allowedSids);
         Assert.DoesNotContain(
