@@ -90,6 +90,7 @@ BLINK_LISTENER_HOOK = """\
     if (Node* recorder_target = ToNode()) {
       Element* recorder_element = DynamicTo<Element>(recorder_target);
       a11y_recorder::RecordBlinkListenerRegistered(
+          reinterpret_cast<uintptr_t>(registered_listener),
           recorder_target->GetDocument().GetDomNodeId(),
           recorder_target->GetDomNodeId(),
           event_type.Utf8().c_str(),
@@ -102,9 +103,45 @@ BLINK_LISTENER_HOOK = """\
           registered_listener->Once());
     }
 """
+BLINK_LISTENER_REMOVED_HOOK = """\
+  if (Node* recorder_target = ToNode()) {
+    Element* recorder_element = DynamicTo<Element>(recorder_target);
+    a11y_recorder::RecordBlinkListenerRemoved(
+        reinterpret_cast<uintptr_t>(registered_listener),
+        recorder_target->GetDocument().GetDomNodeId(),
+        recorder_target->GetDomNodeId(),
+        event_type.Utf8().c_str(),
+        recorder_target->nodeName().Utf8().c_str(),
+        recorder_element
+            ? recorder_element->GetIdAttribute().Utf8().c_str()
+            : "",
+        registered_listener->Capture(),
+        registered_listener->Passive(),
+        registered_listener->Once());
+  }
+"""
+BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
+    a11y_recorder::BeginBlinkListenerInvocation(
+        reinterpret_cast<uintptr_t>(&event),
+        reinterpret_cast<uintptr_t>(registered_listener.Get()));
+"""
+BLINK_LISTENER_INVOKED_HOOK = """\
+    a11y_recorder::RecordBlinkListenerInvoked(
+        reinterpret_cast<uintptr_t>(&event),
+        event.eventPhase() == Event::PhaseType::kCapturingPhase
+            ? 1
+            : event.eventPhase() == Event::PhaseType::kAtTarget
+                  ? 2
+                  : event.eventPhase() == Event::PhaseType::kBubblingPhase ? 3
+                                                                           : 0,
+        event.defaultPrevented(),
+        event.PropagationStopped(),
+        event.ImmediatePropagationStopped());
+"""
 BLINK_DISPATCH_HOOK = """\
   Element* recorder_element = DynamicTo<Element>(*node_);
   a11y_recorder::RecordBlinkDispatchStarted(
+      reinterpret_cast<uintptr_t>(event_.Get()),
       node_->GetDocument().GetDomNodeId(),
       node_->GetDomNodeId(),
       event_->type().Utf8().c_str(),
@@ -113,6 +150,19 @@ BLINK_DISPATCH_HOOK = """\
           ? recorder_element->GetIdAttribute().Utf8().c_str()
           : "",
       event_->isTrusted());
+"""
+BLINK_DISPATCH_COMPLETED_HOOK = """\
+  a11y_recorder::RecordBlinkDispatchCompleted(
+      reinterpret_cast<uintptr_t>(event_.Get()),
+      result == DispatchEventResult::kCanceledByEventHandler
+          ? 1
+          : result == DispatchEventResult::kCanceledByDefaultEventHandler
+                ? 2
+                : result == DispatchEventResult::kCanceledBeforeDispatch ? 3
+                                                                         : 0,
+      event_->defaultPrevented(),
+      event_->PropagationStopped(),
+      event_->ImmediatePropagationStopped());
 """
 
 
@@ -274,6 +324,57 @@ def patch_blink_event_target(path: Path) -> None:
             f"{anchor}{BLINK_LISTENER_HOOK}",
             path,
         )
+    if "RecordBlinkListenerRemoved" not in text:
+        anchor = (
+            "  CHECK(registered_listener);\n"
+            "  RemovedEventListener(event_type, *registered_listener);\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            (
+                "  CHECK(registered_listener);\n"
+                f"{BLINK_LISTENER_REMOVED_HOOK}"
+                "  RemovedEventListener(event_type, *registered_listener);\n"
+            ),
+            path,
+        )
+    if "BeginBlinkListenerInvocation" not in text:
+        anchor = (
+            "    EventListener* listener = registered_listener->Callback();\n"
+            "    // The listener will be retained by Member<EventListener> in the\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            (
+                "    EventListener* listener = registered_listener->Callback();\n"
+                f"{BLINK_LISTENER_INVOCATION_STARTED_HOOK}"
+                "    // The listener will be retained by Member<EventListener> in the\n"
+            ),
+            path,
+        )
+    if "RecordBlinkListenerInvoked" not in text:
+        anchor = (
+            "    // To match Mozilla, the AT_TARGET phase fires both capturing and "
+            "bubbling\n"
+            "    // event listeners, even though that violates some versions of the "
+            "DOM spec.\n"
+            "    listener->Invoke(context, &event);\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            (
+                "    // To match Mozilla, the AT_TARGET phase fires both capturing and "
+                "bubbling\n"
+                "    // event listeners, even though that violates some versions of the "
+                "DOM spec.\n"
+                "    listener->Invoke(context, &event);\n"
+                f"{BLINK_LISTENER_INVOKED_HOOK}"
+            ),
+            path,
+        )
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
@@ -302,6 +403,23 @@ def patch_blink_event_dispatcher(path: Path) -> None:
                 "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
                 f"{BLINK_DISPATCH_HOOK}"
                 "#if DCHECK_IS_ON()\n"
+            ),
+            path,
+        )
+    if "RecordBlinkDispatchCompleted" not in text:
+        anchor = (
+            "  auto result = EventTarget::GetDispatchEventResult(*event_);\n"
+            "\n"
+            "  return result;\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            (
+                "  auto result = EventTarget::GetDispatchEventResult(*event_);\n"
+                f"{BLINK_DISPATCH_COMPLETED_HOOK}"
+                "\n"
+                "  return result;\n"
             ),
             path,
         )

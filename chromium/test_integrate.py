@@ -116,6 +116,37 @@ class IntegrateTests(unittest.TestCase):
                 "    AddedEventListener(event_type, *registered_listener);\n"
                 "  }\n"
                 "  return added;\n"
+                "}\n"
+                "\n"
+                "bool EventTarget::RemoveEventListenerInternal() {\n"
+                "  CHECK(registered_listener);\n"
+                "  RemovedEventListener(event_type, *registered_listener);\n"
+                "  return true;\n"
+                "}\n"
+                "\n"
+                "bool EventTarget::FireEventListeners() {\n"
+                "    listener->Invoke(context, &event);\n"
+                "    EventListener* listener = registered_listener->Callback();\n"
+                "    // The listener will be retained by Member<EventListener> in the\n"
+                "    // registeredListener, i and size are updated with the firing "
+                "event iterator\n"
+                "    // in case the listener is removed from the listener vector "
+                "below.\n"
+                "    if (registered_listener->Once()) {\n"
+                "      removeEventListener(event.type(), listener,\n"
+                "                          registered_listener->Capture());\n"
+                "    }\n"
+                "    event.SetHandlingPassive(EventPassiveMode(*registered_listener));\n"
+                "\n"
+                "    probe::UserCallback probe(context, nullptr, event.type(), false, "
+                "this);\n"
+                "\n"
+                "    // To match Mozilla, the AT_TARGET phase fires both capturing and "
+                "bubbling\n"
+                "    // event listeners, even though that violates some versions of "
+                "the DOM spec.\n"
+                "    listener->Invoke(context, &event);\n"
+                "    fired_listener = true;\n"
                 "}\n",
                 encoding="utf-8",
             )
@@ -130,6 +161,10 @@ class IntegrateTests(unittest.TestCase):
                 "#if DCHECK_IS_ON()\n"
                 "  DCHECK(event_->RawTarget());\n"
                 "#endif\n"
+                "  auto result = "
+                "EventTarget::GetDispatchEventResult(*event_);\n"
+                "\n"
+                "  return result;\n"
                 "}\n",
                 encoding="utf-8",
             )
@@ -273,7 +308,39 @@ class IntegrateTests(unittest.TestCase):
                 first_event_target,
             )
             self.assertIn(
+                "RecordBlinkListenerRemoved",
+                first_event_target,
+            )
+            self.assertIn(
+                "RecordBlinkListenerInvoked",
+                first_event_target,
+            )
+            self.assertIn(
+                "BeginBlinkListenerInvocation",
+                first_event_target,
+            )
+            self.assertLess(
+                first_event_target.index("BeginBlinkListenerInvocation"),
+                first_event_target.index(
+                    "if (registered_listener->Once())"
+                ),
+            )
+            self.assertEqual(
+                1,
+                first_event_target.count("RecordBlinkListenerInvoked"),
+            )
+            self.assertEqual(
+                2,
+                first_event_target.count(
+                    "listener->Invoke(context, &event);"
+                ),
+            )
+            self.assertIn(
                 "RecordBlinkDispatchStarted",
+                first_event_dispatcher,
+            )
+            self.assertIn(
+                "RecordBlinkDispatchCompleted",
                 first_event_dispatcher,
             )
             self.assertEqual(
@@ -283,7 +350,7 @@ class IntegrateTests(unittest.TestCase):
                 ),
             )
             self.assertIn(
-                'payload.Set("phase", "none");',
+                'CreateDispatchPayload(*client, state, std::nullopt, "none"',
                 (Path(__file__).parent / "recorder_bridge" / "browser_bridge.cc")
                 .read_text(encoding="utf-8"),
             )

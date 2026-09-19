@@ -2,10 +2,12 @@
 
 ## Purpose
 
-This document defines the first Blink evidence implementation slice and the
-Windows validation required before it can be described as complete. The slice
-records accepted Node listener registrations and the start of Node event
-dispatches. It does not claim complete listener or dispatch coverage.
+This document defines the first two Blink evidence implementation slices and
+the Windows validation required before either can be described as complete.
+The first validated slice records accepted Node listener registrations and the
+start of Node event dispatches. The second implemented slice correlates
+listener removal and invocation with dispatch completion. It does not claim
+complete listener or dispatch coverage.
 
 ## Implemented hooks
 
@@ -29,8 +31,22 @@ The current hook records:
 
 The hook currently records only EventTargets that are Nodes. Window, worker,
 and other non-Node EventTargets remain outside this slice. Inline attributes,
-`on*` properties, listener removal, isolated-world identity, and source
-location also remain outstanding.
+`on*` properties, isolated-world identity, and source location remain
+outstanding.
+
+### Listener removal and invocation
+
+The second slice retains a process-local correlation from each accepted
+`RegisteredEventListener` to its listener identifier. A successful
+`removeEventListener` operation emits `listener-removed` with the identifier
+allocated at registration. The ordinary Blink listener loop preserves that
+identifier before automatic `once` removal, then emits `listener-invoked`
+after the callback returns.
+
+The invocation record therefore captures the callback's resulting
+`defaultPrevented`, propagation-stopped, and immediate-propagation-stopped
+state. The hook does not yet instrument Blink animation triggers, non-Node
+targets, inline attributes, or event-handler properties.
 
 ### Dispatch start
 
@@ -50,9 +66,22 @@ The current hook records:
   started.
 
 The initial composed-path value is empty rather than presenting partial path
-data as complete evidence. Full retargeted and composed paths, listener
-invocation, propagation changes,
-default-action handling, completion outcome, and timing remain outstanding.
+data as complete evidence.
+
+### Dispatch completion
+
+After Blink calculates its `DispatchEventResult`, the second slice emits
+`dispatch-completed` with the same dispatch identifier as `dispatch-started`.
+The record includes the final default-prevention and propagation state and one
+of these outcomes:
+
+- `not-canceled`
+- `canceled-by-event-handler`
+- `canceled-by-default-event-handler`
+- `canceled-before-dispatch`
+
+Full retargeted and composed paths, default-action detail, callback timing,
+and omission handling for bridge backpressure remain outstanding.
 
 ## Component boundary
 
@@ -70,16 +99,22 @@ high-volume event classes.
 
 ## Deterministic fixture
 
-`tests/fixtures/blink-listener-dispatch.html` installs one click listener on
-`#pointer-only` and invokes `HTMLElement.click()` after 250 milliseconds. This
-must produce:
+`tests/fixtures/blink-listener-dispatch.html` installs one named click listener
+on `#pointer-only`, invokes `HTMLElement.click()` after 250 milliseconds,
+calls `preventDefault()`, and removes the listener inside the callback. The
+expanded fixture must produce:
 
 - At least one `browser.listener` `listener-registered` record for the
   `pointer-only` element and `click` event.
 - At least one `browser.dispatch` `dispatch-started` record for the same
   document and node.
-- Renderer process context, stable non-empty listener and dispatch
-  identifiers, and phase `none`.
+- One correlated `listener-removed` record.
+- One correlated `listener-invoked` record with phase `at-target` and
+  `defaultPrevented` true.
+- One correlated `dispatch-completed` record with outcome
+  `canceled-by-event-handler`.
+- Renderer process context and stable non-empty listener and dispatch
+  identifiers across the lifecycle.
 
 Because `HTMLElement.click()` dispatches a synthetic event, the expected
 `trusted` value is false.
@@ -140,7 +175,11 @@ accepted child connections to renderers, which are the only children with
 implemented evidence hooks.
 
 This result validates the initial Blink listener-registration and
-dispatch-start slice. It does not validate listener removal, listener
-invocation, complete composed paths, default actions, timers, cookies, DOM or
-accessibility snapshots, network evidence, compositor evidence, or rendering
-evidence.
+dispatch-start slice.
+
+The correlated listener-removal, listener-invocation, and dispatch-completion
+slice is implemented in the repository but has not yet completed the reference
+Windows build-and-capture procedure. Until that run succeeds, those records
+must not be described as validated. Complete composed paths, default actions,
+timers, cookies, DOM or accessibility snapshots, network evidence, compositor
+evidence, and rendering evidence also remain unvalidated.

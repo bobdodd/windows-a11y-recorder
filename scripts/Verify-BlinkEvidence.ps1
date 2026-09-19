@@ -47,6 +47,36 @@ $dispatches = @(
         }
 )
 
+$invocations = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.eventType -eq "listener-invoked" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.originalTarget.elementId -eq "pointer-only"
+        }
+)
+
+$completions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.eventType -eq "dispatch-completed" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.originalTarget.elementId -eq "pointer-only"
+        }
+)
+
+$removals = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-removed" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.target.elementId -eq "pointer-only"
+        }
+)
+
 if ($rendererConnections.Count -lt 1) {
     throw "No instrumented Chromium renderer connected to the recorder."
 }
@@ -56,9 +86,21 @@ if ($listeners.Count -lt 1) {
 if ($dispatches.Count -lt 1) {
     throw "No click dispatch start was recorded for #pointer-only."
 }
+if ($invocations.Count -lt 1) {
+    throw "No click listener invocation was recorded for #pointer-only."
+}
+if ($completions.Count -lt 1) {
+    throw "No click dispatch completion was recorded for #pointer-only."
+}
+if ($removals.Count -lt 1) {
+    throw "No click listener removal was recorded for #pointer-only."
+}
 
 $listener = $listeners[0].payload
 $dispatch = $dispatches[0].payload
+$invocation = $invocations[0].payload
+$completion = $completions[0].payload
+$removal = $removals[0].payload
 
 if ($listener.context.processType -ne "renderer") {
     throw "The listener record did not originate in a renderer process."
@@ -90,6 +132,33 @@ if ($listener.capture -or $listener.passive -or $listener.once) {
 if ($dispatch.trusted) {
     throw "The programmatic fixture dispatch was unexpectedly marked trusted."
 }
+if ($invocation.dispatchId -ne $dispatch.dispatchId) {
+    throw "The listener invocation does not reference the started dispatch."
+}
+if ($completion.dispatchId -ne $dispatch.dispatchId) {
+    throw "The dispatch completion does not reference the started dispatch."
+}
+if ($invocation.listenerId -ne $listener.listenerId) {
+    throw "The invocation does not reference the registered listener."
+}
+if ($removal.listenerId -ne $listener.listenerId) {
+    throw "The removal does not reference the registered listener."
+}
+if ($invocation.phase -ne "at-target") {
+    throw "The click listener invocation phase was not 'at-target'."
+}
+if (-not $invocation.defaultPrevented) {
+    throw "The invocation did not capture the listener's preventDefault call."
+}
+if ($completion.outcome -ne "canceled-by-event-handler") {
+    throw "The dispatch completion has an unexpected outcome."
+}
+if (-not $completion.defaultPrevented) {
+    throw "The completed dispatch did not preserve defaultPrevented."
+}
+if ($removal.target.nodeId -ne $listener.target.nodeId) {
+    throw "The removal target does not match the registration target."
+}
 if (@($dispatch.composedPath).Count -ne 0) {
     throw "The initial dispatch record must not claim a complete composed path."
 }
@@ -98,12 +167,17 @@ if (@($dispatch.composedPath).Count -ne 0) {
     SessionPath = (Resolve-Path -LiteralPath $SessionPath).Path
     ListenerRecords = $listeners.Count
     DispatchRecords = $dispatches.Count
+    InvocationRecords = $invocations.Count
+    CompletionRecords = $completions.Count
+    RemovalRecords = $removals.Count
     RendererProcessId = $listener.context.processId
     DocumentId = $listener.context.documentId
     TargetNodeId = $listener.target.nodeId
     ListenerId = $listener.listenerId
     DispatchId = $dispatch.dispatchId
     DispatchTrusted = $dispatch.trusted
+    InvocationPhase = $invocation.phase
+    DispatchOutcome = $completion.outcome
 } | Format-List
 
-Write-Host "Blink listener and dispatch evidence verified."
+Write-Host "Blink listener lifecycle and dispatch evidence verified."

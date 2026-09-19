@@ -82,11 +82,18 @@ Completed:
 6. Build and validate the initial Blink Node listener-registration and
    dispatch-start hooks on the reference Chromium Windows build.
 
+In progress:
+
+1. Correlate Node listener removal and invocation with dispatch completion.
+   The hooks, deterministic fixture, archive contract test, and verification
+   assertions are implemented. The reference Windows build-and-capture run is
+   still required before this slice is marked complete.
+
 Remaining:
 
-1. Extend Blink and browser-process evidence to listener removal and
-   invocation, complete dispatch paths, default actions, timers, cookies, DOM,
-   accessibility, network, and rendering.
+1. Extend Blink and browser-process evidence to complete dispatch paths,
+   default actions, timers, cookies, DOM, accessibility, network, and
+   rendering.
 2. Record representative NVDA, JAWS, and Narrator sessions.
 3. Add evidence correlation and screen-reader behavior analysis.
 4. Investigate touch and gesture coverage on representative hardware.

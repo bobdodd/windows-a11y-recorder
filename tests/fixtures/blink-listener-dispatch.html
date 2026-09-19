@@ -12,13 +12,17 @@
     const target = document.getElementById("pointer-only");
     const status = document.getElementById("status");
 
-    target.addEventListener(
-      "click",
-      () => {
-        status.textContent = "Fixture click listener invoked.";
-      },
-      { capture: false, passive: false, once: false }
-    );
+    function handleClick(event) {
+      event.preventDefault();
+      status.textContent = "Fixture click listener invoked.";
+      target.removeEventListener("click", handleClick, false);
+    }
+
+    target.addEventListener("click", handleClick, {
+      capture: false,
+      passive: false,
+      once: false
+    });
 
     status.textContent = "Fixture listener registered.";
     window.setTimeout(() => target.click(), 250);

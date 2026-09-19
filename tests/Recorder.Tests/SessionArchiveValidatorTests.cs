@@ -322,6 +322,117 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null
+        };
+        var target = new
+        {
+            documentId = "dom-document-8",
+            nodeId = 42,
+            backendNodeId = (string?)null,
+            tagName = "DIV",
+            elementId = "pointer-only",
+            classes = Array.Empty<string>()
+        };
+        var listener = new
+        {
+            context,
+            listenerId = "listener-1",
+            eventName = "click",
+            registrationKind = "add-event-listener",
+            target,
+            capture = false,
+            passive = false,
+            once = false,
+            location = (object?)null
+        };
+        object Dispatch(
+            string phase,
+            string? listenerId,
+            bool defaultPrevented,
+            string? outcome) => new
+        {
+            context,
+            dispatchId = "dispatch-1",
+            eventName = "click",
+            trusted = false,
+            originalTarget = target,
+            composedPath = Array.Empty<object>(),
+            phase,
+            listenerId,
+            defaultPrevented,
+            propagationStopped = false,
+            immediatePropagationStopped = false,
+            defaultAction = (string?)null,
+            outcome
+        };
+
+        var records = new[]
+        {
+            CreateEvent(
+                0,
+                100,
+                BrowserEvidenceChannels.Listener,
+                BrowserEvidenceEventTypes.ListenerRegistered,
+                listener),
+            CreateEvent(
+                1,
+                200,
+                BrowserEvidenceChannels.Dispatch,
+                BrowserEvidenceEventTypes.DispatchStarted,
+                Dispatch("none", null, false, null)),
+            CreateEvent(
+                2,
+                300,
+                BrowserEvidenceChannels.Listener,
+                BrowserEvidenceEventTypes.ListenerRemoved,
+                listener),
+            CreateEvent(
+                3,
+                400,
+                BrowserEvidenceChannels.Dispatch,
+                BrowserEvidenceEventTypes.ListenerInvoked,
+                Dispatch("at-target", "listener-1", true, null)),
+            CreateEvent(
+                4,
+                500,
+                BrowserEvidenceChannels.Dispatch,
+                BrowserEvidenceEventTypes.DispatchCompleted,
+                Dispatch(
+                    "none",
+                    null,
+                    true,
+                    "canceled-by-event-handler"))
+        };
+        var directory = await CreateArchiveAsync(records);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RejectsCookieValuesAtTheArchiveBoundary()
     {
         var record = CreateEvent(
