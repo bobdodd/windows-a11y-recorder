@@ -179,7 +179,12 @@ $firedTimeouts = @(
         Where-Object {
             $_.channel -eq "browser.timer" -and
             $_.eventType -eq "timer-fired" -and
-            $_.payload.timerId -eq $scheduledTimeout.payload.timerId
+            $_.payload.timerId -eq $scheduledTimeout.payload.timerId -and
+            $_.payload.timerKind -eq "timeout" -and
+            $_.payload.context.browserInstanceId -eq
+                $scheduledTimeout.payload.context.browserInstanceId -and
+            $_.payload.context.processId -eq
+                $scheduledTimeout.payload.context.processId
         }
 )
 $firedIntervals = @(
@@ -187,7 +192,12 @@ $firedIntervals = @(
         Where-Object {
             $_.channel -eq "browser.timer" -and
             $_.eventType -eq "timer-fired" -and
-            $_.payload.timerId -eq $scheduledInterval.payload.timerId
+            $_.payload.timerId -eq $scheduledInterval.payload.timerId -and
+            $_.payload.timerKind -eq "interval" -and
+            $_.payload.context.browserInstanceId -eq
+                $scheduledInterval.payload.context.browserInstanceId -and
+            $_.payload.context.processId -eq
+                $scheduledInterval.payload.context.processId
         }
 )
 $cancelledIntervals = @(
@@ -196,6 +206,11 @@ $cancelledIntervals = @(
             $_.channel -eq "browser.timer" -and
             $_.eventType -eq "timer-cancelled" -and
             $_.payload.timerId -eq $scheduledInterval.payload.timerId -and
+            $_.payload.timerKind -eq "interval" -and
+            $_.payload.context.browserInstanceId -eq
+                $scheduledInterval.payload.context.browserInstanceId -and
+            $_.payload.context.processId -eq
+                $scheduledInterval.payload.context.processId -and
             $_.payload.cancellationReason -eq "explicit-clear"
         }
 )
