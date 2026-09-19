@@ -102,33 +102,45 @@ record.
 
 ## Current validation state
 
-The Python integration tests and source formatting checks pass in the
-repository development environment. The instrumented Chromium build and all
-31 managed tests passed on the reference Windows machine on September 19,
-2026.
+Validation completed successfully on the reference Windows machine on
+September 19, 2026, using repository commit `08b75fb`. The complete script
+exited with code 0 after:
 
-The first live fixture runs established the following child-bootstrap facts:
+- Passing the Chromium integration tests.
+- Building the instrumented Chromium executable.
+- Passing the managed recorder test suite.
+- Launching Chromium from a standard, non-elevated PowerShell session.
+- Connecting instrumented renderer processes through the authenticated pipe.
+- Recording the fixture's `click` listener registration for `#pointer-only`.
+- Recording the fixture's programmatic `click` dispatch start for the same
+  document and node.
+- Validating the completed archive.
+- Confirming that Chromium reported no network-service crashes.
 
-- The browser hook entered for renderer launches and attached a bootstrap
-  region to each eligible child. GPU and utility launches are now deliberately
-  skipped because they have no evidence hooks.
-- Renderer children entered bridge initialization.
-- Each observed child received a valid inherited region handle, mapped the
-  region, parsed the bootstrap, and passed process metadata validation.
-- Each observed child then failed while opening the recorder named pipe.
+The validated session is:
 
-This localizes the remaining connection failure to Windows named-pipe security,
-not command-line propagation, shared-memory inheritance, bootstrap parsing, or
-process metadata validation. The receiver formerly used the managed
-`CurrentUserOnly` pipe option. That descriptor does not satisfy Chromium's
-restricted-token and untrusted-integrity access checks. The receiver now uses
-an explicit descriptor granting the current logon SID and Chromium lockdown
-restricting SID access, with an untrusted mandatory label. A focused regression
-test verifies those descriptor properties and verifies that the descriptor
-does not grant Everyone access.
+`C:\Users\Public\Documents\A11yRecorderBlinkValidation\20260919-143342-bd566cd94efe4ba79d20e0c67b90e5dc`
 
-The native Chromium compile and final live archive assertions for this pipe
-descriptor change remain pending on the reference Windows machine. This
-document must not be converted into a success record until the deterministic
-fixture produces the required renderer lifecycle, listener, and dispatch
-records and the archive validator passes.
+The final validation summary reported:
+
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=371`
+- `ARTIFACTS_VALIDATED=81`
+- `NETWORK_SERVICE_CRASHES=0`
+- `VALIDATION_EXIT_CODE=0`
+
+Earlier fixture attempts exposed two independent integration defects. First,
+the managed named-pipe descriptor did not allow Chromium's restricted,
+untrusted renderer token to connect. The final descriptor grants the current
+logon SID and Chromium lockdown restricting SID access, applies an untrusted
+mandatory label, and does not grant Everyone access. Second, distributing the
+bootstrap capability to GPU and utility processes destabilized Chromium's
+network-service utility process. Commit `08b75fb` restricts distribution and
+accepted child connections to renderers, which are the only children with
+implemented evidence hooks.
+
+This result validates the initial Blink listener-registration and
+dispatch-start slice. It does not validate listener removal, listener
+invocation, complete composed paths, default actions, timers, cookies, DOM or
+accessibility snapshots, network evidence, compositor evidence, or rendering
+evidence.

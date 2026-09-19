@@ -29,6 +29,9 @@ from the product version.
 - Made deterministic Blink validation fail explicitly if Chromium reports a
   network-service crash, and allowed 15 seconds by default for clean browser
   startup and fixture dispatch.
+- Validated renderer bootstrap, listener registration, dispatch start, and
+  archive integrity end to end on the reference Windows platform with 371
+  events, 81 artifacts, and zero network-service crashes.
 - Browser launch now rejects an elevated recorder process with an actionable
   diagnostic. This preserves Chromium's least-privilege boundary and avoids
   losing the inherited standard-input bootstrap during Chromium's Windows

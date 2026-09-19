@@ -33,11 +33,12 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Child-process capability propagation is implemented and awaits final
-archive-level validation. The first narrow Blink slice now instruments
-accepted Node listener registrations and dispatch starts. Its native Chromium
-build and live fixture validation are pending. The scope and required checks
-are documented in the
+Renderer capability propagation and the first narrow Blink slice were
+validated end to end on the reference Windows platform on September 19, 2026.
+The validated archive contained the deterministic fixture's listener
+registration and dispatch start, passed structural validation across 371
+events and 81 artifacts, and recorded no network-service crashes. The scope,
+procedure, and evidence are documented in the
 [Blink listener and dispatch validation plan](docs/validation/blink-listener-dispatch-plan.md).
 
 ## Project goals
@@ -78,19 +79,17 @@ Completed:
 5. Implement recorder capability propagation, independent authentication, and
    clock synchronization for Chromium renderer processes. GPU and utility
    processes remain excluded until they have dedicated evidence hooks.
+6. Build and validate the initial Blink Node listener-registration and
+   dispatch-start hooks on the reference Chromium Windows build.
 
 Remaining:
 
-1. Validate child-process capability propagation on the reference Chromium
-   Windows build.
-2. Build and validate the initial Blink Node listener-registration and
-   dispatch-start hooks on the reference Chromium Windows build.
-3. Extend Blink and browser-process evidence to listener removal and
+1. Extend Blink and browser-process evidence to listener removal and
    invocation, complete dispatch paths, default actions, timers, cookies, DOM,
    accessibility, network, and rendering.
-4. Record representative NVDA, JAWS, and Narrator sessions.
-5. Add evidence correlation and screen-reader behavior analysis.
-6. Investigate touch and gesture coverage on representative hardware.
+2. Record representative NVDA, JAWS, and Narrator sessions.
+3. Add evidence correlation and screen-reader behavior analysis.
+4. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 

@@ -125,13 +125,33 @@ remains exclusively inside the read-only shared-memory region. A repeated
 native build and live child-process session are required before child
 propagation is considered validated.
 
+## September 19 renderer and Blink validation
+
+The remaining renderer capability and initial Blink evidence scope was
+validated on September 19, 2026, using commit `08b75fb`. The complete
+validation script exited with code 0. The session was:
+
+`C:\Users\Public\Documents\A11yRecorderBlinkValidation\20260919-143342-bd566cd94efe4ba79d20e0c67b90e5dc`
+
+The archive validator accepted 371 events and 81 artifacts. The fixture
+verifier found the expected renderer connection, `click` listener registration
+for `#pointer-only`, and programmatic `click` dispatch start for the same
+document and node. Chromium reported zero network-service crashes.
+
+This final run used a renderer-only child capability boundary. Earlier
+distribution to GPU and utility processes caused the network-service utility
+process to restart repeatedly. Those process types remain excluded until
+dedicated evidence hooks require and validate their participation.
+
 ## Scope boundary
 
-This validation proves the browser-process bootstrap, local named-pipe
-authentication, protocol framing, clock synchronization, lifecycle evidence,
-session finalization, and archive validation.
+Together, the September 18 and September 19 validations prove browser and
+renderer bootstrap, local named-pipe authentication across the Chromium
+sandbox boundary, protocol framing, per-process clock synchronization,
+lifecycle evidence, initial Blink Node listener-registration evidence, initial
+dispatch-start evidence, session finalization, and archive validation.
 
-It does not yet prove child-process capability distribution, renderer
-connections, Blink listener instrumentation, event-dispatch instrumentation,
-timer instrumentation, DOM or accessibility snapshots, cookie operations, or
-network and compositor evidence. Those remain explicit future stages.
+They do not prove listener removal, listener invocation, complete composed
+paths, default actions, timer instrumentation, DOM or accessibility snapshots,
+cookie operations, network evidence, compositor evidence, or rendering
+evidence. Those remain explicit future stages.
