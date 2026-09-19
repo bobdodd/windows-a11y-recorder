@@ -15,7 +15,7 @@ without inferring scheduler throttling from elapsed delay.
 - .NET runtime: 10.0.12
 - Chromium version: 156.0.8065.0
 - Chromium output: `out\\A11yRecorder\\chrome.exe`
-- Validated source checkpoint: `22fb60b`
+- Validated source checkpoint: `fc5dcbb`
 - Browser evidence protocol: 0.8
 
 ## Procedure
@@ -34,19 +34,13 @@ workflow:
 7. Ran archive validation and the fixture-specific evidence verifier.
 8. Checked the Chromium log for network-service crashes.
 
-PowerShell initially treated expected native Chromium stderr received from the
-background capture job as a terminating `RemoteException`. The capture itself
-completed and finalized normally. The evidence verifier was then run directly
-against that completed session. The validation harness was corrected
-separately so native stderr is displayed without masking the capture result.
-
 ## Result
 
-The validated session was:
+The complete validation script exited with code 0. The validated session was:
 
-`C:\\Users\\Public\\Documents\\A11yRecorderBlinkValidation\\20260919-200840-ffa0e3287ef84c65bd71845186f01115`
+`C:\\Users\\Public\\Documents\\A11yRecorderBlinkValidation\\20260919-203753-2a7ca616e222457aafd0bc814295d6cf`
 
-Archive validator version 1.2 accepted 655 events and 81 artifacts with no
+Archive validator version 1.2 accepted 657 events and 81 artifacts with no
 issues. The capture host dropped no records. Chromium reported no
 network-service crashes.
 
@@ -70,7 +64,7 @@ The fixture verifier reported:
 - Fired idle callbacks: 1
 - Cancelled idle callbacks: 1
 - Fired idle callback `didTimeout`: true
-- Renderer process ID: 19852
+- Renderer process ID: 5960
 - Document ID: `dom-document-3`
 - Original target node ID: 4
 - Listener ID: `listener-3`
