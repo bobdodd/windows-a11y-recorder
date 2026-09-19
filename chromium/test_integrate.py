@@ -247,6 +247,15 @@ class IntegrateTests(unittest.TestCase):
                 "child_process_id().value()",
                 first_child_launcher,
             )
+            self.assertIn(
+                "command_line(), options_ptr, child_process_id().value(),",
+                first_child_launcher,
+            )
+            self.assertIn(
+                "    return;\n  }\n#endif\n"
+                "  if (BeforeLaunchOnLauncherThread(",
+                first_child_launcher,
+            )
             self.assertNotIn(
                 "AppendRecorderBootstrapToChildProcess",
                 first_windows_child_launcher,
@@ -314,6 +323,42 @@ class IntegrateTests(unittest.TestCase):
                         INTEGRATE.CHILD_LAUNCHER_INCLUDE,
                         result,
                     )
+
+    def test_upgrades_incorrect_shared_child_launcher_hook(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "child_process_launcher_helper.cc"
+            path.write_text(
+                '#include "content/browser/child_process_launcher_helper.h"\n'
+                f"{INTEGRATE.CHILD_LAUNCHER_INCLUDE_BLOCK}"
+                "\n"
+                "void ChildProcessLauncherHelper::"
+                "LaunchOnLauncherThread() {\n"
+                "  std::optional<base::LaunchOptions> options;\n"
+                "  base::LaunchOptions* options_ptr = nullptr;\n"
+                f"{INTEGRATE.LEGACY_SHARED_CHILD_LAUNCHER_HOOK}"
+                "  if (BeforeLaunchOnLauncherThread("
+                "*files_to_register, options_ptr)) {\n"
+                "    LaunchProcessOnLauncherThread();\n"
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_child_launcher(path)
+            patched = path.read_text(encoding="utf-8")
+
+            self.assertNotIn(
+                INTEGRATE.LEGACY_SHARED_CHILD_LAUNCHER_HOOK,
+                patched,
+            )
+            self.assertIn(
+                INTEGRATE.CHILD_LAUNCHER_HOOK,
+                patched,
+            )
+            self.assertEqual(
+                1,
+                patched.count("AppendRecorderBootstrapToChildProcess"),
+            )
 
 
 if __name__ == "__main__":

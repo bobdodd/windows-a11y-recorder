@@ -65,9 +65,26 @@ TRACED_CHILD_LAUNCHER_HOOK = """\
     return false;
   }
 """
-CHILD_LAUNCHER_HOOK = f"""\
+SHARED_CHILD_LAUNCHER_HOOK = """\
+  std::string recorder_bridge_error;
+  if (!a11y_recorder::AppendRecorderBootstrapToChildProcess(
+          command_line(), options_ptr, child_process_id().value(),
+          &recorder_bridge_error)) {
+    a11y_recorder::WriteRecorderBridgeDiagnostic(
+        "Recorder child bootstrap attachment failed: " +
+        recorder_bridge_error);
+    LOG(ERROR) << "Windows A11y Recorder child bootstrap failed: "
+               << recorder_bridge_error;
+    return;
+  }
+"""
+LEGACY_SHARED_CHILD_LAUNCHER_HOOK = f"""\
 #if BUILDFLAG(IS_WIN)
 {TRACED_CHILD_LAUNCHER_HOOK}#endif
+"""
+CHILD_LAUNCHER_HOOK = f"""\
+#if BUILDFLAG(IS_WIN)
+{SHARED_CHILD_LAUNCHER_HOOK}#endif
 """
 BLINK_LISTENER_HOOK = """\
     if (Node* recorder_target = ToNode()) {
@@ -171,6 +188,10 @@ def remove_legacy_child_launcher_hook(path: Path) -> None:
 
 def patch_child_launcher(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        LEGACY_SHARED_CHILD_LAUNCHER_HOOK,
+        CHILD_LAUNCHER_HOOK,
+    )
     if CHILD_LAUNCHER_INCLUDE not in text:
         text = replace_once(
             text,
