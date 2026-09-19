@@ -260,6 +260,68 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsInstrumentedBrowserDispatchStartEvidence()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null
+        };
+        var target = new
+        {
+            documentId = "dom-document-8",
+            nodeId = 42,
+            backendNodeId = (string?)null,
+            tagName = "DIV",
+            elementId = "pointer-only",
+            classes = Array.Empty<string>()
+        };
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dispatch,
+            BrowserEvidenceEventTypes.DispatchStarted,
+            new
+            {
+                context,
+                dispatchId = "dispatch-1",
+                eventName = "click",
+                trusted = false,
+                originalTarget = target,
+                composedPath = Array.Empty<object>(),
+                phase = "none",
+                listenerId = (string?)null,
+                defaultPrevented = false,
+                propagationStopped = false,
+                immediatePropagationStopped = false,
+                defaultAction = (string?)null,
+                outcome = (string?)null
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RejectsCookieValuesAtTheArchiveBoundary()
     {
         var record = CreateEvent(

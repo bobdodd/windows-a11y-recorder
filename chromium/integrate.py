@@ -11,6 +11,10 @@ from pathlib import Path
 
 BRIDGE_DEP = '"//chromium/recorder_bridge",'
 BRIDGE_INCLUDE = '#include "chromium/recorder_bridge/browser_bridge.h"'
+BLINK_BRIDGE_INCLUDE = (
+    '#include "chromium/recorder_bridge/browser_bridge.h"'
+)
+BLINK_CORE_DEP = '    "//chromium/recorder_bridge",'
 CHILD_LAUNCHER_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
 )
@@ -64,6 +68,34 @@ TRACED_CHILD_LAUNCHER_HOOK = """\
 CHILD_LAUNCHER_HOOK = f"""\
 #if BUILDFLAG(IS_WIN)
 {TRACED_CHILD_LAUNCHER_HOOK}#endif
+"""
+BLINK_LISTENER_HOOK = """\
+    if (Node* recorder_target = ToNode()) {
+      Element* recorder_element = DynamicTo<Element>(recorder_target);
+      a11y_recorder::RecordBlinkListenerRegistered(
+          recorder_target->GetDocument().GetDomNodeId(),
+          recorder_target->GetDomNodeId(),
+          event_type.Utf8().c_str(),
+          recorder_target->nodeName().Utf8().c_str(),
+          recorder_element
+              ? recorder_element->GetIdAttribute().Utf8().c_str()
+              : "",
+          registered_listener->Capture(),
+          registered_listener->Passive(),
+          registered_listener->Once());
+    }
+"""
+BLINK_DISPATCH_HOOK = """\
+  Element* recorder_element = DynamicTo<Element>(*node_);
+  a11y_recorder::RecordBlinkDispatchStarted(
+      node_->GetDocument().GetDomNodeId(),
+      node_->GetDomNodeId(),
+      event_->type().Utf8().c_str(),
+      node_->nodeName().Utf8().c_str(),
+      recorder_element
+          ? recorder_element->GetIdAttribute().Utf8().c_str()
+          : "",
+      event_->isTrusted());
 """
 
 
@@ -199,6 +231,77 @@ def patch_content_browser_build(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def patch_blink_event_target(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "base/time/time.h"\n',
+            '#include "base/time/time.h"\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n"
+            '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            '#include "third_party/blink/renderer/core/dom/element.h"\n'
+            '#include "third_party/blink/renderer/core/dom/node.h"\n',
+            path,
+        )
+
+    if "RecordBlinkListenerRegistered" not in text:
+        anchor = "  if (added) {\n    CHECK(registered_listener);\n"
+        text = replace_once(
+            text,
+            anchor,
+            f"{anchor}{BLINK_LISTENER_HOOK}",
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_blink_event_dispatcher(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "build/build_config.h"\n',
+            '#include "build/build_config.h"\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            path,
+        )
+
+    if "RecordBlinkDispatchStarted" not in text:
+        anchor = (
+            "  event_->SetTarget("
+            "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            f"{anchor}{BLINK_DISPATCH_HOOK}",
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_blink_core_build(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_CORE_DEP in text:
+        return
+
+    target = 'component("core") {'
+    target_index = text.find(target)
+    if target_index < 0:
+        raise RuntimeError(f"{path}: Blink core component target not found")
+    target_end = text.find("\n}", target_index)
+    deps = text.find("  deps = [\n", target_index)
+    if deps < 0 or (target_end >= 0 and deps > target_end):
+        raise RuntimeError(f"{path}: Blink core deps list not found")
+
+    opening = "  deps = [\n"
+    text = text[:deps] + text[deps:].replace(
+        opening, opening + f"{BLINK_CORE_DEP}\n", 1
+    )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -226,6 +329,29 @@ def main() -> int:
         source / "content" / "browser" / "child_process_launcher_helper.cc"
     )
     patch_content_browser_build(source / "content" / "browser" / "BUILD.gn")
+    patch_blink_event_target(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "events"
+        / "event_target.cc"
+    )
+    patch_blink_event_dispatcher(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "events"
+        / "event_dispatcher.cc"
+    )
+    patch_blink_core_build(
+        source / "third_party" / "blink" / "renderer" / "core" / "BUILD.gn"
+    )
     print(f"Recorder bridge installed in {source}")
     return 0
 

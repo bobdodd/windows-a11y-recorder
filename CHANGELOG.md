@@ -13,6 +13,12 @@ from the product version.
 - Independent child-process authentication and clock synchronization.
 - Browser parent process and Chromium child process identifiers in lifecycle
   evidence.
+- Initial Blink Node listener-registration evidence with resolved capture,
+  passive, and once options.
+- Initial Blink dispatch-start evidence with stable document and node
+  references.
+- A deterministic listener and dispatch fixture plus an archive evidence
+  verifier for Windows validation.
 
 ### Changed
 
@@ -40,6 +46,9 @@ from the product version.
 - Moved Windows child bootstrap attachment to Chromium's shared child-launch
   sequence and made integration remove both historical forms of the obsolete
   platform-local hook.
+- Converted the native recorder bridge to an exported Chromium component so
+  renderer startup and Blink core share one process-local client.
+- Serialized evidence-pipe writes within each Chromium process.
 
 ## 0.1.0 - 2026-09-18
 

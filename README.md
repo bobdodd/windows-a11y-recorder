@@ -33,9 +33,12 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Child-process capability distribution and Blink instrumentation remain future
-work. The full direction is documented in the
-[prototype plan](docs/prototype-plan.md).
+Child-process capability propagation is implemented and awaits final
+archive-level validation. The first narrow Blink slice now instruments
+accepted Node listener registrations and dispatch starts. Its native Chromium
+build and live fixture validation are pending. The scope and required checks
+are documented in the
+[Blink listener and dispatch validation plan](docs/validation/blink-listener-dispatch-plan.md).
 
 ## Project goals
 
@@ -79,12 +82,14 @@ Remaining:
 
 1. Validate child-process capability propagation on the reference Chromium
    Windows build.
-2. Add Blink and browser-process evidence hooks for listeners, dispatch,
-   default actions, timers, cookies, DOM, accessibility, network, and
-   rendering.
-3. Record representative NVDA, JAWS, and Narrator sessions.
-4. Add evidence correlation and screen-reader behavior analysis.
-5. Investigate touch and gesture coverage on representative hardware.
+2. Build and validate the initial Blink Node listener-registration and
+   dispatch-start hooks on the reference Chromium Windows build.
+3. Extend Blink and browser-process evidence to listener removal and
+   invocation, complete dispatch paths, default actions, timers, cookies, DOM,
+   accessibility, network, and rendering.
+4. Record representative NVDA, JAWS, and Narrator sessions.
+5. Add evidence correlation and screen-reader behavior analysis.
+6. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 
@@ -100,6 +105,15 @@ Run the Chromium integration-script test separately:
 
 ```powershell
 python .\chromium\test_integrate.py
+```
+
+The first Blink listener-registration and dispatch-start slice has a complete
+reference-machine validation command. Run it from a standard, non-elevated
+PowerShell window after the Chromium checkout has been prepared:
+
+```powershell
+.\scripts\Run-BlinkValidation.ps1 `
+  -ChromiumSource C:\Users\User\chromium-dev\chromium\src
 ```
 
 The Chromium build requires substantial disk space and the Visual Studio C++
@@ -124,6 +138,7 @@ The setup script checks out Chromium, applies the recorder bridge, generates
 - [Threat model](docs/security/threat-model.md)
 - [Privacy and data-handling policy](docs/security/privacy-and-data-handling-policy.md)
 - [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md)
+- [Blink listener and dispatch validation plan](docs/validation/blink-listener-dispatch-plan.md)
 
 ## Repository visibility
 

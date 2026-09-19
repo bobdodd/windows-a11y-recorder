@@ -64,8 +64,10 @@ int64_t QueryMonotonicFrequency() {
   return value.QuadPart;
 }
 
-bool RequireString(const base::DictValue& value, std::string_view name,
-                   std::string* output, std::string* error) {
+bool RequireString(const base::DictValue& value,
+                   std::string_view name,
+                   std::string* output,
+                   std::string* error) {
   const std::string* item = value.FindString(name);
   if (!item || item->empty()) {
     *error = "Missing or empty bootstrap field: " + std::string(name);
@@ -123,7 +125,8 @@ bool ParseBootstrapConfiguration(std::string_view json,
 }
 
 bool SerializeBootstrapConfiguration(
-    const BootstrapConfiguration& configuration, std::string* json,
+    const BootstrapConfiguration& configuration,
+    std::string* json,
     std::string* error) {
   if (!json || !error) {
     return false;
@@ -168,8 +171,10 @@ RecorderPipeClient::RecorderPipeClient(BootstrapConfiguration configuration)
 RecorderPipeClient::~RecorderPipeClient() = default;
 
 bool RecorderPipeClient::ConnectAndSynchronize(
-    const std::string& process_type, const std::string& chromium_version,
+    const std::string& process_type,
+    const std::string& chromium_version,
     std::string* error) {
+  process_type_ = process_type;
   const std::wstring path =
       L"\\\\.\\pipe\\" + base::UTF8ToWide(configuration_.pipe_name);
   pipe_.Set(::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
@@ -239,6 +244,7 @@ bool RecorderPipeClient::SendEvidence(int64_t browser_timestamp_ticks,
                                       base::DictValue payload,
                                       base::ListValue quality_flags,
                                       std::string* error) {
+  base::AutoLock lock(write_lock_);
   base::DictValue message;
   message.Set("kind", "evidence");
   message.Set("protocolVersion", configuration_.protocol_version);

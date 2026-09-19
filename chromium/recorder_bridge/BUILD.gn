@@ -1,6 +1,8 @@
 assert(is_win)
 
-source_set("recorder_bridge") {
+component("recorder_bridge") {
+  defines = [ "IS_RECORDER_BRIDGE_IMPL" ]
+
   sources = [
     "browser_bridge.cc",
     "browser_bridge.h",
@@ -12,6 +14,5 @@ source_set("recorder_bridge") {
   deps = [
     "//base",
     "//components/version_info",
-    "//content/public/common",
   ]
 }

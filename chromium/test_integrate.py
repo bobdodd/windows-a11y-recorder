@@ -22,6 +22,9 @@ class IntegrateTests(unittest.TestCase):
                 root / "child_process_launcher_helper_win.cc"
             )
             content_build = root / "content_browser_BUILD.gn"
+            event_target = root / "event_target.cc"
+            event_dispatcher = root / "event_dispatcher.cc"
+            blink_build = root / "blink_core_BUILD.gn"
             delegate.write_text(
                 '#include "chrome/app/chrome_main_delegate.h"\n'
                 "\n"
@@ -101,6 +104,44 @@ class IntegrateTests(unittest.TestCase):
                 "}\n",
                 encoding="utf-8",
             )
+            event_target.write_text(
+                '#include "third_party/blink/renderer/core/dom/events/'
+                'event_target.h"\n'
+                '#include "base/time/time.h"\n'
+                "\n"
+                "bool EventTarget::AddEventListenerInternal() {\n"
+                "  bool added = true;\n"
+                "  if (added) {\n"
+                "    CHECK(registered_listener);\n"
+                "    AddedEventListener(event_type, *registered_listener);\n"
+                "  }\n"
+                "  return added;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            event_dispatcher.write_text(
+                '#include "third_party/blink/renderer/core/dom/events/'
+                'event_dispatcher.h"\n'
+                '#include "build/build_config.h"\n'
+                "\n"
+                "DispatchEventResult EventDispatcher::Dispatch() {\n"
+                "  event_->SetTarget("
+                "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
+                "#if DCHECK_IS_ON()\n"
+                "  DCHECK(event_->RawTarget());\n"
+                "#endif\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            blink_build.write_text(
+                'component("core") {\n'
+                '  output_name = "blink_core"\n'
+                "  deps = [\n"
+                '    "//base",\n'
+                "  ]\n"
+                "}\n",
+                encoding="utf-8",
+            )
 
             INTEGRATE.patch_main_delegate(delegate)
             INTEGRATE.patch_chrome_build(chrome_build)
@@ -109,6 +150,9 @@ class IntegrateTests(unittest.TestCase):
             )
             INTEGRATE.patch_child_launcher(child_launcher)
             INTEGRATE.patch_content_browser_build(content_build)
+            INTEGRATE.patch_blink_event_target(event_target)
+            INTEGRATE.patch_blink_event_dispatcher(event_dispatcher)
+            INTEGRATE.patch_blink_core_build(blink_build)
             first_delegate = delegate.read_text(encoding="utf-8")
             first_chrome_build = chrome_build.read_text(encoding="utf-8")
             first_child_launcher = child_launcher.read_text(encoding="utf-8")
@@ -116,6 +160,11 @@ class IntegrateTests(unittest.TestCase):
                 windows_child_launcher.read_text(encoding="utf-8")
             )
             first_content_build = content_build.read_text(encoding="utf-8")
+            first_event_target = event_target.read_text(encoding="utf-8")
+            first_event_dispatcher = event_dispatcher.read_text(
+                encoding="utf-8"
+            )
+            first_blink_build = blink_build.read_text(encoding="utf-8")
 
             INTEGRATE.patch_main_delegate(delegate)
             INTEGRATE.patch_chrome_build(chrome_build)
@@ -124,6 +173,9 @@ class IntegrateTests(unittest.TestCase):
             )
             INTEGRATE.patch_child_launcher(child_launcher)
             INTEGRATE.patch_content_browser_build(content_build)
+            INTEGRATE.patch_blink_event_target(event_target)
+            INTEGRATE.patch_blink_event_dispatcher(event_dispatcher)
+            INTEGRATE.patch_blink_core_build(blink_build)
 
             self.assertEqual(
                 first_delegate, delegate.read_text(encoding="utf-8")
@@ -141,6 +193,18 @@ class IntegrateTests(unittest.TestCase):
             )
             self.assertEqual(
                 first_content_build, content_build.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                first_event_target,
+                event_target.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                first_event_dispatcher,
+                event_dispatcher.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                first_blink_build,
+                blink_build.read_text(encoding="utf-8"),
             )
             self.assertEqual(
                 1, first_delegate.count("InitializeProcessBridge")
@@ -185,6 +249,23 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn(
                 '      "//chromium/recorder_bridge",\n',
                 first_content_build,
+            )
+            self.assertIn(
+                "RecordBlinkListenerRegistered",
+                first_event_target,
+            )
+            self.assertIn(
+                "RecordBlinkDispatchStarted",
+                first_event_dispatcher,
+            )
+            self.assertIn(
+                'payload.Set("phase", "none");',
+                (Path(__file__).parent / "recorder_bridge" / "browser_bridge.cc")
+                .read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                '    "//chromium/recorder_bridge",\n',
+                first_blink_build,
             )
 
     def test_removes_all_historical_windows_hook_variants(self):

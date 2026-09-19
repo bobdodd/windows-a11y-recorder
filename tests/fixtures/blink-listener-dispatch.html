@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Blink listener and dispatch fixture</title>
+</head>
+<body>
+  <h1>Blink listener and dispatch fixture</h1>
+  <p id="status" aria-live="polite">Preparing fixture.</p>
+  <div id="pointer-only">Pointer-only activation target</div>
+  <script>
+    const target = document.getElementById("pointer-only");
+    const status = document.getElementById("status");
+
+    target.addEventListener(
+      "click",
+      () => {
+        status.textContent = "Fixture click listener invoked.";
+      },
+      { capture: false, passive: false, once: false }
+    );
+
+    status.textContent = "Fixture listener registered.";
+    window.setTimeout(() => target.click(), 250);
+  </script>
+</body>
+</html>

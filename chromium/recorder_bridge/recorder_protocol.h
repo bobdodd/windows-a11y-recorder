@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include "base/synchronization/lock.h"
 #include "base/values.h"
 #include "base/win/scoped_handle.h"
 
@@ -30,7 +31,8 @@ bool ParseBootstrapConfiguration(std::string_view json,
                                  std::string* error);
 
 bool SerializeBootstrapConfiguration(
-    const BootstrapConfiguration& configuration, std::string* json,
+    const BootstrapConfiguration& configuration,
+    std::string* json,
     std::string* error);
 
 // Reads the single JSON bootstrap line written to inherited standard input by
@@ -50,18 +52,27 @@ class RecorderPipeClient {
                              const std::string& chromium_version,
                              std::string* error);
 
-  bool SendEvidence(int64_t browser_timestamp_ticks, std::string channel,
-                    std::string event_type, base::DictValue payload,
-                    base::ListValue quality_flags, std::string* error);
+  bool SendEvidence(int64_t browser_timestamp_ticks,
+                    std::string channel,
+                    std::string event_type,
+                    base::DictValue payload,
+                    base::ListValue quality_flags,
+                    std::string* error);
 
   bool connected() const { return pipe_.is_valid(); }
+  const std::string& browser_instance_id() const {
+    return configuration_.browser_instance_id;
+  }
+  const std::string& process_type() const { return process_type_; }
 
  private:
   bool WriteMessage(base::DictValue message, std::string* error);
   bool ReadMessage(base::DictValue* message, std::string* error);
 
   BootstrapConfiguration configuration_;
+  std::string process_type_;
   base::win::ScopedHandle pipe_;
+  base::Lock write_lock_;
 };
 
 }  // namespace a11y_recorder

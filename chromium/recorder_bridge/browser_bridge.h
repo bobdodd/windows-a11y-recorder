@@ -4,6 +4,8 @@
 #include <string>
 #include <string_view>
 
+#include "base/component_export.h"
+
 namespace base {
 class CommandLine;
 struct LaunchOptions;
@@ -17,11 +19,13 @@ class RecorderPipeClient;
 // Returns true when recording was not requested or the connection is ready.
 // When the bootstrap switch is present, failure is fatal to recorder-launched
 // Chromium so a session cannot silently continue without browser evidence.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
 bool InitializeProcessBridge(std::string* error);
 
 // Adds an inherited, read-only shared-memory capability to supported Chromium
 // child processes. The command-line switch contains only handle metadata; the
 // authentication token remains inside the inherited shared-memory region.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
 bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
                                            base::LaunchOptions* launch_options,
                                            int child_process_id,
@@ -29,11 +33,35 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
 
 // Appends a non-secret startup diagnostic when the opt-in bridge log
 // environment variable is present. This works before Chromium logging starts.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
 void WriteRecorderBridgeDiagnostic(std::string_view message);
 
 // Returns the connected client for the current process, or nullptr when
 // Chromium was not launched by the recorder.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
 RecorderPipeClient* GetProcessRecorderClient();
+
+// Records a Blink listener only after Blink has accepted the registration.
+// Node identifiers are Blink DOMNodeIds.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkListenerRegistered(int document_node_id,
+                                   int target_node_id,
+                                   std::string event_name,
+                                   std::string target_tag_name,
+                                   std::string target_element_id,
+                                   bool capture,
+                                   bool passive,
+                                   bool once);
+
+// Records one dispatch-started event after Blink has established the event
+// path and original target, but before capture-phase listeners run.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDispatchStarted(int document_node_id,
+                                int target_node_id,
+                                std::string event_name,
+                                std::string target_tag_name,
+                                std::string target_element_id,
+                                bool trusted);
 
 }  // namespace a11y_recorder
 
