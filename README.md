@@ -33,15 +33,16 @@ valid, contained the expected connection and clock-synchronization records,
 accepted 92 records, and dropped none. See the
 [Chromium connection validation record](docs/validation/chromium-connection-2026-09-18.md).
 
-Renderer capability propagation and seven narrow Blink evidence slices were
+Renderer capability propagation and eight narrow Blink evidence slices were
 validated end to end on the reference Windows platform on September 19, 2026.
 The latest validated archive contained listener lifecycle, dispatch lifecycle,
 the ordered Node propagation path, current targets, listener phases,
 cumulative propagation-stop state, Node default-event-handler decisions, and
-window timeout, interval, animation-frame, and idle-callback lifecycles. It
-passed structural validation across 629 events and 81 artifacts and recorded
-no network-service crashes. See the
-[Blink idle-callback validation record](docs/validation/blink-idle-callbacks-2026-09-19.md).
+window timeout, interval, animation-frame, and idle-callback lifecycles. DOM
+timer records also preserved the observed page lifecycle state across a
+visible-to-hidden transition. The archive passed structural validation across
+655 events and 81 artifacts and recorded no network-service crashes. See the
+[Blink page-lifecycle validation record](docs/validation/blink-page-lifecycle-2026-09-19.md).
 
 ## Project goals
 
@@ -97,11 +98,14 @@ Completed:
 12. Record and validate accepted web-exposed `requestIdleCallback` schedules,
     callback entry with `didTimeout`, and explicit `cancelIdleCallback`
     cancellation with process-local correlation.
+13. Record and validate observed page lifecycle state at scheduling,
+    callback-entry, and explicit-cancellation boundaries, including a
+    visible-to-hidden DOM timer transition.
 
 Remaining:
 
 1. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
-   dispatch paths, timer throttling, cookies, DOM,
+   dispatch paths, scheduler throttling decisions, cookies, DOM,
    accessibility, network, and rendering.
 2. Record representative NVDA, JAWS, and Narrator sessions.
 3. Add evidence correlation and screen-reader behavior analysis.

@@ -301,7 +301,17 @@ try {
         Out-Null
 
     Wait-Job $captureJob | Out-Null
-    $captureOutput = @(Receive-Job $captureJob)
+    $captureErrors = @()
+    $captureOutput = @(
+        Receive-Job `
+            $captureJob `
+            -ErrorAction SilentlyContinue `
+            -ErrorVariable +captureErrors
+    )
+    $captureErrors |
+        ForEach-Object {
+            Write-Host $_
+        }
     $captureResult = $captureOutput |
         Where-Object {
             $_.PSObject.Properties.Name -contains "CaptureExitCode"

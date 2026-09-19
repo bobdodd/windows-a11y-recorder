@@ -201,6 +201,16 @@ Execution-context destruction, worker scheduling, throttling, lifecycle state,
 and callback location remain outside this slice. Live 0.7 connections require
 an exact protocol-version match.
 
+Protocol version 0.8 records Blink's observed page lifecycle state at accepted
+schedule, callback-entry, and explicit-cancellation boundaries for DOM timers,
+animation-frame callbacks, and idle callbacks. Values are `visible`, `hidden`,
+`frozen`, or `unknown`. The state is an observation at each boundary, not an
+inference about why execution was delayed. The `throttled` field remains null
+until a dedicated scheduler hook can report an actual throttling decision.
+Worker scheduling, callback location, queue delay, execution duration, and
+implicit cancellation remain outside this slice. Live 0.8 connections require
+an exact protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native
@@ -243,7 +253,8 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 2. Instrument listener registration and removal.
 3. Instrument dispatch phases, listener invocation, propagation control, cancellation, and default actions.
 4. Instrument timeout, interval, animation-frame, and idle-callback lifecycle
-   evidence, followed by lifecycle-throttling evidence.
+   evidence, including page lifecycle state at the observed boundaries,
+   followed by scheduler-throttling evidence.
 5. Add document, DOM, style, layout, accessibility, and rendered-frame checkpoints.
 6. Add cookie operations and network metadata with prohibited values removed at source.
 7. Add browser-chrome and compositor correlation needed by test scenarios.
