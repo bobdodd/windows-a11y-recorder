@@ -103,6 +103,15 @@ BLINK_LISTENER_HOOK = """\
           registered_listener->Once());
     }
 """
+LEGACY_BLINK_LISTENER_CALL = """\
+      a11y_recorder::RecordBlinkListenerRegistered(
+          recorder_target->GetDocument().GetDomNodeId(),
+"""
+CURRENT_BLINK_LISTENER_CALL = """\
+      a11y_recorder::RecordBlinkListenerRegistered(
+          reinterpret_cast<uintptr_t>(registered_listener),
+          recorder_target->GetDocument().GetDomNodeId(),
+"""
 BLINK_LISTENER_REMOVED_HOOK = """\
   if (Node* recorder_target = ToNode()) {
     Element* recorder_element = DynamicTo<Element>(recorder_target);
@@ -150,6 +159,15 @@ BLINK_DISPATCH_HOOK = """\
           ? recorder_element->GetIdAttribute().Utf8().c_str()
           : "",
       event_->isTrusted());
+"""
+LEGACY_BLINK_DISPATCH_CALL = """\
+  a11y_recorder::RecordBlinkDispatchStarted(
+      node_->GetDocument().GetDomNodeId(),
+"""
+CURRENT_BLINK_DISPATCH_CALL = """\
+  a11y_recorder::RecordBlinkDispatchStarted(
+      reinterpret_cast<uintptr_t>(event_.Get()),
+      node_->GetDocument().GetDomNodeId(),
 """
 BLINK_DISPATCH_COMPLETED_HOOK = """\
   a11y_recorder::RecordBlinkDispatchCompleted(
@@ -316,6 +334,13 @@ def patch_blink_event_target(path: Path) -> None:
             path,
         )
 
+    if LEGACY_BLINK_LISTENER_CALL in text:
+        text = replace_once(
+            text,
+            LEGACY_BLINK_LISTENER_CALL,
+            CURRENT_BLINK_LISTENER_CALL,
+            path,
+        )
     if "RecordBlinkListenerRegistered" not in text:
         anchor = "  if (added) {\n    CHECK(registered_listener);\n"
         text = replace_once(
@@ -389,6 +414,13 @@ def patch_blink_event_dispatcher(path: Path) -> None:
             path,
         )
 
+    if LEGACY_BLINK_DISPATCH_CALL in text:
+        text = replace_once(
+            text,
+            LEGACY_BLINK_DISPATCH_CALL,
+            CURRENT_BLINK_DISPATCH_CALL,
+            path,
+        )
     if "RecordBlinkDispatchStarted" not in text:
         anchor = (
             "  event_->SetTarget("

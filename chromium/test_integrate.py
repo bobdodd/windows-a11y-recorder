@@ -359,6 +359,35 @@ class IntegrateTests(unittest.TestCase):
                 first_blink_build,
             )
 
+            event_target.write_text(
+                first_event_target.replace(
+                    INTEGRATE.CURRENT_BLINK_LISTENER_CALL,
+                    INTEGRATE.LEGACY_BLINK_LISTENER_CALL,
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            event_dispatcher.write_text(
+                first_event_dispatcher.replace(
+                    INTEGRATE.CURRENT_BLINK_DISPATCH_CALL,
+                    INTEGRATE.LEGACY_BLINK_DISPATCH_CALL,
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_blink_event_target(event_target)
+            INTEGRATE.patch_blink_event_dispatcher(event_dispatcher)
+
+            self.assertEqual(
+                first_event_target,
+                event_target.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                first_event_dispatcher,
+                event_dispatcher.read_text(encoding="utf-8"),
+            )
+
     def test_removes_all_historical_windows_hook_variants(self):
         for hook in (
             INTEGRATE.ORIGINAL_CHILD_LAUNCHER_HOOK,
