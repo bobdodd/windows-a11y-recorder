@@ -33,15 +33,18 @@ Protocol 0.11 preserves the protocol 0.10 navigation fields and adds:
 
 The existing context identifiers have the following protocol 0.11 meanings:
 
-- `context.pageId`: the root `FrameTreeNodeId` for the page containing the
-  navigating frame.
+- `context.pageId`: the canonical `frame-N` identity of the root
+  `FrameTreeNodeId` for the page containing the navigating frame.
 - `context.frameId`: the navigating frame's `FrameTreeNodeId`.
 - `context.documentId`: the navigation identity that created the committed
   document hosted by that frame. It remains null before commit and after an
   uncommitted completion.
 
-All identifiers are opaque recorder strings. Numeric suffixes must not be
-interpreted or compared across browser instances.
+Page and frame identities share one `frame-N` namespace. Therefore a main
+frame has equal `pageId` and `frameId` values, while a subframe's `pageId`
+equals its root main frame's `frameId`. All identifiers are opaque recorder
+strings. Numeric suffixes must not be interpreted or compared across browser
+instances.
 
 ## Identity derivation
 

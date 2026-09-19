@@ -658,7 +658,7 @@ public sealed class SessionArchiveValidatorTests
                     processType = "browser",
                     profileId = (string?)null,
                     browserContextId = (string?)null,
-                    pageId = "page-12",
+                    pageId = "frame-12",
                     frameId = "frame-12",
                     documentId = "document-navigation-40",
                     executionWorldId = (string?)null
@@ -711,7 +711,7 @@ public sealed class SessionArchiveValidatorTests
                     processType = "browser",
                     profileId = (string?)null,
                     browserContextId = (string?)null,
-                    pageId = "page-12",
+                    pageId = "frame-12",
                     frameId = "frame-13",
                     documentId = "document-navigation-40",
                     executionWorldId = (string?)null

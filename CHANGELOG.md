@@ -78,6 +78,10 @@ from the product version.
 
 ### Changed
 
+- Unified protocol 0.11 page and frame identity in the canonical `frame-N`
+  namespace. Main-frame records now carry equal `pageId` and `frameId`
+  values, while subframe records reuse their root main frame's identity as
+  `pageId`.
 - Made timer delay values nullable in the native bridge so animation-frame
   evidence does not claim a requested or effective delay.
 - Restricted inherited Chromium recorder bootstrap distribution to renderer

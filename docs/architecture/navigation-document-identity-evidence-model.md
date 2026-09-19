@@ -34,8 +34,8 @@ Every record includes:
 - `context.browserInstanceId`: the recorder-assigned browser instance.
 - `context.processId` and `context.processType`: the browser process that
   observed the navigation.
-- `context.pageId`: an identity for the primary page, derived from the stable
-  primary-main-frame tree node.
+- `context.pageId`: the canonical `frame-N` identity of the stable root
+  main-frame tree node for the page.
 - `context.frameId`: Chromium's browser-global `FrameTreeNodeId`, prefixed as
   a recorder identifier.
 - `context.documentId`: null at start and for an uncommitted finish. A committed
@@ -65,7 +65,10 @@ Each `navigationId` identifies exactly one navigation attempt. Start and
 completion records correlate by browser instance, page ID, frame ID, and
 navigation ID.
 
-`pageId` remains stable for the life of the owning `WebContents`.
+Page and frame identities share one `frame-N` namespace. For a main-frame
+record, `pageId` equals `frameId`. For a subframe record, `pageId` equals the
+root main frame's `frameId`. `pageId` remains stable for the life of the
+owning page.
 `frameId` remains stable for the life of the primary frame tree node. A
 cross-document commit may replace the current `RenderFrameHost`, while the
 frame ID remains stable.

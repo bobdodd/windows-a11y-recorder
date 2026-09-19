@@ -165,7 +165,7 @@ base::DictValue CreateNavigationContext(
     int64_t document_navigation_id) {
   base::DictValue context = CreateContext(client, 0);
   context.Set("pageId",
-              "page-" + base::NumberToString(page_frame_tree_node_id));
+              "frame-" + base::NumberToString(page_frame_tree_node_id));
   context.Set("frameId",
               "frame-" + base::NumberToString(frame_tree_node_id));
   if (document_navigation_id > 0) {

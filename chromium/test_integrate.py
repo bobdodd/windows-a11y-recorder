@@ -942,6 +942,23 @@ class IntegrateTests(unittest.TestCase):
         self.assertNotIn("kChromiumGpuProcess", supported_processes)
         self.assertNotIn("kChromiumUtilityProcess", supported_processes)
 
+    def test_native_bridge_uses_root_frame_identity_for_page_id(self):
+        bridge = (
+            Path(__file__).parent / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+        navigation_context = bridge.split(
+            "base::DictValue CreateNavigationContext", 1
+        )[1].split("base::DictValue CreateNavigationPayload", 1)[0]
+
+        self.assertIn(
+            '"frame-" + base::NumberToString(page_frame_tree_node_id)',
+            navigation_context,
+        )
+        self.assertNotIn(
+            '"page-" + base::NumberToString(page_frame_tree_node_id)',
+            navigation_context,
+        )
+
     def test_patches_scheduler_decision_boundary_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
