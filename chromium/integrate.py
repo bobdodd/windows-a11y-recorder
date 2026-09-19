@@ -585,7 +585,17 @@ BLINK_MAIN_THREAD_QUEUE_CONSTRUCTION = """\
 """
 BLINK_FRAME_THROTTLING_ACCESSOR = """\
   int RecorderThrottlingType() const {
+    return static_cast<int>(throttling_type_.get());
+  }
+"""
+LEGACY_BLINK_FRAME_THROTTLING_ACCESSOR = """\
+  int RecorderThrottlingType() const {
     return static_cast<int>(throttling_type_);
+  }
+"""
+INTERMEDIATE_BLINK_FRAME_THROTTLING_ACCESSOR = """\
+  int RecorderThrottlingType() const {
+    return static_cast<int>(static_cast<ThrottlingType>(throttling_type_));
   }
 """
 BLINK_SCHEDULER_DECISION_HOOK = """\
@@ -1459,6 +1469,19 @@ def patch_blink_frame_scheduler_header(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     if BLINK_FRAME_THROTTLING_ACCESSOR in text:
         return
+    for old_accessor in (
+        LEGACY_BLINK_FRAME_THROTTLING_ACCESSOR,
+        INTERMEDIATE_BLINK_FRAME_THROTTLING_ACCESSOR,
+    ):
+        if old_accessor in text:
+            text = replace_once(
+                text,
+                old_accessor,
+                BLINK_FRAME_THROTTLING_ACCESSOR,
+                path,
+            )
+            path.write_text(text, encoding="utf-8", newline="\n")
+            return
     anchor = "  void UpdatePolicy();\n"
     text = replace_once(
         text,

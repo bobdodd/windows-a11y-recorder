@@ -1034,6 +1034,10 @@ class IntegrateTests(unittest.TestCase):
                 first[build],
             )
             self.assertIn(
+                "static_cast<int>(throttling_type_.get())",
+                first[frame_h],
+            )
+            self.assertIn(
                 '#include "base/memory/weak_ptr.h"',
                 first[throttler_h],
             )
@@ -1068,6 +1072,26 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_blink_task_queue_throttler(throttler_cc)
             self.assertEqual(first[throttler_h], throttler_h.read_text())
             self.assertEqual(first[throttler_cc], throttler_cc.read_text())
+
+            frame_h.write_text(
+                first[frame_h].replace(
+                    INTEGRATE.BLINK_FRAME_THROTTLING_ACCESSOR,
+                    INTEGRATE.LEGACY_BLINK_FRAME_THROTTLING_ACCESSOR,
+                ),
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_frame_scheduler_header(frame_h)
+            self.assertEqual(first[frame_h], frame_h.read_text())
+
+            frame_h.write_text(
+                first[frame_h].replace(
+                    INTEGRATE.BLINK_FRAME_THROTTLING_ACCESSOR,
+                    INTEGRATE.INTERMEDIATE_BLINK_FRAME_THROTTLING_ACCESSOR,
+                ),
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_frame_scheduler_header(frame_h)
+            self.assertEqual(first[frame_h], frame_h.read_text())
 
 
 if __name__ == "__main__":
