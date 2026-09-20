@@ -145,6 +145,8 @@ Resume after a secure transition requires explicit confirmation when the recorde
 - Do not capture browser history, cookie values, saved passwords, authorization values, request bodies, or response bodies.
 - Capture cookie names, non-value attributes, operation type, result, source context, and timing so consent-related cookie behavior can be analyzed.
 - Treat DOM, page source, script locations, computed styles, accessibility trees, URLs, titles, and rendered frames as sensitive tested-content evidence.
+- Record DOM attribute values and character data verbatim, bounded by a per-record length limit that reports truncation, because withheld page text remains visible in the display recording while its absence removes the evidence an auditor needs. This covers values in credential fields entered during a test session, whose acceptance and error handling are themselves evidence, and does not extend to the browser's own credential store.
+- Manage the residual risk of recording a production system with real personal data through purpose and scope configuration before capture, retention limits, encryption at rest, and reviewed redaction before export, not through capture-time withholding of individual fields.
 - Do not record process command lines unless a later requirement and review justify them.
 - Store executable hashes and product metadata only when needed for provenance.
 - Rate-limit and bound UI Automation snapshots.

@@ -157,16 +157,19 @@ zero dropped records and zero network-service crashes. Ten parser-complete
 checkpoints were observed across the documents created during the run. The
 checkpoint correlated to the main fixture document contained 36 nodes and was
 not truncated. Protocol 0.13 post-mutation validation completed on September
-20, 2026. Protocol 0.14 document-token correlation remains pending on the
-reference Windows platform. See the
+20, 2026, and protocol 0.14 document-token correlation was validated on the
+reference Windows platform the same day at revision `4b3d436`, across 9,006
+events and 81 artifacts. See the
 [dated validation record](../validation/blink-dom-checkpoint-2026-09-19.md).
 
 ## Next dependent slices
 
-After protocol 0.14 reference-platform validation, the next DOM work should
-add:
+Protocol 0.14 reference-platform validation is complete, so the next DOM work
+should add:
 
-1. bounded attribute evidence with a privacy policy;
+1. bounded attribute and character-data evidence with a privacy policy, which
+   is specified in the
+   [DOM attribute and text evidence model](dom-attribute-and-text-evidence-model.md);
 2. accessibility checkpoints correlated to the same document boundary; and
 3. style, layout, paint, and rendered-frame checkpoints as separate evidence
    channels rather than inferred properties of DOM structure.

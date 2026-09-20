@@ -132,6 +132,15 @@ from the product version.
   the success stream and renders each record as text, so unittest progress dots
   and build-tool notices read as plain lines. A nonzero exit code still fails
   the step.
+- Added a proposed
+  [DOM attribute and text evidence model](docs/architecture/dom-attribute-and-text-evidence-model.md)
+  for protocol 0.15. Attribute values and character data are recorded verbatim,
+  bounded only by a per-record length limit that reports truncation, so observed
+  DOM state can be compared against what assistive technology exposed. The
+  document also specifies attribute-transition records, which survive checkpoint
+  coalescing, and the deterministic validation that must assert exact string
+  equality with known fixture values. Nothing is implemented, and one decision
+  is recorded as open.
 - Added recorder bridge signature verification to Chromium integration.
   Integration now parses the declared parameter count of every exported bridge
   entry point and fails when a hook template or an already-patched Chromium
