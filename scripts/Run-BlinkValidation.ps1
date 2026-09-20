@@ -40,10 +40,22 @@ function Invoke-Checked {
     # script's own output is redirected or transcribed, which aborts a run
     # that has not actually failed. Only the process exit code decides
     # success here.
+    #
+    # Merging stderr into the success stream and rendering each record as
+    # text keeps that progress output in the transcript as plain lines. Left
+    # as error records it appears as a NativeCommandError block naming this
+    # script and line, which reads like a failure in an otherwise passing run.
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        & $Command
+        & $Command 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                Write-Output $_.ToString()
+            }
+            else {
+                Write-Output $_
+            }
+        }
     }
     finally {
         $ErrorActionPreference = $previousPreference

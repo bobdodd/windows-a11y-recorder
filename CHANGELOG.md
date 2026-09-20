@@ -127,6 +127,11 @@ from the product version.
 - Added integration coverage that patches fixtures carrying the protocol 0.13
   hook bodies and asserts both the upgrade to document-identity hook bodies
   and unchanged output on a second run.
+- Fixed native progress output appearing as a PowerShell error block in
+  otherwise passing validation transcripts. Step output now merges stderr into
+  the success stream and renders each record as text, so unittest progress dots
+  and build-tool notices read as plain lines. A nonzero exit code still fails
+  the step.
 - Added recorder bridge signature verification to Chromium integration.
   Integration now parses the declared parameter count of every exported bridge
   entry point and fails when a hook template or an already-patched Chromium

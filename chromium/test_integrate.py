@@ -1428,6 +1428,24 @@ class IntegrateTests(unittest.TestCase):
         self.assertLess(invoked, restored)
         self.assertLess(restored, checked)
 
+    def test_validation_renders_native_stderr_as_plain_text(self):
+        """Progress output must not read as a failure in a passing run."""
+        runner = (
+            Path(__file__).parent.parent / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("& $Command 2>&1 | ForEach-Object {", runner)
+        self.assertIn(
+            "if ($_ -is [System.Management.Automation.ErrorRecord]) {",
+            runner,
+        )
+        self.assertIn("Write-Output $_.ToString()", runner)
+        merged = runner.index("& $Command 2>&1 | ForEach-Object {")
+        rendered = runner.index("Write-Output $_.ToString()", merged)
+        checked = runner.index("if ($LASTEXITCODE -ne 0) {", rendered)
+        self.assertLess(merged, rendered)
+        self.assertLess(rendered, checked)
+
 
     def test_migrates_protocol_013_document_identity_hooks(self):
         with tempfile.TemporaryDirectory() as directory:
