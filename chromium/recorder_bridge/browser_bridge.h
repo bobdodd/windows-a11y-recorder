@@ -199,8 +199,8 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string reason,
                                  int maximum_nodes);
 
-// Records one node in preorder. Text content and attributes are intentionally
-// excluded from this initial structural evidence boundary.
+// Records one node in preorder. Text content is carried by character-data
+// evidence rather than by the node record.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
                                   int document_node_id,
@@ -211,8 +211,26 @@ void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
                                   int node_type,
                                   std::string node_name);
 
-// Completes the checkpoint and explicitly reports whether its node limit was
-// reached before the complete document tree was emitted.
+// Records one attribute of a node already emitted in the same checkpoint. The
+// caller truncates the value at its own limit and reports the full length in
+// UTF-16 code units so a partial observation is never mistaken for a complete
+// one. An empty value is valid and is not the same as an absent attribute.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomCheckpointNodeAttribute(uint64_t checkpoint_sequence,
+                                           int document_node_id,
+                                           std::string document_token,
+                                           int node_id,
+                                           int attribute_index,
+                                           std::string attribute_namespace,
+                                           std::string attribute_name,
+                                           std::string attribute_value,
+                                           int attribute_value_length,
+                                           bool attribute_value_truncated,
+                                           int maximum_value_length);
+
+// Completes the checkpoint and explicitly reports whether its node limit or
+// its per-node attribute limit was reached before the complete document tree
+// and attribute set were emitted.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int document_node_id,
@@ -220,7 +238,49 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 std::string reason,
                                 int node_count,
                                 bool truncated,
-                                int maximum_nodes);
+                                int maximum_nodes,
+                                int attribute_count,
+                                bool attributes_truncated,
+                                int maximum_attributes_per_node,
+                                int maximum_value_length);
+
+// Records one accepted attribute mutation. The change type is 0 for an added
+// attribute, 1 for a removed attribute, and 2 for a changed attribute, and it
+// determines which of the two values is recorded as absent: an added attribute
+// has no previous value and a removed attribute has no current value. A
+// checkpoint coalesces an unknown number of mutations, so the specific
+// attribute that changed is only recoverable from this record.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomAttributeChanged(int document_node_id,
+                                    std::string document_token,
+                                    int node_id,
+                                    std::string node_name,
+                                    std::string attribute_namespace,
+                                    std::string attribute_name,
+                                    int change_type,
+                                    std::string attribute_value,
+                                    int attribute_value_length,
+                                    bool attribute_value_truncated,
+                                    std::string previous_attribute_value,
+                                    int previous_attribute_value_length,
+                                    bool previous_attribute_value_truncated,
+                                    int maximum_value_length);
+
+// Records one accepted character-data mutation on a text, comment, or other
+// character-data node.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomCharacterDataChanged(int document_node_id,
+                                        std::string document_token,
+                                        int node_id,
+                                        int parent_node_id,
+                                        int node_type,
+                                        std::string text,
+                                        int text_length,
+                                        bool text_truncated,
+                                        std::string previous_text,
+                                        int previous_text_length,
+                                        bool previous_text_truncated,
+                                        int maximum_value_length);
 
 // Records an authoritative task-queue scheduler decision only when the final
 // allowed wake-up is later than the desired wake-up. This queue boundary does

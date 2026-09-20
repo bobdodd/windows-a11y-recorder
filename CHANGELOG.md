@@ -8,6 +8,18 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.15 bounded attribute and character-data evidence. Renderer
+  DOM checkpoints now emit the attribute state of every element they record,
+  and the recorder bridge accepts attribute and character-data transitions that
+  name the specific attribute or text a coalesced checkpoint cannot recover.
+  Values are recorded verbatim up to a reported length limit, and every record
+  states whether it was truncated so a partial observation is never mistaken
+  for a complete one. The attribute and character-data transition hooks in
+  Blink are not yet integrated.
+- Added strict validation of attribute and character-data evidence, including
+  the change-type invariant that an added attribute has no previous value and a
+  removed attribute has no current value, and the truncation invariant that a
+  reported length exceeds the recorded string only when truncation is declared.
 - Added protocol 0.14 deterministic browser-renderer document correlation.
   Committed navigation evidence and renderer DOM checkpoints now carry
   Chromium's shared document token, and committed navigation records identify

@@ -317,7 +317,7 @@ CONTENT_NAVIGATION_COMPLETED_HOOK = """\
           navigation_handle->IsErrorPage(),
       navigation_handle->GetNetErrorCode());
 """
-LEGACY_BLINK_DOM_CHECKPOINT_HOOK = """\
+ORIGINAL_BLINK_DOM_CHECKPOINT_HOOK = """\
   constexpr int kRecorderMaximumDomCheckpointNodes = 512;
   const int recorder_document_node_id = GetDomNodeId();
   const uint64_t recorder_checkpoint_sequence =
@@ -348,7 +348,7 @@ LEGACY_BLINK_DOM_CHECKPOINT_HOOK = """\
         kRecorderMaximumDomCheckpointNodes);
   }
 """
-BLINK_DOM_CHECKPOINT_HOOK = """\
+LEGACY_BLINK_DOM_CHECKPOINT_HOOK = """\
   constexpr int kRecorderMaximumDomCheckpointNodes = 512;
   const int recorder_document_node_id = GetDomNodeId();
   const std::string recorder_document_token = Token().ToString();
@@ -383,11 +383,89 @@ BLINK_DOM_CHECKPOINT_HOOK = """\
         kRecorderMaximumDomCheckpointNodes);
   }
 """
+BLINK_DOM_CHECKPOINT_HOOK = """\
+  constexpr int kRecorderMaximumDomCheckpointNodes = 512;
+  constexpr int kRecorderMaximumDomAttributesPerNode = 64;
+  constexpr int kRecorderMaximumDomValueLength = 4096;
+  const int recorder_document_node_id = GetDomNodeId();
+  const std::string recorder_document_token = Token().ToString();
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          "finished-parsing",
+          kRecorderMaximumDomCheckpointNodes);
+  if (recorder_checkpoint_sequence != 0) {
+    int recorder_node_count = 0;
+    bool recorder_truncated = false;
+    int recorder_attribute_count = 0;
+    bool recorder_attributes_truncated = false;
+    for (Node& recorder_node :
+         NodeTraversal::InclusiveDescendantsOf(*this)) {
+      if (recorder_node_count >= kRecorderMaximumDomCheckpointNodes) {
+        recorder_truncated = true;
+        break;
+      }
+      ContainerNode* recorder_parent = recorder_node.parentNode();
+      a11y_recorder::RecordBlinkDomCheckpointNode(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token,
+          recorder_node_count, recorder_node.GetDomNodeId(),
+          recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+          static_cast<int>(recorder_node.getNodeType()),
+          recorder_node.nodeName().Utf8().c_str());
+      ++recorder_node_count;
+      Element* recorder_element = DynamicTo<Element>(recorder_node);
+      if (!recorder_element)
+        continue;
+      int recorder_node_attribute_index = 0;
+      for (const Attribute& recorder_attribute :
+           recorder_element->Attributes()) {
+        if (recorder_node_attribute_index >=
+            kRecorderMaximumDomAttributesPerNode) {
+          recorder_attributes_truncated = true;
+          break;
+        }
+        const String recorder_attribute_value = recorder_attribute.Value();
+        const int recorder_attribute_value_length =
+            static_cast<int>(recorder_attribute_value.length());
+        const bool recorder_attribute_value_truncated =
+            recorder_attribute_value_length >
+            kRecorderMaximumDomValueLength;
+        const String recorder_recorded_attribute_value =
+            recorder_attribute_value_truncated
+                ? recorder_attribute_value.Left(
+                      kRecorderMaximumDomValueLength)
+                : recorder_attribute_value;
+        a11y_recorder::RecordBlinkDomCheckpointNodeAttribute(
+            recorder_checkpoint_sequence, recorder_document_node_id,
+            recorder_document_token, recorder_node.GetDomNodeId(),
+            recorder_node_attribute_index,
+            recorder_attribute.NamespaceURI().Utf8().c_str(),
+            recorder_attribute.LocalName().Utf8().c_str(),
+            recorder_recorded_attribute_value.Utf8().c_str(),
+            recorder_attribute_value_length,
+            recorder_attribute_value_truncated,
+            kRecorderMaximumDomValueLength);
+        ++recorder_node_attribute_index;
+        ++recorder_attribute_count;
+      }
+    }
+    a11y_recorder::CompleteBlinkDomCheckpoint(
+        recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token,
+        "finished-parsing", recorder_node_count, recorder_truncated,
+        kRecorderMaximumDomCheckpointNodes,
+        recorder_attribute_count,
+        recorder_attributes_truncated,
+        kRecorderMaximumDomAttributesPerNode,
+        kRecorderMaximumDomValueLength);
+  }
+"""
 BLINK_POST_MUTATION_DOM_CHECKPOINT_HOOK = """\
     HeapHashSet<Member<Document>> recorder_mutated_documents;
     recorder_mutated_documents.swap(recorder_mutated_documents_);
 """
-LEGACY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+ORIGINAL_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
     constexpr int kRecorderMaximumDomCheckpointNodes = 512;
     for (const auto& recorder_document : recorder_mutated_documents) {
       if (!recorder_document->HasFinishedParsing() ||
@@ -424,7 +502,7 @@ LEGACY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
           kRecorderMaximumDomCheckpointNodes);
     }
 """
-BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+LEGACY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
     constexpr int kRecorderMaximumDomCheckpointNodes = 512;
     for (const auto& recorder_document : recorder_mutated_documents) {
       if (!recorder_document->HasFinishedParsing() ||
@@ -464,6 +542,91 @@ BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
           recorder_document_token,
           "post-mutation", recorder_node_count, recorder_truncated,
           kRecorderMaximumDomCheckpointNodes);
+    }
+"""
+BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+    constexpr int kRecorderMaximumDomCheckpointNodes = 512;
+    constexpr int kRecorderMaximumDomAttributesPerNode = 64;
+    constexpr int kRecorderMaximumDomValueLength = 4096;
+    for (const auto& recorder_document : recorder_mutated_documents) {
+      if (!recorder_document->HasFinishedParsing() ||
+          !recorder_document->IsActive())
+        continue;
+      const int recorder_document_node_id =
+          recorder_document->GetDomNodeId();
+      const std::string recorder_document_token =
+          recorder_document->Token().ToString();
+      const uint64_t recorder_checkpoint_sequence =
+          a11y_recorder::BeginBlinkDomCheckpoint(
+              recorder_document_node_id, recorder_document_token,
+              "post-mutation",
+              kRecorderMaximumDomCheckpointNodes);
+      if (recorder_checkpoint_sequence == 0)
+        continue;
+      int recorder_node_count = 0;
+      bool recorder_truncated = false;
+      int recorder_attribute_count = 0;
+      bool recorder_attributes_truncated = false;
+      for (Node& recorder_node :
+           NodeTraversal::InclusiveDescendantsOf(*recorder_document)) {
+        if (recorder_node_count >= kRecorderMaximumDomCheckpointNodes) {
+          recorder_truncated = true;
+          break;
+        }
+        ContainerNode* recorder_parent = recorder_node.parentNode();
+        a11y_recorder::RecordBlinkDomCheckpointNode(
+            recorder_checkpoint_sequence, recorder_document_node_id,
+            recorder_document_token,
+            recorder_node_count, recorder_node.GetDomNodeId(),
+            recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+            static_cast<int>(recorder_node.getNodeType()),
+            recorder_node.nodeName().Utf8().c_str());
+        ++recorder_node_count;
+        Element* recorder_element = DynamicTo<Element>(recorder_node);
+        if (!recorder_element)
+          continue;
+        int recorder_node_attribute_index = 0;
+        for (const Attribute& recorder_attribute :
+             recorder_element->Attributes()) {
+          if (recorder_node_attribute_index >=
+              kRecorderMaximumDomAttributesPerNode) {
+            recorder_attributes_truncated = true;
+            break;
+          }
+          const String recorder_attribute_value = recorder_attribute.Value();
+          const int recorder_attribute_value_length =
+              static_cast<int>(recorder_attribute_value.length());
+          const bool recorder_attribute_value_truncated =
+              recorder_attribute_value_length >
+              kRecorderMaximumDomValueLength;
+          const String recorder_recorded_attribute_value =
+              recorder_attribute_value_truncated
+                  ? recorder_attribute_value.Left(
+                        kRecorderMaximumDomValueLength)
+                  : recorder_attribute_value;
+          a11y_recorder::RecordBlinkDomCheckpointNodeAttribute(
+              recorder_checkpoint_sequence, recorder_document_node_id,
+              recorder_document_token, recorder_node.GetDomNodeId(),
+              recorder_node_attribute_index,
+              recorder_attribute.NamespaceURI().Utf8().c_str(),
+              recorder_attribute.LocalName().Utf8().c_str(),
+              recorder_recorded_attribute_value.Utf8().c_str(),
+              recorder_attribute_value_length,
+              recorder_attribute_value_truncated,
+              kRecorderMaximumDomValueLength);
+          ++recorder_node_attribute_index;
+          ++recorder_attribute_count;
+        }
+      }
+      a11y_recorder::CompleteBlinkDomCheckpoint(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token,
+          "post-mutation", recorder_node_count, recorder_truncated,
+          kRecorderMaximumDomCheckpointNodes,
+          recorder_attribute_count,
+          recorder_attributes_truncated,
+          kRecorderMaximumDomAttributesPerNode,
+          kRecorderMaximumDomValueLength);
     }
 """
 BLINK_MUTATION_AGENT_METHOD = """\
@@ -1462,6 +1625,30 @@ def patch_web_contents_navigation(path: Path) -> None:
     write_patched(path, text)
 
 
+def ensure_checkpoint_attribute_includes(text: str, path: Path) -> str:
+    """Makes the Attribute and Element declarations visible in a patched file.
+
+    The checkpoint hooks read element attributes, so the patched translation
+    unit needs both declarations even when upstream only pulled them in
+    transitively. The includes are added after the bridge include, which every
+    patched file already carries.
+    """
+    required = (
+        '#include "third_party/blink/renderer/core/dom/attribute.h"',
+        '#include "third_party/blink/renderer/core/dom/element.h"',
+    )
+    missing = [include for include in required if include not in text]
+    if not missing:
+        return text
+    anchor = f"{BLINK_BRIDGE_INCLUDE}\n"
+    return replace_once(
+        text,
+        anchor,
+        anchor + "".join(f"{include}\n" for include in missing),
+        path,
+    )
+
+
 def patch_blink_event_target(path: Path) -> None:
     text = read_source(path)
     if BLINK_BRIDGE_INCLUDE not in text:
@@ -1562,6 +1749,14 @@ def patch_blink_document(path: Path) -> None:
             f"{BLINK_BRIDGE_INCLUDE}\n",
             path,
         )
+    text = ensure_checkpoint_attribute_includes(text, path)
+    if ORIGINAL_BLINK_DOM_CHECKPOINT_HOOK in text:
+        text = replace_once(
+            text,
+            ORIGINAL_BLINK_DOM_CHECKPOINT_HOOK,
+            BLINK_DOM_CHECKPOINT_HOOK,
+            path,
+        )
     if LEGACY_BLINK_DOM_CHECKPOINT_HOOK in text:
         text = replace_once(
             text,
@@ -1627,6 +1822,14 @@ def patch_blink_mutation_observer(path: Path) -> None:
             '#include "third_party/blink/renderer/core/dom/node.h"\n',
             '#include "third_party/blink/renderer/core/dom/node.h"\n'
             f"{node_traversal_include}\n",
+            path,
+        )
+    text = ensure_checkpoint_attribute_includes(text, path)
+    if ORIGINAL_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK in text:
+        text = replace_once(
+            text,
+            ORIGINAL_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+            BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
             path,
         )
     if LEGACY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK in text:

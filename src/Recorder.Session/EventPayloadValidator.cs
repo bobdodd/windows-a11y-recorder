@@ -140,8 +140,17 @@ internal static class EventPayloadValidator
             case ("browser.dom", "dom-checkpoint-node"):
                 ValidateBrowserDomCheckpointNode(payload, issues, lineNumber);
                 break;
+            case ("browser.dom", "dom-checkpoint-node-attribute"):
+                ValidateBrowserDomCheckpointNodeAttribute(payload, issues, lineNumber);
+                break;
             case ("browser.dom", "dom-checkpoint-completed"):
                 ValidateBrowserDomCheckpointCompleted(payload, issues, lineNumber);
+                break;
+            case ("browser.dom", "dom-attribute-changed"):
+                ValidateBrowserDomAttributeChanged(payload, issues, lineNumber);
+                break;
+            case ("browser.dom", "dom-character-data-changed"):
+                ValidateBrowserDomCharacterDataChanged(payload, issues, lineNumber);
                 break;
             case ("browser.cookie", "cookie-operation"):
                 ValidateBrowserCookie(payload, issues, lineNumber);
@@ -905,6 +914,38 @@ internal static class EventPayloadValidator
         ValidateRendererDocumentContext(payload, issues, line);
     }
 
+    private static void ValidateBrowserDomCheckpointNodeAttribute(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("nodeId", positive: true),
+                RequiredInteger("attributeIndex", nonnegative: true),
+                NullableString("attributeNamespace"),
+                RequiredString("attributeName"),
+                RequiredText("attributeValue"),
+                RequiredInteger("attributeValueLength", nonnegative: true),
+                RequiredBoolean("attributeValueTruncated"),
+                RequiredInteger("maximumValueLength", positive: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        ValidateTruncatedText(
+            payload,
+            "attributeValue",
+            "attributeValueLength",
+            "attributeValueTruncated",
+            issues,
+            line);
+    }
+
     private static void ValidateBrowserDomCheckpointCompleted(
         JsonElement payload,
         ICollection<ArchiveValidationIssue> issues,
@@ -918,12 +959,175 @@ internal static class EventPayloadValidator
                 RequiredEnum("reason", "finished-parsing", "post-mutation"),
                 RequiredInteger("nodeCount", nonnegative: true),
                 RequiredBoolean("truncated"),
-                RequiredInteger("maximumNodes", positive: true)
+                RequiredInteger("maximumNodes", positive: true),
+                RequiredInteger("attributeCount", nonnegative: true),
+                RequiredBoolean("attributesTruncated"),
+                RequiredInteger("maximumAttributesPerNode", positive: true),
+                RequiredInteger("maximumValueLength", positive: true)
             ],
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
         ValidateRendererDocumentContext(payload, issues, line);
+    }
+
+    private static void ValidateBrowserDomAttributeChanged(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableString("checkpointId"),
+                RequiredInteger("nodeId", positive: true),
+                RequiredString("nodeName"),
+                NullableString("attributeNamespace"),
+                RequiredString("attributeName"),
+                RequiredEnum("changeType", "added", "removed", "changed"),
+                NullableString("attributeValue"),
+                NullableInteger("attributeValueLength", nonnegative: true),
+                RequiredBoolean("attributeValueTruncated"),
+                NullableString("previousAttributeValue"),
+                NullableInteger(
+                    "previousAttributeValueLength",
+                    nonnegative: true),
+                RequiredBoolean("previousAttributeValueTruncated"),
+                RequiredInteger("maximumValueLength", positive: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        ValidateTruncatedText(
+            payload,
+            "attributeValue",
+            "attributeValueLength",
+            "attributeValueTruncated",
+            issues,
+            line);
+        ValidateTruncatedText(
+            payload,
+            "previousAttributeValue",
+            "previousAttributeValueLength",
+            "previousAttributeValueTruncated",
+            issues,
+            line);
+        ValidateAttributeChangeTransition(payload, issues, line);
+    }
+
+    private static void ValidateBrowserDomCharacterDataChanged(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableString("checkpointId"),
+                RequiredInteger("nodeId", positive: true),
+                NullableInteger("parentNodeId", nonnegative: true),
+                RequiredEnum("nodeType", "text", "comment", "other"),
+                RequiredText("text"),
+                RequiredInteger("textLength", nonnegative: true),
+                RequiredBoolean("textTruncated"),
+                RequiredText("previousText"),
+                RequiredInteger("previousTextLength", nonnegative: true),
+                RequiredBoolean("previousTextTruncated"),
+                RequiredInteger("maximumValueLength", positive: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        ValidateTruncatedText(
+            payload,
+            "text",
+            "textLength",
+            "textTruncated",
+            issues,
+            line);
+        ValidateTruncatedText(
+            payload,
+            "previousText",
+            "previousTextLength",
+            "previousTextTruncated",
+            issues,
+            line);
+    }
+
+    private static void ValidateAttributeChangeTransition(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        var changeType = ReadString(payload, "changeType");
+        if (changeType is null)
+        {
+            return;
+        }
+
+        var hasValue = HasNonnullProperty(payload, "attributeValue");
+        var hasPrevious = HasNonnullProperty(payload, "previousAttributeValue");
+        var consistent = changeType switch
+        {
+            "added" => hasValue && !hasPrevious,
+            "removed" => !hasValue && hasPrevious,
+            "changed" => hasValue && hasPrevious,
+            _ => true
+        };
+        if (consistent)
+        {
+            return;
+        }
+
+        AddError(
+            issues,
+            "browser-dom-attribute-change-inconsistent",
+            "events.ndjson#/payload/changeType",
+            $"An attribute change of type '{changeType}' does not carry the " +
+            "value and previous value that change type requires.",
+            line);
+    }
+
+    private static void ValidateTruncatedText(
+        JsonElement payload,
+        string textProperty,
+        string lengthProperty,
+        string truncatedProperty,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty(textProperty, out var text) ||
+            text.ValueKind != JsonValueKind.String ||
+            !payload.TryGetProperty(lengthProperty, out var length) ||
+            !length.TryGetInt64(out var reportedLength) ||
+            !payload.TryGetProperty(truncatedProperty, out var truncated) ||
+            truncated.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return;
+        }
+
+        var recordedLength = (text.GetString() ?? string.Empty).Length;
+        var isTruncated = truncated.ValueKind == JsonValueKind.True;
+        var consistent = isTruncated
+            ? reportedLength > recordedLength
+            : reportedLength == recordedLength;
+        if (consistent)
+        {
+            return;
+        }
+
+        AddError(
+            issues,
+            "browser-dom-text-truncation-inconsistent",
+            $"events.ndjson#/payload/{lengthProperty}",
+            $"Property '{lengthProperty}' reports {reportedLength} units for a " +
+            $"recorded value of {recordedLength} units while " +
+            $"'{truncatedProperty}' is {(isTruncated ? "true" : "false")}.",
+            line);
     }
 
     private static void ValidateRendererDocumentContext(
@@ -1208,6 +1412,9 @@ internal static class EventPayloadValidator
     private static PropertyRule NullableString(string name) =>
         new(name, true, true, IsString, "must be a string or null");
 
+    private static PropertyRule RequiredText(string name) =>
+        new(name, true, false, IsString, "must be a string");
+
     private static PropertyRule RequiredInteger(
         string name,
         bool nonnegative = false,
@@ -1413,6 +1620,10 @@ internal static class EventPayloadValidator
         !Path.IsPathRooted(value) &&
         !value.Contains('\\') &&
         !value.Split('/').Any(segment => segment is "" or "." or "..");
+
+    private static bool HasNonnullProperty(JsonElement value, string property) =>
+        value.TryGetProperty(property, out var item) &&
+        item.ValueKind != JsonValueKind.Null;
 
     private static string? ReadString(JsonElement value, string property) =>
         value.TryGetProperty(property, out var item) &&

@@ -87,6 +87,7 @@ struct EvidenceIdentityStorage {
   uint64_t next_timer_id = 1;
   uint64_t next_dom_checkpoint_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
+  std::unordered_map<int, uint64_t> pending_dom_checkpoints;
 
   struct NodeState {
     int document_node_id;
@@ -144,10 +145,33 @@ std::string DomCheckpointId(uint64_t checkpoint_sequence) {
   return "dom-checkpoint-" + base::NumberToString(checkpoint_sequence);
 }
 
-uint64_t AllocateDomCheckpointIdentity() {
+// Reserves the identity of the checkpoint that the current mutation delivery
+// pass will produce for this document, so a transition record can name the
+// tree it occurred in before that tree has been walked. The reservation is
+// consumed by the next checkpoint started for the same document.
+uint64_t ReserveDomCheckpointIdentity(int document_node_id) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
-  return identities.next_dom_checkpoint_id++;
+  auto found = identities.pending_dom_checkpoints.find(document_node_id);
+  if (found != identities.pending_dom_checkpoints.end()) {
+    return found->second;
+  }
+  const uint64_t reserved = identities.next_dom_checkpoint_id++;
+  identities.pending_dom_checkpoints.insert_or_assign(document_node_id,
+                                                     reserved);
+  return reserved;
+}
+
+uint64_t TakeDomCheckpointIdentity(int document_node_id) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.pending_dom_checkpoints.find(document_node_id);
+  if (found == identities.pending_dom_checkpoints.end()) {
+    return identities.next_dom_checkpoint_id++;
+  }
+  const uint64_t reserved = found->second;
+  identities.pending_dom_checkpoints.erase(found);
+  return reserved;
 }
 
 base::DictValue CreateContext(const RecorderPipeClient& client,
@@ -279,6 +303,44 @@ std::string DomNodeTypeName(int node_type) {
     default:
       return "other";
   }
+}
+
+std::string DomAttributeChangeTypeName(int change_type) {
+  switch (change_type) {
+    case 0:
+      return "added";
+    case 1:
+      return "removed";
+    default:
+      return "changed";
+  }
+}
+
+// Records a value that the caller may have truncated, alongside the full
+// length it had before truncation, so a partial observation is explicit.
+void SetTruncatedTextProperties(base::DictValue& payload,
+                                const std::string& value_property,
+                                const std::string& length_property,
+                                const std::string& truncated_property,
+                                std::string value,
+                                int value_length,
+                                bool value_truncated) {
+  payload.Set(value_property, std::move(value));
+  payload.Set(length_property, value_length);
+  payload.Set(truncated_property, value_truncated);
+}
+
+base::DictValue CreateDomStateChangeBasePayload(
+    const RecorderPipeClient& client,
+    int document_node_id,
+    std::string document_token) {
+  base::DictValue payload;
+  payload.Set("context",
+              CreateContext(client, document_node_id,
+                            std::move(document_token)));
+  const uint64_t reserved = ReserveDomCheckpointIdentity(document_node_id);
+  payload.Set("checkpointId", DomCheckpointId(reserved));
+  return payload;
 }
 
 base::DictValue CreateDomCheckpointBasePayload(
@@ -1320,7 +1382,8 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
       maximum_nodes <= 0) {
     return 0;
   }
-  const uint64_t checkpoint_sequence = AllocateDomCheckpointIdentity();
+  const uint64_t checkpoint_sequence =
+      TakeDomCheckpointIdentity(document_node_id);
   base::DictValue payload = CreateDomCheckpointBasePayload(
       *client, checkpoint_sequence, document_node_id,
       std::move(document_token));
@@ -1361,17 +1424,63 @@ void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
                     std::move(payload));
 }
 
+void RecordBlinkDomCheckpointNodeAttribute(uint64_t checkpoint_sequence,
+                                           int document_node_id,
+                                           std::string document_token,
+                                           int node_id,
+                                           int attribute_index,
+                                           std::string attribute_namespace,
+                                           std::string attribute_name,
+                                           std::string attribute_value,
+                                           int attribute_value_length,
+                                           bool attribute_value_truncated,
+                                           int maximum_value_length) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_id <= 0 || attribute_index < 0 ||
+      attribute_name.empty() || attribute_value_length < 0 ||
+      maximum_value_length <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("nodeId", node_id);
+  payload.Set("attributeIndex", attribute_index);
+  if (attribute_namespace.empty()) {
+    payload.Set("attributeNamespace", base::Value());
+  } else {
+    payload.Set("attributeNamespace", std::move(attribute_namespace));
+  }
+  payload.Set("attributeName", std::move(attribute_name));
+  SetTruncatedTextProperties(payload, "attributeValue",
+                             "attributeValueLength",
+                             "attributeValueTruncated",
+                             std::move(attribute_value),
+                             attribute_value_length,
+                             attribute_value_truncated);
+  payload.Set("maximumValueLength", maximum_value_length);
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-node-attribute",
+                    std::move(payload));
+}
+
 void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int document_node_id,
                                 std::string document_token,
                                 std::string reason,
                                 int node_count,
                                 bool truncated,
-                                int maximum_nodes) {
+                                int maximum_nodes,
+                                int attribute_count,
+                                bool attributes_truncated,
+                                int maximum_attributes_per_node,
+                                int maximum_value_length) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() ||
-      reason.empty() || node_count < 0 || maximum_nodes <= 0) {
+      reason.empty() || node_count < 0 || maximum_nodes <= 0 ||
+      attribute_count < 0 || maximum_attributes_per_node <= 0 ||
+      maximum_value_length <= 0) {
     return;
   }
   base::DictValue payload = CreateDomCheckpointBasePayload(
@@ -1381,7 +1490,115 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
   payload.Set("nodeCount", node_count);
   payload.Set("truncated", truncated);
   payload.Set("maximumNodes", maximum_nodes);
+  payload.Set("attributeCount", attribute_count);
+  payload.Set("attributesTruncated", attributes_truncated);
+  payload.Set("maximumAttributesPerNode", maximum_attributes_per_node);
+  payload.Set("maximumValueLength", maximum_value_length);
   SendBlinkEvidence("browser.dom", "dom-checkpoint-completed",
+                    std::move(payload));
+}
+
+void RecordBlinkDomAttributeChanged(int document_node_id,
+                                    std::string document_token,
+                                    int node_id,
+                                    std::string node_name,
+                                    std::string attribute_namespace,
+                                    std::string attribute_name,
+                                    int change_type,
+                                    std::string attribute_value,
+                                    int attribute_value_length,
+                                    bool attribute_value_truncated,
+                                    std::string previous_attribute_value,
+                                    int previous_attribute_value_length,
+                                    bool previous_attribute_value_truncated,
+                                    int maximum_value_length) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || node_name.empty() || attribute_name.empty() ||
+      change_type < 0 || change_type > 2 || attribute_value_length < 0 ||
+      previous_attribute_value_length < 0 || maximum_value_length <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomStateChangeBasePayload(
+      *client, document_node_id, std::move(document_token));
+  payload.Set("nodeId", node_id);
+  payload.Set("nodeName", std::move(node_name));
+  if (attribute_namespace.empty()) {
+    payload.Set("attributeNamespace", base::Value());
+  } else {
+    payload.Set("attributeNamespace", std::move(attribute_namespace));
+  }
+  payload.Set("attributeName", std::move(attribute_name));
+  payload.Set("changeType", DomAttributeChangeTypeName(change_type));
+  // A removed attribute has no current value and an added attribute has no
+  // previous value. The change type decides which side is absent, so the
+  // record cannot contradict itself.
+  const bool has_value = change_type != 1;
+  const bool has_previous_value = change_type != 0;
+  if (has_value) {
+    SetTruncatedTextProperties(payload, "attributeValue",
+                               "attributeValueLength",
+                               "attributeValueTruncated",
+                               std::move(attribute_value),
+                               attribute_value_length,
+                               attribute_value_truncated);
+  } else {
+    payload.Set("attributeValue", base::Value());
+    payload.Set("attributeValueLength", base::Value());
+    payload.Set("attributeValueTruncated", false);
+  }
+  if (has_previous_value) {
+    SetTruncatedTextProperties(payload, "previousAttributeValue",
+                               "previousAttributeValueLength",
+                               "previousAttributeValueTruncated",
+                               std::move(previous_attribute_value),
+                               previous_attribute_value_length,
+                               previous_attribute_value_truncated);
+  } else {
+    payload.Set("previousAttributeValue", base::Value());
+    payload.Set("previousAttributeValueLength", base::Value());
+    payload.Set("previousAttributeValueTruncated", false);
+  }
+  payload.Set("maximumValueLength", maximum_value_length);
+  SendBlinkEvidence("browser.dom", "dom-attribute-changed",
+                    std::move(payload));
+}
+
+void RecordBlinkDomCharacterDataChanged(int document_node_id,
+                                        std::string document_token,
+                                        int node_id,
+                                        int parent_node_id,
+                                        int node_type,
+                                        std::string text,
+                                        int text_length,
+                                        bool text_truncated,
+                                        std::string previous_text,
+                                        int previous_text_length,
+                                        bool previous_text_truncated,
+                                        int maximum_value_length) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || text_length < 0 || previous_text_length < 0 ||
+      maximum_value_length <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomStateChangeBasePayload(
+      *client, document_node_id, std::move(document_token));
+  payload.Set("nodeId", node_id);
+  if (parent_node_id > 0) {
+    payload.Set("parentNodeId", parent_node_id);
+  } else {
+    payload.Set("parentNodeId", base::Value());
+  }
+  payload.Set("nodeType", DomNodeTypeName(node_type));
+  SetTruncatedTextProperties(payload, "text", "textLength", "textTruncated",
+                             std::move(text), text_length, text_truncated);
+  SetTruncatedTextProperties(payload, "previousText", "previousTextLength",
+                             "previousTextTruncated",
+                             std::move(previous_text), previous_text_length,
+                             previous_text_truncated);
+  payload.Set("maximumValueLength", maximum_value_length);
+  SendBlinkEvidence("browser.dom", "dom-character-data-changed",
                     std::move(payload));
 }
 

@@ -920,6 +920,24 @@ public sealed class SessionArchiveValidatorTests
                 3,
                 400,
                 BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointNodeAttribute,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-1",
+                    nodeId = 9,
+                    attributeIndex = 0,
+                    attributeNamespace = (string?)null,
+                    attributeName = "lang",
+                    attributeValue = "en",
+                    attributeValueLength = 2,
+                    attributeValueTruncated = false,
+                    maximumValueLength = 4096
+                }),
+            CreateEvent(
+                4,
+                500,
+                BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCheckpointCompleted,
                 new
                 {
@@ -928,11 +946,15 @@ public sealed class SessionArchiveValidatorTests
                     reason = "finished-parsing",
                     nodeCount = 2,
                     truncated = false,
-                    maximumNodes = 512
+                    maximumNodes = 512,
+                    attributeCount = 1,
+                    attributesTruncated = false,
+                    maximumAttributesPerNode = 64,
+                    maximumValueLength = 4096
                 }),
             CreateEvent(
-                4,
-                500,
+                5,
+                600,
                 BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCheckpointStarted,
                 new
@@ -943,8 +965,8 @@ public sealed class SessionArchiveValidatorTests
                     maximumNodes = 512
                 }),
             CreateEvent(
-                5,
-                600,
+                6,
+                700,
                 BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCheckpointNode,
                 new
@@ -958,8 +980,8 @@ public sealed class SessionArchiveValidatorTests
                     nodeName = "#document"
                 }),
             CreateEvent(
-                6,
-                700,
+                7,
+                800,
                 BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCheckpointCompleted,
                 new
@@ -969,7 +991,11 @@ public sealed class SessionArchiveValidatorTests
                     reason = "post-mutation",
                     nodeCount = 1,
                     truncated = false,
-                    maximumNodes = 512
+                    maximumNodes = 512,
+                    attributeCount = 0,
+                    attributesTruncated = false,
+                    maximumAttributesPerNode = 64,
+                    maximumValueLength = 4096
                 })
         };
         var directory = await CreateArchiveAsync(records);
@@ -988,6 +1014,304 @@ public sealed class SessionArchiveValidatorTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task AcceptsInstrumentedBrowserDomStateChangeEvidence()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
+        };
+        var records = new[]
+        {
+            CreateEvent(
+                0,
+                100,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomAttributeChanged,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-1",
+                    nodeId = 11,
+                    nodeName = "BUTTON",
+                    attributeNamespace = (string?)null,
+                    attributeName = "aria-expanded",
+                    changeType = "changed",
+                    attributeValue = "true",
+                    attributeValueLength = (int?)4,
+                    attributeValueTruncated = false,
+                    previousAttributeValue = "false",
+                    previousAttributeValueLength = (int?)5,
+                    previousAttributeValueTruncated = false,
+                    maximumValueLength = 4096
+                }),
+            CreateEvent(
+                1,
+                200,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomAttributeChanged,
+                new
+                {
+                    context,
+                    checkpointId = (string?)null,
+                    nodeId = 11,
+                    nodeName = "BUTTON",
+                    attributeNamespace = (string?)null,
+                    attributeName = "hidden",
+                    changeType = "removed",
+                    attributeValue = (string?)null,
+                    attributeValueLength = (int?)null,
+                    attributeValueTruncated = false,
+                    previousAttributeValue = "",
+                    previousAttributeValueLength = (int?)0,
+                    previousAttributeValueTruncated = false,
+                    maximumValueLength = 4096
+                }),
+            CreateEvent(
+                2,
+                300,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCharacterDataChanged,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-2",
+                    nodeId = 14,
+                    parentNodeId = (long?)13,
+                    nodeType = "text",
+                    text = "Two items remaining",
+                    textLength = 19,
+                    textTruncated = false,
+                    previousText = "Three items remaining",
+                    previousTextLength = 21,
+                    previousTextTruncated = false,
+                    maximumValueLength = 4096
+                })
+        };
+        var directory = await CreateArchiveAsync(records);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AcceptsTruncatedDomAttributeValueThatReportsItsFullLength()
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dom,
+            BrowserEvidenceEventTypes.DomCheckpointNodeAttribute,
+            new
+            {
+                context = CreateRendererDocumentContext(),
+                checkpointId = "dom-checkpoint-1",
+                nodeId = 11,
+                attributeIndex = 0,
+                attributeNamespace = (string?)null,
+                attributeName = "aria-label",
+                attributeValue = new string('a', 16),
+                attributeValueLength = 4096,
+                attributeValueTruncated = true,
+                maximumValueLength = 16
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsDomAttributeValueLengthWithoutTruncationState()
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dom,
+            BrowserEvidenceEventTypes.DomCheckpointNodeAttribute,
+            new
+            {
+                context = CreateRendererDocumentContext(),
+                checkpointId = "dom-checkpoint-1",
+                nodeId = 11,
+                attributeIndex = 0,
+                attributeNamespace = (string?)null,
+                attributeName = "aria-label",
+                attributeValue = "Save",
+                attributeValueLength = 400,
+                attributeValueTruncated = false,
+                maximumValueLength = 4096
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code == "browser-dom-text-truncation-inconsistent");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("added", "true", "false")]
+    [InlineData("removed", "true", null)]
+    [InlineData("changed", null, "false")]
+    public async Task RejectsDomAttributeChangeThatContradictsItsChangeType(
+        string changeType,
+        string? value,
+        string? previousValue)
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dom,
+            BrowserEvidenceEventTypes.DomAttributeChanged,
+            new
+            {
+                context = CreateRendererDocumentContext(),
+                checkpointId = (string?)null,
+                nodeId = 11,
+                nodeName = "BUTTON",
+                attributeNamespace = (string?)null,
+                attributeName = "aria-expanded",
+                changeType,
+                attributeValue = value,
+                attributeValueLength = value?.Length,
+                attributeValueTruncated = false,
+                previousAttributeValue = previousValue,
+                previousAttributeValueLength = previousValue?.Length,
+                previousAttributeValueTruncated = false,
+                maximumValueLength = 4096
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code == "browser-dom-attribute-change-inconsistent");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsDomCharacterDataChangeWithoutDocumentToken()
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dom,
+            BrowserEvidenceEventTypes.DomCharacterDataChanged,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 3400,
+                    processType = "renderer",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = (string?)null,
+                    frameId = (string?)null,
+                    documentId = "dom-document-8",
+                    executionWorldId = (string?)null,
+                    documentToken = (string?)null
+                },
+                checkpointId = (string?)null,
+                nodeId = 14,
+                parentNodeId = (long?)13,
+                nodeType = "text",
+                text = "Saved",
+                textLength = 5,
+                textTruncated = false,
+                previousText = "Saving",
+                previousTextLength = 6,
+                previousTextTruncated = false,
+                maximumValueLength = 4096
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "browser-dom-context-invalid");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static object CreateRendererDocumentContext() =>
+        new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
+        };
 
     [Fact]
     public async Task RejectsDomCheckpointWithoutDocumentToken()

@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.14";
+    public const string CurrentVersion = "0.15";
 }
 
 public static class BrowserEvidenceChannels
@@ -35,7 +35,10 @@ public static class BrowserEvidenceEventTypes
     public const string NavigationCompleted = "navigation-completed";
     public const string DomCheckpointStarted = "dom-checkpoint-started";
     public const string DomCheckpointNode = "dom-checkpoint-node";
+    public const string DomCheckpointNodeAttribute = "dom-checkpoint-node-attribute";
     public const string DomCheckpointCompleted = "dom-checkpoint-completed";
+    public const string DomAttributeChanged = "dom-attribute-changed";
+    public const string DomCharacterDataChanged = "dom-character-data-changed";
     public const string CookieOperation = "cookie-operation";
     public const string Omission = "collector-omission";
 }
@@ -152,13 +155,59 @@ public sealed record BrowserDomCheckpointNodePayload(
     string NodeType,
     string NodeName);
 
+public sealed record BrowserDomCheckpointNodeAttributePayload(
+    BrowserContext Context,
+    string CheckpointId,
+    long NodeId,
+    int AttributeIndex,
+    string? AttributeNamespace,
+    string AttributeName,
+    string AttributeValue,
+    int AttributeValueLength,
+    bool AttributeValueTruncated,
+    int MaximumValueLength);
+
 public sealed record BrowserDomCheckpointCompletedPayload(
     BrowserContext Context,
     string CheckpointId,
     string Reason,
     int NodeCount,
     bool Truncated,
-    int MaximumNodes);
+    int MaximumNodes,
+    int AttributeCount,
+    bool AttributesTruncated,
+    int MaximumAttributesPerNode,
+    int MaximumValueLength);
+
+public sealed record BrowserDomAttributeChangedPayload(
+    BrowserContext Context,
+    string? CheckpointId,
+    long NodeId,
+    string NodeName,
+    string? AttributeNamespace,
+    string AttributeName,
+    string ChangeType,
+    string? AttributeValue,
+    int? AttributeValueLength,
+    bool AttributeValueTruncated,
+    string? PreviousAttributeValue,
+    int? PreviousAttributeValueLength,
+    bool PreviousAttributeValueTruncated,
+    int MaximumValueLength);
+
+public sealed record BrowserDomCharacterDataChangedPayload(
+    BrowserContext Context,
+    string? CheckpointId,
+    long NodeId,
+    long? ParentNodeId,
+    string NodeType,
+    string Text,
+    int TextLength,
+    bool TextTruncated,
+    string PreviousText,
+    int PreviousTextLength,
+    bool PreviousTextTruncated,
+    int MaximumValueLength);
 
 public sealed record BrowserCookieOperationPayload(
     BrowserContext Context,
