@@ -285,6 +285,14 @@ produce, so a transition and the tree state that followed it share one
 checkpoint identity. Live 0.15 connections require an exact protocol-version
 match.
 
+Bounded values are truncated with `String::substr(0, limit)`. Blink's
+`WTF::String` has no `Left` method in Chromium 156, and the first 0.15 hook
+bodies used one, which failed to compile in `character_data.cc`. The corrected
+bodies are carried as `INTERMEDIATE_` templates and replaced explicitly, because
+the presence guards key on symbol names and would otherwise leave an
+uncompilable body in an already-patched checkout. A body-level defect needs the
+same migration treatment as a signature change.
+
 Changing `CompleteBlinkDomCheckpoint` from seven to eleven arguments required
 keeping the protocol 0.14 hook bodies as named historical templates in
 `chromium/integrate.py`, because the presence guards key on symbol names and

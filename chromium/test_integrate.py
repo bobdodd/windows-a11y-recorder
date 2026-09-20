@@ -1899,10 +1899,10 @@ class IntegrateTests(unittest.TestCase):
                 self.assertEqual(1, first.count(include))
             # The recorded text must be bounded before it reaches the bridge.
             self.assertIn(
-                "new_data.Left(kRecorderMaximumDomValueLength)", first
+                "new_data.substr(0, kRecorderMaximumDomValueLength)", first
             )
             self.assertIn(
-                "old_data.Left(kRecorderMaximumDomValueLength)", first
+                "old_data.substr(0, kRecorderMaximumDomValueLength)", first
             )
 
     def test_parses_declared_bridge_signatures(self):
@@ -2050,6 +2050,101 @@ class IntegrateTests(unittest.TestCase):
         self.assertIn("BeginBlinkDomCheckpoint", message)
         self.assertIn("called with 3 arguments", message)
 
+
+
+    def test_migrates_uncompilable_string_truncation_bodies(self):
+        """A patched body the presence guard would skip must be replaced."""
+        element_source = (
+            '#include "third_party/blink/renderer/core/dom/element.h"\n'
+            f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+            '#include "third_party/blink/renderer/core/dom/'
+            'mutation_observer.h"\n'
+            "\n"
+            f"{INTEGRATE.INTERMEDIATE_BLINK_ELEMENT_ATTRIBUTE_MUTATION_HELPER}"
+            "\n"
+            "void Element::DidAddAttribute(const QualifiedName& name,\n"
+            "                              const AtomicString& value) {\n"
+            f"{INTEGRATE.BLINK_ELEMENT_ATTRIBUTE_ADDED_HOOK}"
+            "  AttributeChanged();\n"
+            "}\n"
+        )
+        character_data_source = (
+            '#include "third_party/blink/renderer/core/dom/character_data.h"\n'
+            f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+            '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            '#include "third_party/blink/renderer/core/dom/'
+            'mutation_observer.h"\n'
+            "\n"
+            "void CharacterData::SetDataAndUpdate(const String& new_data,\n"
+            "                                     const TextDiffRange& diff,\n"
+            "                                     UpdateSource source) {\n"
+            "  String old_data = this->data();\n"
+            f"{INTEGRATE.INTERMEDIATE_BLINK_CHARACTER_DATA_MUTATION_HOOK}"
+            "  SetDataWithoutUpdate(new_data);\n"
+            "}\n"
+        )
+        document_source = (
+            '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+            '#include "third_party/blink/renderer/core/dom/element.h"\n'
+            '#include "third_party/blink/renderer/core/dom/attribute.h"\n'
+            "\n"
+            "void Document::FinishedParsing() {\n"
+            "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+            "\n"
+            f"{INTEGRATE.INTERMEDIATE_BLINK_DOM_CHECKPOINT_HOOK}"
+            "\n"
+            "  DispatchEvent();\n"
+            "}\n"
+            "\n"
+            "void Document::NotifyChangeChildren(\n"
+            "    const ContainerNode& container,\n"
+            "    const ContainerNode::ChildrenChange& change) {\n"
+            f"{INTEGRATE.BLINK_DOCUMENT_MUTATION_HOOK}"
+            "  NotifySelection();\n"
+            "}\n"
+        )
+        cases = (
+            (
+                "element.cc",
+                element_source,
+                INTEGRATE.INTERMEDIATE_BLINK_ELEMENT_ATTRIBUTE_MUTATION_HELPER,
+                INTEGRATE.BLINK_ELEMENT_ATTRIBUTE_MUTATION_HELPER,
+                INTEGRATE.patch_blink_element,
+            ),
+            (
+                "character_data.cc",
+                character_data_source,
+                INTEGRATE.INTERMEDIATE_BLINK_CHARACTER_DATA_MUTATION_HOOK,
+                INTEGRATE.BLINK_CHARACTER_DATA_MUTATION_HOOK,
+                INTEGRATE.patch_blink_character_data,
+            ),
+            (
+                "document.cc",
+                document_source,
+                INTEGRATE.INTERMEDIATE_BLINK_DOM_CHECKPOINT_HOOK,
+                INTEGRATE.BLINK_DOM_CHECKPOINT_HOOK,
+                INTEGRATE.patch_blink_document,
+            ),
+        )
+        for name, source, intermediate, current, patch in cases:
+            with self.subTest(source=name):
+                self.assertIn(".Left(", intermediate)
+                self.assertNotIn(".Left(", current)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / name
+                    path.write_text(source, encoding="utf-8")
+
+                    patch(path)
+                    first = path.read_text(encoding="utf-8")
+                    patch(path)
+
+                    self.assertEqual(
+                        first, path.read_text(encoding="utf-8")
+                    )
+                    self.assertNotIn(".Left(", first)
+                    self.assertNotIn(intermediate, first)
+                    self.assertIn(current, first)
 
 
 if __name__ == "__main__":
