@@ -76,6 +76,7 @@
     window.cancelAnimationFrame(cancelledAnimationFrameId);
     window.requestAnimationFrame((timestamp) => {
       status.dataset.animationFrameTimestamp = String(timestamp);
+      document.title = "Blink listener and dispatch fixture ready";
     });
     const cancelledIdleCallbackId = window.requestIdleCallback(() => {
       status.dataset.cancelledIdleCallbackRan = "true";
@@ -106,6 +107,10 @@
     }, 3500);
     window.setTimeout(() => {
       target.click();
+      const mutationResult = document.createElement("div");
+      mutationResult.id = "post-mutation-result";
+      mutationResult.textContent = "Deterministic post-mutation checkpoint.";
+      propagationRoot.appendChild(mutationResult);
       defaultActionLink.click();
       window.history.pushState(
         { fixture: "same-document" },
@@ -113,7 +118,6 @@
         "#same-document-navigation"
       );
     }, 250);
-    document.title = "Blink listener and dispatch fixture ready";
   </script>
 </body>
 </html>

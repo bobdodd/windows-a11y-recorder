@@ -273,6 +273,72 @@ BLINK_DOM_CHECKPOINT_HOOK = """\
         kRecorderMaximumDomCheckpointNodes);
   }
 """
+BLINK_POST_MUTATION_DOM_CHECKPOINT_HOOK = """\
+    HeapHashSet<Member<Document>> recorder_mutated_documents;
+    recorder_mutated_documents.swap(recorder_mutated_documents_);
+"""
+BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+    constexpr int kRecorderMaximumDomCheckpointNodes = 512;
+    for (const auto& recorder_document : recorder_mutated_documents) {
+      if (!recorder_document->HasFinishedParsing() ||
+          !recorder_document->IsActive())
+        continue;
+      const int recorder_document_node_id =
+          recorder_document->GetDomNodeId();
+      const uint64_t recorder_checkpoint_sequence =
+          a11y_recorder::BeginBlinkDomCheckpoint(
+              recorder_document_node_id, "post-mutation",
+              kRecorderMaximumDomCheckpointNodes);
+      if (recorder_checkpoint_sequence == 0)
+        continue;
+      int recorder_node_count = 0;
+      bool recorder_truncated = false;
+      for (Node& recorder_node :
+           NodeTraversal::InclusiveDescendantsOf(*recorder_document)) {
+        if (recorder_node_count >= kRecorderMaximumDomCheckpointNodes) {
+          recorder_truncated = true;
+          break;
+        }
+        ContainerNode* recorder_parent = recorder_node.parentNode();
+        a11y_recorder::RecordBlinkDomCheckpointNode(
+            recorder_checkpoint_sequence, recorder_document_node_id,
+            recorder_node_count, recorder_node.GetDomNodeId(),
+            recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+            static_cast<int>(recorder_node.getNodeType()),
+            recorder_node.nodeName().Utf8().c_str());
+        ++recorder_node_count;
+      }
+      a11y_recorder::CompleteBlinkDomCheckpoint(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          "post-mutation", recorder_node_count, recorder_truncated,
+          kRecorderMaximumDomCheckpointNodes);
+    }
+"""
+BLINK_MUTATION_AGENT_METHOD = """\
+  void EnqueueRecorderDomCheckpoint(Document& document) {
+    EnsureEnqueueMicrotask();
+    recorder_mutated_documents_.insert(&document);
+  }
+
+"""
+BLINK_MUTATION_AGENT_TRACE_HOOK = """\
+    visitor->Trace(recorder_mutated_documents_);
+"""
+BLINK_MUTATION_AGENT_MEMBER = """\
+  HeapHashSet<Member<Document>> recorder_mutated_documents_;
+"""
+BLINK_MUTATION_OBSERVER_METHOD = """\
+// static
+void MutationObserver::EnqueueRecorderDomCheckpoint(Document& document) {
+  MutationObserverAgentData::From(document.GetAgent())
+      .EnqueueRecorderDomCheckpoint(document);
+}
+
+"""
+BLINK_DOCUMENT_MUTATION_HOOK = """\
+  if (HasFinishedParsing())
+    MutationObserver::EnqueueRecorderDomCheckpoint(*this);
+"""
 BLINK_LISTENER_HOOK = """\
     if (Node* recorder_target = ToNode()) {
       Element* recorder_element = DynamicTo<Element>(recorder_target);
@@ -1123,6 +1189,126 @@ def patch_blink_document(path: Path) -> None:
             anchor + BLINK_DOM_CHECKPOINT_HOOK + "\n",
             path,
         )
+    if "EnqueueRecorderDomCheckpoint(*this)" not in text:
+        anchor = (
+            "void Document::NotifyChangeChildren(\n"
+            "    const ContainerNode& container,\n"
+            "    const ContainerNode::ChildrenChange& change) {\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            anchor + BLINK_DOCUMENT_MUTATION_HOOK,
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_blink_mutation_observer_header(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if "EnqueueRecorderDomCheckpoint" not in text:
+        anchor = "  static void EnqueueSlotChange(HTMLSlotElement&);\n"
+        text = replace_once(
+            text,
+            anchor,
+            (
+                "  static void EnqueueRecorderDomCheckpoint(Document&);\n"
+                + anchor
+            ),
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def patch_blink_mutation_observer(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "third_party/blink/renderer/core/dom/mutation_observer.h"\n',
+            '#include "third_party/blink/renderer/core/dom/mutation_observer.h"\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            path,
+        )
+    node_traversal_include = (
+        '#include "third_party/blink/renderer/core/dom/node_traversal.h"'
+    )
+    if node_traversal_include not in text:
+        text = replace_once(
+            text,
+            '#include "third_party/blink/renderer/core/dom/node.h"\n',
+            '#include "third_party/blink/renderer/core/dom/node.h"\n'
+            f"{node_traversal_include}\n",
+            path,
+        )
+    if "recorder_mutated_documents" not in text:
+        enqueue_condition = (
+            "    if (active_mutation_observers_.empty() &&\n"
+            "        active_slot_change_list_.empty()) {\n"
+        )
+        text = replace_once(
+            text,
+            enqueue_condition,
+            (
+                "    if (active_mutation_observers_.empty() &&\n"
+                "        active_slot_change_list_.empty() &&\n"
+                "        recorder_mutated_documents_.empty()) {\n"
+            ),
+            path,
+        )
+        trace_anchor = "    visitor->Trace(active_mutation_observers_);\n"
+        text = replace_once(
+            text,
+            trace_anchor,
+            trace_anchor + BLINK_MUTATION_AGENT_TRACE_HOOK,
+            path,
+        )
+        method_anchor = "  void ActivateObserver(MutationObserver* observer) {\n"
+        text = replace_once(
+            text,
+            method_anchor,
+            BLINK_MUTATION_AGENT_METHOD + method_anchor,
+            path,
+        )
+        collection_anchor = (
+            "    MutationObserverVector observers(active_mutation_observers_);\n"
+        )
+        text = replace_once(
+            text,
+            collection_anchor,
+            collection_anchor + BLINK_POST_MUTATION_DOM_CHECKPOINT_HOOK,
+            path,
+        )
+        delivery_anchor = (
+            "    for (const auto& slot : slots)\n"
+            "      slot->DispatchSlotChangeEvent();\n"
+        )
+        text = replace_once(
+            text,
+            delivery_anchor,
+            delivery_anchor
+            + BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+            path,
+        )
+        member_anchor = (
+            "  MutationObserverSet active_mutation_observers_;\n"
+        )
+        text = replace_once(
+            text,
+            member_anchor,
+            BLINK_MUTATION_AGENT_MEMBER + member_anchor,
+            path,
+        )
+        observer_method_anchor = (
+            "// static\n"
+            "void MutationObserver::EnqueueSlotChange(HTMLSlotElement& slot) {\n"
+        )
+        text = replace_once(
+            text,
+            observer_method_anchor,
+            BLINK_MUTATION_OBSERVER_METHOD + observer_method_anchor,
+            path,
+        )
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
@@ -1820,6 +2006,24 @@ def main() -> int:
         / "core"
         / "dom"
         / "document.cc"
+    )
+    patch_blink_mutation_observer_header(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "mutation_observer.h"
+    )
+    patch_blink_mutation_observer(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "mutation_observer.cc"
     )
     patch_blink_event_dispatcher(
         source

@@ -112,6 +112,22 @@ $domCheckpointCompletions = @(
             $_.payload.reason -eq "finished-parsing"
         }
 )
+$postMutationCheckpointStarts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-checkpoint-started" -and
+            $_.payload.reason -eq "post-mutation"
+        }
+)
+$postMutationCheckpointCompletions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-checkpoint-completed" -and
+            $_.payload.reason -eq "post-mutation"
+        }
+)
 
 $dispatches = @(
     $records |
@@ -360,6 +376,9 @@ $fixtureDomNodes = @(
     $domCheckpointNodes |
         Where-Object {
             $_.payload.checkpointId -eq $domCheckpointId -and
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq $listener.context.processId -and
             $_.payload.context.documentId -eq $listener.context.documentId
         } |
         Sort-Object { $_.payload.nodeIndex }
@@ -367,6 +386,9 @@ $fixtureDomNodes = @(
 $domCheckpointCompletion = $domCheckpointCompletions |
     Where-Object {
         $_.payload.checkpointId -eq $domCheckpointId -and
+        $_.payload.context.browserInstanceId -eq
+            $listener.context.browserInstanceId -and
+        $_.payload.context.processId -eq $listener.context.processId -and
         $_.payload.context.documentId -eq $listener.context.documentId
     } |
     Select-Object -First 1
@@ -423,6 +445,89 @@ $bodyNodes = @(
 )
 if ($bodyNodes.Count -ne 1) {
     throw "The fixture DOM checkpoint does not contain one BODY element."
+}
+$fixturePostMutationStarts = @(
+    $postMutationCheckpointStarts |
+        Where-Object {
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId
+        }
+)
+if ($fixturePostMutationStarts.Count -ne 1) {
+    throw "The fixture document did not produce one post-mutation checkpoint."
+}
+$postMutationCheckpointStart = $fixturePostMutationStarts[0]
+$postMutationCheckpointId = $postMutationCheckpointStart.payload.checkpointId
+if ($postMutationCheckpointId -eq $domCheckpointId) {
+    throw "The post-mutation checkpoint reused the parser checkpoint identity."
+}
+$postMutationDomNodes = @(
+    $domCheckpointNodes |
+        Where-Object {
+            $_.payload.checkpointId -eq $postMutationCheckpointId -and
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId
+        } |
+        Sort-Object { $_.payload.nodeIndex }
+)
+$postMutationCheckpointCompletion = $postMutationCheckpointCompletions |
+    Where-Object {
+        $_.payload.checkpointId -eq $postMutationCheckpointId -and
+        $_.payload.context.browserInstanceId -eq
+            $listener.context.browserInstanceId -and
+        $_.payload.context.processId -eq $listener.context.processId -and
+        $_.payload.context.documentId -eq $listener.context.documentId
+    } |
+    Select-Object -First 1
+if (-not $postMutationCheckpointCompletion) {
+    throw "The fixture post-mutation checkpoint did not complete."
+}
+if ($postMutationCheckpointCompletion.payload.truncated) {
+    throw "The fixture post-mutation checkpoint was unexpectedly truncated."
+}
+if (
+    $postMutationCheckpointCompletion.payload.maximumNodes -ne
+        $postMutationCheckpointStart.payload.maximumNodes -or
+    $postMutationCheckpointCompletion.payload.nodeCount -ne
+        $postMutationDomNodes.Count
+) {
+    throw "The post-mutation checkpoint counts or limits are inconsistent."
+}
+if (
+    $postMutationCheckpointStart.monotonicNanoseconds -le
+        $domCheckpointCompletion.monotonicNanoseconds
+) {
+    throw "The post-mutation checkpoint did not follow parser completion."
+}
+if ($postMutationDomNodes.Count -ne ($fixtureDomNodes.Count + 2)) {
+    throw "The fixture mutation did not add exactly one element and text node."
+}
+for ($index = 0; $index -lt $postMutationDomNodes.Count; $index++) {
+    if ($postMutationDomNodes[$index].payload.nodeIndex -ne $index) {
+        throw "The post-mutation checkpoint node indices are not contiguous."
+    }
+}
+$postMutationDivNodes = @(
+    $postMutationDomNodes |
+        Where-Object {
+            $_.payload.nodeType -eq "element" -and
+            $_.payload.nodeName -eq "DIV" -and
+            $_.payload.nodeId -notin @(
+                $fixtureDomNodes |
+                    Where-Object {
+                        $_.payload.nodeType -eq "element" -and
+                        $_.payload.nodeName -eq "DIV"
+                    } |
+                    ForEach-Object { $_.payload.nodeId }
+            )
+        }
+)
+if ($postMutationDivNodes.Count -ne 1) {
+    throw "The post-mutation checkpoint did not contain one new DIV node."
 }
 $scheduledAnimationFrames = @(
     $animationFrameScheduleCandidates |
@@ -1077,6 +1182,9 @@ if (
     DomCheckpointId = $domCheckpointId
     DomCheckpointNodes = $fixtureDomNodes.Count
     DomCheckpointTruncated = $domCheckpointCompletion.payload.truncated
+    PostMutationCheckpoints = $fixturePostMutationStarts.Count
+    PostMutationCheckpointId = $postMutationCheckpointId
+    PostMutationCheckpointNodes = $postMutationDomNodes.Count
     HiddenTimeoutTimerId = $scheduledHiddenTimeout.payload.timerId
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId
@@ -1100,6 +1208,7 @@ if (
 Write-Host (
     "Blink propagation, listener, default-handler, DOM timer, " +
     "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
-    "frame/page navigation-identity, and parser-complete DOM checkpoint " +
+    "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
+    "coalesced post-mutation DOM checkpoint " +
     "evidence verified."
 )

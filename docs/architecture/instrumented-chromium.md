@@ -254,7 +254,14 @@ name. It intentionally excludes text, attributes, mutation history, style,
 layout, accessibility, paint, and rendered pixels. The complete contract is
 defined in the
 [DOM checkpoint evidence model](dom-checkpoint-evidence-model.md).
-Live 0.12 connections require an exact protocol-version match.
+
+Protocol version 0.13 adds coalesced post-mutation checkpoints for structural
+child-list changes. `Document::NotifyChangeChildren` queues the affected
+document into Blink's mutation observer agent microtask machinery. Each
+delivery pass deduplicates documents and emits at most one bounded checkpoint
+for each active, parser-complete document. Page script does not need to create
+a JavaScript `MutationObserver`. Live 0.13 connections require an exact
+protocol-version match.
 
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder

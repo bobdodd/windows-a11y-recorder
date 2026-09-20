@@ -1206,6 +1206,12 @@ class IntegrateTests(unittest.TestCase):
                 "  DocumentParserTiming::From(*this).MarkParserStop();\n"
                 "\n"
                 "  DispatchEvent();\n"
+                "}\n"
+                "\n"
+                "void Document::NotifyChangeChildren(\n"
+                "    const ContainerNode& container,\n"
+                "    const ContainerNode::ChildrenChange& change) {\n"
+                "  NotifySelection();\n"
                 "}\n",
                 encoding="utf-8",
             )
@@ -1224,6 +1230,110 @@ class IntegrateTests(unittest.TestCase):
                 first,
             )
             self.assertIn("recorder_node.parentNode()", first)
+            self.assertIn(
+                "if (HasFinishedParsing())\n"
+                "    MutationObserver::EnqueueRecorderDomCheckpoint(*this)",
+                first,
+            )
+            self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, first)
+
+    def test_patches_mutation_delivery_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            header_path = Path(directory) / "mutation_observer.h"
+            header_path.write_text(
+                "class MutationObserver {\n"
+                " public:\n"
+                "  static void EnqueueSlotChange(HTMLSlotElement&);\n"
+                "};\n",
+                encoding="utf-8",
+            )
+            path = Path(directory) / "mutation_observer.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/core/dom/mutation_observer.h"\n'
+                '#include "third_party/blink/renderer/core/dom/node.h"\n'
+                "\n"
+                "class MutationObserverAgentData {\n"
+                " public:\n"
+                "  void Trace(Visitor* visitor) const override {\n"
+                "    Supplement<Agent>::Trace(visitor);\n"
+                "    visitor->Trace(active_mutation_observers_);\n"
+                "    visitor->Trace(active_slot_change_list_);\n"
+                "  }\n"
+                "\n"
+                "  void ActivateObserver(MutationObserver* observer) {\n"
+                "    EnsureEnqueueMicrotask();\n"
+                "    active_mutation_observers_.insert(observer);\n"
+                "  }\n"
+                "\n"
+                "  void EnsureEnqueueMicrotask() {\n"
+                "    if (active_mutation_observers_.empty() &&\n"
+                "        active_slot_change_list_.empty()) {\n"
+                "      Enqueue();\n"
+                "    }\n"
+                "  }\n"
+                "\n"
+                "  void DeliverMutations() {\n"
+                "    MutationObserverVector observers(active_mutation_observers_);\n"
+                "    active_mutation_observers_.clear();\n"
+                "    SlotChangeList slots;\n"
+                "    slots.swap(active_slot_change_list_);\n"
+                "    for (const auto& observer : observers)\n"
+                "      observer->Deliver();\n"
+                "    for (const auto& slot : slots)\n"
+                "      slot->DispatchSlotChangeEvent();\n"
+                "  }\n"
+                "\n"
+                " private:\n"
+                "  MutationObserverSet active_mutation_observers_;\n"
+                "  SlotChangeList active_slot_change_list_;\n"
+                "};\n"
+                "\n"
+                "// static\n"
+                "void MutationObserver::EnqueueSlotChange(HTMLSlotElement& slot) {\n"
+                "  Enqueue(slot);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_blink_mutation_observer_header(header_path)
+            header_first = header_path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_mutation_observer(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_mutation_observer_header(header_path)
+            INTEGRATE.patch_blink_mutation_observer(path)
+
+            self.assertEqual(
+                header_first,
+                header_path.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                1,
+                header_first.count("EnqueueRecorderDomCheckpoint"),
+            )
+            self.assertGreaterEqual(
+                first.count("recorder_mutated_documents"),
+                4,
+            )
+            self.assertEqual(2, first.count('"post-mutation"'))
+            self.assertEqual(1, first.count("BeginBlinkDomCheckpoint"))
+            self.assertEqual(1, first.count("RecordBlinkDomCheckpointNode"))
+            self.assertEqual(1, first.count("CompleteBlinkDomCheckpoint"))
+            self.assertIn(
+                "MutationObserver::EnqueueRecorderDomCheckpoint",
+                first,
+            )
+            self.assertIn("recorder_mutated_documents_.insert", first)
+            self.assertIn(
+                "recorder_mutated_documents_.empty()",
+                first,
+            )
+            self.assertIn("recorder_document->HasFinishedParsing()", first)
+            self.assertIn("recorder_document->IsActive()", first)
+            self.assertIn(
+                "NodeTraversal::InclusiveDescendantsOf(*recorder_document)",
+                first,
+            )
             self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, first)
 
     def test_migrates_protocol_010_navigation_hooks_idempotently(self):

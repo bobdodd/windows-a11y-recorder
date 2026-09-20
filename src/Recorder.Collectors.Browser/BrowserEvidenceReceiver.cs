@@ -11,6 +11,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
 {
     private readonly BrowserEvidenceReceiverOptions _options;
     private readonly object _gate = new();
+    private readonly object _eventWriteGate = new();
     private readonly List<Task> _connections = [];
     private readonly ChromiumLauncher _launcher = new();
     private CollectorInitializationContext? _context;
@@ -36,6 +37,8 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                 BrowserEvidenceChannels.Dispatch,
                 BrowserEvidenceChannels.Timer,
                 BrowserEvidenceChannels.Scheduler,
+                BrowserEvidenceChannels.Navigation,
+                BrowserEvidenceChannels.Dom,
                 BrowserEvidenceChannels.Cookie
             ],
             "instrumented-chromium-local-ipc");
@@ -448,9 +451,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                         "Browser event maps before the session clock origin.");
                 }
 
-                var sequence = unchecked(
-                    (ulong)Interlocked.Increment(ref _sequence));
-                var record = new RecorderEvent
+                if (!WriteSequencedRecord(sequence => new RecorderEvent
                 {
                     SchemaVersion = RecorderEvent.CurrentSchemaVersion,
                     EventId =
@@ -482,9 +483,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                     QualityFlags = message.QualityFlags ?? [],
                     RelatedEvidenceIds = [],
                     Analysis = null
-                };
-
-                if (!_context.EventSink.TryWrite(record))
+                }))
                 {
                     HealthState = CollectorHealthState.Degraded;
                 }
@@ -499,8 +498,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
             return;
         }
 
-        var sequence = unchecked((ulong)Interlocked.Increment(ref _sequence));
-        if (!_context.EventSink.TryWrite(RecorderEventFactory.Create(
+        if (!WriteSequencedRecord(sequence => RecorderEventFactory.Create(
                 _context.SessionId,
                 Descriptor,
                 BrowserEvidenceChannels.Lifecycle,
@@ -520,8 +518,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
             return;
         }
 
-        var sequence = unchecked((ulong)Interlocked.Increment(ref _sequence));
-        _context.EventSink.TryWrite(RecorderEventFactory.Create(
+        WriteSequencedRecord(sequence => RecorderEventFactory.Create(
             _context.SessionId,
             Descriptor,
             BrowserEvidenceChannels.Listener,
@@ -529,6 +526,23 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
             _context.Clock.GetElapsedNanoseconds(),
             BrowserEvidenceEventTypes.Omission,
             new { reason, count = 1 }));
+    }
+
+    internal bool WriteSequencedRecord(
+        Func<ulong, RecorderEvent> createRecord)
+    {
+        ArgumentNullException.ThrowIfNull(createRecord);
+        if (_context is null)
+        {
+            return false;
+        }
+
+        lock (_eventWriteGate)
+        {
+            var sequence = unchecked(
+                (ulong)Interlocked.Increment(ref _sequence));
+            return _context.EventSink.TryWrite(createRecord(sequence));
+        }
     }
 
     private static long ReadInt64(string value, string property)

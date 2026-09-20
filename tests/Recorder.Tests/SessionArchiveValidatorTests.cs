@@ -853,6 +853,47 @@ public sealed class SessionArchiveValidatorTests
                     nodeCount = 2,
                     truncated = false,
                     maximumNodes = 512
+                }),
+            CreateEvent(
+                4,
+                500,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointStarted,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-2",
+                    reason = "post-mutation",
+                    maximumNodes = 512
+                }),
+            CreateEvent(
+                5,
+                600,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointNode,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-2",
+                    nodeIndex = 0,
+                    nodeId = 8,
+                    parentNodeId = (long?)null,
+                    nodeType = "document",
+                    nodeName = "#document"
+                }),
+            CreateEvent(
+                6,
+                700,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointCompleted,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-2",
+                    reason = "post-mutation",
+                    nodeCount = 1,
+                    truncated = false,
+                    maximumNodes = 512
                 })
         };
         var directory = await CreateArchiveAsync(records);

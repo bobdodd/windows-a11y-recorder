@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.12` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.13` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -51,10 +51,12 @@ identifiers.
 Protocol 0.11 extends those navigation records to subframes and non-primary
 main-frame types, including primary-page membership, root page identity, and
 direct parent or outer-document relationships.
-Protocol 0.12 adds bounded parser-complete DOM structural checkpoints. The
-renderer streams node and parent identities, node types, and node names, then
-reports the observed node count and whether the 512-node limit truncated the
-checkpoint. Text content and attributes are not recorded.
+Protocol 0.12 adds bounded parser-complete DOM structural checkpoints.
+Protocol 0.13 adds coalesced post-mutation checkpoints for structural
+child-list changes. The renderer streams node and parent identities, node
+types, and node names, then reports the observed node count and whether the
+512-node limit truncated the checkpoint. Text content and attributes are not
+recorded.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

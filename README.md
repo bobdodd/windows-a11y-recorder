@@ -80,6 +80,12 @@ selected fixture checkpoint contained 36 nodes and was not truncated. See the
 and the
 [DOM checkpoint evidence model](docs/architecture/dom-checkpoint-evidence-model.md).
 
+Protocol 0.13 is ready for reference-platform validation. It adds a coalesced
+post-mutation checkpoint after Blink delivers structural child-list changes.
+The deterministic fixture appends one element containing one text node and
+requires one later checkpoint for the same renderer document with a distinct
+checkpoint identity and the expected two-node structural difference.
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.

@@ -190,8 +190,8 @@ COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
                                       int page_lifecycle_state);
 
-// Starts one bounded structural checkpoint after Blink finishes parsing a
-// document. Returns zero when the recorder is not connected.
+// Starts one bounded structural checkpoint at a named Blink document boundary.
+// Returns zero when the recorder is not connected.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string reason,

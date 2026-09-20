@@ -8,6 +8,20 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.13 coalesced post-mutation DOM checkpoints. Structural
+  child-list changes queue affected documents through Blink's mutation
+  delivery microtask machinery without requiring page-created observers.
+- Added deterministic verification of one later checkpoint for the same
+  renderer document, distinct checkpoint identity, chronological ordering,
+  and the expected element-plus-text structural difference.
+- Serialized browser evidence sequence allocation with event-sink submission
+  across concurrent browser and renderer connections, preventing later
+  sequence numbers from overtaking earlier records under checkpoint load.
+- Declared the existing `browser.navigation` and new `browser.dom` channels in
+  the instrumented-browser collector descriptor and session manifest.
+- Updated the
+  [DOM checkpoint evidence model](docs/architecture/dom-checkpoint-evidence-model.md)
+  with the post-mutation trigger, coalescing semantics, and explicit limits.
 - Added protocol 0.12 `browser.dom` evidence for a bounded structural
   checkpoint at Blink's parser-complete boundary.
 - Added streamed checkpoint start, preorder node, and completion records with

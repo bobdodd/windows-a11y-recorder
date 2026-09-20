@@ -417,6 +417,56 @@ public sealed class BrowserEvidenceReceiverTests
         Assert.True(stopped.Accepted);
     }
 
+    [Fact]
+    public async Task SerializesSequenceAssignmentWithSinkSubmission()
+    {
+        var sink = new BlockingFirstWriteEventSink(
+            TestContext.Current.CancellationToken);
+        await using var receiver = new BrowserEvidenceReceiver();
+        var context = new CollectorInitializationContext(
+            "test-session",
+            Path.GetTempPath(),
+            new TestSessionClock(),
+            sink);
+        await receiver.InitializeAsync(
+            context,
+            TestContext.Current.CancellationToken);
+
+        RecorderEvent CreateRecord(ulong sequence) =>
+            RecorderEventFactory.Create(
+                context.SessionId,
+                receiver.Descriptor,
+                BrowserEvidenceChannels.Dom,
+                sequence,
+                (long)sequence,
+                BrowserEvidenceEventTypes.DomCheckpointNode,
+                new { sequence });
+
+        var firstWrite = Task.Run(
+            () => receiver.WriteSequencedRecord(CreateRecord),
+            TestContext.Current.CancellationToken);
+        Assert.True(
+            sink.FirstWriteEntered.Wait(
+                TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken),
+            "The first sink write did not start.");
+
+        var secondWrite = Task.Run(
+            () => receiver.WriteSequencedRecord(CreateRecord),
+            TestContext.Current.CancellationToken);
+        await Task.Delay(
+            TimeSpan.FromMilliseconds(50),
+            TestContext.Current.CancellationToken);
+        Assert.False(secondWrite.IsCompleted);
+
+        sink.ReleaseFirstWrite.Set();
+        Assert.True(await firstWrite);
+        Assert.True(await secondWrite);
+        Assert.Equal(
+            [0UL, 1UL],
+            sink.Records.Select(record => record.Sequence).ToArray());
+    }
+
     private static async Task WriteFrameAsync<T>(
         Stream stream,
         T message)
@@ -478,5 +528,52 @@ public sealed class BrowserEvidenceReceiverTests
             _records.Reader.ReadAsync(cancellationToken)
                 .AsTask()
                 .WaitAsync(timeout, cancellationToken);
+    }
+
+    private sealed class BlockingFirstWriteEventSink : IRecorderEventSink
+    {
+        private readonly object _gate = new();
+        private readonly List<RecorderEvent> _records = [];
+        private readonly CancellationToken _cancellationToken;
+
+        public BlockingFirstWriteEventSink(
+            CancellationToken cancellationToken)
+        {
+            _cancellationToken = cancellationToken;
+        }
+
+        public ManualResetEventSlim FirstWriteEntered { get; } = new(false);
+        public ManualResetEventSlim ReleaseFirstWrite { get; } = new(false);
+
+        public IReadOnlyList<RecorderEvent> Records
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _records.ToArray();
+                }
+            }
+        }
+
+        public bool TryWrite(RecorderEvent record)
+        {
+            if (record.Sequence == 0)
+            {
+                FirstWriteEntered.Set();
+                if (!ReleaseFirstWrite.Wait(
+                        TimeSpan.FromSeconds(5),
+                        _cancellationToken))
+                {
+                    return false;
+                }
+            }
+
+            lock (_gate)
+            {
+                _records.Add(record);
+            }
+            return true;
+        }
     }
 }

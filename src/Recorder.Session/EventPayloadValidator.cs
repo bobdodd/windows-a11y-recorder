@@ -836,7 +836,7 @@ internal static class EventPayloadValidator
             [
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
-                RequiredEnum("reason", "finished-parsing"),
+                RequiredEnum("reason", "finished-parsing", "post-mutation"),
                 RequiredInteger("maximumNodes", positive: true)
             ],
             issues,
@@ -883,7 +883,7 @@ internal static class EventPayloadValidator
             [
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
-                RequiredEnum("reason", "finished-parsing"),
+                RequiredEnum("reason", "finished-parsing", "post-mutation"),
                 RequiredInteger("nodeCount", nonnegative: true),
                 RequiredBoolean("truncated"),
                 RequiredInteger("maximumNodes", positive: true)
