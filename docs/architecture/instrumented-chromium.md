@@ -271,6 +271,26 @@ renderer process to match. Cross-document commits replace the active frame
 mapping, while same-document commits must preserve it. Live 0.14 connections
 require an exact protocol-version match.
 
+Protocol version 0.15 adds bounded attribute and character-data evidence. The
+checkpoint hooks in `Document::FinishedParsing` and the mutation delivery pass
+emit `dom-checkpoint-node-attribute` for each attribute of each element node
+they record. `Element::DidAddAttribute`, `Element::DidModifyAttribute`, and
+`Element::DidRemoveAttribute` route through one file-local recorder helper that
+records `dom-attribute-changed`, and `CharacterData::SetDataAndUpdate` records
+`dom-character-data-changed` for updates that did not come from the parser.
+Both transition hooks queue the mutated document through the existing recorder
+checkpoint path, because neither mutation changes a child list. The bridge
+reserves the identity of the checkpoint that the current delivery pass will
+produce, so a transition and the tree state that followed it share one
+checkpoint identity. Live 0.15 connections require an exact protocol-version
+match.
+
+Changing `CompleteBlinkDomCheckpoint` from seven to eleven arguments required
+keeping the protocol 0.14 hook bodies as named historical templates in
+`chromium/integrate.py`, because the presence guards key on symbol names and
+would otherwise leave a stale call site in an already-patched checkout. The
+integration-time signature checks added at revision `b7fd67b` enforce this.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native

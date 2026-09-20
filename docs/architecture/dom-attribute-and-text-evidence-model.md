@@ -2,9 +2,11 @@
 
 ## Status
 
-Proposed for protocol 0.15. Nothing in this document is implemented. It records
-the design decisions that must be settled before the bridge, the Blink hooks, or
-the archive validator change.
+Implemented for protocol 0.15. The recorder bridge, the Blink hooks, the archive
+validator, and the reference-fixture validation all reflect this document. The
+Blink hooks are verified by the integration tests and by integration-time
+signature checks; they are pending a full validation run on the reference
+platform.
 
 ## Purpose
 
@@ -90,9 +92,12 @@ than leaving a reader to infer them from truncation flags.
 ### Attribute state at a checkpoint
 
 `dom-checkpoint-node-attribute` is streamed between a checkpoint start and its
-completion, after the node record it describes. It contains the checkpoint
-identity, the node identity, the attribute namespace and local name, the
-verbatim value, and whether that value was truncated at the record limit.
+completion, after the node record it describes. Its fields are `checkpointId`,
+`nodeId`, `attributeIndex`, `attributeNamespace`, `attributeName`,
+`attributeValue`, `attributeValueLength`, `attributeValueTruncated`, and
+`maximumValueLength`. `attributeIndex` is contiguous from zero within one node,
+so a truncated attribute set is visible as a missing tail rather than as a gap.
+An empty value is valid and is not the same as an absent attribute.
 
 Emitting attributes as separate records keyed by node identity, rather than
 extending `dom-checkpoint-node`, keeps the existing node record and its bridge
@@ -103,13 +108,27 @@ hooks are the project's most expensive failure mode.
 
 Per-node and per-checkpoint attribute limits apply, with truncation state
 reported on the checkpoint completion record in the same way as node limits.
+`dom-checkpoint-completed` gains `attributeCount`, `attributesTruncated`,
+`maximumAttributesPerNode`, and `maximumValueLength`. The in-force limits are 64
+attributes per node and 4096 UTF-16 code units per value.
 
 ### Attribute transitions
 
-`dom-attribute-changed` records one accepted attribute mutation. It contains the
-node identity, the attribute namespace and local name, the change type of added,
-removed, or changed, the verbatim current and previous values, and truncation
-state for each.
+`dom-attribute-changed` records one accepted attribute mutation. Its fields are
+`checkpointId`, `nodeId`, `nodeName`, `attributeNamespace`, `attributeName`,
+`changeType`, `attributeValue`, `attributeValueLength`,
+`attributeValueTruncated`, `previousAttributeValue`,
+`previousAttributeValueLength`, `previousAttributeValueTruncated`, and
+`maximumValueLength`.
+
+`changeType` is `added`, `removed`, or `changed`, and it decides which side is
+absent: an added attribute has no previous value and a removed attribute has no
+current value. The bridge derives the absent side from the change type rather
+than accepting it from the caller, so the record cannot contradict itself, and
+the archive validator rejects a record that does. The change type itself is
+derived in the Blink hook from which value is null rather than from the calling
+function, so a modification that upstream reports with a null old or new value is
+recorded as an addition or a removal.
 
 A transition record is not derivable from two checkpoints. Coalescing means one
 checkpoint represents an unknown number of changes, so the specific attribute
@@ -118,17 +137,35 @@ activating a control changed its exposed state.
 
 ### Character-data transitions
 
-`dom-character-data-changed` records one accepted character-data mutation with
-the node identity, the verbatim new and previous text, the length of each in
-UTF-16 code units, and truncation state for each.
+`dom-character-data-changed` records one accepted character-data mutation. Its
+fields are `checkpointId`, `nodeId`, `parentNodeId`, `nodeType`, `text`,
+`textLength`, `textTruncated`, `previousText`, `previousTextLength`,
+`previousTextTruncated`, and `maximumValueLength`.
+
+Parser-driven character-data updates are excluded. The text a document was
+parsed with is already reported by the finished-parsing checkpoint, and
+recording every parse-time chunk would queue a checkpoint per chunk during load.
+This is a volume decision, and its cost is that text appended by the parser is
+observable only as checkpoint state, not as a transition.
 
 ### Trigger integration
 
 Attribute and character-data mutations join the existing post-mutation
 machinery, so a qualifying change also queues its document for a structural
-checkpoint. The transition records carry the checkpoint identity that the same
-delivery pass produced, when one was produced, so a state change and the tree it
-occurred in can be joined.
+checkpoint. Neither mutation changes a child list, so nothing else would queue
+the document.
+
+The join works by reservation. A transition record is written before the tree it
+belongs to has been walked, so the bridge reserves the identity of the
+checkpoint that the current delivery pass will produce, keyed by document, and
+the next checkpoint started for that document consumes the reservation.
+Transitions in one delivery pass therefore share one `checkpointId` with the
+checkpoint that followed them.
+
+The residual limit of that design is recorded under claims the evidence does not
+support: if a delivery pass ends without producing a checkpoint, a transition
+names a checkpoint that does not appear in the archive. The alternative was a
+null `checkpointId` and no join at all.
 
 ## Claims the evidence supports
 
@@ -157,7 +194,9 @@ The evidence does not establish:
 - the order of several mutations within one delivery pass beyond the recorded
   sequence of accepted transitions;
 - browser-held data the tested page never displayed, such as the credential
-  store, browser history, cookie values, or authorization values; or
+  store, browser history, cookie values, or authorization values;
+- the existence of the checkpoint a transition names, in the case where the
+  delivery pass ended without producing one; or
 - that a change was perceivable, painted, or presented.
 
 ## Deterministic validation
@@ -172,29 +211,37 @@ listener and dispatch evidence:
 - an attribute removal; and
 - a value longer than the record limit, to exercise truncation.
 
-The verifier must require correlated context on every record, the expected
-change types, and exact string equality between the recorded values and the
-fixture's known before and after values. The truncation case must report
-`valueTruncated` with a recorded prefix of the expected length rather than a
-dropped record.
+The verifier requires correlated context on every record, the expected change
+types, and exact case-sensitive string equality between the recorded values and
+the fixture's known before and after values. The truncation case must report
+`attributeValueTruncated` with a recorded prefix of the limit length and the
+full length of the original value, rather than a dropped record. The verifier
+also requires the removed attribute to be absent from the following checkpoint
+state, and requires the six transitions to share one reserved checkpoint
+identity whose checkpoint was completed.
+
+Because attribute and character-data mutations now queue checkpoints of their
+own, the document no longer produces exactly one post-mutation checkpoint. The
+structural checkpoint is identified by the node it added.
 
 Archive validation must reject a transition record whose document context does
 not match a known document, and reject a record that reports a value length
 greater than the recorded value without truncation state.
 
-## Open decisions
+## Settled decisions
 
-One decision remains before implementation starts.
+1. Attribute state at checkpoints is included in this slice, rather than
+   deferring it until accessibility checkpoints land.
+2. Attribute state is emitted as separate records keyed by node identity rather
+   than as additional fields on `dom-checkpoint-node`, so that hook's bridge
+   signature is unchanged.
+3. Transitions are joined to checkpoints by reserved identity rather than left
+   unjoined with a null `checkpointId`.
+4. Parser-driven character-data updates are excluded.
 
-1. Whether attribute state at checkpoints is included in this slice, or whether
-   transitions alone are enough until accessibility checkpoints land.
-   Transitions only would make this slice smaller and avoid changing
-   checkpoint limits.
-
-The per-record length limit is a configuration value rather than a decision,
-but it needs choosing with care. It must be large enough that ordinary names,
-labels, and live-region text are never truncated, because routine truncation
-would lose exactly the evidence this slice exists to capture.
+The per-record length limit is 4096 UTF-16 code units. It is large enough that
+ordinary names, labels, and live-region text are never truncated, because
+routine truncation would lose exactly the evidence this slice exists to capture.
 
 ## Next dependent slices
 

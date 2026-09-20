@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.14` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.15` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -61,6 +61,14 @@ Protocol 0.14 records Chromium's document token in committed browser
 navigations and renderer DOM checkpoints, together with the renderer process
 ID on committed navigation records. Consumers join the two document identity
 namespaces only when browser instance, token, and renderer process all match.
+
+Protocol 0.15 adds bounded attribute and character-data evidence. Checkpoints
+emit the attribute state of every element node they record, and accepted
+attribute and character-data mutations are recorded as transitions. Values are
+recorded verbatim up to 4096 UTF-16 code units, with the full length and an
+explicit truncation flag on every value, and at most 64 attributes per node.
+An attribute or text mutation queues its document for a checkpoint, and a
+transition names the checkpoint that the same delivery pass produced.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

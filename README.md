@@ -95,6 +95,17 @@ records. The deterministic verifier requires stable mappings across
 same-document navigation, distinct main-frame and subframe tokens, and rejects
 stale or process-mismatched checkpoint mappings.
 
+Protocol 0.15 is ready for reference-platform validation. It adds bounded
+attribute and character-data evidence. Checkpoints now report the attribute
+state of every element node they record, and accepted attribute and
+character-data mutations are recorded as transitions that name the specific
+attribute or text a coalesced checkpoint cannot recover. Values are recorded
+verbatim up to a reported length limit, and every record states whether it was
+truncated. The deterministic verifier asserts exact case-sensitive equality
+against the fixture's known before and after values for an enumerated change, a
+reference change, a name change, a live-region text change, an attribute
+removal, and an over-length value.
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.
