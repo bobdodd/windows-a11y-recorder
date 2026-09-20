@@ -1193,6 +1193,39 @@ class IntegrateTests(unittest.TestCase):
             )
             self.assertIn(INTEGRATE.CONTENT_NAVIGATION_INCLUDE, first)
 
+    def test_patches_document_finished_parsing_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/core/dom/document.h"\n'
+                '#include "third_party/blink/renderer/core/dom/element.h"\n'
+                '#include "third_party/blink/renderer/core/dom/node_traversal.h"\n'
+                "\n"
+                "void Document::FinishedParsing() {\n"
+                "  SetParsingState(kInDOMContentLoaded);\n"
+                "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+                "\n"
+                "  DispatchEvent();\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_blink_document(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertEqual(1, first.count("BeginBlinkDomCheckpoint"))
+            self.assertEqual(1, first.count("RecordBlinkDomCheckpointNode"))
+            self.assertEqual(1, first.count("CompleteBlinkDomCheckpoint"))
+            self.assertIn("kRecorderMaximumDomCheckpointNodes = 512", first)
+            self.assertIn(
+                "NodeTraversal::InclusiveDescendantsOf(*this)",
+                first,
+            )
+            self.assertIn("recorder_node.parentNode()", first)
+            self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, first)
+
     def test_migrates_protocol_010_navigation_hooks_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "web_contents_impl.cc"

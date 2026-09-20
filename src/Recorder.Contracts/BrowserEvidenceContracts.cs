@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.11";
+    public const string CurrentVersion = "0.12";
 }
 
 public static class BrowserEvidenceChannels
@@ -13,6 +13,7 @@ public static class BrowserEvidenceChannels
     public const string Timer = "browser.timer";
     public const string Scheduler = "browser.scheduler";
     public const string Navigation = "browser.navigation";
+    public const string Dom = "browser.dom";
     public const string Cookie = "browser.cookie";
 }
 
@@ -32,6 +33,9 @@ public static class BrowserEvidenceEventTypes
     public const string WakeUpDeferred = "wake-up-deferred";
     public const string NavigationStarted = "navigation-started";
     public const string NavigationCompleted = "navigation-completed";
+    public const string DomCheckpointStarted = "dom-checkpoint-started";
+    public const string DomCheckpointNode = "dom-checkpoint-node";
+    public const string DomCheckpointCompleted = "dom-checkpoint-completed";
     public const string CookieOperation = "cookie-operation";
     public const string Omission = "collector-omission";
 }
@@ -130,6 +134,29 @@ public sealed record BrowserNavigationPayload(
     bool? ErrorPage,
     int? NetErrorCode,
     string? Outcome);
+
+public sealed record BrowserDomCheckpointStartedPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    string Reason,
+    int MaximumNodes);
+
+public sealed record BrowserDomCheckpointNodePayload(
+    BrowserContext Context,
+    string CheckpointId,
+    int NodeIndex,
+    long NodeId,
+    long? ParentNodeId,
+    string NodeType,
+    string NodeName);
+
+public sealed record BrowserDomCheckpointCompletedPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    string Reason,
+    int NodeCount,
+    bool Truncated,
+    int MaximumNodes);
 
 public sealed record BrowserCookieOperationPayload(
     BrowserContext Context,

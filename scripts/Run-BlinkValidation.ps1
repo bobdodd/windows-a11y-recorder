@@ -169,6 +169,11 @@ $integratedFiles = @(
     ),
     (
         Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\dom\document.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
             "third_party\blink\renderer\core\scheduler\dom_timer.cc"
         )
     ),

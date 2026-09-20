@@ -242,6 +242,37 @@ CONTENT_NAVIGATION_COMPLETED_HOOK = """\
           navigation_handle->IsErrorPage(),
       navigation_handle->GetNetErrorCode());
 """
+BLINK_DOM_CHECKPOINT_HOOK = """\
+  constexpr int kRecorderMaximumDomCheckpointNodes = 512;
+  const int recorder_document_node_id = GetDomNodeId();
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, "finished-parsing",
+          kRecorderMaximumDomCheckpointNodes);
+  if (recorder_checkpoint_sequence != 0) {
+    int recorder_node_count = 0;
+    bool recorder_truncated = false;
+    for (Node& recorder_node :
+         NodeTraversal::InclusiveDescendantsOf(*this)) {
+      if (recorder_node_count >= kRecorderMaximumDomCheckpointNodes) {
+        recorder_truncated = true;
+        break;
+      }
+      ContainerNode* recorder_parent = recorder_node.parentNode();
+      a11y_recorder::RecordBlinkDomCheckpointNode(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_node_count, recorder_node.GetDomNodeId(),
+          recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+          static_cast<int>(recorder_node.getNodeType()),
+          recorder_node.nodeName().Utf8().c_str());
+      ++recorder_node_count;
+    }
+    a11y_recorder::CompleteBlinkDomCheckpoint(
+        recorder_checkpoint_sequence, recorder_document_node_id,
+        "finished-parsing", recorder_node_count, recorder_truncated,
+        kRecorderMaximumDomCheckpointNodes);
+  }
+"""
 BLINK_LISTENER_HOOK = """\
     if (Node* recorder_target = ToNode()) {
       Element* recorder_element = DynamicTo<Element>(recorder_target);
@@ -1074,6 +1105,27 @@ def patch_blink_event_target(path: Path) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def patch_blink_document(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "third_party/blink/renderer/core/dom/document.h"\n',
+            '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            path,
+        )
+    if "BeginBlinkDomCheckpoint" not in text:
+        anchor = "  DocumentParserTiming::From(*this).MarkParserStop();\n\n"
+        text = replace_once(
+            text,
+            anchor,
+            anchor + BLINK_DOM_CHECKPOINT_HOOK + "\n",
+            path,
+        )
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def patch_blink_event_dispatcher(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     text = text.replace(
@@ -1759,6 +1811,15 @@ def main() -> int:
         / "dom"
         / "events"
         / "event_target.cc"
+    )
+    patch_blink_document(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "document.cc"
     )
     patch_blink_event_dispatcher(
         source

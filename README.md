@@ -57,14 +57,23 @@ recorded no network-service crashes. See the
 and the
 [navigation and document identity evidence model](docs/architecture/navigation-document-identity-evidence-model.md).
 
-Protocol 0.11 is implemented and ready for reference-platform validation. It
+Protocol 0.11 has been validated on the reference Windows platform. It
 extends navigation evidence to child frames and non-primary page types with
 explicit frame classification, primary-page membership, root page identity,
 direct parent identity, and parent-or-outer-document identity. The deterministic
 fixture validates one same-origin child frame while leaving prerender,
 fenced-frame, guest-page, nested-frame, and cross-origin execution outside the
-validated scope. See the
+validated scope. The archive passed structural validation across 2,026 events
+and 81 artifacts and recorded no network-service crashes. See the
 [frame and page identity evidence model](docs/architecture/frame-and-page-identity-evidence-model.md).
+
+Protocol 0.12 implements a bounded, parser-complete DOM structural checkpoint.
+Each checkpoint streams a start record, preorder node records, and a completion
+record with an explicit node limit and truncation state. The initial slice
+records node identity, parent identity, node type, and node name. It does not
+record text content, attributes, mutation history, style, layout, accessibility,
+paint, or rendered pixels. See the
+[DOM checkpoint evidence model](docs/architecture/dom-checkpoint-evidence-model.md).
 
 ## Project goals
 

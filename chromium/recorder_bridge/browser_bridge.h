@@ -190,6 +190,34 @@ COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
                                       int page_lifecycle_state);
 
+// Starts one bounded structural checkpoint after Blink finishes parsing a
+// document. Returns zero when the recorder is not connected.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t BeginBlinkDomCheckpoint(int document_node_id,
+                                 std::string reason,
+                                 int maximum_nodes);
+
+// Records one node in preorder. Text content and attributes are intentionally
+// excluded from this initial structural evidence boundary.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
+                                  int document_node_id,
+                                  int node_index,
+                                  int node_id,
+                                  int parent_node_id,
+                                  int node_type,
+                                  std::string node_name);
+
+// Completes the checkpoint and explicitly reports whether its node limit was
+// reached before the complete document tree was emitted.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
+                                int document_node_id,
+                                std::string reason,
+                                int node_count,
+                                bool truncated,
+                                int maximum_nodes);
+
 // Records an authoritative task-queue scheduler decision only when the final
 // allowed wake-up is later than the desired wake-up. This queue boundary does
 // not identify an individual DOM timer or document.

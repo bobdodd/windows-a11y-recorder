@@ -782,6 +782,97 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsInstrumentedBrowserDomCheckpointEvidence()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null
+        };
+        var records = new[]
+        {
+            CreateEvent(
+                0,
+                100,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointStarted,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-1",
+                    reason = "finished-parsing",
+                    maximumNodes = 512
+                }),
+            CreateEvent(
+                1,
+                200,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointNode,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-1",
+                    nodeIndex = 0,
+                    nodeId = 8,
+                    parentNodeId = (long?)null,
+                    nodeType = "document",
+                    nodeName = "#document"
+                }),
+            CreateEvent(
+                2,
+                300,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointNode,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-1",
+                    nodeIndex = 1,
+                    nodeId = 9,
+                    parentNodeId = (long?)8,
+                    nodeType = "element",
+                    nodeName = "HTML"
+                }),
+            CreateEvent(
+                3,
+                400,
+                BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointCompleted,
+                new
+                {
+                    context,
+                    checkpointId = "dom-checkpoint-1",
+                    reason = "finished-parsing",
+                    nodeCount = 2,
+                    truncated = false,
+                    maximumNodes = 512
+                })
+        };
+        var directory = await CreateArchiveAsync(records);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
     {
         var context = new

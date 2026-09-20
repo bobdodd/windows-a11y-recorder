@@ -8,6 +8,14 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.12 `browser.dom` evidence for a bounded structural
+  checkpoint at Blink's parser-complete boundary.
+- Added streamed checkpoint start, preorder node, and completion records with
+  stable node and parent identities, explicit node limits, and truncation
+  state. Text content and attributes remain excluded.
+- Added strict archive validation, idempotent Chromium integration coverage,
+  deterministic fixture verification, and a
+  [DOM checkpoint evidence model](docs/architecture/dom-checkpoint-evidence-model.md).
 - Added protocol 0.11 frame and page identity for all navigation boundaries,
   including explicit Chromium frame type, primary-page membership, root page
   identity, direct parent identity, and parent-or-outer-document identity.

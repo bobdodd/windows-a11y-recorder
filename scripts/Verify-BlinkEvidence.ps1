@@ -89,6 +89,30 @@ $listeners = @(
         }
 )
 
+$domCheckpointStarts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-checkpoint-started" -and
+            $_.payload.reason -eq "finished-parsing"
+        }
+)
+$domCheckpointNodes = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-checkpoint-node"
+        }
+)
+$domCheckpointCompletions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-checkpoint-completed" -and
+            $_.payload.reason -eq "finished-parsing"
+        }
+)
+
 $dispatches = @(
     $records |
         Where-Object {
@@ -320,6 +344,86 @@ if ($schedulerDeferrals.Count -lt 1) {
     throw "No authoritative frame-throttleable wake-up deferral was recorded."
 }
 $listener = $listeners[0].payload
+$domCheckpointStart = $domCheckpointStarts |
+    Where-Object {
+        $_.payload.context.browserInstanceId -eq
+            $listener.context.browserInstanceId -and
+        $_.payload.context.processId -eq $listener.context.processId -and
+        $_.payload.context.documentId -eq $listener.context.documentId
+    } |
+    Select-Object -First 1
+if (-not $domCheckpointStart) {
+    throw "No parser-complete DOM checkpoint was recorded for the fixture document."
+}
+$domCheckpointId = $domCheckpointStart.payload.checkpointId
+$fixtureDomNodes = @(
+    $domCheckpointNodes |
+        Where-Object {
+            $_.payload.checkpointId -eq $domCheckpointId -and
+            $_.payload.context.documentId -eq $listener.context.documentId
+        } |
+        Sort-Object { $_.payload.nodeIndex }
+)
+$domCheckpointCompletion = $domCheckpointCompletions |
+    Where-Object {
+        $_.payload.checkpointId -eq $domCheckpointId -and
+        $_.payload.context.documentId -eq $listener.context.documentId
+    } |
+    Select-Object -First 1
+if (-not $domCheckpointCompletion) {
+    throw "The fixture DOM checkpoint did not complete."
+}
+if ($domCheckpointCompletion.payload.truncated) {
+    throw "The fixture DOM checkpoint was unexpectedly truncated."
+}
+if (
+    $domCheckpointCompletion.payload.maximumNodes -ne
+        $domCheckpointStart.payload.maximumNodes -or
+    $domCheckpointCompletion.payload.nodeCount -ne $fixtureDomNodes.Count
+) {
+    throw "The fixture DOM checkpoint counts or limits are inconsistent."
+}
+if ($fixtureDomNodes.Count -lt 4) {
+    throw "The fixture DOM checkpoint did not contain the expected structure."
+}
+for ($index = 0; $index -lt $fixtureDomNodes.Count; $index++) {
+    if ($fixtureDomNodes[$index].payload.nodeIndex -ne $index) {
+        throw "The fixture DOM checkpoint node indices are not contiguous."
+    }
+}
+$documentNodes = @(
+    $fixtureDomNodes |
+        Where-Object {
+            $_.payload.nodeType -eq "document" -and
+            $_.payload.nodeName -eq "#document" -and
+            $null -eq $_.payload.parentNodeId
+        }
+)
+if ($documentNodes.Count -ne 1) {
+    throw "The fixture DOM checkpoint does not have one root document node."
+}
+$htmlNodes = @(
+    $fixtureDomNodes |
+        Where-Object {
+            $_.payload.nodeType -eq "element" -and
+            $_.payload.nodeName -eq "HTML" -and
+            $_.payload.parentNodeId -eq $documentNodes[0].payload.nodeId
+        }
+)
+if ($htmlNodes.Count -ne 1) {
+    throw "The fixture DOM checkpoint does not preserve the document-to-HTML edge."
+}
+$bodyNodes = @(
+    $fixtureDomNodes |
+        Where-Object {
+            $_.payload.nodeType -eq "element" -and
+            $_.payload.nodeName -eq "BODY" -and
+            $null -ne $_.payload.parentNodeId
+        }
+)
+if ($bodyNodes.Count -ne 1) {
+    throw "The fixture DOM checkpoint does not contain one BODY element."
+}
 $scheduledAnimationFrames = @(
     $animationFrameScheduleCandidates |
         Where-Object {
@@ -969,6 +1073,10 @@ if (
     SubframeFrameId = $subframeNavigation.payload.context.frameId
     SubframeDocumentId = $subframeNavigation.payload.context.documentId
     SubframeParentFrameId = $subframeNavigation.payload.parentFrameId
+    DomCheckpoints = $domCheckpointStarts.Count
+    DomCheckpointId = $domCheckpointId
+    DomCheckpointNodes = $fixtureDomNodes.Count
+    DomCheckpointTruncated = $domCheckpointCompletion.payload.truncated
     HiddenTimeoutTimerId = $scheduledHiddenTimeout.payload.timerId
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId
@@ -992,5 +1100,6 @@ if (
 Write-Host (
     "Blink propagation, listener, default-handler, DOM timer, " +
     "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
-    "and frame/page navigation-identity evidence verified."
+    "frame/page navigation-identity, and parser-complete DOM checkpoint " +
+    "evidence verified."
 )

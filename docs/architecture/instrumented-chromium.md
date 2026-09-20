@@ -246,6 +246,16 @@ complete rules are defined in the
 [frame and page identity evidence model](frame-and-page-identity-evidence-model.md).
 Live 0.11 connections require an exact protocol-version match.
 
+Protocol version 0.12 adds a bounded structural checkpoint when Blink finishes
+parsing a document. The renderer emits a start record, preorder node records,
+and a completion record with explicit node-count, limit, and truncation fields.
+This first DOM slice includes node and parent identities, node type, and node
+name. It intentionally excludes text, attributes, mutation history, style,
+layout, accessibility, paint, and rendered pixels. The complete contract is
+defined in the
+[DOM checkpoint evidence model](dom-checkpoint-evidence-model.md).
+Live 0.12 connections require an exact protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native
@@ -290,7 +300,9 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 4. Instrument timeout, interval, animation-frame, and idle-callback lifecycle
    evidence, including page lifecycle state at the observed boundaries,
    followed by scheduler-throttling evidence.
-5. Add document, DOM, style, layout, accessibility, and rendered-frame checkpoints.
+5. Add document, DOM, style, layout, accessibility, and rendered-frame
+   checkpoints. The bounded parser-complete DOM structure checkpoint is the
+   first implemented part of this stage.
 6. Add cookie operations and network metadata with prohibited values removed at source.
 7. Add browser-chrome and compositor correlation needed by test scenarios.
 8. Package the browser and recorder as one installable application.

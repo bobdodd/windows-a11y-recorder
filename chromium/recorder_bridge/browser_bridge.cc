@@ -85,6 +85,7 @@ struct EvidenceIdentityStorage {
   uint64_t next_listener_id = 1;
   uint64_t next_dispatch_id = 1;
   uint64_t next_timer_id = 1;
+  uint64_t next_dom_checkpoint_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
 
   struct NodeState {
@@ -137,6 +138,16 @@ int64_t QueryEvidenceTicks() {
 
 std::string DocumentId(int document_node_id) {
   return "dom-document-" + base::NumberToString(document_node_id);
+}
+
+std::string DomCheckpointId(uint64_t checkpoint_sequence) {
+  return "dom-checkpoint-" + base::NumberToString(checkpoint_sequence);
+}
+
+uint64_t AllocateDomCheckpointIdentity() {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  return identities.next_dom_checkpoint_id++;
 }
 
 base::DictValue CreateContext(const RecorderPipeClient& client,
@@ -237,6 +248,31 @@ base::DictValue CreateNode(int document_node_id,
   }
   target.Set("classes", base::ListValue());
   return target;
+}
+
+std::string DomNodeTypeName(int node_type) {
+  switch (node_type) {
+    case 1:
+      return "element";
+    case 3:
+      return "text";
+    case 8:
+      return "comment";
+    case 9:
+      return "document";
+    default:
+      return "other";
+  }
+}
+
+base::DictValue CreateDomCheckpointBasePayload(
+    const RecorderPipeClient& client,
+    uint64_t checkpoint_sequence,
+    int document_node_id) {
+  base::DictValue payload;
+  payload.Set("context", CreateContext(client, document_node_id));
+  payload.Set("checkpointId", DomCheckpointId(checkpoint_sequence));
+  return payload;
 }
 
 std::string RegisterListenerIdentity(uintptr_t listener_identity) {
@@ -1253,6 +1289,72 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
       *client, *state, std::string("explicit-cancel-idle-callback"),
       std::nullopt, page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-cancelled", std::move(payload));
+}
+
+uint64_t BeginBlinkDomCheckpoint(int document_node_id,
+                                 std::string reason,
+                                 int maximum_nodes) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || reason.empty() ||
+      maximum_nodes <= 0) {
+    return 0;
+  }
+  const uint64_t checkpoint_sequence = AllocateDomCheckpointIdentity();
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id);
+  payload.Set("reason", std::move(reason));
+  payload.Set("maximumNodes", maximum_nodes);
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-started",
+                    std::move(payload));
+  return checkpoint_sequence;
+}
+
+void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
+                                  int document_node_id,
+                                  int node_index,
+                                  int node_id,
+                                  int parent_node_id,
+                                  int node_type,
+                                  std::string node_name) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      node_index < 0 || node_id <= 0 || node_name.empty()) {
+    return;
+  }
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id);
+  payload.Set("nodeIndex", node_index);
+  payload.Set("nodeId", node_id);
+  if (parent_node_id > 0) {
+    payload.Set("parentNodeId", parent_node_id);
+  } else {
+    payload.Set("parentNodeId", base::Value());
+  }
+  payload.Set("nodeType", DomNodeTypeName(node_type));
+  payload.Set("nodeName", std::move(node_name));
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-node",
+                    std::move(payload));
+}
+
+void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
+                                int document_node_id,
+                                std::string reason,
+                                int node_count,
+                                bool truncated,
+                                int maximum_nodes) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      reason.empty() || node_count < 0 || maximum_nodes <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id);
+  payload.Set("reason", std::move(reason));
+  payload.Set("nodeCount", node_count);
+  payload.Set("truncated", truncated);
+  payload.Set("maximumNodes", maximum_nodes);
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-completed",
+                    std::move(payload));
 }
 
 void RecordBlinkSchedulerWakeUpDeferred(

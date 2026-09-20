@@ -88,6 +88,15 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.NavigationStarted or
                 BrowserEvidenceEventTypes.NavigationCompleted) =>
                 payload.Deserialize<BrowserNavigationPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointStarted) =>
+                payload.Deserialize<BrowserDomCheckpointStartedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointNode) =>
+                payload.Deserialize<BrowserDomCheckpointNodePayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointCompleted) =>
+                payload.Deserialize<BrowserDomCheckpointCompletedPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Cookie,
                 BrowserEvidenceEventTypes.CookieOperation) =>
                 payload.Deserialize<BrowserCookieOperationPayload>(JsonOptions) as object,

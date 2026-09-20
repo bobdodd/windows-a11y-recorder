@@ -20,6 +20,7 @@ internal static class EventPayloadValidator
         "browser.timer",
         "browser.scheduler",
         "browser.navigation",
+        "browser.dom",
         "browser.cookie"
     ];
 
@@ -133,6 +134,15 @@ internal static class EventPayloadValidator
                     lineNumber,
                     completed: true);
                 break;
+            case ("browser.dom", "dom-checkpoint-started"):
+                ValidateBrowserDomCheckpointStarted(payload, issues, lineNumber);
+                break;
+            case ("browser.dom", "dom-checkpoint-node"):
+                ValidateBrowserDomCheckpointNode(payload, issues, lineNumber);
+                break;
+            case ("browser.dom", "dom-checkpoint-completed"):
+                ValidateBrowserDomCheckpointCompleted(payload, issues, lineNumber);
+                break;
             case ("browser.cookie", "cookie-operation"):
                 ValidateBrowserCookie(payload, issues, lineNumber);
                 break;
@@ -146,6 +156,7 @@ internal static class EventPayloadValidator
             case ("browser.timer", "collector-omission"):
             case ("browser.scheduler", "collector-omission"):
             case ("browser.navigation", "collector-omission"):
+            case ("browser.dom", "collector-omission"):
             case ("browser.cookie", "collector-omission"):
                 ValidateOmission(payload, issues, lineNumber);
                 break;
@@ -812,6 +823,96 @@ internal static class EventPayloadValidator
                     $"A committed navigation must have outcome {expectedOutcome}.",
                     line);
             }
+        }
+    }
+
+    private static void ValidateBrowserDomCheckpointStarted(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredEnum("reason", "finished-parsing"),
+                RequiredInteger("maximumNodes", positive: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+    }
+
+    private static void ValidateBrowserDomCheckpointNode(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("nodeIndex", nonnegative: true),
+                RequiredInteger("nodeId", positive: true),
+                NullableInteger("parentNodeId", nonnegative: true),
+                RequiredEnum(
+                    "nodeType",
+                    "document",
+                    "element",
+                    "text",
+                    "comment",
+                    "other"),
+                RequiredString("nodeName")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+    }
+
+    private static void ValidateBrowserDomCheckpointCompleted(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredEnum("reason", "finished-parsing"),
+                RequiredInteger("nodeCount", nonnegative: true),
+                RequiredBoolean("truncated"),
+                RequiredInteger("maximumNodes", positive: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+    }
+
+    private static void ValidateRendererDocumentContext(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty("context", out var context) ||
+            context.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        if (ReadString(context, "processType") != "renderer" ||
+            ReadString(context, "documentId") is null)
+        {
+            AddError(
+                issues,
+                "browser-dom-context-invalid",
+                "events.ndjson#/payload/context",
+                "DOM checkpoint evidence must identify a renderer document.",
+                line);
         }
     }
 
