@@ -88,6 +88,36 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsTimestampOverlapAcrossIndependentClockMappings()
+    {
+        var directory = await CreateArchiveAsync(
+            [
+                CreateEvent(0, 200) with
+                {
+                    ClockMappingId = "chromium:browser-1:100"
+                },
+                CreateEvent(1, 100) with
+                {
+                    ClockMappingId = "chromium:browser-1:200"
+                }
+            ]);
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(
+                result.IsValid,
+                JsonSerializer.Serialize(result.Issues, JsonOptions));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DetectsUnsafeAndUnlistedArtifactPaths()
     {
         var directory = await CreateArchiveAsync([CreateEvent(0, 100)]);

@@ -202,6 +202,8 @@ Sequence rules:
 - The archive service assigns a persistence sequence when the record is durably appended.
 - Session time is the primary cross-stream ordering key.
 - Sequence numbers break ties within a stream but do not assert causality across streams.
+- Sequence values must increase within a collector channel.
+- Mapped session timestamps must not regress within a collector channel and clock mapping. Records from independent clock mappings may overlap within their declared uncertainty, so their mapped timestamps are not required to follow persistence order.
 - A global sequence is not assigned in capture callbacks because centralized serialization would add contention and imply false precision.
 - Deterministic relations may be added after capture without changing raw records.
 

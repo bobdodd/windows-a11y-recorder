@@ -433,7 +433,8 @@ public static class SessionArchiveValidator
             return 0;
         }
 
-        var streamStates = new Dictionary<string, EventStreamState>(StringComparer.Ordinal);
+        var sequenceStates = new Dictionary<string, ulong>(StringComparer.Ordinal);
+        var timestampStates = new Dictionary<string, long>(StringComparer.Ordinal);
         var eventIds = new Dictionary<string, long>(StringComparer.Ordinal);
         var references = new List<EventReference>();
         long lineNumber = 0;
@@ -524,7 +525,12 @@ public static class SessionArchiveValidator
                         lineNumber);
                 }
 
-                ValidateEventOrdering(record, streamStates, issues, lineNumber);
+                ValidateEventOrdering(
+                    record,
+                    sequenceStates,
+                    timestampStates,
+                    issues,
+                    lineNumber);
                 ValidateEventFields(record, issues, lineNumber);
                 EventPayloadValidator.Validate(record, issues, lineNumber);
             }
@@ -911,7 +917,8 @@ public static class SessionArchiveValidator
 
     private static void ValidateEventOrdering(
         JsonElement record,
-        IDictionary<string, EventStreamState> states,
+        IDictionary<string, ulong> sequenceStates,
+        IDictionary<string, long> timestampStates,
         ICollection<ArchiveValidationIssue> issues,
         long lineNumber)
     {
@@ -919,39 +926,48 @@ public static class SessionArchiveValidator
         var channel = ReadString(record, "channel");
         var sequence = ReadUInt64(record, "sequence");
         var timestamp = ReadInt64(record, "monotonicNanoseconds");
+        var clockMappingId = ReadString(record, "clockMappingId");
         if (string.IsNullOrWhiteSpace(collectorInstanceId) ||
-            string.IsNullOrWhiteSpace(channel) ||
-            sequence is null ||
-            timestamp is null)
+            string.IsNullOrWhiteSpace(channel))
         {
             return;
         }
 
-        var key = $"{collectorInstanceId}\u001f{channel}";
-        if (states.TryGetValue(key, out var previous))
+        var streamKey = $"{collectorInstanceId}\u001f{channel}";
+        if (sequence is not null)
         {
-            if (sequence <= previous.Sequence)
+            if (sequenceStates.TryGetValue(streamKey, out var previousSequence) &&
+                sequence <= previousSequence)
             {
                 AddError(
                     issues,
                     "event-sequence-not-increasing",
                     "events.ndjson#/sequence",
-                    $"Sequence {sequence} does not follow {previous.Sequence} for this stream.",
+                    $"Sequence {sequence} does not follow {previousSequence} for this stream.",
                     lineNumber);
             }
 
-            if (timestamp < previous.MonotonicNanoseconds)
+            sequenceStates[streamKey] = sequence.Value;
+        }
+
+        if (timestamp is not null && !string.IsNullOrWhiteSpace(clockMappingId))
+        {
+            var timestampKey = $"{streamKey}\u001f{clockMappingId}";
+            if (timestampStates.TryGetValue(
+                    timestampKey,
+                    out var previousTimestamp) &&
+                timestamp < previousTimestamp)
             {
                 AddError(
                     issues,
                     "event-time-regressed",
                     "events.ndjson#/monotonicNanoseconds",
-                    "Monotonic time regressed within a collector channel.",
+                    "Monotonic time regressed within a collector channel and clock mapping.",
                     lineNumber);
             }
-        }
 
-        states[key] = new EventStreamState(sequence.Value, timestamp.Value);
+            timestampStates[timestampKey] = timestamp.Value;
+        }
     }
 
     private static void ValidateEventFields(
@@ -1130,6 +1146,5 @@ public static class SessionArchiveValidator
             message,
             line));
 
-    private sealed record EventStreamState(ulong Sequence, long MonotonicNanoseconds);
     private sealed record EventReference(string TargetEventId, long Line);
 }
