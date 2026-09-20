@@ -128,8 +128,8 @@ $postMutationCheckpointCompletions = @(
             $_.payload.reason -eq "post-mutation"
         }
 )
-# A transition reserves whichever checkpoint the delivery pass produces, which
-# may be either reason, so the join must not be restricted to one of them.
+# A checkpoint of either reason can cover transitions, so coverage lookups must
+# not be restricted to one of them.
 $allCheckpointCompletions = @(
     $records |
         Where-Object {
@@ -741,8 +741,8 @@ foreach ($record in @($fixtureAttributeChanges) + @($fixtureCharacterDataChanges
     if ($record.payload.context.documentToken -notin $fixtureDocumentTokens) {
         throw "A DOM state change record carried an unknown document token."
     }
-    if ([string]::IsNullOrWhiteSpace($record.payload.checkpointId)) {
-        throw "A DOM state change record did not name the checkpoint it reserved."
+    if ([string]::IsNullOrWhiteSpace($record.payload.transitionId)) {
+        throw "A DOM state change record did not carry its transition identity."
     }
     if ($record.payload.nodeId -le 0) {
         throw "A DOM state change record did not identify its node."
