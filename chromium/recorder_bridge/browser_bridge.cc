@@ -86,8 +86,19 @@ struct EvidenceIdentityStorage {
   uint64_t next_dispatch_id = 1;
   uint64_t next_timer_id = 1;
   uint64_t next_dom_checkpoint_id = 1;
+  uint64_t next_dom_transition_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
-  std::unordered_map<int, uint64_t> pending_dom_checkpoints;
+
+  // The transitions recorded for a document since its last completed
+  // checkpoint. A checkpoint reports the range it covers, so no record ever
+  // names evidence that may not exist.
+  struct DomTransitionCoverage {
+    uint64_t first_transition_id = 0;
+    uint64_t last_transition_id = 0;
+    int transition_count = 0;
+  };
+
+  std::unordered_map<int, DomTransitionCoverage> dom_transition_coverage;
 
   struct NodeState {
     int document_node_id;
@@ -145,33 +156,51 @@ std::string DomCheckpointId(uint64_t checkpoint_sequence) {
   return "dom-checkpoint-" + base::NumberToString(checkpoint_sequence);
 }
 
-// Reserves the identity of the checkpoint that the current mutation delivery
-// pass will produce for this document, so a transition record can name the
-// tree it occurred in before that tree has been walked. The reservation is
-// consumed by the next checkpoint started for the same document.
-uint64_t ReserveDomCheckpointIdentity(int document_node_id) {
-  EvidenceIdentityStorage& identities = EvidenceIdentities();
-  base::AutoLock lock(identities.lock);
-  auto found = identities.pending_dom_checkpoints.find(document_node_id);
-  if (found != identities.pending_dom_checkpoints.end()) {
-    return found->second;
-  }
-  const uint64_t reserved = identities.next_dom_checkpoint_id++;
-  identities.pending_dom_checkpoints.insert_or_assign(document_node_id,
-                                                     reserved);
-  return reserved;
+std::string DomTransitionId(uint64_t transition_sequence) {
+  return "dom-transition-" + base::NumberToString(transition_sequence);
 }
 
-uint64_t TakeDomCheckpointIdentity(int document_node_id) {
+uint64_t AssignDomCheckpointIdentity() {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
-  auto found = identities.pending_dom_checkpoints.find(document_node_id);
-  if (found == identities.pending_dom_checkpoints.end()) {
-    return identities.next_dom_checkpoint_id++;
+  return identities.next_dom_checkpoint_id++;
+}
+
+// Assigns the identity of one recorded transition and accumulates it into the
+// coverage of the document's next completed checkpoint.
+//
+// An earlier protocol had the transition name the checkpoint its delivery pass
+// was expected to produce. That was a forward reference that could not be
+// guaranteed: a document can be discarded before any checkpoint is produced,
+// which left the transition naming evidence absent from the archive. The join
+// now runs from the checkpoint to the transitions it actually covers, so an
+// uncovered transition is stated by omission instead of by a dead reference.
+uint64_t AssignDomTransitionIdentity(int document_node_id) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  const uint64_t assigned = identities.next_dom_transition_id++;
+  EvidenceIdentityStorage::DomTransitionCoverage& coverage =
+      identities.dom_transition_coverage[document_node_id];
+  if (coverage.transition_count == 0) {
+    coverage.first_transition_id = assigned;
   }
-  const uint64_t reserved = found->second;
-  identities.pending_dom_checkpoints.erase(found);
-  return reserved;
+  coverage.last_transition_id = assigned;
+  ++coverage.transition_count;
+  return assigned;
+}
+
+EvidenceIdentityStorage::DomTransitionCoverage TakeDomTransitionCoverage(
+    int document_node_id) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.dom_transition_coverage.find(document_node_id);
+  if (found == identities.dom_transition_coverage.end()) {
+    return EvidenceIdentityStorage::DomTransitionCoverage();
+  }
+  const EvidenceIdentityStorage::DomTransitionCoverage coverage =
+      found->second;
+  identities.dom_transition_coverage.erase(found);
+  return coverage;
 }
 
 base::DictValue CreateContext(const RecorderPipeClient& client,
@@ -338,8 +367,8 @@ base::DictValue CreateDomStateChangeBasePayload(
   payload.Set("context",
               CreateContext(client, document_node_id,
                             std::move(document_token)));
-  const uint64_t reserved = ReserveDomCheckpointIdentity(document_node_id);
-  payload.Set("checkpointId", DomCheckpointId(reserved));
+  const uint64_t assigned = AssignDomTransitionIdentity(document_node_id);
+  payload.Set("transitionId", DomTransitionId(assigned));
   return payload;
 }
 
@@ -1382,8 +1411,7 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
       maximum_nodes <= 0) {
     return 0;
   }
-  const uint64_t checkpoint_sequence =
-      TakeDomCheckpointIdentity(document_node_id);
+  const uint64_t checkpoint_sequence = AssignDomCheckpointIdentity();
   base::DictValue payload = CreateDomCheckpointBasePayload(
       *client, checkpoint_sequence, document_node_id,
       std::move(document_token));
@@ -1494,6 +1522,18 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
   payload.Set("attributesTruncated", attributes_truncated);
   payload.Set("maximumAttributesPerNode", maximum_attributes_per_node);
   payload.Set("maximumValueLength", maximum_value_length);
+  const EvidenceIdentityStorage::DomTransitionCoverage coverage =
+      TakeDomTransitionCoverage(document_node_id);
+  payload.Set("coveredTransitionCount", coverage.transition_count);
+  if (coverage.transition_count == 0) {
+    payload.Set("coveredTransitionFirstId", base::Value());
+    payload.Set("coveredTransitionLastId", base::Value());
+  } else {
+    payload.Set("coveredTransitionFirstId",
+                DomTransitionId(coverage.first_transition_id));
+    payload.Set("coveredTransitionLastId",
+                DomTransitionId(coverage.last_transition_id));
+  }
   SendBlinkEvidence("browser.dom", "dom-checkpoint-completed",
                     std::move(payload));
 }

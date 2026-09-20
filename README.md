@@ -111,12 +111,27 @@ events and 81 artifacts, with zero dropped records and zero network-service
 crashes.
 
 Validation of 0.15 also measured two limits of the transition-to-checkpoint
-join. A transition names the checkpoint its delivery pass is expected to
+join. A transition named the checkpoint its delivery pass was expected to
 produce, and 200 of the 452 transitions in the validated archive named a
 reservation that no checkpoint completed. Checkpoint identity is numbered per
 renderer, so 49 completed checkpoints used 32 distinct identity strings and a
 join requires the browser instance, renderer process, and document to match as
 well. Both limits are recorded in the DOM attribute and text evidence model.
+
+Protocol 0.16 is ready for reference-platform validation. It reverses the
+direction of that join. Each transition now carries its own `transitionId`, and
+each completed checkpoint reports the count and the first and last identity of
+the transitions it covers for its document. The reason is that the earlier
+direction was unresolvable by construction: the three documents accounting for
+all 200 unjoined transitions appeared in the archive only as transitions, with
+no checkpoint and no committed navigation, so they were created, mutated, and
+discarded before any delivery pass produced a checkpoint. A checkpoint can only
+name transitions that already happened, so no record references absent
+evidence, and a transition no checkpoint covers is stated by omission. The
+deterministic verifier requires one checkpoint in the fixture document to cover
+all six fixture transitions, requires every completed checkpoint to state a
+coherent coverage range, and reports how many recorded transitions no
+checkpoint covered.
 
 ## Project goals
 

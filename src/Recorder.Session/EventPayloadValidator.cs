@@ -946,6 +946,46 @@ internal static class EventPayloadValidator
             line);
     }
 
+    // A checkpoint either covers no transition and names neither bound, or
+    // covers at least one and names both. A half-stated range would leave a
+    // consumer unable to decide whether a transition was covered.
+    private static void ValidateTransitionCoverage(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty("coveredTransitionCount", out var countValue) ||
+            countValue.ValueKind != JsonValueKind.Number ||
+            !countValue.TryGetInt64(out var count))
+        {
+            return;
+        }
+
+        var hasFirst = HasNonnullProperty(payload, "coveredTransitionFirstId");
+        var hasLast = HasNonnullProperty(payload, "coveredTransitionLastId");
+        if (count == 0 && (hasFirst || hasLast))
+        {
+            AddError(
+                issues,
+                "browser-dom-checkpoint-coverage-inconsistent",
+                "events.ndjson#/payload/coveredTransitionCount",
+                "A checkpoint covering no transition named a transition bound.",
+                line);
+            return;
+        }
+
+        if (count > 0 && (!hasFirst || !hasLast))
+        {
+            AddError(
+                issues,
+                "browser-dom-checkpoint-coverage-inconsistent",
+                "events.ndjson#/payload/coveredTransitionCount",
+                "A checkpoint covering transitions did not name the first and " +
+                "last transition it covers.",
+                line);
+        }
+    }
+
     private static void ValidateBrowserDomCheckpointCompleted(
         JsonElement payload,
         ICollection<ArchiveValidationIssue> issues,
@@ -963,12 +1003,16 @@ internal static class EventPayloadValidator
                 RequiredInteger("attributeCount", nonnegative: true),
                 RequiredBoolean("attributesTruncated"),
                 RequiredInteger("maximumAttributesPerNode", positive: true),
-                RequiredInteger("maximumValueLength", positive: true)
+                RequiredInteger("maximumValueLength", positive: true),
+                RequiredInteger("coveredTransitionCount", nonnegative: true),
+                NullableString("coveredTransitionFirstId"),
+                NullableString("coveredTransitionLastId")
             ],
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
         ValidateRendererDocumentContext(payload, issues, line);
+        ValidateTransitionCoverage(payload, issues, line);
     }
 
     private static void ValidateBrowserDomAttributeChanged(
@@ -980,7 +1024,7 @@ internal static class EventPayloadValidator
             payload,
             [
                 RequiredObject("context"),
-                NullableString("checkpointId"),
+                RequiredString("transitionId"),
                 RequiredInteger("nodeId", positive: true),
                 RequiredString("nodeName"),
                 NullableString("attributeNamespace"),
@@ -1026,7 +1070,7 @@ internal static class EventPayloadValidator
             payload,
             [
                 RequiredObject("context"),
-                NullableString("checkpointId"),
+                RequiredString("transitionId"),
                 RequiredInteger("nodeId", positive: true),
                 NullableInteger("parentNodeId", nonnegative: true),
                 RequiredEnum("nodeType", "text", "comment", "other"),

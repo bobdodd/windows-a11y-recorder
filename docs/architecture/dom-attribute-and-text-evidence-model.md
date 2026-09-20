@@ -2,11 +2,12 @@
 
 ## Status
 
-Implemented for protocol 0.15. The recorder bridge, the Blink hooks, the archive
-validator, and the reference-fixture validation all reflect this document. The
-Blink hooks are verified by the integration tests and by integration-time
-signature checks; they are pending a full validation run on the reference
-platform.
+Implemented for protocol 0.16. The recorder bridge, the Blink hooks, the archive
+validator, and the reference-fixture validation all reflect this document.
+Protocol 0.15 introduced this evidence and was validated on the reference
+platform at revision `6aeb57b`. Protocol 0.16 reverses the direction of the
+transition-to-checkpoint join on the strength of what that validation measured,
+and is pending its own validation run.
 
 ## Purpose
 
@@ -110,12 +111,13 @@ Per-node and per-checkpoint attribute limits apply, with truncation state
 reported on the checkpoint completion record in the same way as node limits.
 `dom-checkpoint-completed` gains `attributeCount`, `attributesTruncated`,
 `maximumAttributesPerNode`, and `maximumValueLength`. The in-force limits are 64
-attributes per node and 4096 UTF-16 code units per value.
+attributes per node and 4096 UTF-16 code units per value. It also reports the
+transitions it covers, described under the trigger integration below.
 
 ### Attribute transitions
 
 `dom-attribute-changed` records one accepted attribute mutation. Its fields are
-`checkpointId`, `nodeId`, `nodeName`, `attributeNamespace`, `attributeName`,
+`transitionId`, `nodeId`, `nodeName`, `attributeNamespace`, `attributeName`,
 `changeType`, `attributeValue`, `attributeValueLength`,
 `attributeValueTruncated`, `previousAttributeValue`,
 `previousAttributeValueLength`, `previousAttributeValueTruncated`, and
@@ -138,7 +140,7 @@ activating a control changed its exposed state.
 ### Character-data transitions
 
 `dom-character-data-changed` records one accepted character-data mutation. Its
-fields are `checkpointId`, `nodeId`, `parentNodeId`, `nodeType`, `text`,
+fields are `transitionId`, `nodeId`, `parentNodeId`, `nodeType`, `text`,
 `textLength`, `textTruncated`, `previousText`, `previousTextLength`,
 `previousTextTruncated`, and `maximumValueLength`.
 
@@ -155,32 +157,40 @@ machinery, so a qualifying change also queues its document for a structural
 checkpoint. Neither mutation changes a child list, so nothing else would queue
 the document.
 
-The join works by reservation. A transition record is written before the tree it
-belongs to has been walked, so the bridge reserves the identity of the
-checkpoint that the current delivery pass will produce, keyed by document, and
-the next checkpoint started for that document consumes the reservation.
-Transitions in one delivery pass therefore share one `checkpointId` with the
-checkpoint that followed them.
+The join runs from the checkpoint to the transitions it covers. Each transition
+carries its own identity in `transitionId`, assigned from a per-renderer
+sequence. Each `dom-checkpoint-completed` record reports
+`coveredTransitionCount` with the number of transitions recorded for that
+document since its previous completed checkpoint, and `coveredTransitionFirstId`
+and `coveredTransitionLastId` with the bounds of that range. A checkpoint
+covering no transition reports zero and names neither bound, and the archive
+validator rejects a half-stated range.
 
-The residual limit of that design is recorded under claims the evidence does not
-support: if a delivery pass ends without producing a checkpoint, a transition
-names a checkpoint that does not appear in the archive. The alternative was a
-null `checkpointId` and no join at all.
+Protocol 0.15 joined in the opposite direction, by reservation: a transition
+named the checkpoint its delivery pass was expected to produce. That was
+withdrawn in 0.16 because the promise cannot be kept. Reference-platform
+validation at revision `6aeb57b` recorded 200 of 452 transitions naming a
+reservation that no checkpoint completed, collapsing into three dead identities
+because an unconsumed reservation was reused by every later transition in the
+same document. All three documents appeared in the archive only as attribute
+transitions, with no checkpoint and no committed navigation carrying their
+document tokens. They were documents Blink created, mutated, and discarded
+before any delivery pass produced a checkpoint. No hook can prevent that, so a
+forward reference from a transition to a checkpoint is unresolvable by
+construction.
 
-That limit is not marginal. In the first reference-platform validation archive
-at revision `8e2ba51`, 200 of 452 transition records named a reservation that
-was never completed, spread across three distinct reservations. The reference
-fixture's own transitions joined correctly, so the defect is not in the
-reservation mechanism itself; documents that mutate without ever producing a
-checkpoint are common. A consumer must therefore treat `checkpointId` on a
-transition as a claim to be resolved against the archive, not as a guaranteed
-reference.
+Reversing the direction removes the failure rather than bounding it. A
+checkpoint names only transitions that have already been recorded, so no record
+can reference absent evidence. A transition that no checkpoint covers is stated
+by omission, which is the accurate claim: the change was observed, and no tree
+snapshot followed it. A consumer computes the uncovered set exactly, and the
+reference verifier reports it as `UncoveredTransitions` on every run.
 
-Checkpoint identity is also unique only within a renderer process. The same
-archive contained 49 completed checkpoints using 32 distinct identity strings,
-because each renderer numbers its own checkpoints. Joining a transition to a
-checkpoint requires browser instance, renderer process, and document to match as
-well as the identity string.
+Checkpoint and transition identities are unique only within a renderer process.
+The 0.15 validation archive contained 49 completed checkpoints using 32 distinct
+checkpoint identity strings, because each renderer numbers its own. Resolving
+coverage requires browser instance, renderer process, and document to match as
+well as the sequence range.
 
 ## Claims the evidence supports
 
@@ -194,8 +204,9 @@ The evidence can establish:
   the same limit;
 - the attribute state of nodes observed at a checkpoint, within the configured
   limits; and
-- whether an observed attribute or text change occurred in the same delivery
-  pass as an observed structural checkpoint.
+- whether an observed attribute or text change is covered by an observed
+  structural checkpoint for the same document, and which transitions a given
+  checkpoint covers.
 
 ## Claims the evidence does not support
 
@@ -210,11 +221,11 @@ The evidence does not establish:
   sequence of accepted transitions;
 - browser-held data the tested page never displayed, such as the credential
   store, browser history, cookie values, or authorization values;
-- the existence of the checkpoint a transition names, in the case where the
-  delivery pass ended without producing one, which was 200 of 452 transitions in
-  the first validated archive;
-- a checkpoint identity that is comparable across renderer processes, since each
-  renderer numbers its checkpoints independently; or
+- that a recorded transition was followed by any structural checkpoint, since a
+  document can be discarded first, which accounted for 200 of 452 transitions in
+  the protocol 0.15 validation archive;
+- a checkpoint or transition identity that is comparable across renderer
+  processes, since each renderer numbers its own; or
 - that a change was perceivable, painted, or presented.
 
 ## Deterministic validation
@@ -235,8 +246,10 @@ the fixture's known before and after values. The truncation case must report
 `attributeValueTruncated` with a recorded prefix of the limit length and the
 full length of the original value, rather than a dropped record. The verifier
 also requires the removed attribute to be absent from the following checkpoint
-state, and requires the six transitions to share one reserved checkpoint
-identity whose checkpoint was completed.
+state, and requires one completed checkpoint in the fixture document to report
+that it covers all six transition identities. It also requires every completed
+checkpoint in the archive to state a coherent coverage range, and it reports how
+many recorded transitions no checkpoint covered.
 
 Because attribute and character-data mutations now queue checkpoints of their
 own, the document no longer produces exactly one post-mutation checkpoint. The
@@ -253,8 +266,9 @@ greater than the recorded value without truncation state.
 2. Attribute state is emitted as separate records keyed by node identity rather
    than as additional fields on `dom-checkpoint-node`, so that hook's bridge
    signature is unchanged.
-3. Transitions are joined to checkpoints by reserved identity rather than left
-   unjoined with a null `checkpointId`.
+3. Checkpoints name the transitions they cover, rather than transitions naming a
+   checkpoint that may never be produced. Protocol 0.15 made the opposite
+   choice and was withdrawn in 0.16 on validation evidence.
 4. Parser-driven character-data updates are excluded.
 
 The per-record length limit is 4096 UTF-16 code units. It is large enough that

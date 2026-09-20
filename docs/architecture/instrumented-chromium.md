@@ -279,11 +279,23 @@ they record. `Element::DidAddAttribute`, `Element::DidModifyAttribute`, and
 records `dom-attribute-changed`, and `CharacterData::SetDataAndUpdate` records
 `dom-character-data-changed` for updates that did not come from the parser.
 Both transition hooks queue the mutated document through the existing recorder
-checkpoint path, because neither mutation changes a child list. The bridge
-reserves the identity of the checkpoint that the current delivery pass will
-produce, so a transition and the tree state that followed it share one
-checkpoint identity. Live 0.15 connections require an exact protocol-version
-match.
+checkpoint path, because neither mutation changes a child list. Live 0.15
+connections require an exact protocol-version match.
+
+Protocol version 0.16 reverses the direction of the join between a transition
+and the tree state around it. In 0.15 the bridge reserved the identity of the
+checkpoint that the current delivery pass was expected to produce, and the
+transition named it. Validation showed that promise cannot be kept: a document
+can be created, mutated, and discarded before any delivery pass produces a
+checkpoint, which left 200 of 452 transitions naming absent evidence, and an
+unconsumed reservation was reused by every later transition in the same
+document. In 0.16 each transition carries its own `transitionId` from a
+per-renderer sequence, and each completed checkpoint reports
+`coveredTransitionCount`, `coveredTransitionFirstId`, and
+`coveredTransitionLastId`. No record can name evidence the archive does not
+contain, and an uncovered transition is stated by omission. Both counters live
+in the bridge, so no Blink hook signature or body changed. Live 0.16 connections
+require an exact protocol-version match.
 
 Bounded values are truncated with `String::substr(0, limit)`. Blink's
 `WTF::String` has no `Left` method in Chromium 156, and the first 0.15 hook

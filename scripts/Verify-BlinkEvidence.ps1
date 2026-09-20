@@ -879,34 +879,78 @@ if ($liveRegionChange.parentNodeId -le 0) {
     throw "The live-region text change did not identify its parent element."
 }
 
-# The six mutations run as consecutive statements in one task, so they reserve
-# one checkpoint identity, and the checkpoint that follows must consume it.
-$transitionCheckpointIds = @(
-    @($matchedAttributeChanges) + @($liveRegionChanges) |
-        ForEach-Object { $_.payload.checkpointId } |
-        Select-Object -Unique
-)
-if ($transitionCheckpointIds.Count -ne 1) {
-    throw (
-        "The fixture's attribute and text transitions did not share one " +
-        "reserved checkpoint identity."
-    )
+# The six mutations run as consecutive statements in one task, so one later
+# checkpoint in the same document must report that it covers all six. The join
+# runs from the checkpoint to the transitions it covers, so a transition never
+# names evidence the archive may not contain.
+function Get-TransitionSequence {
+    param([string] $TransitionId)
+
+    if ($TransitionId -notmatch '^dom-transition-(\d+)$') {
+        throw "A transition identity was not in the expected form: $TransitionId"
+    }
+    return [uint64] $Matches[1]
 }
-$stateCheckpointId = $transitionCheckpointIds[0]
+
+$fixtureTransitionSequences = @(
+    @($matchedAttributeChanges) + @($liveRegionChanges) |
+        ForEach-Object { Get-TransitionSequence $_.payload.transitionId }
+)
+if (@($fixtureTransitionSequences | Select-Object -Unique).Count -ne 6) {
+    throw "The fixture's six transitions did not carry six distinct identities."
+}
+$firstFixtureSequence =
+    ($fixtureTransitionSequences | Measure-Object -Minimum).Minimum
+$lastFixtureSequence =
+    ($fixtureTransitionSequences | Measure-Object -Maximum).Maximum
+
 $stateCheckpointCompletion = $allCheckpointCompletions |
     Where-Object {
-        $_.payload.checkpointId -eq $stateCheckpointId -and
         $_.payload.context.browserInstanceId -eq
             $listener.context.browserInstanceId -and
         $_.payload.context.processId -eq $listener.context.processId -and
-        $_.payload.context.documentId -eq $listener.context.documentId
+        $_.payload.context.documentId -eq $listener.context.documentId -and
+        $_.payload.coveredTransitionCount -ge 6 -and
+        $null -ne $_.payload.coveredTransitionFirstId -and
+        $null -ne $_.payload.coveredTransitionLastId -and
+        (Get-TransitionSequence $_.payload.coveredTransitionFirstId) -le
+            $firstFixtureSequence -and
+        (Get-TransitionSequence $_.payload.coveredTransitionLastId) -ge
+            $lastFixtureSequence
     } |
     Select-Object -First 1
 if (-not $stateCheckpointCompletion) {
     throw (
-        "The checkpoint identity reserved by the fixture's transitions was " +
-        "never completed."
+        "No checkpoint in the fixture document reported covering the six " +
+        "transitions the fixture recorded."
     )
+}
+$stateCheckpointId = $stateCheckpointCompletion.payload.checkpointId
+
+# Every completed checkpoint must state a coherent coverage range, and no
+# transition may fall inside the range of a checkpoint for another document.
+foreach ($completion in $allCheckpointCompletions) {
+    $count = $completion.payload.coveredTransitionCount
+    if ($null -eq $count -or $count -lt 0) {
+        throw "A completed checkpoint did not report its transition coverage."
+    }
+    $hasFirst = $null -ne $completion.payload.coveredTransitionFirstId
+    $hasLast = $null -ne $completion.payload.coveredTransitionLastId
+    if ($count -eq 0) {
+        if ($hasFirst -or $hasLast) {
+            throw (
+                "A checkpoint covering no transition named a transition bound."
+            )
+        }
+        continue
+    }
+    if (-not $hasFirst -or -not $hasLast) {
+        throw "A checkpoint covering transitions did not name both bounds."
+    }
+    if ((Get-TransitionSequence $completion.payload.coveredTransitionFirstId) -gt
+        (Get-TransitionSequence $completion.payload.coveredTransitionLastId)) {
+        throw "A checkpoint reported an inverted transition coverage range."
+    }
 }
 if ($stateCheckpointCompletion.payload.attributesTruncated) {
     throw "The fixture checkpoint exceeded its per-node attribute limit."
@@ -929,6 +973,46 @@ if ($stateCheckpointCompletion.payload.attributeCount -ne
     $stateCheckpointAttributes.Count) {
     throw "The fixture checkpoint attribute count does not match its records."
 }
+# Coverage across the whole archive, reported so a run states how much of its
+# transition evidence a checkpoint actually accounts for. A transition in a
+# document that produced no checkpoint is uncovered, which is a fact about the
+# recorded page rather than a defect in the join.
+$allTransitions = @(@($attributeChanges) + @($characterDataChanges))
+$coverageRanges = @{}
+foreach ($completion in $allCheckpointCompletions) {
+    if ($completion.payload.coveredTransitionCount -le 0) {
+        continue
+    }
+    $scope = "$($completion.payload.context.processId)|" +
+        "$($completion.payload.context.documentId)"
+    if (-not $coverageRanges.ContainsKey($scope)) {
+        $coverageRanges[$scope] = New-Object System.Collections.ArrayList
+    }
+    [void] $coverageRanges[$scope].Add(
+        [pscustomobject]@{
+            First = Get-TransitionSequence $completion.payload.coveredTransitionFirstId
+            Last = Get-TransitionSequence $completion.payload.coveredTransitionLastId
+        })
+}
+$uncoveredTransitions = 0
+foreach ($transition in $allTransitions) {
+    $scope = "$($transition.payload.context.processId)|" +
+        "$($transition.payload.context.documentId)"
+    $sequence = Get-TransitionSequence $transition.payload.transitionId
+    $covered = $false
+    if ($coverageRanges.ContainsKey($scope)) {
+        foreach ($range in $coverageRanges[$scope]) {
+            if ($sequence -ge $range.First -and $sequence -le $range.Last) {
+                $covered = $true
+                break
+            }
+        }
+    }
+    if (-not $covered) {
+        ++$uncoveredTransitions
+    }
+}
+
 $disclosureNodeId = $truncatedChange.payload.nodeId
 $expectedCheckpointState = @{
     "aria-expanded" = "true"
@@ -1660,6 +1744,11 @@ if (
     PostMutationCheckpoints = $fixturePostMutationStarts.Count
     PostMutationCheckpointId = $postMutationCheckpointId
     PostMutationCheckpointNodes = $postMutationDomNodes.Count
+    StateCheckpointId = $stateCheckpointId
+    StateCheckpointCoveredTransitions =
+        $stateCheckpointCompletion.payload.coveredTransitionCount
+    RecordedTransitions = $allTransitions.Count
+    UncoveredTransitions = $uncoveredTransitions
     HiddenTimeoutTimerId = $scheduledHiddenTimeout.payload.timerId
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId

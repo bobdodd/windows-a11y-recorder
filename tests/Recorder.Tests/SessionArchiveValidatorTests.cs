@@ -950,7 +950,10 @@ public sealed class SessionArchiveValidatorTests
                     attributeCount = 1,
                     attributesTruncated = false,
                     maximumAttributesPerNode = 64,
-                    maximumValueLength = 4096
+                    maximumValueLength = 4096,
+                    coveredTransitionCount = 0,
+                    coveredTransitionFirstId = (string?)null,
+                    coveredTransitionLastId = (string?)null
                 }),
             CreateEvent(
                 5,
@@ -995,7 +998,10 @@ public sealed class SessionArchiveValidatorTests
                     attributeCount = 0,
                     attributesTruncated = false,
                     maximumAttributesPerNode = 64,
-                    maximumValueLength = 4096
+                    maximumValueLength = 4096,
+                    coveredTransitionCount = 2,
+                    coveredTransitionFirstId = "dom-transition-1",
+                    coveredTransitionLastId = "dom-transition-2"
                 })
         };
         var directory = await CreateArchiveAsync(records);
@@ -1041,7 +1047,7 @@ public sealed class SessionArchiveValidatorTests
                 new
                 {
                     context,
-                    checkpointId = "dom-checkpoint-1",
+                    transitionId = "dom-transition-1",
                     nodeId = 11,
                     nodeName = "BUTTON",
                     attributeNamespace = (string?)null,
@@ -1063,7 +1069,7 @@ public sealed class SessionArchiveValidatorTests
                 new
                 {
                     context,
-                    checkpointId = (string?)null,
+                    transitionId = "dom-transition-2",
                     nodeId = 11,
                     nodeName = "BUTTON",
                     attributeNamespace = (string?)null,
@@ -1085,7 +1091,7 @@ public sealed class SessionArchiveValidatorTests
                 new
                 {
                     context,
-                    checkpointId = "dom-checkpoint-2",
+                    transitionId = "dom-transition-3",
                     nodeId = 14,
                     parentNodeId = (long?)13,
                     nodeType = "text",
@@ -1194,6 +1200,57 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Theory]
+    [InlineData(0, "dom-transition-1", "dom-transition-2")]
+    [InlineData(0, "dom-transition-1", null)]
+    [InlineData(2, null, null)]
+    [InlineData(2, "dom-transition-1", null)]
+    public async Task RejectsDomCheckpointWithHalfStatedTransitionCoverage(
+        int coveredTransitionCount,
+        string? coveredTransitionFirstId,
+        string? coveredTransitionLastId)
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dom,
+            BrowserEvidenceEventTypes.DomCheckpointCompleted,
+            new
+            {
+                context = CreateRendererDocumentContext(),
+                checkpointId = "dom-checkpoint-1",
+                reason = "post-mutation",
+                nodeCount = 1,
+                truncated = false,
+                maximumNodes = 512,
+                attributeCount = 0,
+                attributesTruncated = false,
+                maximumAttributesPerNode = 64,
+                maximumValueLength = 4096,
+                coveredTransitionCount,
+                coveredTransitionFirstId,
+                coveredTransitionLastId
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code == "browser-dom-checkpoint-coverage-inconsistent");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
     [InlineData("added", "true", "false")]
     [InlineData("removed", "true", null)]
     [InlineData("changed", null, "false")]
@@ -1210,7 +1267,7 @@ public sealed class SessionArchiveValidatorTests
             new
             {
                 context = CreateRendererDocumentContext(),
-                checkpointId = (string?)null,
+                transitionId = "dom-transition-4",
                 nodeId = 11,
                 nodeName = "BUTTON",
                 attributeNamespace = (string?)null,
@@ -1267,7 +1324,7 @@ public sealed class SessionArchiveValidatorTests
                     executionWorldId = (string?)null,
                     documentToken = (string?)null
                 },
-                checkpointId = (string?)null,
+                transitionId = "dom-transition-5",
                 nodeId = 14,
                 parentNodeId = (long?)13,
                 nodeType = "text",

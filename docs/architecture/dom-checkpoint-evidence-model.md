@@ -65,8 +65,11 @@ pixels.
   start record;
 - `nodeCount`: the number of node records emitted;
 - `truncated`: whether additional nodes existed after the limit was reached;
-  and
-- `maximumNodes`: the limit used by this checkpoint.
+- `maximumNodes`: the limit used by this checkpoint; and
+- from protocol 0.16, `coveredTransitionCount`, `coveredTransitionFirstId`, and
+  `coveredTransitionLastId`, which state the attribute and character-data
+  transitions recorded for this document since its previous completed
+  checkpoint. The attribute and text evidence model specifies them.
 
 The current implementation uses a 512-node limit. A truncated checkpoint is
 valid evidence of a partial preorder prefix. It must not be interpreted as the

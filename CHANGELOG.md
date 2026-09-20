@@ -6,6 +6,21 @@ from the product version.
 
 ## Unreleased
 
+### Changed
+
+- Reversed the join between an attribute or character-data transition and the
+  DOM checkpoint around it, as protocol 0.16. A transition now carries its own
+  `transitionId`, and a completed checkpoint reports the count and the first and
+  last identity of the transitions it covers for that document. Protocol 0.15
+  had the transition name the checkpoint its delivery pass was expected to
+  produce; reference-platform validation recorded 200 of 452 transitions naming
+  a checkpoint that was never produced, because a document can be created,
+  mutated, and discarded before any delivery pass runs. A checkpoint can only
+  name transitions that already happened, so no record references absent
+  evidence, and a transition that no checkpoint covers is stated by omission.
+  The archive validator rejects a half-stated coverage range, and the reference
+  verifier reports how many recorded transitions no checkpoint covered.
+
 ### Added
 
 - Added protocol 0.15 bounded attribute and character-data evidence. Renderer

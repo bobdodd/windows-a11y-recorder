@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.15";
+    public const string CurrentVersion = "0.16";
 }
 
 public static class BrowserEvidenceChannels
