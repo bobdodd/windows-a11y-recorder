@@ -1178,6 +1178,8 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn("GetParentFrame()", first)
             self.assertIn("GetParentFrameOrOuterDocument()", first)
             self.assertIn("GetMainFrame()", first)
+            self.assertIn("GetDocumentToken()", first)
+            self.assertIn("GetProcess()->GetProcess().Pid()", first)
             self.assertIn("FrameType::kPrerenderMainFrame", first)
             self.assertIn("FrameType::kFencedFrameRoot", first)
             self.assertIn("FrameType::kGuestMainFrame", first)
@@ -1230,6 +1232,7 @@ class IntegrateTests(unittest.TestCase):
                 first,
             )
             self.assertIn("recorder_node.parentNode()", first)
+            self.assertIn("Token().ToString()", first)
             self.assertIn(
                 "if (HasFinishedParsing())\n"
                 "    MutationObserver::EnqueueRecorderDomCheckpoint(*this)",
@@ -1330,6 +1333,7 @@ class IntegrateTests(unittest.TestCase):
             )
             self.assertIn("recorder_document->HasFinishedParsing()", first)
             self.assertIn("recorder_document->IsActive()", first)
+            self.assertIn("recorder_document->Token().ToString()", first)
             self.assertIn(
                 "NodeTraversal::InclusiveDescendantsOf(*recorder_document)",
                 first,

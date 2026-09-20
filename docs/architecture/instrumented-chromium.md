@@ -263,6 +263,14 @@ for each active, parser-complete document. Page script does not need to create
 a JavaScript `MutationObserver`. Live 0.13 connections require an exact
 protocol-version match.
 
+Protocol version 0.14 adds explicit browser-renderer document correlation.
+Committed browser navigation records and renderer DOM checkpoints carry the
+same Chromium document token. Navigation completions also identify the hosting
+renderer process. Correlation requires browser instance, document token, and
+renderer process to match. Cross-document commits replace the active frame
+mapping, while same-document commits must preserve it. Live 0.14 connections
+require an exact protocol-version match.
+
 Chromium's Windows renderer and other lockdown sandbox tokens cannot open a
 named pipe created with the managed `CurrentUserOnly` option. The recorder
 therefore creates each browser-evidence pipe through the native

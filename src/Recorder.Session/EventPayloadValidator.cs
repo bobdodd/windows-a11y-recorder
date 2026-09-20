@@ -665,7 +665,8 @@ internal static class EventPayloadValidator
                         "committed",
                         "committed-error-page",
                         "not-committed")
-                    : NullableString("outcome")
+                    : NullableString("outcome"),
+                NullableInteger("rendererProcessId")
             ],
             issues,
             line);
@@ -717,6 +718,7 @@ internal static class EventPayloadValidator
             var pageId = ReadString(context, "pageId");
             var frameId = ReadString(context, "frameId");
             var documentId = ReadString(context, "documentId");
+            var documentToken = ReadString(context, "documentToken");
             if (ReadString(context, "processType") != "browser" ||
                 pageId is null ||
                 frameId is null)
@@ -753,23 +755,53 @@ internal static class EventPayloadValidator
                 "committed",
                 out var contextCommittedValue) &&
                 contextCommittedValue.ValueKind == JsonValueKind.True;
-            if ((!completed || !committed) && documentId is not null)
+            if ((!completed || !committed) &&
+                (documentId is not null || documentToken is not null))
             {
                 AddError(
                     issues,
                     "browser-navigation-document-before-commit",
                     "events.ndjson#/payload/context/documentId",
-                    "Document identity must be null before commit and after an uncommitted completion.",
+                    "Document identity and token must be null before commit and after an uncommitted completion.",
                     line);
             }
 
-            if (completed && committed && documentId is null)
+            if (completed && committed &&
+                (documentId is null || documentToken is null))
             {
                 AddError(
                     issues,
                     "browser-navigation-committed-document-missing",
                     "events.ndjson#/payload/context/documentId",
-                    "A committed navigation must identify its resulting document.",
+                    "A committed navigation must identify its resulting document and document token.",
+                    line);
+            }
+
+            var rendererProcessId = payload.TryGetProperty(
+                "rendererProcessId",
+                out var rendererProcessIdValue) &&
+                rendererProcessIdValue.ValueKind == JsonValueKind.Number &&
+                rendererProcessIdValue.TryGetInt32(out var processId)
+                    ? processId
+                    : (int?)null;
+            if ((!completed || !committed) && rendererProcessId is not null)
+            {
+                AddError(
+                    issues,
+                    "browser-navigation-renderer-before-commit",
+                    "events.ndjson#/payload/rendererProcessId",
+                    "Renderer process identity must be null before commit and after an uncommitted completion.",
+                    line);
+            }
+
+            if (completed && committed &&
+                (rendererProcessId is null || rendererProcessId <= 0))
+            {
+                AddError(
+                    issues,
+                    "browser-navigation-committed-renderer-missing",
+                    "events.ndjson#/payload/rendererProcessId",
+                    "A committed navigation must identify the renderer process hosting its document.",
                     line);
             }
         }
@@ -905,13 +937,14 @@ internal static class EventPayloadValidator
             return;
         }
         if (ReadString(context, "processType") != "renderer" ||
-            ReadString(context, "documentId") is null)
+            ReadString(context, "documentId") is null ||
+            ReadString(context, "documentToken") is null)
         {
             AddError(
                 issues,
                 "browser-dom-context-invalid",
                 "events.ndjson#/payload/context",
-                "DOM checkpoint evidence must identify a renderer document.",
+                "DOM checkpoint evidence must identify a renderer document and its Chromium document token.",
                 line);
         }
     }
@@ -938,7 +971,8 @@ internal static class EventPayloadValidator
                 NullableString("pageId"),
                 NullableString("frameId"),
                 NullableString("documentId"),
-                NullableString("executionWorldId")
+                NullableString("executionWorldId"),
+                NullableString("documentToken")
             ],
             issues,
             line,

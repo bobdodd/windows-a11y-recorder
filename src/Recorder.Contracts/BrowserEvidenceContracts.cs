@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.13";
+    public const string CurrentVersion = "0.14";
 }
 
 public static class BrowserEvidenceChannels
@@ -49,7 +49,8 @@ public sealed record BrowserContext(
     string? PageId,
     string? FrameId,
     string? DocumentId,
-    string? ExecutionWorldId);
+    string? ExecutionWorldId,
+    string? DocumentToken);
 
 public sealed record BrowserNodeReference(
     string DocumentId,
@@ -133,7 +134,8 @@ public sealed record BrowserNavigationPayload(
     bool? Committed,
     bool? ErrorPage,
     int? NetErrorCode,
-    string? Outcome);
+    string? Outcome,
+    int? RendererProcessId);
 
 public sealed record BrowserDomCheckpointStartedPayload(
     BrowserContext Context,

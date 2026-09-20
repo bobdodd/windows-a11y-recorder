@@ -151,7 +151,8 @@ uint64_t AllocateDomCheckpointIdentity() {
 }
 
 base::DictValue CreateContext(const RecorderPipeClient& client,
-                              int document_node_id) {
+                              int document_node_id,
+                              std::string document_token = {}) {
   base::DictValue context;
   context.Set("browserInstanceId", client.browser_instance_id());
   context.Set("processId", static_cast<int>(::GetCurrentProcessId()));
@@ -166,6 +167,11 @@ base::DictValue CreateContext(const RecorderPipeClient& client,
     context.Set("documentId", base::Value());
   }
   context.Set("executionWorldId", base::Value());
+  if (!document_token.empty()) {
+    context.Set("documentToken", std::move(document_token));
+  } else {
+    context.Set("documentToken", base::Value());
+  }
   return context;
 }
 
@@ -173,8 +179,10 @@ base::DictValue CreateNavigationContext(
     const RecorderPipeClient& client,
     int page_frame_tree_node_id,
     int frame_tree_node_id,
-    int64_t document_navigation_id) {
-  base::DictValue context = CreateContext(client, 0);
+    int64_t document_navigation_id,
+    std::string document_token) {
+  base::DictValue context =
+      CreateContext(client, 0, std::move(document_token));
   context.Set("pageId",
               "frame-" + base::NumberToString(page_frame_tree_node_id));
   context.Set("frameId",
@@ -198,6 +206,8 @@ base::DictValue CreateNavigationPayload(
     std::string frame_type,
     bool primary_page,
     int64_t document_navigation_id,
+    std::string document_token,
+    int renderer_process_id,
     std::string url,
     bool renderer_initiated,
     bool same_document) {
@@ -205,7 +215,8 @@ base::DictValue CreateNavigationPayload(
   payload.Set("context",
               CreateNavigationContext(client, page_frame_tree_node_id,
                                       frame_tree_node_id,
-                                      document_navigation_id));
+                                      document_navigation_id,
+                                      std::move(document_token)));
   payload.Set(
       "parentFrameId",
       parent_frame_tree_node_id >= 0
@@ -229,6 +240,11 @@ base::DictValue CreateNavigationPayload(
               same_document ? "same-document" : "cross-document");
   payload.Set("rendererInitiated", renderer_initiated);
   payload.Set("sameDocument", same_document);
+  if (renderer_process_id > 0) {
+    payload.Set("rendererProcessId", renderer_process_id);
+  } else {
+    payload.Set("rendererProcessId", base::Value());
+  }
   return payload;
 }
 
@@ -268,9 +284,12 @@ std::string DomNodeTypeName(int node_type) {
 base::DictValue CreateDomCheckpointBasePayload(
     const RecorderPipeClient& client,
     uint64_t checkpoint_sequence,
-    int document_node_id) {
+    int document_node_id,
+    std::string document_token) {
   base::DictValue payload;
-  payload.Set("context", CreateContext(client, document_node_id));
+  payload.Set("context",
+              CreateContext(client, document_node_id,
+                            std::move(document_token)));
   payload.Set("checkpointId", DomCheckpointId(checkpoint_sequence));
   return payload;
 }
@@ -1292,16 +1311,19 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
 }
 
 uint64_t BeginBlinkDomCheckpoint(int document_node_id,
+                                 std::string document_token,
                                  std::string reason,
                                  int maximum_nodes) {
   RecorderPipeClient* client = GetProcessRecorderClient();
-  if (!client || document_node_id <= 0 || reason.empty() ||
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      reason.empty() ||
       maximum_nodes <= 0) {
     return 0;
   }
   const uint64_t checkpoint_sequence = AllocateDomCheckpointIdentity();
   base::DictValue payload = CreateDomCheckpointBasePayload(
-      *client, checkpoint_sequence, document_node_id);
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
   payload.Set("reason", std::move(reason));
   payload.Set("maximumNodes", maximum_nodes);
   SendBlinkEvidence("browser.dom", "dom-checkpoint-started",
@@ -1311,6 +1333,7 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
 
 void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
                                   int document_node_id,
+                                  std::string document_token,
                                   int node_index,
                                   int node_id,
                                   int parent_node_id,
@@ -1318,11 +1341,13 @@ void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
                                   std::string node_name) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() ||
       node_index < 0 || node_id <= 0 || node_name.empty()) {
     return;
   }
   base::DictValue payload = CreateDomCheckpointBasePayload(
-      *client, checkpoint_sequence, document_node_id);
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
   payload.Set("nodeIndex", node_index);
   payload.Set("nodeId", node_id);
   if (parent_node_id > 0) {
@@ -1338,17 +1363,20 @@ void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
 
 void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int document_node_id,
+                                std::string document_token,
                                 std::string reason,
                                 int node_count,
                                 bool truncated,
                                 int maximum_nodes) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() ||
       reason.empty() || node_count < 0 || maximum_nodes <= 0) {
     return;
   }
   base::DictValue payload = CreateDomCheckpointBasePayload(
-      *client, checkpoint_sequence, document_node_id);
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
   payload.Set("reason", std::move(reason));
   payload.Set("nodeCount", node_count);
   payload.Set("truncated", truncated);
@@ -1413,7 +1441,8 @@ void RecordBrowserNavigationStarted(int64_t navigation_id,
   base::DictValue payload = CreateNavigationPayload(
       *client, navigation_id, page_frame_tree_node_id, frame_tree_node_id,
       parent_frame_tree_node_id, parent_or_outer_document_frame_tree_node_id,
-      std::move(frame_type), primary_page, 0, std::move(url),
+      std::move(frame_type), primary_page, 0, std::string(), 0,
+      std::move(url),
       renderer_initiated, same_document);
   payload.Set("committed", base::Value());
   payload.Set("errorPage", base::Value());
@@ -1431,6 +1460,8 @@ void RecordBrowserNavigationCompleted(int64_t navigation_id,
                                       std::string frame_type,
                                       bool primary_page,
                                       int64_t document_navigation_id,
+                                      std::string document_token,
+                                      int renderer_process_id,
                                       std::string url,
                                       bool renderer_initiated,
                                       bool same_document,
@@ -1447,7 +1478,9 @@ void RecordBrowserNavigationCompleted(int64_t navigation_id,
       *client, navigation_id, page_frame_tree_node_id, frame_tree_node_id,
       parent_frame_tree_node_id, parent_or_outer_document_frame_tree_node_id,
       std::move(frame_type), primary_page,
-      committed ? document_navigation_id : 0, std::move(url),
+      committed ? document_navigation_id : 0,
+      committed ? std::move(document_token) : std::string(),
+      committed ? renderer_process_id : 0, std::move(url),
       renderer_initiated, same_document);
   payload.Set("committed", committed);
   payload.Set("errorPage", error_page);

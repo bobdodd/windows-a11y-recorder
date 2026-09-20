@@ -12,6 +12,13 @@ microtask machinery. The delivery pass deduplicates documents and emits at
 most one checkpoint for each active, parser-complete document represented in
 that pass. Page script does not need to create a JavaScript `MutationObserver`.
 
+Protocol 0.14 adds Chromium's document token to every DOM checkpoint context.
+The browser process records the same token and the hosting renderer process ID
+on committed navigation evidence. This creates an explicit, deterministic join
+between renderer `dom-document-N` identity and browser
+`document-navigation-N` identity without treating either namespace as globally
+stable.
+
 Together, these boundaries provide deterministic document-tree observations
 that can be correlated with renderer process and Blink document identity. They
 do not claim that a tree was painted, exposed through an accessibility API, or
@@ -27,7 +34,7 @@ All records use the `browser.dom` channel and renderer-process
 `dom-checkpoint-started` contains:
 
 - `context`: the browser instance, renderer process, and Blink document
-  identity;
+  identity, including Chromium's document token;
 - `checkpointId`: a process-local opaque checkpoint identity;
 - `reason`: `finished-parsing` or `post-mutation`; and
 - `maximumNodes`: the maximum number of node records the checkpoint may emit.
@@ -77,9 +84,13 @@ correlate them with browser instance ID and renderer process ID. Node IDs are
 scoped to the identified Blink document and must not be compared across
 documents or browser instances.
 
-The renderer-side `dom-document-N` identity and the browser-process
-`document-navigation-N` identity remain separate namespaces in protocol 0.13.
-This slice does not claim a direct mapping between them.
+The renderer-side `dom-document-N` identity and browser-process
+`document-navigation-N` identity remain separate namespaces. Protocol 0.14
+maps them only when browser instance ID, Chromium document token, and renderer
+process ID all agree. A cross-document commit replaces the active mapping for
+its frame. A later checkpoint carrying the prior token is stale and must not be
+joined to the replacement document. A same-document commit must retain the
+active token, document identity, and renderer process.
 
 ## Claims the evidence supports
 
@@ -94,7 +105,9 @@ The evidence can establish:
 - the observed preorder structural prefix at that boundary;
 - stable node-to-parent relationships within the checkpoint;
 - the observed node type and node name for each emitted node; and
-- whether the checkpoint was complete within the configured node limit.
+- whether the checkpoint was complete within the configured node limit; and
+- which committed browser-process document, page, and frame correspond to the
+  renderer document when the complete correlation tuple matches.
 
 ## Claims the evidence does not support
 
@@ -110,7 +123,6 @@ The evidence does not establish:
 - accessibility-tree state or platform accessibility exposure;
 - paint, compositing, presentation, visibility, focus, or user perception;
 - load completion or network completion;
-- a direct mapping to browser-process navigation document identity; or
 - that a structural difference represents a distinct user-visible view.
 
 ## Deterministic validation
@@ -144,16 +156,17 @@ checkpoint `79caba1`. The archive contained 2,236 events and 81 artifacts, with
 zero dropped records and zero network-service crashes. Ten parser-complete
 checkpoints were observed across the documents created during the run. The
 checkpoint correlated to the main fixture document contained 36 nodes and was
-not truncated. Protocol 0.13 post-mutation validation remains pending on the
+not truncated. Protocol 0.13 post-mutation validation completed on September
+20, 2026. Protocol 0.14 document-token correlation remains pending on the
 reference Windows platform. See the
 [dated validation record](../validation/blink-dom-checkpoint-2026-09-19.md).
 
 ## Next dependent slices
 
-The next DOM work should add:
+After protocol 0.14 reference-platform validation, the next DOM work should
+add:
 
-1. explicit checkpoint-to-navigation document correlation;
-2. bounded attribute evidence with a privacy policy;
-3. accessibility checkpoints correlated to the same document boundary; and
-4. style, layout, paint, and rendered-frame checkpoints as separate evidence
+1. bounded attribute evidence with a privacy policy;
+2. accessibility checkpoints correlated to the same document boundary; and
+3. style, layout, paint, and rendered-frame checkpoints as separate evidence
    channels rather than inferred properties of DOM structure.

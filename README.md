@@ -80,11 +80,20 @@ selected fixture checkpoint contained 36 nodes and was not truncated. See the
 and the
 [DOM checkpoint evidence model](docs/architecture/dom-checkpoint-evidence-model.md).
 
-Protocol 0.13 is ready for reference-platform validation. It adds a coalesced
-post-mutation checkpoint after Blink delivers structural child-list changes.
-The deterministic fixture appends one element containing one text node and
-requires one later checkpoint for the same renderer document with a distinct
-checkpoint identity and the expected two-node structural difference.
+Protocol 0.13 has been validated on the reference Windows platform. It adds a
+coalesced post-mutation checkpoint after Blink delivers structural child-list
+changes. The deterministic fixture appends one element containing one text
+node and requires one later checkpoint for the same renderer document with a
+distinct checkpoint identity and the expected two-node structural difference.
+The validated archive contained 8,985 events and 81 artifacts, with zero
+dropped records and zero network-service crashes.
+
+Protocol 0.14 is ready for reference-platform validation. It adds Chromium's
+shared document token to committed browser navigations and renderer DOM
+checkpoints, plus the hosting renderer process ID to committed navigation
+records. The deterministic verifier requires stable mappings across
+same-document navigation, distinct main-frame and subframe tokens, and rejects
+stale or process-mismatched checkpoint mappings.
 
 ## Project goals
 

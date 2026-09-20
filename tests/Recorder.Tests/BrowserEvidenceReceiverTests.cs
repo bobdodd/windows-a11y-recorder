@@ -172,7 +172,8 @@ public sealed class BrowserEvidenceReceiverTests
                         pageId = "page-1",
                         frameId = "frame-1",
                         documentId = "document-1",
-                        executionWorldId = "main"
+                        executionWorldId = "main",
+                        documentToken = (string?)null
                     },
                     operation = "read",
                     name = "consent",

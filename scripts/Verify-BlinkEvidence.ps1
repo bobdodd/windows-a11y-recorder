@@ -129,6 +129,77 @@ $postMutationCheckpointCompletions = @(
         }
 )
 
+$fixtureDocumentTokens = @(
+    (@($navigationCompletions) + @($subframeNavigationCompletions)) |
+        ForEach-Object { $_.payload.context.documentToken } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique
+)
+$activeDocumentsByFrame = @{}
+$mappedDomCheckpoints = @{}
+foreach ($record in $records) {
+    if (
+        $record.channel -eq "browser.navigation" -and
+        $record.eventType -eq "navigation-completed" -and
+        $record.payload.committed -eq $true
+    ) {
+        $context = $record.payload.context
+        if (
+            [string]::IsNullOrWhiteSpace($context.documentToken) -or
+            $record.payload.rendererProcessId -le 0
+        ) {
+            throw "A committed navigation omitted its document token or renderer process."
+        }
+
+        $frameKey = "$($context.browserInstanceId)|$($context.frameId)"
+        $identity = [pscustomobject]@{
+            BrowserInstanceId = $context.browserInstanceId
+            FrameId = $context.frameId
+            DocumentId = $context.documentId
+            DocumentToken = $context.documentToken
+            RendererProcessId = $record.payload.rendererProcessId
+        }
+        if ($record.payload.sameDocument -eq $true) {
+            if (-not $activeDocumentsByFrame.ContainsKey($frameKey)) {
+                throw "A same-document commit has no active cross-document mapping."
+            }
+            $active = $activeDocumentsByFrame[$frameKey]
+            if (
+                $active.DocumentId -ne $identity.DocumentId -or
+                $active.DocumentToken -ne $identity.DocumentToken -or
+                $active.RendererProcessId -ne $identity.RendererProcessId
+            ) {
+                throw "A same-document commit changed document or renderer identity."
+            }
+        } else {
+            $activeDocumentsByFrame[$frameKey] = $identity
+        }
+    }
+
+    if (
+        $record.channel -eq "browser.dom" -and
+        $record.eventType -eq "dom-checkpoint-started" -and
+        $record.payload.context.documentToken -in $fixtureDocumentTokens
+    ) {
+        $context = $record.payload.context
+        $matches = @(
+            $activeDocumentsByFrame.Values |
+                Where-Object {
+                    $_.BrowserInstanceId -eq $context.browserInstanceId -and
+                    $_.DocumentToken -eq $context.documentToken -and
+                    $_.RendererProcessId -eq $context.processId
+                }
+        )
+        if ($matches.Count -ne 1) {
+            throw (
+                "A DOM checkpoint did not map to exactly one active browser " +
+                "document identity. Stale and process-mismatched mappings are rejected."
+            )
+        }
+        $mappedDomCheckpoints[$record.payload.checkpointId] = $matches[0]
+    }
+}
+
 $dispatches = @(
     $records |
         Where-Object {
@@ -314,6 +385,31 @@ if ($subframeNavigationStarts.Count -lt 1) {
 if ($subframeNavigationCompletions.Count -lt 1) {
     throw "The fixture did not produce a child-frame navigation commit."
 }
+$mainCrossDocumentCommit = $navigationCompletions |
+    Where-Object { $_.payload.sameDocument -eq $false } |
+    Select-Object -First 1
+$mainSameDocumentCommit = $navigationCompletions |
+    Where-Object { $_.payload.sameDocument -eq $true } |
+    Select-Object -First 1
+if (-not $mainCrossDocumentCommit -or -not $mainSameDocumentCommit) {
+    throw "The fixture did not produce both main-frame navigation kinds."
+}
+if (
+    $mainCrossDocumentCommit.payload.context.documentId -ne
+        $mainSameDocumentCommit.payload.context.documentId -or
+    $mainCrossDocumentCommit.payload.context.documentToken -ne
+        $mainSameDocumentCommit.payload.context.documentToken -or
+    $mainCrossDocumentCommit.payload.rendererProcessId -ne
+        $mainSameDocumentCommit.payload.rendererProcessId
+) {
+    throw "The same-document navigation did not preserve its document mapping."
+}
+if (
+    $subframeNavigationCompletions[0].payload.context.documentToken -eq
+        $mainCrossDocumentCommit.payload.context.documentToken
+) {
+    throw "The child frame reused the main-frame document token."
+}
 if ($listeners.Count -lt 1) {
     throw "No click listener registration was recorded for #pointer-only."
 }
@@ -372,6 +468,18 @@ if (-not $domCheckpointStart) {
     throw "No parser-complete DOM checkpoint was recorded for the fixture document."
 }
 $domCheckpointId = $domCheckpointStart.payload.checkpointId
+if (-not $mappedDomCheckpoints.ContainsKey($domCheckpointId)) {
+    throw "The fixture DOM checkpoint has no active browser document mapping."
+}
+$fixtureDocumentMapping = $mappedDomCheckpoints[$domCheckpointId]
+if (
+    $fixtureDocumentMapping.DocumentId -ne
+        $mainCrossDocumentCommit.payload.context.documentId -or
+    $fixtureDocumentMapping.FrameId -ne
+        $mainCrossDocumentCommit.payload.context.frameId
+) {
+    throw "The fixture DOM checkpoint mapped to the wrong committed document."
+}
 $fixtureDomNodes = @(
     $domCheckpointNodes |
         Where-Object {

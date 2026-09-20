@@ -191,9 +191,11 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
                                       int page_lifecycle_state);
 
 // Starts one bounded structural checkpoint at a named Blink document boundary.
+// The document token is Chromium's shared browser-renderer document identity.
 // Returns zero when the recorder is not connected.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 uint64_t BeginBlinkDomCheckpoint(int document_node_id,
+                                 std::string document_token,
                                  std::string reason,
                                  int maximum_nodes);
 
@@ -202,6 +204,7 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
                                   int document_node_id,
+                                  std::string document_token,
                                   int node_index,
                                   int node_id,
                                   int parent_node_id,
@@ -213,6 +216,7 @@ void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int document_node_id,
+                                std::string document_token,
                                 std::string reason,
                                 int node_count,
                                 bool truncated,
@@ -246,6 +250,8 @@ void RecordBrowserNavigationStarted(int64_t navigation_id,
                                     bool renderer_initiated,
                                     bool same_document);
 
+// A committed completion carries Chromium's shared document token and the
+// renderer process that hosts that document.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBrowserNavigationCompleted(int64_t navigation_id,
                                       int page_frame_tree_node_id,
@@ -255,6 +261,8 @@ void RecordBrowserNavigationCompleted(int64_t navigation_id,
                                       std::string frame_type,
                                       bool primary_page,
                                       int64_t document_navigation_id,
+                                      std::string document_token,
+                                      int renderer_process_id,
                                       std::string url,
                                       bool renderer_initiated,
                                       bool same_document,

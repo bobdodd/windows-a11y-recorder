@@ -219,10 +219,18 @@ CONTENT_NAVIGATION_COMPLETED_HOOK = """\
         recorder_owner->GetFrameTreeNodeId().GetUnsafeValue();
   }
   int64_t recorder_document_navigation_id = 0;
+  std::string recorder_document_token;
+  int recorder_renderer_process_id = 0;
   if (navigation_handle->HasCommitted()) {
     if (RenderFrameHost* recorder_frame =
             navigation_handle->GetRenderFrameHost()) {
       recorder_document_navigation_id = recorder_frame->GetNavigationId();
+      recorder_document_token =
+          static_cast<RenderFrameHostImpl*>(recorder_frame)
+              ->GetDocumentToken()
+              .ToString();
+      recorder_renderer_process_id = static_cast<int>(
+          recorder_frame->GetProcess()->GetProcess().Pid());
     }
   }
   a11y_recorder::RecordBrowserNavigationCompleted(
@@ -234,6 +242,8 @@ CONTENT_NAVIGATION_COMPLETED_HOOK = """\
       recorder_frame_type,
       recorder_primary_page,
       recorder_document_navigation_id,
+      recorder_document_token,
+      recorder_renderer_process_id,
       navigation_handle->GetURL().spec(),
       navigation_handle->IsRendererInitiated(),
       navigation_handle->IsSameDocument(),
@@ -245,9 +255,11 @@ CONTENT_NAVIGATION_COMPLETED_HOOK = """\
 BLINK_DOM_CHECKPOINT_HOOK = """\
   constexpr int kRecorderMaximumDomCheckpointNodes = 512;
   const int recorder_document_node_id = GetDomNodeId();
+  const std::string recorder_document_token = Token().ToString();
   const uint64_t recorder_checkpoint_sequence =
       a11y_recorder::BeginBlinkDomCheckpoint(
-          recorder_document_node_id, "finished-parsing",
+          recorder_document_node_id, recorder_document_token,
+          "finished-parsing",
           kRecorderMaximumDomCheckpointNodes);
   if (recorder_checkpoint_sequence != 0) {
     int recorder_node_count = 0;
@@ -261,6 +273,7 @@ BLINK_DOM_CHECKPOINT_HOOK = """\
       ContainerNode* recorder_parent = recorder_node.parentNode();
       a11y_recorder::RecordBlinkDomCheckpointNode(
           recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token,
           recorder_node_count, recorder_node.GetDomNodeId(),
           recorder_parent ? recorder_parent->GetDomNodeId() : 0,
           static_cast<int>(recorder_node.getNodeType()),
@@ -269,6 +282,7 @@ BLINK_DOM_CHECKPOINT_HOOK = """\
     }
     a11y_recorder::CompleteBlinkDomCheckpoint(
         recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token,
         "finished-parsing", recorder_node_count, recorder_truncated,
         kRecorderMaximumDomCheckpointNodes);
   }
@@ -285,9 +299,12 @@ BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
         continue;
       const int recorder_document_node_id =
           recorder_document->GetDomNodeId();
+      const std::string recorder_document_token =
+          recorder_document->Token().ToString();
       const uint64_t recorder_checkpoint_sequence =
           a11y_recorder::BeginBlinkDomCheckpoint(
-              recorder_document_node_id, "post-mutation",
+              recorder_document_node_id, recorder_document_token,
+              "post-mutation",
               kRecorderMaximumDomCheckpointNodes);
       if (recorder_checkpoint_sequence == 0)
         continue;
@@ -302,6 +319,7 @@ BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
         ContainerNode* recorder_parent = recorder_node.parentNode();
         a11y_recorder::RecordBlinkDomCheckpointNode(
             recorder_checkpoint_sequence, recorder_document_node_id,
+            recorder_document_token,
             recorder_node_count, recorder_node.GetDomNodeId(),
             recorder_parent ? recorder_parent->GetDomNodeId() : 0,
             static_cast<int>(recorder_node.getNodeType()),
@@ -310,6 +328,7 @@ BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
       }
       a11y_recorder::CompleteBlinkDomCheckpoint(
           recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token,
           "post-mutation", recorder_node_count, recorder_truncated,
           kRecorderMaximumDomCheckpointNodes);
     }

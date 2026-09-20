@@ -7,6 +7,11 @@ browser process. It establishes the page, frame, navigation, and committed
 document identities needed to correlate later browser evidence without treating
 every URL change as a new document or a new user-visible view.
 
+Protocol 0.14 adds the cross-process correlation boundary. A committed
+navigation records Chromium's document token and the operating-system process
+ID of the renderer hosting that document. Blink DOM checkpoints record the
+same document token in their renderer context.
+
 The instrumentation boundaries are
 `WebContentsImpl::DidStartNavigation()` and
 `WebContentsImpl::DidFinishNavigation()`. Chromium documents
@@ -20,9 +25,12 @@ document. The latter does not change after same-document navigation:
 
 ## Scope
 
-The slice records only navigations in the primary main frame. Subframe,
-prerender, fenced-frame, portal, and non-primary page navigations remain outside
-protocol 0.10.
+Protocol 0.10 recorded only primary-main-frame navigations. Protocol 0.11
+extended the channel to subframes and non-primary main-frame types and added
+page membership and parent or outer-document relationships. The deterministic
+fixture currently covers the primary main frame and one same-origin child
+frame. Prerender, fenced-frame, guest-page, nested-frame, and cross-origin
+execution remain outside the validated fixture scope.
 
 The `browser.navigation` channel emits:
 
@@ -41,6 +49,8 @@ Every record includes:
 - `context.documentId`: null at start and for an uncommitted finish. A committed
   finish uses the navigation ID that created the current `RenderFrameHost`
   document.
+- `context.documentToken`: null at start and for an uncommitted finish. A
+  committed finish uses Chromium's token for the current document.
 - `navigationId`: Chromium's unique navigation ID, prefixed as a recorder
   identifier.
 - `url`: the URL observed at that boundary.
@@ -58,6 +68,8 @@ Completion records add:
 - `errorPage`: whether the committed result is an error page.
 - `netErrorCode`: Chromium's terminal network error code.
 - `outcome`: `committed`, `committed-error-page`, or `not-committed`.
+- `rendererProcessId`: the operating-system process ID of the renderer hosting
+  the committed document. It is null for starts and uncommitted completions.
 
 ## Identity rules
 
@@ -78,6 +90,14 @@ frame ID remains stable.
 receive a new navigation ID but retain the existing document ID. A
 cross-document commit receives the document ID derived from the navigation
 that created the committed document.
+
+`documentToken` is the shared browser-renderer join key. A DOM checkpoint maps
+to a committed navigation only when browser instance ID, document token, and
+renderer process ID all match. A cross-document commit replaces the active
+mapping for its frame. Evidence carrying a prior token after replacement, or a
+matching token from another renderer process, must be rejected as a mapping.
+Same-document commits must preserve the active document ID, document token,
+and renderer process ID.
 
 Identifiers are opaque correlation values. Their numeric suffixes have no
 meaning outside their originating browser instance. The page and frame IDs
@@ -131,10 +151,13 @@ The Blink fixture produces:
 - one stable page ID and frame ID across both commits;
 - one stable committed document ID across the same-document commit;
 - a start record that precedes each selected completion; and
-- browser-process provenance for all selected navigation records.
+- browser-process provenance for all selected navigation records;
+- a stable document token and renderer process across the same-document commit;
+- a distinct document token for the fixture subframe; and
+- one active browser document mapping for each selected DOM checkpoint.
 
-Passing these checks establishes the protocol 0.10 navigation and document
-identity contract. It does not establish view equivalence or prove any
+Passing these checks establishes the protocol 0.14 navigation and document
+correlation contract. It does not establish view equivalence or prove any
 resulting visual, DOM, or accessibility change.
 
 ## Next dependent slices

@@ -8,6 +8,15 @@ from the product version.
 
 ### Added
 
+- Added protocol 0.14 deterministic browser-renderer document correlation.
+  Committed navigation evidence and renderer DOM checkpoints now carry
+  Chromium's shared document token, and committed navigation records identify
+  the hosting renderer process.
+- Added strict validation for committed-navigation correlation fields and DOM
+  checkpoint document tokens.
+- Added deterministic validation of same-document identity stability,
+  main-frame and subframe token separation, and rejection of stale or
+  process-mismatched DOM checkpoint mappings.
 - Added protocol 0.13 coalesced post-mutation DOM checkpoints. Structural
   child-list changes queue affected documents through Blink's mutation
   delivery microtask machinery without requiring page-created observers.

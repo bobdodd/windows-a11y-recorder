@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.13` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.14` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -57,6 +57,10 @@ child-list changes. The renderer streams node and parent identities, node
 types, and node names, then reports the observed node count and whether the
 512-node limit truncated the checkpoint. Text content and attributes are not
 recorded.
+Protocol 0.14 records Chromium's document token in committed browser
+navigations and renderer DOM checkpoints, together with the renderer process
+ID on committed navigation records. Consumers join the two document identity
+namespaces only when browser instance, token, and renderer process all match.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

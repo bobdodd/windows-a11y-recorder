@@ -235,7 +235,8 @@ public sealed class SessionArchiveValidatorTests
             pageId = "page-1",
             frameId = "frame-1",
             documentId = "document-1",
-            executionWorldId = "main"
+            executionWorldId = "main",
+            documentToken = (string?)null
         };
         var target = new
         {
@@ -302,7 +303,8 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
         };
         var target = new
         {
@@ -364,7 +366,8 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
         };
         var target = new
         {
@@ -427,7 +430,8 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
         };
         var scheduled = CreateEvent(
             0,
@@ -495,7 +499,8 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
         };
         var scheduled = CreateEvent(
             0,
@@ -565,7 +570,8 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
         };
         var scheduled = CreateEvent(
             0,
@@ -642,7 +648,8 @@ public sealed class SessionArchiveValidatorTests
                     pageId = (string?)null,
                     frameId = (string?)null,
                     documentId = (string?)null,
-                    executionWorldId = (string?)null
+                    executionWorldId = (string?)null,
+                    documentToken = (string?)null
                 },
                 queueName = "frame-throttleable",
                 queueType = 12,
@@ -691,7 +698,8 @@ public sealed class SessionArchiveValidatorTests
                     pageId = "frame-12",
                     frameId = "frame-12",
                     documentId = "document-navigation-40",
-                    executionWorldId = (string?)null
+                    executionWorldId = (string?)null,
+                    documentToken = "document-token-40"
                 },
                 parentFrameId = (string?)null,
                 parentOrOuterDocumentFrameId = (string?)null,
@@ -705,7 +713,8 @@ public sealed class SessionArchiveValidatorTests
                 committed = true,
                 errorPage = false,
                 netErrorCode = 0,
-                outcome = "committed"
+                outcome = "committed",
+                rendererProcessId = 3400
             });
         var directory = await CreateArchiveAsync([record]);
 
@@ -717,6 +726,70 @@ public sealed class SessionArchiveValidatorTests
 
             Assert.True(result.IsValid);
             Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsCommittedNavigationWithoutRendererDocumentCorrelation()
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Navigation,
+            BrowserEvidenceEventTypes.NavigationCompleted,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 1200,
+                    processType = "browser",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = "frame-12",
+                    frameId = "frame-12",
+                    documentId = "document-navigation-40",
+                    executionWorldId = (string?)null,
+                    documentToken = (string?)null
+                },
+                parentFrameId = (string?)null,
+                parentOrOuterDocumentFrameId = (string?)null,
+                frameType = "primary-main-frame",
+                primaryPage = true,
+                navigationId = "navigation-40",
+                url = "file:///fixture.html",
+                navigationKind = "cross-document",
+                rendererInitiated = false,
+                sameDocument = false,
+                committed = true,
+                errorPage = false,
+                netErrorCode = 0,
+                outcome = "committed",
+                rendererProcessId = (int?)null
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code ==
+                    "browser-navigation-committed-document-missing");
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code ==
+                    "browser-navigation-committed-renderer-missing");
         }
         finally
         {
@@ -744,7 +817,8 @@ public sealed class SessionArchiveValidatorTests
                     pageId = "frame-12",
                     frameId = "frame-13",
                     documentId = "document-navigation-40",
-                    executionWorldId = (string?)null
+                    executionWorldId = (string?)null,
+                    documentToken = "document-token-40"
                 },
                 parentFrameId = (string?)null,
                 parentOrOuterDocumentFrameId = (string?)null,
@@ -758,7 +832,8 @@ public sealed class SessionArchiveValidatorTests
                 committed = true,
                 errorPage = false,
                 netErrorCode = 0,
-                outcome = "committed"
+                outcome = "committed",
+                rendererProcessId = 3400
             });
         var directory = await CreateArchiveAsync([record]);
 
@@ -794,7 +869,8 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
         };
         var records = new[]
         {
@@ -914,6 +990,52 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task RejectsDomCheckpointWithoutDocumentToken()
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dom,
+            BrowserEvidenceEventTypes.DomCheckpointStarted,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 3400,
+                    processType = "renderer",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = (string?)null,
+                    frameId = (string?)null,
+                    documentId = "dom-document-8",
+                    executionWorldId = (string?)null,
+                    documentToken = (string?)null
+                },
+                checkpointId = "dom-checkpoint-1",
+                reason = "finished-parsing",
+                maximumNodes = 512
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "browser-dom-context-invalid");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
     {
         var context = new
@@ -926,7 +1048,8 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
         };
         var target = new
         {
@@ -954,22 +1077,22 @@ public sealed class SessionArchiveValidatorTests
             string? listenerId,
             bool defaultPrevented,
             string? outcome) => new
-        {
-            context,
-            dispatchId = "dispatch-1",
-            eventName = "click",
-            trusted = false,
-            originalTarget = target,
-            composedPath = new object[] { target },
-            phase,
-            listenerId,
-            defaultPrevented,
-            propagationStopped = false,
-            immediatePropagationStopped = false,
-            defaultAction = (string?)null,
-            outcome,
-            currentTarget = listenerId is null ? null : target
-        };
+            {
+                context,
+                dispatchId = "dispatch-1",
+                eventName = "click",
+                trusted = false,
+                originalTarget = target,
+                composedPath = new object[] { target },
+                phase,
+                listenerId,
+                defaultPrevented,
+                propagationStopped = false,
+                immediatePropagationStopped = false,
+                defaultAction = (string?)null,
+                outcome,
+                currentTarget = listenerId is null ? null : target
+            };
 
         var records = new[]
         {
@@ -1045,7 +1168,8 @@ public sealed class SessionArchiveValidatorTests
                     pageId = "page-1",
                     frameId = "frame-1",
                     documentId = "document-1",
-                    executionWorldId = "main"
+                    executionWorldId = "main",
+                    documentToken = (string?)null
                 },
                 operation = "read",
                 name = "consent",
