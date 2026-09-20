@@ -139,6 +139,11 @@ from the product version.
 
 ### Changed
 
+- Validated recorder bridge signature verification end to end on the reference
+  Windows platform at revision `b7fd67b`. Integration reported no disagreement
+  between any call site in the already-patched checkout and the bridge header,
+  and the run verified 9,007 events and 81 artifacts, a valid session archive,
+  and zero network-service crashes.
 - Validated protocol 0.14 browser-renderer document correlation end to end on
   the reference Windows platform at revision `4b3d436`, with committed
   navigation document identity, parser-complete DOM checkpoints, and coalesced
