@@ -352,3 +352,13 @@ The integration script is applied repeatedly to the same Chromium checkout, so i
 Every protocol revision that changes the arguments of a bridge entry point must therefore keep the previous hook body as a named template and replace it with the current body before the presence guards run. Without that replacement the checkout retains an older call shape while the copied bridge header advances, and the Chromium build fails with argument-count errors at the stale call sites rather than at integration time.
 
 The integration tests cover this by patching fixtures that already contain the previous revision's hook bodies, asserting that the current bodies replace them, and asserting that a second run changes nothing.
+
+## Bridge signature verification
+
+A presence guard cannot distinguish a superseded hook body from a current one, so the protocol revision that omits a replacement template is not detected by the integration script itself. Integration therefore verifies argument counts directly.
+
+The script parses the declared parameter count of every exported entry point in the recorder bridge header, then compares that count against every call site it can observe. Before any file is modified it checks the hook templates it is about to write. After all patching completes it re-reads every Chromium source it inspected, including files a presence guard left untouched, and checks the call sites those files actually contain. A disagreement fails integration with the file, line, entry point, observed argument count, and declared parameter count. Calling an entry point the bridge does not declare fails the same way.
+
+Integration also fails when a template describing a superseded call shape is declared but never referenced by an in-place upgrade. That is the shape of the omission itself: the previous body is preserved for reference while nothing replaces it in an existing checkout.
+
+Two limits are deliberate. Argument counting is textual, so a template holding only the leading arguments of a call it rewrites in place cannot be checked in isolation; the assembled Chromium source is checked instead. Argument counts are compared, not types, so a revision that changes a parameter's type without changing the count is not detected by this check and still relies on the Chromium build.

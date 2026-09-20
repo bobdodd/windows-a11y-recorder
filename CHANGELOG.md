@@ -127,6 +127,15 @@ from the product version.
 - Added integration coverage that patches fixtures carrying the protocol 0.13
   hook bodies and asserts both the upgrade to document-identity hook bodies
   and unchanged output on a second run.
+- Added recorder bridge signature verification to Chromium integration.
+  Integration now parses the declared parameter count of every exported bridge
+  entry point and fails when a hook template or an already-patched Chromium
+  source calls one with a different number of arguments. Presence guards keyed
+  on a symbol name cannot distinguish a superseded hook body from a current
+  one, so this reports the mismatch at integration time with the file, line,
+  and expected argument count instead of surfacing it as a Chromium build
+  failure. Integration also fails when a superseded hook template is declared
+  but never wired into an in-place upgrade.
 
 ### Changed
 

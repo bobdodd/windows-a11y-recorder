@@ -1612,6 +1612,152 @@ class IntegrateTests(unittest.TestCase):
             )
 
 
+    def test_parses_declared_bridge_signatures(self):
+        header = (
+            "namespace a11y_recorder {\n"
+            "\n"
+            "// Records a checkpoint, counting three parameters.\n"
+            "COMPONENT_EXPORT(RECORDER_BRIDGE)\n"
+            "void BeginBlinkDomCheckpoint(int document_node_id,\n"
+            "                             std::string document_token,\n"
+            "                             int checkpoint_id);\n"
+            "\n"
+            "COMPONENT_EXPORT(RECORDER_BRIDGE)\n"
+            "RecorderPipeClient* GetProcessRecorderClient();\n"
+            "\n"
+            "}  // namespace a11y_recorder\n"
+        )
+        self.assertEqual(
+            {"BeginBlinkDomCheckpoint": 3, "GetProcessRecorderClient": 0},
+            INTEGRATE.parse_bridge_signatures(header),
+        )
+
+    def test_counts_call_arguments_without_splitting_literals(self):
+        text = (
+            "  a11y_recorder::RecordBlinkDomCheckpointNode(\n"
+            "      document->GetDomNodeId(), MakeName(a, b), \"text, more\",\n"
+            "      static_cast<int>(node.getNodeType()));\n"
+        )
+        self.assertEqual(
+            (("RecordBlinkDomCheckpointNode", 4, 1),),
+            INTEGRATE.bridge_call_arities(text),
+        )
+
+    def test_partial_call_templates_are_not_counted(self):
+        text = "  a11y_recorder::RecordBlinkDispatchStarted(\n      first,\n"
+        self.assertEqual((), INTEGRATE.bridge_call_arities(text))
+
+    def test_current_hook_templates_match_the_bridge_header(self):
+        header = (
+            INTEGRATE.Path(INTEGRATE.__file__).resolve().parent
+            / "recorder_bridge"
+            / "browser_bridge.h"
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            header.read_text(encoding="utf-8")
+        )
+        INTEGRATE.verify_hook_templates(signatures)
+
+    def test_hook_template_verification_reports_superseded_call_shapes(self):
+        signatures = {"BeginBlinkDomCheckpoint": 4}
+        problems = INTEGRATE.describe_signature_mismatches(
+            "BLINK_DOM_CHECKPOINT_HOOK",
+            "  a11y_recorder::BeginBlinkDomCheckpoint(a, b, c);\n",
+            signatures,
+        )
+        self.assertEqual(1, len(problems))
+        self.assertIn("called with 3 arguments", problems[0])
+        self.assertIn("bridge declares 4", problems[0])
+
+    def test_hook_template_verification_reports_unknown_entry_points(self):
+        problems = INTEGRATE.describe_signature_mismatches(
+            "SOME_HOOK",
+            "  a11y_recorder::RecordSomethingRemoved(a);\n",
+            {"BeginBlinkDomCheckpoint": 4},
+        )
+        self.assertEqual(1, len(problems))
+        self.assertIn("unknown recorder bridge entry point", problems[0])
+
+    def test_patched_sources_are_verified_against_the_bridge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stale = Path(directory) / "mutation_observer.cc"
+            stale.write_text(
+                "void MutationObserver::Deliver() {\n"
+                "  a11y_recorder::BeginBlinkDomCheckpoint(\n"
+                "      document->GetDomNodeId(), checkpoint_id, 512);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            INTEGRATE._INTEGRATED_PATHS.clear()
+            INTEGRATE.read_source(stale)
+            try:
+                with self.assertRaises(RuntimeError) as failure:
+                    INTEGRATE.verify_integrated_sources(
+                        {"BeginBlinkDomCheckpoint": 4}
+                    )
+            finally:
+                INTEGRATE._INTEGRATED_PATHS.clear()
+        message = str(failure.exception)
+        self.assertIn("mutation_observer.cc:2", message)
+        self.assertIn("called with 3 arguments", message)
+
+    def test_superseded_templates_must_be_wired_into_a_migration(self):
+        unused = "LEGACY_UNUSED_DOM_CHECKPOINT_HOOK"
+        setattr(
+            INTEGRATE,
+            unused,
+            "  a11y_recorder::BeginBlinkDomCheckpoint(a, b, c);\n",
+        )
+        try:
+            with self.assertRaises(RuntimeError) as failure:
+                INTEGRATE.verify_hook_templates(
+                    {"BeginBlinkDomCheckpoint": 4}
+                )
+        finally:
+            delattr(INTEGRATE, unused)
+        self.assertIn(unused, str(failure.exception))
+        self.assertIn("never used to upgrade", str(failure.exception))
+
+
+    def test_verification_catches_a_hook_a_presence_guard_skipped(self):
+        """A stale hook with no registered template must still be reported."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mutation_observer.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/core/dom/'
+                'mutation_observer.h"\n'
+                f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                '#include "third_party/blink/renderer/core/dom/node.h"\n'
+                '#include "third_party/blink/renderer/core/dom/'
+                'node_traversal.h"\n'
+                "\n"
+                "void MutationObserver::DeliverMutations() {\n"
+                "  for (auto& document : recorder_mutated_documents) {\n"
+                "    a11y_recorder::BeginBlinkDomCheckpoint(\n"
+                "        recorder_node_id, recorder_checkpoint, 512);\n"
+                "  }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            header = (
+                MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h"
+            )
+            signatures = INTEGRATE.parse_bridge_signatures(
+                header.read_text(encoding="utf-8")
+            )
+            INTEGRATE._INTEGRATED_PATHS.clear()
+            try:
+                INTEGRATE.patch_blink_mutation_observer(path)
+                with self.assertRaises(RuntimeError) as failure:
+                    INTEGRATE.verify_integrated_sources(signatures)
+            finally:
+                INTEGRATE._INTEGRATED_PATHS.clear()
+        message = str(failure.exception)
+        self.assertIn("mutation_observer.cc:8", message)
+        self.assertIn("BeginBlinkDomCheckpoint", message)
+        self.assertIn("called with 3 arguments", message)
+
+
 
 if __name__ == "__main__":
     unittest.main()

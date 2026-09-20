@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -1027,6 +1028,228 @@ BLINK_SCHEDULER_DECISION_HOOK = """\
 """
 
 
+HISTORICAL_TEMPLATE_PREFIXES = (
+    "LEGACY_",
+    "INTERMEDIATE_",
+    "ORIGINAL_",
+    "TRACED_",
+)
+BRIDGE_CALL_PATTERN = re.compile(
+    r"a11y_recorder::([A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+BRIDGE_EXPORT_MARKER = "COMPONENT_EXPORT(RECORDER_BRIDGE)"
+_INTEGRATED_PATHS: list[Path] = []
+
+
+def read_source(path: Path) -> str:
+    """Reads a Chromium source and records it for later verification.
+
+    Recording happens on read rather than on write, because a presence guard
+    may leave a file untouched. An untouched file is exactly the case that
+    needs verifying: it may already hold a hook body written by an earlier
+    protocol revision.
+    """
+    if path not in _INTEGRATED_PATHS:
+        _INTEGRATED_PATHS.append(path)
+    return path.read_text(encoding="utf-8")
+
+
+def write_patched(path: Path, text: str) -> None:
+    """Writes a patched Chromium source with fixed encoding and newlines."""
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def integrated_paths() -> tuple[Path, ...]:
+    return tuple(_INTEGRATED_PATHS)
+
+
+def strip_cxx_comments(text: str) -> str:
+    without_block = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    return re.sub(r"//[^\n]*", "", without_block)
+
+
+def split_argument_list(
+    text: str, open_paren: int
+) -> tuple[int | None, int]:
+    """Counts top-level arguments starting at an opening parenthesis.
+
+    Returns the argument count and the index just past the matching closing
+    parenthesis. String and character literals are skipped so that a comma
+    inside a literal is not counted as an argument separator. Some hook
+    templates hold only the leading arguments of a call, because they rewrite
+    an existing call in place. An argument list that does not close within the
+    given text counts as unknown rather than as an error, since the assembled
+    Chromium source is verified separately.
+    """
+    depth = 0
+    arguments = 0
+    seen_content = False
+    index = open_paren
+    while index < len(text):
+        character = text[index]
+        if character in "\"'":
+            quote = character
+            index += 1
+            while index < len(text):
+                if text[index] == "\\":
+                    index += 2
+                    continue
+                if text[index] == quote:
+                    break
+                index += 1
+            seen_content = True
+        elif character in "([{":
+            depth += 1
+            if depth > 1:
+                seen_content = True
+        elif character in ")]}":
+            depth -= 1
+            if depth == 0:
+                return (arguments + 1 if seen_content else 0), index + 1
+        elif character == "," and depth == 1:
+            arguments += 1
+        elif not character.isspace():
+            seen_content = True
+        index += 1
+    return None, len(text)
+
+
+def parse_bridge_signatures(header_text: str) -> dict[str, int]:
+    """Maps each exported bridge entry point to its declared parameter count."""
+    text = strip_cxx_comments(header_text)
+    signatures: dict[str, int] = {}
+    index = text.find(BRIDGE_EXPORT_MARKER)
+    while index >= 0:
+        start = index + len(BRIDGE_EXPORT_MARKER)
+        open_paren = text.find("(", start)
+        if open_paren < 0:
+            break
+        name = re.search(
+            r"([A-Za-z_][A-Za-z0-9_]*)\s*$", text[start:open_paren]
+        )
+        if not name:
+            index = text.find(BRIDGE_EXPORT_MARKER, start)
+            continue
+        count, end = split_argument_list(text, open_paren)
+        if count is not None:
+            signatures[name.group(1)] = count
+        index = text.find(BRIDGE_EXPORT_MARKER, end)
+    if not signatures:
+        raise RuntimeError("no exported recorder bridge entry points found")
+    return signatures
+
+
+def bridge_call_arities(text: str) -> tuple[tuple[str, int, int], ...]:
+    """Returns the name, argument count, and line of every complete call."""
+    calls: list[tuple[str, int, int]] = []
+    for match in BRIDGE_CALL_PATTERN.finditer(text):
+        open_paren = match.end() - 1
+        count, _ = split_argument_list(text, open_paren)
+        if count is None:
+            continue
+        line = text.count("\n", 0, match.start()) + 1
+        calls.append((match.group(1), count, line))
+    return tuple(calls)
+
+
+def describe_signature_mismatches(
+    label: str, text: str, signatures: dict[str, int]
+) -> list[str]:
+    problems: list[str] = []
+    for name, count, line in bridge_call_arities(text):
+        expected = signatures.get(name)
+        if expected is None:
+            problems.append(
+                f"{label}:{line}: calls unknown recorder bridge entry point "
+                f"{name}"
+            )
+        elif expected != count:
+            problems.append(
+                f"{label}:{line}: {name} is called with {count} arguments but "
+                f"the bridge declares {expected}"
+            )
+    return problems
+
+
+def current_hook_templates() -> dict[str, str]:
+    """Returns the hook templates that must match the current bridge."""
+    templates = {}
+    for name, value in sorted(globals().items()):
+        if not isinstance(value, str) or not name.isupper():
+            continue
+        if "a11y_recorder::" not in value:
+            continue
+        if name.startswith(HISTORICAL_TEMPLATE_PREFIXES):
+            continue
+        templates[name] = value
+    return templates
+
+
+def historical_hook_templates() -> dict[str, str]:
+    """Returns the templates that describe superseded hook shapes."""
+    return {
+        name: value
+        for name, value in sorted(globals().items())
+        if isinstance(value, str)
+        and name.isupper()
+        and name.startswith(HISTORICAL_TEMPLATE_PREFIXES)
+        and "a11y_recorder::" in value
+    }
+
+
+def verify_hook_templates(signatures: dict[str, int]) -> None:
+    """Fails when a hook template disagrees with the bridge declarations.
+
+    A hook template is the exact text this script writes into a Chromium
+    source. The recorder bridge is copied into the checkout on every run, so a
+    template that still carries a superseded call shape produces a Chromium
+    build failure at the patched call site rather than an integration failure.
+    This check moves that failure forward to integration time.
+    """
+    problems: list[str] = []
+    for name, template in current_hook_templates().items():
+        problems.extend(
+            describe_signature_mismatches(name, template, signatures)
+        )
+
+    source = Path(__file__).resolve().read_text(encoding="utf-8")
+    for name, template in historical_hook_templates().items():
+        mismatched = describe_signature_mismatches(name, template, signatures)
+        if not mismatched:
+            continue
+        if source.count(name) < 2:
+            problems.append(
+                f"{name}: describes a superseded call shape but is never used "
+                "to upgrade an already-patched checkout"
+            )
+    if problems:
+        raise RuntimeError(
+            "recorder bridge signatures and hook templates disagree:\n  "
+            + "\n  ".join(problems)
+        )
+
+
+def verify_integrated_sources(signatures: dict[str, int]) -> None:
+    """Fails when a patched checkout still holds a superseded call shape.
+
+    Presence guards in this script key on symbol names, so a hook body written
+    by an earlier protocol revision can read as already integrated. This check
+    inspects what the checkout actually contains after patching.
+    """
+    problems: list[str] = []
+    for path in integrated_paths():
+        text = read_source(path)
+        if "a11y_recorder::" not in text:
+            continue
+        problems.extend(
+            describe_signature_mismatches(str(path), text, signatures)
+        )
+    if problems:
+        raise RuntimeError(
+            "patched Chromium sources disagree with the recorder bridge:\n  "
+            + "\n  ".join(problems)
+        )
+
 def replace_once(text: str, old: str, new: str, path: Path) -> str:
     count = text.count(old)
     if count != 1:
@@ -1052,7 +1275,7 @@ def upgrade_legacy_hooks(
 
 
 def patch_main_delegate(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     text = text.replace(
         "InitializeBrowserProcessBridge", "InitializeProcessBridge"
     )
@@ -1072,11 +1295,11 @@ def patch_main_delegate(path: Path) -> None:
             "std::optional<int> ChromeMainDelegate::BasicStartupComplete() {"
         )
         text = replace_once(text, function, f"{function}\n{HOOK}", path)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_chrome_build(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if BRIDGE_DEP in text:
         return
 
@@ -1101,19 +1324,19 @@ def patch_chrome_build(path: Path) -> None:
     text = text[:deps] + text[deps:].replace(
         opening, opening + f"      {BRIDGE_DEP}\n", 1
     )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def remove_legacy_child_launcher_hook(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     text = text.replace(f"{CHILD_LAUNCHER_INCLUDE}\n", "")
     text = text.replace(TRACED_CHILD_LAUNCHER_HOOK, "")
     text = text.replace(ORIGINAL_CHILD_LAUNCHER_HOOK, "")
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_child_launcher(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     text = text.replace(
         LEGACY_SHARED_CHILD_LAUNCHER_HOOK,
         CHILD_LAUNCHER_HOOK,
@@ -1151,11 +1374,11 @@ def patch_child_launcher(path: Path) -> None:
             + CHILD_LAUNCHER_HOOK
             + text[anchor_index:]
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_content_browser_build(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if BRIDGE_DEP in text:
         return
 
@@ -1175,11 +1398,11 @@ def patch_content_browser_build(path: Path) -> None:
     text = text[:deps] + text[deps:].replace(
         opening, opening + f"      {BRIDGE_DEP}\n", 1
     )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_web_contents_navigation(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if CONTENT_NAVIGATION_INCLUDE not in text:
         text = replace_once(
             text,
@@ -1236,11 +1459,11 @@ def patch_web_contents_navigation(path: Path) -> None:
             finish_anchor + CONTENT_NAVIGATION_COMPLETED_HOOK + "\n",
             path,
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_event_target(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if BLINK_BRIDGE_INCLUDE not in text:
         text = replace_once(
             text,
@@ -1326,11 +1549,11 @@ def patch_blink_event_target(path: Path) -> None:
             ),
             path,
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_document(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if BLINK_BRIDGE_INCLUDE not in text:
         text = replace_once(
             text,
@@ -1366,11 +1589,11 @@ def patch_blink_document(path: Path) -> None:
             anchor + BLINK_DOCUMENT_MUTATION_HOOK,
             path,
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_mutation_observer_header(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if "EnqueueRecorderDomCheckpoint" not in text:
         anchor = "  static void EnqueueSlotChange(HTMLSlotElement&);\n"
         text = replace_once(
@@ -1382,11 +1605,11 @@ def patch_blink_mutation_observer_header(path: Path) -> None:
             ),
             path,
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_mutation_observer(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if BLINK_BRIDGE_INCLUDE not in text:
         text = replace_once(
             text,
@@ -1481,11 +1704,11 @@ def patch_blink_mutation_observer(path: Path) -> None:
             BLINK_MUTATION_OBSERVER_METHOD + observer_method_anchor,
             path,
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_event_dispatcher(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     text = text.replace(
         "reinterpret_cast<uintptr_t>(event_.Get())",
         "reinterpret_cast<uintptr_t>(event_)",
@@ -1581,11 +1804,11 @@ def patch_blink_event_dispatcher(path: Path) -> None:
             ),
             path,
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_dom_timer(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     text = upgrade_legacy_hooks(
         text,
         (
@@ -1666,11 +1889,11 @@ def patch_blink_dom_timer(path: Path) -> None:
             + f"{BLINK_TIMER_FIRED_HOOK}\n"
             + text[insertion_index:]
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_animation_frame_callbacks(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     text = upgrade_legacy_hooks(
         text,
         (
@@ -1825,11 +2048,11 @@ def patch_blink_animation_frame_callbacks(path: Path) -> None:
             + f"{BLINK_ANIMATION_FRAME_FIRED_HOOK}\n"
             + text[anchor_index:]
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_idle_callbacks(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     text = upgrade_legacy_hooks(
         text,
         (
@@ -1924,11 +2147,11 @@ def patch_blink_idle_callbacks(path: Path) -> None:
             + f"{BLINK_IDLE_CALLBACK_FIRED_HOOK}\n"
             + text[anchor_index:]
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_core_build(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if BLINK_CORE_DEP in text:
         return
 
@@ -1945,11 +2168,11 @@ def patch_blink_core_build(path: Path) -> None:
     text = text[:deps] + text[deps:].replace(
         opening, opening + f"{BLINK_CORE_DEP}\n", 1
     )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_task_queue_throttler_header(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     weak_ptr_include = '#include "base/memory/weak_ptr.h"\n'
     if weak_ptr_include not in text:
         text = replace_once(
@@ -2001,11 +2224,11 @@ def patch_blink_task_queue_throttler_header(path: Path) -> None:
                 "  const raw_ptr<base::sequence_manager::TaskQueue> task_queue_;\n",
                 path,
             )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_task_queue_throttler(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     includes = (
         f"{BLINK_BRIDGE_INCLUDE}\n"
         '#include "third_party/blink/renderer/platform/scheduler/main_thread/'
@@ -2061,11 +2284,11 @@ TaskQueueThrottler::TaskQueueThrottler(
             BLINK_SCHEDULER_DECISION_HOOK,
             path,
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_main_thread_task_queue(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     old_construction = """\
       throttler_.emplace(task_queue_.get(),
                          main_thread_scheduler_->GetTickClock());
@@ -2077,11 +2300,11 @@ def patch_blink_main_thread_task_queue(path: Path) -> None:
             BLINK_MAIN_THREAD_QUEUE_CONSTRUCTION,
             path,
         )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_frame_scheduler_header(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if BLINK_FRAME_THROTTLING_ACCESSOR in text:
         return
     for old_accessor in (
@@ -2095,7 +2318,7 @@ def patch_blink_frame_scheduler_header(path: Path) -> None:
                 BLINK_FRAME_THROTTLING_ACCESSOR,
                 path,
             )
-            path.write_text(text, encoding="utf-8", newline="\n")
+            write_patched(path, text)
             return
     anchor = "  void UpdatePolicy();\n"
     text = replace_once(
@@ -2104,11 +2327,11 @@ def patch_blink_frame_scheduler_header(path: Path) -> None:
         anchor + "\n" + BLINK_FRAME_THROTTLING_ACCESSOR,
         path,
     )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def patch_blink_scheduler_build(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+    text = read_source(path)
     if BLINK_SCHEDULER_DEP in text:
         return
     target = 'blink_platform_sources("scheduler") {'
@@ -2123,7 +2346,7 @@ def patch_blink_scheduler_build(path: Path) -> None:
     text = text[:deps] + text[deps:].replace(
         opening, opening + f"{BLINK_SCHEDULER_DEP}\n", 1
     )
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_patched(path, text)
 
 
 def main() -> int:
@@ -2139,6 +2362,11 @@ def main() -> int:
         parser.error(f"{source} is not a Chromium Git checkout")
 
     bridge_source = Path(__file__).resolve().parent / "recorder_bridge"
+    signatures = parse_bridge_signatures(
+        (bridge_source / "browser_bridge.h").read_text(encoding="utf-8")
+    )
+    verify_hook_templates(signatures)
+
     bridge_destination = source / "chromium" / "recorder_bridge"
     if bridge_destination.exists():
         shutil.rmtree(bridge_destination)
@@ -2254,6 +2482,7 @@ def main() -> int:
         scheduler / "main_thread" / "frame_scheduler_impl.h"
     )
     patch_blink_scheduler_build(scheduler / "BUILD.gn")
+    verify_integrated_sources(signatures)
     print(f"Recorder bridge installed in {source}")
     return 0
 
