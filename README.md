@@ -88,14 +88,16 @@ distinct checkpoint identity and the expected two-node structural difference.
 The validated archive contained 8,985 events and 81 artifacts, with zero
 dropped records and zero network-service crashes.
 
-Protocol 0.14 is ready for reference-platform validation. It adds Chromium's
+Protocol 0.14 has been validated on the reference Windows platform. It adds Chromium's
 shared document token to committed browser navigations and renderer DOM
 checkpoints, plus the hosting renderer process ID to committed navigation
 records. The deterministic verifier requires stable mappings across
 same-document navigation, distinct main-frame and subframe tokens, and rejects
-stale or process-mismatched checkpoint mappings.
+stale or process-mismatched checkpoint mappings. The validated archive
+contained 9,007 events and 81 artifacts, with zero dropped records and zero
+network-service crashes.
 
-Protocol 0.15 is ready for reference-platform validation. It adds bounded
+Protocol 0.15 has been validated on the reference Windows platform. It adds bounded
 attribute and character-data evidence. Checkpoints now report the attribute
 state of every element node they record, and accepted attribute and
 character-data mutations are recorded as transitions that name the specific
@@ -104,7 +106,17 @@ verbatim up to a reported length limit, and every record states whether it was
 truncated. The deterministic verifier asserts exact case-sensitive equality
 against the fixture's known before and after values for an enumerated change, a
 reference change, a name change, a live-region text change, an attribute
-removal, and an over-length value.
+removal, and an over-length value. The validated archive contained 18,097
+events and 81 artifacts, with zero dropped records and zero network-service
+crashes.
+
+Validation of 0.15 also measured two limits of the transition-to-checkpoint
+join. A transition names the checkpoint its delivery pass is expected to
+produce, and 200 of the 452 transitions in the validated archive named a
+reservation that no checkpoint completed. Checkpoint identity is numbered per
+renderer, so 49 completed checkpoints used 32 distinct identity strings and a
+join requires the browser instance, renderer process, and document to match as
+well. Both limits are recorded in the DOM attribute and text evidence model.
 
 ## Project goals
 

@@ -14,8 +14,7 @@ from the product version.
   name the specific attribute or text a coalesced checkpoint cannot recover.
   Values are recorded verbatim up to a reported length limit, and every record
   states whether it was truncated so a partial observation is never mistaken
-  for a complete one. The attribute and character-data transition hooks in
-  Blink are not yet integrated.
+  for a complete one.
 - Added strict validation of attribute and character-data evidence, including
   the change-type invariant that an added attribute has no previous value and a
   removed attribute has no current value, and the truncation invariant that a
