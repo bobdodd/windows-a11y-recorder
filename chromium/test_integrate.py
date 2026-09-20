@@ -1787,6 +1787,124 @@ class IntegrateTests(unittest.TestCase):
                 )
 
 
+    def test_patches_element_attribute_mutations_idempotently(self):
+        """Attribute transitions must be recorded once per mutation path."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "element.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/core/dom/element.h"\n'
+                "\n"
+                "void Element::DidAddAttribute(const QualifiedName& name,\n"
+                "                              const AtomicString& value) {\n"
+                "  AttributeChangedWithInvalidations(\n"
+                "      AttributeModificationParams(name, g_null_atom, value));\n"
+                "  probe::DidModifyDOMAttr(this, name, value);\n"
+                "}\n"
+                "\n"
+                "void Element::DidModifyAttribute(const QualifiedName& name,\n"
+                "                                 const AtomicString& old_value,\n"
+                "                                 const AtomicString& new_value,\n"
+                "                                 AttributeModificationReason reason) {\n"
+                "  probe::DidModifyDOMAttr(this, name, new_value);\n"
+                "}\n"
+                "\n"
+                "void Element::DidRemoveAttribute(const QualifiedName& name,\n"
+                "                                 const AtomicString& old_value) {\n"
+                "  probe::DidRemoveDOMAttr(this, name);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_blink_element(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_element(path)
+
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                1, first.count("RecordBlinkDomAttributeChanged(")
+            )
+            self.assertEqual(
+                4, first.count("RecordRecorderElementAttributeMutation")
+            )
+            self.assertIn(
+                "RecordRecorderElementAttributeMutation("
+                "*this, name, g_null_atom, value);",
+                first,
+            )
+            self.assertIn(
+                "RecordRecorderElementAttributeMutation("
+                "*this, name, old_value, new_value);",
+                first,
+            )
+            self.assertIn(
+                "RecordRecorderElementAttributeMutation("
+                "*this, name, old_value, g_null_atom);",
+                first,
+            )
+            self.assertIn(
+                "MutationObserver::EnqueueRecorderDomCheckpoint("
+                "recorder_document);",
+                first,
+            )
+            self.assertIn(
+                '#include "third_party/blink/renderer/core/dom/'
+                'mutation_observer.h"',
+                first,
+            )
+            # The helper must be defined before the first call site, because it
+            # is a file-local function rather than a declared symbol.
+            self.assertLess(
+                first.index("static void RecordRecorderElementAttributeMutation"),
+                first.index("void Element::DidAddAttribute"),
+            )
+
+    def test_patches_character_data_mutations_idempotently(self):
+        """Text transitions must exclude parse-time updates."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "character_data.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/core/dom/'
+                'character_data.h"\n'
+                "\n"
+                "void CharacterData::SetDataAndUpdate(const String& new_data,\n"
+                "                                     const TextDiffRange& diff,\n"
+                "                                     UpdateSource source) {\n"
+                "  String old_data = this->data();\n"
+                "  diff.CheckValid(old_data, new_data);\n"
+                "  SetDataWithoutUpdate(new_data);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_blink_character_data(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_character_data(path)
+
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                1, first.count("RecordBlinkDomCharacterDataChanged(")
+            )
+            self.assertIn("if (source != kUpdateFromParser) {", first)
+            self.assertIn("kRecorderMaximumDomValueLength = 4096", first)
+            self.assertIn(
+                "MutationObserver::EnqueueRecorderDomCheckpoint("
+                "recorder_document);",
+                first,
+            )
+            for include in (
+                '#include "third_party/blink/renderer/core/dom/document.h"',
+                '#include "third_party/blink/renderer/core/dom/'
+                'mutation_observer.h"',
+            ):
+                self.assertEqual(1, first.count(include))
+            # The recorded text must be bounded before it reaches the bridge.
+            self.assertIn(
+                "new_data.Left(kRecorderMaximumDomValueLength)", first
+            )
+            self.assertIn(
+                "old_data.Left(kRecorderMaximumDomValueLength)", first
+            )
+
     def test_parses_declared_bridge_signatures(self):
         header = (
             "namespace a11y_recorder {\n"

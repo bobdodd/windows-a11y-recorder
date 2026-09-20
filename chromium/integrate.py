@@ -642,6 +642,129 @@ BLINK_MUTATION_AGENT_TRACE_HOOK = """\
 BLINK_MUTATION_AGENT_MEMBER = """\
   HeapHashSet<Member<Document>> recorder_mutated_documents_;
 """
+BLINK_ELEMENT_ATTRIBUTE_MUTATION_HELPER = """\
+// Records one accepted attribute mutation as recorder evidence.
+//
+// A coalesced DOM checkpoint reports the attribute state of a tree but cannot
+// report which attribute changed, so the transition is only recoverable from
+// this record. The change type is derived from which value is null rather than
+// from the calling function, so a modification that upstream reports with a
+// null old or new value is still recorded as an addition or a removal instead
+// of a self-contradicting change.
+static void RecordRecorderElementAttributeMutation(
+    Element& recorder_element,
+    const QualifiedName& recorder_name,
+    const AtomicString& recorder_old_value,
+    const AtomicString& recorder_new_value) {
+  constexpr int kRecorderMaximumDomValueLength = 4096;
+  const bool recorder_has_value = !recorder_new_value.IsNull();
+  const bool recorder_has_previous_value = !recorder_old_value.IsNull();
+  if (!recorder_has_value && !recorder_has_previous_value) {
+    return;
+  }
+  Document& recorder_document = recorder_element.GetDocument();
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  if (recorder_document_node_id <= 0) {
+    return;
+  }
+  const int recorder_change_type =
+      !recorder_has_previous_value ? 0 : (!recorder_has_value ? 1 : 2);
+  const String recorder_value =
+      recorder_has_value ? recorder_new_value.GetString() : g_empty_string;
+  const String recorder_previous_value =
+      recorder_has_previous_value ? recorder_old_value.GetString()
+                                 : g_empty_string;
+  const int recorder_value_length = static_cast<int>(recorder_value.length());
+  const int recorder_previous_value_length =
+      static_cast<int>(recorder_previous_value.length());
+  const bool recorder_value_truncated =
+      recorder_value_length > kRecorderMaximumDomValueLength;
+  const bool recorder_previous_value_truncated =
+      recorder_previous_value_length > kRecorderMaximumDomValueLength;
+  const String recorder_recorded_value =
+      recorder_value_truncated
+          ? recorder_value.Left(kRecorderMaximumDomValueLength)
+          : recorder_value;
+  const String recorder_recorded_previous_value =
+      recorder_previous_value_truncated
+          ? recorder_previous_value.Left(kRecorderMaximumDomValueLength)
+          : recorder_previous_value;
+  a11y_recorder::RecordBlinkDomAttributeChanged(
+      recorder_document_node_id, recorder_document.Token().ToString(),
+      recorder_element.GetDomNodeId(),
+      recorder_element.nodeName().Utf8().c_str(),
+      recorder_name.NamespaceURI().Utf8().c_str(),
+      recorder_name.LocalName().Utf8().c_str(), recorder_change_type,
+      recorder_recorded_value.Utf8().c_str(), recorder_value_length,
+      recorder_value_truncated,
+      recorder_recorded_previous_value.Utf8().c_str(),
+      recorder_previous_value_length, recorder_previous_value_truncated,
+      kRecorderMaximumDomValueLength);
+  // An attribute mutation does not change the child list, so nothing else
+  // queues the document. Queuing it here keeps the tree state that follows a
+  // recorded transition observable, and consumes the checkpoint identity the
+  // transition record already reserved.
+  MutationObserver::EnqueueRecorderDomCheckpoint(recorder_document);
+}
+"""
+
+
+BLINK_ELEMENT_ATTRIBUTE_ADDED_HOOK = """\
+  RecordRecorderElementAttributeMutation(*this, name, g_null_atom, value);
+"""
+
+
+BLINK_ELEMENT_ATTRIBUTE_MODIFIED_HOOK = """\
+  RecordRecorderElementAttributeMutation(*this, name, old_value, new_value);
+"""
+
+
+BLINK_ELEMENT_ATTRIBUTE_REMOVED_HOOK = """\
+  RecordRecorderElementAttributeMutation(*this, name, old_value, g_null_atom);
+"""
+
+
+BLINK_CHARACTER_DATA_MUTATION_HOOK = """\
+  // Parser-driven text updates are excluded. The text a document was parsed
+  // with is already reported by the finished-parsing checkpoint, and recording
+  // every parse-time chunk would queue a checkpoint per chunk during load.
+  if (source != kUpdateFromParser) {
+    constexpr int kRecorderMaximumDomValueLength = 4096;
+    Document& recorder_document = GetDocument();
+    const int recorder_document_node_id = recorder_document.GetDomNodeId();
+    if (recorder_document_node_id > 0) {
+      ContainerNode* recorder_parent = parentNode();
+      const int recorder_text_length = static_cast<int>(new_data.length());
+      const int recorder_previous_text_length =
+          static_cast<int>(old_data.length());
+      const bool recorder_text_truncated =
+          recorder_text_length > kRecorderMaximumDomValueLength;
+      const bool recorder_previous_text_truncated =
+          recorder_previous_text_length > kRecorderMaximumDomValueLength;
+      const String recorder_recorded_text =
+          recorder_text_truncated
+              ? new_data.Left(kRecorderMaximumDomValueLength)
+              : new_data;
+      const String recorder_recorded_previous_text =
+          recorder_previous_text_truncated
+              ? old_data.Left(kRecorderMaximumDomValueLength)
+              : old_data;
+      a11y_recorder::RecordBlinkDomCharacterDataChanged(
+          recorder_document_node_id, recorder_document.Token().ToString(),
+          GetDomNodeId(),
+          recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+          static_cast<int>(getNodeType()),
+          recorder_recorded_text.Utf8().c_str(), recorder_text_length,
+          recorder_text_truncated,
+          recorder_recorded_previous_text.Utf8().c_str(),
+          recorder_previous_text_length, recorder_previous_text_truncated,
+          kRecorderMaximumDomValueLength);
+      MutationObserver::EnqueueRecorderDomCheckpoint(recorder_document);
+    }
+  }
+"""
+
+
 BLINK_MUTATION_OBSERVER_METHOD = """\
 // static
 void MutationObserver::EnqueueRecorderDomCheckpoint(Document& document) {
@@ -1649,6 +1772,100 @@ def ensure_checkpoint_attribute_includes(text: str, path: Path) -> str:
     )
 
 
+def patch_blink_element(path: Path) -> None:
+    text = read_source(path)
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "third_party/blink/renderer/core/dom/element.h"\n',
+            '#include "third_party/blink/renderer/core/dom/element.h"\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            path,
+        )
+    mutation_observer_include = (
+        '#include "third_party/blink/renderer/core/dom/mutation_observer.h"'
+    )
+    if mutation_observer_include not in text:
+        text = replace_once(
+            text,
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            f"{BLINK_BRIDGE_INCLUDE}\n{mutation_observer_include}\n",
+            path,
+        )
+    added_anchor = (
+        "void Element::DidAddAttribute(const QualifiedName& name,\n"
+        "                              const AtomicString& value) {\n"
+    )
+    if "RecordRecorderElementAttributeMutation" not in text:
+        text = replace_once(
+            text,
+            added_anchor,
+            BLINK_ELEMENT_ATTRIBUTE_MUTATION_HELPER
+            + "\n"
+            + added_anchor
+            + BLINK_ELEMENT_ATTRIBUTE_ADDED_HOOK,
+            path,
+        )
+        modified_anchor = (
+            "void Element::DidModifyAttribute(const QualifiedName& name,\n"
+            "                                 const AtomicString& old_value,\n"
+            "                                 const AtomicString& new_value,\n"
+            "                                 AttributeModificationReason "
+            "reason) {\n"
+        )
+        text = replace_once(
+            text,
+            modified_anchor,
+            modified_anchor + BLINK_ELEMENT_ATTRIBUTE_MODIFIED_HOOK,
+            path,
+        )
+        removed_anchor = (
+            "void Element::DidRemoveAttribute(const QualifiedName& name,\n"
+            "                                 const AtomicString& old_value) "
+            "{\n"
+        )
+        text = replace_once(
+            text,
+            removed_anchor,
+            removed_anchor + BLINK_ELEMENT_ATTRIBUTE_REMOVED_HOOK,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_blink_character_data(path: Path) -> None:
+    text = read_source(path)
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "third_party/blink/renderer/core/dom/character_data.h"\n',
+            '#include "third_party/blink/renderer/core/dom/character_data.h"\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            path,
+        )
+    for include in (
+        '#include "third_party/blink/renderer/core/dom/document.h"',
+        '#include "third_party/blink/renderer/core/dom/mutation_observer.h"',
+    ):
+        if include in text:
+            continue
+        text = replace_once(
+            text,
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            f"{BLINK_BRIDGE_INCLUDE}\n{include}\n",
+            path,
+        )
+    if "RecordBlinkDomCharacterDataChanged" not in text:
+        anchor = "  String old_data = this->data();\n"
+        text = replace_once(
+            text,
+            anchor,
+            anchor + BLINK_CHARACTER_DATA_MUTATION_HOOK,
+            path,
+        )
+    write_patched(path, text)
+
+
 def patch_blink_event_target(path: Path) -> None:
     text = read_source(path)
     if BLINK_BRIDGE_INCLUDE not in text:
@@ -2600,6 +2817,24 @@ def main() -> int:
         / "dom"
         / "events"
         / "event_target.cc"
+    )
+    patch_blink_element(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "element.cc"
+    )
+    patch_blink_character_data(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "character_data.cc"
     )
     patch_blink_document(
         source
