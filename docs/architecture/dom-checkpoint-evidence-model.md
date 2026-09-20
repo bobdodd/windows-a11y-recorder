@@ -122,6 +122,14 @@ checkpoint. It does not validate large-document truncation, dynamic mutation
 checkpoints, shadow DOM, cross-origin frame traversal, or sustained
 high-volume operation.
 
+The September 19, 2026 reference run passed these checks at source checkpoint
+`79caba1`. The archive contained 2,236 events and 81 artifacts, with zero
+dropped records and zero network-service crashes. Ten parser-complete
+checkpoints were observed across the documents created during the run. The
+checkpoint correlated to the main fixture document contained 36 nodes and was
+not truncated. See the
+[dated validation record](../validation/blink-dom-checkpoint-2026-09-19.md).
+
 ## Next dependent slices
 
 The next DOM work should add:

@@ -67,12 +67,17 @@ validated scope. The archive passed structural validation across 2,026 events
 and 81 artifacts and recorded no network-service crashes. See the
 [frame and page identity evidence model](docs/architecture/frame-and-page-identity-evidence-model.md).
 
-Protocol 0.12 implements a bounded, parser-complete DOM structural checkpoint.
+Protocol 0.12 has been validated on the reference Windows platform. It
+implements a bounded, parser-complete DOM structural checkpoint.
 Each checkpoint streams a start record, preorder node records, and a completion
 record with an explicit node limit and truncation state. The initial slice
 records node identity, parent identity, node type, and node name. It does not
 record text content, attributes, mutation history, style, layout, accessibility,
-paint, or rendered pixels. See the
+paint, or rendered pixels. The validated archive contained 2,236 events and 81
+artifacts, with zero dropped records and zero network-service crashes. The
+selected fixture checkpoint contained 36 nodes and was not truncated. See the
+[DOM checkpoint validation record](docs/validation/blink-dom-checkpoint-2026-09-19.md)
+and the
 [DOM checkpoint evidence model](docs/architecture/dom-checkpoint-evidence-model.md).
 
 ## Project goals

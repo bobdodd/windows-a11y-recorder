@@ -16,6 +16,10 @@ from the product version.
 - Added strict archive validation, idempotent Chromium integration coverage,
   deterministic fixture verification, and a
   [DOM checkpoint evidence model](docs/architecture/dom-checkpoint-evidence-model.md).
+- Validated protocol 0.12 end to end on the reference Windows platform across
+  2,236 events and 81 artifacts with no dropped records or network-service
+  crashes. The selected fixture checkpoint contained 36 nodes and was not
+  truncated.
 - Added protocol 0.11 frame and page identity for all navigation boundaries,
   including explicit Chromium frame type, primary-page membership, root page
   identity, direct parent identity, and parent-or-outer-document identity.
