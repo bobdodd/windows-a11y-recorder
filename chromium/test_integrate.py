@@ -1405,5 +1405,189 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn("recorder_primary_page", first)
 
 
+    def test_migrates_protocol_013_document_identity_hooks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            navigation_path = root / "web_contents_impl.cc"
+            navigation_path.write_text(
+                '#include "content/browser/web_contents/web_contents_impl.h"\n'
+                f"{INTEGRATE.CONTENT_NAVIGATION_INCLUDE}\n"
+                "\n"
+                "void WebContentsImpl::DidStartNavigation(\n"
+                "    NavigationHandle* navigation_handle) {\n"
+                "  const GURL url = navigation_handle->GetURL();\n"
+                "\n"
+                f"{INTEGRATE.CONTENT_NAVIGATION_STARTED_HOOK}\n"
+                "  base::ElapsedTimer duration;\n"
+                "}\n"
+                "\n"
+                "void WebContentsImpl::DidFinishNavigation(\n"
+                "    NavigationHandle* navigation_handle) {\n"
+                "\n"
+                f"{INTEGRATE.INTERMEDIATE_CONTENT_NAVIGATION_COMPLETED_HOOK}\n"
+                "  observers_.NotifyObservers(\n"
+                "      &WebContentsObserver::DidFinishNavigation,\n"
+                "      navigation_handle);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            document_path = root / "document.cc"
+            document_path.write_text(
+                '#include "third_party/blink/renderer/core/dom/document.h"\n'
+                f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                '#include "third_party/blink/renderer/core/dom/node_traversal.h"\n'
+                "\n"
+                "void Document::FinishedParsing() {\n"
+                "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+                "\n"
+                f"{INTEGRATE.LEGACY_BLINK_DOM_CHECKPOINT_HOOK}"
+                "\n"
+                "  DispatchEvent();\n"
+                "}\n"
+                "\n"
+                "void Document::NotifyChangeChildren(\n"
+                "    const ContainerNode& container,\n"
+                "    const ContainerNode::ChildrenChange& change) {\n"
+                f"{INTEGRATE.BLINK_DOCUMENT_MUTATION_HOOK}"
+                "  NotifySelection();\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            mutation_path = root / "mutation_observer.cc"
+            mutation_path.write_text(
+                '#include "third_party/blink/renderer/core/dom/mutation_observer.h"\n'
+                f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                '#include "third_party/blink/renderer/core/dom/node.h"\n'
+                '#include "third_party/blink/renderer/core/dom/node_traversal.h"\n'
+                "\n"
+                "class MutationObserverAgentData {\n"
+                " public:\n"
+                "  void Trace(Visitor* visitor) const override {\n"
+                "    visitor->Trace(active_mutation_observers_);\n"
+                f"{INTEGRATE.BLINK_MUTATION_AGENT_TRACE_HOOK}"
+                "    visitor->Trace(active_slot_change_list_);\n"
+                "  }\n"
+                "\n"
+                f"{INTEGRATE.BLINK_MUTATION_AGENT_METHOD}"
+                "  void ActivateObserver(MutationObserver* observer) {\n"
+                "    active_mutation_observers_.insert(observer);\n"
+                "  }\n"
+                "\n"
+                "  void EnsureEnqueueMicrotask() {\n"
+                "    if (active_mutation_observers_.empty() &&\n"
+                "        active_slot_change_list_.empty() &&\n"
+                "        recorder_mutated_documents_.empty()) {\n"
+                "      Enqueue();\n"
+                "    }\n"
+                "  }\n"
+                "\n"
+                "  void DeliverMutations() {\n"
+                "    MutationObserverVector observers(active_mutation_observers_);\n"
+                f"{INTEGRATE.BLINK_POST_MUTATION_DOM_CHECKPOINT_HOOK}"
+                "    active_mutation_observers_.clear();\n"
+                "    SlotChangeList slots;\n"
+                "    slots.swap(active_slot_change_list_);\n"
+                "    for (const auto& observer : observers)\n"
+                "      observer->Deliver();\n"
+                "    for (const auto& slot : slots)\n"
+                "      slot->DispatchSlotChangeEvent();\n"
+                f"{INTEGRATE.LEGACY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK}"
+                "  }\n"
+                "\n"
+                " private:\n"
+                f"{INTEGRATE.BLINK_MUTATION_AGENT_MEMBER}"
+                "  MutationObserverSet active_mutation_observers_;\n"
+                "  SlotChangeList active_slot_change_list_;\n"
+                "};\n"
+                "\n"
+                f"{INTEGRATE.BLINK_MUTATION_OBSERVER_METHOD}"
+                "// static\n"
+                "void MutationObserver::EnqueueSlotChange(HTMLSlotElement& slot) {\n"
+                "  Enqueue(slot);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_web_contents_navigation(navigation_path)
+            INTEGRATE.patch_blink_document(document_path)
+            INTEGRATE.patch_blink_mutation_observer(mutation_path)
+            navigation_first = navigation_path.read_text(encoding="utf-8")
+            document_first = document_path.read_text(encoding="utf-8")
+            mutation_first = mutation_path.read_text(encoding="utf-8")
+            INTEGRATE.patch_web_contents_navigation(navigation_path)
+            INTEGRATE.patch_blink_document(document_path)
+            INTEGRATE.patch_blink_mutation_observer(mutation_path)
+
+            self.assertEqual(
+                navigation_first,
+                navigation_path.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                document_first,
+                document_path.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                mutation_first,
+                mutation_path.read_text(encoding="utf-8"),
+            )
+
+            self.assertNotIn(
+                INTEGRATE.INTERMEDIATE_CONTENT_NAVIGATION_COMPLETED_HOOK,
+                navigation_first,
+            )
+            self.assertIn(
+                INTEGRATE.CONTENT_NAVIGATION_COMPLETED_HOOK,
+                navigation_first,
+            )
+            self.assertEqual(
+                1,
+                navigation_first.count("RecordBrowserNavigationCompleted"),
+            )
+            self.assertIn("recorder_document_token", navigation_first)
+            self.assertIn("recorder_renderer_process_id", navigation_first)
+
+            self.assertNotIn(
+                INTEGRATE.LEGACY_BLINK_DOM_CHECKPOINT_HOOK,
+                document_first,
+            )
+            self.assertIn(INTEGRATE.BLINK_DOM_CHECKPOINT_HOOK, document_first)
+            self.assertEqual(1, document_first.count("BeginBlinkDomCheckpoint"))
+            self.assertEqual(
+                1,
+                document_first.count("RecordBlinkDomCheckpointNode"),
+            )
+            self.assertEqual(
+                1,
+                document_first.count("CompleteBlinkDomCheckpoint"),
+            )
+            self.assertIn("Token().ToString()", document_first)
+
+            self.assertNotIn(
+                INTEGRATE.LEGACY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+                mutation_first,
+            )
+            self.assertIn(
+                INTEGRATE.BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+                mutation_first,
+            )
+            self.assertEqual(1, mutation_first.count("BeginBlinkDomCheckpoint"))
+            self.assertEqual(
+                1,
+                mutation_first.count("RecordBlinkDomCheckpointNode"),
+            )
+            self.assertEqual(
+                1,
+                mutation_first.count("CompleteBlinkDomCheckpoint"),
+            )
+            self.assertIn(
+                "recorder_document->Token().ToString()",
+                mutation_first,
+            )
+
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -111,6 +111,18 @@ from the product version.
 - A deterministic listener and dispatch fixture plus an archive evidence
   verifier for Windows validation.
 
+### Fixed
+
+- Fixed protocol 0.14 integration of Chromium checkouts already patched at
+  protocol 0.13. Committed-navigation, parser-complete DOM checkpoint, and
+  post-mutation DOM checkpoint hook bodies are now replaced in place instead
+  of being treated as already integrated, which previously left stale call
+  shapes against the updated bridge header and failed the instrumented
+  Chromium build with argument-count errors.
+- Added integration coverage that patches fixtures carrying the protocol 0.13
+  hook bodies and asserts both the upgrade to document-identity hook bodies
+  and unchanged output on a second run.
+
 ### Changed
 
 - Made deterministic lifecycle validation wait for an explicit fixture-ready

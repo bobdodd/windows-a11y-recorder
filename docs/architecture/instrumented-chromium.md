@@ -344,3 +344,11 @@ Expected records must be asserted by stable identifiers and relationships, not o
 ## Maintenance rule
 
 The Chromium fork should remain narrow. Instrumentation hooks call a small recorder-owned evidence layer and avoid unrelated product changes. Upstream revisions are integrated on a controlled cadence, and every rebase runs the fixture suite to detect moved hooks, missing paths, changed scheduling behavior, and protocol incompatibility.
+
+## Existing-checkout upgrades
+
+The integration script is applied repeatedly to the same Chromium checkout, so it must both skip work that is already present and rewrite hook bodies that an earlier protocol revision wrote. Recorder-owned files such as the bridge sources are copied wholesale on every run and therefore always match the current protocol. Hooks patched in place inside upstream Chromium sources do not, because presence guards keyed on a symbol name treat an older hook body as already integrated.
+
+Every protocol revision that changes the arguments of a bridge entry point must therefore keep the previous hook body as a named template and replace it with the current body before the presence guards run. Without that replacement the checkout retains an older call shape while the copied bridge header advances, and the Chromium build fails with argument-count errors at the stale call sites rather than at integration time.
+
+The integration tests cover this by patching fixtures that already contain the previous revision's hook bodies, asserting that the current bodies replace them, and asserting that a second run changes nothing.
