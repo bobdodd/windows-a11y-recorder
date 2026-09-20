@@ -186,6 +186,17 @@ by omission, which is the accurate claim: the change was observed, and no tree
 snapshot followed it. A consumer computes the uncovered set exactly, and the
 reference verifier reports it as `UncoveredTransitions` on every run.
 
+Correlating a checkpoint to its committed browser document is order-independent.
+A renderer finishes parsing a document before the browser process records the
+commit, and the two channels are merged into one archive, so which record appears
+first is a timing artifact of the run. Both orders were measured: the protocol
+0.15 archive placed the fixture commit 979 records before its checkpoint, and the
+first 0.16 archive placed the checkpoint eight records before the commit. A
+verifier that consumes records in one pass and requires the commit to have
+arrived already will fail a correct archive whenever the renderer wins that race,
+so correlation is resolved against every committed identity rather than the
+identity active at the moment a record was appended.
+
 Checkpoint and transition identities are unique only within a renderer process.
 The 0.15 validation archive contained 49 completed checkpoints using 32 distinct
 checkpoint identity strings, because each renderer numbers its own. Resolving

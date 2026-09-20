@@ -297,6 +297,19 @@ contain, and an uncovered transition is stated by omission. Both counters live
 in the bridge, so no Blink hook signature or body changed. Live 0.16 connections
 require an exact protocol-version match.
 
+The recorder's managed payload contracts are part of the protocol surface, not a
+convenience. Evidence ingest deserializes every payload into a typed record and
+rejects unmapped members, and the receive loop treats a rejection as a failed
+connection and closes that process's pipe. A bridge field with no matching
+contract property therefore costs the rest of that renderer's evidence for the
+whole session instead of failing one record. The first 0.16 build renamed a
+transition field and added three checkpoint completion fields without updating
+the contracts, and the capture recorded 203 events where the comparable 0.15
+capture recorded 18,097, with four rejected connections and 221 failed evidence
+writes. Ingest of each DOM payload shape is now covered by a platform-neutral
+test, because the receiver test that exercises a live pipe does not run on every
+platform.
+
 Bounded values are truncated with `String::substr(0, limit)`. Blink's
 `WTF::String` has no `Left` method in Chromium 156, and the first 0.15 hook
 bodies used one, which failed to compile in `character_data.cc`. The corrected

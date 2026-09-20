@@ -177,11 +177,14 @@ public sealed record BrowserDomCheckpointCompletedPayload(
     int AttributeCount,
     bool AttributesTruncated,
     int MaximumAttributesPerNode,
-    int MaximumValueLength);
+    int MaximumValueLength,
+    int CoveredTransitionCount,
+    string? CoveredTransitionFirstId,
+    string? CoveredTransitionLastId);
 
 public sealed record BrowserDomAttributeChangedPayload(
     BrowserContext Context,
-    string? CheckpointId,
+    string TransitionId,
     long NodeId,
     string NodeName,
     string? AttributeNamespace,
@@ -197,7 +200,7 @@ public sealed record BrowserDomAttributeChangedPayload(
 
 public sealed record BrowserDomCharacterDataChangedPayload(
     BrowserContext Context,
-    string? CheckpointId,
+    string TransitionId,
     long NodeId,
     long? ParentNodeId,
     string NodeType,

@@ -166,6 +166,7 @@ $fixtureDocumentTokens = @(
         Select-Object -Unique
 )
 $activeDocumentsByFrame = @{}
+$committedDocumentIdentities = New-Object System.Collections.ArrayList
 $mappedDomCheckpoints = @{}
 foreach ($record in $records) {
     if (
@@ -203,31 +204,50 @@ foreach ($record in $records) {
             }
         } else {
             $activeDocumentsByFrame[$frameKey] = $identity
+            [void] $committedDocumentIdentities.Add($identity)
         }
     }
 
+}
+
+# Checkpoint correlation is resolved in a second pass, against every committed
+# identity rather than the identity active at the moment the record happened to
+# be appended.
+#
+# A renderer finishes parsing a document before the browser process records the
+# commit, and the two channels are merged into one archive, so the order in
+# which those records appear is a timing artifact of the run. An earlier version
+# of this check consumed records in one pass and therefore required the commit
+# to arrive first, which made a correct archive fail whenever the renderer won
+# the race. The substantive requirement is that a checkpoint's token resolves to
+# exactly one committed document in the same browser instance and renderer
+# process, and that is order-independent.
+foreach ($record in $records) {
     if (
-        $record.channel -eq "browser.dom" -and
-        $record.eventType -eq "dom-checkpoint-started" -and
-        $record.payload.context.documentToken -in $fixtureDocumentTokens
+        $record.channel -ne "browser.dom" -or
+        $record.eventType -ne "dom-checkpoint-started" -or
+        $record.payload.context.documentToken -notin $fixtureDocumentTokens
     ) {
-        $context = $record.payload.context
-        $matches = @(
-            $activeDocumentsByFrame.Values |
-                Where-Object {
-                    $_.BrowserInstanceId -eq $context.browserInstanceId -and
-                    $_.DocumentToken -eq $context.documentToken -and
-                    $_.RendererProcessId -eq $context.processId
-                }
-        )
-        if ($matches.Count -ne 1) {
-            throw (
-                "A DOM checkpoint did not map to exactly one active browser " +
-                "document identity. Stale and process-mismatched mappings are rejected."
-            )
-        }
-        $mappedDomCheckpoints[$record.payload.checkpointId] = $matches[0]
+        continue
     }
+
+    $context = $record.payload.context
+    $resolved = @(
+        $committedDocumentIdentities |
+            Where-Object {
+                $_.BrowserInstanceId -eq $context.browserInstanceId -and
+                $_.DocumentToken -eq $context.documentToken -and
+                $_.RendererProcessId -eq $context.processId
+            }
+    )
+    if ($resolved.Count -ne 1) {
+        throw (
+            "A DOM checkpoint did not resolve to exactly one committed browser " +
+            "document identity. Process-mismatched and ambiguous mappings are " +
+            "rejected."
+        )
+    }
+    $mappedDomCheckpoints[$record.payload.checkpointId] = $resolved[0]
 }
 
 $dispatches = @(

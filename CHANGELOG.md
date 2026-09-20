@@ -6,6 +6,24 @@ from the product version.
 
 ## Unreleased
 
+### Fixed
+
+- Updated the recorder's managed browser payload contracts to the protocol 0.16
+  fields. Evidence ingest rejects unmapped members and the receive loop closes
+  the pipe of a process whose payload is rejected, so the stale contracts cost
+  the rest of each renderer's evidence: the first 0.16 capture recorded 203
+  events where the comparable 0.15 capture recorded 18,097, with four rejected
+  connections and 221 failed evidence writes. Ingest of every DOM payload shape
+  is now covered by a platform-neutral test, since the receiver test that
+  exercises a live pipe does not run on every platform.
+- Made the deterministic verifier's checkpoint-to-document correlation
+  independent of record arrival order. A renderer finishes parsing before the
+  browser process records the commit, and the merged archive can carry either
+  order, so the previous single pass failed a correct archive whenever the
+  renderer won that race. Correlation now resolves against every committed
+  document identity, which keeps the process-mismatch and ambiguity checks
+  without depending on a timing artifact.
+
 ### Changed
 
 - Reversed the join between an attribute or character-data transition and the
