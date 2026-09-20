@@ -1405,6 +1405,30 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn("recorder_primary_page", first)
 
 
+    def test_validation_treats_native_stderr_as_progress(self):
+        runner = (
+            Path(__file__).parent.parent / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('$previousPreference = $ErrorActionPreference', runner)
+        self.assertIn('$ErrorActionPreference = "Continue"', runner)
+        self.assertIn(
+            "$ErrorActionPreference = $previousPreference",
+            runner,
+        )
+        relaxed = runner.index('$ErrorActionPreference = "Continue"')
+        invoked = runner.index("& $Command", relaxed)
+        restored = runner.index(
+            "$ErrorActionPreference = $previousPreference",
+            invoked,
+        )
+        checked = runner.index("if ($LASTEXITCODE -ne 0) {", restored)
+
+        self.assertLess(relaxed, invoked)
+        self.assertLess(invoked, restored)
+        self.assertLess(restored, checked)
+
+
     def test_migrates_protocol_013_document_identity_hooks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

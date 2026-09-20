@@ -32,7 +32,23 @@ function Invoke-Checked {
     )
 
     Write-Host "`n== $Description =="
-    & $Command
+
+    # Native tools in this pipeline report progress on stderr. Python's
+    # unittest runner writes its progress and summary there even on success.
+    # With $ErrorActionPreference set to Stop, PowerShell converts that
+    # stderr output into a terminating NativeCommandError whenever the
+    # script's own output is redirected or transcribed, which aborts a run
+    # that has not actually failed. Only the process exit code decides
+    # success here.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Command
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+
     if ($LASTEXITCODE -ne 0) {
         throw "$Description failed with exit code $LASTEXITCODE."
     }

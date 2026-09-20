@@ -113,6 +113,11 @@ from the product version.
 
 ### Fixed
 
+- Fixed deterministic Blink validation aborting when a native tool wrote
+  progress output to stderr. Python's unittest runner reports progress and its
+  summary on stderr even when every test passes, which PowerShell converted
+  into a terminating error under a redirected or transcribed run. Step success
+  is now decided only by the process exit code.
 - Fixed protocol 0.14 integration of Chromium checkouts already patched at
   protocol 0.13. Committed-navigation, parser-complete DOM checkpoint, and
   post-mutation DOM checkpoint hook bodies are now replaced in place instead
