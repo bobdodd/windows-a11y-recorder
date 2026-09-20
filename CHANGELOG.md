@@ -130,6 +130,11 @@ from the product version.
 
 ### Changed
 
+- Validated protocol 0.14 browser-renderer document correlation end to end on
+  the reference Windows platform at revision `4b3d436`, with committed
+  navigation document identity, parser-complete DOM checkpoints, and coalesced
+  post-mutation DOM checkpoints verified across 9,006 events and 81 artifacts,
+  a valid session archive, and zero network-service crashes.
 - Made deterministic lifecycle validation wait for an explicit fixture-ready
   signal before moving the page into the background, preventing the hidden
   transition from racing listener registration.
