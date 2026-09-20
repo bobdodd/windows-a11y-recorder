@@ -167,6 +167,21 @@ support: if a delivery pass ends without producing a checkpoint, a transition
 names a checkpoint that does not appear in the archive. The alternative was a
 null `checkpointId` and no join at all.
 
+That limit is not marginal. In the first reference-platform validation archive
+at revision `8e2ba51`, 200 of 452 transition records named a reservation that
+was never completed, spread across three distinct reservations. The reference
+fixture's own transitions joined correctly, so the defect is not in the
+reservation mechanism itself; documents that mutate without ever producing a
+checkpoint are common. A consumer must therefore treat `checkpointId` on a
+transition as a claim to be resolved against the archive, not as a guaranteed
+reference.
+
+Checkpoint identity is also unique only within a renderer process. The same
+archive contained 49 completed checkpoints using 32 distinct identity strings,
+because each renderer numbers its own checkpoints. Joining a transition to a
+checkpoint requires browser instance, renderer process, and document to match as
+well as the identity string.
+
 ## Claims the evidence supports
 
 The evidence can establish:
@@ -196,7 +211,10 @@ The evidence does not establish:
 - browser-held data the tested page never displayed, such as the credential
   store, browser history, cookie values, or authorization values;
 - the existence of the checkpoint a transition names, in the case where the
-  delivery pass ended without producing one; or
+  delivery pass ended without producing one, which was 200 of 452 transitions in
+  the first validated archive;
+- a checkpoint identity that is comparable across renderer processes, since each
+  renderer numbers its checkpoints independently; or
 - that a change was perceivable, painted, or presented.
 
 ## Deterministic validation

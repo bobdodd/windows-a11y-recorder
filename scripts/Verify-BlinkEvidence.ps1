@@ -128,6 +128,15 @@ $postMutationCheckpointCompletions = @(
             $_.payload.reason -eq "post-mutation"
         }
 )
+# A transition reserves whichever checkpoint the delivery pass produces, which
+# may be either reason, so the join must not be restricted to one of them.
+$allCheckpointCompletions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-checkpoint-completed"
+        }
+)
 $checkpointNodeAttributes = @(
     $records |
         Where-Object {
@@ -884,7 +893,7 @@ if ($transitionCheckpointIds.Count -ne 1) {
     )
 }
 $stateCheckpointId = $transitionCheckpointIds[0]
-$stateCheckpointCompletion = $domCheckpointCompletions |
+$stateCheckpointCompletion = $allCheckpointCompletions |
     Where-Object {
         $_.payload.checkpointId -eq $stateCheckpointId -and
         $_.payload.context.browserInstanceId -eq
