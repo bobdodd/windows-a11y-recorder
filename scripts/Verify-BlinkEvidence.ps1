@@ -128,6 +128,27 @@ $postMutationCheckpointCompletions = @(
             $_.payload.reason -eq "post-mutation"
         }
 )
+$checkpointNodeAttributes = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-checkpoint-node-attribute"
+        }
+)
+$attributeChanges = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-attribute-changed"
+        }
+)
+$characterDataChanges = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dom" -and
+            $_.eventType -eq "dom-character-data-changed"
+        }
+)
 
 $fixtureDocumentTokens = @(
     (@($navigationCompletions) + @($subframeNavigationCompletions)) |
@@ -563,10 +584,37 @@ $fixturePostMutationStarts = @(
             $_.payload.context.documentId -eq $listener.context.documentId
         }
 )
-if ($fixturePostMutationStarts.Count -ne 1) {
-    throw "The fixture document did not produce one post-mutation checkpoint."
+if ($fixturePostMutationStarts.Count -lt 1) {
+    throw "The fixture document did not produce a post-mutation checkpoint."
 }
-$postMutationCheckpointStart = $fixturePostMutationStarts[0]
+# Attribute and character-data mutations queue checkpoints of their own, so the
+# structural checkpoint is identified by the node it added rather than by being
+# the only one.
+$parserDivNodeIds = @(
+    $fixtureDomNodes |
+        Where-Object {
+            $_.payload.nodeType -eq "element" -and
+            $_.payload.nodeName -eq "DIV"
+        } |
+        ForEach-Object { $_.payload.nodeId }
+)
+$postMutationCheckpointStart = $fixturePostMutationStarts |
+    Where-Object {
+        $candidateId = $_.payload.checkpointId
+        @(
+            $domCheckpointNodes |
+                Where-Object {
+                    $_.payload.checkpointId -eq $candidateId -and
+                    $_.payload.nodeType -eq "element" -and
+                    $_.payload.nodeName -eq "DIV" -and
+                    $_.payload.nodeId -notin $parserDivNodeIds
+                }
+        ).Count -eq 1
+    } |
+    Select-Object -First 1
+if (-not $postMutationCheckpointStart) {
+    throw "No post-mutation checkpoint contained the appended fixture node."
+}
 $postMutationCheckpointId = $postMutationCheckpointStart.payload.checkpointId
 if ($postMutationCheckpointId -eq $domCheckpointId) {
     throw "The post-mutation checkpoint reused the parser checkpoint identity."
@@ -636,6 +684,316 @@ $postMutationDivNodes = @(
 )
 if ($postMutationDivNodes.Count -ne 1) {
     throw "The post-mutation checkpoint did not contain one new DIV node."
+}
+
+# Attribute and character-data evidence for the fixture document. Every
+# assertion below compares against the fixture's known before and after values,
+# because a record that carries the right shape and the wrong text is not
+# evidence.
+$fixtureAttributeChanges = @(
+    $attributeChanges |
+        Where-Object {
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId
+        }
+)
+$fixtureCharacterDataChanges = @(
+    $characterDataChanges |
+        Where-Object {
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId
+        }
+)
+foreach ($record in @($fixtureAttributeChanges) + @($fixtureCharacterDataChanges)) {
+    if ($record.payload.context.documentToken -notin $fixtureDocumentTokens) {
+        throw "A DOM state change record carried an unknown document token."
+    }
+    if ([string]::IsNullOrWhiteSpace($record.payload.checkpointId)) {
+        throw "A DOM state change record did not name the checkpoint it reserved."
+    }
+    if ($record.payload.nodeId -le 0) {
+        throw "A DOM state change record did not identify its node."
+    }
+}
+
+$expectedAttributeChanges = @(
+    [pscustomobject]@{
+        NodeName = "BUTTON"
+        AttributeName = "aria-expanded"
+        ChangeType = "changed"
+        PreviousValue = "false"
+        Value = "true"
+        Description = "an enumerated change"
+    }
+    [pscustomobject]@{
+        NodeName = "BUTTON"
+        AttributeName = "aria-labelledby"
+        ChangeType = "changed"
+        PreviousValue = "disclosure-name-one"
+        Value = "disclosure-name-two"
+        Description = "a reference change"
+    }
+    [pscustomobject]@{
+        NodeName = "BUTTON"
+        AttributeName = "aria-label"
+        ChangeType = "changed"
+        PreviousValue = "Fixture disclosure"
+        Value = "Fixture disclosure expanded"
+        Description = "a name change"
+    }
+    [pscustomobject]@{
+        NodeName = "P"
+        AttributeName = "data-removable"
+        ChangeType = "removed"
+        PreviousValue = "present"
+        Value = $null
+        Description = "an attribute removal"
+    }
+)
+$matchedAttributeChanges = @()
+foreach ($expected in $expectedAttributeChanges) {
+    $matches = @(
+        $fixtureAttributeChanges |
+            Where-Object {
+                $_.payload.attributeName -eq $expected.AttributeName -and
+                $_.payload.nodeName -eq $expected.NodeName
+            }
+    )
+    if ($matches.Count -ne 1) {
+        throw (
+            "The fixture did not record exactly one transition for " +
+            "$($expected.AttributeName) ($($expected.Description))."
+        )
+    }
+    $observed = $matches[0].payload
+    if ($observed.changeType -ne $expected.ChangeType) {
+        throw (
+            "$($expected.AttributeName) was recorded as " +
+            "$($observed.changeType) rather than $($expected.ChangeType)."
+        )
+    }
+    if ($observed.attributeValueTruncated -or
+        $observed.previousAttributeValueTruncated) {
+        throw "$($expected.AttributeName) was unexpectedly truncated."
+    }
+    if ($observed.previousAttributeValue -cne $expected.PreviousValue) {
+        throw (
+            "$($expected.AttributeName) recorded the wrong previous value."
+        )
+    }
+    if ($null -eq $expected.Value) {
+        if ($null -ne $observed.attributeValue) {
+            throw (
+                "$($expected.AttributeName) was removed but recorded a value."
+            )
+        }
+    } else {
+        if ($observed.attributeValue -cne $expected.Value) {
+            throw "$($expected.AttributeName) recorded the wrong value."
+        }
+        if ($observed.attributeValueLength -ne $expected.Value.Length) {
+            throw (
+                "$($expected.AttributeName) recorded an inconsistent length."
+            )
+        }
+    }
+    if ($observed.previousAttributeValueLength -ne
+        $expected.PreviousValue.Length) {
+        throw (
+            "$($expected.AttributeName) recorded an inconsistent previous length."
+        )
+    }
+    $matchedAttributeChanges += $matches[0]
+}
+
+$truncatedChanges = @(
+    $fixtureAttributeChanges |
+        Where-Object { $_.payload.attributeName -eq "data-long-value" }
+)
+if ($truncatedChanges.Count -ne 1) {
+    throw "The fixture did not record exactly one over-length attribute."
+}
+$truncatedChange = $truncatedChanges[0]
+$expectedTruncatedLength = 5000
+if ($truncatedChange.payload.changeType -ne "added") {
+    throw "The over-length attribute was not recorded as an addition."
+}
+if (-not $truncatedChange.payload.attributeValueTruncated) {
+    throw "The over-length attribute did not report truncation."
+}
+if ($truncatedChange.payload.attributeValueLength -ne
+    $expectedTruncatedLength) {
+    throw "The over-length attribute did not report its full length."
+}
+$valueLimit = $truncatedChange.payload.maximumValueLength
+if ($valueLimit -le 0 -or $valueLimit -ge $expectedTruncatedLength) {
+    throw "The over-length attribute did not report a usable value limit."
+}
+if ($truncatedChange.payload.attributeValue.Length -ne $valueLimit) {
+    throw "The over-length attribute was not recorded as a bounded prefix."
+}
+if ($truncatedChange.payload.attributeValue -cne ("A" * $valueLimit)) {
+    throw "The over-length attribute prefix does not match the fixture value."
+}
+if ($null -ne $truncatedChange.payload.previousAttributeValue) {
+    throw "The added attribute recorded a previous value."
+}
+$matchedAttributeChanges += $truncatedChange
+
+$liveRegionChanges = @(
+    $fixtureCharacterDataChanges |
+        Where-Object {
+            $_.payload.previousText -ceq "Live region before." -and
+            $_.payload.text -ceq "Live region after."
+        }
+)
+if ($liveRegionChanges.Count -ne 1) {
+    throw "The fixture did not record exactly one live-region text change."
+}
+$liveRegionChange = $liveRegionChanges[0].payload
+if ($liveRegionChange.nodeType -ne "text") {
+    throw "The live-region text change was not recorded on a text node."
+}
+if ($liveRegionChange.textTruncated -or
+    $liveRegionChange.previousTextTruncated) {
+    throw "The live-region text change was unexpectedly truncated."
+}
+if ($liveRegionChange.textLength -ne "Live region after.".Length -or
+    $liveRegionChange.previousTextLength -ne "Live region before.".Length) {
+    throw "The live-region text change recorded inconsistent lengths."
+}
+if ($liveRegionChange.parentNodeId -le 0) {
+    throw "The live-region text change did not identify its parent element."
+}
+
+# The six mutations run as consecutive statements in one task, so they reserve
+# one checkpoint identity, and the checkpoint that follows must consume it.
+$transitionCheckpointIds = @(
+    @($matchedAttributeChanges) + @($liveRegionChanges) |
+        ForEach-Object { $_.payload.checkpointId } |
+        Select-Object -Unique
+)
+if ($transitionCheckpointIds.Count -ne 1) {
+    throw (
+        "The fixture's attribute and text transitions did not share one " +
+        "reserved checkpoint identity."
+    )
+}
+$stateCheckpointId = $transitionCheckpointIds[0]
+$stateCheckpointCompletion = $domCheckpointCompletions |
+    Where-Object {
+        $_.payload.checkpointId -eq $stateCheckpointId -and
+        $_.payload.context.browserInstanceId -eq
+            $listener.context.browserInstanceId -and
+        $_.payload.context.processId -eq $listener.context.processId -and
+        $_.payload.context.documentId -eq $listener.context.documentId
+    } |
+    Select-Object -First 1
+if (-not $stateCheckpointCompletion) {
+    throw (
+        "The checkpoint identity reserved by the fixture's transitions was " +
+        "never completed."
+    )
+}
+if ($stateCheckpointCompletion.payload.attributesTruncated) {
+    throw "The fixture checkpoint exceeded its per-node attribute limit."
+}
+if ($stateCheckpointCompletion.payload.maximumAttributesPerNode -le 0 -or
+    $stateCheckpointCompletion.payload.maximumValueLength -ne $valueLimit) {
+    throw "The fixture checkpoint reported inconsistent attribute limits."
+}
+$stateCheckpointAttributes = @(
+    $checkpointNodeAttributes |
+        Where-Object {
+            $_.payload.checkpointId -eq $stateCheckpointId -and
+            $_.payload.context.browserInstanceId -eq
+                $listener.context.browserInstanceId -and
+            $_.payload.context.processId -eq $listener.context.processId -and
+            $_.payload.context.documentId -eq $listener.context.documentId
+        }
+)
+if ($stateCheckpointCompletion.payload.attributeCount -ne
+    $stateCheckpointAttributes.Count) {
+    throw "The fixture checkpoint attribute count does not match its records."
+}
+$disclosureNodeId = $truncatedChange.payload.nodeId
+$expectedCheckpointState = @{
+    "aria-expanded" = "true"
+    "aria-label" = "Fixture disclosure expanded"
+    "aria-labelledby" = "disclosure-name-two"
+}
+foreach ($attributeName in $expectedCheckpointState.Keys) {
+    $matches = @(
+        $stateCheckpointAttributes |
+            Where-Object {
+                $_.payload.nodeId -eq $disclosureNodeId -and
+                $_.payload.attributeName -eq $attributeName
+            }
+    )
+    if ($matches.Count -ne 1) {
+        throw (
+            "The fixture checkpoint did not record one $attributeName " +
+            "attribute for the changed element."
+        )
+    }
+    if ($matches[0].payload.attributeValue -cne
+        $expectedCheckpointState[$attributeName]) {
+        throw (
+            "The fixture checkpoint recorded a stale $attributeName value."
+        )
+    }
+    if ($matches[0].payload.attributeValueTruncated) {
+        throw "The fixture checkpoint truncated a short attribute value."
+    }
+}
+$checkpointLongValues = @(
+    $stateCheckpointAttributes |
+        Where-Object {
+            $_.payload.nodeId -eq $disclosureNodeId -and
+            $_.payload.attributeName -eq "data-long-value"
+        }
+)
+if ($checkpointLongValues.Count -ne 1) {
+    throw "The fixture checkpoint did not record the over-length attribute."
+}
+if (-not $checkpointLongValues[0].payload.attributeValueTruncated -or
+    $checkpointLongValues[0].payload.attributeValueLength -ne
+        $expectedTruncatedLength -or
+    $checkpointLongValues[0].payload.attributeValue.Length -ne $valueLimit) {
+    throw (
+        "The fixture checkpoint did not report the over-length attribute as " +
+        "a bounded prefix of a longer value."
+    )
+}
+$removedInCheckpoint = @(
+    $stateCheckpointAttributes |
+        Where-Object { $_.payload.attributeName -eq "data-removable" }
+)
+if ($removedInCheckpoint.Count -ne 0) {
+    throw "The fixture checkpoint still reported the removed attribute."
+}
+$attributeIndicesByNode = @{}
+foreach ($record in $stateCheckpointAttributes) {
+    $nodeKey = $record.payload.nodeId
+    if (-not $attributeIndicesByNode.ContainsKey($nodeKey)) {
+        $attributeIndicesByNode[$nodeKey] = @()
+    }
+    $attributeIndicesByNode[$nodeKey] += $record.payload.attributeIndex
+}
+foreach ($nodeKey in $attributeIndicesByNode.Keys) {
+    $indices = @($attributeIndicesByNode[$nodeKey] | Sort-Object)
+    for ($index = 0; $index -lt $indices.Count; $index++) {
+        if ($indices[$index] -ne $index) {
+            throw (
+                "The fixture checkpoint attribute indices are not contiguous " +
+                "for one node."
+            )
+        }
+    }
 }
 $scheduledAnimationFrames = @(
     $animationFrameScheduleCandidates |

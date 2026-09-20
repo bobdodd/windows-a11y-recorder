@@ -14,6 +14,21 @@
     Default-action target
   </a>
   <div id="default-action-result">Default-action destination</div>
+  <div id="attribute-evidence">
+    <button
+      id="disclosure"
+      aria-expanded="false"
+      aria-label="Fixture disclosure"
+      aria-labelledby="disclosure-name-one"
+    >Toggle</button>
+    <span id="disclosure-name-one">First disclosure name</span>
+    <span id="disclosure-name-two">Second disclosure name</span>
+    <p
+      id="live-region"
+      aria-live="polite"
+      data-removable="present"
+    >Live region before.</p>
+  </div>
   <iframe
     id="identity-subframe"
     src="blink-subframe.html"
@@ -117,6 +132,19 @@
         "",
         "#same-document-navigation"
       );
+      const disclosure = document.getElementById("disclosure");
+      const liveRegion = document.getElementById("live-region");
+      // Each mutation below has one known before and after value, so the
+      // verifier can assert exact string equality rather than shape alone.
+      disclosure.setAttribute("aria-expanded", "true");
+      disclosure.setAttribute("aria-labelledby", "disclosure-name-two");
+      disclosure.setAttribute("aria-label", "Fixture disclosure expanded");
+      liveRegion.firstChild.data = "Live region after.";
+      liveRegion.removeAttribute("data-removable");
+      // Exercises the per-value length limit. The recorded value must be a
+      // prefix of this value with the reported full length, not a dropped
+      // record.
+      disclosure.setAttribute("data-long-value", "A".repeat(5000));
     }, 250);
   </script>
 </body>
