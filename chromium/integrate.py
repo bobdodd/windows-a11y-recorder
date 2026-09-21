@@ -27,6 +27,10 @@ CHILD_LAUNCHER_INCLUDE = (
 CONTENT_NAVIGATION_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
 )
+CONTENT_RENDERER_ACCESSIBILITY_INCLUDE = (
+    '#include "chromium/recorder_bridge/browser_bridge.h"'
+)
+CONTENT_RENDERER_DEP = '    "//chromium/recorder_bridge",'
 CHILD_LAUNCHER_INCLUDE_BLOCK = f"""\
 #if BUILDFLAG(IS_WIN)
 {CHILD_LAUNCHER_INCLUDE}
@@ -316,6 +320,69 @@ CONTENT_NAVIGATION_COMPLETED_HOOK = """\
       navigation_handle->HasCommitted() &&
           navigation_handle->IsErrorPage(),
       navigation_handle->GetNetErrorCode());
+"""
+CONTENT_RENDERER_ACCESSIBILITY_HOOK = """\
+  constexpr int kRecorderMaximumAccessibilityCheckpointNodes = 100000;
+  const std::string recorder_document_token =
+      document.Token().ToString();
+  const int recorder_update_count =
+      static_cast<int>(updates_and_events.updates.size());
+  const int recorder_event_count =
+      static_cast<int>(updates_and_events.events.size());
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginRendererAccessibilityCheckpoint(
+          recorder_document_token, "renderer-serialization",
+          kRecorderMaximumAccessibilityCheckpointNodes,
+          recorder_update_count, recorder_event_count);
+  if (recorder_checkpoint_sequence != 0) {
+    std::unordered_map<int32_t, int32_t> recorder_parent_ids;
+    for (const ui::AXTreeUpdate& recorder_update :
+         updates_and_events.updates) {
+      for (const ui::AXNodeData& recorder_node : recorder_update.nodes) {
+        for (int32_t recorder_child_id : recorder_node.child_ids) {
+          recorder_parent_ids.insert_or_assign(
+              recorder_child_id, recorder_node.id);
+        }
+      }
+    }
+    int recorder_node_count = 0;
+    bool recorder_truncated = false;
+    for (const ui::AXTreeUpdate& recorder_update :
+         updates_and_events.updates) {
+      for (const ui::AXNodeData& recorder_node : recorder_update.nodes) {
+        if (recorder_node_count >=
+            kRecorderMaximumAccessibilityCheckpointNodes) {
+          recorder_truncated = true;
+          break;
+        }
+        const auto recorder_parent =
+            recorder_parent_ids.find(recorder_node.id);
+        a11y_recorder::RecordRendererAccessibilityCheckpointNode(
+            recorder_checkpoint_sequence, recorder_document_token,
+            recorder_node_count, recorder_node.id,
+            recorder_parent == recorder_parent_ids.end()
+                ? 0
+                : recorder_parent->second,
+            recorder_node.GetDOMNodeId(),
+            static_cast<int>(recorder_node.role),
+            recorder_node.GetStringAttribute(
+                ax::mojom::StringAttribute::kName),
+            recorder_node.GetStringAttribute(
+                ax::mojom::StringAttribute::kDescription),
+            recorder_node.ToString(false),
+            recorder_node.HasState(ax::mojom::State::kFocused));
+        ++recorder_node_count;
+      }
+      if (recorder_truncated)
+        break;
+    }
+    a11y_recorder::CompleteRendererAccessibilityCheckpoint(
+        recorder_checkpoint_sequence, recorder_document_token,
+        "renderer-serialization", recorder_node_count,
+        recorder_truncated,
+        kRecorderMaximumAccessibilityCheckpointNodes,
+        recorder_update_count, recorder_event_count);
+  }
 """
 ORIGINAL_BLINK_DOM_CHECKPOINT_HOOK = """\
   constexpr int kRecorderMaximumDomCheckpointNodes = 512;
@@ -1958,6 +2025,60 @@ def patch_content_browser_build(path: Path) -> None:
     write_patched(path, text)
 
 
+def patch_content_renderer_accessibility(path: Path) -> None:
+    text = read_source(path)
+    header = (
+        '#include "content/renderer/accessibility/'
+        'render_accessibility_impl.h"\n'
+    )
+    if CONTENT_RENDERER_ACCESSIBILITY_INCLUDE not in text:
+        text = replace_once(
+            text,
+            header,
+            header + "\n#include <unordered_map>\n\n"
+            + f"{CONTENT_RENDERER_ACCESSIBILITY_INCLUDE}\n",
+            path,
+        )
+    elif "#include <unordered_map>" not in text:
+        text = replace_once(
+            text,
+            header,
+            header + "\n#include <unordered_map>\n",
+            path,
+        )
+    if "BeginRendererAccessibilityCheckpoint" not in text:
+        anchor = (
+            "  ax_annotators_manager_->AddDebuggingAttributes("
+            "updates_and_events.updates);\n"
+        )
+        text = replace_once(
+            text,
+            anchor,
+            anchor + CONTENT_RENDERER_ACCESSIBILITY_HOOK,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_content_renderer_build(path: Path) -> None:
+    text = read_source(path)
+    if CONTENT_RENDERER_DEP in text:
+        return
+    target = 'target(link_target_type, "renderer") {'
+    target_index = text.find(target)
+    if target_index < 0:
+        raise RuntimeError(f"{path}: content renderer target not found")
+    target_end = text.find("\n}", target_index)
+    deps = text.find("  deps = [\n", target_index)
+    if deps < 0 or (target_end >= 0 and deps > target_end):
+        raise RuntimeError(f"{path}: content renderer deps list not found")
+    opening = "  deps = [\n"
+    text = text[:deps] + text[deps:].replace(
+        opening, opening + f"{CONTENT_RENDERER_DEP}\n", 1
+    )
+    write_patched(path, text)
+
+
 def patch_web_contents_navigation(path: Path) -> None:
     text = read_source(path)
     if CONTENT_NAVIGATION_INCLUDE not in text:
@@ -3100,6 +3221,16 @@ def main() -> int:
         source / "content" / "browser" / "child_process_launcher_helper.cc"
     )
     patch_content_browser_build(source / "content" / "browser" / "BUILD.gn")
+    patch_content_renderer_accessibility(
+        source
+        / "content"
+        / "renderer"
+        / "accessibility"
+        / "render_accessibility_impl.cc"
+    )
+    patch_content_renderer_build(
+        source / "content" / "renderer" / "BUILD.gn"
+    )
     patch_web_contents_navigation(
         source
         / "content"

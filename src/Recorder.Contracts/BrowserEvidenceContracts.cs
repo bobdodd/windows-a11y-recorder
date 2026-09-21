@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.16";
+    public const string CurrentVersion = "0.17";
 }
 
 public static class BrowserEvidenceChannels
@@ -14,6 +14,7 @@ public static class BrowserEvidenceChannels
     public const string Scheduler = "browser.scheduler";
     public const string Navigation = "browser.navigation";
     public const string Dom = "browser.dom";
+    public const string Accessibility = "browser.accessibility";
     public const string Cookie = "browser.cookie";
 }
 
@@ -39,6 +40,12 @@ public static class BrowserEvidenceEventTypes
     public const string DomCheckpointCompleted = "dom-checkpoint-completed";
     public const string DomAttributeChanged = "dom-attribute-changed";
     public const string DomCharacterDataChanged = "dom-character-data-changed";
+    public const string AccessibilityCheckpointStarted =
+        "accessibility-checkpoint-started";
+    public const string AccessibilityCheckpointNode =
+        "accessibility-checkpoint-node";
+    public const string AccessibilityCheckpointCompleted =
+        "accessibility-checkpoint-completed";
     public const string CookieOperation = "cookie-operation";
     public const string Omission = "collector-omission";
 }
@@ -211,6 +218,37 @@ public sealed record BrowserDomCharacterDataChangedPayload(
     int PreviousTextLength,
     bool PreviousTextTruncated,
     int MaximumValueLength);
+
+public sealed record BrowserAccessibilityCheckpointStartedPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    string Reason,
+    int MaximumNodes,
+    int UpdateCount,
+    int EventCount);
+
+public sealed record BrowserAccessibilityCheckpointNodePayload(
+    BrowserContext Context,
+    string CheckpointId,
+    int NodeIndex,
+    int AccessibilityNodeId,
+    int? ParentAccessibilityNodeId,
+    int? DomNodeId,
+    int Role,
+    string Name,
+    string Description,
+    string SerializedProperties,
+    bool Focused);
+
+public sealed record BrowserAccessibilityCheckpointCompletedPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    string Reason,
+    int NodeCount,
+    bool Truncated,
+    int MaximumNodes,
+    int UpdateCount,
+    int EventCount);
 
 public sealed record BrowserCookieOperationPayload(
     BrowserContext Context,

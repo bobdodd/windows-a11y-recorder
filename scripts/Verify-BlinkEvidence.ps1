@@ -158,6 +158,52 @@ $characterDataChanges = @(
             $_.eventType -eq "dom-character-data-changed"
         }
 )
+$accessibilityCheckpointStarts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.accessibility" -and
+            $_.eventType -eq "accessibility-checkpoint-started" -and
+            $_.payload.reason -eq "renderer-serialization"
+        }
+)
+$accessibilityCheckpointNodes = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.accessibility" -and
+            $_.eventType -eq "accessibility-checkpoint-node"
+        }
+)
+$accessibilityCheckpointCompletions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.accessibility" -and
+            $_.eventType -eq "accessibility-checkpoint-completed" -and
+            $_.payload.reason -eq "renderer-serialization"
+        }
+)
+$accessibilityCheckpointStarts = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.accessibility" -and
+            $_.eventType -eq "accessibility-checkpoint-started" -and
+            $_.payload.reason -eq "renderer-serialization"
+        }
+)
+$accessibilityCheckpointNodes = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.accessibility" -and
+            $_.eventType -eq "accessibility-checkpoint-node"
+        }
+)
+$accessibilityCheckpointCompletions = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.accessibility" -and
+            $_.eventType -eq "accessibility-checkpoint-completed" -and
+            $_.payload.reason -eq "renderer-serialization"
+        }
+)
 
 $fixtureDocumentTokens = @(
     (@($navigationCompletions) + @($subframeNavigationCompletions)) |
@@ -459,6 +505,103 @@ if (
         $mainCrossDocumentCommit.payload.context.documentToken
 ) {
     throw "The child frame reused the main-frame document token."
+}
+$fixtureAccessibilityStarts = @(
+    $accessibilityCheckpointStarts |
+        Where-Object {
+            $_.payload.context.browserInstanceId -eq
+                $mainCrossDocumentCommit.payload.context.browserInstanceId -and
+            $_.payload.context.processId -eq
+                $mainCrossDocumentCommit.payload.rendererProcessId -and
+            $_.payload.context.processType -eq "renderer" -and
+            $_.payload.context.documentToken -eq
+                $mainCrossDocumentCommit.payload.context.documentToken
+        }
+)
+if ($fixtureAccessibilityStarts.Count -lt 1) {
+    throw (
+        "No renderer accessibility serialization checkpoint correlated with " +
+        "the committed fixture document."
+    )
+}
+$fixtureAccessibilityNodes = New-Object System.Collections.ArrayList
+$fixtureAccessibilityCompletions = New-Object System.Collections.ArrayList
+foreach ($checkpointStart in $fixtureAccessibilityStarts) {
+    $checkpointId = $checkpointStart.payload.checkpointId
+    if ([string]::IsNullOrWhiteSpace($checkpointId)) {
+        throw "An accessibility checkpoint start omitted its identity."
+    }
+    $checkpointNodes = @(
+        $accessibilityCheckpointNodes |
+            Where-Object {
+                $_.payload.checkpointId -eq $checkpointId -and
+                $_.payload.context.browserInstanceId -eq
+                    $checkpointStart.payload.context.browserInstanceId -and
+                $_.payload.context.processId -eq
+                    $checkpointStart.payload.context.processId -and
+                $_.payload.context.documentToken -eq
+                    $checkpointStart.payload.context.documentToken
+            } |
+            Sort-Object { $_.payload.nodeIndex }
+    )
+    $checkpointCompletions = @(
+        $accessibilityCheckpointCompletions |
+            Where-Object {
+                $_.payload.checkpointId -eq $checkpointId -and
+                $_.payload.context.browserInstanceId -eq
+                    $checkpointStart.payload.context.browserInstanceId -and
+                $_.payload.context.processId -eq
+                    $checkpointStart.payload.context.processId -and
+                $_.payload.context.documentToken -eq
+                    $checkpointStart.payload.context.documentToken
+            }
+    )
+    if ($checkpointCompletions.Count -ne 1) {
+        throw (
+            "An accessibility checkpoint did not have exactly one correlated " +
+            "completion."
+        )
+    }
+    $checkpointCompletion = $checkpointCompletions[0]
+    if (
+        $checkpointCompletion.payload.maximumNodes -ne
+            $checkpointStart.payload.maximumNodes -or
+        $checkpointCompletion.payload.updateCount -ne
+            $checkpointStart.payload.updateCount -or
+        $checkpointCompletion.payload.eventCount -ne
+            $checkpointStart.payload.eventCount -or
+        $checkpointCompletion.payload.nodeCount -ne $checkpointNodes.Count
+    ) {
+        throw "An accessibility checkpoint reported inconsistent counts or limits."
+    }
+    if ($checkpointCompletion.payload.truncated) {
+        throw "A fixture accessibility checkpoint was unexpectedly truncated."
+    }
+    for ($index = 0; $index -lt $checkpointNodes.Count; $index++) {
+        if ($checkpointNodes[$index].payload.nodeIndex -ne $index) {
+            throw "Accessibility checkpoint node indices are not contiguous."
+        }
+        [void] $fixtureAccessibilityNodes.Add($checkpointNodes[$index])
+    }
+    [void] $fixtureAccessibilityCompletions.Add($checkpointCompletion)
+}
+$fixtureAccessibilityButtons = @(
+    $fixtureAccessibilityNodes |
+        Where-Object {
+            $_.payload.serializedProperties -match "(?i)role=button" -and
+            $_.payload.name -in @(
+                "First disclosure name",
+                "Second disclosure name",
+                "Fixture disclosure",
+                "Fixture disclosure expanded"
+            )
+        }
+)
+if ($fixtureAccessibilityButtons.Count -lt 1) {
+    throw (
+        "The correlated accessibility evidence did not contain the fixture " +
+        "button and one of its known accessible names."
+    )
 }
 if ($listeners.Count -lt 1) {
     throw "No click listener registration was recorded for #pointer-only."
@@ -1757,6 +1900,13 @@ if (
     SubframeFrameId = $subframeNavigation.payload.context.frameId
     SubframeDocumentId = $subframeNavigation.payload.context.documentId
     SubframeParentFrameId = $subframeNavigation.payload.parentFrameId
+    AccessibilityCheckpoints = $fixtureAccessibilityStarts.Count
+    AccessibilityCheckpointNodes = $fixtureAccessibilityNodes.Count
+    AccessibilityButtonRecords = $fixtureAccessibilityButtons.Count
+    AccessibilityCheckpointsTruncated = @(
+        $fixtureAccessibilityCompletions |
+            Where-Object { $_.payload.truncated }
+    ).Count
     DomCheckpoints = $domCheckpointStarts.Count
     DomCheckpointId = $domCheckpointId
     DomCheckpointNodes = $fixtureDomNodes.Count
@@ -1793,6 +1943,7 @@ Write-Host (
     "Blink propagation, listener, default-handler, DOM timer, " +
     "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
     "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
-    "coalesced post-mutation DOM checkpoint " +
+    "coalesced post-mutation DOM checkpoint, and correlated renderer " +
+    "accessibility serialization checkpoint " +
     "evidence verified."
 )

@@ -145,6 +145,20 @@ short-lived documents that are mutated and discarded before any delivery pass
 produces a checkpoint. Under 0.16 the archive states that absence rather than
 naming evidence it does not contain.
 
+Protocol 0.17 is implemented as a proof of concept and awaits reference-platform
+build and capture validation. It records the AX update batches Chromium
+renderers serialize for the browser process and correlates them to committed
+navigations by browser instance, document token, and renderer process. Each
+batch reports its update count, event count, node count, 100,000-node limit, and
+truncation state. Node records include AX and DOM identities, role, accessible
+name and description, focused state, and Chromium's readable serialized
+properties. The launcher forces renderer accessibility for deterministic
+fixture capture, strict managed ingest covers all three payload shapes, and
+playback reports correlated accessibility checkpoint and node counts. These
+records are incremental serialization batches, not complete tree snapshots.
+See the
+[accessibility checkpoint evidence model](docs/architecture/accessibility-checkpoint-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.

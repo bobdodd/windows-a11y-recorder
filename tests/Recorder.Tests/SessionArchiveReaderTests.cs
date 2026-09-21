@@ -196,6 +196,36 @@ public sealed class SessionArchiveReaderTests
                             truncated = true
                         }),
                     CreateEvent(
+                        "browser.accessibility",
+                        "accessibility-checkpoint-started",
+                        212,
+                        new
+                        {
+                            context = rendererContext,
+                            checkpointId = "accessibility-checkpoint-1"
+                        }),
+                    CreateEvent(
+                        "browser.accessibility",
+                        "accessibility-checkpoint-node",
+                        214,
+                        new
+                        {
+                            context = rendererContext,
+                            checkpointId = "accessibility-checkpoint-1",
+                            accessibilityNodeId = 7
+                        }),
+                    CreateEvent(
+                        "browser.accessibility",
+                        "accessibility-checkpoint-completed",
+                        216,
+                        new
+                        {
+                            context = rendererContext,
+                            checkpointId = "accessibility-checkpoint-1",
+                            nodeCount = 1,
+                            truncated = true
+                        }),
+                    CreateEvent(
                         "browser.dispatch",
                         "dispatch-started",
                         220,
@@ -229,9 +259,14 @@ public sealed class SessionArchiveReaderTests
             Assert.Equal(1, navigation.CheckpointCount);
             Assert.Equal(1, navigation.DomNodeCount);
             Assert.Equal(1, navigation.TruncatedCheckpointCount);
+            Assert.Equal(1, navigation.AccessibilityCheckpointCount);
+            Assert.Equal(1, navigation.AccessibilityNodeCount);
+            Assert.Equal(
+                1,
+                navigation.TruncatedAccessibilityCheckpointCount);
             Assert.Equal(1, navigation.DispatchCount);
             Assert.Equal(1, navigation.ListenerInvocationCount);
-            Assert.Equal(6, navigation.RelatedEventCount);
+            Assert.Equal(9, navigation.RelatedEventCount);
         }
         finally
         {

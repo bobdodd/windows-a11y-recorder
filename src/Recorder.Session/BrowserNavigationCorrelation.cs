@@ -18,6 +18,9 @@ public sealed record BrowserNavigationCorrelation(
     int CheckpointCount,
     int DomNodeCount,
     int TruncatedCheckpointCount,
+    int AccessibilityCheckpointCount,
+    int AccessibilityNodeCount,
+    int TruncatedAccessibilityCheckpointCount,
     int DispatchCount,
     int ListenerInvocationCount,
     int RelatedEventCount)
@@ -173,6 +176,16 @@ internal static class BrowserNavigationCorrelator
                     item.Event.EventType == "dom-checkpoint-node"),
                 related.Count(item =>
                     item.Event.EventType == "dom-checkpoint-completed" &&
+                    item.Truncated),
+                related.Count(item =>
+                    item.Event.EventType ==
+                    "accessibility-checkpoint-completed"),
+                related.Count(item =>
+                    item.Event.EventType ==
+                    "accessibility-checkpoint-node"),
+                related.Count(item =>
+                    item.Event.EventType ==
+                    "accessibility-checkpoint-completed" &&
                     item.Truncated),
                 related.Count(item =>
                     item.Event.EventType == "dispatch-started"),

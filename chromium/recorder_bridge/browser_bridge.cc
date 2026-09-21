@@ -87,6 +87,7 @@ struct EvidenceIdentityStorage {
   uint64_t next_timer_id = 1;
   uint64_t next_dom_checkpoint_id = 1;
   uint64_t next_dom_transition_id = 1;
+  uint64_t next_accessibility_checkpoint_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
 
   // The transitions recorded for a document since its last completed
@@ -160,10 +161,21 @@ std::string DomTransitionId(uint64_t transition_sequence) {
   return "dom-transition-" + base::NumberToString(transition_sequence);
 }
 
+std::string AccessibilityCheckpointId(uint64_t checkpoint_sequence) {
+  return "accessibility-checkpoint-" +
+         base::NumberToString(checkpoint_sequence);
+}
+
 uint64_t AssignDomCheckpointIdentity() {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
   return identities.next_dom_checkpoint_id++;
+}
+
+uint64_t AssignAccessibilityCheckpointIdentity() {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  return identities.next_accessibility_checkpoint_id++;
 }
 
 // Assigns the identity of one recorded transition and accumulates it into the
@@ -382,6 +394,18 @@ base::DictValue CreateDomCheckpointBasePayload(
               CreateContext(client, document_node_id,
                             std::move(document_token)));
   payload.Set("checkpointId", DomCheckpointId(checkpoint_sequence));
+  return payload;
+}
+
+base::DictValue CreateAccessibilityCheckpointBasePayload(
+    const RecorderPipeClient& client,
+    uint64_t checkpoint_sequence,
+    std::string document_token) {
+  base::DictValue payload;
+  payload.Set("context",
+              CreateContext(client, 0, std::move(document_token)));
+  payload.Set("checkpointId",
+              AccessibilityCheckpointId(checkpoint_sequence));
   return payload;
 }
 
@@ -1535,6 +1559,101 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                 DomTransitionId(coverage.last_transition_id));
   }
   SendBlinkEvidence("browser.dom", "dom-checkpoint-completed",
+                    std::move(payload));
+}
+
+uint64_t BeginRendererAccessibilityCheckpoint(
+    std::string document_token,
+    std::string reason,
+    int maximum_nodes,
+    int update_count,
+    int event_count) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_token.empty() || reason.empty() ||
+      maximum_nodes <= 0 || update_count < 0 || event_count < 0) {
+    return 0;
+  }
+  const uint64_t checkpoint_sequence =
+      AssignAccessibilityCheckpointIdentity();
+  base::DictValue payload = CreateAccessibilityCheckpointBasePayload(
+      *client, checkpoint_sequence, std::move(document_token));
+  payload.Set("reason", std::move(reason));
+  payload.Set("maximumNodes", maximum_nodes);
+  payload.Set("updateCount", update_count);
+  payload.Set("eventCount", event_count);
+  SendBlinkEvidence("browser.accessibility",
+                    "accessibility-checkpoint-started",
+                    std::move(payload));
+  return checkpoint_sequence;
+}
+
+void RecordRendererAccessibilityCheckpointNode(
+    uint64_t checkpoint_sequence,
+    std::string document_token,
+    int node_index,
+    int accessibility_node_id,
+    int parent_accessibility_node_id,
+    int dom_node_id,
+    int role,
+    std::string name,
+    std::string description,
+    std::string serialized_properties,
+    bool focused) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_token.empty() ||
+      node_index < 0 || accessibility_node_id <= 0 || role < 0) {
+    return;
+  }
+  base::DictValue payload = CreateAccessibilityCheckpointBasePayload(
+      *client, checkpoint_sequence, std::move(document_token));
+  payload.Set("nodeIndex", node_index);
+  payload.Set("accessibilityNodeId", accessibility_node_id);
+  if (parent_accessibility_node_id > 0) {
+    payload.Set("parentAccessibilityNodeId",
+                parent_accessibility_node_id);
+  } else {
+    payload.Set("parentAccessibilityNodeId", base::Value());
+  }
+  if (dom_node_id > 0) {
+    payload.Set("domNodeId", dom_node_id);
+  } else {
+    payload.Set("domNodeId", base::Value());
+  }
+  payload.Set("role", role);
+  payload.Set("name", std::move(name));
+  payload.Set("description", std::move(description));
+  payload.Set("serializedProperties", std::move(serialized_properties));
+  payload.Set("focused", focused);
+  SendBlinkEvidence("browser.accessibility",
+                    "accessibility-checkpoint-node",
+                    std::move(payload));
+}
+
+void CompleteRendererAccessibilityCheckpoint(
+    uint64_t checkpoint_sequence,
+    std::string document_token,
+    std::string reason,
+    int node_count,
+    bool truncated,
+    int maximum_nodes,
+    int update_count,
+    int event_count) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_token.empty() ||
+      reason.empty() || node_count < 0 || maximum_nodes <= 0 ||
+      update_count < 0 || event_count < 0) {
+    return;
+  }
+  base::DictValue payload = CreateAccessibilityCheckpointBasePayload(
+      *client, checkpoint_sequence, std::move(document_token));
+  payload.Set("reason", std::move(reason));
+  payload.Set("nodeCount", node_count);
+  payload.Set("truncated", truncated);
+  payload.Set("maximumNodes", maximum_nodes);
+  payload.Set("updateCount", update_count);
+  payload.Set("eventCount", event_count);
+  SendBlinkEvidence("browser.accessibility",
+                    "accessibility-checkpoint-completed",
                     std::move(payload));
 }
 

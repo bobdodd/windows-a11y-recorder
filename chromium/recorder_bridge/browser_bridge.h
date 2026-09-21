@@ -244,6 +244,47 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int maximum_attributes_per_node,
                                 int maximum_value_length);
 
+// Starts one checkpoint for the accessibility updates Chromium is about to
+// send from the renderer to the browser process. The shared document token
+// correlates this evidence with the committed navigation.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t BeginRendererAccessibilityCheckpoint(
+    std::string document_token,
+    std::string reason,
+    int maximum_nodes,
+    int update_count,
+    int event_count);
+
+// Records one serialized AXNodeData item. The serialized properties retain
+// Chromium's own readable role and state representation in addition to the
+// structured fields used by playback.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordRendererAccessibilityCheckpointNode(
+    uint64_t checkpoint_sequence,
+    std::string document_token,
+    int node_index,
+    int accessibility_node_id,
+    int parent_accessibility_node_id,
+    int dom_node_id,
+    int role,
+    std::string name,
+    std::string description,
+    std::string serialized_properties,
+    bool focused);
+
+// Completes the renderer serialization checkpoint and reports capture limits
+// explicitly so a partial update cannot be mistaken for a complete one.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void CompleteRendererAccessibilityCheckpoint(
+    uint64_t checkpoint_sequence,
+    std::string document_token,
+    std::string reason,
+    int node_count,
+    bool truncated,
+    int maximum_nodes,
+    int update_count,
+    int event_count);
+
 // Records one accepted attribute mutation. The change type is 0 for an added
 // attribute, 1 for a removed attribute, and 2 for a changed attribute, and it
 // determines which of the two values is recorded as absent: an added attribute

@@ -733,6 +733,12 @@ public partial class MainWindow : Window
             : $"{navigation.TruncatedCheckpointCount:N0} of " +
               $"{navigation.CheckpointCount:N0} correlated checkpoints " +
               "were marked truncated.";
+        var accessibilityTruncation =
+            navigation.TruncatedAccessibilityCheckpointCount == 0
+                ? "No correlated accessibility checkpoint was marked truncated."
+                : $"{navigation.TruncatedAccessibilityCheckpointCount:N0} of " +
+                  $"{navigation.AccessibilityCheckpointCount:N0} correlated " +
+                  "accessibility checkpoints were marked truncated.";
         BrowserCorrelationTextBox.Text =
             $"{navigation.Url}{Environment.NewLine}" +
             $"{completion} Correlation basis: {navigation.CorrelationBasis}." +
@@ -740,19 +746,22 @@ public partial class MainWindow : Window
             $"Renderer: {navigation.RendererProcessId?.ToString() ?? "not recorded"}; " +
             $"DOM checkpoints: {navigation.CheckpointCount:N0}; " +
             $"DOM nodes: {navigation.DomNodeCount:N0}; " +
+            $"accessibility checkpoints: {navigation.AccessibilityCheckpointCount:N0}; " +
+            $"accessibility nodes: {navigation.AccessibilityNodeCount:N0}; " +
             $"dispatches: {navigation.DispatchCount:N0}; " +
             $"listener invocations: {navigation.ListenerInvocationCount:N0}; " +
             $"related records: {navigation.RelatedEventCount:N0}." +
-            $"{Environment.NewLine}{truncation}";
+            $"{Environment.NewLine}{truncation} {accessibilityTruncation}";
         BrowserCorrelationTextBox.CaretIndex = 0;
         BrowserCorrelationTextBox.ScrollToHome();
         AutomationProperties.SetHelpText(
             BrowserCorrelationTextBox,
             $"Navigation at {FormatTime(navigation.StartNanoseconds)}. " +
             $"{navigation.CheckpointCount:N0} DOM checkpoints, " +
+            $"{navigation.AccessibilityCheckpointCount:N0} accessibility checkpoints, " +
             $"{navigation.DispatchCount:N0} dispatches, and " +
             $"{navigation.ListenerInvocationCount:N0} listener invocations. " +
-            truncation);
+            truncation + " " + accessibilityTruncation);
     }
 
     private void DisplayFrameAt(long positionNanoseconds)

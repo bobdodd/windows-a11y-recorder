@@ -106,6 +106,15 @@ internal static class BrowserProtocol
             (BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCharacterDataChanged) =>
                 payload.Deserialize<BrowserDomCharacterDataChangedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Accessibility,
+                BrowserEvidenceEventTypes.AccessibilityCheckpointStarted) =>
+                payload.Deserialize<BrowserAccessibilityCheckpointStartedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Accessibility,
+                BrowserEvidenceEventTypes.AccessibilityCheckpointNode) =>
+                payload.Deserialize<BrowserAccessibilityCheckpointNodePayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Accessibility,
+                BrowserEvidenceEventTypes.AccessibilityCheckpointCompleted) =>
+                payload.Deserialize<BrowserAccessibilityCheckpointCompletedPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Cookie,
                 BrowserEvidenceEventTypes.CookieOperation) =>
                 payload.Deserialize<BrowserCookieOperationPayload>(JsonOptions) as object,

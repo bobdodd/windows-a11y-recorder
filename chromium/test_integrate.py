@@ -12,6 +12,53 @@ SPEC.loader.exec_module(INTEGRATE)
 
 
 class IntegrateTests(unittest.TestCase):
+    def test_patches_renderer_accessibility_serialization_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "render_accessibility_impl.cc"
+            build = root / "BUILD.gn"
+            source.write_text(
+                '#include "content/renderer/accessibility/'
+                'render_accessibility_impl.h"\n\n'
+                "bool RenderAccessibilityImpl::"
+                "SendAccessibilitySerialization() {\n"
+                "  ax_annotators_manager_->AddDebuggingAttributes("
+                "updates_and_events.updates);\n"
+                "  return true;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            build.write_text(
+                'target(link_target_type, "renderer") {\n'
+                "  deps = [\n"
+                '    "//base",\n'
+                "  ]\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            INTEGRATE.patch_content_renderer_accessibility(source)
+            INTEGRATE.patch_content_renderer_build(build)
+            first_source = source.read_text(encoding="utf-8")
+            first_build = build.read_text(encoding="utf-8")
+            INTEGRATE.patch_content_renderer_accessibility(source)
+            INTEGRATE.patch_content_renderer_build(build)
+
+            self.assertEqual(first_source, source.read_text(encoding="utf-8"))
+            self.assertEqual(first_build, build.read_text(encoding="utf-8"))
+            self.assertIn(
+                "BeginRendererAccessibilityCheckpoint", first_source
+            )
+            self.assertIn(
+                "RecordRendererAccessibilityCheckpointNode", first_source
+            )
+            self.assertIn(
+                "CompleteRendererAccessibilityCheckpoint", first_source
+            )
+            self.assertIn(
+                '    "//chromium/recorder_bridge",', first_build
+            )
+
     def test_upgrades_legacy_scheduling_hooks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -297,6 +297,19 @@ contain, and an uncovered transition is stated by omission. Both counters live
 in the bridge, so no Blink hook signature or body changed. Live 0.16 connections
 require an exact protocol-version match.
 
+Protocol version 0.17 records the accessibility updates and events the renderer
+is about to send from
+`RenderAccessibilityImpl::SendAccessibilitySerialization()`. Each operation
+emits a start record, zero or more AX node records, and a completion record with
+explicit update, event, node-limit, node-count, and truncation fields. Records
+carry Chromium's document token and renderer process identity for correlation
+with committed navigation. The launcher uses
+`--force-renderer-accessibility` for deterministic proof-of-concept capture.
+These records are incremental serialization batches and do not claim to be
+complete accessibility-tree snapshots. The complete contract is defined in the
+[accessibility checkpoint evidence model](accessibility-checkpoint-evidence-model.md).
+Live 0.17 connections require an exact protocol-version match.
+
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
 rejects unmapped members, and the receive loop treats a rejection as a failed

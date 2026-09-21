@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.16` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.17` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -75,6 +75,14 @@ the count and the first and last identity of the transitions it covers for that
 document. Protocol 0.15 had the transition name the checkpoint its delivery pass
 was expected to produce, which validation showed can name a checkpoint that is
 never produced.
+
+Protocol 0.17 records renderer accessibility serialization batches before
+Chromium sends them to the browser process. Each batch has start, node, and
+completion records with the document token, update and event counts, a
+100,000-node limit, and explicit truncation. Node records include AX and DOM
+identities, role, name, description, focused state, and Chromium's readable
+serialized properties. These batches are incremental updates, not complete
+accessibility-tree snapshots.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

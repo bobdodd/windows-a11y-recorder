@@ -148,6 +148,7 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         result.ArgumentList.Add("--no-first-run");
         result.ArgumentList.Add("--no-default-browser-check");
         result.ArgumentList.Add("--disable-background-mode");
+        result.ArgumentList.Add("--force-renderer-accessibility");
         if (remoteDebuggingPort is not null)
         {
             if (remoteDebuggingPort is <= 0 or > 65535)
