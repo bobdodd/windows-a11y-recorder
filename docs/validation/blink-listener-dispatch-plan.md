@@ -785,3 +785,47 @@ captured before the collector's queued evidence had drained, 0.74 ms before the
 last drained observation it was written after, which made the session status
 `failed` and the capture host exit with code 3 after a complete capture of
 42,949 records.
+
+## Registration-form validation result
+
+Reference platform, September 21, 2026, at repository revision `e107a34`.
+Protocol 0.19. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, with a 20-second
+capture.
+
+The run passed: 45 integration tests, 99 managed tests, a valid session archive,
+42,233 events and 110 artifacts validated, no network-service crashes, and exit
+code 0.
+
+Observed for this slice:
+
+| Field | Value |
+| --- | --- |
+| `InlineAttributeListenerId` | `listener-1` |
+| `InlineAttributeRegistrationKind` | `inline-attribute` |
+| `EventHandlerPropertyListenerId` | `listener-9` |
+| `EventHandlerPropertyRegistrationKind` | `event-handler-property` |
+| `InlineAttributeReplacements` | 1 |
+| `PropertyListenerReplacements` | 1 |
+| `ReplacedCallbackRegistrationKind` | `event-handler-property` |
+| `WindowClickInvocations` | 1 |
+
+What this establishes: a listener created by an inline `on*` content attribute
+is recorded as `inline-attribute`, one created by an `on*` property assignment
+as `event-handler-property`, and the `addEventListener` registration on
+`#pointer-only` still as `add-event-listener`. Each replacement record carries
+the listener identity of the registration whose callback Blink swapped, one for
+the registration an inline attribute established and one for a registration an
+earlier assignment established, and reports the form of the callback Blink then
+held. The window click invocation count is unchanged from the previous run,
+because each new fixture handler stops propagation at its target, so the added
+fixture work did not disturb the non-Node assertions.
+
+What this does not establish: the recorded form is a reading of Blink's own
+listener classification rather than an independent record of the call that
+created the listener, the previous callback in a replacement is not identified,
+a listener Blink installs itself is still not distinguished from one a script
+added, and `native` is defined but never emitted. Listener source location,
+isolated-world identity, and worker global scopes remain outstanding, and the
+455 recorded transitions with 200 uncovered are the same population described
+under protocol 0.16 rather than a result of this slice.
