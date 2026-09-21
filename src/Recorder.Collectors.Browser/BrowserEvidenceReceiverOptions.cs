@@ -14,6 +14,11 @@ public sealed record BrowserEvidenceReceiverOptions
     public string? ChromiumExecutablePath { get; init; }
     public string? StartUrl { get; init; }
     public string? ProfileDirectory { get; init; }
+
+    // When absent, the receiver writes the browser bridge log into the session
+    // directory so a startup failure is diagnosable without preparing the
+    // environment first.
+    public string? BridgeDiagnosticLogPath { get; init; }
     public int? RemoteDebuggingPort { get; init; }
 }
 

@@ -982,6 +982,114 @@ class IntegrateTests(unittest.TestCase):
                 event_dispatcher.read_text(encoding="utf-8"),
             )
 
+    def _write_main_delegate(self, path: Path, hook: str = "") -> None:
+        path.write_text(
+            '#include "chrome/app/chrome_main_delegate.h"\n'
+            "\n"
+            "std::optional<int> ChromeMainDelegate::BasicStartupComplete() {\n"
+            f"{hook}"
+            "  return std::nullopt;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+    def test_bridge_failure_exits_with_the_failure_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chrome_main_delegate.cc"
+            self._write_main_delegate(path)
+
+            INTEGRATE.patch_main_delegate(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_main_delegate(path)
+
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertIn(
+                "return a11y_recorder::kBridgeInitializationFailureExitCode;",
+                first,
+            )
+            self.assertNotIn("RESULT_CODE_NORMAL_EXIT", first)
+            self.assertIn(
+                "kBridgeInitializationFailureExitCode",
+                (
+                    Path(__file__).parent
+                    / "recorder_bridge"
+                    / "recorder_switches.h"
+                ).read_text(encoding="utf-8"),
+            )
+
+    # Every bridge hook body this script has written, oldest first. A checkout
+    # patched by any of these revisions must converge on the current body, so
+    # each one is migrated here rather than trusted to match a template.
+    HISTORICAL_BRIDGE_HOOKS = (
+        # The original body: no diagnostic, and a normal exit code.
+        "#if BUILDFLAG(IS_WIN)\n"
+        "  std::string recorder_bridge_error;\n"
+        "  if (!a11y_recorder::InitializeProcessBridge(\n"
+        "          &recorder_bridge_error)) {\n"
+        '    LOG(ERROR) << "Windows A11y Recorder bridge failed: "\n'
+        "               << recorder_bridge_error;\n"
+        "    return content::RESULT_CODE_NORMAL_EXIT;\n"
+        "  }\n"
+        "#endif\n",
+        # A diagnostic was added, still with a normal exit code.
+        "#if BUILDFLAG(IS_WIN)\n"
+        "  std::string recorder_bridge_error;\n"
+        "  if (!a11y_recorder::InitializeProcessBridge(\n"
+        "          &recorder_bridge_error)) {\n"
+        "    a11y_recorder::WriteRecorderBridgeDiagnostic(\n"
+        '        "Recorder process bridge initialization failed: " +\n'
+        "        recorder_bridge_error);\n"
+        '    LOG(ERROR) << "Windows A11y Recorder bridge failed: "\n'
+        "               << recorder_bridge_error;\n"
+        "    return content::RESULT_CODE_NORMAL_EXIT;\n"
+        "  }\n"
+        "#endif\n",
+    )
+
+    def test_migrates_every_historical_bridge_hook_body(self):
+        for hook in self.HISTORICAL_BRIDGE_HOOKS:
+            with self.subTest(hook=hook.splitlines()[4].strip()):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "chrome_main_delegate.cc"
+                    self._write_main_delegate(path, hook)
+
+                    INTEGRATE.patch_main_delegate(path)
+                    patched = path.read_text(encoding="utf-8")
+
+                    self.assertNotIn("RESULT_CODE_NORMAL_EXIT", patched)
+                    self.assertEqual(
+                        1,
+                        patched.count(
+                            "a11y_recorder::InitializeProcessBridge("
+                        ),
+                    )
+                    self.assertIn(INTEGRATE.HOOK, patched)
+
+    def test_reports_a_duplicated_bridge_hook(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chrome_main_delegate.cc"
+            self._write_main_delegate(
+                path, INTEGRATE.HOOK + self.HISTORICAL_BRIDGE_HOOKS[0]
+            )
+
+            with self.assertRaises(RuntimeError) as failure:
+                INTEGRATE.patch_main_delegate(path)
+
+            self.assertIn(
+                "more than one recorder bridge hook", str(failure.exception)
+            )
+
+    def test_a_normal_exit_bridge_hook_never_reaches_a_build(self):
+        """The migration is the fix, and this guard is its backstop."""
+        with self.assertRaises(RuntimeError) as failure:
+            INTEGRATE.verify_bridge_failure_is_fatal(
+                self.HISTORICAL_BRIDGE_HOOKS[0], Path("chrome_main_delegate.cc")
+            )
+
+        self.assertIn(
+            "kBridgeInitializationFailureExitCode", str(failure.exception)
+        )
+
     def test_removes_all_historical_windows_hook_variants(self):
         for hook in (
             INTEGRATE.ORIGINAL_CHILD_LAUNCHER_HOOK,

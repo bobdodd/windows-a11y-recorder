@@ -8,6 +8,25 @@ public sealed class ChromiumLauncher : IAsyncDisposable
 {
     public const string LogFileEnvironmentVariable =
         "A11Y_RECORDER_CHROMIUM_LOG_FILE";
+
+    // The instrumented browser reads this variable before Chromium logging
+    // starts, which is the only point at which a bridge initialization failure
+    // can still be described. The name is declared in the native bridge as
+    // kBridgeLogFileEnvironmentWide.
+    public const string BridgeLogFileEnvironmentVariable =
+        "A11Y_RECORDER_BRIDGE_LOG_FILE";
+
+    // Declared in the native bridge as kBridgeInitializationFailureExitCode. A
+    // recorder-launched browser whose bridge cannot initialize exits with this
+    // code, so a failed bridge is never reported as a normal browser exit.
+    public const int BridgeInitializationFailureExitCode = 0xA11B;
+
+    // Written by the browser startup hook that chromium/integrate.py inserts,
+    // immediately before it returns the failure exit code. The two texts must
+    // stay identical or the reason cannot be recovered from the log.
+    private const string BridgeInitializationFailureMarker =
+        "Recorder process bridge initialization failed:";
+
     private static readonly TimeSpan StartupStabilityWindow =
         TimeSpan.FromMilliseconds(500);
 
@@ -16,6 +35,7 @@ public sealed class ChromiumLauncher : IAsyncDisposable
 
     private readonly Func<bool> _isCurrentProcessElevated;
     private Process? _process;
+    private string? _bridgeDiagnosticLogPath;
 
     public ChromiumLauncher()
         : this(IsCurrentProcessElevated)
@@ -36,6 +56,7 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         BrowserEvidenceConnectionInfo connection,
         string? startUrl,
         int? remoteDebuggingPort,
+        string? bridgeDiagnosticLogPath,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
@@ -66,7 +87,12 @@ public sealed class ChromiumLauncher : IAsyncDisposable
             profileDirectory,
             startUrl,
             Environment.GetEnvironmentVariable(LogFileEnvironmentVariable),
-            remoteDebuggingPort);
+            remoteDebuggingPort,
+            bridgeDiagnosticLogPath);
+        _bridgeDiagnosticLogPath =
+            string.IsNullOrWhiteSpace(bridgeDiagnosticLogPath)
+                ? null
+                : Path.GetFullPath(bridgeDiagnosticLogPath);
         var process = Process.Start(startInfo) ??
             throw new InvalidOperationException(
                 "Instrumented Chromium did not start.");
@@ -90,9 +116,10 @@ public sealed class ChromiumLauncher : IAsyncDisposable
                 .ConfigureAwait(false);
             if (process.HasExited)
             {
-                throw new InvalidOperationException(
-                    "Instrumented Chromium exited during startup with exit " +
-                    $"code {process.ExitCode}.");
+                throw new BrowserStartupExitException(
+                    DescribeStartupExit(
+                        process.ExitCode,
+                        _bridgeDiagnosticLogPath));
             }
             return process;
         }
@@ -113,16 +140,83 @@ public sealed class ChromiumLauncher : IAsyncDisposable
             await StopAsync(CancellationToken.None).ConfigureAwait(false);
             if (exitCode.HasValue &&
                 exception is not OperationCanceledException &&
-                !exception.Message.StartsWith(
-                    "Instrumented Chromium exited during startup with exit ",
-                    StringComparison.Ordinal))
+                exception is not BrowserStartupExitException)
             {
-                throw new InvalidOperationException(
-                    "Instrumented Chromium exited during startup with exit " +
-                    $"code {exitCode.Value}.",
+                throw new BrowserStartupExitException(
+                    DescribeStartupExit(
+                        exitCode.Value,
+                        _bridgeDiagnosticLogPath),
                     exception);
             }
             throw;
+        }
+    }
+
+    // A bridge initialization failure is reported by its own exit code, so the
+    // launcher can name the failure instead of reporting only a number. The
+    // reason itself is only available when the browser was able to record it.
+    internal static string DescribeStartupExit(
+        int exitCode,
+        string? bridgeDiagnosticLogPath)
+    {
+        if (exitCode != BridgeInitializationFailureExitCode)
+        {
+            return "Instrumented Chromium exited during startup with exit " +
+                $"code {exitCode}.";
+        }
+
+        var reason = ReadBridgeInitializationFailure(bridgeDiagnosticLogPath);
+        if (reason is not null)
+        {
+            return "Instrumented Chromium could not initialize its recorder " +
+                $"bridge: {reason}";
+        }
+        if (bridgeDiagnosticLogPath is null)
+        {
+            return "Instrumented Chromium could not initialize its recorder " +
+                "bridge. No bridge diagnostic log was configured for this " +
+                "session, so the reason was not recorded.";
+        }
+        return "Instrumented Chromium could not initialize its recorder " +
+            "bridge. No reason was recorded in " +
+            $"{bridgeDiagnosticLogPath}.";
+    }
+
+    private static string? ReadBridgeInitializationFailure(string? path)
+    {
+        if (path is null || !File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            string? latest = null;
+            while (reader.ReadLine() is { } line)
+            {
+                var marker = line.IndexOf(
+                    BridgeInitializationFailureMarker,
+                    StringComparison.Ordinal);
+                if (marker >= 0)
+                {
+                    latest = line[marker..].Trim();
+                }
+            }
+            return latest;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 
@@ -131,7 +225,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         string profileDirectory,
         string? startUrl,
         string? diagnosticLogPath = null,
-        int? remoteDebuggingPort = null)
+        int? remoteDebuggingPort = null,
+        string? bridgeDiagnosticLogPath = null)
     {
         var result = new ProcessStartInfo
         {
@@ -143,6 +238,17 @@ public sealed class ChromiumLauncher : IAsyncDisposable
             CreateNoWindow = false
         };
         RemoveSensitiveEnvironmentVariables(result);
+        if (!string.IsNullOrWhiteSpace(bridgeDiagnosticLogPath))
+        {
+            var fullBridgeLogPath = Path.GetFullPath(bridgeDiagnosticLogPath);
+            var bridgeLogDirectory = Path.GetDirectoryName(fullBridgeLogPath);
+            if (!string.IsNullOrEmpty(bridgeLogDirectory))
+            {
+                Directory.CreateDirectory(bridgeLogDirectory);
+            }
+            result.Environment[BridgeLogFileEnvironmentVariable] =
+                fullBridgeLogPath;
+        }
         result.ArgumentList.Add("--a11y-recorder-bootstrap=stdin");
         result.ArgumentList.Add($"--user-data-dir={Path.GetFullPath(profileDirectory)}");
         result.ArgumentList.Add("--no-first-run");
@@ -247,6 +353,21 @@ public sealed class ChromiumLauncher : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+}
+
+// Distinguishes an exit observed inside the startup stability window from any
+// other launch failure, so a described exit is never described again.
+public sealed class BrowserStartupExitException : InvalidOperationException
+{
+    public BrowserStartupExitException(string message)
+        : base(message)
+    {
+    }
+
+    public BrowserStartupExitException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
 

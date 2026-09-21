@@ -103,8 +103,25 @@ capture host. The launcher then adds Chromium's `--enable-logging` and
 can contain tested URLs and other local browsing details. Diagnostic logs are
 not session evidence and must not contain the recorder authentication token.
 
+A browser process whose bridge cannot initialize exits with
+`kBridgeInitializationFailureExitCode`, declared in `recorder_switches.h` as
+`0xA11B`. The value sits outside Chromium's own result-code range so the
+recorder can tell a failed bridge from a browser that exited normally. Reporting
+this failure as a normal exit code is a defect: the recorder observes only the
+exit code within its startup window, so a normal code makes a failed session
+indistinguishable from one the operator closed. Because the hook is inserted
+only when absent, an already-patched checkout keeps whatever body its revision
+wrote, so `integrate.py` migrates the hook by replacing the whole region it
+introduces rather than by matching any earlier body verbatim. Integration still
+fails if the resulting hook would not return the failure code, which is a
+backstop rather than the mechanism.
+
 For failures that occur before Chromium logging is initialized, set
-`A11Y_RECORDER_BRIDGE_LOG_FILE` to an absolute file path. The native bridge
+`A11Y_RECORDER_BRIDGE_LOG_FILE` to an absolute file path. The recorder sets this
+variable for every browser it launches, defaulting to
+`diagnostics\browser-bridge.log` inside the session directory, and reports the
+recorded reason in its launch failure message. An environment value set by a
+validation harness is preserved. The native bridge
 appends only process identifiers, monotonic tick values, bootstrap attachment
 stages, child process types, and internal error text. It never writes bootstrap
 contents, pipe names, authentication tokens, command lines, URLs, or page data.

@@ -16,6 +16,14 @@ inline constexpr wchar_t kChildBootstrapMetadataEnvironmentWide[] =
 inline constexpr wchar_t kBridgeLogFileEnvironmentWide[] =
     L"A11Y_RECORDER_BRIDGE_LOG_FILE";
 
+// A recorder-launched browser whose bridge cannot initialize exits with this
+// code. The value is outside Chromium's own result-code range, so the recorder
+// can distinguish a failed bridge from a browser that exited normally. A normal
+// exit code here would make a failed bridge indistinguishable from success.
+// The recorder declares the same value as
+// ChromiumLauncher.BridgeInitializationFailureExitCode.
+inline constexpr int kBridgeInitializationFailureExitCode = 0xA11B;
+
 // These values mirror Chromium's public process command-line contract. Keeping
 // them here prevents the bridge component, which is also consumed by Blink
 // core, from depending upward on //content/public/common.

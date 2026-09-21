@@ -20,6 +20,25 @@ from the product version.
 
 ### Fixed
 
+- Made a failed browser bridge report itself. A recorder-launched browser whose
+  bridge could not initialize returned `content::RESULT_CODE_NORMAL_EXIT`, so the
+  recorder saw exit code 0 inside its startup window and could report only
+  "exited during startup with exit code 0". A failed bridge was therefore
+  indistinguishable from a browser that started and closed, and the reason was
+  reachable only by preparing `A11Y_RECORDER_BRIDGE_LOG_FILE` before the run,
+  which the application never did. The instrumented browser now exits with
+  `kBridgeInitializationFailureExitCode`, the recorder sets a per-session bridge
+  log under `diagnostics\browser-bridge.log` for every browser it launches while
+  preserving a value set by a validation harness, and the launch failure names
+  the bridge failure and quotes the recorded reason. When no reason was recorded,
+  the message says so and gives the path rather than implying one. `integrate.py`
+  migrates an already-patched checkout onto the current hook body by replacing
+  the whole region the hook introduces, because matching an earlier body
+  verbatim requires anticipating every shape ever written: the first attempt at
+  this change carried a verbatim copy of the previous body and failed on a
+  checkout patched two revisions earlier, whose body predated the bridge
+  diagnostic as well as the exit code. Integration still fails if the resulting
+  hook would not return the failure code.
 - Recorded Chromium's role name on every protocol 0.17 accessibility node and
   moved role verification onto that field. The first reference run of the
   accessibility slice failed because the verifier searched the readable

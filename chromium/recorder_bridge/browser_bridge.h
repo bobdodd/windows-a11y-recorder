@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "base/component_export.h"
+#include "chromium/recorder_bridge/recorder_switches.h"
 
 namespace base {
 class CommandLine;

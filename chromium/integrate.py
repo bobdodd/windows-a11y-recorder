@@ -60,20 +60,31 @@ BRIDGE_INCLUDE_BLOCK = f"""\
 {BRIDGE_INCLUDE}
 #endif
 """
-HOOK = """\
+BRIDGE_FAILURE_RETURN = (
+    "    return a11y_recorder::kBridgeInitializationFailureExitCode;"
+)
+HOOK = f"""\
 #if BUILDFLAG(IS_WIN)
   std::string recorder_bridge_error;
   if (!a11y_recorder::InitializeProcessBridge(
-          &recorder_bridge_error)) {
+          &recorder_bridge_error)) {{
     a11y_recorder::WriteRecorderBridgeDiagnostic(
         "Recorder process bridge initialization failed: " +
         recorder_bridge_error);
     LOG(ERROR) << "Windows A11y Recorder bridge failed: "
                << recorder_bridge_error;
-    return content::RESULT_CODE_NORMAL_EXIT;
-  }
+{BRIDGE_FAILURE_RETURN}
+  }}
 #endif
 """
+# Every bridge hook body, current or historical, opens with this text. The hook
+# is migrated by rewriting the whole region it introduces, so a checkout patched
+# by any earlier revision converges on the current body without this script
+# having to carry a verbatim copy of each shape it ever wrote.
+BRIDGE_HOOK_ANCHOR = (
+    "#if BUILDFLAG(IS_WIN)\n  std::string recorder_bridge_error;\n"
+)
+BRIDGE_HOOK_TERMINATOR = "#endif\n"
 ORIGINAL_CHILD_LAUNCHER_HOOK = """\
   std::string recorder_bridge_error;
   if (!a11y_recorder::AppendRecorderBootstrapToChildProcess(
@@ -1919,6 +1930,62 @@ def upgrade_legacy_hooks(
     return text
 
 
+def migrate_bridge_hook(text: str, path: Path) -> str:
+    """Rewrites an existing bridge hook to the current body.
+
+    Chromium checkouts are reused between revisions and the hook is inserted
+    only when absent, so a checkout patched by an earlier revision keeps that
+    revision's body. Earlier bodies have differed in the diagnostic they write
+    and in the exit code they return, so this replaces the region the hook
+    introduces rather than matching any particular earlier text.
+    """
+    start = text.find(BRIDGE_HOOK_ANCHOR)
+    if start < 0:
+        return text
+    if text.find(BRIDGE_HOOK_ANCHOR, start + 1) >= 0:
+        raise RuntimeError(
+            f"{path}: more than one recorder bridge hook is present"
+        )
+    end = text.find(BRIDGE_HOOK_TERMINATOR, start)
+    if end < 0:
+        raise RuntimeError(
+            f"{path}: the recorder bridge hook is not terminated"
+        )
+    end += len(BRIDGE_HOOK_TERMINATOR)
+    body = text[start:end]
+    if "a11y_recorder::InitializeProcessBridge(" not in body:
+        raise RuntimeError(
+            f"{path}: the recorder bridge hook does not initialize the bridge"
+        )
+    if body == HOOK:
+        return text
+    return f"{text[:start]}{HOOK}{text[end:]}"
+
+
+def verify_bridge_failure_is_fatal(text: str, path: Path) -> None:
+    """Fails when a failed bridge would not exit with the failure code.
+
+    The recorder detects a failed bridge only by the browser's exit code, so a
+    hook body that returns a normal exit code makes a failed session look like a
+    browser the operator closed. A hand-edited body that this script cannot
+    migrate is reported here rather than at recording time.
+    """
+    marker = "a11y_recorder::InitializeProcessBridge("
+    start = text.find(marker)
+    if start < 0:
+        raise RuntimeError(
+            f"{path}: the recorder bridge initialization hook is missing"
+        )
+    end = text.find("#endif", start)
+    region = text[start:end if end > start else len(text)]
+    if BRIDGE_FAILURE_RETURN.strip() not in region:
+        raise RuntimeError(
+            f"{path}: a failed recorder bridge must return "
+            "a11y_recorder::kBridgeInitializationFailureExitCode, so that a "
+            "failed bridge is not reported as a normal browser exit"
+        )
+
+
 def patch_main_delegate(path: Path) -> None:
     text = read_source(path)
     text = text.replace(
@@ -1933,6 +2000,10 @@ def patch_main_delegate(path: Path) -> None:
             path,
         )
 
+    # A checkout patched by an earlier revision already contains the hook, so
+    # the presence guard below leaves it untouched. Migrate its body first.
+    text = migrate_bridge_hook(text, path)
+
     if "InitializeProcessBridge" not in text.replace(
         BRIDGE_INCLUDE, ""
     ):
@@ -1940,6 +2011,7 @@ def patch_main_delegate(path: Path) -> None:
             "std::optional<int> ChromeMainDelegate::BasicStartupComplete() {"
         )
         text = replace_once(text, function, f"{function}\n{HOOK}", path)
+    verify_bridge_failure_is_fatal(text, path)
     write_patched(path, text)
 
 

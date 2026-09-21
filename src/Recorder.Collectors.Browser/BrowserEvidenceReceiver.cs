@@ -119,6 +119,18 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                     _context.SessionId);
                 _ownedProfileDirectory = profileDirectory;
             }
+            // A bridge that fails before Chromium logging starts can only
+            // report its reason through this file, so a path is always
+            // supplied. An environment value set by a validation harness is
+            // preserved rather than replaced.
+            var bridgeDiagnosticLogPath =
+                _options.BridgeDiagnosticLogPath ??
+                Environment.GetEnvironmentVariable(
+                    ChromiumLauncher.BridgeLogFileEnvironmentVariable) ??
+                Path.Combine(
+                    _context.SessionDirectory,
+                    "diagnostics",
+                    "browser-bridge.log");
             try
             {
                 await _launcher.LaunchAsync(
@@ -127,6 +139,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                     ConnectionInfo,
                     _options.StartUrl,
                     _options.RemoteDebuggingPort,
+                    bridgeDiagnosticLogPath,
                     cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception)

@@ -20,15 +20,17 @@ public sealed class ChromiumLauncherTests
             1024);
         await using var launcher = new ChromiumLauncher(() => false);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        var exception = await Assert.ThrowsAsync<BrowserStartupExitException>(
             () => launcher.LaunchAsync(
                 Path.Combine(Environment.SystemDirectory, "cmd.exe"),
                 profile,
                 connection,
                 "/c",
                 remoteDebuggingPort: null,
+                bridgeDiagnosticLogPath: null,
                 CancellationToken.None));
 
+        Assert.IsAssignableFrom<InvalidOperationException>(exception);
         Assert.Contains(
             "exited during startup with exit code",
             exception.Message,
@@ -58,6 +60,7 @@ public sealed class ChromiumLauncherTests
                 connection,
                 "/c",
                 remoteDebuggingPort: null,
+                bridgeDiagnosticLogPath: null,
                 CancellationToken.None));
 
         Assert.Contains(
@@ -141,6 +144,101 @@ public sealed class ChromiumLauncherTests
             argument => argument.Contains(
                 "authentication",
                 StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BridgeDiagnosticLogPathIsGivenToTheBrowser()
+    {
+        var executable = Path.Combine(
+            Path.GetTempPath(),
+            "browser",
+            "chrome.exe");
+        var profile = Path.Combine(
+            Path.GetTempPath(),
+            "profiles",
+            "session-1");
+        var bridgeLogPath = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-tests",
+            Guid.NewGuid().ToString("N"),
+            "browser-bridge.log");
+
+        var startInfo = ChromiumLauncher.CreateStartInfo(
+            executable,
+            profile,
+            "about:blank",
+            diagnosticLogPath: null,
+            remoteDebuggingPort: null,
+            bridgeDiagnosticLogPath: bridgeLogPath);
+
+        Assert.Equal(
+            Path.GetFullPath(bridgeLogPath),
+            startInfo.Environment[
+                ChromiumLauncher.BridgeLogFileEnvironmentVariable]);
+        Assert.True(
+            Directory.Exists(Path.GetDirectoryName(bridgeLogPath)),
+            "The bridge cannot create its own log directory.");
+    }
+
+    [Fact]
+    public void BridgeInitializationFailureIsNamedWithItsRecordedReason()
+    {
+        var bridgeLogPath = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-tests",
+            Guid.NewGuid().ToString("N"),
+            "browser-bridge.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(bridgeLogPath)!);
+        File.WriteAllLines(
+            bridgeLogPath,
+            [
+                "pid=1 ticks=10 Recorder bridge bootstrap read from stdin",
+                "pid=1 ticks=20 Recorder process bridge initialization " +
+                    "failed: bootstrap protocol version 0.16 is not 0.17"
+            ]);
+
+        var message = ChromiumLauncher.DescribeStartupExit(
+            ChromiumLauncher.BridgeInitializationFailureExitCode,
+            bridgeLogPath);
+
+        Assert.Contains(
+            "could not initialize its recorder bridge",
+            message,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "bootstrap protocol version 0.16 is not 0.17",
+            message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BridgeInitializationFailureWithoutAReasonSaysWhereToLook()
+    {
+        var bridgeLogPath = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-tests",
+            Guid.NewGuid().ToString("N"),
+            "browser-bridge.log");
+
+        var message = ChromiumLauncher.DescribeStartupExit(
+            ChromiumLauncher.BridgeInitializationFailureExitCode,
+            bridgeLogPath);
+
+        Assert.Contains(
+            "could not initialize its recorder bridge",
+            message,
+            StringComparison.Ordinal);
+        Assert.Contains(bridgeLogPath, message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OtherStartupExitsStillReportTheirExitCode()
+    {
+        var message = ChromiumLauncher.DescribeStartupExit(3, null);
+
+        Assert.Equal(
+            "Instrumented Chromium exited during startup with exit code 3.",
+            message);
     }
 
     [Fact]
