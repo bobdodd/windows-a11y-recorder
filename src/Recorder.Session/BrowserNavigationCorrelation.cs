@@ -49,6 +49,7 @@ internal sealed record BrowserEventProjection(
     int? RendererProcessId,
     string? DocumentId,
     string? DocumentToken,
+    string? FrameId,
     string? NavigationId,
     string? Url,
     bool PrimaryPage,
@@ -81,6 +82,7 @@ internal static class BrowserNavigationCorrelator
             ReadInt32(payload, "rendererProcessId"),
             ReadString(context, "documentId"),
             ReadString(context, "documentToken"),
+            ReadString(context, "frameId"),
             ReadString(payload, "navigationId"),
             ReadString(payload, "url"),
             ReadBoolean(payload, "primaryPage") ?? false,
@@ -187,27 +189,41 @@ internal static class BrowserNavigationCorrelator
         int currentIndex,
         long sessionDurationNanoseconds)
     {
-        var current = navigations[currentIndex].Started;
+        var currentPair = navigations[currentIndex];
+        var current = currentPair.Completed ?? currentPair.Started;
         for (var index = currentIndex + 1; index < navigations.Count; index++)
         {
-            var candidate = navigations[index].Started;
+            var candidatePair = navigations[index];
+            var candidate = candidatePair.Completed ?? candidatePair.Started;
             if (!SameBrowser(candidate, current))
             {
                 continue;
             }
 
-            if (current.PrimaryPage && candidate.PrimaryPage)
+            if (!string.IsNullOrWhiteSpace(current.FrameId) &&
+                string.Equals(
+                    candidate.FrameId,
+                    current.FrameId,
+                    StringComparison.Ordinal))
             {
-                return candidate.Event.MonotonicNanoseconds;
+                return candidatePair.Started.Event.MonotonicNanoseconds;
             }
 
-            if (!current.PrimaryPage &&
+            if (string.IsNullOrWhiteSpace(current.FrameId) &&
+                current.PrimaryPage &&
+                candidate.PrimaryPage)
+            {
+                return candidatePair.Started.Event.MonotonicNanoseconds;
+            }
+
+            if (string.IsNullOrWhiteSpace(current.FrameId) &&
+                !current.PrimaryPage &&
                 string.Equals(
                     candidate.DocumentId,
                     current.DocumentId,
                     StringComparison.Ordinal))
             {
-                return candidate.Event.MonotonicNanoseconds;
+                return candidatePair.Started.Event.MonotonicNanoseconds;
             }
         }
 

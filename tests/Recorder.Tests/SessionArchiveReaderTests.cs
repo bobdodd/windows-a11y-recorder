@@ -123,7 +123,8 @@ public sealed class SessionArchiveReaderTests
                 processId = 1,
                 processType = "browser",
                 documentId = "document-navigation-1",
-                documentToken = "TOKEN-1"
+                documentToken = "TOKEN-1",
+                frameId = "frame-1"
             };
             var rendererContext = new
             {
@@ -131,7 +132,8 @@ public sealed class SessionArchiveReaderTests
                 processId = 20,
                 processType = "renderer",
                 documentId = "dom-document-1",
-                documentToken = "TOKEN-1"
+                documentToken = "TOKEN-1",
+                frameId = "frame-1"
             };
             var rendererContextWithoutToken = new
             {
@@ -139,7 +141,8 @@ public sealed class SessionArchiveReaderTests
                 processId = 20,
                 processType = "renderer",
                 documentId = "dom-document-1",
-                documentToken = (string?)null
+                documentToken = (string?)null,
+                frameId = "frame-1"
             };
             await WriteEventsAsync(
                 directory,
@@ -229,6 +232,108 @@ public sealed class SessionArchiveReaderTests
             Assert.Equal(1, navigation.DispatchCount);
             Assert.Equal(1, navigation.ListenerInvocationCount);
             Assert.Equal(6, navigation.RelatedEventCount);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentFrameNavigationDoesNotEndAnotherFrameCorrelation()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            await WriteManifestAsync(directory, 1_000);
+            await WriteEventsAsync(
+                directory,
+                [
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        100,
+                        new
+                        {
+                            context = new
+                            {
+                                browserInstanceId = "browser-1",
+                                processId = 1,
+                                processType = "browser",
+                                frameId = "frame-1",
+                                documentToken = "TOKEN-1"
+                            },
+                            navigationId = "navigation-1",
+                            url = "chrome://surface-one/",
+                            primaryPage = true
+                        }),
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-completed",
+                        200,
+                        new
+                        {
+                            context = new
+                            {
+                                browserInstanceId = "browser-1",
+                                processId = 1,
+                                processType = "browser",
+                                frameId = "frame-1",
+                                documentToken = "TOKEN-1"
+                            },
+                            navigationId = "navigation-1",
+                            url = "chrome://surface-one/",
+                            primaryPage = true,
+                            committed = true
+                        }),
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        150,
+                        new
+                        {
+                            context = new
+                            {
+                                browserInstanceId = "browser-1",
+                                processId = 1,
+                                processType = "browser",
+                                frameId = "frame-2",
+                                documentToken = "TOKEN-2"
+                            },
+                            navigationId = "navigation-2",
+                            url = "chrome://surface-two/",
+                            primaryPage = true
+                        }),
+                    CreateEvent(
+                        "browser.dom",
+                        "dom-checkpoint-completed",
+                        300,
+                        new
+                        {
+                            context = new
+                            {
+                                browserInstanceId = "browser-1",
+                                processId = 20,
+                                processType = "renderer",
+                                frameId = "frame-1",
+                                documentId = "dom-document-1",
+                                documentToken = "TOKEN-1"
+                            },
+                            checkpointId = "checkpoint-1",
+                            nodeCount = 512,
+                            truncated = true
+                        })
+                ]);
+
+            var archive = await SessionArchiveReader.LoadAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            var navigation = Assert.Single(
+                archive.BrowserNavigations,
+                item => item.NavigationId == "navigation-1");
+            Assert.Equal(1, navigation.CheckpointCount);
+            Assert.Equal(1, navigation.TruncatedCheckpointCount);
         }
         finally
         {
