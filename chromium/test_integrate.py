@@ -11,6 +11,75 @@ INTEGRATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(INTEGRATE)
 
 
+# Hook bodies written by earlier revisions of the integration script. They are
+# test data rather than integration templates: the script migrates a listener
+# hook by replacing the region the hook introduces, so it does not carry a copy
+# of every body it has ever written, and these bodies exist here to prove that a
+# checkout holding one converges on the current body.
+HISTORICAL_LISTENER_HOOK_NODE_ONLY = """\
+    if (Node* recorder_target = ToNode()) {
+      Element* recorder_element = DynamicTo<Element>(recorder_target);
+      a11y_recorder::RecordBlinkListenerRegistered(
+          reinterpret_cast<uintptr_t>(registered_listener),
+          recorder_target->GetDocument().GetDomNodeId(),
+          recorder_target->GetDomNodeId(),
+          event_type.Utf8().c_str(),
+          recorder_target->nodeName().Utf8().c_str(),
+          recorder_element
+              ? recorder_element->GetIdAttribute().Utf8().c_str()
+              : "",
+          registered_listener->Capture(),
+          registered_listener->Passive(),
+          registered_listener->Once());
+    }
+"""
+HISTORICAL_LISTENER_REMOVED_HOOK_NODE_ONLY = """\
+  if (Node* recorder_target = ToNode()) {
+    Element* recorder_element = DynamicTo<Element>(recorder_target);
+    a11y_recorder::RecordBlinkListenerRemoved(
+        reinterpret_cast<uintptr_t>(registered_listener),
+        recorder_target->GetDocument().GetDomNodeId(),
+        recorder_target->GetDomNodeId(),
+        event_type.Utf8().c_str(),
+        recorder_target->nodeName().Utf8().c_str(),
+        recorder_element
+            ? recorder_element->GetIdAttribute().Utf8().c_str()
+            : "",
+        registered_listener->Capture(),
+        registered_listener->Passive(),
+        registered_listener->Once());
+  }
+"""
+# The body written before a registration kind was reported, which recorded every
+# EventTarget kind but always described the registration as an addEventListener
+# call.
+HISTORICAL_LISTENER_HOOK_WITHOUT_REGISTRATION_KIND = """\
+    {
+      Node* recorder_target = ToNode();
+      LocalDOMWindow* recorder_window = ToLocalDOMWindow();
+      Element* recorder_element = DynamicTo<Element>(recorder_target);
+      a11y_recorder::RecordBlinkListenerRegistered(
+          reinterpret_cast<uintptr_t>(registered_listener),
+          recorder_target ? a11y_recorder::kEventTargetKindNode
+                          : (recorder_window
+                                 ? a11y_recorder::kEventTargetKindWindow
+                                 : a11y_recorder::kEventTargetKindOther),
+          InterfaceName().Utf8().c_str(),
+          reinterpret_cast<uintptr_t>(this),
+          recorder_target ? recorder_target->GetDocument().GetDomNodeId() : 0,
+          recorder_target ? recorder_target->GetDomNodeId() : 0,
+          event_type.Utf8().c_str(),
+          recorder_target ? recorder_target->nodeName().Utf8().c_str() : "",
+          recorder_element
+              ? recorder_element->GetIdAttribute().Utf8().c_str()
+              : "",
+          registered_listener->Capture(),
+          registered_listener->Passive(),
+          registered_listener->Once());
+    }
+"""
+
+
 class IntegrateTests(unittest.TestCase):
     def test_bridge_accepts_generated_negative_ax_node_ids(self):
         bridge_source = (
@@ -456,6 +525,25 @@ class IntegrateTests(unittest.TestCase):
                 "    AddedEventListener(event_type, *registered_listener);\n"
                 "  }\n"
                 "  return added;\n"
+                "}\n"
+                "\n"
+                "bool EventTarget::SetAttributeEventListener("
+                "const AtomicString& event_type,\n"
+                "                                            "
+                "EventListener* listener) {\n"
+                "  RegisteredEventListener* registered_listener =\n"
+                "      GetAttributeRegisteredEventListener(event_type);\n"
+                "  if (!listener) {\n"
+                "    if (registered_listener)\n"
+                "      removeEventListener(event_type, "
+                "registered_listener->Callback(), false);\n"
+                "    return false;\n"
+                "  }\n"
+                "  if (registered_listener) {\n"
+                "    registered_listener->SetCallback(listener);\n"
+                "    return true;\n"
+                "  }\n"
+                "  return addEventListener(event_type, listener, false);\n"
                 "}\n"
                 "\n"
                 "bool EventTarget::RemoveEventListenerInternal() {\n"
@@ -978,8 +1066,8 @@ class IntegrateTests(unittest.TestCase):
             event_target.write_text(
                 first_event_target
                 .replace(
-                    INTEGRATE.CURRENT_BLINK_LISTENER_CALL,
-                    INTEGRATE.LEGACY_BLINK_LISTENER_CALL,
+                    INTEGRATE.BLINK_LISTENER_HOOK,
+                    HISTORICAL_LISTENER_HOOK_WITHOUT_REGISTRATION_KIND,
                     1,
                 )
                 .replace(
@@ -2234,12 +2322,12 @@ class IntegrateTests(unittest.TestCase):
             node_only = (
                 current.replace(
                     INTEGRATE.BLINK_LISTENER_HOOK,
-                    INTEGRATE.LEGACY_BLINK_LISTENER_HOOK_NODE_ONLY,
+                    HISTORICAL_LISTENER_HOOK_NODE_ONLY,
                     1,
                 )
                 .replace(
                     INTEGRATE.BLINK_LISTENER_REMOVED_HOOK,
-                    INTEGRATE.LEGACY_BLINK_LISTENER_REMOVED_HOOK_NODE_ONLY,
+                    HISTORICAL_LISTENER_REMOVED_HOOK_NODE_ONLY,
                     1,
                 )
                 .replace(
@@ -2255,6 +2343,134 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_blink_event_target(path)
 
             self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_reports_how_each_listener_registration_was_created(self):
+        """Every registration carries the form Blink created it from.
+
+        Blink funnels an addEventListener call, an on-event attribute
+        assignment, and an inline content attribute through one registration
+        path, so the form is read from the listener object rather than from the
+        call site.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            patched = path.read_text(encoding="utf-8")
+
+            self.assertEqual(
+                1,
+                patched.count(
+                    "const char* RecorderListenerRegistrationKind("
+                ),
+            )
+            self.assertIn(
+                '#include "third_party/blink/renderer/core/dom/events/'
+                'event_listener.h"',
+                patched,
+            )
+            self.assertIn(
+                "listener->IsEventHandlerForContentAttribute()", patched
+            )
+            self.assertIn(
+                "a11y_recorder::kListenerRegistrationKindInlineAttribute",
+                patched,
+            )
+            self.assertIn(
+                "a11y_recorder::kListenerRegistrationKindEventHandlerProperty",
+                patched,
+            )
+            self.assertIn(
+                "a11y_recorder::kListenerRegistrationKindAddEventListener",
+                patched,
+            )
+            self.assertEqual(
+                3, patched.count("recorder_registration_kind")
+                - patched.count("const char* recorder_registration_kind")
+            )
+
+    def test_records_a_replaced_attribute_listener_callback(self):
+        """Reassigning an on-event attribute replaces the callback in place.
+
+        Blink returns from SetAttributeEventListener after swapping the
+        callback of an existing registration, so neither the add hook nor the
+        remove hook runs and the recorded form would keep describing a callback
+        Blink no longer holds.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            patched = path.read_text(encoding="utf-8")
+
+            self.assertEqual(
+                1,
+                patched.count(
+                    "a11y_recorder::RecordBlinkListenerCallbackReplaced("
+                ),
+            )
+            self.assertIn(
+                "    registered_listener->SetCallback(listener);\n    {\n",
+                patched,
+            )
+            self.assertIn(
+                "const EventListener* recorder_callback = listener;", patched
+            )
+
+            INTEGRATE.patch_blink_event_target(path)
+            self.assertEqual(patched, path.read_text(encoding="utf-8"))
+
+    def test_migrates_a_listener_hook_body_it_never_wrote(self):
+        """An unrecognized hook body still converges on the current one.
+
+        A hook is inserted only when its symbol is absent, so a checkout
+        patched by an earlier revision keeps that revision's body. The region
+        the hook introduces is replaced rather than a remembered copy of its
+        text, so a body this script has no record of is migrated too.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            current = path.read_text(encoding="utf-8")
+
+            invented = current.replace(
+                INTEGRATE.BLINK_LISTENER_HOOK,
+                "    {\n"
+                "      a11y_recorder::RecordBlinkListenerRegistered(\n"
+                "          reinterpret_cast<uintptr_t>(registered_listener));\n"
+                "    }\n",
+                1,
+            )
+            self.assertNotEqual(current, invented)
+            path.write_text(invented, encoding="utf-8")
+
+            INTEGRATE.patch_blink_event_target(path)
+
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_refuses_to_migrate_a_region_that_is_not_a_hook(self):
+        """A bridge call in a Blink function body is not treated as a hook.
+
+        The migration replaces the whole block that contains the call, so it
+        must refuse a block it did not introduce rather than delete Blink code.
+        """
+        source = (
+            "bool EventTarget::AddEventListenerInternal() {\n"
+            "  a11y_recorder::RecordBlinkListenerRegistered(0);\n"
+            "  return true;\n"
+            "}\n"
+        )
+
+        with self.assertRaises(RuntimeError) as raised:
+            INTEGRATE.migrate_hook_region(
+                source,
+                Path("event_target.cc"),
+                "RecordBlinkListenerRegistered",
+                INTEGRATE.BLINK_LISTENER_HOOK,
+            )
+
+        self.assertIn("does not open a hook region", str(raised.exception))
 
     def test_migrates_a_dispatch_path_that_omitted_the_window(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2306,6 +2522,25 @@ class IntegrateTests(unittest.TestCase):
             "    AddedEventListener(event_type, *registered_listener);\n"
             "  }\n"
             "  return added;\n"
+            "}\n"
+            "\n"
+            "bool EventTarget::SetAttributeEventListener("
+            "const AtomicString& event_type,\n"
+            "                                            "
+            "EventListener* listener) {\n"
+            "  RegisteredEventListener* registered_listener =\n"
+            "      GetAttributeRegisteredEventListener(event_type);\n"
+            "  if (!listener) {\n"
+            "    if (registered_listener)\n"
+            "      removeEventListener(event_type, "
+            "registered_listener->Callback(), false);\n"
+            "    return false;\n"
+            "  }\n"
+            "  if (registered_listener) {\n"
+            "    registered_listener->SetCallback(listener);\n"
+            "    return true;\n"
+            "  }\n"
+            "  return addEventListener(event_type, listener, false);\n"
             "}\n"
             "\n"
             "bool EventTarget::RemoveEventListenerInternal() {\n"

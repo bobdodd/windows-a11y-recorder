@@ -13,7 +13,7 @@
 
 namespace a11y_recorder {
 
-inline constexpr char kProtocolVersion[] = "0.18";
+inline constexpr char kProtocolVersion[] = "0.19";
 inline constexpr uint32_t kDefaultMaximumMessageBytes = 4 * 1024 * 1024;
 
 struct BootstrapConfiguration {

@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.18";
+    public const string CurrentVersion = "0.19";
 }
 
 public static class BrowserEvidenceChannels
@@ -24,6 +24,7 @@ public static class BrowserEvidenceEventTypes
     public const string ClockSynchronized = "browser-clock-synchronized";
     public const string ListenerRegistered = "listener-registered";
     public const string ListenerRemoved = "listener-removed";
+    public const string ListenerCallbackReplaced = "listener-callback-replaced";
     public const string DispatchStarted = "dispatch-started";
     public const string ListenerInvoked = "listener-invoked";
     public const string DispatchCompleted = "dispatch-completed";

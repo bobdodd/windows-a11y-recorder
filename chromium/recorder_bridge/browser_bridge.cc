@@ -493,6 +493,21 @@ std::string RegisterEventTargetIdentity(uintptr_t target_identity) {
   return target_id;
 }
 
+// Accepts only the registration kinds the archive schema defines. A patched
+// Chromium source names a kind with a bridge header constant, so an unexpected
+// value means the two sides were built from different revisions, and recording
+// it would put a value in the archive that validation rejects for the whole
+// session. The addEventListener kind is the one Blink reaches without an
+// attribute or handler-property setter, so it is the safe fallback.
+std::string NormalizeRegistrationKind(std::string registration_kind) {
+  if (registration_kind == kListenerRegistrationKindInlineAttribute ||
+      registration_kind == kListenerRegistrationKindEventHandlerProperty ||
+      registration_kind == kListenerRegistrationKindAddEventListener) {
+    return registration_kind;
+  }
+  return kListenerRegistrationKindAddEventListener;
+}
+
 std::string RegisterListenerIdentity(uintptr_t listener_identity) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
@@ -789,6 +804,7 @@ std::string SchedulerBlockTypeName(int block_type) {
 base::DictValue CreateListenerPayload(
     const RecorderPipeClient& client,
     std::string listener_id,
+    std::string registration_kind,
     std::string target_kind,
     std::string target_interface_name,
     std::string target_id,
@@ -804,7 +820,7 @@ base::DictValue CreateListenerPayload(
   payload.Set("context", CreateContext(client, document_node_id));
   payload.Set("listenerId", std::move(listener_id));
   payload.Set("eventName", std::move(event_name));
-  payload.Set("registrationKind", "add-event-listener");
+  payload.Set("registrationKind", std::move(registration_kind));
   payload.Set("target", CreateEventTarget(
                             std::move(target_kind),
                             std::move(target_interface_name),
@@ -1194,6 +1210,7 @@ RecorderPipeClient* GetProcessRecorderClient() {
 }
 
 void RecordBlinkListenerRegistered(uintptr_t listener_identity,
+                                   std::string registration_kind,
                                    std::string target_kind,
                                    std::string target_interface_name,
                                    uintptr_t target_identity,
@@ -1214,6 +1231,7 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
   const bool node_target = target_kind == kEventTargetKindNode;
   base::DictValue payload = CreateListenerPayload(
       *client, RegisterListenerIdentity(listener_identity),
+      NormalizeRegistrationKind(std::move(registration_kind)),
       std::move(target_kind), std::move(target_interface_name),
       node_target ? std::string()
                   : RegisterEventTargetIdentity(target_identity),
@@ -1225,6 +1243,7 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
 }
 
 void RecordBlinkListenerRemoved(uintptr_t listener_identity,
+                                std::string registration_kind,
                                 std::string target_kind,
                                 std::string target_interface_name,
                                 uintptr_t target_identity,
@@ -1247,14 +1266,57 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
 
   const bool node_target = target_kind == kEventTargetKindNode;
   base::DictValue payload = CreateListenerPayload(
-      *client, std::move(*listener_id), std::move(target_kind),
-      std::move(target_interface_name),
+      *client, std::move(*listener_id),
+      NormalizeRegistrationKind(std::move(registration_kind)),
+      std::move(target_kind), std::move(target_interface_name),
       node_target ? std::string()
                   : RegisterEventTargetIdentity(target_identity),
       document_node_id, target_node_id, std::move(event_name),
       std::move(target_tag_name), std::move(target_element_id), capture,
       passive, once);
   SendBlinkEvidence("browser.listener", "listener-removed",
+                    std::move(payload));
+}
+
+void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
+                                        std::string registration_kind,
+                                        std::string target_kind,
+                                        std::string target_interface_name,
+                                        uintptr_t target_identity,
+                                        int document_node_id,
+                                        int target_node_id,
+                                        std::string event_name,
+                                        std::string target_tag_name,
+                                        std::string target_element_id,
+                                        bool capture,
+                                        bool passive,
+                                        bool once) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !IsRecordableEventTarget(target_kind, document_node_id,
+                                          target_node_id)) {
+    return;
+  }
+
+  // A replacement is only meaningful for a registration this session recorded,
+  // and the registration keeps its identity, so the identity is looked up
+  // rather than allocated or consumed.
+  std::optional<std::string> listener_id =
+      FindListenerIdentity(listener_identity);
+  if (!listener_id) {
+    return;
+  }
+
+  const bool node_target = target_kind == kEventTargetKindNode;
+  base::DictValue payload = CreateListenerPayload(
+      *client, std::move(*listener_id),
+      NormalizeRegistrationKind(std::move(registration_kind)),
+      std::move(target_kind), std::move(target_interface_name),
+      node_target ? std::string()
+                  : RegisterEventTargetIdentity(target_identity),
+      document_node_id, target_node_id, std::move(event_name),
+      std::move(target_tag_name), std::move(target_element_id), capture,
+      passive, once);
+  SendBlinkEvidence("browser.listener", "listener-callback-replaced",
                     std::move(payload));
 }
 

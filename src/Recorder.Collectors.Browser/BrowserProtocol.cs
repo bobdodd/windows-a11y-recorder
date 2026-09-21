@@ -68,7 +68,8 @@ internal static class BrowserProtocol
         {
             (BrowserEvidenceChannels.Listener,
                 BrowserEvidenceEventTypes.ListenerRegistered or
-                BrowserEvidenceEventTypes.ListenerRemoved) =>
+                BrowserEvidenceEventTypes.ListenerRemoved or
+                BrowserEvidenceEventTypes.ListenerCallbackReplaced) =>
                 payload.Deserialize<BrowserListenerPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Dispatch,
                 BrowserEvidenceEventTypes.DispatchStarted or

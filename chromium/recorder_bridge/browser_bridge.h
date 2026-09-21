@@ -61,12 +61,27 @@ inline constexpr char kEventTargetKindNode[] = "node";
 inline constexpr char kEventTargetKindWindow[] = "window";
 inline constexpr char kEventTargetKindOther[] = "other";
 
+// Identifies how a listener entered Blink's listener map. Blink accepts the
+// three forms through one internal registration path, and the distinction is
+// read from the listener object Blink created rather than from the call site:
+// a content-attribute handler is a JSEventHandlerForContentAttribute, any other
+// event handler is the one an on-event IDL attribute setter created, and
+// everything else arrived through addEventListener. A native listener is one
+// Blink itself installed, which reports no script handler.
+inline constexpr char kListenerRegistrationKindAddEventListener[] =
+    "add-event-listener";
+inline constexpr char kListenerRegistrationKindInlineAttribute[] =
+    "inline-attribute";
+inline constexpr char kListenerRegistrationKindEventHandlerProperty[] =
+    "event-handler-property";
+
 // Records a Blink listener only after Blink has accepted the registration.
 // Node identifiers are Blink DOMNodeIds. A non-Node target passes a zero
 // target node identifier, its Blink interface name, and the address Blink uses
 // for the target, which is mapped to a stable process-local target identifier.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkListenerRegistered(uintptr_t listener_identity,
+                                   std::string registration_kind,
                                    std::string target_kind,
                                    std::string target_interface_name,
                                    uintptr_t target_identity,
@@ -83,6 +98,7 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
 // identifier is the same one allocated when the registration was accepted.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkListenerRemoved(uintptr_t listener_identity,
+                                std::string registration_kind,
                                 std::string target_kind,
                                 std::string target_interface_name,
                                 uintptr_t target_identity,
@@ -94,6 +110,28 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                                 bool capture,
                                 bool passive,
                                 bool once);
+
+// Records that Blink replaced the callback of an existing attribute listener
+// registration in place. Assigning an on-event IDL attribute over a listener
+// that a content attribute or an earlier assignment established does not add or
+// remove a registration, so neither of those records is emitted and the
+// registration keeps the identity it was given. Without this record the
+// registration kind reported for that identity would describe the callback
+// Blink no longer holds.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
+                                        std::string registration_kind,
+                                        std::string target_kind,
+                                        std::string target_interface_name,
+                                        uintptr_t target_identity,
+                                        int document_node_id,
+                                        int target_node_id,
+                                        std::string event_name,
+                                        std::string target_tag_name,
+                                        std::string target_element_id,
+                                        bool capture,
+                                        bool passive,
+                                        bool once);
 
 // Records one dispatch-started event after Blink has established the event
 // path and original target, but before capture-phase listeners run.

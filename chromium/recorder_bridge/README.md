@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.18` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.19` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -101,6 +101,23 @@ entry at the end of a composed path are recorded from Blink's own
 `WindowEventContext`, so a recorded path ends where Blink's path ends. Worker
 global scopes are not covered. A target identifier is process-local and must
 never be compared across processes.
+
+Protocol 0.19 reports how each listener entered Blink's listener map.
+`registrationKind` is `add-event-listener`, `inline-attribute`, or
+`event-handler-property`, and the value is read from the listener object Blink
+created rather than from the call site, because an `addEventListener` call, an
+inline `on*` content attribute, and an `on*` property assignment all reach the
+same internal registration path. A listener whose object is a content-attribute
+event handler is an inline attribute, any other event handler came from a
+property assignment, and a listener that is neither arrived through
+`addEventListener`. Assigning an `on*` property over an existing attribute
+registration makes Blink swap that registration's callback and return, without
+adding or removing a listener, so a `listener-callback-replaced` record on
+`browser.listener` reports the unchanged listener identity together with the form
+of the callback Blink now holds. Without that record the archive would keep
+describing a callback Blink no longer holds. A value outside the schema is
+normalized to `add-event-listener` rather than written through, because an
+out-of-schema value fails archive validation for the whole session.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

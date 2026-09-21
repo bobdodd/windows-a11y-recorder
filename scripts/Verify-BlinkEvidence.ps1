@@ -369,6 +369,53 @@ $windowResizeRemovals = @(
         }
 )
 
+# Blink creates a listener from an inline content attribute, from an on-event
+# property assignment, and from an addEventListener call through one internal
+# registration path, so each form is selected by the kind the bridge reports.
+$inlineAttributeListeners = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-registered" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.target.elementId -eq "inline-handler" -and
+            $_.payload.registrationKind -eq "inline-attribute"
+        }
+)
+
+$eventHandlerPropertyListeners = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-registered" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.target.elementId -eq "property-handler" -and
+            $_.payload.registrationKind -eq "event-handler-property"
+        }
+)
+
+# Reassigning an on-event property over an existing registration replaces the
+# callback in place, so Blink reports neither an addition nor a removal.
+$inlineAttributeReplacements = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-callback-replaced" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.target.elementId -eq "inline-handler"
+        }
+)
+
+$propertyListenerReplacements = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-callback-replaced" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.target.elementId -eq "property-handler"
+        }
+)
+
 $linkDispatches = @(
     $records |
         Where-Object {
@@ -707,6 +754,30 @@ if ($windowClickInvocations.Count -lt 1) {
 }
 if ($suppressedDefaultActions.Count -lt 1) {
     throw "No suppressed default handler was recorded for #pointer-only."
+}
+if ($inlineAttributeListeners.Count -lt 1) {
+    throw (
+        "No inline content attribute registration was recorded for " +
+        "#inline-handler."
+    )
+}
+if ($eventHandlerPropertyListeners.Count -lt 1) {
+    throw (
+        "No event handler property registration was recorded for " +
+        "#property-handler."
+    )
+}
+if ($inlineAttributeReplacements.Count -lt 1) {
+    throw (
+        "No callback replacement was recorded for the inline content " +
+        "attribute registration on #inline-handler."
+    )
+}
+if ($propertyListenerReplacements.Count -lt 1) {
+    throw (
+        "No callback replacement was recorded for the event handler property " +
+        "registration on #property-handler."
+    )
 }
 if ($invokedDefaultActions.Count -lt 1) {
     throw "No invoked default handler was recorded for #default-action-link."
@@ -1806,6 +1877,41 @@ if ([string]::IsNullOrWhiteSpace($dispatch.dispatchId)) {
 if ($listener.registrationKind -ne "add-event-listener") {
     throw "The listener record has an unexpected registration kind."
 }
+$inlineAttributeListener = $inlineAttributeListeners[0].payload
+$eventHandlerPropertyListener = $eventHandlerPropertyListeners[0].payload
+$inlineAttributeReplacement = $inlineAttributeReplacements[0].payload
+$propertyListenerReplacement = $propertyListenerReplacements[0].payload
+# A replacement carries the identity of the registration whose callback Blink
+# swapped, so the record has to reference the same listener rather than a new
+# one, and it reports the form of the callback Blink now holds.
+if ($inlineAttributeReplacement.listenerId -ne
+        $inlineAttributeListener.listenerId) {
+    throw (
+        "The inline attribute callback replacement does not reference the " +
+        "registration it replaced."
+    )
+}
+if ($propertyListenerReplacement.listenerId -ne
+        $eventHandlerPropertyListener.listenerId) {
+    throw (
+        "The property callback replacement does not reference the " +
+        "registration it replaced."
+    )
+}
+if ($inlineAttributeReplacement.registrationKind -ne
+        "event-handler-property") {
+    throw (
+        "The inline attribute callback replacement did not report the " +
+        "replacing on-event property assignment."
+    )
+}
+if ($propertyListenerReplacement.registrationKind -ne
+        "event-handler-property") {
+    throw (
+        "The property callback replacement did not report an on-event " +
+        "property assignment."
+    )
+}
 if ($listener.capture -or $listener.passive -or $listener.once) {
     throw "The listener record does not contain the fixture's resolved options."
 }
@@ -2172,6 +2278,15 @@ if (
     WindowTargetId = $windowListener.target.targetId
     WindowListenerId = $windowListener.listenerId
     WindowClickInvocations = $windowClickInvocations.Count
+    InlineAttributeListenerId = $inlineAttributeListener.listenerId
+    InlineAttributeRegistrationKind = $inlineAttributeListener.registrationKind
+    EventHandlerPropertyListenerId = $eventHandlerPropertyListener.listenerId
+    EventHandlerPropertyRegistrationKind =
+        $eventHandlerPropertyListener.registrationKind
+    InlineAttributeReplacements = $inlineAttributeReplacements.Count
+    PropertyListenerReplacements = $propertyListenerReplacements.Count
+    ReplacedCallbackRegistrationKind =
+        $inlineAttributeReplacement.registrationKind
     LinkComposedPathEntries = $linkComposedPath.Count
     ListenerId = $listener.listenerId
     DispatchId = $dispatch.dispatchId

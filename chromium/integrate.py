@@ -1157,31 +1157,40 @@ BLINK_DOCUMENT_MUTATION_HOOK = """\
   if (HasFinishedParsing())
     MutationObserver::EnqueueRecorderDomCheckpoint(*this);
 """
-# Blink calls this hook for every EventTarget, not only for Nodes. An earlier
-# revision recorded a registration only when the target was a Node, which left
-# listeners on Window and on other non-Node EventTargets absent from the
-# evidence with nothing to say they had been omitted. The kind, the Blink
-# interface name, and the address Blink uses for the target are now reported so
-# a non-Node target is identified without inventing a DOM node identifier.
-LEGACY_BLINK_LISTENER_HOOK_NODE_ONLY = """\
-    if (Node* recorder_target = ToNode()) {
-      Element* recorder_element = DynamicTo<Element>(recorder_target);
-      a11y_recorder::RecordBlinkListenerRegistered(
-          reinterpret_cast<uintptr_t>(registered_listener),
-          recorder_target->GetDocument().GetDomNodeId(),
-          recorder_target->GetDomNodeId(),
-          event_type.Utf8().c_str(),
-          recorder_target->nodeName().Utf8().c_str(),
-          recorder_element
-              ? recorder_element->GetIdAttribute().Utf8().c_str()
-              : "",
-          registered_listener->Capture(),
-          registered_listener->Passive(),
-          registered_listener->Once());
-    }
+BLINK_EVENT_LISTENER_INCLUDE = (
+    '#include "third_party/blink/renderer/core/dom/events/event_listener.h"'
+)
+BLINK_LISTENER_KIND_HELPER = """\
+namespace {
+
+// Reports how a listener entered Blink's listener map. Blink accepts an
+// addEventListener call, an on-event IDL attribute assignment, and an inline
+// content attribute through one internal registration path, so the form is read
+// from the listener object Blink created rather than from the call site. A
+// content attribute produces a JSEventHandlerForContentAttribute, any other
+// event handler is the one an on-event attribute setter created, and a listener
+// that is neither arrived through addEventListener.
+const char* RecorderListenerRegistrationKind(const EventListener* listener) {
+  if (!listener) {
+    return a11y_recorder::kListenerRegistrationKindAddEventListener;
+  }
+  if (listener->IsEventHandlerForContentAttribute()) {
+    return a11y_recorder::kListenerRegistrationKindInlineAttribute;
+  }
+  if (listener->IsEventHandler()) {
+    return a11y_recorder::kListenerRegistrationKindEventHandlerProperty;
+  }
+  return a11y_recorder::kListenerRegistrationKindAddEventListener;
+}
+
+}  // namespace
+
 """
 BLINK_LISTENER_HOOK = """\
     {
+      const EventListener* recorder_callback = registered_listener->Callback();
+      const char* recorder_registration_kind =
+          RecorderListenerRegistrationKind(recorder_callback);
       Node* recorder_target = ToNode();
       LocalDOMWindow* recorder_window = ToLocalDOMWindow();
       Element* recorder_element = DynamicTo<Element>(recorder_target);
@@ -1195,6 +1204,7 @@ BLINK_LISTENER_HOOK = """\
                                  : nullptr);
       a11y_recorder::RecordBlinkListenerRegistered(
           reinterpret_cast<uintptr_t>(registered_listener),
+          recorder_registration_kind,
           recorder_target ? a11y_recorder::kEventTargetKindNode
                           : (recorder_window
                                  ? a11y_recorder::kEventTargetKindWindow
@@ -1213,34 +1223,11 @@ BLINK_LISTENER_HOOK = """\
           registered_listener->Once());
     }
 """
-LEGACY_BLINK_LISTENER_CALL = """\
-      a11y_recorder::RecordBlinkListenerRegistered(
-          recorder_target->GetDocument().GetDomNodeId(),
-"""
-CURRENT_BLINK_LISTENER_CALL = """\
-      a11y_recorder::RecordBlinkListenerRegistered(
-          reinterpret_cast<uintptr_t>(registered_listener),
-          recorder_target->GetDocument().GetDomNodeId(),
-"""
-LEGACY_BLINK_LISTENER_REMOVED_HOOK_NODE_ONLY = """\
-  if (Node* recorder_target = ToNode()) {
-    Element* recorder_element = DynamicTo<Element>(recorder_target);
-    a11y_recorder::RecordBlinkListenerRemoved(
-        reinterpret_cast<uintptr_t>(registered_listener),
-        recorder_target->GetDocument().GetDomNodeId(),
-        recorder_target->GetDomNodeId(),
-        event_type.Utf8().c_str(),
-        recorder_target->nodeName().Utf8().c_str(),
-        recorder_element
-            ? recorder_element->GetIdAttribute().Utf8().c_str()
-            : "",
-        registered_listener->Capture(),
-        registered_listener->Passive(),
-        registered_listener->Once());
-  }
-"""
 BLINK_LISTENER_REMOVED_HOOK = """\
   {
+    const EventListener* recorder_callback = registered_listener->Callback();
+    const char* recorder_registration_kind =
+        RecorderListenerRegistrationKind(recorder_callback);
     Node* recorder_target = ToNode();
     LocalDOMWindow* recorder_window = ToLocalDOMWindow();
     Element* recorder_element = DynamicTo<Element>(recorder_target);
@@ -1254,6 +1241,7 @@ BLINK_LISTENER_REMOVED_HOOK = """\
                                : nullptr);
     a11y_recorder::RecordBlinkListenerRemoved(
         reinterpret_cast<uintptr_t>(registered_listener),
+        recorder_registration_kind,
         recorder_target ? a11y_recorder::kEventTargetKindNode
                         : (recorder_window
                                ? a11y_recorder::kEventTargetKindWindow
@@ -1272,6 +1260,63 @@ BLINK_LISTENER_REMOVED_HOOK = """\
         registered_listener->Once());
   }
 """
+BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_ANCHOR = """\
+  if (registered_listener) {
+    registered_listener->SetCallback(listener);
+    return true;
+  }
+"""
+# Assigning an on-event IDL attribute over a listener that a content attribute
+# or an earlier assignment established replaces the callback in place. Blink
+# neither adds nor removes a registration on that path, so neither hook above
+# runs and the registration keeps its identity. Without this hook the archive
+# would keep reporting the kind of the callback Blink no longer holds.
+# The inner block is the region a later revision migrates, so it is defined
+# once and composed into the hook rather than restated.
+BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION = """\
+    {
+      const EventListener* recorder_callback = listener;
+      const char* recorder_registration_kind =
+          RecorderListenerRegistrationKind(recorder_callback);
+      Node* recorder_target = ToNode();
+      LocalDOMWindow* recorder_window = ToLocalDOMWindow();
+      Element* recorder_element = DynamicTo<Element>(recorder_target);
+      LocalDOMWindow* recorder_document_window =
+          recorder_window ? recorder_window
+                          : DynamicTo<LocalDOMWindow>(GetExecutionContext());
+      Document* recorder_document =
+          recorder_target ? &recorder_target->GetDocument()
+                          : (recorder_document_window
+                                 ? recorder_document_window->document()
+                                 : nullptr);
+      a11y_recorder::RecordBlinkListenerCallbackReplaced(
+          reinterpret_cast<uintptr_t>(registered_listener),
+          recorder_registration_kind,
+          recorder_target ? a11y_recorder::kEventTargetKindNode
+                          : (recorder_window
+                                 ? a11y_recorder::kEventTargetKindWindow
+                                 : a11y_recorder::kEventTargetKindOther),
+          InterfaceName().Utf8().c_str(),
+          reinterpret_cast<uintptr_t>(this),
+          recorder_document ? recorder_document->GetDomNodeId() : 0,
+          recorder_target ? recorder_target->GetDomNodeId() : 0,
+          event_type.Utf8().c_str(),
+          recorder_target ? recorder_target->nodeName().Utf8().c_str() : "",
+          recorder_element
+              ? recorder_element->GetIdAttribute().Utf8().c_str()
+              : "",
+          registered_listener->Capture(),
+          registered_listener->Passive(),
+          registered_listener->Once());
+    }
+"""
+BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK = (
+    "  if (registered_listener) {\n"
+    "    registered_listener->SetCallback(listener);\n"
+    + BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION
+    + "    return true;\n"
+    "  }\n"
+)
 LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
     a11y_recorder::BeginBlinkListenerInvocation(
         reinterpret_cast<uintptr_t>(&event),
@@ -2113,6 +2158,94 @@ def migrate_bridge_hook(text: str, path: Path) -> str:
     return f"{text[:start]}{HOOK}{text[end:]}"
 
 
+def migrate_hook_region(
+    text: str, path: Path, symbol: str, template: str
+) -> str:
+    """Rewrites the block that introduces one bridge call to the current body.
+
+    Chromium checkouts are reused between revisions and a hook is inserted only
+    when its symbol is absent, so a checkout patched by an earlier revision
+    keeps that revision's body. Carrying a verbatim copy of every earlier body
+    requires anticipating every shape ever written and does nothing when it
+    guesses wrong, so the block that directly contains the call is located and
+    replaced wholesale instead.
+    """
+    marker = f"a11y_recorder::{symbol}("
+    occurrences = text.count(marker)
+    if occurrences == 0:
+        return text
+    if occurrences > 1:
+        raise RuntimeError(
+            f"{path}: more than one {symbol} hook is present"
+        )
+
+    call = text.index(marker)
+    depth = 0
+    index = call
+    while index > 0:
+        index -= 1
+        character = text[index]
+        if character == "}":
+            depth += 1
+        elif character == "{":
+            if depth == 0:
+                break
+            depth -= 1
+    else:
+        raise RuntimeError(
+            f"{path}: the {symbol} hook is not inside a block"
+        )
+
+    open_brace = index
+    line_start = text.rfind("\n", 0, open_brace) + 1
+    depth = 0
+    end = open_brace
+    while end < len(text):
+        character = text[end]
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        end += 1
+    else:
+        raise RuntimeError(
+            f"{path}: the {symbol} hook block is not terminated"
+        )
+
+    line_end = text.find("\n", end)
+    if line_end < 0:
+        raise RuntimeError(
+            f"{path}: the {symbol} hook block is not terminated by a line"
+        )
+    region = text[line_start:line_end + 1]
+
+    # The region must be a block this script introduced, not a Blink function
+    # body that happens to contain the call. A hook block opens either on its
+    # own line or on a condition this script wrote, and it contains no bridge
+    # call other than the one being migrated.
+    opening = region.split("\n", 1)[0].strip()
+    if opening != "{" and not opening.startswith("if ("):
+        raise RuntimeError(
+            f"{path}: the {symbol} hook block does not open a hook region"
+        )
+    other_calls = [
+        name
+        for name, _, _ in bridge_call_arities(region)
+        if name != symbol
+    ]
+    if other_calls:
+        raise RuntimeError(
+            f"{path}: the {symbol} hook region also calls "
+            + ", ".join(sorted(set(other_calls)))
+        )
+
+    if region == template:
+        return text
+    return f"{text[:line_start]}{template}{text[line_end + 1:]}"
+
+
 def verify_bridge_failure_is_fatal(text: str, path: Path) -> None:
     """Fails when a failed bridge would not exit with the failure code.
 
@@ -2593,11 +2726,21 @@ def patch_blink_event_target(path: Path) -> None:
             path,
         )
 
-    if LEGACY_BLINK_LISTENER_CALL in text:
+    # Calling the virtuals that report how a listener was created needs the
+    # listener definition, which this source reaches only indirectly.
+    if BLINK_EVENT_LISTENER_INCLUDE not in text:
         text = replace_once(
             text,
-            LEGACY_BLINK_LISTENER_CALL,
-            CURRENT_BLINK_LISTENER_CALL,
+            BLINK_BRIDGE_INCLUDE,
+            f"{BLINK_BRIDGE_INCLUDE}\n{BLINK_EVENT_LISTENER_INCLUDE}",
+            path,
+        )
+    if "RecorderListenerRegistrationKind(" not in text:
+        anchor = "bool EventTarget::AddEventListenerInternal("
+        text = replace_once(
+            text,
+            anchor,
+            f"{BLINK_LISTENER_KIND_HELPER}{anchor}",
             path,
         )
     if LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK in text:
@@ -2607,23 +2750,17 @@ def patch_blink_event_target(path: Path) -> None:
             BLINK_LISTENER_INVOCATION_STARTED_HOOK,
             path,
         )
-    # A checkout patched before non-Node EventTargets were recorded still holds
-    # hook bodies that only ever reported a Node. Those bodies read as already
-    # integrated to the presence guards below, so they are replaced explicitly.
-    if LEGACY_BLINK_LISTENER_HOOK_NODE_ONLY in text:
-        text = replace_once(
-            text,
-            LEGACY_BLINK_LISTENER_HOOK_NODE_ONLY,
-            BLINK_LISTENER_HOOK,
-            path,
-        )
-    if LEGACY_BLINK_LISTENER_REMOVED_HOOK_NODE_ONLY in text:
-        text = replace_once(
-            text,
-            LEGACY_BLINK_LISTENER_REMOVED_HOOK_NODE_ONLY,
-            BLINK_LISTENER_REMOVED_HOOK,
-            path,
-        )
+    # A checkout patched by an earlier revision holds that revision's hook
+    # bodies, and the presence guards below read them as already integrated.
+    # Each listener hook body is replaced by rewriting the region it introduces,
+    # so any earlier body converges on the current one without this script
+    # having to carry a copy of every shape it has ever written.
+    text = migrate_hook_region(
+        text, path, "RecordBlinkListenerRegistered", BLINK_LISTENER_HOOK
+    )
+    text = migrate_hook_region(
+        text, path, "RecordBlinkListenerRemoved", BLINK_LISTENER_REMOVED_HOOK
+    )
     if LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK_NODE_ONLY in text:
         text = replace_once(
             text,
@@ -2653,6 +2790,20 @@ def patch_blink_event_target(path: Path) -> None:
                 "  RemovedEventListener(event_type, *registered_listener);\n"
             ),
             path,
+        )
+    if "RecordBlinkListenerCallbackReplaced" not in text:
+        text = replace_once(
+            text,
+            BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_ANCHOR,
+            BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK,
+            path,
+        )
+    else:
+        text = migrate_hook_region(
+            text,
+            path,
+            "RecordBlinkListenerCallbackReplaced",
+            BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION,
         )
     if "BeginBlinkListenerInvocation" not in text:
         anchor = (

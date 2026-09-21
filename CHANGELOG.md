@@ -36,6 +36,25 @@ from the product version.
 
 ### Added
 
+- Recorded how each listener entered Blink's listener map, as protocol 0.19.
+  Blink accepts an `addEventListener` call, an inline `on*` content attribute,
+  and an `on*` property assignment through one internal registration path, so
+  every registration was previously reported as `add-event-listener` and the
+  archive could not distinguish a handler written in markup from one added by
+  script. The form is now read from the listener object Blink created rather
+  than from the call site, and a registration reports `add-event-listener`,
+  `inline-attribute`, or `event-handler-property`. A form outside the schema is
+  normalized to `add-event-listener`, because an out-of-schema value would fail
+  archive validation for the whole session rather than for one record.
+- Recorded a replaced listener callback as `listener-callback-replaced`.
+  Assigning an `on*` property over a registration an inline attribute or an
+  earlier assignment established makes Blink swap that registration's callback
+  and return, so neither the add hook nor the remove hook runs and the archive
+  would keep reporting the form of a callback Blink no longer holds. The record
+  carries the unchanged listener identity together with the form of the callback
+  Blink now holds. The deterministic Blink fixture exercises an inline `on*`
+  content attribute, an `on*` property assignment, and a reassignment over an
+  existing attribute registration.
 - Recorded listener and dispatch evidence for EventTargets that are not Nodes,
   beginning with the window, as protocol 0.18. The Blink listener hooks
   previously recorded a registration, removal, or invocation only when the
@@ -96,6 +115,17 @@ from the product version.
   check. The expected exit code, marker text, and supported protocol version are
   read from the native and managed sources, so the check also fails if the two
   sides of that contract ever disagree.
+
+### Changed
+
+- Upgraded a listener hook in an existing Chromium checkout by rewriting the
+  region the hook introduced instead of matching a remembered copy of its text.
+  The integration script located the innermost block enclosing the single bridge
+  call and replaced it, so a checkout holding a body no revision of the script
+  records is still upgraded and the script no longer has to carry a copy of
+  every body it has ever written. A block containing another bridge call, or one
+  that opens on an upstream Chromium function signature, is refused rather than
+  replaced.
 
 ### Fixed
 

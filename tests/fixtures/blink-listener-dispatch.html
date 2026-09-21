@@ -14,6 +14,15 @@
     Default-action target
   </a>
   <div id="default-action-result">Default-action destination</div>
+  <div id="registration-form-evidence">
+    <!-- Parsed as an inline content attribute, so Blink creates the listener
+         from markup rather than from a script call. -->
+    <button
+      id="inline-handler"
+      onclick="event.stopPropagation(); document.getElementById('status').dataset.inlineHandlerRan = 'true';"
+    >Inline attribute handler</button>
+    <button id="property-handler">Event handler property</button>
+  </div>
   <div id="attribute-evidence">
     <button
       id="disclosure"
@@ -106,6 +115,30 @@
     window.addEventListener("resize", handleWindowResize, false);
     window.removeEventListener("resize", handleWindowResize, false);
 
+    // Assigning an on-event property registers a listener through the same
+    // internal path as addEventListener, so the recorded form has to come from
+    // the listener Blink created rather than from the call site.
+    const propertyHandler = document.getElementById("property-handler");
+    propertyHandler.onclick = (event) => {
+      event.stopPropagation();
+      status.dataset.propertyHandlerRan = "first";
+    };
+
+    // Reassigning over an existing on-event registration replaces the callback
+    // in place, so Blink reports neither an addition nor a removal. The second
+    // assignment here replaces a property registration and the third replaces
+    // the inline content attribute registration above.
+    propertyHandler.onclick = (event) => {
+      event.stopPropagation();
+      status.dataset.propertyHandlerRan = "second";
+    };
+
+    const inlineHandler = document.getElementById("inline-handler");
+    inlineHandler.onclick = (event) => {
+      event.stopPropagation();
+      status.dataset.inlineHandlerReplaced = "true";
+    };
+
     status.textContent = "Fixture listener registered.";
     const cancelledAnimationFrameId = window.requestAnimationFrame(() => {
       status.dataset.cancelledAnimationFrameRan = "true";
@@ -144,6 +177,8 @@
     }, 3500);
     window.setTimeout(() => {
       target.click();
+      propertyHandler.click();
+      inlineHandler.click();
       const mutationResult = document.createElement("div");
       mutationResult.id = "post-mutation-result";
       mutationResult.textContent = "Deterministic post-mutation checkpoint.";

@@ -1628,6 +1628,164 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsEveryListenerRegistrationFormAtTheArchiveBoundary()
+    {
+        // Blink registers an addEventListener call, an on-event attribute
+        // assignment, and an inline content attribute through one path, and
+        // reassigning an on-event attribute over an existing registration
+        // replaces the callback without adding or removing a listener. The
+        // archive has to carry all four, so a session that reports them is
+        // valid.
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
+        };
+        var target = new
+        {
+            kind = "node",
+            interfaceName = "HTMLButtonElement",
+            targetId = (string?)null,
+            documentId = "dom-document-8",
+            nodeId = 42,
+            backendNodeId = (string?)null,
+            tagName = "BUTTON",
+            elementId = "pointer-only",
+            classes = Array.Empty<string>()
+        };
+        object Listener(string listenerId, string registrationKind) => new
+        {
+            context,
+            listenerId,
+            eventName = "click",
+            registrationKind,
+            target,
+            capture = false,
+            passive = false,
+            once = false,
+            location = (object?)null
+        };
+
+        var records = new[]
+        {
+            CreateEvent(
+                0,
+                100,
+                BrowserEvidenceChannels.Listener,
+                BrowserEvidenceEventTypes.ListenerRegistered,
+                Listener("listener-1", "add-event-listener")),
+            CreateEvent(
+                1,
+                200,
+                BrowserEvidenceChannels.Listener,
+                BrowserEvidenceEventTypes.ListenerRegistered,
+                Listener("listener-2", "inline-attribute")),
+            CreateEvent(
+                2,
+                300,
+                BrowserEvidenceChannels.Listener,
+                BrowserEvidenceEventTypes.ListenerCallbackReplaced,
+                Listener("listener-2", "event-handler-property")),
+            CreateEvent(
+                3,
+                400,
+                BrowserEvidenceChannels.Listener,
+                BrowserEvidenceEventTypes.ListenerRemoved,
+                Listener("listener-2", "event-handler-property"))
+        };
+        var directory = await CreateArchiveAsync(records);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsAListenerRegistrationFormTheSchemaDoesNotDefine()
+    {
+        // A registration form outside the schema would let an unreviewed
+        // reading of how a listener was created reach the archive, so it is
+        // rejected at the boundary rather than carried through.
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 1200,
+                    processType = "renderer",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = (string?)null,
+                    frameId = (string?)null,
+                    documentId = "dom-document-8",
+                    executionWorldId = (string?)null,
+                    documentToken = "document-token-8"
+                },
+                listenerId = "listener-1",
+                eventName = "click",
+                registrationKind = "on-attribute",
+                target = new
+                {
+                    kind = "node",
+                    interfaceName = "HTMLButtonElement",
+                    targetId = (string?)null,
+                    documentId = "dom-document-8",
+                    nodeId = 42,
+                    backendNodeId = (string?)null,
+                    tagName = "BUTTON",
+                    elementId = "pointer-only",
+                    classes = Array.Empty<string>()
+                },
+                capture = false,
+                passive = false,
+                once = false,
+                location = (object?)null
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code == "payload-property-invalid" &&
+                    issue.Path.EndsWith("/registrationKind", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
     {
         var context = new

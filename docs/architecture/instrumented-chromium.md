@@ -320,8 +320,23 @@ taken from Blink's `WindowEventContext`, which exists exactly when Blink will
 run window listeners for that event, so the recorded path ends where Blink's
 path ends. A dispatch whose original target is not a Node does not pass through
 `EventDispatcher::Dispatch` and is not recorded by this increment, and worker
-global scopes remain outside it. Live 0.18 connections require an exact
-protocol-version match.
+global scopes remain outside it.
+
+Protocol version 0.19 reports how each listener entered Blink's listener map.
+Blink funnels an `addEventListener` call, an inline `on*` content attribute, and
+an `on*` property assignment through `EventTarget::AddEventListenerInternal`, so
+the call site does not distinguish them and the form is read from the listener
+object Blink created: a content-attribute event handler is an inline attribute,
+any other event handler came from a property assignment, and a listener that is
+neither arrived through `addEventListener`. `EventTarget::SetAttributeEventListener`
+replaces the callback of an existing attribute registration in place and
+returns, so neither the add hook nor the remove hook runs on that path and the
+archive would otherwise keep reporting the form of a callback Blink no longer
+holds. That path emits a `listener-callback-replaced` record which keeps the
+listener identity and reports the form of the replacing callback. A form outside
+the schema is normalized to `add-event-listener`, because an out-of-schema value
+would fail archive validation for the whole session rather than for one record.
+Live 0.19 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
@@ -428,7 +443,9 @@ The Chromium fork should remain narrow. Instrumentation hooks call a small recor
 
 The integration script is applied repeatedly to the same Chromium checkout, so it must both skip work that is already present and rewrite hook bodies that an earlier protocol revision wrote. Recorder-owned files such as the bridge sources are copied wholesale on every run and therefore always match the current protocol. Hooks patched in place inside upstream Chromium sources do not, because presence guards keyed on a symbol name treat an older hook body as already integrated.
 
-Every protocol revision that changes the arguments of a bridge entry point must therefore keep the previous hook body as a named template and replace it with the current body before the presence guards run. Without that replacement the checkout retains an older call shape while the copied bridge header advances, and the Chromium build fails with argument-count errors at the stale call sites rather than at integration time.
+A listener hook is upgraded by rewriting the region it introduced rather than by matching a remembered copy of its text. The script locates the single call to the bridge entry point, takes the innermost block that encloses it, and replaces that whole block with the current body. The block must contain no other bridge call and must open either on its own line or on a condition the script wrote, so a bridge call sitting directly in an upstream Chromium function body is refused instead of deleted. A checkout holding a body no revision of this script records is therefore still upgraded, and the script does not have to anticipate every shape it has ever written.
+
+Hooks that are not upgraded this way must keep the previous hook body as a named template and replace it with the current body before the presence guards run. Without that replacement the checkout retains an older call shape while the copied bridge header advances, and the Chromium build fails with argument-count errors at the stale call sites rather than at integration time.
 
 The integration tests cover this by patching fixtures that already contain the previous revision's hook bodies, asserting that the current bodies replace them, and asserting that a second run changes nothing.
 

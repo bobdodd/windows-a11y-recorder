@@ -9,7 +9,9 @@ namespace Recorder.Tests;
 // the rest of that renderer's evidence for the session. Protocol 0.18 replaced
 // the node reference in listener and dispatch records with an event-target
 // reference that also describes Window and other non-Node targets, so these
-// fixtures mirror the JSON the bridge now writes for each kind.
+// fixtures mirror the JSON the bridge now writes for each kind. Protocol 0.19
+// adds the registration form a listener entered Blink with and a record for a
+// callback Blink replaced in place, so those shapes are covered here too.
 public sealed class BrowserEventTargetPayloadIngestTests
 {
     private const string ContextJson = """
@@ -196,6 +198,59 @@ public sealed class BrowserEventTargetPayloadIngestTests
             payload.CurrentTarget);
         Assert.Equal(BrowserEventTargetKinds.Window, currentTarget.Kind);
         Assert.Equal("event-target-2", currentTarget.TargetId);
+    }
+
+    [Fact]
+    public void AcceptsAnInlineAttributeRegistrationAsWritten()
+    {
+        var payload = Accept<BrowserListenerPayload>(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            $$"""
+            {
+              "context": {{ContextJson}},
+              "listenerId": "listener-9",
+              "eventName": "click",
+              "registrationKind": "inline-attribute",
+              "target": {{NodeTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": null
+            }
+            """);
+
+        Assert.Equal("inline-attribute", payload.RegistrationKind);
+    }
+
+    [Fact]
+    public void AcceptsAReplacedAttributeListenerCallbackAsWritten()
+    {
+        // Assigning an on-event attribute over a registration an inline
+        // attribute or an earlier assignment established swaps the callback in
+        // place, so Blink reports neither an addition nor a removal. The record
+        // keeps the listener identity and carries the form of the callback
+        // Blink now holds.
+        var payload = Accept<BrowserListenerPayload>(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerCallbackReplaced,
+            $$"""
+            {
+              "context": {{ContextJson}},
+              "listenerId": "listener-9",
+              "eventName": "click",
+              "registrationKind": "event-handler-property",
+              "target": {{NodeTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": null
+            }
+            """);
+
+        Assert.Equal("listener-9", payload.ListenerId);
+        Assert.Equal("event-handler-property", payload.RegistrationKind);
+        Assert.Equal(BrowserEventTargetKinds.Node, payload.Target.Kind);
     }
 
     [Fact]

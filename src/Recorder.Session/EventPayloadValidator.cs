@@ -94,6 +94,7 @@ internal static class EventPayloadValidator
                 break;
             case ("browser.listener", "listener-registered"):
             case ("browser.listener", "listener-removed"):
+            case ("browser.listener", "listener-callback-replaced"):
                 ValidateBrowserListener(payload, issues, lineNumber);
                 break;
             case ("browser.dispatch", "dispatch-started"):

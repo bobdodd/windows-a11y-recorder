@@ -159,17 +159,28 @@ records are incremental serialization batches, not complete tree snapshots.
 See the
 [accessibility checkpoint evidence model](docs/architecture/accessibility-checkpoint-evidence-model.md).
 
-Protocol 0.18 is implemented as a proof of concept and awaits reference-platform
-build and capture validation. It records listener and dispatch evidence for
+Protocol 0.18 records listener and dispatch evidence for
 EventTargets that are not Nodes, beginning with the window. Every listener and
 dispatch target reference reports its kind, the Blink interface name the target
 reports for itself, which is recorded as observed rather than as a
 cross-version identity, and a process-local target identifier when the target is not
 a Node, and reports no node identifier where no DOM node exists. The window
 entry at the end of a composed path comes from Blink's own window event context,
-so a recorded path ends where Blink's path ends. Worker global scopes, inline
-attributes, event-handler properties, isolated-world identity, source location,
-and dispatches whose original target is never a Node remain outstanding.
+so a recorded path ends where Blink's path ends.
+
+Protocol 0.19 is implemented as a proof of concept and awaits reference-platform
+build and capture validation. It reports how each listener entered Blink's
+listener map. Blink accepts an `addEventListener` call, an inline `on*` content
+attribute, and an `on*` property assignment through one internal registration
+path, so the form is read from the listener object Blink created rather than from
+the call site, and a registration reports `add-event-listener`,
+`inline-attribute`, or `event-handler-property`. Assigning an `on*` property over
+an existing attribute registration replaces that registration's callback in
+place, and Blink reports neither an addition nor a removal for it, so a
+`listener-callback-replaced` record carries the unchanged listener identity and
+the form of the callback Blink now holds. Worker global scopes, isolated-world
+identity, source location, and dispatches whose original target is never a Node
+remain outstanding.
 
 ## Project goals
 

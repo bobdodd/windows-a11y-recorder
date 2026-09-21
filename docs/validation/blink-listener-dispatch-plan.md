@@ -220,6 +220,51 @@ The archive validator enforces this rule rather than inferring it: a `node`
 target must carry a node identifier, and a `window` or `other` target must
 carry a target identifier and no node identifier.
 
+### Registration form
+
+Every listener record reports `registrationKind`, the form in which the listener
+entered Blink's listener map:
+
+- `add-event-listener`, an `addEventListener` call.
+- `inline-attribute`, an inline `on*` content attribute in markup.
+- `event-handler-property`, an `on*` IDL attribute assignment.
+- `native`, reserved for a listener Blink installs itself. The recorder does not
+  emit it yet.
+
+Blink routes all three script-reachable forms through
+`EventTarget::AddEventListenerInternal`, so the call site cannot distinguish
+them. The form is therefore read from the listener object Blink created: a
+listener that reports itself as an event handler for a content attribute is an
+inline attribute, any other event handler came from an `on*` property
+assignment, and a listener that is neither arrived through `addEventListener`.
+This is a reading of Blink's own listener classification, not an independent
+record of the call that created it.
+
+A form outside this set is normalized to `add-event-listener` rather than
+written through, because archive validation rejects an out-of-schema enumeration
+value and a rejected payload costs the rest of that renderer's evidence for the
+session rather than one record.
+
+### Replaced callbacks
+
+`EventTarget::SetAttributeEventListener` replaces the callback of an existing
+attribute registration in place and returns, without adding or removing a
+listener. Assigning an `on*` property over a listener that an inline attribute
+or an earlier assignment established therefore runs neither the add hook nor
+the remove hook, and the archive would keep reporting the form of a callback
+Blink no longer holds.
+
+That path emits `listener-callback-replaced` on `browser.listener`, with the
+same payload shape as a registration. The record keeps the listener identity,
+because Blink keeps the registration, and reports the form of the callback Blink
+now holds. A consumer reconstructing a listener's state must apply these records
+in order alongside registrations and removals.
+
+What this does not establish: the previous callback is not identified, the
+record does not say what the callback was replaced with beyond its form, and a
+listener Blink installs itself is still not distinguished from one a script
+added.
+
 ## Component boundary
 
 The recorder bridge is a Chromium component with exported entry points. This
@@ -239,7 +284,13 @@ high-volume event classes.
 `tests/fixtures/blink-listener-dispatch.html` installs capture and bubble
 listeners on `#propagation-root` and two listeners on `#pointer-only`. It
 installs a `click` listener on the window, and registers and removes a window
-`resize` listener. It
+`resize` listener. `#inline-handler` carries an inline `onclick` content
+attribute, `#property-handler` receives an `onclick` property assignment that is
+then reassigned, and `#inline-handler` receives an `onclick` assignment over its
+attribute registration, so the three registration forms and both in-place
+callback replacements are exercised. Each of those handlers calls
+`stopPropagation()`, so the recorded window click invocations stay
+deterministic. It
 installs a 125-millisecond interval that clears itself after one callback, then
 requests two animation-frame callbacks, explicitly cancels one, and invokes
 two idle callbacks, explicitly cancels the 5,000-millisecond callback, and
@@ -251,6 +302,11 @@ listeners call `preventDefault()`, remove the named listener, and call
 
 - At least one `browser.listener` `listener-registered` record for the
   `pointer-only` element and `click` event.
+- A `listener-registered` record with `registrationKind` `inline-attribute` for
+  `#inline-handler` and `event-handler-property` for `#property-handler`.
+- A `listener-callback-replaced` record for each of those two elements, carrying
+  the listener identity of the registration it replaced and the
+  `event-handler-property` form of the replacing callback.
 - At least one `browser.dispatch` `dispatch-started` record for the same
   document and node.
 - One correlated `listener-removed` record.
