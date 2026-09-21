@@ -668,3 +668,64 @@ state, callback source location, sustained high-volume operation, and omission
 handling under backpressure remain outside the validated scope. The
 [dated validation record](blink-idle-callbacks-2026-09-19.md) documents the
 environment, evidence, and limits.
+
+## Non-Node event-target validation result
+
+The non-Node event-target slice completed the reference Windows procedure on
+September 21, 2026, using repository commit `8fae574`. The complete script
+exited with code 0 after:
+
+- Passing 41 Chromium integration tests.
+- Building the protocol 0.18 instrumented Chromium executable.
+- Passing the managed recorder test suite, 95 tests with no failures.
+- Connecting the instrumented renderer through the authenticated pipe.
+- Recording listener registration, removal, and invocation for the fixture
+  document's window, and a composed path that ends at that window.
+- Validating the completed archive.
+- Confirming that Chromium reported no network-service crashes.
+
+The validated session is:
+
+`C:\\Users\\Public\\Downloads\\A11yRecorderWindowEvidence\\sessions\\20260921-195100-55f92d53399840e483117e40ec97b9d2`
+
+The final validation summary reported:
+
+- `WindowInterfaceName=DOMWindow`
+- `WindowTargetId=event-target-3`
+- `WindowListenerId=listener-6`
+- `WindowClickInvocations=1`
+- `LinkComposedPathEntries=5`
+- `RendererProcessId=15816`
+- `DocumentId=dom-document-9`
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=42176`
+- `ARTIFACTS_VALIDATED=111`
+- `NETWORK_SERVICE_CRASHES=0`
+- `VALIDATION_EXIT_CODE=0`
+
+The window registration, its correlated removal, and the window entry in the
+`#default-action-link` composed path share one process-local target identifier
+and carry no node identifier. The window listener invocation reports the
+`bubbling` phase and a Node original target.
+
+This result validates that a listener registered on an EventTarget that is not
+a Node is recorded, that its removal correlates with its registration, that it
+is invoked within a recorded dispatch, and that a composed path ends where
+Blink's own path ends. The interface name is recorded as observed and is not a
+cross-version identity: this checkout reports `DOMWindow`, while current
+Chromium returns `event_target_names::kWindow` from
+`DOMWindow::InterfaceName`. Worker and worklet global scopes, inline event
+attributes, `on*` handler properties, isolated-world identity, listener source
+location, shadow-adjusted targets, and dispatches whose original target is
+never a Node remain outside the validated scope.
+
+Two earlier runs of this slice failed, and both failures were in the harness
+rather than the recorded evidence. The first recorded every intended record and
+failed a fixture assertion that required the window's interface name to equal
+`Window`. The second failed archive validation with `event-time-regressed`
+after the UI Automation observation queue overflowed and dropped 1,062
+observations: the closing omission record was stamped with the stop boundary
+captured before the collector's queued evidence had drained, 0.74 ms before the
+last drained observation it was written after, which made the session status
+`failed` and the capture host exit with code 3 after a complete capture of
+42,949 records.
