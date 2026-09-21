@@ -7,7 +7,7 @@ validator, and the reference-fixture validation all reflect this document.
 Protocol 0.15 introduced this evidence and was validated on the reference
 platform at revision `6aeb57b`. Protocol 0.16 reverses the direction of the
 transition-to-checkpoint join on the strength of what that validation measured,
-and is pending its own validation run.
+and was validated on the reference platform at revision `aabeae1`.
 
 ## Purpose
 

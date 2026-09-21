@@ -118,8 +118,10 @@ renderer, so 49 completed checkpoints used 32 distinct identity strings and a
 join requires the browser instance, renderer process, and document to match as
 well. Both limits are recorded in the DOM attribute and text evidence model.
 
-Protocol 0.16 is ready for reference-platform validation. It reverses the
-direction of that join. Each transition now carries its own `transitionId`, and
+Protocol 0.16 is validated on the reference platform, at revision `aabeae1`,
+with 18,184 events and 81 artifacts recorded, no network service crashes, no
+collector omissions, and clean archive validation. It reverses the direction of
+that join. Each transition now carries its own `transitionId`, and
 each completed checkpoint reports the count and the first and last identity of
 the transitions it covers for its document. The reason is that the earlier
 direction was unresolvable by construction: the three documents accounting for
@@ -132,6 +134,13 @@ deterministic verifier requires one checkpoint in the fixture document to cover
 all six fixture transitions, requires every completed checkpoint to state a
 coherent coverage range, and reports how many recorded transitions no
 checkpoint covered.
+
+The validated run recorded 444 transitions, of which 200 were covered by no
+checkpoint, and the fixture's state checkpoint covered 8. The uncovered figure
+is the same population that produced 200 dangling references under 0.15: three
+short-lived documents that are mutated and discarded before any delivery pass
+produces a checkpoint. Under 0.16 the archive states that absence rather than
+naming evidence it does not contain.
 
 ## Project goals
 
