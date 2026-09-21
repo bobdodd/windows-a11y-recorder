@@ -476,22 +476,64 @@
                    AutomationProperties.Name="Timeline visible range start" />
       </Grid>
 
-      <GroupBox Grid.Row="3"
-                Margin="0,8,0,0"
-                Padding="8"
-                Header="Selected event values">
-        <TextBox x:Name="EventDetailsTextBox"
-                 MinHeight="90"
-                 MaxHeight="180"
-                 IsReadOnly="True"
-                 AcceptsReturn="True"
-                 TextWrapping="NoWrap"
-                 VerticalScrollBarVisibility="Auto"
-                 HorizontalScrollBarVisibility="Auto"
-                 FontFamily="Consolas"
-                 AutomationProperties.Name="Selected event values"
-                 Text="Select an event in the timeline to inspect its complete recorded values." />
-      </GroupBox>
+      <Grid Grid.Row="3" Margin="0,8,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="2*" MinWidth="300" />
+          <ColumnDefinition Width="8" />
+          <ColumnDefinition Width="3*" MinWidth="360" />
+        </Grid.ColumnDefinitions>
+        <GroupBox Grid.Column="0"
+                  Padding="8"
+                  Header="Browser navigation correlation">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <ListBox x:Name="BrowserNavigationListBox"
+                     Grid.Row="0"
+                     MinHeight="70"
+                     MaxHeight="100"
+                     DisplayMemberPath="Label"
+                     SelectionChanged="BrowserNavigationListBox_SelectionChanged"
+                     AutomationProperties.Name="Recorded browser navigations"
+                     AutomationProperties.HelpText="Select a navigation to seek to it and inspect its correlated browser evidence." />
+            <TextBox x:Name="BrowserCorrelationTextBox"
+                     Grid.Row="1"
+                     Margin="0,6,0,0"
+                     MinHeight="70"
+                     MaxHeight="100"
+                     IsReadOnly="True"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     AutomationProperties.Name="Browser navigation correlation summary"
+                     Text="Open a recording with browser evidence to inspect navigation correlation." />
+          </Grid>
+        </GroupBox>
+        <GridSplitter Grid.Column="1"
+                      Width="8"
+                      HorizontalAlignment="Stretch"
+                      Background="Transparent"
+                      ResizeDirection="Columns"
+                      ResizeBehavior="PreviousAndNext"
+                      AutomationProperties.Name="Resize browser correlation and event values" />
+        <GroupBox Grid.Column="2"
+                  Padding="8"
+                  Header="Selected event values">
+          <TextBox x:Name="EventDetailsTextBox"
+                   MinHeight="146"
+                   MaxHeight="206"
+                   IsReadOnly="True"
+                   AcceptsReturn="True"
+                   TextWrapping="NoWrap"
+                   VerticalScrollBarVisibility="Auto"
+                   HorizontalScrollBarVisibility="Auto"
+                   FontFamily="Consolas"
+                   AutomationProperties.Name="Selected event values"
+                   Text="Select an event in the timeline to inspect its complete recorded values." />
+        </GroupBox>
+      </Grid>
 
       <Grid Grid.Row="4" Margin="0,8,0,0">
         <Grid.ColumnDefinitions>

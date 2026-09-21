@@ -8,7 +8,8 @@ public sealed record SessionPlaybackArchive(
     long DurationNanoseconds,
     IReadOnlyList<SessionTimelineEvent> Events,
     IReadOnlyList<SessionVideoFrame> Frames,
-    IReadOnlyList<SessionAudioTrack> AudioTracks);
+    IReadOnlyList<SessionAudioTrack> AudioTracks,
+    IReadOnlyList<BrowserNavigationCorrelation> BrowserNavigations);
 
 public sealed record SessionTimelineEvent(
     long Line,
@@ -64,6 +65,7 @@ public static class SessionArchiveReader
         var frames = new List<SessionVideoFrame>();
         var audioTracks = new Dictionary<string, SessionAudioTrack>(
             StringComparer.OrdinalIgnoreCase);
+        var browserProjections = new List<BrowserEventProjection>();
         long maximumTimestamp = 0;
         long lineNumber = 0;
 
@@ -89,7 +91,7 @@ public static class SessionArchiveReader
                 : default;
             var eventId = ReadString(record, "eventId") ??
                 CreateLegacyEventId(record, channel, lineNumber);
-            events.Add(new SessionTimelineEvent(
+            var timelineEvent = new SessionTimelineEvent(
                 lineNumber,
                 eventId,
                 ReadString(record, "evidenceClass") ?? "observed",
@@ -97,7 +99,15 @@ public static class SessionArchiveReader
                 eventType,
                 timestamp,
                 CreateSummary(channel, eventType, payload),
-                record.GetRawText()));
+                record.GetRawText());
+            events.Add(timelineEvent);
+            var browserProjection = BrowserNavigationCorrelator.Project(
+                timelineEvent,
+                payload);
+            if (browserProjection is not null)
+            {
+                browserProjections.Add(browserProjection);
+            }
 
             if (channel == "graphics.desktop.frames" &&
                 eventType == "desktop-frame" &&
@@ -119,6 +129,9 @@ public static class SessionArchiveReader
         frames.Sort(static (left, right) =>
             left.MonotonicNanoseconds.CompareTo(right.MonotonicNanoseconds));
         var duration = Math.Max(manifest.DurationNanoseconds ?? 0, maximumTimestamp);
+        var browserNavigations = BrowserNavigationCorrelator.Build(
+            browserProjections,
+            duration);
         return new SessionPlaybackArchive(
             root,
             manifest,
@@ -127,7 +140,8 @@ public static class SessionArchiveReader
             frames,
             audioTracks.Values
                 .OrderBy(track => track.Stream, StringComparer.OrdinalIgnoreCase)
-                .ToArray());
+                .ToArray(),
+            browserNavigations);
     }
 
     private static void AddFrame(
@@ -223,6 +237,39 @@ public static class SessionArchiveReader
                 eventType,
                 ReadString(payload, "stream"),
                 ReadString(payload, "device"));
+        }
+
+        if (channel == "browser.navigation")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "url"),
+                ReadString(payload, "navigationKind"),
+                ReadString(payload, "outcome"));
+        }
+
+        if (channel == "browser.dispatch")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "eventName"),
+                ReadString(payload, "outcome"));
+        }
+
+        if (channel == "browser.listener")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "eventName"),
+                ReadString(payload, "registrationKind"));
+        }
+
+        if (channel == "browser.dom")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "reason"),
+                ReadString(payload, "checkpointId"));
         }
 
         return eventType;

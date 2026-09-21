@@ -61,6 +61,7 @@ public partial class MainWindow : Window
     private bool _isPlaying;
     private bool _updatingSlider;
     private bool _updatingTimelineControls;
+    private bool _updatingBrowserNavigationSelection;
 
     public MainWindow()
     {
@@ -359,6 +360,24 @@ public partial class MainWindow : Window
             $"{FormatTime(e.TimelineEvent.MonotonicNanoseconds)}");
     }
 
+    private void BrowserNavigationListBox_SelectionChanged(
+        object sender,
+        System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_updatingBrowserNavigationSelection ||
+            BrowserNavigationListBox.SelectedItem is not
+                BrowserNavigationCorrelation navigation)
+        {
+            return;
+        }
+
+        PausePlayback();
+        _updatingBrowserNavigationSelection = true;
+        SeekTo(navigation.StartNanoseconds, synchronizeAudio: false);
+        _updatingBrowserNavigationSelection = false;
+        DisplayBrowserCorrelation(navigation);
+    }
+
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (Keyboard.FocusedElement is System.Windows.Controls.TextBox)
@@ -501,6 +520,13 @@ public partial class MainWindow : Window
             TimelineControl.SetSession(
                 _playbackArchive.Events,
                 _playbackArchive.DurationNanoseconds);
+            BrowserNavigationListBox.ItemsSource =
+                _playbackArchive.BrowserNavigations;
+            BrowserCorrelationTextBox.Text =
+                _playbackArchive.BrowserNavigations.Count == 0
+                    ? "This recording contains no browser navigation evidence."
+                    : "Select a browser navigation, or move through playback, " +
+                      "to inspect its correlated DOM and interaction evidence.";
             TimelineZoomSlider.Value = 1;
             ApplyTimelineFilters();
             ApplyTimelineZoom();
@@ -528,6 +554,9 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             _playbackArchive = null;
+            BrowserNavigationListBox.ItemsSource = null;
+            BrowserCorrelationTextBox.Text =
+                "The recording could not be opened.";
             VideoImage.Source = null;
             VideoPlaceholderTextBlock.Text = "The recording could not be opened.";
             VideoPlaceholderTextBlock.Visibility = Visibility.Visible;
@@ -658,6 +687,72 @@ public partial class MainWindow : Window
             $"{FormatTime(_playbackArchive.DurationNanoseconds)}");
         DisplayFrameAt(positionNanoseconds);
         DisplayNearestEvent(positionNanoseconds);
+        DisplayBrowserCorrelationAt(positionNanoseconds);
+    }
+
+    private void DisplayBrowserCorrelationAt(long positionNanoseconds)
+    {
+        if (_updatingBrowserNavigationSelection ||
+            _playbackArchive is null ||
+            _playbackArchive.BrowserNavigations.Count == 0)
+        {
+            return;
+        }
+
+        var navigation = _playbackArchive.BrowserNavigations
+            .LastOrDefault(item =>
+                item.StartNanoseconds <= positionNanoseconds &&
+                positionNanoseconds < item.EndNanoseconds &&
+                item.PrimaryPage) ??
+            _playbackArchive.BrowserNavigations
+                .LastOrDefault(item =>
+                    item.StartNanoseconds <= positionNanoseconds &&
+                    positionNanoseconds < item.EndNanoseconds);
+        if (navigation is null)
+        {
+            return;
+        }
+
+        _updatingBrowserNavigationSelection = true;
+        BrowserNavigationListBox.SelectedItem = navigation;
+        BrowserNavigationListBox.ScrollIntoView(navigation);
+        _updatingBrowserNavigationSelection = false;
+        DisplayBrowserCorrelation(navigation);
+    }
+
+    private void DisplayBrowserCorrelation(
+        BrowserNavigationCorrelation navigation)
+    {
+        var completion = navigation.CompletedNanoseconds is null
+            ? "No matching navigation completion was recorded."
+            : navigation.Committed == true
+                ? $"Completed as {navigation.Outcome ?? "committed"}."
+                : $"Completed as {navigation.Outcome ?? "not committed"}.";
+        var truncation = navigation.TruncatedCheckpointCount == 0
+            ? "No correlated checkpoint was marked truncated."
+            : $"{navigation.TruncatedCheckpointCount:N0} of " +
+              $"{navigation.CheckpointCount:N0} correlated checkpoints " +
+              "were marked truncated.";
+        BrowserCorrelationTextBox.Text =
+            $"{navigation.Url}{Environment.NewLine}" +
+            $"{completion} Correlation basis: {navigation.CorrelationBasis}." +
+            $"{Environment.NewLine}" +
+            $"Renderer: {navigation.RendererProcessId?.ToString() ?? "not recorded"}; " +
+            $"DOM checkpoints: {navigation.CheckpointCount:N0}; " +
+            $"DOM nodes: {navigation.DomNodeCount:N0}; " +
+            $"dispatches: {navigation.DispatchCount:N0}; " +
+            $"listener invocations: {navigation.ListenerInvocationCount:N0}; " +
+            $"related records: {navigation.RelatedEventCount:N0}." +
+            $"{Environment.NewLine}{truncation}";
+        BrowserCorrelationTextBox.CaretIndex = 0;
+        BrowserCorrelationTextBox.ScrollToHome();
+        AutomationProperties.SetHelpText(
+            BrowserCorrelationTextBox,
+            $"Navigation at {FormatTime(navigation.StartNanoseconds)}. " +
+            $"{navigation.CheckpointCount:N0} DOM checkpoints, " +
+            $"{navigation.DispatchCount:N0} dispatches, and " +
+            $"{navigation.ListenerInvocationCount:N0} listener invocations. " +
+            truncation);
     }
 
     private void DisplayFrameAt(long positionNanoseconds)

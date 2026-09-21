@@ -110,6 +110,132 @@ public sealed class SessionArchiveReaderTests
         }
     }
 
+    [Fact]
+    public async Task CorrelatesNavigationWithRendererDocumentEvidence()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            await WriteManifestAsync(directory, 1_000);
+            var browserContext = new
+            {
+                browserInstanceId = "browser-1",
+                processId = 1,
+                processType = "browser",
+                documentId = "document-navigation-1",
+                documentToken = "TOKEN-1"
+            };
+            var rendererContext = new
+            {
+                browserInstanceId = "browser-1",
+                processId = 20,
+                processType = "renderer",
+                documentId = "dom-document-1",
+                documentToken = "TOKEN-1"
+            };
+            var rendererContextWithoutToken = new
+            {
+                browserInstanceId = "browser-1",
+                processId = 20,
+                processType = "renderer",
+                documentId = "dom-document-1",
+                documentToken = (string?)null
+            };
+            await WriteEventsAsync(
+                directory,
+                [
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        100,
+                        new
+                        {
+                            context = browserContext,
+                            navigationId = "navigation-1",
+                            url = "https://example.test/",
+                            primaryPage = true,
+                            sameDocument = false
+                        }),
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-completed",
+                        150,
+                        new
+                        {
+                            context = browserContext,
+                            navigationId = "navigation-1",
+                            url = "https://example.test/",
+                            primaryPage = true,
+                            sameDocument = false,
+                            committed = true,
+                            outcome = "committed",
+                            rendererProcessId = 20
+                        }),
+                    CreateEvent(
+                        "browser.dom",
+                        "dom-checkpoint-node",
+                        200,
+                        new
+                        {
+                            context = rendererContext,
+                            checkpointId = "checkpoint-1",
+                            nodeId = 1
+                        }),
+                    CreateEvent(
+                        "browser.dom",
+                        "dom-checkpoint-completed",
+                        210,
+                        new
+                        {
+                            context = rendererContext,
+                            checkpointId = "checkpoint-1",
+                            nodeCount = 1,
+                            truncated = true
+                        }),
+                    CreateEvent(
+                        "browser.dispatch",
+                        "dispatch-started",
+                        220,
+                        new
+                        {
+                            context = rendererContextWithoutToken,
+                            dispatchId = "dispatch-1",
+                            eventName = "click"
+                        }),
+                    CreateEvent(
+                        "browser.listener",
+                        "listener-invoked",
+                        230,
+                        new
+                        {
+                            context = rendererContextWithoutToken,
+                            listenerId = "listener-1",
+                            eventName = "click"
+                        })
+                ]);
+
+            var archive = await SessionArchiveReader.LoadAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            var navigation = Assert.Single(archive.BrowserNavigations);
+            Assert.Equal("https://example.test/", navigation.Url);
+            Assert.Equal(
+                "document token and renderer document identity",
+                navigation.CorrelationBasis);
+            Assert.Equal(1, navigation.CheckpointCount);
+            Assert.Equal(1, navigation.DomNodeCount);
+            Assert.Equal(1, navigation.TruncatedCheckpointCount);
+            Assert.Equal(1, navigation.DispatchCount);
+            Assert.Equal(1, navigation.ListenerInvocationCount);
+            Assert.Equal(6, navigation.RelatedEventCount);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static string CreateDirectory()
     {
         var directory = Path.Combine(
