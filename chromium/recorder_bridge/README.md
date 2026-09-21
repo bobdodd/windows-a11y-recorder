@@ -116,6 +116,16 @@ introduces rather than by matching any earlier body verbatim. Integration still
 fails if the resulting hook would not return the failure code, which is a
 backstop rather than the mechanism.
 
+Failure reporting is checked by provoking it. `scripts/Test-BridgeFailureReporting.ps1`
+starts the instrumented browser with no recorder pipe server, once with an
+unsupported bootstrap protocol version and once with the supported version, and
+requires both runs to exit with the failure code, to record a reason behind the
+marker the recorder searches for, and to record different reasons from each
+other. The script reads the expected exit code, marker text, and supported
+protocol version from the native and managed sources, so it fails if those
+constants ever diverge. A successful recording does not exercise any of this,
+which is why the check does not depend on one.
+
 For failures that occur before Chromium logging is initialized, set
 `A11Y_RECORDER_BRIDGE_LOG_FILE` to an absolute file path. The recorder sets this
 variable for every browser it launches, defaulting to

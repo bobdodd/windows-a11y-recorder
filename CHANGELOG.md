@@ -18,6 +18,21 @@ from the product version.
 
 ## Unreleased
 
+### Added
+
+- Added `scripts/Test-BridgeFailureReporting.ps1`, which provokes a bridge
+  initialization failure in the instrumented browser instead of waiting for one.
+  A successful recording proves nothing about failure reporting, so the check
+  starts the browser twice with no pipe server: once with an unsupported
+  bootstrap protocol version, which is the shape of a published application that
+  is older than the browser it starts, and once with the supported version, which
+  reaches the connection attempt. Both must exit with the bridge initialization
+  failure code and record a reason behind the marker the recorder searches for,
+  and the two reasons must differ, so a reason that identifies nothing fails the
+  check. The expected exit code, marker text, and supported protocol version are
+  read from the native and managed sources, so the check also fails if the two
+  sides of that contract ever disagree.
+
 ### Fixed
 
 - Made a failed browser bridge report itself. A recorder-launched browser whose
