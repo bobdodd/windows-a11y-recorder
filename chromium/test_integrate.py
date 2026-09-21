@@ -72,6 +72,12 @@ class IntegrateTests(unittest.TestCase):
                 "ax::mojom::State::kFocused", first_source
             )
             self.assertIn(
+                "ui::ToString(recorder_node.role)", first_source
+            )
+            self.assertIn(
+                INTEGRATE.CONTENT_RENDERER_AX_ENUM_INCLUDE, first_source
+            )
+            self.assertIn(
                 '    "//chromium/recorder_bridge",', first_build
             )
 
@@ -89,6 +95,41 @@ class IntegrateTests(unittest.TestCase):
             self.assertNotIn(
                 INTEGRATE.LEGACY_CONTENT_RENDERER_FOCUSED_EXPRESSION,
                 upgraded_source,
+            )
+
+            # A checkout patched before the role name was recorded keeps its
+            # hook body, so the migration has to supply both the new argument
+            # and the include it needs.
+            legacy_role_source = first_source.replace(
+                INTEGRATE.CONTENT_RENDERER_ROLE_EXPRESSION,
+                INTEGRATE.LEGACY_CONTENT_RENDERER_ROLE_EXPRESSION,
+            ).replace(
+                INTEGRATE.CONTENT_RENDERER_AX_ENUM_INCLUDE + "\n", ""
+            )
+            self.assertNotIn(
+                "ui::ToString(recorder_node.role)", legacy_role_source
+            )
+            source.write_text(legacy_role_source, encoding="utf-8")
+            INTEGRATE.patch_content_renderer_accessibility(source)
+            upgraded_role_source = source.read_text(encoding="utf-8")
+            self.assertIn(
+                INTEGRATE.CONTENT_RENDERER_ROLE_EXPRESSION,
+                upgraded_role_source,
+            )
+            self.assertIn(
+                INTEGRATE.CONTENT_RENDERER_AX_ENUM_INCLUDE,
+                upgraded_role_source,
+            )
+            self.assertEqual(
+                1,
+                upgraded_role_source.count(
+                    INTEGRATE.CONTENT_RENDERER_AX_ENUM_INCLUDE
+                ),
+            )
+            INTEGRATE.patch_content_renderer_accessibility(source)
+            self.assertEqual(
+                upgraded_role_source,
+                source.read_text(encoding="utf-8"),
             )
 
     def test_upgrades_legacy_scheduling_hooks(self):

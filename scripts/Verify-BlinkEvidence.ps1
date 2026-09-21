@@ -581,14 +581,29 @@ foreach ($checkpointStart in $fixtureAccessibilityStarts) {
         if ($checkpointNodes[$index].payload.nodeIndex -ne $index) {
             throw "Accessibility checkpoint node indices are not contiguous."
         }
+        if (
+            [string]::IsNullOrWhiteSpace(
+                $checkpointNodes[$index].payload.roleName
+            )
+        ) {
+            throw (
+                "An accessibility checkpoint node did not record a role name. " +
+                "The numeric role alone is not a stable identity across " +
+                "Chromium versions."
+            )
+        }
         [void] $fixtureAccessibilityNodes.Add($checkpointNodes[$index])
     }
     [void] $fixtureAccessibilityCompletions.Add($checkpointCompletion)
 }
+# The role is matched on the recorded role name, which is Chromium's own stable
+# role token. It is not matched on the numeric role, whose ordinals shift
+# between Chromium versions, and not on the serialized properties, which are a
+# readable debug representation rather than a field contract.
 $fixtureAccessibilityButtons = @(
     $fixtureAccessibilityNodes |
         Where-Object {
-            $_.payload.serializedProperties -match "(?i)role=button" -and
+            $_.payload.roleName -eq "button" -and
             $_.payload.name -in @(
                 "First disclosure name",
                 "Second disclosure name",

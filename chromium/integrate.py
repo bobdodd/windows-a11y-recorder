@@ -31,8 +31,20 @@ CONTENT_RENDERER_ACCESSIBILITY_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
 )
 CONTENT_RENDERER_DEP = '    "//chromium/recorder_bridge",'
+CONTENT_RENDERER_AX_ENUM_INCLUDE = (
+    '#include "ui/accessibility/ax_enum_util.h"'
+)
 LEGACY_CONTENT_RENDERER_FOCUSED_EXPRESSION = (
     "recorder_node.HasState(ax::mojom::State::kFocused)"
+)
+LEGACY_CONTENT_RENDERER_ROLE_EXPRESSION = (
+    "            static_cast<int>(recorder_node.role),\n"
+    "            recorder_node.GetStringAttribute(\n"
+)
+CONTENT_RENDERER_ROLE_EXPRESSION = (
+    "            static_cast<int>(recorder_node.role),\n"
+    "            ui::ToString(recorder_node.role),\n"
+    "            recorder_node.GetStringAttribute(\n"
 )
 CONTENT_RENDERER_FOCUSED_EXPRESSION = (
     "recorder_update.has_tree_data &&\n"
@@ -372,6 +384,7 @@ CONTENT_RENDERER_ACCESSIBILITY_HOOK = """\
                 : recorder_parent->second,
             recorder_node.GetDOMNodeId(),
             static_cast<int>(recorder_node.role),
+            ui::ToString(recorder_node.role),
             recorder_node.GetStringAttribute(
                 ax::mojom::StringAttribute::kName),
             recorder_node.GetStringAttribute(
@@ -2042,6 +2055,13 @@ def patch_content_renderer_accessibility(path: Path) -> None:
             CONTENT_RENDERER_FOCUSED_EXPRESSION,
             path,
         )
+    if LEGACY_CONTENT_RENDERER_ROLE_EXPRESSION in text:
+        text = replace_once(
+            text,
+            LEGACY_CONTENT_RENDERER_ROLE_EXPRESSION,
+            CONTENT_RENDERER_ROLE_EXPRESSION,
+            path,
+        )
     header = (
         '#include "content/renderer/accessibility/'
         'render_accessibility_impl.h"\n'
@@ -2051,16 +2071,29 @@ def patch_content_renderer_accessibility(path: Path) -> None:
             text,
             header,
             header + "\n#include <unordered_map>\n\n"
-            + f"{CONTENT_RENDERER_ACCESSIBILITY_INCLUDE}\n",
+            + f"{CONTENT_RENDERER_ACCESSIBILITY_INCLUDE}\n"
+            + f"{CONTENT_RENDERER_AX_ENUM_INCLUDE}\n",
             path,
         )
-    elif "#include <unordered_map>" not in text:
-        text = replace_once(
-            text,
-            header,
-            header + "\n#include <unordered_map>\n",
-            path,
-        )
+    else:
+        # A checkout patched by an earlier protocol revision keeps its hook
+        # body, so each include this revision requires is added separately
+        # rather than as one block.
+        if "#include <unordered_map>" not in text:
+            text = replace_once(
+                text,
+                header,
+                header + "\n#include <unordered_map>\n",
+                path,
+            )
+        if CONTENT_RENDERER_AX_ENUM_INCLUDE not in text:
+            text = replace_once(
+                text,
+                f"{CONTENT_RENDERER_ACCESSIBILITY_INCLUDE}\n",
+                f"{CONTENT_RENDERER_ACCESSIBILITY_INCLUDE}\n"
+                + f"{CONTENT_RENDERER_AX_ENUM_INCLUDE}\n",
+                path,
+            )
     if "BeginRendererAccessibilityCheckpoint" not in text:
         anchor = (
             "  ax_annotators_manager_->AddDebuggingAttributes("

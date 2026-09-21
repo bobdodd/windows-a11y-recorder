@@ -1595,13 +1595,15 @@ void RecordRendererAccessibilityCheckpointNode(
     int parent_accessibility_node_id,
     int dom_node_id,
     int role,
+    std::string role_name,
     std::string name,
     std::string description,
     std::string serialized_properties,
     bool focused) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_token.empty() ||
-      node_index < 0 || accessibility_node_id == 0 || role < 0) {
+      node_index < 0 || accessibility_node_id == 0 || role < 0 ||
+      role_name.empty()) {
     return;
   }
   base::DictValue payload = CreateAccessibilityCheckpointBasePayload(
@@ -1620,6 +1622,7 @@ void RecordRendererAccessibilityCheckpointNode(
     payload.Set("domNodeId", base::Value());
   }
   payload.Set("role", role);
+  payload.Set("roleName", std::move(role_name));
   payload.Set("name", std::move(name));
   payload.Set("description", std::move(description));
   payload.Set("serializedProperties", std::move(serialized_properties));

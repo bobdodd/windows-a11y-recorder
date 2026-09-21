@@ -235,6 +235,7 @@ public sealed record BrowserAccessibilityCheckpointNodePayload(
     int? ParentAccessibilityNodeId,
     int? DomNodeId,
     int Role,
+    string RoleName,
     string Name,
     string Description,
     string SerializedProperties,

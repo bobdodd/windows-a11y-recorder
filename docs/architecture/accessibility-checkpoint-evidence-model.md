@@ -57,6 +57,7 @@ Each node record reports:
 - the parent AX node identity when the parent occurs in the same batch;
 - the associated DOM node identity when Chromium supplies one;
 - Chromium's numeric accessibility role;
+- Chromium's role name for that role;
 - accessible name and description;
 - Chromium's readable serialized AX properties; and
 - whether the node identity matches `AXTreeData::focus_id` when its serialized
@@ -69,6 +70,33 @@ The same rule applies to a recorded parent AX node identity.
 The readable serialized properties deliberately retain the broader role, state,
 attribute, and relationship vocabulary while the structured protocol grows.
 They are observed Chromium output, not a recorder interpretation.
+
+## Role identity
+
+The role is recorded twice, and only one of the two is a durable identity.
+
+`role` is the numeric `ax::mojom::Role` value. Its ordinals are assigned by
+declaration order in Chromium's accessibility enumeration, so the same number
+can denote different roles in different Chromium versions. It is retained
+because it is what the renderer held, but it must not be used to identify a role
+across versions.
+
+`roleName` is Chromium's own role token for that value, taken from
+`ui::ToString(ax::mojom::Role)`. Consumers, verification, and analysis identify
+a role by this field.
+
+The serialized properties also contain a role token, because Chromium's
+`AXNodeData` debug string emits the role as a bare word following the node
+identity, as in `id=32 button COLLAPSED FOCUSABLE`. That string is a diagnostic
+representation whose shape Chromium may change at any time. It is not a field
+contract, and no consumer should parse a role out of it. The protocol 0.17
+reference run failed its accessibility assertion for exactly this reason: the
+verifier searched the serialized properties for `role=button`, a form Chromium
+never emits, while the correct evidence was present in the node record.
+
+A node record is not emitted without a role name, so a node reaching the archive
+with an absent or empty `roleName` is a defect rather than an observation about
+the page.
 
 ## Correlation rules
 

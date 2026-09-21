@@ -20,6 +20,18 @@ from the product version.
 
 ### Fixed
 
+- Recorded Chromium's role name on every protocol 0.17 accessibility node and
+  moved role verification onto that field. The first reference run of the
+  accessibility slice failed because the verifier searched the readable
+  serialized properties for `role=button`, which Chromium never emits: its
+  `AXNodeData` debug string writes the role as a bare token, as in
+  `id=32 button COLLAPSED FOCUSABLE`. The assertion could not have passed on any
+  build, while the underlying capture was correct. Node records now carry
+  `roleName` from `ui::ToString`, the managed payload contract carries the field
+  in the same change so ingest does not reject the payload, and the verifier
+  requires a role name on every node. The numeric role is retained as observed
+  renderer state but is not a cross-version identity, and no consumer parses a
+  role out of the debug string.
 - Updated the recorder's managed browser payload contracts to the protocol 0.16
   fields. Evidence ingest rejects unmapped members and the receive loop closes
   the pipe of a process whose payload is rejected, so the stale contracts cost

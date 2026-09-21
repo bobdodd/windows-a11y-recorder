@@ -80,9 +80,12 @@ Protocol 0.17 records renderer accessibility serialization batches before
 Chromium sends them to the browser process. Each batch has start, node, and
 completion records with the document token, update and event counts, a
 100,000-node limit, and explicit truncation. Node records include AX and DOM
-identities, role, name, description, whether the node identity matches the
-focus identity when its serialized update carries tree data, and Chromium's
-readable serialized properties. AX identity zero is invalid, while negative AX
+identities, the numeric role and Chromium's role name for it, name, description,
+whether the node identity matches the focus identity when its serialized update
+carries tree data, and Chromium's readable serialized properties. Consumers
+identify a role by the role name, because numeric role ordinals shift between
+Chromium versions and the serialized properties are a debug representation
+rather than a field contract. AX identity zero is invalid, while negative AX
 identities are retained for Chromium-generated renderer nodes. These batches
 are incremental updates, not complete accessibility-tree snapshots.
 

@@ -255,9 +255,11 @@ uint64_t BeginRendererAccessibilityCheckpoint(
     int update_count,
     int event_count);
 
-// Records one serialized AXNodeData item. The serialized properties retain
-// Chromium's own readable role and state representation in addition to the
-// structured fields used by playback.
+// Records one serialized AXNodeData item. The role is recorded twice: as the
+// numeric ax::mojom::Role value, whose ordinals are not stable across Chromium
+// versions, and as Chromium's own stable role token from ui::ToString. The
+// serialized properties retain Chromium's readable debug representation, which
+// is a diagnostic aid and not a field contract.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordRendererAccessibilityCheckpointNode(
     uint64_t checkpoint_sequence,
@@ -267,6 +269,7 @@ void RecordRendererAccessibilityCheckpointNode(
     int parent_accessibility_node_id,
     int dom_node_id,
     int role,
+    std::string role_name,
     std::string name,
     std::string description,
     std::string serialized_properties,

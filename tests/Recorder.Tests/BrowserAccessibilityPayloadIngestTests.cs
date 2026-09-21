@@ -55,6 +55,7 @@ public sealed class BrowserAccessibilityPayloadIngestTests
               "parentAccessibilityNodeId": 88,
               "domNodeId": 42,
               "role": 9,
+              "roleName": "button",
               "name": "Save",
               "description": "Saves the form",
               "serializedProperties": "id=91 button name=Save",
