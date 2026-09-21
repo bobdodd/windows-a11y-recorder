@@ -84,6 +84,28 @@
       status.dataset.invocationOrder = invocationOrder.join(",");
     });
 
+    // Registered on the window, which is an EventTarget that is not a Node.
+    // The pointer-only click stops propagation at its target, so the only
+    // click that reaches the window is the default-action link click, and the
+    // recorded window invocations are deterministic.
+    const windowClickTargets = [];
+    window.addEventListener(
+      "click",
+      (event) => {
+        windowClickTargets.push(event.target.id);
+        status.dataset.windowClickTargets = windowClickTargets.join(",");
+      },
+      false
+    );
+
+    // Registered and removed on the window so a non-Node removal is recorded.
+    function handleWindowResize() {
+      status.dataset.windowResizeSeen = "true";
+    }
+
+    window.addEventListener("resize", handleWindowResize, false);
+    window.removeEventListener("resize", handleWindowResize, false);
+
     status.textContent = "Fixture listener registered.";
     const cancelledAnimationFrameId = window.requestAnimationFrame(() => {
       status.dataset.cancelledAnimationFrameRan = "true";

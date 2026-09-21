@@ -240,6 +240,9 @@ public sealed class SessionArchiveValidatorTests
         };
         var target = new
         {
+            kind = "node",
+            interfaceName = "HTMLDivElement",
+            targetId = (string?)null,
             documentId = "document-1",
             nodeId = 42,
             backendNodeId = "blink-node-42",
@@ -308,6 +311,9 @@ public sealed class SessionArchiveValidatorTests
         };
         var target = new
         {
+            kind = "node",
+            interfaceName = "HTMLDivElement",
+            targetId = (string?)null,
             documentId = "dom-document-8",
             nodeId = 42,
             backendNodeId = (string?)null,
@@ -354,6 +360,208 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsAWindowEventTargetWithoutANodeIdentifier()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
+        };
+        var window = new
+        {
+            kind = "window",
+            interfaceName = "Window",
+            targetId = "event-target-3",
+            documentId = "dom-document-8",
+            nodeId = (long?)null,
+            backendNodeId = (string?)null,
+            tagName = (string?)null,
+            elementId = (string?)null,
+            classes = Array.Empty<string>()
+        };
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            new
+            {
+                context,
+                listenerId = "listener-1",
+                eventName = "resize",
+                registrationKind = "add-event-listener",
+                target = window,
+                capture = false,
+                passive = false,
+                once = false,
+                location = (object?)null
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsANonNodeEventTargetThatClaimsANodeIdentifier()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
+        };
+        var window = new
+        {
+            kind = "window",
+            interfaceName = "Window",
+            targetId = (string?)null,
+            documentId = "dom-document-8",
+            nodeId = 42,
+            backendNodeId = (string?)null,
+            tagName = (string?)null,
+            elementId = (string?)null,
+            classes = Array.Empty<string>()
+        };
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            new
+            {
+                context,
+                listenerId = "listener-1",
+                eventName = "resize",
+                registrationKind = "add-event-listener",
+                target = window,
+                capture = false,
+                passive = false,
+                once = false,
+                location = (object?)null
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "browser-event-target-identity" &&
+                    issue.Message.Contains(
+                        "has no nodeId",
+                        StringComparison.Ordinal));
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "browser-event-target-identity" &&
+                    issue.Message.Contains(
+                        "must report its targetId",
+                        StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsANodeEventTargetWithoutANodeIdentifier()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = (string?)null,
+            documentToken = "document-token-8"
+        };
+        var node = new
+        {
+            kind = "node",
+            interfaceName = "HTMLDivElement",
+            targetId = (string?)null,
+            documentId = "dom-document-8",
+            nodeId = (long?)null,
+            backendNodeId = (string?)null,
+            tagName = "DIV",
+            elementId = "pointer-only",
+            classes = Array.Empty<string>()
+        };
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            new
+            {
+                context,
+                listenerId = "listener-1",
+                eventName = "click",
+                registrationKind = "add-event-listener",
+                target = node,
+                capture = false,
+                passive = false,
+                once = false,
+                location = (object?)null
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "browser-event-target-identity" &&
+                    issue.Message.Contains(
+                        "must report its nodeId",
+                        StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsInstrumentedBrowserDefaultActionEvidence()
     {
         var context = new
@@ -371,6 +579,9 @@ public sealed class SessionArchiveValidatorTests
         };
         var target = new
         {
+            kind = "node",
+            interfaceName = "HTMLAnchorElement",
+            targetId = (string?)null,
             documentId = "dom-document-8",
             nodeId = 42,
             backendNodeId = (string?)null,
@@ -1434,6 +1645,9 @@ public sealed class SessionArchiveValidatorTests
         };
         var target = new
         {
+            kind = "node",
+            interfaceName = "HTMLDivElement",
+            targetId = (string?)null,
             documentId = "dom-document-8",
             nodeId = 42,
             backendNodeId = (string?)null,

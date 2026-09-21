@@ -52,10 +52,24 @@ void WriteRecorderBridgeDiagnostic(std::string_view message);
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 RecorderPipeClient* GetProcessRecorderClient();
 
+// Identifies the kind of EventTarget a record is about. A listener on a Window
+// or another non-Node EventTarget has no DOM node identifier, so the kind is
+// recorded rather than inferred from a missing node. These are header constants
+// rather than exported data so a patched Chromium source can name a kind
+// without depending on the bridge's data exports.
+inline constexpr char kEventTargetKindNode[] = "node";
+inline constexpr char kEventTargetKindWindow[] = "window";
+inline constexpr char kEventTargetKindOther[] = "other";
+
 // Records a Blink listener only after Blink has accepted the registration.
-// Node identifiers are Blink DOMNodeIds.
+// Node identifiers are Blink DOMNodeIds. A non-Node target passes a zero
+// target node identifier, its Blink interface name, and the address Blink uses
+// for the target, which is mapped to a stable process-local target identifier.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkListenerRegistered(uintptr_t listener_identity,
+                                   std::string target_kind,
+                                   std::string target_interface_name,
+                                   uintptr_t target_identity,
                                    int document_node_id,
                                    int target_node_id,
                                    std::string event_name,
@@ -69,6 +83,9 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
 // identifier is the same one allocated when the registration was accepted.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkListenerRemoved(uintptr_t listener_identity,
+                                std::string target_kind,
+                                std::string target_interface_name,
+                                uintptr_t target_identity,
                                 int document_node_id,
                                 int target_node_id,
                                 std::string event_name,
@@ -97,6 +114,15 @@ void RecordBlinkDispatchPathNode(uintptr_t event_identity,
                                  std::string tag_name,
                                  std::string element_id);
 
+// Adds the Window entry that terminates a Node dispatch path. Blink keeps the
+// Window outside its NodeEventContexts, so it is appended separately rather
+// than represented as a Node.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDispatchPathWindow(uintptr_t event_identity,
+                                   int document_node_id,
+                                   uintptr_t target_identity,
+                                   std::string interface_name);
+
 // Emits dispatch-started after the complete Node path has been accumulated.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void CompleteBlinkDispatchStart(uintptr_t event_identity);
@@ -105,6 +131,9 @@ void CompleteBlinkDispatchStart(uintptr_t event_identity);
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void BeginBlinkListenerInvocation(uintptr_t event_identity,
                                   uintptr_t listener_identity,
+                                  std::string current_target_kind,
+                                  std::string current_target_interface_name,
+                                  uintptr_t current_target_identity,
                                   int current_document_node_id,
                                   int current_target_node_id,
                                   std::string current_target_tag_name,

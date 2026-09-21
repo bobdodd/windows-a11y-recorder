@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.17` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.18` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -88,6 +88,18 @@ Chromium versions and the serialized properties are a debug representation
 rather than a field contract. AX identity zero is invalid, while negative AX
 identities are retained for Chromium-generated renderer nodes. These batches
 are incremental updates, not complete accessibility-tree snapshots.
+
+Protocol 0.18 replaces the node reference in listener and dispatch records with
+an event-target reference that also describes EventTargets that are not Nodes.
+Each reference reports a `kind` of `node`, `window`, or `other`, the Blink
+interface name the target reports for itself, and, for a target that is not a
+Node, a process-local `targetId` minted from the address Blink uses for that
+target. A Node keeps its `nodeId`; a target that is not a Node reports null
+there. Window listener registrations, removals, invocations, and the window
+entry at the end of a composed path are recorded from Blink's own
+`WindowEventContext`, so a recorded path ends where Blink's path ends. Worker
+global scopes are not covered. A target identifier is process-local and must
+never be compared across processes.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

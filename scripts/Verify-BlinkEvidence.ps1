@@ -336,6 +336,60 @@ $removals = @(
         }
 )
 
+# The window is an EventTarget that is not a Node, so its records carry no node
+# identifier and are selected by kind and interface name instead.
+$windowClickListeners = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-registered" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.target.kind -eq "window" -and
+            $_.payload.target.interfaceName -eq "Window"
+        }
+)
+
+$windowResizeListeners = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-registered" -and
+            $_.payload.eventName -eq "resize" -and
+            $_.payload.target.kind -eq "window"
+        }
+)
+
+$windowResizeRemovals = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-removed" -and
+            $_.payload.eventName -eq "resize" -and
+            $_.payload.target.kind -eq "window"
+        }
+)
+
+$linkDispatches = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.eventType -eq "dispatch-started" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.originalTarget.elementId -eq "default-action-link"
+        }
+)
+
+$windowClickInvocations = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.eventType -eq "listener-invoked" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.originalTarget.elementId -eq "default-action-link" -and
+            $_.payload.currentTarget.kind -eq "window"
+        }
+)
+
 $suppressedDefaultActions = @(
     $records |
         Where-Object {
@@ -632,6 +686,24 @@ if ($completions.Count -lt 1) {
 }
 if ($removals.Count -lt 1) {
     throw "No click listener removal was recorded for #pointer-only."
+}
+if ($windowClickListeners.Count -lt 1) {
+    throw "No click listener registration was recorded for the window."
+}
+if ($windowResizeListeners.Count -lt 1) {
+    throw "No resize listener registration was recorded for the window."
+}
+if ($windowResizeRemovals.Count -lt 1) {
+    throw "No resize listener removal was recorded for the window."
+}
+if ($linkDispatches.Count -lt 1) {
+    throw "No click dispatch start was recorded for #default-action-link."
+}
+if ($windowClickInvocations.Count -lt 1) {
+    throw (
+        "No click listener invocation with the window as its current target " +
+        "was recorded."
+    )
 }
 if ($suppressedDefaultActions.Count -lt 1) {
     throw "No suppressed default handler was recorded for #pointer-only."
@@ -1741,6 +1813,97 @@ if (@(
 if (-not $completion.propagationStopped) {
     throw "The completed dispatch did not preserve stopPropagation()."
 }
+if ($composedPath[0].kind -ne "node") {
+    throw "The composed path target was not recorded as a node event target."
+}
+if (-not $composedPath[0].nodeId) {
+    throw "The composed path target does not carry a node identifier."
+}
+
+$windowListener = $windowClickListeners[0].payload
+if ($windowListener.target.nodeId) {
+    throw "The window listener target unexpectedly carries a node identifier."
+}
+if ($windowListener.target.tagName) {
+    throw "The window listener target unexpectedly carries a tag name."
+}
+if ([string]::IsNullOrWhiteSpace($windowListener.target.targetId)) {
+    throw "The window listener target does not carry a target identifier."
+}
+if ($windowListener.target.documentId -ne $listener.context.documentId) {
+    throw (
+        "The window listener target does not name the document the fixture " +
+        "script ran in."
+    )
+}
+$windowResizeListener = $windowResizeListeners[0].payload
+$windowResizeRemoval = $windowResizeRemovals[0].payload
+if ($windowResizeRemoval.listenerId -ne $windowResizeListener.listenerId) {
+    throw (
+        "The window resize removal does not reference the registered window " +
+        "listener."
+    )
+}
+if ($windowResizeRemoval.target.targetId -ne
+        $windowResizeListener.target.targetId) {
+    throw "The window removal target does not match the registration target."
+}
+if ($windowResizeListener.target.targetId -ne $windowListener.target.targetId) {
+    throw (
+        "Two listeners registered on the same window reported different " +
+        "target identifiers."
+    )
+}
+
+# Blink appends the window to the end of an event path when the top node event
+# context is a document, so the recorded path must end there too.
+$linkDispatch = $linkDispatches[0].payload
+$linkComposedPath = @($linkDispatch.composedPath)
+if ($linkComposedPath.Count -lt 2) {
+    throw "The #default-action-link composed path is too short to reach the window."
+}
+$linkPathWindow = $linkComposedPath[$linkComposedPath.Count - 1]
+if ($linkPathWindow.kind -ne "window") {
+    throw "The #default-action-link composed path does not end at the window."
+}
+if ($linkPathWindow.interfaceName -ne "Window") {
+    throw "The composed path window entry has an unexpected interface name."
+}
+if ($linkPathWindow.nodeId) {
+    throw "The composed path window entry unexpectedly carries a node identifier."
+}
+if ($linkPathWindow.targetId -ne $windowListener.target.targetId) {
+    throw (
+        "The composed path window entry and the window listener target " +
+        "report different target identifiers."
+    )
+}
+if (@($linkComposedPath | Where-Object { $_.kind -eq "window" }).Count -ne 1) {
+    throw "The composed path contains the window more than once."
+}
+$windowClickInvocation = $windowClickInvocations[0].payload
+if ($windowClickInvocation.phase -ne "bubbling") {
+    throw "The window click invocation phase was not 'bubbling'."
+}
+if ($windowClickInvocation.listenerId -ne $windowListener.listenerId) {
+    throw (
+        "The window click invocation does not reference the registered " +
+        "window listener."
+    )
+}
+if ($windowClickInvocation.currentTarget.targetId -ne
+        $windowListener.target.targetId) {
+    throw (
+        "The window click invocation current target does not match the " +
+        "registered window listener target."
+    )
+}
+if ($windowClickInvocation.originalTarget.kind -ne "node") {
+    throw (
+        "The window click invocation original target was not recorded as a " +
+        "node event target."
+    )
+}
 
 $crossDocumentNavigation = $navigationCompletions |
     Where-Object {
@@ -1944,6 +2107,10 @@ if (
     RendererProcessId = $listener.context.processId
     DocumentId = $listener.context.documentId
     TargetNodeId = $listener.target.nodeId
+    WindowTargetId = $windowListener.target.targetId
+    WindowListenerId = $windowListener.listenerId
+    WindowClickInvocations = $windowClickInvocations.Count
+    LinkComposedPathEntries = $linkComposedPath.Count
     ListenerId = $listener.listenerId
     DispatchId = $dispatch.dispatchId
     DispatchTrusted = $dispatch.trusted
@@ -1955,7 +2122,8 @@ if (
 } | Format-List
 
 Write-Host (
-    "Blink propagation, listener, default-handler, DOM timer, " +
+    "Blink propagation, listener, window event-target, default-handler, " +
+    "DOM timer, " +
     "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
     "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +

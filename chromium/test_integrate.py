@@ -802,6 +802,22 @@ class IntegrateTests(unittest.TestCase):
                 first_event_target,
             )
             self.assertIn(
+                "a11y_recorder::kEventTargetKindWindow",
+                first_event_target,
+            )
+            self.assertIn(
+                "ToLocalDOMWindow()",
+                first_event_target,
+            )
+            self.assertNotIn(
+                "if (Node* recorder_target = ToNode()) {",
+                first_event_target,
+            )
+            self.assertNotIn(
+                "if (Node* recorder_current_target = ToNode()) {",
+                first_event_target,
+            )
+            self.assertIn(
                 "RecordBlinkListenerRemoved",
                 first_event_target,
             )
@@ -840,6 +856,18 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn(
                 "RecordBlinkDispatchPathNode",
                 first_event_dispatcher,
+            )
+            self.assertIn(
+                "RecordBlinkDispatchPathWindow",
+                first_event_dispatcher,
+            )
+            self.assertLess(
+                first_event_dispatcher.index("RecordBlinkDispatchPathNode"),
+                first_event_dispatcher.index("RecordBlinkDispatchPathWindow"),
+            )
+            self.assertLess(
+                first_event_dispatcher.index("RecordBlinkDispatchPathWindow"),
+                first_event_dispatcher.index("CompleteBlinkDispatchStart"),
             )
             self.assertIn(
                 "CompleteBlinkDispatchStart",
@@ -2188,6 +2216,177 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn(
                 "old_data.substr(0, kRecorderMaximumDomValueLength)", first
             )
+
+    def test_migrates_node_only_event_target_hooks(self):
+        """A checkout patched before non-Node targets were recorded upgrades.
+
+        The presence guards in the integration script key on symbol names, so a
+        hook body that only ever reported a Node reads as already integrated.
+        The historical bodies are replaced explicitly, and the result is the
+        body the script writes into a fresh checkout.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            current = path.read_text(encoding="utf-8")
+
+            node_only = (
+                current.replace(
+                    INTEGRATE.BLINK_LISTENER_HOOK,
+                    INTEGRATE.LEGACY_BLINK_LISTENER_HOOK_NODE_ONLY,
+                    1,
+                )
+                .replace(
+                    INTEGRATE.BLINK_LISTENER_REMOVED_HOOK,
+                    INTEGRATE.LEGACY_BLINK_LISTENER_REMOVED_HOOK_NODE_ONLY,
+                    1,
+                )
+                .replace(
+                    INTEGRATE.BLINK_LISTENER_INVOCATION_STARTED_HOOK,
+                    INTEGRATE
+                    .LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK_NODE_ONLY,
+                    1,
+                )
+            )
+            self.assertNotEqual(current, node_only)
+            path.write_text(node_only, encoding="utf-8")
+
+            INTEGRATE.patch_blink_event_target(path)
+
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_migrates_a_dispatch_path_that_omitted_the_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_dispatcher.cc"
+            self._write_event_dispatcher(path)
+            INTEGRATE.patch_blink_event_dispatcher(path)
+            current = path.read_text(encoding="utf-8")
+
+            without_window = current.replace(
+                INTEGRATE.BLINK_DISPATCH_HOOK,
+                INTEGRATE.LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_WINDOW,
+                1,
+            )
+            self.assertNotIn("RecordBlinkDispatchPathWindow", without_window)
+            path.write_text(without_window, encoding="utf-8")
+
+            INTEGRATE.patch_blink_event_dispatcher(path)
+
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_exported_data_declarations_do_not_hide_a_signature(self):
+        header = (
+            "namespace a11y_recorder {\n"
+            "\n"
+            "COMPONENT_EXPORT(RECORDER_BRIDGE)\n"
+            "extern const char kEventTargetKindNode[];\n"
+            "\n"
+            "COMPONENT_EXPORT(RECORDER_BRIDGE)\n"
+            "void RecordBlinkListenerRegistered(uintptr_t listener_identity,\n"
+            "                                   std::string target_kind);\n"
+            "\n"
+            "}  // namespace a11y_recorder\n"
+        )
+        self.assertEqual(
+            {"RecordBlinkListenerRegistered": 2},
+            INTEGRATE.parse_bridge_signatures(header),
+        )
+
+    def _write_event_target(self, path: Path) -> None:
+        path.write_text(
+            '#include "third_party/blink/renderer/core/dom/events/'
+            'event_target.h"\n'
+            '#include "base/time/time.h"\n'
+            "\n"
+            "bool EventTarget::AddEventListenerInternal() {\n"
+            "  bool added = true;\n"
+            "  if (added) {\n"
+            "    CHECK(registered_listener);\n"
+            "    AddedEventListener(event_type, *registered_listener);\n"
+            "  }\n"
+            "  return added;\n"
+            "}\n"
+            "\n"
+            "bool EventTarget::RemoveEventListenerInternal() {\n"
+            "  CHECK(registered_listener);\n"
+            "  RemovedEventListener(event_type, *registered_listener);\n"
+            "  return true;\n"
+            "}\n"
+            "\n"
+            "bool EventTarget::FireEventListeners() {\n"
+            "    listener->Invoke(context, &event);\n"
+            "    EventListener* listener = registered_listener->Callback();\n"
+            "    // The listener will be retained by Member<EventListener> in "
+            "the\n"
+            "    // registeredListener, i and size are updated with the firing "
+            "event iterator\n"
+            "    // in case the listener is removed from the listener vector "
+            "below.\n"
+            "    if (registered_listener->Once()) {\n"
+            "      removeEventListener(event.type(), listener,\n"
+            "                          registered_listener->Capture());\n"
+            "    }\n"
+            "    event.SetHandlingPassive("
+            "EventPassiveMode(*registered_listener));\n"
+            "\n"
+            "    probe::UserCallback probe(context, nullptr, event.type(), "
+            "false, this);\n"
+            "\n"
+            "    // To match Mozilla, the AT_TARGET phase fires both capturing "
+            "and bubbling\n"
+            "    // event listeners, even though that violates some versions "
+            "of the DOM spec.\n"
+            "    listener->Invoke(context, &event);\n"
+            "    fired_listener = true;\n"
+            "}\n",
+            encoding="utf-8",
+        )
+
+    def _write_event_dispatcher(self, path: Path) -> None:
+        path.write_text(
+            '#include "third_party/blink/renderer/core/dom/events/'
+            'event_dispatcher.h"\n'
+            '#include "build/build_config.h"\n'
+            "\n"
+            "DispatchEventResult EventDispatcher::Dispatch() {\n"
+            "  event_->SetTarget("
+            "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
+            "#if DCHECK_IS_ON()\n"
+            "  DCHECK(event_->RawTarget());\n"
+            "#endif\n"
+            "  auto result = "
+            "EventTarget::GetDispatchEventResult(*event_);\n"
+            "\n"
+            "  return result;\n"
+            "}\n"
+            "\n"
+            "inline void EventDispatcher::DispatchEventPostProcess() {\n"
+            "  bool is_trusted_or_click = true;\n"
+            "  if (!event_->defaultPrevented() && !event_->DefaultHandled() "
+            "&&\n"
+            "      is_trusted_or_click) {\n"
+            "    node_->DefaultEventHandler(*event_);\n"
+            "    if (!event_->DefaultHandled() && "
+            "!event_->defaultPrevented() &&\n"
+            "        event_->bubbles()) {\n"
+            "      wtf_size_t size = event_->GetEventPath().size();\n"
+            "      for (wtf_size_t i = 1; i < size; ++i) {\n"
+            "        event_->GetEventPath()[i].GetNode()."
+            "DefaultEventHandler(*event_);\n"
+            "        if (event_->DefaultHandled() || "
+            "event_->defaultPrevented()) {\n"
+            "          break;\n"
+            "        }\n"
+            "      }\n"
+            "    }\n"
+            "  } else {\n"
+            "#if BUILDFLAG(IS_MAC)\n"
+            "#endif\n"
+            "  }\n"
+            "}\n",
+            encoding="utf-8",
+        )
 
     def test_parses_declared_bridge_signatures(self):
         header = (

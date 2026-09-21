@@ -1157,7 +1157,13 @@ BLINK_DOCUMENT_MUTATION_HOOK = """\
   if (HasFinishedParsing())
     MutationObserver::EnqueueRecorderDomCheckpoint(*this);
 """
-BLINK_LISTENER_HOOK = """\
+# Blink calls this hook for every EventTarget, not only for Nodes. An earlier
+# revision recorded a registration only when the target was a Node, which left
+# listeners on Window and on other non-Node EventTargets absent from the
+# evidence with nothing to say they had been omitted. The kind, the Blink
+# interface name, and the address Blink uses for the target are now reported so
+# a non-Node target is identified without inventing a DOM node identifier.
+LEGACY_BLINK_LISTENER_HOOK_NODE_ONLY = """\
     if (Node* recorder_target = ToNode()) {
       Element* recorder_element = DynamicTo<Element>(recorder_target);
       a11y_recorder::RecordBlinkListenerRegistered(
@@ -1166,6 +1172,39 @@ BLINK_LISTENER_HOOK = """\
           recorder_target->GetDomNodeId(),
           event_type.Utf8().c_str(),
           recorder_target->nodeName().Utf8().c_str(),
+          recorder_element
+              ? recorder_element->GetIdAttribute().Utf8().c_str()
+              : "",
+          registered_listener->Capture(),
+          registered_listener->Passive(),
+          registered_listener->Once());
+    }
+"""
+BLINK_LISTENER_HOOK = """\
+    {
+      Node* recorder_target = ToNode();
+      LocalDOMWindow* recorder_window = ToLocalDOMWindow();
+      Element* recorder_element = DynamicTo<Element>(recorder_target);
+      LocalDOMWindow* recorder_document_window =
+          recorder_window ? recorder_window
+                          : DynamicTo<LocalDOMWindow>(GetExecutionContext());
+      Document* recorder_document =
+          recorder_target ? &recorder_target->GetDocument()
+                          : (recorder_document_window
+                                 ? recorder_document_window->document()
+                                 : nullptr);
+      a11y_recorder::RecordBlinkListenerRegistered(
+          reinterpret_cast<uintptr_t>(registered_listener),
+          recorder_target ? a11y_recorder::kEventTargetKindNode
+                          : (recorder_window
+                                 ? a11y_recorder::kEventTargetKindWindow
+                                 : a11y_recorder::kEventTargetKindOther),
+          InterfaceName().Utf8().c_str(),
+          reinterpret_cast<uintptr_t>(this),
+          recorder_document ? recorder_document->GetDomNodeId() : 0,
+          recorder_target ? recorder_target->GetDomNodeId() : 0,
+          event_type.Utf8().c_str(),
+          recorder_target ? recorder_target->nodeName().Utf8().c_str() : "",
           recorder_element
               ? recorder_element->GetIdAttribute().Utf8().c_str()
               : "",
@@ -1183,7 +1222,7 @@ CURRENT_BLINK_LISTENER_CALL = """\
           reinterpret_cast<uintptr_t>(registered_listener),
           recorder_target->GetDocument().GetDomNodeId(),
 """
-BLINK_LISTENER_REMOVED_HOOK = """\
+LEGACY_BLINK_LISTENER_REMOVED_HOOK_NODE_ONLY = """\
   if (Node* recorder_target = ToNode()) {
     Element* recorder_element = DynamicTo<Element>(recorder_target);
     a11y_recorder::RecordBlinkListenerRemoved(
@@ -1200,12 +1239,45 @@ BLINK_LISTENER_REMOVED_HOOK = """\
         registered_listener->Once());
   }
 """
+BLINK_LISTENER_REMOVED_HOOK = """\
+  {
+    Node* recorder_target = ToNode();
+    LocalDOMWindow* recorder_window = ToLocalDOMWindow();
+    Element* recorder_element = DynamicTo<Element>(recorder_target);
+    LocalDOMWindow* recorder_document_window =
+        recorder_window ? recorder_window
+                        : DynamicTo<LocalDOMWindow>(GetExecutionContext());
+    Document* recorder_document =
+        recorder_target ? &recorder_target->GetDocument()
+                        : (recorder_document_window
+                               ? recorder_document_window->document()
+                               : nullptr);
+    a11y_recorder::RecordBlinkListenerRemoved(
+        reinterpret_cast<uintptr_t>(registered_listener),
+        recorder_target ? a11y_recorder::kEventTargetKindNode
+                        : (recorder_window
+                               ? a11y_recorder::kEventTargetKindWindow
+                               : a11y_recorder::kEventTargetKindOther),
+        InterfaceName().Utf8().c_str(),
+        reinterpret_cast<uintptr_t>(this),
+        recorder_document ? recorder_document->GetDomNodeId() : 0,
+        recorder_target ? recorder_target->GetDomNodeId() : 0,
+        event_type.Utf8().c_str(),
+        recorder_target ? recorder_target->nodeName().Utf8().c_str() : "",
+        recorder_element
+            ? recorder_element->GetIdAttribute().Utf8().c_str()
+            : "",
+        registered_listener->Capture(),
+        registered_listener->Passive(),
+        registered_listener->Once());
+  }
+"""
 LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
     a11y_recorder::BeginBlinkListenerInvocation(
         reinterpret_cast<uintptr_t>(&event),
         reinterpret_cast<uintptr_t>(registered_listener.Get()));
 """
-BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
+LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK_NODE_ONLY = """\
     if (Node* recorder_current_target = ToNode()) {
       Element* recorder_current_element =
           DynamicTo<Element>(recorder_current_target);
@@ -1215,6 +1287,44 @@ BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
           recorder_current_target->GetDocument().GetDomNodeId(),
           recorder_current_target->GetDomNodeId(),
           recorder_current_target->nodeName().Utf8().c_str(),
+          recorder_current_element
+              ? recorder_current_element->GetIdAttribute().Utf8().c_str()
+              : "");
+    }
+"""
+BLINK_LISTENER_INVOCATION_STARTED_HOOK = """\
+    {
+      Node* recorder_current_target = ToNode();
+      LocalDOMWindow* recorder_current_window = ToLocalDOMWindow();
+      Element* recorder_current_element =
+          DynamicTo<Element>(recorder_current_target);
+      LocalDOMWindow* recorder_current_document_window =
+          recorder_current_window
+              ? recorder_current_window
+              : DynamicTo<LocalDOMWindow>(GetExecutionContext());
+      Document* recorder_current_document =
+          recorder_current_target
+              ? &recorder_current_target->GetDocument()
+              : (recorder_current_document_window
+                     ? recorder_current_document_window->document()
+                     : nullptr);
+      a11y_recorder::BeginBlinkListenerInvocation(
+          reinterpret_cast<uintptr_t>(&event),
+          reinterpret_cast<uintptr_t>(registered_listener.Get()),
+          recorder_current_target
+              ? a11y_recorder::kEventTargetKindNode
+              : (recorder_current_window
+                     ? a11y_recorder::kEventTargetKindWindow
+                     : a11y_recorder::kEventTargetKindOther),
+          InterfaceName().Utf8().c_str(),
+          reinterpret_cast<uintptr_t>(this),
+          recorder_current_document
+              ? recorder_current_document->GetDomNodeId()
+              : 0,
+          recorder_current_target ? recorder_current_target->GetDomNodeId() : 0,
+          recorder_current_target
+              ? recorder_current_target->nodeName().Utf8().c_str()
+              : "",
           recorder_current_element
               ? recorder_current_element->GetIdAttribute().Utf8().c_str()
               : "");
@@ -1246,7 +1356,12 @@ LEGACY_BLINK_DISPATCH_HOOK_WITH_IDENTITY = """\
           : "",
       event_->isTrusted());
 """
-BLINK_DISPATCH_HOOK = """\
+# Blink keeps the Window outside the Node event contexts, so the propagation
+# path recorded from those contexts alone stopped at the document and said
+# nothing about the Window that the same dispatch reaches. The Window entry is
+# taken from Blink's own window event context, which is established before this
+# hook runs, so the recorded path ends where Blink's does.
+LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_WINDOW = """\
   Element* recorder_element = DynamicTo<Element>(*node_);
   a11y_recorder::RecordBlinkDispatchStarted(
       reinterpret_cast<uintptr_t>(event_),
@@ -1275,6 +1390,24 @@ BLINK_DISPATCH_HOOK = """\
   a11y_recorder::CompleteBlinkDispatchStart(
       reinterpret_cast<uintptr_t>(event_));
 """
+BLINK_DISPATCH_HOOK = (
+    LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_WINDOW.replace(
+        """\
+  a11y_recorder::CompleteBlinkDispatchStart(""",
+        """\
+  if (LocalDOMWindow* recorder_path_window =
+          event_->GetEventPath().GetWindowEventContext().Window()) {
+    a11y_recorder::RecordBlinkDispatchPathWindow(
+        reinterpret_cast<uintptr_t>(event_),
+        recorder_path_window->document()
+            ? recorder_path_window->document()->GetDomNodeId()
+            : 0,
+        reinterpret_cast<uintptr_t>(recorder_path_window),
+        recorder_path_window->InterfaceName().Utf8().c_str());
+  }
+  a11y_recorder::CompleteBlinkDispatchStart(""",
+    )
+)
 LEGACY_BLINK_DISPATCH_CALL = """\
   a11y_recorder::RecordBlinkDispatchStarted(
       node_->GetDocument().GetDomNodeId(),
@@ -1790,6 +1923,14 @@ def parse_bridge_signatures(header_text: str) -> dict[str, int]:
         open_paren = text.find("(", start)
         if open_paren < 0:
             break
+        # An export marker on a data declaration has no parameter list. Reading
+        # forward to the next parenthesis would attribute the following
+        # function's parameters to it and drop that function from the check, so
+        # a declaration that ends before its parenthesis is skipped instead.
+        statement_end = text.find(";", start)
+        if 0 <= statement_end < open_paren:
+            index = text.find(BRIDGE_EXPORT_MARKER, statement_end)
+            continue
         name = re.search(
             r"([A-Za-z_][A-Za-z0-9_]*)\s*$", text[start:open_paren]
         )
@@ -2466,6 +2607,30 @@ def patch_blink_event_target(path: Path) -> None:
             BLINK_LISTENER_INVOCATION_STARTED_HOOK,
             path,
         )
+    # A checkout patched before non-Node EventTargets were recorded still holds
+    # hook bodies that only ever reported a Node. Those bodies read as already
+    # integrated to the presence guards below, so they are replaced explicitly.
+    if LEGACY_BLINK_LISTENER_HOOK_NODE_ONLY in text:
+        text = replace_once(
+            text,
+            LEGACY_BLINK_LISTENER_HOOK_NODE_ONLY,
+            BLINK_LISTENER_HOOK,
+            path,
+        )
+    if LEGACY_BLINK_LISTENER_REMOVED_HOOK_NODE_ONLY in text:
+        text = replace_once(
+            text,
+            LEGACY_BLINK_LISTENER_REMOVED_HOOK_NODE_ONLY,
+            BLINK_LISTENER_REMOVED_HOOK,
+            path,
+        )
+    if LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK_NODE_ONLY in text:
+        text = replace_once(
+            text,
+            LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK_NODE_ONLY,
+            BLINK_LISTENER_INVOCATION_STARTED_HOOK,
+            path,
+        )
     if "RecordBlinkListenerRegistered" not in text:
         anchor = "  if (added) {\n    CHECK(registered_listener);\n"
         text = replace_once(
@@ -2742,6 +2907,16 @@ def patch_blink_event_dispatcher(path: Path) -> None:
         text = replace_once(
             text,
             LEGACY_BLINK_DISPATCH_HOOK_WITH_IDENTITY,
+            BLINK_DISPATCH_HOOK,
+            path,
+        )
+    if (
+        "RecordBlinkDispatchPathWindow" not in text
+        and LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_WINDOW in text
+    ):
+        text = replace_once(
+            text,
+            LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_WINDOW,
             BLINK_DISPATCH_HOOK,
             path,
         )

@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.17";
+    public const string CurrentVersion = "0.18";
 }
 
 public static class BrowserEvidenceChannels
@@ -62,9 +62,24 @@ public sealed record BrowserContext(
     string? ExecutionWorldId,
     string? DocumentToken);
 
-public sealed record BrowserNodeReference(
+public static class BrowserEventTargetKinds
+{
+    public const string Node = "node";
+    public const string Window = "window";
+    public const string Other = "other";
+}
+
+// Describes the EventTarget a listener or dispatch record is about. A Node
+// carries a DOM node identifier. A Window or other non-Node EventTarget has
+// none, so its NodeId is absent and it is identified by Kind, by the Blink
+// interface name, and by a target identifier that is stable for the lifetime of
+// the renderer process that reported it.
+public sealed record BrowserEventTargetReference(
+    string Kind,
+    string? InterfaceName,
+    string? TargetId,
     string DocumentId,
-    long NodeId,
+    long? NodeId,
     string? BackendNodeId,
     string? TagName,
     string? ElementId,
@@ -83,7 +98,7 @@ public sealed record BrowserListenerPayload(
     string ListenerId,
     string EventName,
     string RegistrationKind,
-    BrowserNodeReference Target,
+    BrowserEventTargetReference Target,
     bool Capture,
     bool Passive,
     bool Once,
@@ -94,8 +109,8 @@ public sealed record BrowserDispatchPayload(
     string DispatchId,
     string EventName,
     bool Trusted,
-    BrowserNodeReference? OriginalTarget,
-    IReadOnlyList<BrowserNodeReference> ComposedPath,
+    BrowserEventTargetReference? OriginalTarget,
+    IReadOnlyList<BrowserEventTargetReference> ComposedPath,
     string Phase,
     string? ListenerId,
     bool DefaultPrevented,
@@ -103,7 +118,7 @@ public sealed record BrowserDispatchPayload(
     bool ImmediatePropagationStopped,
     string? DefaultAction,
     string? Outcome,
-    BrowserNodeReference? CurrentTarget = null);
+    BrowserEventTargetReference? CurrentTarget = null);
 
 public sealed record BrowserTimerPayload(
     BrowserContext Context,

@@ -460,7 +460,7 @@ internal static class EventPayloadValidator
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
-        ValidateBrowserNodeProperty(payload, "target", issues, line);
+        ValidateBrowserEventTargetProperty(payload, "target", issues, line);
         ValidateBrowserLocationProperty(payload, issues, line);
     }
 
@@ -504,9 +504,9 @@ internal static class EventPayloadValidator
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
-        ValidateBrowserNodeProperty(payload, "originalTarget", issues, line);
-        ValidateBrowserNodeProperty(payload, "currentTarget", issues, line);
-        ValidateBrowserNodeArrayProperty(payload, "composedPath", issues, line);
+        ValidateBrowserEventTargetProperty(payload, "originalTarget", issues, line);
+        ValidateBrowserEventTargetProperty(payload, "currentTarget", issues, line);
+        ValidateBrowserEventTargetArrayProperty(payload, "composedPath", issues, line);
     }
 
     private static void ValidateBrowserTimer(
@@ -1227,40 +1227,44 @@ internal static class EventPayloadValidator
             "events.ndjson#/payload/context");
     }
 
-    private static void ValidateBrowserNodeProperty(
+    private static void ValidateBrowserEventTargetProperty(
         JsonElement payload,
         string property,
         ICollection<ArchiveValidationIssue> issues,
         long line)
     {
-        if (!payload.TryGetProperty(property, out var node) ||
-            node.ValueKind != JsonValueKind.Object)
+        if (!payload.TryGetProperty(property, out var target) ||
+            target.ValueKind != JsonValueKind.Object)
         {
             return;
         }
 
-        ValidateBrowserNode(node, issues, line, $"events.ndjson#/payload/{property}");
+        ValidateBrowserEventTarget(
+            target,
+            issues,
+            line,
+            $"events.ndjson#/payload/{property}");
     }
 
-    private static void ValidateBrowserNodeArrayProperty(
+    private static void ValidateBrowserEventTargetArrayProperty(
         JsonElement payload,
         string property,
         ICollection<ArchiveValidationIssue> issues,
         long line)
     {
-        if (!payload.TryGetProperty(property, out var nodes) ||
-            nodes.ValueKind != JsonValueKind.Array)
+        if (!payload.TryGetProperty(property, out var targets) ||
+            targets.ValueKind != JsonValueKind.Array)
         {
             return;
         }
 
         var index = 0;
-        foreach (var node in nodes.EnumerateArray())
+        foreach (var target in targets.EnumerateArray())
         {
-            if (node.ValueKind == JsonValueKind.Object)
+            if (target.ValueKind == JsonValueKind.Object)
             {
-                ValidateBrowserNode(
-                    node,
+                ValidateBrowserEventTarget(
+                    target,
                     issues,
                     line,
                     $"events.ndjson#/payload/{property}/{index}");
@@ -1269,16 +1273,23 @@ internal static class EventPayloadValidator
         }
     }
 
-    private static void ValidateBrowserNode(
-        JsonElement node,
+    // Validates one EventTarget reference. A Node carries a DOM node
+    // identifier; a Window or other non-Node EventTarget has none and carries a
+    // target identifier instead, so the identity required depends on the kind.
+    private static void ValidateBrowserEventTarget(
+        JsonElement target,
         ICollection<ArchiveValidationIssue> issues,
         long line,
-        string path) =>
+        string path)
+    {
         ValidateShape(
-            node,
+            target,
             [
+                RequiredEnum("kind", "node", "window", "other"),
+                NullableString("interfaceName"),
+                NullableString("targetId"),
                 RequiredString("documentId"),
-                RequiredInteger("nodeId", nonnegative: true),
+                NullableInteger("nodeId", nonnegative: true),
                 NullableString("backendNodeId"),
                 NullableString("tagName"),
                 NullableString("elementId"),
@@ -1287,6 +1298,41 @@ internal static class EventPayloadValidator
             issues,
             line,
             path);
+
+        var kind = ReadString(target, "kind");
+        if (kind == "node" && !HasNonnullProperty(target, "nodeId"))
+        {
+            AddError(
+                issues,
+                "browser-event-target-identity",
+                path,
+                "a node event target must report its nodeId",
+                line);
+        }
+
+        if (kind is "window" or "other")
+        {
+            if (HasNonnullProperty(target, "nodeId"))
+            {
+                AddError(
+                    issues,
+                    "browser-event-target-identity",
+                    path,
+                    $"a {kind} event target has no nodeId",
+                    line);
+            }
+
+            if (!HasNonnullProperty(target, "targetId"))
+            {
+                AddError(
+                    issues,
+                    "browser-event-target-identity",
+                    path,
+                    $"a {kind} event target must report its targetId",
+                    line);
+            }
+        }
+    }
 
     private static void ValidateBrowserLocationProperty(
         JsonElement payload,

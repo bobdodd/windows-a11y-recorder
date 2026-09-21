@@ -20,6 +20,27 @@ from the product version.
 
 ### Added
 
+- Recorded listener and dispatch evidence for EventTargets that are not Nodes,
+  beginning with the window, as protocol 0.18. The Blink listener hooks
+  previously recorded a registration, removal, or invocation only when the
+  EventTarget was a Node, so a `window.addEventListener` call produced no
+  evidence at all and a composed path stopped one entry short of where Blink's
+  own path ends. Every listener and dispatch target reference now reports a
+  `kind` of `node`, `window`, or `other`, the Blink interface name the target
+  reports for itself, and a process-local `targetId` for a target that is not a
+  Node, and reports a null `nodeId` where no DOM node exists. The window entry
+  in a composed path is taken from Blink's own `WindowEventContext`, which is
+  present exactly when Blink will run window listeners for that event, so the
+  recorded path ends where Blink's does rather than where the recorder guesses.
+  A target identifier is minted from the address Blink uses for that target in
+  that renderer process; it is valid for the lifetime of that process and must
+  never be compared across processes. The archive validator enforces the
+  identity rule for each kind instead of inferring it, and the deterministic
+  fixture now registers a window `click` listener plus a window `resize`
+  listener it then removes. Worker global scopes, inline attributes,
+  event-handler properties, isolated-world identity, source location, and
+  dispatches whose original target is never a Node, such as `XMLHttpRequest`
+  progress events, remain outstanding.
 - Made the bridge's protocol rejection name both versions. A mismatch was
   reported as "Recorder protocol version is not supported.", which does not say
   which version the application sent or which one the browser requires, so an

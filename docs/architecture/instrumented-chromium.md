@@ -310,6 +310,18 @@ complete accessibility-tree snapshots. The complete contract is defined in the
 [accessibility checkpoint evidence model](accessibility-checkpoint-evidence-model.md).
 Live 0.17 connections require an exact protocol-version match.
 
+Protocol version 0.18 records listener and dispatch evidence for EventTargets
+that are not Nodes, beginning with the window. Every target reference now
+reports its kind, its Blink interface name, and a process-local target
+identifier for a target that is not a Node, and reports a null node identifier
+where no DOM node exists. The window entry at the end of a composed path is
+taken from Blink's `WindowEventContext`, which exists exactly when Blink will
+run window listeners for that event, so the recorded path ends where Blink's
+path ends. A dispatch whose original target is not a Node does not pass through
+`EventDispatcher::Dispatch` and is not recorded by this increment, and worker
+global scopes remain outside it. Live 0.18 connections require an exact
+protocol-version match.
+
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
 rejects unmapped members, and the receive loop treats a rejection as a failed

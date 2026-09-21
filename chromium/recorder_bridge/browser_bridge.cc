@@ -29,6 +29,24 @@
 namespace a11y_recorder {
 namespace {
 
+// Decides whether one reported EventTarget can be recorded without inventing
+// identity. Every recordable target belongs to a document, because the record
+// names that document. A Node must also report its own node identifier; a
+// Window or other non-Node EventTarget has none and is identified by its kind
+// and its process-local target identifier instead.
+bool IsRecordableEventTarget(std::string_view kind,
+                             int document_node_id,
+                             int target_node_id) {
+  if (document_node_id <= 0) {
+    return false;
+  }
+  if (kind == kEventTargetKindWindow || kind == kEventTargetKindOther) {
+    return true;
+  }
+  return target_node_id > 0;
+}
+
+
 void WriteDiagnosticLine(std::string_view message) {
   std::array<wchar_t, 32768> path = {};
   const DWORD path_length =
@@ -89,7 +107,15 @@ struct EvidenceIdentityStorage {
   uint64_t next_dom_checkpoint_id = 1;
   uint64_t next_dom_transition_id = 1;
   uint64_t next_accessibility_checkpoint_id = 1;
+  uint64_t next_event_target_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
+
+  // Non-Node EventTargets have no DOM node identifier, so a Window or other
+  // EventTarget is identified by a process-local identifier allocated the first
+  // time Blink reports that target. The key is the address Blink uses for the
+  // target, which is stable while the target is alive and is only ever compared
+  // within one renderer process.
+  std::unordered_map<uintptr_t, std::string> event_target_ids;
 
   // The transitions recorded for a document since its last completed
   // checkpoint. A checkpoint reports the range it covers, so no record ever
@@ -107,6 +133,9 @@ struct EvidenceIdentityStorage {
     int node_id;
     std::string tag_name;
     std::string element_id;
+    std::string kind;
+    std::string interface_name;
+    std::string target_id;
   };
 
   struct DispatchState {
@@ -314,15 +343,43 @@ base::DictValue CreateNavigationPayload(
   return payload;
 }
 
-base::DictValue CreateNode(int document_node_id,
-                           int target_node_id,
-                           std::string target_tag_name,
-                           std::string target_element_id) {
+// Describes the EventTarget a listener or dispatch record is about. A Node
+// carries its DOM node identifier. A Window or other non-Node EventTarget has
+// no DOM node identifier, so its node identifier is absent rather than zero,
+// and it is identified by its kind, its Blink interface name, and a stable
+// process-local target identifier.
+base::DictValue CreateEventTarget(std::string kind,
+                                  std::string interface_name,
+                                  std::string target_id,
+                                  int document_node_id,
+                                  int target_node_id,
+                                  std::string target_tag_name,
+                                  std::string target_element_id) {
   base::DictValue target;
+  target.Set("kind", kind.empty() ? std::string(kEventTargetKindNode)
+                                  : std::move(kind));
+  if (interface_name.empty()) {
+    target.Set("interfaceName", base::Value());
+  } else {
+    target.Set("interfaceName", std::move(interface_name));
+  }
+  if (target_id.empty()) {
+    target.Set("targetId", base::Value());
+  } else {
+    target.Set("targetId", std::move(target_id));
+  }
   target.Set("documentId", DocumentId(document_node_id));
-  target.Set("nodeId", target_node_id);
+  if (target_node_id > 0) {
+    target.Set("nodeId", target_node_id);
+  } else {
+    target.Set("nodeId", base::Value());
+  }
   target.Set("backendNodeId", base::Value());
-  target.Set("tagName", std::move(target_tag_name));
+  if (target_tag_name.empty()) {
+    target.Set("tagName", base::Value());
+  } else {
+    target.Set("tagName", std::move(target_tag_name));
+  }
   if (target_element_id.empty()) {
     target.Set("elementId", base::Value());
   } else {
@@ -330,6 +387,13 @@ base::DictValue CreateNode(int document_node_id,
   }
   target.Set("classes", base::ListValue());
   return target;
+}
+
+base::DictValue CreateEventTarget(
+    const EvidenceIdentityStorage::NodeState& state) {
+  return CreateEventTarget(state.kind, state.interface_name, state.target_id,
+                           state.document_node_id, state.node_id,
+                           state.tag_name, state.element_id);
 }
 
 std::string DomNodeTypeName(int node_type) {
@@ -408,6 +472,25 @@ base::DictValue CreateAccessibilityCheckpointBasePayload(
   payload.Set("checkpointId",
               AccessibilityCheckpointId(checkpoint_sequence));
   return payload;
+}
+
+// Returns the process-local identifier for a non-Node EventTarget, allocating
+// one the first time Blink reports that target. A Node is identified by its DOM
+// node identifier instead, so it never reaches here.
+std::string RegisterEventTargetIdentity(uintptr_t target_identity) {
+  if (target_identity == 0) {
+    return std::string();
+  }
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.event_target_ids.find(target_identity);
+  if (found != identities.event_target_ids.end()) {
+    return found->second;
+  }
+  std::string target_id =
+      "event-target-" + base::NumberToString(identities.next_event_target_id++);
+  identities.event_target_ids.insert_or_assign(target_identity, target_id);
+  return target_id;
 }
 
 std::string RegisterListenerIdentity(uintptr_t listener_identity) {
@@ -508,6 +591,9 @@ std::optional<EvidenceIdentityStorage::DispatchState> TakeDispatchIdentity(
 
 void RegisterActiveInvocation(uintptr_t event_identity,
                               std::string listener_id,
+                              std::string current_target_kind,
+                              std::string current_target_interface_name,
+                              std::string current_target_id,
                               int current_document_node_id,
                               int current_target_node_id,
                               std::string current_target_tag_name,
@@ -523,6 +609,9 @@ void RegisterActiveInvocation(uintptr_t event_identity,
               .node_id = current_target_node_id,
               .tag_name = std::move(current_target_tag_name),
               .element_id = std::move(current_target_element_id),
+              .kind = std::move(current_target_kind),
+              .interface_name = std::move(current_target_interface_name),
+              .target_id = std::move(current_target_id),
           },
       });
 }
@@ -700,6 +789,9 @@ std::string SchedulerBlockTypeName(int block_type) {
 base::DictValue CreateListenerPayload(
     const RecorderPipeClient& client,
     std::string listener_id,
+    std::string target_kind,
+    std::string target_interface_name,
+    std::string target_id,
     int document_node_id,
     int target_node_id,
     std::string event_name,
@@ -713,9 +805,12 @@ base::DictValue CreateListenerPayload(
   payload.Set("listenerId", std::move(listener_id));
   payload.Set("eventName", std::move(event_name));
   payload.Set("registrationKind", "add-event-listener");
-  payload.Set("target", CreateNode(document_node_id, target_node_id,
-                                   std::move(target_tag_name),
-                                   std::move(target_element_id)));
+  payload.Set("target", CreateEventTarget(
+                            std::move(target_kind),
+                            std::move(target_interface_name),
+                            std::move(target_id), document_node_id,
+                            target_node_id, std::move(target_tag_name),
+                            std::move(target_element_id)));
   payload.Set("capture", capture);
   payload.Set("passive", passive);
   payload.Set("once", once);
@@ -740,19 +835,17 @@ base::DictValue CreateDispatchPayload(
   payload.Set("eventName", state.event_name);
   payload.Set("trusted", state.trusted);
   payload.Set("originalTarget",
-              CreateNode(state.document_node_id, state.target_node_id,
-                         state.target_tag_name, state.target_element_id));
+              CreateEventTarget(kEventTargetKindNode, std::string(),
+                                std::string(), state.document_node_id,
+                                state.target_node_id, state.target_tag_name,
+                                state.target_element_id));
   base::ListValue composed_path;
-  for (const auto& node : state.composed_path) {
-    composed_path.Append(CreateNode(node.document_node_id, node.node_id,
-                                    node.tag_name, node.element_id));
+  for (const auto& entry : state.composed_path) {
+    composed_path.Append(CreateEventTarget(entry));
   }
   payload.Set("composedPath", std::move(composed_path));
   if (current_target) {
-    payload.Set("currentTarget",
-                CreateNode(current_target->document_node_id,
-                           current_target->node_id, current_target->tag_name,
-                           current_target->element_id));
+    payload.Set("currentTarget", CreateEventTarget(*current_target));
   } else {
     payload.Set("currentTarget", base::Value());
   }
@@ -1101,6 +1194,9 @@ RecorderPipeClient* GetProcessRecorderClient() {
 }
 
 void RecordBlinkListenerRegistered(uintptr_t listener_identity,
+                                   std::string target_kind,
+                                   std::string target_interface_name,
+                                   uintptr_t target_identity,
                                    int document_node_id,
                                    int target_node_id,
                                    std::string event_name,
@@ -1110,19 +1206,28 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    bool passive,
                                    bool once) {
   RecorderPipeClient* client = GetProcessRecorderClient();
-  if (!client || document_node_id <= 0 || target_node_id <= 0) {
+  if (!client || !IsRecordableEventTarget(target_kind, document_node_id,
+                                          target_node_id)) {
     return;
   }
 
+  const bool node_target = target_kind == kEventTargetKindNode;
   base::DictValue payload = CreateListenerPayload(
-      *client, RegisterListenerIdentity(listener_identity), document_node_id,
-      target_node_id, std::move(event_name), std::move(target_tag_name),
-      std::move(target_element_id), capture, passive, once);
+      *client, RegisterListenerIdentity(listener_identity),
+      std::move(target_kind), std::move(target_interface_name),
+      node_target ? std::string()
+                  : RegisterEventTargetIdentity(target_identity),
+      document_node_id, target_node_id, std::move(event_name),
+      std::move(target_tag_name), std::move(target_element_id), capture,
+      passive, once);
   SendBlinkEvidence("browser.listener", "listener-registered",
                     std::move(payload));
 }
 
 void RecordBlinkListenerRemoved(uintptr_t listener_identity,
+                                std::string target_kind,
+                                std::string target_interface_name,
+                                uintptr_t target_identity,
                                 int document_node_id,
                                 int target_node_id,
                                 std::string event_name,
@@ -1134,15 +1239,21 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<std::string> listener_id =
       TakeListenerIdentity(listener_identity);
-  if (!client || !listener_id || document_node_id <= 0 ||
-      target_node_id <= 0) {
+  if (!client || !listener_id ||
+      !IsRecordableEventTarget(target_kind, document_node_id,
+                               target_node_id)) {
     return;
   }
 
+  const bool node_target = target_kind == kEventTargetKindNode;
   base::DictValue payload = CreateListenerPayload(
-      *client, std::move(*listener_id), document_node_id, target_node_id,
-      std::move(event_name), std::move(target_tag_name),
-      std::move(target_element_id), capture, passive, once);
+      *client, std::move(*listener_id), std::move(target_kind),
+      std::move(target_interface_name),
+      node_target ? std::string()
+                  : RegisterEventTargetIdentity(target_identity),
+      document_node_id, target_node_id, std::move(event_name),
+      std::move(target_tag_name), std::move(target_element_id), capture,
+      passive, once);
   SendBlinkEvidence("browser.listener", "listener-removed",
                     std::move(payload));
 }
@@ -1180,7 +1291,30 @@ void RecordBlinkDispatchPathNode(uintptr_t event_identity,
       {.document_node_id = document_node_id,
        .node_id = node_id,
        .tag_name = std::move(tag_name),
-       .element_id = std::move(element_id)});
+       .element_id = std::move(element_id),
+       .kind = kEventTargetKindNode});
+}
+
+void RecordBlinkDispatchPathWindow(uintptr_t event_identity,
+                                   int document_node_id,
+                                   uintptr_t target_identity,
+                                   std::string interface_name) {
+  if (document_node_id <= 0) {
+    return;
+  }
+  std::string target_id = RegisterEventTargetIdentity(target_identity);
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.dispatches.find(event_identity);
+  if (found == identities.dispatches.end()) {
+    return;
+  }
+  found->second.composed_path.push_back(
+      {.document_node_id = document_node_id,
+       .node_id = 0,
+       .kind = kEventTargetKindWindow,
+       .interface_name = std::move(interface_name),
+       .target_id = std::move(target_id)});
 }
 
 void CompleteBlinkDispatchStart(uintptr_t event_identity) {
@@ -1198,19 +1332,29 @@ void CompleteBlinkDispatchStart(uintptr_t event_identity) {
 
 void BeginBlinkListenerInvocation(uintptr_t event_identity,
                                   uintptr_t listener_identity,
+                                  std::string current_target_kind,
+                                  std::string current_target_interface_name,
+                                  uintptr_t current_target_identity,
                                   int current_document_node_id,
                                   int current_target_node_id,
                                   std::string current_target_tag_name,
                                   std::string current_target_element_id) {
   std::optional<std::string> listener_id =
       FindListenerIdentity(listener_identity);
-  if (listener_id && current_document_node_id > 0 &&
-      current_target_node_id > 0) {
-    RegisterActiveInvocation(
-        event_identity, std::move(*listener_id), current_document_node_id,
-        current_target_node_id, std::move(current_target_tag_name),
-        std::move(current_target_element_id));
+  if (!listener_id ||
+      !IsRecordableEventTarget(current_target_kind, current_document_node_id,
+                               current_target_node_id)) {
+    return;
   }
+  const bool node_target = current_target_kind == kEventTargetKindNode;
+  RegisterActiveInvocation(
+      event_identity, std::move(*listener_id), std::move(current_target_kind),
+      std::move(current_target_interface_name),
+      node_target ? std::string()
+                  : RegisterEventTargetIdentity(current_target_identity),
+      current_document_node_id, current_target_node_id,
+      std::move(current_target_tag_name),
+      std::move(current_target_element_id));
 }
 
 void RecordBlinkListenerInvoked(uintptr_t event_identity,

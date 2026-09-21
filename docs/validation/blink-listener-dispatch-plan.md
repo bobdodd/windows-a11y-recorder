@@ -38,10 +38,14 @@ The current hook records:
 - The target tag name and HTML `id`, when present.
 - The resolved capture, passive, and once options.
 
-The hook currently records only EventTargets that are Nodes. Window, worker,
-and other non-Node EventTargets remain outside this slice. Inline attributes,
-`on*` properties, isolated-world identity, and source location remain
-outstanding.
+- The kind of EventTarget the registration is on, its Blink interface name,
+  and, for a target that is not a Node, a process-local target identifier.
+
+The hook records registrations on Nodes and on EventTargets that are not Nodes,
+including the window. Worker and worklet global scopes remain outside this
+slice because their execution contexts are not document-scoped. Inline
+attributes, `on*` properties, isolated-world identity, and source location
+remain outstanding.
 
 ### Listener removal and invocation
 
@@ -52,11 +56,11 @@ allocated at registration. The ordinary Blink listener loop preserves that
 identifier before automatic `once` removal, then emits `listener-invoked`
 after the callback returns.
 
-The invocation record therefore captures the callback's current target and
-resulting
+The invocation record therefore captures the callback's current target, which
+may be a Node or the window, and the resulting
 `defaultPrevented`, propagation-stopped, and immediate-propagation-stopped
-state. The hook does not yet instrument Blink animation triggers, non-Node
-targets, inline attributes, or event-handler properties.
+state. The hook does not yet instrument Blink animation triggers, worker
+global scopes, inline attributes, or event-handler properties.
 
 ### Dispatch start
 
@@ -80,9 +84,14 @@ capture-phase processing starts. It records those Nodes in Blink path order,
 from the original target through its ancestors. Each listener invocation also
 records the Node on which Blink invoked that listener as `currentTarget`.
 
-This first propagation increment does not yet include Window, non-Node event
-targets, or a separate representation of shadow-adjusted targets. Closed
-shadow-root behavior therefore remains outside the validated claim.
+After the Node contexts, the hook appends the window taken from Blink's own
+`WindowEventContext`, which is present exactly when Blink will run window
+listeners for that event. The recorded path therefore ends where Blink's path
+ends. A dispatch whose original target is not a Node does not reach
+`EventDispatcher::Dispatch` at all, so events such as `XMLHttpRequest`
+progress events remain outside this slice. A separate representation of
+shadow-adjusted targets is also still outstanding, so closed shadow-root
+behavior remains outside the validated claim.
 
 ### Dispatch completion
 
@@ -183,6 +192,31 @@ Callback entry does not claim callback completion or resulting page effects.
 Implicit removal caused by execution-context destruction is not reported by
 this slice.
 
+### Event-target references
+
+Every listener and dispatch record describes its EventTarget with one shape.
+The shape reports:
+
+- `kind`, one of `node`, `window`, or `other`.
+- `interfaceName`, the Blink interface the target reports for itself, such as
+  `Window` or `HTMLButtonElement`.
+- `targetId`, a process-local identifier for a target that is not a Node, and
+  null for a Node.
+- `documentId`, the document the target belongs to. For a target that is not a
+  Node, this is the document of its local DOM window.
+- `nodeId`, present only for a Node and null otherwise.
+- `backendNodeId`, `tagName`, `elementId`, and `classes`, as before.
+
+A Node therefore reads exactly as it did in protocol 0.17 apart from the three
+new fields. A target identifier is minted from the address Blink uses for the
+target in that renderer process. It is stable for the lifetime of that process
+and must never be compared across processes. A record is emitted only when the
+document is known; a Node additionally requires a known node identifier.
+
+The archive validator enforces this rule rather than inferring it: a `node`
+target must carry a node identifier, and a `window` or `other` target must
+carry a target identifier and no node identifier.
+
 ## Component boundary
 
 The recorder bridge is a Chromium component with exported entry points. This
@@ -201,6 +235,8 @@ high-volume event classes.
 
 `tests/fixtures/blink-listener-dispatch.html` installs capture and bubble
 listeners on `#propagation-root` and two listeners on `#pointer-only`. It
+installs a `click` listener on the window, and registers and removes a window
+`resize` listener. It
 installs a 125-millisecond interval that clears itself after one callback, then
 requests two animation-frame callbacks, explicitly cancels one, and invokes
 two idle callbacks, explicitly cancels the 5,000-millisecond callback, and
@@ -221,6 +257,17 @@ listeners call `preventDefault()`, remove the named listener, and call
   `canceled-by-event-handler`.
 - A composed Node path beginning with `#pointer-only` and containing
   `#propagation-root`.
+- One `listener-registered` record whose target kind is `window` and whose
+  interface name is `Window`, carrying a target identifier and no node
+  identifier.
+- One correlated window `resize` registration and removal that report the same
+  listener identifier and the same target identifier as each other, and the
+  same target identifier as the window `click` registration.
+- A `dispatch-started` record for `#default-action-link` whose composed path
+  ends at the window exactly once. The `#pointer-only` click stops propagation
+  at its target, so the link click is the only click that reaches the window.
+- One `listener-invoked` record whose current target is the window, whose
+  phase is `bubbling`, and whose original target is a Node.
 - A capturing invocation whose current target is `#propagation-root`.
 - At-target invocations whose current target is `#pointer-only`.
 - No bubbling invocation for `#propagation-root` after propagation is stopped.
