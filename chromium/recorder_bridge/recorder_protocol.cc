@@ -2,10 +2,12 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -77,6 +79,32 @@ bool RequireString(const base::DictValue& value,
   return true;
 }
 
+// The rejected protocol version is the only bootstrap field this bridge ever
+// reports, because a mismatch cannot be acted on without knowing which half is
+// stale. It arrives from outside this process, so it is bounded and reduced to
+// printable ASCII before it reaches a log or an error message.
+std::string DescribeReportedProtocolVersion(const std::string& version) {
+  constexpr size_t kMaximumReportedVersionLength = 32;
+  if (version.empty()) {
+    return "<empty>";
+  }
+  std::string described;
+  const size_t length =
+      std::min(version.size(), kMaximumReportedVersionLength);
+  described.reserve(length + 3);
+  for (size_t index = 0; index < length; ++index) {
+    const unsigned char character =
+        static_cast<unsigned char>(version[index]);
+    described.push_back(character >= 0x20 && character < 0x7F
+                            ? version[index]
+                            : '?');
+  }
+  if (version.size() > kMaximumReportedVersionLength) {
+    described.append("...");
+  }
+  return described;
+}
+
 }  // namespace
 
 bool ParseBootstrapConfiguration(std::string_view json,
@@ -118,7 +146,12 @@ bool ParseBootstrapConfiguration(std::string_view json,
   configuration->parent_process_id = value.FindInt("parentProcessId");
   configuration->child_process_id = value.FindInt("childProcessId");
   if (configuration->protocol_version != kProtocolVersion) {
-    *error = "Recorder protocol version is not supported.";
+    *error = "Recorder protocol version " +
+             DescribeReportedProtocolVersion(configuration->protocol_version) +
+             " is not supported. This browser requires protocol version " +
+             std::string(kProtocolVersion) +
+             ", so the recorder application and the instrumented browser were "
+             "built from different revisions.";
     return false;
   }
   return true;

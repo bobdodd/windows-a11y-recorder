@@ -134,7 +134,12 @@ recorded reason in its launch failure message. An environment value set by a
 validation harness is preserved. The native bridge
 appends only process identifiers, monotonic tick values, bootstrap attachment
 stages, child process types, and internal error text. It never writes bootstrap
-contents, pipe names, authentication tokens, command lines, URLs, or page data.
+contents, pipe names, authentication tokens, command lines, URLs, or page data,
+with one exception: a rejected protocol version is named in the rejection, next
+to the version this browser requires, because either half of the pair may be the
+stale one and the reason is useless without saying which. The reported value is
+bounded to 32 characters and reduced to printable ASCII, since it arrives from
+outside the process.
 Sandboxed Chromium children cannot open this diagnostic path directly. Use
 `A11Y_RECORDER_CHROMIUM_LOG_FILE` when child startup errors are required;
 Chromium passes that log to sandboxed children through an inherited handle,

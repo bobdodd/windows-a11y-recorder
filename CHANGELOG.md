@@ -20,6 +20,15 @@ from the product version.
 
 ### Added
 
+- Made the bridge's protocol rejection name both versions. A mismatch was
+  reported as "Recorder protocol version is not supported.", which does not say
+  which version the application sent or which one the browser requires, so an
+  operator could not tell which half of the pair was stale. The rejection now
+  names the received version and the required version and states that the two
+  were built from different revisions. The received value arrives from outside
+  the process, so it is bounded to 32 characters and reduced to printable ASCII,
+  and the data-handling policy records it as the single bootstrap field the
+  bridge diagnostic log may contain.
 - Added `scripts/Test-BridgeFailureReporting.ps1`, which provokes a bridge
   initialization failure in the instrumented browser instead of waiting for one.
   A successful recording proves nothing about failure reporting, so the check

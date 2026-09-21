@@ -192,7 +192,11 @@ During those states:
 - Early native bridge tracing through `A11Y_RECORDER_BRIDGE_LOG_FILE` records
   only process identifiers, monotonic tick values, startup stages, child
   process types, and internal errors. It must never include bootstrap contents,
-  pipe names, authentication tokens, command lines, URLs, or page data. Because
+  pipe names, authentication tokens, command lines, URLs, or page data. The one
+  exception is a rejected protocol version, which is reported alongside the
+  version the browser requires, because a version mismatch cannot be acted on
+  without knowing which half is stale. That value is bounded in length and
+  reduced to printable characters before it is recorded. Because
   its content is bounded in this way, the recorder sets this path for every
   browser it launches, writing to `diagnostics\browser-bridge.log` inside the
   session directory so that a browser that fails before Chromium logging starts

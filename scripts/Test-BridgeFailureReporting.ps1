@@ -169,7 +169,9 @@ $failures = New-Object System.Collections.Generic.List[string]
 # A bootstrap that names an unsupported protocol version is the failure this
 # check was written for: a published application older than the browser it
 # starts. It is rejected while the bootstrap is parsed.
-$unsupportedVersion = "0.1"
+# Deliberately unlike any real version, and not a substring of a real one, so
+# the assertions below cannot pass on a coincidence.
+$unsupportedVersion = "0.0-stale-application"
 $cases = @(
     (Invoke-BridgeFailure -Name "unsupported-protocol-version" `
         -ProtocolVersion $unsupportedVersion),
@@ -200,9 +202,19 @@ if ($cases[0].Reason -and $cases[1].Reason -and
     $cases[0].Reason -eq $cases[1].Reason) {
     $failures.Add("Both failures recorded the same reason, so the reason does not identify the failure.")
 }
-if ($cases[0].Reason -and $cases[0].Reason -notlike "*protocol version*") {
-    $failures.Add(("unsupported-protocol-version: the recorded reason does " +
-        "not name the protocol version: $($cases[0].Reason)"))
+# A mismatch cannot be acted on unless the reason says which version was sent
+# and which one the browser requires, because either half may be the stale one.
+if ($cases[0].Reason) {
+    if ($cases[0].Reason -notlike "*$unsupportedVersion*") {
+        $failures.Add(("unsupported-protocol-version: the recorded reason does " +
+            "not name the rejected version '$unsupportedVersion': " +
+            "$($cases[0].Reason)"))
+    }
+    if ($cases[0].Reason -notlike "*$supportedProtocol*") {
+        $failures.Add(("unsupported-protocol-version: the recorded reason does " +
+            "not name the version this browser requires " +
+            "('$supportedProtocol'): $($cases[0].Reason)"))
+    }
 }
 
 if ($failures.Count -gt 0) {
