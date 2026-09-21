@@ -18,6 +18,22 @@ from the product version.
 
 ## Unreleased
 
+### Fixed
+
+- Stamp a collector's closing records with the session clock read when they are
+  emitted rather than with the stop boundary captured before the collector's
+  queued evidence was drained. A validation run whose UI Automation observation
+  queue overflowed dropped 1,062 observations and reported the omission at
+  23,439,242,300 ns, 0.74 ms before the last drained observation it was written
+  after, so archive validation rejected the session with `event-time-regressed`,
+  the session status became `failed`, and the capture host exited with code 3
+  after a complete capture of 42,949 records. The stop boundary is retained as a
+  floor, so a closing record can never precede the boundary or the evidence that
+  preceded it, and the rule is shared by the UI Automation, foreground-window,
+  desktop-frame, and audio collectors instead of restated at each call site. The
+  audio collector already read the clock at emission time and now uses the
+  shared rule.
+
 ### Added
 
 - Recorded listener and dispatch evidence for EventTargets that are not Nodes,

@@ -185,7 +185,7 @@ public sealed class ForegroundWindowCollector : ICaptureCollector
             EmitEvent(
                 "collector-omission",
                 new { reason = "foreground-window-queue-full", count = dropped },
-                boundary.MonotonicNanoseconds,
+                CollectorClosingTimestamp.Resolve(_context?.Clock, boundary),
                 "evidence-dropped");
         }
 

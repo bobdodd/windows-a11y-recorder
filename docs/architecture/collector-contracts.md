@@ -279,6 +279,8 @@ When a record or buffer is not accepted, the collector MUST update an omission a
 
 The health service periodically snapshots accumulators into the diagnostics stream. Stop, failure, and checkpoint operations MUST attempt a final snapshot.
 
+A closing omission record MUST NOT be stamped with a timestamp earlier than evidence the collector already emitted on the same channel. A stop boundary is captured before a collector drains the evidence it has already queued, so the last drained record can carry a later timestamp than the boundary, and an omission stamped with the boundary regresses monotonic order within that channel. The archive validator rejects such an archive with `event-time-regressed`, which makes the session status `failed`. A collector therefore reads the session clock when it emits a closing record and retains the stop boundary only as a floor, so the recorded timestamp is an observation of when the closing record was produced rather than an adjustment of a recorded one.
+
 Overflow thresholds:
 
 - The first confirmed loss moves health to `Degraded`.

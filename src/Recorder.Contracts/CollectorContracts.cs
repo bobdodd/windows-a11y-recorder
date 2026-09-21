@@ -96,6 +96,40 @@ public sealed record CollectorInitializationContext(
 
 public sealed record SessionBoundary(long MonotonicNanoseconds, DateTimeOffset Utc);
 
+/// <summary>
+/// Resolves the monotonic timestamp a collector stamps on the records it emits
+/// while it is closing, after its in-flight evidence has been drained.
+/// </summary>
+public static class CollectorClosingTimestamp
+{
+    /// <summary>
+    /// Returns the later of the session stop boundary and the clock read at the
+    /// moment of the call.
+    /// </summary>
+    /// <remarks>
+    /// A stop boundary is captured before a collector drains the evidence it
+    /// has already queued, so records the collector emits afterwards, such as
+    /// an omission that reports dropped evidence, would carry a timestamp
+    /// earlier than evidence they are written after. That regresses monotonic
+    /// order within the collector's channel, which the archive validator
+    /// rejects. Reading the clock at emission time is an observation of when
+    /// the closing record was produced rather than an adjustment of a recorded
+    /// one, and the boundary is retained as a floor for a collector whose clock
+    /// is unavailable or has not advanced.
+    /// </remarks>
+    public static long Resolve(ISessionClock? clock, SessionBoundary boundary)
+    {
+        ArgumentNullException.ThrowIfNull(boundary);
+
+        if (clock is null)
+        {
+            return boundary.MonotonicNanoseconds;
+        }
+
+        return Math.Max(clock.GetElapsedNanoseconds(), boundary.MonotonicNanoseconds);
+    }
+}
+
 public interface ISessionClock
 {
     long Frequency { get; }

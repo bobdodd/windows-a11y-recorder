@@ -176,7 +176,7 @@ public sealed class UiAutomationCollector : ICaptureCollector
                 EmitEvent(
                     "collector-omission",
                     new { reason = "uia-provider-read-timeout" },
-                    boundary.MonotonicNanoseconds,
+                    CollectorClosingTimestamp.Resolve(_context?.Clock, boundary),
                     "snapshot-processing-incomplete");
             }
         }
@@ -191,7 +191,7 @@ public sealed class UiAutomationCollector : ICaptureCollector
                     reason = "uia-observation-queue-full",
                     count = Interlocked.Read(ref _observationsDropped)
                 },
-                boundary.MonotonicNanoseconds,
+                CollectorClosingTimestamp.Resolve(_context?.Clock, boundary),
                 "evidence-dropped");
         }
 

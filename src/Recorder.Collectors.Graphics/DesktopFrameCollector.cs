@@ -204,7 +204,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
             EmitFrameEvent(
                 "collector-omission",
                 new { reason = "desktop-frame-capture-failed", count = failedFrames },
-                boundary.MonotonicNanoseconds,
+                CollectorClosingTimestamp.Resolve(_context?.Clock, boundary),
                 unchecked((ulong)Interlocked.Increment(ref _frameSequence)),
                 "frame-capture-failed");
         }

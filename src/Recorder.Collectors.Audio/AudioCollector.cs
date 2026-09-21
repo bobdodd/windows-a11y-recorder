@@ -223,7 +223,7 @@ public sealed class AudioCollector : ICaptureCollector
             EmitStreamEvent(
                 "audio-stream-stopped",
                 stream,
-                _context?.Clock.GetElapsedNanoseconds() ?? boundary.MonotonicNanoseconds);
+                CollectorClosingTimestamp.Resolve(_context?.Clock, boundary));
             if (stream.DroppedBuffers > 0)
             {
                 HealthState = CollectorHealthState.Degraded;
@@ -236,8 +236,7 @@ public sealed class AudioCollector : ICaptureCollector
                         stream = stream.KindName,
                         count = stream.DroppedBuffers
                     },
-                    _context?.Clock.GetElapsedNanoseconds() ??
-                    boundary.MonotonicNanoseconds,
+                    CollectorClosingTimestamp.Resolve(_context?.Clock, boundary),
                     "evidence-dropped");
             }
 
