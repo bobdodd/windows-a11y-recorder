@@ -1044,6 +1044,19 @@ class IntegrateTests(unittest.TestCase):
         "    return content::RESULT_CODE_NORMAL_EXIT;\n"
         "  }\n"
         "#endif\n",
+        # The failure exit code was adopted, before the version query existed.
+        "#if BUILDFLAG(IS_WIN)\n"
+        "  std::string recorder_bridge_error;\n"
+        "  if (!a11y_recorder::InitializeProcessBridge(\n"
+        "          &recorder_bridge_error)) {\n"
+        "    a11y_recorder::WriteRecorderBridgeDiagnostic(\n"
+        '        "Recorder process bridge initialization failed: " +\n'
+        "        recorder_bridge_error);\n"
+        '    LOG(ERROR) << "Windows A11y Recorder bridge failed: "\n'
+        "               << recorder_bridge_error;\n"
+        "    return a11y_recorder::kBridgeInitializationFailureExitCode;\n"
+        "  }\n"
+        "#endif\n",
     )
 
     def test_migrates_every_historical_bridge_hook_body(self):
@@ -1062,6 +1075,10 @@ class IntegrateTests(unittest.TestCase):
                         patched.count(
                             "a11y_recorder::InitializeProcessBridge("
                         ),
+                    )
+                    self.assertIn(
+                        "a11y_recorder::WriteProtocolVersionIfRequested(",
+                        patched,
                     )
                     self.assertIn(INTEGRATE.HOOK, patched)
 
@@ -1089,6 +1106,45 @@ class IntegrateTests(unittest.TestCase):
         self.assertIn(
             "kBridgeInitializationFailureExitCode", str(failure.exception)
         )
+
+    def test_a_hook_without_the_version_query_never_reaches_a_build(self):
+        """A hook that cannot answer the query would degrade the check quietly."""
+        with self.assertRaises(RuntimeError) as failure:
+            INTEGRATE.verify_protocol_query_is_answered(
+                self.HISTORICAL_BRIDGE_HOOKS[-1],
+                Path("chrome_main_delegate.cc"),
+            )
+
+        self.assertIn("protocol version query", str(failure.exception))
+
+    def test_the_patched_hook_answers_the_version_query(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chrome_main_delegate.cc"
+            self._write_main_delegate(path)
+
+            INTEGRATE.patch_main_delegate(path)
+            patched = path.read_text(encoding="utf-8")
+
+            self.assertIn(
+                "return a11y_recorder::kProtocolVersionQueryExitCode;", patched
+            )
+            switches = (
+                Path(__file__).parent / "recorder_bridge" / "recorder_switches.h"
+            ).read_text(encoding="utf-8")
+            for declaration in (
+                "kProtocolVersionQueryExitCode",
+                "kProtocolVersionOutputPrefix",
+                "kPrintProtocolVersionSwitch",
+            ):
+                self.assertIn(declaration, switches)
+            self.assertIn(
+                "bool WriteProtocolVersionIfRequested();",
+                (
+                    Path(__file__).parent
+                    / "recorder_bridge"
+                    / "browser_bridge.h"
+                ).read_text(encoding="utf-8"),
+            )
 
     def test_removes_all_historical_windows_hook_variants(self):
         for hook in (

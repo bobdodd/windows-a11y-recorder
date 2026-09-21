@@ -126,6 +126,29 @@ protocol version from the native and managed sources, so it fails if those
 constants ever diverge. A successful recording does not exercise any of this,
 which is why the check does not depend on one.
 
+The browser also reports which protocol version it was built with, so a
+mismatched pair can be refused before anything is recorded. Started with
+`--a11y-recorder-print-protocol-version`, the browser writes
+`a11y-recorder-protocol-version=<version>` to standard output and exits with
+`kProtocolVersionQueryExitCode`, declared in `recorder_switches.h` as `0xA11C`,
+before any window or profile work. The recorder runs this query before every
+launch and refuses to start a session when the reported version differs from
+`BrowserEvidenceProtocol.CurrentVersion`, naming both versions and the
+executable path.
+
+The binary is asked rather than a file placed beside it, because a manifest can
+be copied, kept, or moved apart from the executable it claims to describe, while
+an answer from the process cannot be about a different binary. A browser built
+before the query existed treats the switch as unknown and starts normally, so the
+query always passes `--no-startup-window`, uses a throwaway profile directory, is
+bounded by a timeout, and terminates the process tree if that timeout expires.
+Such a browser leaves its version unknown, which is not treated as agreement and
+not treated as a refusal: the bridge still rejects a mismatched bootstrap and
+names both versions. `integrate.py` fails the build if the patched hook does not
+answer the query, and `scripts/Test-BrowserProtocolQuery.ps1` drives a real
+browser to check that it answers with the declared version, exits with the query
+exit code, and leaves no browser running.
+
 For failures that occur before Chromium logging is initialized, set
 `A11Y_RECORDER_BRIDGE_LOG_FILE` to an absolute file path. The recorder sets this
 variable for every browser it launches, defaulting to

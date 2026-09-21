@@ -17,6 +17,7 @@
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/shared_memory_switch.h"
 #include "base/no_destructor.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
@@ -909,6 +910,29 @@ bool ReadChildBootstrap(const base::CommandLine& command_line,
 
 void WriteRecorderBridgeDiagnostic(std::string_view message) {
   WriteDiagnosticLine(message);
+}
+
+bool WriteProtocolVersionIfRequested() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  if (!command_line.HasSwitch(kPrintProtocolVersionSwitch)) {
+    return false;
+  }
+
+  // The recorder redirects standard output for this query. Writing to the
+  // handle directly avoids depending on Chromium's logging or standard stream
+  // setup, neither of which has run at this point.
+  const std::string reported =
+      std::string(kProtocolVersionOutputPrefix) + kProtocolVersion + "\r\n";
+  const HANDLE output = ::GetStdHandle(STD_OUTPUT_HANDLE);
+  if (output && output != INVALID_HANDLE_VALUE) {
+    DWORD written = 0;
+    ::WriteFile(output, reported.data(),
+                base::checked_cast<DWORD>(reported.size()), &written, nullptr);
+  }
+  WriteDiagnosticLine(std::string("Recorder protocol version query answered ") +
+                      kProtocolVersion + ".");
+  return true;
 }
 
 bool InitializeProcessBridge(std::string* error) {

@@ -24,6 +24,23 @@ inline constexpr wchar_t kBridgeLogFileEnvironmentWide[] =
 // ChromiumLauncher.BridgeInitializationFailureExitCode.
 inline constexpr int kBridgeInitializationFailureExitCode = 0xA11B;
 
+// Asks the browser to report the evidence protocol version it was built with
+// and exit without starting. A file written beside the executable could be
+// separated from the executable it describes, so the recorder asks the binary
+// it is about to run rather than trusting anything alongside it.
+inline constexpr char kPrintProtocolVersionSwitch[] =
+    "a11y-recorder-print-protocol-version";
+
+// The reported version is written to standard output behind this prefix, and
+// the process exits with this code. The code distinguishes a browser that
+// answered the query from one that ignored an unknown switch and started
+// normally. The recorder declares the same values as
+// ChromiumLauncher.ProtocolVersionQueryExitCode and
+// ChromiumLauncher.ProtocolVersionOutputPrefix.
+inline constexpr int kProtocolVersionQueryExitCode = 0xA11C;
+inline constexpr char kProtocolVersionOutputPrefix[] =
+    "a11y-recorder-protocol-version=";
+
 // These values mirror Chromium's public process command-line contract. Keeping
 // them here prevents the bridge component, which is also consumed by Blink
 // core, from depending upward on //content/public/common.

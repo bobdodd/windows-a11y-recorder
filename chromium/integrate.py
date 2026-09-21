@@ -63,9 +63,19 @@ BRIDGE_INCLUDE_BLOCK = f"""\
 BRIDGE_FAILURE_RETURN = (
     "    return a11y_recorder::kBridgeInitializationFailureExitCode;"
 )
+PROTOCOL_VERSION_QUERY_RETURN = (
+    "    return a11y_recorder::kProtocolVersionQueryExitCode;"
+)
+# The query is answered after the error declaration so that every hook body,
+# current or historical, still opens with BRIDGE_HOOK_ANCHOR. Region detection
+# depends on that text matching both what earlier revisions wrote and what this
+# revision writes, so the anchor must not move.
 HOOK = f"""\
 #if BUILDFLAG(IS_WIN)
   std::string recorder_bridge_error;
+  if (a11y_recorder::WriteProtocolVersionIfRequested()) {{
+{PROTOCOL_VERSION_QUERY_RETURN}
+  }}
   if (!a11y_recorder::InitializeProcessBridge(
           &recorder_bridge_error)) {{
     a11y_recorder::WriteRecorderBridgeDiagnostic(
@@ -1986,6 +1996,41 @@ def verify_bridge_failure_is_fatal(text: str, path: Path) -> None:
         )
 
 
+def verify_protocol_query_is_answered(text: str, path: Path) -> None:
+    """Fails when the hook would not answer the protocol version query.
+
+    The recorder asks the browser which protocol version it speaks before it
+    starts a session, and treats a browser that does not answer as one whose
+    version is unknown. A hook body that omits the query therefore degrades that
+    check silently instead of failing, so the omission is reported here.
+    """
+    marker = "a11y_recorder::InitializeProcessBridge("
+    start = text.find(marker)
+    if start < 0:
+        raise RuntimeError(
+            f"{path}: the recorder bridge initialization hook is missing"
+        )
+    region_start = text.rfind(BRIDGE_HOOK_ANCHOR, 0, start)
+    if region_start < 0:
+        raise RuntimeError(
+            f"{path}: the recorder bridge hook region could not be located"
+        )
+    end = text.find("#endif", start)
+    region = text[region_start:end if end > start else len(text)]
+    if "a11y_recorder::WriteProtocolVersionIfRequested(" not in region:
+        raise RuntimeError(
+            f"{path}: the recorder bridge hook must answer the protocol "
+            "version query, so that the recorder can refuse a mismatched "
+            "browser before it starts a session"
+        )
+    if PROTOCOL_VERSION_QUERY_RETURN.strip() not in region:
+        raise RuntimeError(
+            f"{path}: answering the protocol version query must return "
+            "a11y_recorder::kProtocolVersionQueryExitCode, so that a browser "
+            "which ignored the switch is not mistaken for one that answered"
+        )
+
+
 def patch_main_delegate(path: Path) -> None:
     text = read_source(path)
     text = text.replace(
@@ -2012,6 +2057,7 @@ def patch_main_delegate(path: Path) -> None:
         )
         text = replace_once(text, function, f"{function}\n{HOOK}", path)
     verify_bridge_failure_is_fatal(text, path)
+    verify_protocol_query_is_answered(text, path)
     write_patched(path, text)
 
 

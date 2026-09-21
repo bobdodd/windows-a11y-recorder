@@ -27,8 +27,26 @@ public sealed class ChromiumLauncher : IAsyncDisposable
     private const string BridgeInitializationFailureMarker =
         "Recorder process bridge initialization failed:";
 
+    // Declared in the native bridge as kPrintProtocolVersionSwitch,
+    // kProtocolVersionQueryExitCode, and kProtocolVersionOutputPrefix. The
+    // browser is asked which protocol version it was built with, because a file
+    // written beside the executable can be separated from the executable it
+    // describes.
+    public const string ProtocolVersionQuerySwitch =
+        "--a11y-recorder-print-protocol-version";
+
+    public const int ProtocolVersionQueryExitCode = 0xA11C;
+
+    public const string ProtocolVersionOutputPrefix =
+        "a11y-recorder-protocol-version=";
+
     private static readonly TimeSpan StartupStabilityWindow =
         TimeSpan.FromMilliseconds(500);
+
+    // A browser built before the query existed treats the switch as unknown and
+    // starts normally, so the query is always bounded in time.
+    private static readonly TimeSpan ProtocolVersionQueryTimeout =
+        TimeSpan.FromSeconds(15);
 
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
@@ -220,6 +238,231 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         }
     }
 
+    // A browser that answers names the version it speaks. A browser that does
+    // not answer is not assumed to agree: its version is unknown, and the
+    // bridge remains the thing that reports a mismatch.
+    public enum BrowserProtocolVersionOutcome
+    {
+        Reported,
+        Unknown
+    }
+
+    public sealed record BrowserProtocolVersionQueryResult(
+        BrowserProtocolVersionOutcome Outcome,
+        string? Version,
+        string Description);
+
+    public static ProcessStartInfo CreateProtocolVersionQueryStartInfo(
+        string executablePath,
+        string profileDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(profileDirectory);
+
+        var result = new ProcessStartInfo
+        {
+            FileName = Path.GetFullPath(executablePath),
+            UseShellExecute = false,
+            RedirectStandardInput = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        RemoveSensitiveEnvironmentVariables(result);
+        result.ArgumentList.Add(ProtocolVersionQuerySwitch);
+        // A browser that does not recognize the query switch would otherwise
+        // open a window nobody asked for. This switch predates the query, so
+        // such a build still honors it.
+        result.ArgumentList.Add("--no-startup-window");
+        result.ArgumentList.Add(
+            $"--user-data-dir={Path.GetFullPath(profileDirectory)}");
+        result.ArgumentList.Add("--no-first-run");
+        result.ArgumentList.Add("--no-default-browser-check");
+        return result;
+    }
+
+    public static async Task<BrowserProtocolVersionQueryResult>
+        QueryProtocolVersionAsync(
+            string executablePath,
+            CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        if (!File.Exists(executablePath))
+        {
+            throw new FileNotFoundException(
+                "The bundled instrumented Chromium executable was not found.",
+                executablePath);
+        }
+
+        var profileDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "Windows A11y Recorder",
+            "ProtocolVersionQuery",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(profileDirectory);
+        try
+        {
+            var startInfo = CreateProtocolVersionQueryStartInfo(
+                executablePath,
+                profileDirectory);
+            using var process = Process.Start(startInfo) ??
+                throw new InvalidOperationException(
+                    "Instrumented Chromium did not start for the protocol " +
+                    "version query.");
+            var output = process.StandardOutput.ReadToEndAsync(
+                cancellationToken);
+            using var timeout = CancellationTokenSource
+                .CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(ProtocolVersionQueryTimeout);
+            int? exitCode = null;
+            try
+            {
+                await process.WaitForExitAsync(timeout.Token)
+                    .ConfigureAwait(false);
+                exitCode = process.ExitCode;
+            }
+            catch (OperationCanceledException)
+                when (!cancellationToken.IsCancellationRequested)
+            {
+                TerminateProcessTree(process);
+            }
+
+            var text = string.Empty;
+            try
+            {
+                text = await output.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+                when (!cancellationToken.IsCancellationRequested)
+            {
+            }
+            return InterpretProtocolVersionQuery(exitCode, text);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(profileDirectory, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    internal static BrowserProtocolVersionQueryResult
+        InterpretProtocolVersionQuery(int? exitCode, string? output)
+    {
+        var reported = ReadReportedProtocolVersion(output);
+        if (reported is null)
+        {
+            return new BrowserProtocolVersionQueryResult(
+                BrowserProtocolVersionOutcome.Unknown,
+                null,
+                exitCode is null
+                    ? "The browser did not report a protocol version before " +
+                        "the query timed out, so it was built before the " +
+                        "query existed."
+                    : "The browser exited with code " +
+                        $"{exitCode.Value} without reporting a protocol " +
+                        "version, so it was built before the query existed.");
+        }
+        if (exitCode != ProtocolVersionQueryExitCode)
+        {
+            // Reported text without the query exit code means the process did
+            // something other than answer and stop, so the answer is not
+            // trustworthy on its own.
+            return new BrowserProtocolVersionQueryResult(
+                BrowserProtocolVersionOutcome.Unknown,
+                null,
+                $"The browser reported protocol version {reported} but " +
+                    (exitCode is null
+                        ? "did not exit for the query"
+                        : $"exited with code {exitCode.Value} instead of " +
+                            $"{ProtocolVersionQueryExitCode}") +
+                    ", so the report was not accepted.");
+        }
+        return new BrowserProtocolVersionQueryResult(
+            BrowserProtocolVersionOutcome.Reported,
+            reported,
+            $"The browser reported protocol version {reported}.");
+    }
+
+    // A reported version is only acted on when the browser actually reported
+    // one. An unknown version is left to the bridge, which rejects a mismatched
+    // bootstrap and names both versions.
+    public static void EnsureProtocolVersionIsCompatible(
+        BrowserProtocolVersionQueryResult query,
+        string expectedVersion,
+        string executablePath)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedVersion);
+
+        if (query.Outcome != BrowserProtocolVersionOutcome.Reported ||
+            query.Version is null ||
+            string.Equals(
+                query.Version,
+                expectedVersion,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        throw new BrowserProtocolMismatchException(
+            "This recorder speaks browser evidence protocol version " +
+            $"{expectedVersion}, and {executablePath} speaks " +
+            $"{query.Version}. The recorder and the instrumented browser were " +
+            "built from different revisions, so no session was started. " +
+            "Rebuild the instrumented browser and republish the recorder from " +
+            "the same revision.");
+    }
+
+    private static string? ReadReportedProtocolVersion(string? output)
+    {
+        if (string.IsNullOrEmpty(output))
+        {
+            return null;
+        }
+
+        foreach (var line in output.Split(
+            '\n',
+            StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var marker = line.IndexOf(
+                ProtocolVersionOutputPrefix,
+                StringComparison.Ordinal);
+            if (marker < 0)
+            {
+                continue;
+            }
+            var value = line[(marker + ProtocolVersionOutputPrefix.Length)..]
+                .Trim();
+            if (value.Length > 0)
+            {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static void TerminateProcessTree(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (NotSupportedException)
+        {
+        }
+    }
+
     public static ProcessStartInfo CreateStartInfo(
         string executablePath,
         string profileDirectory,
@@ -366,6 +609,24 @@ public sealed class BrowserStartupExitException : InvalidOperationException
     }
 
     public BrowserStartupExitException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+// Raised before a browser is launched, when the browser has reported a protocol
+// version the recorder does not speak. Distinct from a startup exit, because
+// nothing was started and the operator's action is to rebuild or republish.
+public sealed class BrowserProtocolMismatchException : InvalidOperationException
+{
+    public BrowserProtocolMismatchException(string message)
+        : base(message)
+    {
+    }
+
+    public BrowserProtocolMismatchException(
+        string message,
+        Exception innerException)
         : base(message, innerException)
     {
     }

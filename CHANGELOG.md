@@ -29,6 +29,23 @@ from the product version.
   the process, so it is bounded to 32 characters and reduced to printable ASCII,
   and the data-handling policy records it as the single bootstrap field the
   bridge diagnostic log may contain.
+- Made the browser report the evidence protocol version it was built with, and
+  made the recorder refuse a mismatched pair before launching it. Started with
+  `--a11y-recorder-print-protocol-version`, the browser writes
+  `a11y-recorder-protocol-version=<version>` to standard output and exits with
+  `0xA11C` before any window or profile work, and the recorder rejects the
+  session with `instrumented-browser-protocol-mismatch` when that version
+  differs from the one it speaks, naming both versions and the executable. The
+  binary is asked rather than a file placed beside it, because a manifest can be
+  separated from the executable it claims to describe. A browser built before
+  the query existed ignores an unknown switch and would start normally, so the
+  query passes `--no-startup-window`, uses a throwaway profile, is bounded by a
+  timeout, and terminates the process tree on expiry; its version is then
+  unknown, which is not read as agreement and does not block a session, since
+  the bridge still rejects a mismatched bootstrap and names both versions.
+  `integrate.py` fails the build if the patched hook does not answer the query,
+  and `scripts/Test-BrowserProtocolQuery.ps1` drives a real browser to check
+  that the answer, the exit code, and the absence of a started browser all hold.
 - Added `scripts/Test-BridgeFailureReporting.ps1`, which provokes a bridge
   initialization failure in the instrumented browser instead of waiting for one.
   A successful recording proves nothing about failure reporting, so the check

@@ -266,4 +266,120 @@ public sealed class ChromiumLauncherTests
             "--remote-debugging-port=9229",
             startInfo.ArgumentList);
     }
+
+    [Fact]
+    public void ProtocolVersionQueryDoesNotOpenABrowserWindow()
+    {
+        var executable = Path.Combine(
+            Path.GetTempPath(),
+            "browser",
+            "chrome.exe");
+        var profile = Path.Combine(
+            Path.GetTempPath(),
+            "profiles",
+            "protocol-query");
+
+        var startInfo = ChromiumLauncher.CreateProtocolVersionQueryStartInfo(
+            executable,
+            profile);
+
+        Assert.Contains(
+            ChromiumLauncher.ProtocolVersionQuerySwitch,
+            startInfo.ArgumentList);
+        // A browser built before the query would treat the switch as unknown
+        // and start normally, so the query must not be able to open a window.
+        Assert.Contains("--no-startup-window", startInfo.ArgumentList);
+        Assert.DoesNotContain(
+            "--a11y-recorder-bootstrap=stdin",
+            startInfo.ArgumentList);
+        Assert.True(startInfo.RedirectStandardOutput);
+        Assert.True(startInfo.CreateNoWindow);
+    }
+
+    [Fact]
+    public void AnAnsweredProtocolVersionQueryIsAccepted()
+    {
+        var query = ChromiumLauncher.InterpretProtocolVersionQuery(
+            ChromiumLauncher.ProtocolVersionQueryExitCode,
+            $"{ChromiumLauncher.ProtocolVersionOutputPrefix}0.17\r\n");
+
+        Assert.Equal(
+            ChromiumLauncher.BrowserProtocolVersionOutcome.Reported,
+            query.Outcome);
+        Assert.Equal("0.17", query.Version);
+    }
+
+    [Fact]
+    public void AReportedVersionWithoutTheQueryExitCodeIsNotAccepted()
+    {
+        var query = ChromiumLauncher.InterpretProtocolVersionQuery(
+            0,
+            $"{ChromiumLauncher.ProtocolVersionOutputPrefix}0.17\r\n");
+
+        Assert.Equal(
+            ChromiumLauncher.BrowserProtocolVersionOutcome.Unknown,
+            query.Outcome);
+        Assert.Null(query.Version);
+    }
+
+    [Fact]
+    public void ABrowserThatCannotAnswerLeavesItsVersionUnknown()
+    {
+        var exited = ChromiumLauncher.InterpretProtocolVersionQuery(0, "");
+        var timedOut = ChromiumLauncher.InterpretProtocolVersionQuery(null, "");
+
+        Assert.Equal(
+            ChromiumLauncher.BrowserProtocolVersionOutcome.Unknown,
+            exited.Outcome);
+        Assert.Equal(
+            ChromiumLauncher.BrowserProtocolVersionOutcome.Unknown,
+            timedOut.Outcome);
+        Assert.Contains(
+            "before the query existed",
+            timedOut.Description,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AMismatchedBrowserIsRefusedBeforeItIsLaunched()
+    {
+        var query = ChromiumLauncher.InterpretProtocolVersionQuery(
+            ChromiumLauncher.ProtocolVersionQueryExitCode,
+            $"{ChromiumLauncher.ProtocolVersionOutputPrefix}0.16\r\n");
+
+        var failure = Assert.Throws<BrowserProtocolMismatchException>(
+            () => ChromiumLauncher.EnsureProtocolVersionIsCompatible(
+                query,
+                "0.17",
+                @"C:\browser\chrome.exe"));
+
+        Assert.Contains("0.16", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("0.17", failure.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            @"C:\browser\chrome.exe",
+            failure.Message,
+            StringComparison.Ordinal);
+        Assert.IsAssignableFrom<InvalidOperationException>(failure);
+    }
+
+    [Fact]
+    public void AMatchingOrUnknownVersionIsNotRefused()
+    {
+        var matching = ChromiumLauncher.InterpretProtocolVersionQuery(
+            ChromiumLauncher.ProtocolVersionQueryExitCode,
+            $"{ChromiumLauncher.ProtocolVersionOutputPrefix}0.17\r\n");
+        var unknown = ChromiumLauncher.InterpretProtocolVersionQuery(0, "");
+
+        ChromiumLauncher.EnsureProtocolVersionIsCompatible(
+            matching,
+            "0.17",
+            "chrome.exe");
+        // An unknown version is left to the bridge, which rejects a mismatched
+        // bootstrap and names both versions. Refusing here would stop sessions
+        // against any browser built before the query existed.
+        ChromiumLauncher.EnsureProtocolVersionIsCompatible(
+            unknown,
+            "0.17",
+            "chrome.exe");
+    }
 }

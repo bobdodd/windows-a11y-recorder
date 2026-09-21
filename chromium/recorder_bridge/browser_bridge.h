@@ -25,6 +25,14 @@ class RecorderPipeClient;
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 bool InitializeProcessBridge(std::string* error);
 
+// Reports the evidence protocol version this browser was built with when the
+// query switch is present, and returns true when it did. The caller must then
+// exit with kProtocolVersionQueryExitCode without starting a browser. This lets
+// the recorder refuse a mismatched pair before it launches a session, instead
+// of discovering the mismatch from a browser that has already failed.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool WriteProtocolVersionIfRequested();
+
 // Adds an inherited, read-only shared-memory capability to supported Chromium
 // child processes. The command-line switch contains only handle metadata; the
 // authentication token remains inside the inherited shared-memory region.

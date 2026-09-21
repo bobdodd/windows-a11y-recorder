@@ -133,6 +133,18 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                     "browser-bridge.log");
             try
             {
+                // The browser is asked which protocol version it was built
+                // with before a session starts. A browser that cannot answer
+                // leaves its version unknown, and the bridge still rejects a
+                // mismatched bootstrap, so an unknown answer is not a refusal.
+                var protocolVersionQuery =
+                    await ChromiumLauncher.QueryProtocolVersionAsync(
+                        _options.ChromiumExecutablePath,
+                        cancellationToken).ConfigureAwait(false);
+                ChromiumLauncher.EnsureProtocolVersionIsCompatible(
+                    protocolVersionQuery,
+                    BrowserEvidenceProtocol.CurrentVersion,
+                    _options.ChromiumExecutablePath);
                 await _launcher.LaunchAsync(
                     _options.ChromiumExecutablePath,
                     profileDirectory,
@@ -149,7 +161,9 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                 HealthState = CollectorHealthState.Failed;
                 return CollectorTransitionResult.Reject(
                     LifecycleState,
-                    "instrumented-browser-launch-failed",
+                    exception is BrowserProtocolMismatchException
+                        ? "instrumented-browser-protocol-mismatch"
+                        : "instrumented-browser-launch-failed",
                     exception.Message);
             }
         }
