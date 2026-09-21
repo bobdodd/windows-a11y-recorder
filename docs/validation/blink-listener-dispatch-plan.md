@@ -281,9 +281,9 @@ as a null location rather than an object of nulls. `sourceHash` is always null,
 because the recorder does not read script text.
 
 What this does not establish: the definition site of a callback is not recorded,
-a location is only as good as the top frame Blink reports and is absent for a
-registration made while no script was running, no script text or hash is
-recorded, and an eval or inline script reports whatever URL Blink attributes to
+a location is only as good as the top frame Blink reports and falls back to a
+parsing position for a registration made while no script was running, no script
+text or hash is recorded, and an eval or inline script reports whatever URL Blink attributes to
 it rather than a file on disk.
 
 ## Component boundary
@@ -853,3 +853,66 @@ added, and `native` is defined but never emitted. Listener source location,
 isolated-world identity, and worker global scopes remain outstanding, and the
 455 recorded transitions with 200 uncovered are the same population described
 under protocol 0.16 rather than a result of this slice.
+
+## Registration-location validation result
+
+Reference platform, September 21, 2026, at repository revision `7355f71`.
+Protocol 0.20. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, with a 20-second
+capture.
+
+The run passed on the first attempt, with no harness failures: 47 integration
+tests, 102 managed tests, a valid session archive, 40,663 events and 110
+artifacts validated, no network-service crashes, exit code 0, and 40,663 accepted
+records with none dropped.
+
+Observed for this slice:
+
+| Field | Value |
+| --- | --- |
+| `ExternalScriptListenerId` | `listener-3` |
+| `ExternalScriptLocationUrl` | the `blink-listener-registration.js` file URL |
+| `ExternalScriptLocationFunction` | `registerExternalScriptListener` |
+| `ExternalScriptLocationLine` | 9 |
+| `ExternalScriptLocationColumn` | 18 |
+| `ExternalScriptLocationScriptId` | `3` |
+| `RegistrationLocationUrl` | the `blink-listener-dispatch.html` file URL |
+| `RegistrationLocationLine` | 88 |
+| `RegistrationLocationColumn` | 12 |
+| `RegistrationLocationFunction` | null |
+| `RemovalLocationFunction` | `handleClick` |
+| `RemovalLocationLine` | 85 |
+| `ReplacementLocationFunction` | null |
+| `ReplacementLocationLine` | 141 |
+| `InlineAttributeLocationUrl` | the `blink-listener-dispatch.html` file URL |
+| `InlineAttributeLocationLine` | 23 |
+
+What this establishes: a registration made from a separate script file reports
+that file rather than the document that loaded it, and reports the enclosing
+function the call was made from. Each record reports its own call: the
+registration on `#pointer-only` reports line 88, which is the
+`addEventListener` call in the fixture document, and the removal of the same
+listener reports line 85 inside `handleClick`, which is the
+`removeEventListener` call. Blink's line and column numbering is 1-based in
+these records: `blink-listener-registration.js` line 9 column 18 is the first
+character of `addEventListener` in the call the fixture makes there, and
+`blink-listener-dispatch.html` line 88 column 12 is the first character of
+`addEventListener` in the call the document script makes. A registration made
+from a top-level script reports a null function name rather than an invented one.
+A registration Blink creates while parsing an inline attribute still reports a
+location: the inline attribute on `#inline-handler` reported the document URL and
+line 23, which is the line the element's start tag closes on, one line after the
+`onclick` attribute itself, so the recorded line is the parser position when
+Blink created the listener and not the position of the attribute text.
+
+What this does not establish: the definition site of a callback is still not
+recorded, only the call that changed the listener. A location is only as good as
+the top frame Blink reports, so a registration made through a wrapper reports the
+wrapper. No script text or hash is recorded, and `sourceHash` is null in every
+record. The verifier requires the line and column to be present but does not
+assert their exact values, so the 1-based numbering above is an observation from
+this run rather than an assertion the suite enforces. A registration with no
+observable location was not exercised, because every registration in the fixture
+had either a script stack or a parser position. The 448 recorded transitions with
+200 uncovered are the same population described under protocol 0.16 and are not a
+result of this slice.

@@ -343,9 +343,11 @@ returns Blink's own `SourceLocation`, whose `Url`, `ScriptId`, `LineNumber`,
 `ColumnNumber`, and `Function` accessors are written into the record's
 `location`. Because the capture happens at the hook, the location describes the
 call that registered, removed, or replaced the listener and not the definition
-site of the callback, and a registration Blink performs while no script is
-running, such as one an inline attribute creates during parsing, reports
-whatever parsing location Blink can supply and otherwise a null location.
+site of the callback. A registration Blink performs while no script is running,
+such as one an inline attribute creates during parsing, reports the parsing
+location Blink can supply, which the reference run showed to be the parser
+position when the listener was created rather than the position of the attribute
+text, and reports a null location only when Blink can supply nothing.
 `SourceLocation` states that a zero line or column means unknown, so a zero line,
 column, or script identifier and an empty URL or function name are each recorded
 as null. `sourceHash` is always null, because the recorder does not read script

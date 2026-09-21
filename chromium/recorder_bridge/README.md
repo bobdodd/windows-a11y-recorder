@@ -127,7 +127,9 @@ script text. The location describes the call that registered, removed, or
 replaced the listener, not the definition site of the callback. Blink represents
 an unobserved URL as an empty string and an unobserved identifier, line, or
 column as zero; each is carried through as null, and a record with nothing
-observed in any field reports a null location rather than an object of nulls.
+observed in any field reports a null location rather than an object of nulls. A
+registration made while no script was running still reports a location when
+Blink can supply a parsing position.
 Capturing a location walks the top of the JavaScript stack on every listener
 record, which is a cost this build accepts for evidence completeness.
 

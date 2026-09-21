@@ -178,20 +178,21 @@ an existing attribute registration replaces that registration's callback in
 place, and Blink reports neither an addition nor a removal for it, so a
 `listener-callback-replaced` record carries the unchanged listener identity and
 the form of the callback Blink now holds. Worker global scopes, isolated-world
-identity and dispatches whose original target is never a Node remain
+identity, and dispatches whose original target is never a Node remain
 outstanding.
 
-Protocol 0.20 is implemented as a proof of concept and awaits reference-platform
-build and capture validation. It reports where each listener registration,
+Protocol 0.20 reports where each listener registration,
 removal, and callback replacement came from. The location is captured from
 Blink's own capture helper at the moment the record is written, so it describes
 the call that changed the listener rather than where the callback function was
 defined, and it reports the script URL, script identifier, line, column, and
 enclosing function name that Blink reports. A fact Blink does not observe is
-reported as null rather than as a zero, and a record with nothing observed
-reports a null location, which is what a registration made while no script was
-running does. The recorder does not read script text, so it reports no source
-hash.
+reported as null rather than as a zero, and a record with nothing observed in
+any field reports a null location. A registration Blink creates while parsing an
+inline attribute reports the parser position Blink held rather than the position
+of the attribute text. The recorder does not read script text, so it reports no source
+hash. Isolated-world identity, worker global scopes, and dispatches whose
+original target is never a Node remain outstanding.
 
 ## Project goals
 
