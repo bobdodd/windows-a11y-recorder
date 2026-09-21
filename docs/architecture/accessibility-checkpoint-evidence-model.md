@@ -59,7 +59,12 @@ Each node record reports:
 - Chromium's numeric accessibility role;
 - accessible name and description;
 - Chromium's readable serialized AX properties; and
-- whether the node carries Chromium's focused state.
+- whether the node identity matches `AXTreeData::focus_id` when its serialized
+  update carries tree data.
+
+AX node identity `0` is invalid. Negative identities are retained because
+Chromium assigns them to generated renderer nodes, including inline text boxes.
+The same rule applies to a recorded parent AX node identity.
 
 The readable serialized properties deliberately retain the broader role, state,
 attribute, and relationship vocabulary while the structured protocol grows.
@@ -87,6 +92,11 @@ missing `parentAccessibilityNodeId` does not establish that the node is a tree
 root. Its parent may be unchanged and therefore absent from that incremental
 batch.
 
+Focus identity is also bounded by each serialized update. A false `focused`
+value does not establish that the node was unfocused when its update carried no
+tree data. Reconstructing current focus across updates requires the later
+ordered-state reconstruction slice.
+
 ## Volume and limits
 
 The proof of concept permits up to 100,000 node records for each serialization
@@ -102,7 +112,8 @@ recording size. Storage optimization belongs to a later archival workflow.
 A complete, correlated checkpoint proves that the renderer serialized the
 recorded AX node data for the identified document at that boundary. It can
 support observations about the serialized role, name, description, focus
-state, DOM mapping, and readable properties of the nodes in that batch.
+identity when the batch carries tree data, DOM mapping, and readable properties
+of the nodes in that batch.
 
 The evidence does not by itself prove:
 

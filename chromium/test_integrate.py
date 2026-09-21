@@ -12,6 +12,16 @@ SPEC.loader.exec_module(INTEGRATE)
 
 
 class IntegrateTests(unittest.TestCase):
+    def test_bridge_accepts_generated_negative_ax_node_ids(self):
+        bridge_source = (
+            MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("accessibility_node_id == 0", bridge_source)
+        self.assertNotIn("accessibility_node_id <= 0", bridge_source)
+        self.assertIn("parent_accessibility_node_id != 0", bridge_source)
+        self.assertNotIn("parent_accessibility_node_id > 0", bridge_source)
+
     def test_patches_renderer_accessibility_serialization_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -56,7 +66,29 @@ class IntegrateTests(unittest.TestCase):
                 "CompleteRendererAccessibilityCheckpoint", first_source
             )
             self.assertIn(
+                "recorder_update.has_tree_data", first_source
+            )
+            self.assertNotIn(
+                "ax::mojom::State::kFocused", first_source
+            )
+            self.assertIn(
                 '    "//chromium/recorder_bridge",', first_build
+            )
+
+            legacy_source = first_source.replace(
+                INTEGRATE.CONTENT_RENDERER_FOCUSED_EXPRESSION,
+                INTEGRATE.LEGACY_CONTENT_RENDERER_FOCUSED_EXPRESSION,
+            )
+            source.write_text(legacy_source, encoding="utf-8")
+            INTEGRATE.patch_content_renderer_accessibility(source)
+            upgraded_source = source.read_text(encoding="utf-8")
+            self.assertIn(
+                INTEGRATE.CONTENT_RENDERER_FOCUSED_EXPRESSION,
+                upgraded_source,
+            )
+            self.assertNotIn(
+                INTEGRATE.LEGACY_CONTENT_RENDERER_FOCUSED_EXPRESSION,
+                upgraded_source,
             )
 
     def test_upgrades_legacy_scheduling_hooks(self):

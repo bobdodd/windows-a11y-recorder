@@ -1601,14 +1601,14 @@ void RecordRendererAccessibilityCheckpointNode(
     bool focused) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_token.empty() ||
-      node_index < 0 || accessibility_node_id <= 0 || role < 0) {
+      node_index < 0 || accessibility_node_id == 0 || role < 0) {
     return;
   }
   base::DictValue payload = CreateAccessibilityCheckpointBasePayload(
       *client, checkpoint_sequence, std::move(document_token));
   payload.Set("nodeIndex", node_index);
   payload.Set("accessibilityNodeId", accessibility_node_id);
-  if (parent_accessibility_node_id > 0) {
+  if (parent_accessibility_node_id != 0) {
     payload.Set("parentAccessibilityNodeId",
                 parent_accessibility_node_id);
   } else {

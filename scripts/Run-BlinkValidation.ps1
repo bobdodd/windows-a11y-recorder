@@ -182,6 +182,12 @@ $integratedFiles = @(
     (Join-Path $chromiumSource "content\browser\BUILD.gn"),
     (
         Join-Path $chromiumSource (
+            "content\renderer\accessibility\render_accessibility_impl.cc"
+        )
+    ),
+    (Join-Path $chromiumSource "content\renderer\BUILD.gn"),
+    (
+        Join-Path $chromiumSource (
             "content\browser\web_contents\web_contents_impl.cc"
         )
     ),

@@ -31,6 +31,13 @@ CONTENT_RENDERER_ACCESSIBILITY_INCLUDE = (
     '#include "chromium/recorder_bridge/browser_bridge.h"'
 )
 CONTENT_RENDERER_DEP = '    "//chromium/recorder_bridge",'
+LEGACY_CONTENT_RENDERER_FOCUSED_EXPRESSION = (
+    "recorder_node.HasState(ax::mojom::State::kFocused)"
+)
+CONTENT_RENDERER_FOCUSED_EXPRESSION = (
+    "recorder_update.has_tree_data &&\n"
+    "                recorder_node.id == recorder_update.tree_data.focus_id"
+)
 CHILD_LAUNCHER_INCLUDE_BLOCK = f"""\
 #if BUILDFLAG(IS_WIN)
 {CHILD_LAUNCHER_INCLUDE}
@@ -370,7 +377,8 @@ CONTENT_RENDERER_ACCESSIBILITY_HOOK = """\
             recorder_node.GetStringAttribute(
                 ax::mojom::StringAttribute::kDescription),
             recorder_node.ToString(false),
-            recorder_node.HasState(ax::mojom::State::kFocused));
+            recorder_update.has_tree_data &&
+                recorder_node.id == recorder_update.tree_data.focus_id);
         ++recorder_node_count;
       }
       if (recorder_truncated)
@@ -2027,6 +2035,13 @@ def patch_content_browser_build(path: Path) -> None:
 
 def patch_content_renderer_accessibility(path: Path) -> None:
     text = read_source(path)
+    if LEGACY_CONTENT_RENDERER_FOCUSED_EXPRESSION in text:
+        text = replace_once(
+            text,
+            LEGACY_CONTENT_RENDERER_FOCUSED_EXPRESSION,
+            CONTENT_RENDERER_FOCUSED_EXPRESSION,
+            path,
+        )
     header = (
         '#include "content/renderer/accessibility/'
         'render_accessibility_impl.h"\n'
