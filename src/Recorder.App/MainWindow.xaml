@@ -92,17 +92,14 @@
                           AutomationProperties.HelpText="Records audio rendered through the default Windows playback device, including screen reader speech." />
                 <CheckBox x:Name="BrowserEvidenceCheckBox"
                           Content="_Instrumented Chromium evidence"
-                          AutomationProperties.HelpText="Launches the recorder-owned instrumented Chromium build and records its browser evidence."
-                          Checked="BrowserEvidenceCheckBox_Changed"
-                          Unchecked="BrowserEvidenceCheckBox_Changed" />
+                          AutomationProperties.HelpText="Launches the recorder-owned instrumented Chromium build and records its browser evidence." />
               </StackPanel>
             </GroupBox>
 
             <GroupBox x:Name="BrowserCaptureGroupBox"
                       Header="Instrumented Chromium"
                       Padding="10"
-                      Margin="0,0,0,12"
-                      IsEnabled="False">
+                      Margin="0,0,0,12">
               <StackPanel>
                 <TextBlock Margin="0,0,0,8"
                            Foreground="{StaticResource MutedText}"

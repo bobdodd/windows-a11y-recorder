@@ -7,6 +7,10 @@
   website, launch it through the authenticated evidence receiver, record its
   output with the other session channels, and filter browser evidence during
   playback.
+- Keep the Chromium executable, Browse button, and starting website operable
+  while recording configuration is editable. The capture checkbox controls
+  whether the configured browser is launched, not whether its fields can be
+  edited.
 
 This project uses semantic version numbers for product releases. Protocol and
 archive schema versions are compatibility contracts and advance independently

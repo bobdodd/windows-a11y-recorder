@@ -209,16 +209,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void BrowserEvidenceCheckBox_Changed(object sender, RoutedEventArgs e)
-    {
-        if (IsInitialized)
-        {
-            BrowserCaptureGroupBox.IsEnabled =
-                BrowserEvidenceCheckBox.IsChecked == true &&
-                BrowserEvidenceCheckBox.IsEnabled;
-        }
-    }
-
     private async void OpenRecordingButton_Click(object sender, RoutedEventArgs e)
     {
         var initialDirectory = Directory.Exists(SessionFolderTextBox.Text)
@@ -994,8 +984,7 @@ public partial class MainWindow : Window
         MicrophoneCheckBox.IsEnabled = enabled;
         SystemAudioCheckBox.IsEnabled = enabled;
         BrowserEvidenceCheckBox.IsEnabled = enabled;
-        BrowserCaptureGroupBox.IsEnabled =
-            enabled && BrowserEvidenceCheckBox.IsChecked == true;
+        BrowserCaptureGroupBox.IsEnabled = enabled;
         OutputRootTextBox.IsEnabled = enabled;
         BrowseButton.IsEnabled = enabled;
     }
