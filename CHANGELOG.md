@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Restore instrumented Chromium capture to the WPF application as a
+  proof-of-concept. The recorder can select a Chromium executable and starting
+  website, launch it through the authenticated evidence receiver, record its
+  output with the other session channels, and filter browser evidence during
+  playback.
+
 This project uses semantic version numbers for product releases. Protocol and
 archive schema versions are compatibility contracts and advance independently
 from the product version.

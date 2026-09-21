@@ -26,6 +26,9 @@ currently implements:
 - An authenticated local bridge that launches an instrumented Chromium build,
   synchronizes its clock, and records explicit browser connection lifecycle
   evidence.
+- A proof-of-concept WPF capture path for choosing the instrumented Chromium
+  executable and starting website, launching it with the recording, and
+  filtering its recorded evidence during playback.
 
 The Chromium browser-process bridge was built and exercised end to end on the
 reference Windows platform on September 18, 2026. The resulting archive was

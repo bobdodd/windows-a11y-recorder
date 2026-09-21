@@ -16,6 +16,17 @@ namespace Recorder.App;
 
 public partial class MainWindow : Window
 {
+    private static readonly string[] BrowserChannels =
+    [
+        "browser.lifecycle",
+        "browser.listener",
+        "browser.dispatch",
+        "browser.timer",
+        "browser.scheduler",
+        "browser.navigation",
+        "browser.dom",
+        "browser.cookie"
+    ];
     private static readonly HashSet<string> FilteredChannels =
     [
         "input.keyboard",
@@ -25,7 +36,8 @@ public partial class MainWindow : Window
         "graphics.desktop.frames",
         "audio.microphone",
         "audio.system",
-        "session.annotations"
+        "session.annotations",
+        .. BrowserChannels
     ];
     private static readonly JsonSerializerOptions InspectorJsonOptions = new()
     {
@@ -56,6 +68,7 @@ public partial class MainWindow : Window
         OutputRootTextBox.Text = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "Windows A11y Recorder");
+        ChromiumPathTextBox.Text = GetDefaultChromiumExecutablePath();
         _statusTimer = new DispatcherTimer(
             TimeSpan.FromMilliseconds(250),
             DispatcherPriority.Background,
@@ -88,6 +101,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!TryValidateBrowserCapture(out var chromiumPath, out var browserStartUrl))
+        {
+            return;
+        }
+
         PausePlayback();
         _transitioning = true;
         SetConfigurationEnabled(false);
@@ -105,7 +123,10 @@ public partial class MainWindow : Window
                 CaptureForegroundWindow = WindowCheckBox.IsChecked == true,
                 CaptureDesktopFrames = FramesCheckBox.IsChecked == true,
                 CaptureMicrophone = MicrophoneCheckBox.IsChecked == true,
-                CaptureSystemAudio = SystemAudioCheckBox.IsChecked == true
+                CaptureSystemAudio = SystemAudioCheckBox.IsChecked == true,
+                CaptureBrowserEvidence = BrowserEvidenceCheckBox.IsChecked == true,
+                ChromiumExecutablePath = chromiumPath,
+                BrowserStartUrl = browserStartUrl
             });
             SessionFolderTextBox.Text = status.SessionDirectory;
             StartButton.IsEnabled = false;
@@ -165,6 +186,36 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             OutputRootTextBox.Text = dialog.FolderName;
+        }
+    }
+
+    private void BrowseChromiumButton_Click(object sender, RoutedEventArgs e)
+    {
+        var initialDirectory = Path.GetDirectoryName(ChromiumPathTextBox.Text);
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose instrumented Chromium executable",
+            Filter = "Chromium executable (chrome.exe)|chrome.exe|Executable files (*.exe)|*.exe",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (Directory.Exists(initialDirectory))
+        {
+            dialog.InitialDirectory = initialDirectory;
+        }
+        if (dialog.ShowDialog(this) == true)
+        {
+            ChromiumPathTextBox.Text = dialog.FileName;
+        }
+    }
+
+    private void BrowserEvidenceCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (IsInitialized)
+        {
+            BrowserCaptureGroupBox.IsEnabled =
+                BrowserEvidenceCheckBox.IsChecked == true &&
+                BrowserEvidenceCheckBox.IsEnabled;
         }
     }
 
@@ -780,6 +831,13 @@ public partial class MainWindow : Window
             FilterMarkersCheckBox,
             "session.annotations",
             visibleChannels);
+        if (FilterBrowserCheckBox.IsChecked == true)
+        {
+            foreach (var channel in BrowserChannels)
+            {
+                visibleChannels.Add(channel);
+            }
+        }
         var showOther = FilterOtherCheckBox.IsChecked == true;
 
         _visibleTimelineEvents = _playbackArchive.Events
@@ -815,6 +873,7 @@ public partial class MainWindow : Window
         FilterMicrophoneCheckBox.IsChecked = selected;
         FilterSystemAudioCheckBox.IsChecked = selected;
         FilterMarkersCheckBox.IsChecked = selected;
+        FilterBrowserCheckBox.IsChecked = selected;
         FilterOtherCheckBox.IsChecked = selected;
         ApplyTimelineFilters();
     }
@@ -934,6 +993,9 @@ public partial class MainWindow : Window
         FramesCheckBox.IsEnabled = enabled;
         MicrophoneCheckBox.IsEnabled = enabled;
         SystemAudioCheckBox.IsEnabled = enabled;
+        BrowserEvidenceCheckBox.IsEnabled = enabled;
+        BrowserCaptureGroupBox.IsEnabled =
+            enabled && BrowserEvidenceCheckBox.IsChecked == true;
         OutputRootTextBox.IsEnabled = enabled;
         BrowseButton.IsEnabled = enabled;
     }
@@ -944,7 +1006,98 @@ public partial class MainWindow : Window
         WindowCheckBox.IsChecked == true ||
         FramesCheckBox.IsChecked == true ||
         MicrophoneCheckBox.IsChecked == true ||
-        SystemAudioCheckBox.IsChecked == true;
+        SystemAudioCheckBox.IsChecked == true ||
+        BrowserEvidenceCheckBox.IsChecked == true;
+
+    private bool TryValidateBrowserCapture(
+        out string? chromiumPath,
+        out string? browserStartUrl)
+    {
+        chromiumPath = null;
+        browserStartUrl = null;
+        if (BrowserEvidenceCheckBox.IsChecked != true)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(ChromiumPathTextBox.Text))
+        {
+            ShowBrowserValidationError(
+                "Choose the instrumented Chromium executable.",
+                ChromiumPathTextBox);
+            return false;
+        }
+
+        try
+        {
+            chromiumPath = Path.GetFullPath(ChromiumPathTextBox.Text.Trim());
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            ShowBrowserValidationError(
+                "Enter a valid path to the instrumented Chromium executable.",
+                ChromiumPathTextBox);
+            return false;
+        }
+        if (!File.Exists(chromiumPath))
+        {
+            ShowBrowserValidationError(
+                "The selected instrumented Chromium executable does not exist.",
+                ChromiumPathTextBox);
+            return false;
+        }
+
+        var startUrlText = BrowserStartUrlTextBox.Text.Trim();
+        if (startUrlText.Length == 0)
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(startUrlText, UriKind.Absolute, out _))
+        {
+            ShowBrowserValidationError(
+                "Enter an absolute starting website address, or about:blank.",
+                BrowserStartUrlTextBox);
+            return false;
+        }
+
+        browserStartUrl = startUrlText;
+        return true;
+    }
+
+    private void ShowBrowserValidationError(
+        string message,
+        System.Windows.Controls.Control control)
+    {
+        MessageBox.Show(
+            this,
+            message,
+            "Instrumented Chromium configuration",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        control.Focus();
+    }
+
+    private static string GetDefaultChromiumExecutablePath()
+    {
+        var bundledPath = Path.Combine(
+            AppContext.BaseDirectory,
+            "browser",
+            "chrome.exe");
+        var developmentPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "chromium-dev",
+            "chromium",
+            "src",
+            "out",
+            "A11yRecorder",
+            "chrome.exe");
+
+        return File.Exists(bundledPath) || !File.Exists(developmentPath)
+            ? bundledPath
+            : developmentPath;
+    }
 
     private async void OnClosing(object? sender, CancelEventArgs eventArgs)
     {
