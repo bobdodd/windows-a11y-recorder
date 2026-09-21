@@ -80,6 +80,14 @@ inline constexpr char kListenerRegistrationKindEventHandlerProperty[] =
 // target node identifier, its Blink interface name, and the address Blink uses
 // for the target, which is mapped to a stable process-local target identifier.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
+// The trailing five parameters of each listener entry point describe where the
+// call that produced the record came from, as Blink reported it. An empty script
+// URL, an empty function name, and a zero script identifier, line, or column
+// each mean that fact was not observed, which Blink itself represents the same
+// way; a record whose location is unknown in every field reports a null
+// location rather than an object of nulls. The location describes the call that
+// registered, removed, or replaced the listener, not where its callback
+// function was defined.
 void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string registration_kind,
                                    std::string target_kind,
@@ -92,7 +100,12 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string target_element_id,
                                    bool capture,
                                    bool passive,
-                                   bool once);
+                                   bool once,
+                                   std::string script_url,
+                                   std::string function_name,
+                                   int script_id,
+                                   int line_number,
+                                   int column_number);
 
 // Records a listener only after Blink has accepted its removal. The listener
 // identifier is the same one allocated when the registration was accepted.
@@ -109,7 +122,12 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                                 std::string target_element_id,
                                 bool capture,
                                 bool passive,
-                                bool once);
+                                bool once,
+                                std::string script_url,
+                                std::string function_name,
+                                int script_id,
+                                int line_number,
+                                int column_number);
 
 // Records that Blink replaced the callback of an existing attribute listener
 // registration in place. Assigning an on-event IDL attribute over a listener
@@ -131,7 +149,12 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
                                         std::string target_element_id,
                                         bool capture,
                                         bool passive,
-                                        bool once);
+                                        bool once,
+                                        std::string script_url,
+                                        std::string function_name,
+                                        int script_id,
+                                        int line_number,
+                                        int column_number);
 
 // Records one dispatch-started event after Blink has established the event
 // path and original target, but before capture-phase listeners run.

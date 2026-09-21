@@ -22,7 +22,11 @@
       onclick="event.stopPropagation(); document.getElementById('status').dataset.inlineHandlerRan = 'true';"
     >Inline attribute handler</button>
     <button id="property-handler">Event handler property</button>
+    <button id="external-script-handler">External script handler</button>
   </div>
+  <!-- Loaded as a separate script so a recorded registration location reports
+       that file rather than the document. -->
+  <script src="blink-listener-registration.js"></script>
   <div id="attribute-evidence">
     <button
       id="disclosure"
@@ -179,6 +183,7 @@
       target.click();
       propertyHandler.click();
       inlineHandler.click();
+      document.getElementById("external-script-handler").click();
       const mutationResult = document.createElement("div");
       mutationResult.id = "post-mutation-result";
       mutationResult.textContent = "Deterministic post-mutation checkpoint.";

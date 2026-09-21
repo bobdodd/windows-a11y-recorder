@@ -44,8 +44,9 @@ The current hook records:
 The hook records registrations on Nodes and on EventTargets that are not Nodes,
 including the window. Worker and worklet global scopes remain outside this
 slice because their execution contexts are not document-scoped. Inline
-attributes, `on*` properties, isolated-world identity, and source location
-remain outstanding.
+attributes and `on*` properties are reported by the registration form described
+below, and the call that made the registration is reported by the registration
+location described below. Isolated-world identity remains outstanding.
 
 ### Listener removal and invocation
 
@@ -265,6 +266,26 @@ record does not say what the callback was replaced with beyond its form, and a
 listener Blink installs itself is still not distinguished from one a script
 added.
 
+### Registration location
+
+Each listener hook calls `CaptureSourceLocation(ExecutionContext*)` and writes
+the `Url`, `ScriptId`, `LineNumber`, `ColumnNumber`, and `Function` that Blink's
+`SourceLocation` reports into the record's `location`. The capture happens where
+the record is written, so the location describes the call that registered,
+removed, or replaced the listener, not where the callback function was defined.
+
+`SourceLocation` states that a zero line or column means unknown, so a zero
+line, column, or script identifier and an empty URL or function name are each
+recorded as null, and a location with nothing observed in any field is recorded
+as a null location rather than an object of nulls. `sourceHash` is always null,
+because the recorder does not read script text.
+
+What this does not establish: the definition site of a callback is not recorded,
+a location is only as good as the top frame Blink reports and is absent for a
+registration made while no script was running, no script text or hash is
+recorded, and an eval or inline script reports whatever URL Blink attributes to
+it rather than a file on disk.
+
 ## Component boundary
 
 The recorder bridge is a Chromium component with exported entry points. This
@@ -290,7 +311,10 @@ then reassigned, and `#inline-handler` receives an `onclick` assignment over its
 attribute registration, so the three registration forms and both in-place
 callback replacements are exercised. Each of those handlers calls
 `stopPropagation()`, so the recorded window click invocations stay
-deterministic. It
+deterministic. `tests/fixtures/blink-listener-registration.js` registers a
+`click` listener on `#external-script-handler` from inside
+`registerExternalScriptListener`, so a recorded registration location names a
+script the document does not share and an enclosing function the fixture fixes. It
 installs a 125-millisecond interval that clears itself after one callback, then
 requests two animation-frame callbacks, explicitly cancels one, and invokes
 two idle callbacks, explicitly cancels the 5,000-millisecond callback, and

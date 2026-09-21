@@ -37,6 +37,10 @@ from the product version.
 ### Added
 
 - Recorded how each listener entered Blink's listener map, as protocol 0.19.
+- Recorded where every listener registration, removal, and callback
+  replacement came from, as protocol 0.20. Each `browser.listener` record
+  carries the script URL, script identifier, line, column, and function name
+  Blink reports at the hook, with null for any fact Blink did not observe.
   Blink accepts an `addEventListener` call, an inline `on*` content attribute,
   and an `on*` property assignment through one internal registration path, so
   every registration was previously reported as `add-event-listener` and the

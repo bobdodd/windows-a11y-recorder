@@ -394,6 +394,19 @@ $eventHandlerPropertyListeners = @(
         }
 )
 
+# The external script registers its listener from a file that is not the
+# document, so a recorded location that names that file came from the script
+# that made the call and not from the document being parsed.
+$externalScriptListeners = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-registered" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.target.elementId -eq "external-script-handler"
+        }
+)
+
 # Reassigning an on-event property over an existing registration replaces the
 # callback in place, so Blink reports neither an addition nor a removal.
 $inlineAttributeReplacements = @(
@@ -765,6 +778,11 @@ if ($eventHandlerPropertyListeners.Count -lt 1) {
     throw (
         "No event handler property registration was recorded for " +
         "#property-handler."
+    )
+}
+if ($externalScriptListeners.Count -lt 1) {
+    throw (
+        "No registration was recorded for #external-script-handler."
     )
 }
 if ($inlineAttributeReplacements.Count -lt 1) {
@@ -1912,6 +1930,77 @@ if ($propertyListenerReplacement.registrationKind -ne
         "property assignment."
     )
 }
+$externalScriptListener = $externalScriptListeners[0].payload
+# The location describes the call that produced the record. The external script
+# makes its call from a file the document does not share, inside a named
+# function, so both facts are checked against values the fixture fixes. The
+# line and column are only required to be reported, because Blink's own
+# numbering is not asserted here.
+$externalScriptLocation = $externalScriptListener.location
+if ($null -eq $externalScriptLocation) {
+    throw (
+        "The external script registration reported no location."
+    )
+}
+if ($externalScriptLocation.url -notlike "*blink-listener-registration.js") {
+    throw (
+        "The external script registration reported the location of " +
+        "$($externalScriptLocation.url) rather than the script that made " +
+        "the call."
+    )
+}
+if ($externalScriptLocation.functionName -ne
+        "registerExternalScriptListener") {
+    throw (
+        "The external script registration reported the enclosing function " +
+        "$($externalScriptLocation.functionName)."
+    )
+}
+if ($null -eq $externalScriptLocation.line -or
+        $externalScriptLocation.line -lt 1) {
+    throw "The external script registration reported no line."
+}
+if ($null -eq $externalScriptLocation.column -or
+        $externalScriptLocation.column -lt 1) {
+    throw "The external script registration reported no column."
+}
+if ([string]::IsNullOrWhiteSpace($externalScriptLocation.scriptId)) {
+    throw "The external script registration reported no script identifier."
+}
+# The recorder does not read script text, so it must not claim a source hash.
+if ($null -ne $externalScriptLocation.sourceHash) {
+    throw "A listener location reported a source hash it cannot compute."
+}
+# The document's own script made the pointer-only registration and its removal,
+# so both report the document as their script URL. The removal is made from
+# inside the named handler, which is a different location from the
+# registration, so a record's location has to describe its own call.
+$listenerLocation = $listener.location
+$removalLocation = $removal.location
+foreach ($documentLocation in @($listenerLocation, $removalLocation)) {
+    if ($null -eq $documentLocation) {
+        throw "A pointer-only listener record reported no location."
+    }
+    if ($documentLocation.url -notlike "*blink-listener-dispatch.html") {
+        throw (
+            "A pointer-only listener record reported the location of " +
+            "$($documentLocation.url) rather than the fixture document."
+        )
+    }
+}
+if ($removalLocation.functionName -ne "handleClick") {
+    throw (
+        "The listener removal reported the enclosing function " +
+        "$($removalLocation.functionName) rather than the handler that made " +
+        "the call."
+    )
+}
+if ($removalLocation.line -eq $listenerLocation.line) {
+    throw (
+        "The listener removal reported the same line as the registration, " +
+        "so a record's location does not describe its own call."
+    )
+}
 if ($listener.capture -or $listener.passive -or $listener.once) {
     throw "The listener record does not contain the fixture's resolved options."
 }
@@ -2287,6 +2376,23 @@ if (
     PropertyListenerReplacements = $propertyListenerReplacements.Count
     ReplacedCallbackRegistrationKind =
         $inlineAttributeReplacement.registrationKind
+    ExternalScriptListenerId = $externalScriptListener.listenerId
+    ExternalScriptLocationUrl = $externalScriptLocation.url
+    ExternalScriptLocationFunction = $externalScriptLocation.functionName
+    ExternalScriptLocationLine = $externalScriptLocation.line
+    ExternalScriptLocationColumn = $externalScriptLocation.column
+    ExternalScriptLocationScriptId = $externalScriptLocation.scriptId
+    RegistrationLocationUrl = $listenerLocation.url
+    RegistrationLocationLine = $listenerLocation.line
+    RegistrationLocationColumn = $listenerLocation.column
+    RegistrationLocationFunction = $listenerLocation.functionName
+    RemovalLocationFunction = $removalLocation.functionName
+    RemovalLocationLine = $removalLocation.line
+    ReplacementLocationFunction =
+        $inlineAttributeReplacement.location.functionName
+    ReplacementLocationLine = $inlineAttributeReplacement.location.line
+    InlineAttributeLocationUrl = $inlineAttributeListener.location.url
+    InlineAttributeLocationLine = $inlineAttributeListener.location.line
     LinkComposedPathEntries = $linkComposedPath.Count
     ListenerId = $listener.listenerId
     DispatchId = $dispatch.dispatchId

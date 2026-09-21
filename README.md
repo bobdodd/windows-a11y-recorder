@@ -168,8 +168,7 @@ a Node, and reports no node identifier where no DOM node exists. The window
 entry at the end of a composed path comes from Blink's own window event context,
 so a recorded path ends where Blink's path ends.
 
-Protocol 0.19 is implemented as a proof of concept and awaits reference-platform
-build and capture validation. It reports how each listener entered Blink's
+Protocol 0.19 reports how each listener entered Blink's
 listener map. Blink accepts an `addEventListener` call, an inline `on*` content
 attribute, and an `on*` property assignment through one internal registration
 path, so the form is read from the listener object Blink created rather than from
@@ -179,8 +178,20 @@ an existing attribute registration replaces that registration's callback in
 place, and Blink reports neither an addition nor a removal for it, so a
 `listener-callback-replaced` record carries the unchanged listener identity and
 the form of the callback Blink now holds. Worker global scopes, isolated-world
-identity, source location, and dispatches whose original target is never a Node
-remain outstanding.
+identity and dispatches whose original target is never a Node remain
+outstanding.
+
+Protocol 0.20 is implemented as a proof of concept and awaits reference-platform
+build and capture validation. It reports where each listener registration,
+removal, and callback replacement came from. The location is captured from
+Blink's own capture helper at the moment the record is written, so it describes
+the call that changed the listener rather than where the callback function was
+defined, and it reports the script URL, script identifier, line, column, and
+enclosing function name that Blink reports. A fact Blink does not observe is
+reported as null rather than as a zero, and a record with nothing observed
+reports a null location, which is what a registration made while no script was
+running does. The recorder does not read script text, so it reports no source
+hash.
 
 ## Project goals
 

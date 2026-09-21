@@ -336,7 +336,24 @@ holds. That path emits a `listener-callback-replaced` record which keeps the
 listener identity and reports the form of the replacing callback. A form outside
 the schema is normalized to `add-event-listener`, because an out-of-schema value
 would fail archive validation for the whole session rather than for one record.
-Live 0.19 connections require an exact protocol-version match.
+
+Protocol version 0.20 reports where each listener record came from.
+`CaptureSourceLocation(ExecutionContext*)` is called in each listener hook and
+returns Blink's own `SourceLocation`, whose `Url`, `ScriptId`, `LineNumber`,
+`ColumnNumber`, and `Function` accessors are written into the record's
+`location`. Because the capture happens at the hook, the location describes the
+call that registered, removed, or replaced the listener and not the definition
+site of the callback, and a registration Blink performs while no script is
+running, such as one an inline attribute creates during parsing, reports
+whatever parsing location Blink can supply and otherwise a null location.
+`SourceLocation` states that a zero line or column means unknown, so a zero line,
+column, or script identifier and an empty URL or function name are each recorded
+as null. `sourceHash` is always null, because the recorder does not read script
+text and cannot report a hash it did not compute. The capture walks the top of
+the JavaScript stack for every listener record, and no listener record is
+suppressed to avoid that cost.
+
+Live 0.20 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

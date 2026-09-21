@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.19` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.20` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -118,6 +118,18 @@ of the callback Blink now holds. Without that record the archive would keep
 describing a callback Blink no longer holds. A value outside the schema is
 normalized to `add-event-listener` rather than written through, because an
 out-of-schema value fails archive validation for the whole session.
+
+Protocol 0.20 reports where each listener record came from. Every
+`browser.listener` record carries a `location` with the script URL, script
+identifier, line, column, and enclosing function name that Blink's capture helper
+reports at the hook, and a null `sourceHash`, because the recorder does not read
+script text. The location describes the call that registered, removed, or
+replaced the listener, not the definition site of the callback. Blink represents
+an unobserved URL as an empty string and an unobserved identifier, line, or
+column as zero; each is carried through as null, and a record with nothing
+observed in any field reports a null location rather than an object of nulls.
+Capturing a location walks the top of the JavaScript stack on every listener
+record, which is a cost this build accepts for evidence completeness.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

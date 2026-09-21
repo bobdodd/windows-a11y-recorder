@@ -801,6 +801,42 @@ std::string SchedulerBlockTypeName(int block_type) {
   return block_type == 0 ? "all-tasks" : "new-tasks-only";
 }
 
+// Builds the script-location value for a listener record. Blink reports an
+// unobserved URL as an empty string and an unobserved script identifier, line,
+// or column as zero, and those are carried through as nulls rather than as
+// zeroes, which would read as line zero of an unnamed script. A location that
+// is unknown in every field is reported as a null location, so a consumer does
+// not have to distinguish an object of nulls from the absence of evidence.
+base::Value CreateScriptLocation(std::string script_url,
+                                 std::string function_name,
+                                 int script_id,
+                                 int line_number,
+                                 int column_number) {
+  if (script_url.empty() && function_name.empty() && script_id <= 0 &&
+      line_number <= 0 && column_number <= 0) {
+    return base::Value();
+  }
+
+  base::DictValue location;
+  location.Set("scriptId", script_id > 0 ? base::Value(base::NumberToString(
+                                               script_id))
+                                         : base::Value());
+  location.Set("url",
+               script_url.empty() ? base::Value()
+                                  : base::Value(std::move(script_url)));
+  location.Set("line", line_number > 0 ? base::Value(line_number)
+                                       : base::Value());
+  location.Set("column", column_number > 0 ? base::Value(column_number)
+                                           : base::Value());
+  location.Set("functionName",
+               function_name.empty()
+                   ? base::Value()
+                   : base::Value(std::move(function_name)));
+  // The recorder does not read script text, so it cannot report a source hash.
+  location.Set("sourceHash", base::Value());
+  return base::Value(std::move(location));
+}
+
 base::DictValue CreateListenerPayload(
     const RecorderPipeClient& client,
     std::string listener_id,
@@ -815,7 +851,12 @@ base::DictValue CreateListenerPayload(
     std::string target_element_id,
     bool capture,
     bool passive,
-    bool once) {
+    bool once,
+    std::string script_url,
+    std::string function_name,
+    int script_id,
+    int line_number,
+    int column_number) {
   base::DictValue payload;
   payload.Set("context", CreateContext(client, document_node_id));
   payload.Set("listenerId", std::move(listener_id));
@@ -830,7 +871,10 @@ base::DictValue CreateListenerPayload(
   payload.Set("capture", capture);
   payload.Set("passive", passive);
   payload.Set("once", once);
-  payload.Set("location", base::Value());
+  payload.Set("location",
+              CreateScriptLocation(std::move(script_url),
+                                   std::move(function_name), script_id,
+                                   line_number, column_number));
   return payload;
 }
 
@@ -1221,7 +1265,12 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string target_element_id,
                                    bool capture,
                                    bool passive,
-                                   bool once) {
+                                   bool once,
+                                   std::string script_url,
+                                   std::string function_name,
+                                   int script_id,
+                                   int line_number,
+                                   int column_number) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || !IsRecordableEventTarget(target_kind, document_node_id,
                                           target_node_id)) {
@@ -1237,7 +1286,8 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                   : RegisterEventTargetIdentity(target_identity),
       document_node_id, target_node_id, std::move(event_name),
       std::move(target_tag_name), std::move(target_element_id), capture,
-      passive, once);
+      passive, once, std::move(script_url), std::move(function_name),
+      script_id, line_number, column_number);
   SendBlinkEvidence("browser.listener", "listener-registered",
                     std::move(payload));
 }
@@ -1254,7 +1304,12 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                                 std::string target_element_id,
                                 bool capture,
                                 bool passive,
-                                bool once) {
+                                bool once,
+                                std::string script_url,
+                                std::string function_name,
+                                int script_id,
+                                int line_number,
+                                int column_number) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<std::string> listener_id =
       TakeListenerIdentity(listener_identity);
@@ -1273,7 +1328,8 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                   : RegisterEventTargetIdentity(target_identity),
       document_node_id, target_node_id, std::move(event_name),
       std::move(target_tag_name), std::move(target_element_id), capture,
-      passive, once);
+      passive, once, std::move(script_url), std::move(function_name),
+      script_id, line_number, column_number);
   SendBlinkEvidence("browser.listener", "listener-removed",
                     std::move(payload));
 }
@@ -1290,7 +1346,12 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
                                         std::string target_element_id,
                                         bool capture,
                                         bool passive,
-                                        bool once) {
+                                        bool once,
+                                        std::string script_url,
+                                        std::string function_name,
+                                        int script_id,
+                                        int line_number,
+                                        int column_number) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || !IsRecordableEventTarget(target_kind, document_node_id,
                                           target_node_id)) {
@@ -1315,7 +1376,8 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
                   : RegisterEventTargetIdentity(target_identity),
       document_node_id, target_node_id, std::move(event_name),
       std::move(target_tag_name), std::move(target_element_id), capture,
-      passive, once);
+      passive, once, std::move(script_url), std::move(function_name),
+      script_id, line_number, column_number);
   SendBlinkEvidence("browser.listener", "listener-callback-replaced",
                     std::move(payload));
 }

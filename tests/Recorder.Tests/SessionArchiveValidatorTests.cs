@@ -1786,6 +1786,81 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task RejectsAListenerLocationLineTheSchemaDoesNotAllow()
+    {
+        // A negative line is not a line Blink can report, so it is a defect in
+        // the recorder rather than a fact about the session, and it is rejected
+        // at the boundary rather than published as evidence.
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 1200,
+                    processType = "renderer",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = (string?)null,
+                    frameId = (string?)null,
+                    documentId = "dom-document-8",
+                    executionWorldId = (string?)null,
+                    documentToken = "document-token-8"
+                },
+                listenerId = "listener-1",
+                eventName = "click",
+                registrationKind = "add-event-listener",
+                target = new
+                {
+                    kind = "node",
+                    interfaceName = "HTMLButtonElement",
+                    targetId = (string?)null,
+                    documentId = "dom-document-8",
+                    nodeId = 42,
+                    backendNodeId = (string?)null,
+                    tagName = "BUTTON",
+                    elementId = "pointer-only",
+                    classes = Array.Empty<string>()
+                },
+                capture = false,
+                passive = false,
+                once = false,
+                location = new
+                {
+                    scriptId = "7",
+                    url = "file:///fixtures/blink-listener-registration.js",
+                    line = -3,
+                    column = 5,
+                    functionName = "registerExternalScriptListener",
+                    sourceHash = (string?)null
+                }
+            });
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code == "payload-property-invalid" &&
+                    issue.Path.EndsWith("/location/line", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
     {
         var context = new

@@ -254,6 +254,85 @@ public sealed class BrowserEventTargetPayloadIngestTests
     }
 
     [Fact]
+    public void AcceptsARegistrationLocationAsWritten()
+    {
+        // The location describes the call that registered the listener, so the
+        // script it names is the script that made the call and not the
+        // document that loaded it.
+        var payload = Accept<BrowserListenerPayload>(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            $$"""
+            {
+              "context": {{ContextJson}},
+              "listenerId": "listener-10",
+              "eventName": "click",
+              "registrationKind": "add-event-listener",
+              "target": {{NodeTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": {
+                "scriptId": "7",
+                "url": "file:///fixtures/blink-listener-registration.js",
+                "line": 9,
+                "column": 18,
+                "functionName": "registerExternalScriptListener",
+                "sourceHash": null
+              }
+            }
+            """);
+
+        var location = Assert.IsType<BrowserScriptLocation>(payload.Location);
+        Assert.Equal("7", location.ScriptId);
+        Assert.Equal(
+            "file:///fixtures/blink-listener-registration.js",
+            location.Url);
+        Assert.Equal(9, location.Line);
+        Assert.Equal(18, location.Column);
+        Assert.Equal("registerExternalScriptListener", location.FunctionName);
+        // The recorder does not read script text, so it reports no hash.
+        Assert.Null(location.SourceHash);
+    }
+
+    [Fact]
+    public void AcceptsALocationWhoseFactsWereNotAllObserved()
+    {
+        // Blink reports an unobserved script identifier or function name as
+        // absent, and a partly observed location is evidence of where the call
+        // came from, so it is carried rather than discarded.
+        var payload = Accept<BrowserListenerPayload>(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRemoved,
+            $$"""
+            {
+              "context": {{ContextJson}},
+              "listenerId": "listener-10",
+              "eventName": "click",
+              "registrationKind": "add-event-listener",
+              "target": {{NodeTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": {
+                "scriptId": null,
+                "url": "file:///fixtures/blink-listener-dispatch.html",
+                "line": 81,
+                "column": null,
+                "functionName": null,
+                "sourceHash": null
+              }
+            }
+            """);
+
+        var location = Assert.IsType<BrowserScriptLocation>(payload.Location);
+        Assert.Null(location.ScriptId);
+        Assert.Null(location.Column);
+        Assert.Null(location.FunctionName);
+        Assert.Equal(81, location.Line);
+    }
+
+    [Fact]
     public void RejectsAnEventTargetFieldNoContractMaps()
     {
         var payload = $$"""

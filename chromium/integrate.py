@@ -1160,6 +1160,16 @@ BLINK_DOCUMENT_MUTATION_HOOK = """\
 BLINK_EVENT_LISTENER_INCLUDE = (
     '#include "third_party/blink/renderer/core/dom/events/event_listener.h"'
 )
+
+# Capturing where a listener registration came from needs Blink's own capture
+# helper and the location type it returns.
+BLINK_CAPTURE_SOURCE_LOCATION_INCLUDE = (
+    '#include "third_party/blink/renderer/bindings/core/v8/'
+    'capture_source_location.h"'
+)
+BLINK_SOURCE_LOCATION_INCLUDE = (
+    '#include "third_party/blink/renderer/platform/bindings/source_location.h"'
+)
 BLINK_LISTENER_KIND_HELPER = """\
 namespace {
 
@@ -1194,9 +1204,12 @@ BLINK_LISTENER_HOOK = """\
       Node* recorder_target = ToNode();
       LocalDOMWindow* recorder_window = ToLocalDOMWindow();
       Element* recorder_element = DynamicTo<Element>(recorder_target);
+      ExecutionContext* recorder_context = GetExecutionContext();
+      SourceLocation* recorder_location =
+          recorder_context ? CaptureSourceLocation(recorder_context) : nullptr;
       LocalDOMWindow* recorder_document_window =
           recorder_window ? recorder_window
-                          : DynamicTo<LocalDOMWindow>(GetExecutionContext());
+                          : DynamicTo<LocalDOMWindow>(recorder_context);
       Document* recorder_document =
           recorder_target ? &recorder_target->GetDocument()
                           : (recorder_document_window
@@ -1220,7 +1233,15 @@ BLINK_LISTENER_HOOK = """\
               : "",
           registered_listener->Capture(),
           registered_listener->Passive(),
-          registered_listener->Once());
+          registered_listener->Once(),
+          recorder_location ? recorder_location->Url().Utf8().c_str() : "",
+          recorder_location ? recorder_location->Function().Utf8().c_str() : "",
+          recorder_location ? recorder_location->ScriptId() : 0,
+          recorder_location ? static_cast<int>(recorder_location->LineNumber())
+                            : 0,
+          recorder_location
+              ? static_cast<int>(recorder_location->ColumnNumber())
+              : 0);
     }
 """
 BLINK_LISTENER_REMOVED_HOOK = """\
@@ -1231,9 +1252,12 @@ BLINK_LISTENER_REMOVED_HOOK = """\
     Node* recorder_target = ToNode();
     LocalDOMWindow* recorder_window = ToLocalDOMWindow();
     Element* recorder_element = DynamicTo<Element>(recorder_target);
+    ExecutionContext* recorder_context = GetExecutionContext();
+    SourceLocation* recorder_location =
+        recorder_context ? CaptureSourceLocation(recorder_context) : nullptr;
     LocalDOMWindow* recorder_document_window =
         recorder_window ? recorder_window
-                        : DynamicTo<LocalDOMWindow>(GetExecutionContext());
+                        : DynamicTo<LocalDOMWindow>(recorder_context);
     Document* recorder_document =
         recorder_target ? &recorder_target->GetDocument()
                         : (recorder_document_window
@@ -1257,7 +1281,14 @@ BLINK_LISTENER_REMOVED_HOOK = """\
             : "",
         registered_listener->Capture(),
         registered_listener->Passive(),
-        registered_listener->Once());
+        registered_listener->Once(),
+        recorder_location ? recorder_location->Url().Utf8().c_str() : "",
+        recorder_location ? recorder_location->Function().Utf8().c_str() : "",
+        recorder_location ? recorder_location->ScriptId() : 0,
+        recorder_location ? static_cast<int>(recorder_location->LineNumber())
+                          : 0,
+        recorder_location ? static_cast<int>(recorder_location->ColumnNumber())
+                          : 0);
   }
 """
 BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_ANCHOR = """\
@@ -1281,9 +1312,12 @@ BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION = """\
       Node* recorder_target = ToNode();
       LocalDOMWindow* recorder_window = ToLocalDOMWindow();
       Element* recorder_element = DynamicTo<Element>(recorder_target);
+      ExecutionContext* recorder_context = GetExecutionContext();
+      SourceLocation* recorder_location =
+          recorder_context ? CaptureSourceLocation(recorder_context) : nullptr;
       LocalDOMWindow* recorder_document_window =
           recorder_window ? recorder_window
-                          : DynamicTo<LocalDOMWindow>(GetExecutionContext());
+                          : DynamicTo<LocalDOMWindow>(recorder_context);
       Document* recorder_document =
           recorder_target ? &recorder_target->GetDocument()
                           : (recorder_document_window
@@ -1307,7 +1341,15 @@ BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION = """\
               : "",
           registered_listener->Capture(),
           registered_listener->Passive(),
-          registered_listener->Once());
+          registered_listener->Once(),
+          recorder_location ? recorder_location->Url().Utf8().c_str() : "",
+          recorder_location ? recorder_location->Function().Utf8().c_str() : "",
+          recorder_location ? recorder_location->ScriptId() : 0,
+          recorder_location ? static_cast<int>(recorder_location->LineNumber())
+                            : 0,
+          recorder_location
+              ? static_cast<int>(recorder_location->ColumnNumber())
+              : 0);
     }
 """
 BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK = (
@@ -2733,6 +2775,22 @@ def patch_blink_event_target(path: Path) -> None:
             text,
             BLINK_BRIDGE_INCLUDE,
             f"{BLINK_BRIDGE_INCLUDE}\n{BLINK_EVENT_LISTENER_INCLUDE}",
+            path,
+        )
+
+    # Reading where a registration came from needs Blink's capture helper and
+    # the location type it returns, neither of which this source reaches on its
+    # own.
+    for include in (
+        BLINK_CAPTURE_SOURCE_LOCATION_INCLUDE,
+        BLINK_SOURCE_LOCATION_INCLUDE,
+    ):
+        if include in text:
+            continue
+        text = replace_once(
+            text,
+            BLINK_BRIDGE_INCLUDE,
+            f"{BLINK_BRIDGE_INCLUDE}\n{include}",
             path,
         )
     if "RecorderListenerRegistrationKind(" not in text:

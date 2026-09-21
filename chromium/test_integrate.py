@@ -53,6 +53,46 @@ HISTORICAL_LISTENER_REMOVED_HOOK_NODE_ONLY = """\
 # The body written before a registration kind was reported, which recorded every
 # EventTarget kind but always described the registration as an addEventListener
 # call.
+# The registration hook as protocol 0.19 wrote it, reporting the registration
+# form but no location.
+HISTORICAL_LISTENER_HOOK_WITHOUT_LOCATION = """\
+    {
+      const EventListener* recorder_callback = registered_listener->Callback();
+      const char* recorder_registration_kind =
+          RecorderListenerRegistrationKind(recorder_callback);
+      Node* recorder_target = ToNode();
+      LocalDOMWindow* recorder_window = ToLocalDOMWindow();
+      Element* recorder_element = DynamicTo<Element>(recorder_target);
+      LocalDOMWindow* recorder_document_window =
+          recorder_window ? recorder_window
+                          : DynamicTo<LocalDOMWindow>(GetExecutionContext());
+      Document* recorder_document =
+          recorder_target ? &recorder_target->GetDocument()
+                          : (recorder_document_window
+                                 ? recorder_document_window->document()
+                                 : nullptr);
+      a11y_recorder::RecordBlinkListenerRegistered(
+          reinterpret_cast<uintptr_t>(registered_listener),
+          recorder_registration_kind,
+          recorder_target ? a11y_recorder::kEventTargetKindNode
+                          : (recorder_window
+                                 ? a11y_recorder::kEventTargetKindWindow
+                                 : a11y_recorder::kEventTargetKindOther),
+          InterfaceName().Utf8().c_str(),
+          reinterpret_cast<uintptr_t>(this),
+          recorder_document ? recorder_document->GetDomNodeId() : 0,
+          recorder_target ? recorder_target->GetDomNodeId() : 0,
+          event_type.Utf8().c_str(),
+          recorder_target ? recorder_target->nodeName().Utf8().c_str() : "",
+          recorder_element
+              ? recorder_element->GetIdAttribute().Utf8().c_str()
+              : "",
+          registered_listener->Capture(),
+          registered_listener->Passive(),
+          registered_listener->Once());
+    }
+"""
+
 HISTORICAL_LISTENER_HOOK_WITHOUT_REGISTRATION_KIND = """\
     {
       Node* recorder_target = ToNode();
@@ -2388,6 +2428,78 @@ class IntegrateTests(unittest.TestCase):
                 3, patched.count("recorder_registration_kind")
                 - patched.count("const char* recorder_registration_kind")
             )
+
+    def test_reports_where_each_listener_record_came_from(self):
+        """Every listener record carries the location Blink reports for it.
+
+        The location is captured from Blink's own capture helper at the hook, so
+        it describes the call that registered, removed, or replaced the
+        listener. It does not describe where the callback function was defined,
+        and it is absent when no script was running.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            patched = path.read_text(encoding="utf-8")
+
+            for include in (
+                INTEGRATE.BLINK_CAPTURE_SOURCE_LOCATION_INCLUDE,
+                INTEGRATE.BLINK_SOURCE_LOCATION_INCLUDE,
+            ):
+                self.assertEqual(1, patched.count(include), include)
+
+            # One capture per listener record, and none of them assumes an
+            # execution context is present.
+            self.assertEqual(
+                3, patched.count("CaptureSourceLocation(recorder_context)")
+            )
+            self.assertEqual(
+                3,
+                patched.count(
+                    "recorder_context ? CaptureSourceLocation("
+                    "recorder_context) : nullptr"
+                ),
+            )
+            for accessor in ("Url()", "Function()", "ScriptId()",
+                             "LineNumber()", "ColumnNumber()"):
+                self.assertEqual(
+                    3,
+                    patched.count(f"recorder_location->{accessor}"),
+                    accessor,
+                )
+
+            INTEGRATE.patch_blink_event_target(path)
+            self.assertEqual(patched, path.read_text(encoding="utf-8"))
+
+    def test_migrates_a_listener_hook_that_reported_no_location(self):
+        """A checkout patched before locations were recorded upgrades.
+
+        The registration hook already existed with its registration kind, so
+        the presence guard reads it as integrated. The region the hook
+        introduces is replaced, so the earlier body converges on the current
+        one and starts reporting a location.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            current = path.read_text(encoding="utf-8")
+
+            without_location = current.replace(
+                INTEGRATE.BLINK_LISTENER_HOOK,
+                HISTORICAL_LISTENER_HOOK_WITHOUT_LOCATION,
+                1,
+            )
+            self.assertNotEqual(current, without_location)
+            self.assertNotIn(
+                "recorder_location", HISTORICAL_LISTENER_HOOK_WITHOUT_LOCATION
+            )
+            path.write_text(without_location, encoding="utf-8")
+
+            INTEGRATE.patch_blink_event_target(path)
+
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
 
     def test_records_a_replaced_attribute_listener_callback(self):
         """Reassigning an on-event attribute replaces the callback in place.
