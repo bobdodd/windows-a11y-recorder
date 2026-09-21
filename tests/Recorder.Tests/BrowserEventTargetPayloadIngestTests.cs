@@ -39,7 +39,7 @@ public sealed class BrowserEventTargetPayloadIngestTests
     private const string WindowTargetJson = """
         {
           "kind": "window",
-          "interfaceName": "Window",
+          "interfaceName": "DOMWindow",
           "targetId": "event-target-2",
           "documentId": "dom-document-19",
           "nodeId": null,
@@ -98,7 +98,11 @@ public sealed class BrowserEventTargetPayloadIngestTests
             """);
 
         Assert.Equal(BrowserEventTargetKinds.Window, payload.Target.Kind);
-        Assert.Equal("Window", payload.Target.InterfaceName);
+        // "DOMWindow" is the token the reference Chromium checkout reports for a
+        // window. The value is Blink's own and has changed between revisions, so
+        // it is carried through ingest unaltered rather than validated against a
+        // fixed set.
+        Assert.Equal("DOMWindow", payload.Target.InterfaceName);
         Assert.Equal("event-target-2", payload.Target.TargetId);
         Assert.Null(payload.Target.NodeId);
         Assert.Null(payload.Target.TagName);
@@ -205,7 +209,7 @@ public sealed class BrowserEventTargetPayloadIngestTests
               "registrationKind": "add-event-listener",
               "target": {
                 "kind": "window",
-                "interfaceName": "Window",
+                "interfaceName": "DOMWindow",
                 "targetId": "event-target-2",
                 "targetScope": "renderer",
                 "documentId": "dom-document-19",

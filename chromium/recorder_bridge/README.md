@@ -94,7 +94,8 @@ an event-target reference that also describes EventTargets that are not Nodes.
 Each reference reports a `kind` of `node`, `window`, or `other`, the Blink
 interface name the target reports for itself, and, for a target that is not a
 Node, a process-local `targetId` minted from the address Blink uses for that
-target. A Node keeps its `nodeId`; a target that is not a Node reports null
+target. The interface name is Blink's own token for that build and is not a
+cross-version identity, so a consumer identifies a target by its kind. A Node keeps its `nodeId`; a target that is not a Node reports null
 there. Window listener registrations, removals, invocations, and the window
 entry at the end of a composed path are recorded from Blink's own
 `WindowEventContext`, so a recorded path ends where Blink's path ends. Worker

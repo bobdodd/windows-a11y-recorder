@@ -27,8 +27,9 @@ from the product version.
   evidence at all and a composed path stopped one entry short of where Blink's
   own path ends. Every listener and dispatch target reference now reports a
   `kind` of `node`, `window`, or `other`, the Blink interface name the target
-  reports for itself, and a process-local `targetId` for a target that is not a
-  Node, and reports a null `nodeId` where no DOM node exists. The window entry
+  reports for itself, recorded as observed rather than as a cross-version
+  identity because that token has changed between Chromium revisions, and a
+  process-local `targetId` for a target that is not a Node, and reports a null `nodeId` where no DOM node exists. The window entry
   in a composed path is taken from Blink's own `WindowEventContext`, which is
   present exactly when Blink will run window listeners for that event, so the
   recorded path ends where Blink's does rather than where the recorder guesses.

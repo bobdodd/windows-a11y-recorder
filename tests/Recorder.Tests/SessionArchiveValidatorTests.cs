@@ -378,7 +378,7 @@ public sealed class SessionArchiveValidatorTests
         var window = new
         {
             kind = "window",
-            interfaceName = "Window",
+            interfaceName = "DOMWindow",
             targetId = "event-target-3",
             documentId = "dom-document-8",
             nodeId = (long?)null,
@@ -440,7 +440,7 @@ public sealed class SessionArchiveValidatorTests
         var window = new
         {
             kind = "window",
-            interfaceName = "Window",
+            interfaceName = "DOMWindow",
             targetId = (string?)null,
             documentId = "dom-document-8",
             nodeId = 42,

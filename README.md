@@ -163,7 +163,8 @@ Protocol 0.18 is implemented as a proof of concept and awaits reference-platform
 build and capture validation. It records listener and dispatch evidence for
 EventTargets that are not Nodes, beginning with the window. Every listener and
 dispatch target reference reports its kind, the Blink interface name the target
-reports for itself, and a process-local target identifier when the target is not
+reports for itself, which is recorded as observed rather than as a
+cross-version identity, and a process-local target identifier when the target is not
 a Node, and reports no node identifier where no DOM node exists. The window
 entry at the end of a composed path comes from Blink's own window event context,
 so a recorded path ends where Blink's path ends. Worker global scopes, inline

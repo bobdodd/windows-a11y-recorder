@@ -312,8 +312,9 @@ Live 0.17 connections require an exact protocol-version match.
 
 Protocol version 0.18 records listener and dispatch evidence for EventTargets
 that are not Nodes, beginning with the window. Every target reference now
-reports its kind, its Blink interface name, and a process-local target
-identifier for a target that is not a Node, and reports a null node identifier
+reports its kind, its Blink interface name as observed rather than as a
+cross-version identity, and a process-local target identifier for a target that
+is not a Node, and reports a null node identifier
 where no DOM node exists. The window entry at the end of a composed path is
 taken from Blink's `WindowEventContext`, which exists exactly when Blink will
 run window listeners for that event, so the recorded path ends where Blink's

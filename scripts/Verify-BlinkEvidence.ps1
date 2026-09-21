@@ -337,15 +337,15 @@ $removals = @(
 )
 
 # The window is an EventTarget that is not a Node, so its records carry no node
-# identifier and are selected by kind and interface name instead.
+# identifier and are selected by kind instead. The interface name is Blink's own
+# token for the build under test and is not used as a selector.
 $windowClickListeners = @(
     $records |
         Where-Object {
             $_.channel -eq "browser.listener" -and
             $_.eventType -eq "listener-registered" -and
             $_.payload.eventName -eq "click" -and
-            $_.payload.target.kind -eq "window" -and
-            $_.payload.target.interfaceName -eq "Window"
+            $_.payload.target.kind -eq "window"
         }
 )
 
@@ -736,6 +736,55 @@ if ($schedulerDeferrals.Count -lt 1) {
     throw "No authoritative frame-throttleable wake-up deferral was recorded."
 }
 $listener = $listeners[0].payload
+
+# The fixture can be loaded by more than one renderer in a single validation
+# run, so each window collection is narrowed to the document the fixture's node
+# listener was registered in before any identity is compared. Records from a
+# second load of the same fixture are a different window in a different process
+# and their target identifiers are unrelated.
+$fixtureDocumentId = $listener.context.documentId
+$fixtureProcessId = $listener.context.processId
+$inFixtureDocument = {
+    $_.payload.context.documentId -eq $fixtureDocumentId -and
+    $_.payload.context.processId -eq $fixtureProcessId
+}
+$windowClickListeners = @($windowClickListeners | Where-Object $inFixtureDocument)
+$windowResizeListeners = @($windowResizeListeners | Where-Object $inFixtureDocument)
+$windowResizeRemovals = @($windowResizeRemovals | Where-Object $inFixtureDocument)
+$linkDispatches = @($linkDispatches | Where-Object $inFixtureDocument)
+$windowClickInvocations = @(
+    $windowClickInvocations | Where-Object $inFixtureDocument
+)
+if ($windowClickListeners.Count -lt 1) {
+    throw (
+        "No click listener registration was recorded for the window of the " +
+        "document the fixture's node listener was registered in."
+    )
+}
+if ($windowResizeListeners.Count -lt 1) {
+    throw (
+        "No resize listener registration was recorded for the fixture " +
+        "document's window."
+    )
+}
+if ($windowResizeRemovals.Count -lt 1) {
+    throw (
+        "No resize listener removal was recorded for the fixture document's " +
+        "window."
+    )
+}
+if ($linkDispatches.Count -lt 1) {
+    throw (
+        "No #default-action-link click dispatch was recorded in the fixture " +
+        "document."
+    )
+}
+if ($windowClickInvocations.Count -lt 1) {
+    throw (
+        "No window listener invocation was recorded for the fixture " +
+        "document's #default-action-link click."
+    )
+}
 $domCheckpointStart = $domCheckpointStarts |
     Where-Object {
         $_.payload.context.browserInstanceId -eq
@@ -1821,6 +1870,9 @@ if (-not $composedPath[0].nodeId) {
 }
 
 $windowListener = $windowClickListeners[0].payload
+if ([string]::IsNullOrWhiteSpace($windowListener.target.interfaceName)) {
+    throw "The window listener target has no interface name."
+}
 if ($windowListener.target.nodeId) {
     throw "The window listener target unexpectedly carries a node identifier."
 }
@@ -1866,8 +1918,17 @@ $linkPathWindow = $linkComposedPath[$linkComposedPath.Count - 1]
 if ($linkPathWindow.kind -ne "window") {
     throw "The #default-action-link composed path does not end at the window."
 }
-if ($linkPathWindow.interfaceName -ne "Window") {
-    throw "The composed path window entry has an unexpected interface name."
+# The interface name is the token Blink reports for the target in the build
+# under test, and that token has changed between Chromium revisions, so it is
+# required to be present and consistent rather than equal to a fixed string.
+if ([string]::IsNullOrWhiteSpace($linkPathWindow.interfaceName)) {
+    throw "The composed path window entry has no interface name."
+}
+if ($linkPathWindow.interfaceName -ne $windowListener.target.interfaceName) {
+    throw (
+        "The composed path window entry and the window listener target " +
+        "report different interface names."
+    )
 }
 if ($linkPathWindow.nodeId) {
     throw "The composed path window entry unexpectedly carries a node identifier."
@@ -2107,6 +2168,7 @@ if (
     RendererProcessId = $listener.context.processId
     DocumentId = $listener.context.documentId
     TargetNodeId = $listener.target.nodeId
+    WindowInterfaceName = $windowListener.target.interfaceName
     WindowTargetId = $windowListener.target.targetId
     WindowListenerId = $windowListener.listenerId
     WindowClickInvocations = $windowClickInvocations.Count

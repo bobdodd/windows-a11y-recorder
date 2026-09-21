@@ -198,8 +198,11 @@ Every listener and dispatch record describes its EventTarget with one shape.
 The shape reports:
 
 - `kind`, one of `node`, `window`, or `other`.
-- `interfaceName`, the Blink interface the target reports for itself, such as
-  `Window` or `HTMLButtonElement`.
+- `interfaceName`, the token Blink reports for the target's own interface. It
+  is recorded as observed and is not a cross-version identity: the reference
+  checkout reports `DOMWindow` for a window, while current Chromium returns
+  `event_target_names::kWindow` from `DOMWindow::InterfaceName`. Consumers
+  must identify a target by its kind, not by this token.
 - `targetId`, a process-local identifier for a target that is not a Node, and
   null for a Node.
 - `documentId`, the document the target belongs to. For a target that is not a
@@ -257,9 +260,8 @@ listeners call `preventDefault()`, remove the named listener, and call
   `canceled-by-event-handler`.
 - A composed Node path beginning with `#pointer-only` and containing
   `#propagation-root`.
-- One `listener-registered` record whose target kind is `window` and whose
-  interface name is `Window`, carrying a target identifier and no node
-  identifier.
+- One `listener-registered` record whose target kind is `window`, carrying a
+  non-empty interface name, a target identifier, and no node identifier.
 - One correlated window `resize` registration and removal that report the same
   listener identifier and the same target identifier as each other, and the
   same target identifier as the window `click` registration.
@@ -268,6 +270,8 @@ listeners call `preventDefault()`, remove the named listener, and call
   at its target, so the link click is the only click that reaches the window.
 - One `listener-invoked` record whose current target is the window, whose
   phase is `bubbling`, and whose original target is a Node.
+- The same interface name and target identifier on the window listener target
+  and the window entry in the composed path.
 - A capturing invocation whose current target is `#propagation-root`.
 - At-target invocations whose current target is `#pointer-only`.
 - No bubbling invocation for `#propagation-root` after propagation is stopped.
