@@ -127,10 +127,20 @@ $process = Start-Process -FilePath $ChromiumExecutable -PassThru -NoNewWindow `
         "--no-first-run",
         "--no-default-browser-check")
 
+# Reading the handle caches it while the process is alive. Without this, the exit
+# code of a process started through Start-Process is unavailable after it exits
+# on Windows PowerShell 5.1, which would report an answered query as unanswered.
+$null = $process.Handle
+
 if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
     & taskkill.exe /PID $process.Id /T /F | Out-Null
     throw ("The browser did not exit within $TimeoutSeconds seconds, so the " +
         "query did not stop it.")
+}
+$exitCode = $process.ExitCode
+if ($null -eq $exitCode) {
+    throw ("The browser exited but its exit code could not be read, so the " +
+        "query result cannot be judged.")
 }
 
 $output = ""
@@ -143,13 +153,13 @@ if ($match.Success) {
     $reported = $match.Groups[1].Value.Trim()
 }
 
-Write-Host ("Exit code: {0} (0x{0:X})" -f $process.ExitCode)
+Write-Host ("Exit code: {0} (0x{0:X})" -f $exitCode)
 Write-Host "Reported version: $(if ($reported) { $reported } else { '<none>' })"
 Write-Host ""
 
-if ($process.ExitCode -ne $queryExitCode) {
+if ($exitCode -ne $queryExitCode) {
     $failures.Add(("Expected exit code $queryExitCode, observed " +
-        "$($process.ExitCode). A browser that answers the query must exit " +
+        "$exitCode. A browser that answers the query must exit " +
         "with the query exit code."))
 }
 if (-not $reported) {
