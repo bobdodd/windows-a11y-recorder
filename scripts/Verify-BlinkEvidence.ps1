@@ -2072,25 +2072,39 @@ foreach ($listenerRecord in $listenerRecords) {
         )
     }
 }
-# The fixture's own registrations are made by page script, so each of the
-# registrations the assertions above select must report the main world.
-foreach ($scriptListener in @(
-        $listener,
-        $removal,
-        $externalScriptListener,
-        $inlineAttributeListener,
-        $eventHandlerPropertyListener,
-        $windowListener)) {
-    if ($null -eq $scriptListener.world) {
+# The fixture's own registrations, removals, and callback replacements are all
+# made by the document's script, which runs in the main world. These are read
+# from the record selections rather than from the single payloads the later
+# assertions bind, so this check does not depend on where in this script it runs.
+$pageScriptListenerRecords = @(
+    $listeners +
+    $removals +
+    $windowClickListeners +
+    $windowResizeListeners +
+    $windowResizeRemovals +
+    $inlineAttributeListeners +
+    $eventHandlerPropertyListeners +
+    $externalScriptListeners +
+    $inlineAttributeReplacements +
+    $propertyListenerReplacements
+)
+if ($pageScriptListenerRecords.Count -eq 0) {
+    throw "No page-script listener records were selected."
+}
+foreach ($pageScriptRecord in $pageScriptListenerRecords) {
+    $pageScriptListener = $pageScriptRecord.payload
+    if ($null -eq $pageScriptListener.world) {
         throw (
-            "A fixture registration for $($scriptListener.eventName) on " +
-            "$($scriptListener.target.kind) reported no world."
+            "A page-script $($pageScriptRecord.eventType) record for " +
+            "$($pageScriptListener.eventName) on " +
+            "$($pageScriptListener.target.kind) reported no world."
         )
     }
-    if ($scriptListener.world.kind -ne "main") {
+    if ($pageScriptListener.world.kind -ne "main") {
         throw (
-            "A fixture registration for $($scriptListener.eventName) reported " +
-            "the world kind $($scriptListener.world.kind) rather than main."
+            "A page-script $($pageScriptRecord.eventType) record for " +
+            "$($pageScriptListener.eventName) reported the world kind " +
+            "$($pageScriptListener.world.kind) rather than main."
         )
     }
 }
