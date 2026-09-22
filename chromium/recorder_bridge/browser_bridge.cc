@@ -508,6 +508,57 @@ std::string NormalizeRegistrationKind(std::string registration_kind) {
   return kListenerRegistrationKindAddEventListener;
 }
 
+// Accepts only the world kinds the archive schema defines, for the same reason
+// registration kinds are normalized: a patched Chromium source names a kind
+// with a bridge header constant, so an unexpected value means the two sides were
+// built from different revisions. An unrecognized kind is recorded as other,
+// which is the schema value for a world Blink classifies as none of the named
+// ones. An empty kind is preserved, because a hook that observed no world must
+// not be turned into a record that claims one.
+std::string NormalizeExecutionWorldKind(std::string world_kind) {
+  if (world_kind.empty() || world_kind == kExecutionWorldKindMain ||
+      world_kind == kExecutionWorldKindIsolated ||
+      world_kind == kExecutionWorldKindInspectorIsolated ||
+      world_kind == kExecutionWorldKindWorkerOrWorklet ||
+      world_kind == kExecutionWorldKindShadowRealm ||
+      world_kind == kExecutionWorldKindOther) {
+    return world_kind;
+  }
+  return kExecutionWorldKindOther;
+}
+
+// Returns the correlatable identifier for a world, which is what the record's
+// context reports. Blink's world identifiers are per-thread, so the identifier
+// is only comparable within the renderer process that reported it, which is the
+// same scope as the process-local event-target identifiers.
+std::string ExecutionWorldId(int world_id) {
+  return "world-" + base::NumberToString(world_id);
+}
+
+// Builds the world value for a listener record. An empty kind means Blink
+// reported no world for the callback, which is recorded as a null world rather
+// than as a world of nulls. A name or stable identifier Blink does not hold is
+// recorded as null rather than as an empty string.
+base::Value CreateExecutionWorld(const std::string& world_kind,
+                                 int world_id,
+                                 std::string world_name,
+                                 std::string world_stable_id) {
+  if (world_kind.empty()) {
+    return base::Value();
+  }
+
+  base::DictValue world;
+  world.Set("kind", world_kind);
+  world.Set("blinkWorldId", world_id);
+  world.Set("name", world_name.empty()
+                        ? base::Value()
+                        : base::Value(std::move(world_name)));
+  world.Set("stableId", world_stable_id.empty()
+                            ? base::Value()
+                            : base::Value(std::move(world_stable_id)));
+  return base::Value(std::move(world));
+}
+
 std::string RegisterListenerIdentity(uintptr_t listener_identity) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
@@ -856,9 +907,20 @@ base::DictValue CreateListenerPayload(
     std::string function_name,
     int script_id,
     int line_number,
-    int column_number) {
+    int column_number,
+    std::string world_kind,
+    int world_id,
+    std::string world_name,
+    std::string world_stable_id) {
   base::DictValue payload;
-  payload.Set("context", CreateContext(client, document_node_id));
+  base::DictValue context = CreateContext(client, document_node_id);
+  // The context reports the world the record is about only when Blink reported
+  // one. Every other channel leaves the field null, so a populated value is
+  // evidence rather than a default.
+  if (!world_kind.empty()) {
+    context.Set("executionWorldId", ExecutionWorldId(world_id));
+  }
+  payload.Set("context", std::move(context));
   payload.Set("listenerId", std::move(listener_id));
   payload.Set("eventName", std::move(event_name));
   payload.Set("registrationKind", std::move(registration_kind));
@@ -875,6 +937,10 @@ base::DictValue CreateListenerPayload(
               CreateScriptLocation(std::move(script_url),
                                    std::move(function_name), script_id,
                                    line_number, column_number));
+  payload.Set("world",
+              CreateExecutionWorld(world_kind, world_id,
+                                   std::move(world_name),
+                                   std::move(world_stable_id)));
   return payload;
 }
 
@@ -1270,7 +1336,11 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string function_name,
                                    int script_id,
                                    int line_number,
-                                   int column_number) {
+                                   int column_number,
+                                   std::string world_kind,
+                                   int world_id,
+                                   std::string world_name,
+                                   std::string world_stable_id) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || !IsRecordableEventTarget(target_kind, document_node_id,
                                           target_node_id)) {
@@ -1287,7 +1357,9 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
       document_node_id, target_node_id, std::move(event_name),
       std::move(target_tag_name), std::move(target_element_id), capture,
       passive, once, std::move(script_url), std::move(function_name),
-      script_id, line_number, column_number);
+      script_id, line_number, column_number,
+      NormalizeExecutionWorldKind(std::move(world_kind)), world_id,
+      std::move(world_name), std::move(world_stable_id));
   SendBlinkEvidence("browser.listener", "listener-registered",
                     std::move(payload));
 }
@@ -1309,7 +1381,11 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                                 std::string function_name,
                                 int script_id,
                                 int line_number,
-                                int column_number) {
+                                int column_number,
+                                std::string world_kind,
+                                int world_id,
+                                std::string world_name,
+                                std::string world_stable_id) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<std::string> listener_id =
       TakeListenerIdentity(listener_identity);
@@ -1329,7 +1405,9 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
       document_node_id, target_node_id, std::move(event_name),
       std::move(target_tag_name), std::move(target_element_id), capture,
       passive, once, std::move(script_url), std::move(function_name),
-      script_id, line_number, column_number);
+      script_id, line_number, column_number,
+      NormalizeExecutionWorldKind(std::move(world_kind)), world_id,
+      std::move(world_name), std::move(world_stable_id));
   SendBlinkEvidence("browser.listener", "listener-removed",
                     std::move(payload));
 }
@@ -1351,7 +1429,11 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
                                         std::string function_name,
                                         int script_id,
                                         int line_number,
-                                        int column_number) {
+                                        int column_number,
+                                        std::string world_kind,
+                                        int world_id,
+                                        std::string world_name,
+                                        std::string world_stable_id) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || !IsRecordableEventTarget(target_kind, document_node_id,
                                           target_node_id)) {
@@ -1377,7 +1459,9 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
       document_node_id, target_node_id, std::move(event_name),
       std::move(target_tag_name), std::move(target_element_id), capture,
       passive, once, std::move(script_url), std::move(function_name),
-      script_id, line_number, column_number);
+      script_id, line_number, column_number,
+      NormalizeExecutionWorldKind(std::move(world_kind)), world_id,
+      std::move(world_name), std::move(world_stable_id));
   SendBlinkEvidence("browser.listener", "listener-callback-replaced",
                     std::move(payload));
 }

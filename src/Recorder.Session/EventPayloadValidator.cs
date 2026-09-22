@@ -456,13 +456,15 @@ internal static class EventPayloadValidator
                 RequiredBoolean("capture"),
                 RequiredBoolean("passive"),
                 RequiredBoolean("once"),
-                NullableObject("location")
+                NullableObject("location"),
+                NullableObject("world")
             ],
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
         ValidateBrowserEventTargetProperty(payload, "target", issues, line);
         ValidateBrowserLocationProperty(payload, issues, line);
+        ValidateBrowserExecutionWorldProperty(payload, issues, line);
     }
 
     private static void ValidateBrowserDispatch(
@@ -1360,6 +1362,76 @@ internal static class EventPayloadValidator
             issues,
             line,
             $"events.ndjson#/payload/{property}");
+    }
+
+    // A listener record that names a world must also report that world in its
+    // context, because the context field is what correlates records from the
+    // same world. A world named in only one of the two places would let a
+    // consumer read two different answers from one record.
+    private static void ValidateBrowserExecutionWorldProperty(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty("world", out var world) ||
+            world.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        ValidateShape(
+            world,
+            [
+                RequiredEnum(
+                    "kind",
+                    "main",
+                    "isolated",
+                    "inspector-isolated",
+                    "worker-or-worklet",
+                    "shadow-realm",
+                    "other"),
+                RequiredInteger("blinkWorldId", nonnegative: true),
+                NullableString("name"),
+                NullableString("stableId")
+            ],
+            issues,
+            line,
+            "events.ndjson#/payload/world");
+
+        if (!payload.TryGetProperty("context", out var context) ||
+            context.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        if (!HasNonnullProperty(context, "executionWorldId"))
+        {
+            AddError(
+                issues,
+                "browser-execution-world-identity",
+                "events.ndjson#/payload/context/executionWorldId",
+                "a record that names a world must report its executionWorldId",
+                line);
+            return;
+        }
+
+        if (!world.TryGetProperty("blinkWorldId", out var blinkWorldId) ||
+            blinkWorldId.ValueKind != JsonValueKind.Number ||
+            !blinkWorldId.TryGetInt32(out var worldId))
+        {
+            return;
+        }
+
+        var expected = $"world-{worldId}";
+        if (context.GetProperty("executionWorldId").GetString() != expected)
+        {
+            AddError(
+                issues,
+                "browser-execution-world-identity",
+                "events.ndjson#/payload/context/executionWorldId",
+                $"a record whose world is {worldId} must report {expected}",
+                line);
+        }
     }
 
     private static void ValidateOmission(

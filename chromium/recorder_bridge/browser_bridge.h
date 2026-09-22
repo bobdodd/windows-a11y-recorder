@@ -75,6 +75,27 @@ inline constexpr char kListenerRegistrationKindInlineAttribute[] =
 inline constexpr char kListenerRegistrationKindEventHandlerProperty[] =
     "event-handler-property";
 
+// Identifies the JavaScript world a listener callback belongs to. Blink keeps
+// the main world, each isolated world an embedder creates, each world the
+// inspector creates, worker and worklet worlds, and shadow realms in one world
+// type enumeration, and a recorded kind is a reading of that enumeration. A
+// world Blink classifies as none of these, such as the utility world used for
+// context snapshotting, is recorded as other, so a future world type is named
+// honestly instead of being reported as a world it is not. These are header
+// constants for the same reason the target and registration kinds are.
+inline constexpr char kExecutionWorldKindMain[] = "main";
+inline constexpr char kExecutionWorldKindIsolated[] = "isolated";
+inline constexpr char kExecutionWorldKindInspectorIsolated[] =
+    "inspector-isolated";
+inline constexpr char kExecutionWorldKindWorkerOrWorklet[] =
+    "worker-or-worklet";
+inline constexpr char kExecutionWorldKindShadowRealm[] = "shadow-realm";
+inline constexpr char kExecutionWorldKindOther[] = "other";
+
+// The world identifier Blink uses for a world it has not classified. A hook
+// that observed no world passes this together with an empty world kind.
+inline constexpr int kExecutionWorldIdUnobserved = -1;
+
 // Records a Blink listener only after Blink has accepted the registration.
 // Node identifiers are Blink DOMNodeIds. A non-Node target passes a zero
 // target node identifier, its Blink interface name, and the address Blink uses
@@ -88,6 +109,13 @@ COMPONENT_EXPORT(RECORDER_BRIDGE)
 // location rather than an object of nulls. The location describes the call that
 // registered, removed, or replaced the listener, not where its callback
 // function was defined.
+// The final four parameters of each listener entry point describe the
+// JavaScript world the callback belongs to, which is the world the registration
+// was made from rather than the world that happened to be current when the
+// record was written. An empty world kind means Blink reported no world, which
+// is the case for a listener Blink installed itself, and a record with no world
+// reports a null world rather than a world of nulls. An empty world name or
+// stable identifier means Blink holds none for that world.
 void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string registration_kind,
                                    std::string target_kind,
@@ -105,7 +133,11 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string function_name,
                                    int script_id,
                                    int line_number,
-                                   int column_number);
+                                   int column_number,
+                                   std::string world_kind,
+                                   int world_id,
+                                   std::string world_name,
+                                   std::string world_stable_id);
 
 // Records a listener only after Blink has accepted its removal. The listener
 // identifier is the same one allocated when the registration was accepted.
@@ -127,7 +159,11 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                                 std::string function_name,
                                 int script_id,
                                 int line_number,
-                                int column_number);
+                                int column_number,
+                                std::string world_kind,
+                                int world_id,
+                                std::string world_name,
+                                std::string world_stable_id);
 
 // Records that Blink replaced the callback of an existing attribute listener
 // registration in place. Assigning an on-event IDL attribute over a listener
@@ -154,7 +190,11 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
                                         std::string function_name,
                                         int script_id,
                                         int line_number,
-                                        int column_number);
+                                        int column_number,
+                                        std::string world_kind,
+                                        int world_id,
+                                        std::string world_name,
+                                        std::string world_stable_id);
 
 // Records one dispatch-started event after Blink has established the event
 // path and original target, but before capture-phase listeners run.

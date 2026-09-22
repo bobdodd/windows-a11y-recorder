@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.20` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.21` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -132,6 +132,18 @@ registration made while no script was running still reports a location when
 Blink can supply a parsing position.
 Capturing a location walks the top of the JavaScript stack on every listener
 record, which is a cost this build accepts for evidence completeness.
+
+Protocol 0.21 reports the world each listener callback belongs to. Every
+`browser.listener` record carries a `world` with `kind`, `blinkWorldId`, `name`,
+and `stableId`, and repeats the world as `executionWorldId` on the record's
+context. The world is read from the callback through
+`JSBasedEventListener::GetWorldForInspector`, so it is the world the registration
+was made from rather than the world current when the record was written. A
+listener that is not script based, such as one Blink installed itself, belongs to
+no world and reports a null world rather than the main world. Blink holds a human
+readable name and a stable identifier only for a world other than the main world,
+so both are null for a main-world registration. A world type the recorder does
+not name is reported as `other` rather than as one it is not.
 
 Timer evidence covers accepted scheduling, callback entry, and explicit
 `clearTimeout`, `clearInterval`, or `cancelAnimationFrame` cancellation. It

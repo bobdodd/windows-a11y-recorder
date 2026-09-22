@@ -1861,6 +1861,185 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsAListenerRegisteredFromAnIsolatedWorld()
+    {
+        // An isolated world is the world an extension or the inspector runs
+        // script in. The world named on the record and the world named in its
+        // context are the same world, so both readings of one registration
+        // agree.
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            CreateListenerWithWorld("world-13", "isolated", 13));
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsAListenerWorldItsContextContradicts()
+    {
+        // A record that names one world on the payload and another in its
+        // context gives a consumer two answers to the same question, so the
+        // archive is rejected rather than published with the contradiction in
+        // it.
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            CreateListenerWithWorld("world-0", "isolated", 13));
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code == "browser-execution-world-identity" &&
+                    issue.Path.EndsWith(
+                        "/context/executionWorldId",
+                        StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsAListenerWorldWithNoExecutionWorldIdentity()
+    {
+        // The context identity is what correlates records from one world, so a
+        // record that names a world without it cannot be grouped with the rest
+        // of that world's evidence.
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            CreateListenerWithWorld(null, "isolated", 13));
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "browser-execution-world-identity");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsAListenerWorldKindTheSchemaDoesNotAllow()
+    {
+        // The recorder names the world types Blink has, and reports a type it
+        // does not name as other. A kind outside that set is a defect in the
+        // recorder rather than a fact about the session.
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            CreateListenerWithWorld("world-13", "extension", 13));
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code == "payload-property-invalid" &&
+                    issue.Path.EndsWith("/world/kind", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    // Builds one listener registration whose context world identity, world kind
+    // and Blink world identifier the caller chooses, so a test can state the
+    // agreement or the contradiction it is about and nothing else.
+    private static object CreateListenerWithWorld(
+        string? executionWorldId,
+        string kind,
+        int blinkWorldId) =>
+        new
+        {
+            context = new
+            {
+                browserInstanceId = "browser-1",
+                processId = 1200,
+                processType = "renderer",
+                profileId = (string?)null,
+                browserContextId = (string?)null,
+                pageId = (string?)null,
+                frameId = (string?)null,
+                documentId = "dom-document-8",
+                executionWorldId,
+                documentToken = "document-token-8"
+            },
+            listenerId = "listener-1",
+            eventName = "click",
+            registrationKind = "add-event-listener",
+            target = new
+            {
+                kind = "node",
+                interfaceName = "HTMLButtonElement",
+                targetId = (string?)null,
+                documentId = "dom-document-8",
+                nodeId = 42,
+                backendNodeId = (string?)null,
+                tagName = "BUTTON",
+                elementId = "pointer-only",
+                classes = Array.Empty<string>()
+            },
+            capture = false,
+            passive = false,
+            once = false,
+            location = (object?)null,
+            world = new
+            {
+                kind,
+                blinkWorldId,
+                name = "recorder probe",
+                stableId = "probe-world"
+            }
+        };
+
+    [Fact]
     public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
     {
         var context = new

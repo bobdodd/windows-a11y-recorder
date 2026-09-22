@@ -36,6 +36,21 @@ from the product version.
 
 ### Added
 
+- Recorded the JavaScript world each listener callback belongs to, as protocol
+  0.21. Each `browser.listener` record carries a `world` with the world kind,
+  Blink's numeric world identifier, and the human readable name and stable
+  identifier Blink holds for a world other than the main world, and repeats the
+  world as `executionWorldId` on the record's context. The archive previously
+  reported no world on any record, so a listener an extension or the inspector
+  registered from an isolated world could not be told apart from one the page
+  registered itself. The world is read from the callback object rather than from
+  the world current at the hook, so it is the world the registration was made
+  from. A listener Blink installed itself is not script based and belongs to no
+  world, which is reported as a null world rather than as the main world. Blink
+  holds a name and a stable identifier only for a world other than the main
+  world, so both are null for a main-world registration. A world type the
+  recorder does not name is reported as `other`, and a record whose world and
+  context disagree fails archive validation.
 - Recorded how each listener entered Blink's listener map, as protocol 0.19.
 - Recorded where every listener registration, removal, and callback
   replacement came from, as protocol 0.20. Each `browser.listener` record

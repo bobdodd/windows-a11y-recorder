@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.20";
+    public const string CurrentVersion = "0.21";
 }
 
 public static class BrowserEvidenceChannels
@@ -86,6 +86,29 @@ public sealed record BrowserEventTargetReference(
     string? ElementId,
     IReadOnlyList<string> Classes);
 
+public static class BrowserExecutionWorldKinds
+{
+    public const string Main = "main";
+    public const string Isolated = "isolated";
+    public const string InspectorIsolated = "inspector-isolated";
+    public const string WorkerOrWorklet = "worker-or-worklet";
+    public const string ShadowRealm = "shadow-realm";
+    public const string Other = "other";
+}
+
+// Describes the JavaScript world a recorded listener callback belongs to, as
+// Blink reported it at the hook. BlinkWorldId is Blink's own per-thread world
+// identifier, where zero is the main world. Name and StableId are the names an
+// embedder or the inspector gave a world that is not the main world, and each
+// is absent when Blink holds none. A listener Blink installed itself has no
+// world, which a record reports by carrying no world at all rather than by
+// naming one.
+public sealed record BrowserExecutionWorld(
+    string Kind,
+    int BlinkWorldId,
+    string? Name,
+    string? StableId);
+
 public sealed record BrowserScriptLocation(
     string? ScriptId,
     string? Url,
@@ -103,7 +126,8 @@ public sealed record BrowserListenerPayload(
     bool Capture,
     bool Passive,
     bool Once,
-    BrowserScriptLocation? Location);
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
 
 public sealed record BrowserDispatchPayload(
     BrowserContext Context,

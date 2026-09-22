@@ -45,8 +45,9 @@ The hook records registrations on Nodes and on EventTargets that are not Nodes,
 including the window. Worker and worklet global scopes remain outside this
 slice because their execution contexts are not document-scoped. Inline
 attributes and `on*` properties are reported by the registration form described
-below, and the call that made the registration is reported by the registration
-location described below. Isolated-world identity remains outstanding.
+below, the call that made the registration is reported by the registration
+location described below, and the world the registration was made from is
+reported by the execution-world identity described below.
 
 ### Listener removal and invocation
 
@@ -285,6 +286,40 @@ a location is only as good as the top frame Blink reports and falls back to a
 parsing position for a registration made while no script was running, no script
 text or hash is recorded, and an eval or inline script reports whatever URL Blink attributes to
 it rather than a file on disk.
+
+### Execution-world identity
+
+Each listener hook reads the world of the callback through
+`JSBasedEventListener::GetWorldForInspector()`, which returns the
+`DOMWrapperWorld` the callback was created in. The record's `world` reports the
+world kind, the numeric identifier `DOMWrapperWorld::GetWorldId()` returns, and
+the values `NonMainWorldHumanReadableName()` and `NonMainWorldStableId()` return.
+Because the world is read from the callback rather than from the world current at
+the hook, it is the world the registration was made from and not the world that
+happened to be running when the record was written. The record's context repeats
+the same world as `executionWorldId` in the form `world-<blinkWorldId>`, so
+records from one world can be grouped without reading the payload, and archive
+validation rejects a record whose two readings disagree.
+
+Both name accessors assert that the world is not the main world, so they are
+called only for a world other than the main world and a main-world registration
+reports both as null. Blink classifies isolated worlds and the inspector's
+isolated worlds alike as isolated, so the inspector's worlds are tested first and
+reported as `inspector-isolated`. An `EventListener` that is not a
+`JSBasedEventListener`, which includes a listener Blink installed itself, belongs
+to no world: that record reports a null world and a null `executionWorldId`
+rather than claiming the main world. A world type the recorder does not name is
+reported as `other`, because an out-of-schema value would fail archive validation
+for the whole session rather than for one record.
+
+What this does not establish: the origin, the content security policy, and the
+extension or client that owns an isolated world are not recorded, only the
+identity Blink holds for it. A stable identifier is stable within a Blink
+installation rather than across builds. Nothing here records which world a
+dispatch or an invocation ran in, only the world each listener registration,
+removal, and callback replacement was made from. Validating an isolated-world
+registration requires a world other than the main world to exist during the run,
+which the current fixture does not create.
 
 ## Component boundary
 

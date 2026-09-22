@@ -355,7 +355,26 @@ text and cannot report a hash it did not compute. The capture walks the top of
 the JavaScript stack for every listener record, and no listener record is
 suppressed to avoid that cost.
 
-Live 0.20 connections require an exact protocol-version match.
+Protocol version 0.21 reports the world each listener callback belongs to.
+`JSBasedEventListener::GetWorldForInspector()` returns the `DOMWrapperWorld` the
+callback was created in, which is the world the registration was made from and
+not whichever world is current when the record is written. The record's `world`
+reports `kind` from the world type, `blinkWorldId` from `GetWorldId()`, and
+`name` and `stableId` from `NonMainWorldHumanReadableName()` and
+`NonMainWorldStableId()`. Those two accessors assert that the world is not the
+main world, so they are called only for a world other than the main world and a
+main-world registration reports both as null. The context's `executionWorldId`
+repeats the same world as `world-<blinkWorldId>`, so records from one world can
+be grouped without reading the payload. An `EventListener` that is not a
+`JSBasedEventListener`, such as one Blink installed itself, belongs to no world:
+that record reports a null `world` and a null `executionWorldId` rather than
+claiming the main world. Blink classifies both isolated and inspector-isolated
+worlds as isolated, so the inspector's worlds are tested first and reported as
+`inspector-isolated`. A world type the recorder does not name is reported as
+`other`, because an out-of-schema value would fail archive validation for the
+whole session.
+
+Live 0.21 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

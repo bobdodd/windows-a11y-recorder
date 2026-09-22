@@ -2001,6 +2001,95 @@ if ($removalLocation.line -eq $listenerLocation.line) {
         "so a record's location does not describe its own call."
     )
 }
+# Every listener record reports the world its callback belongs to, and Blink
+# holds that world on the callback. A listener Blink installed itself is not
+# script based and belongs to no world, so it reports a null world and a null
+# execution world identity rather than claiming the main world. The fixture's own
+# registrations are made by page script, so each of them reports the main world,
+# which Blink numbers 0 and holds no name or stable identifier for.
+$listenerRecords = @(
+    $records |
+        Where-Object { $_.channel -eq "browser.listener" }
+)
+$listenerWorldRecords = @(
+    $listenerRecords |
+        Where-Object { $null -ne $_.payload.world }
+)
+if ($listenerWorldRecords.Count -eq 0) {
+    throw "No listener record reported the world its callback belongs to."
+}
+foreach ($listenerRecord in $listenerRecords) {
+    $world = $listenerRecord.payload.world
+    $recordedWorldId = $listenerRecord.payload.context.executionWorldId
+    if ($null -eq $world) {
+        if ($null -ne $recordedWorldId) {
+            throw (
+                "A listener record that observed no world reported the " +
+                "execution world identity $recordedWorldId."
+            )
+        }
+        continue
+    }
+    if ($world.kind -ne "main") {
+        throw (
+            "A $($listenerRecord.eventType) record reported the world kind " +
+            "$($world.kind) rather than main, which the fixture's page script " +
+            "cannot produce."
+        )
+    }
+    if ($world.blinkWorldId -ne 0) {
+        throw (
+            "A main-world listener record reported Blink world " +
+            "$($world.blinkWorldId) rather than 0."
+        )
+    }
+    if ($null -ne $world.name -or $null -ne $world.stableId) {
+        throw (
+            "A main-world listener record reported a name or stable " +
+            "identifier Blink holds only for other worlds."
+        )
+    }
+    $expectedWorldId = "world-$($world.blinkWorldId)"
+    if ($recordedWorldId -ne $expectedWorldId) {
+        throw (
+            "A listener record reported world $($world.blinkWorldId) with the " +
+            "execution world identity $recordedWorldId rather than " +
+            "$expectedWorldId."
+        )
+    }
+}
+# The fixture's own registrations are made by page script, so each of the
+# registrations the assertions above select must report a world rather than
+# leaving it unobserved.
+foreach ($scriptListener in @(
+        $listener,
+        $removal,
+        $externalScriptListener,
+        $inlineAttributeListener,
+        $eventHandlerPropertyListener,
+        $windowListener)) {
+    if ($null -eq $scriptListener.world) {
+        throw (
+            "A fixture registration for $($scriptListener.eventName) on " +
+            "$($scriptListener.target.kind) reported no world."
+        )
+    }
+}
+# Nothing outside the listener channel observes a world in this protocol, so a
+# world identity on another channel would be a claim the recorder cannot support.
+$nonListenerWorldRecords = @(
+    $records |
+        Where-Object {
+            $_.channel -ne "browser.listener" -and
+            $null -ne $_.payload.context.executionWorldId
+        }
+)
+if ($nonListenerWorldRecords.Count -gt 0) {
+    throw (
+        "$($nonListenerWorldRecords.Count) records outside the listener " +
+        "channel reported an execution world identity."
+    )
+}
 if ($listener.capture -or $listener.passive -or $listener.once) {
     throw "The listener record does not contain the fixture's resolved options."
 }
@@ -2382,6 +2471,11 @@ if (
     ExternalScriptLocationLine = $externalScriptLocation.line
     ExternalScriptLocationColumn = $externalScriptLocation.column
     ExternalScriptLocationScriptId = $externalScriptLocation.scriptId
+    ListenerChannelRecords = $listenerRecords.Count
+    ListenerWorldRecords = $listenerWorldRecords.Count
+    RegistrationWorldKind = $listener.world.kind
+    RegistrationBlinkWorldId = $listener.world.blinkWorldId
+    RegistrationExecutionWorldId = $listener.context.executionWorldId
     RegistrationLocationUrl = $listenerLocation.url
     RegistrationLocationLine = $listenerLocation.line
     RegistrationLocationColumn = $listenerLocation.column

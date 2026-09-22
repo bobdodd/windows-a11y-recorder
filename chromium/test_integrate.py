@@ -93,6 +93,57 @@ HISTORICAL_LISTENER_HOOK_WITHOUT_LOCATION = """\
     }
 """
 
+# The registration hook as protocol 0.20 wrote it, reporting the call that
+# made the registration but not the world its callback belongs to.
+HISTORICAL_LISTENER_HOOK_WITHOUT_WORLD = """\
+    {
+      const EventListener* recorder_callback = registered_listener->Callback();
+      const char* recorder_registration_kind =
+          RecorderListenerRegistrationKind(recorder_callback);
+      Node* recorder_target = ToNode();
+      LocalDOMWindow* recorder_window = ToLocalDOMWindow();
+      Element* recorder_element = DynamicTo<Element>(recorder_target);
+      ExecutionContext* recorder_context = GetExecutionContext();
+      SourceLocation* recorder_location =
+          recorder_context ? CaptureSourceLocation(recorder_context) : nullptr;
+      LocalDOMWindow* recorder_document_window =
+          recorder_window ? recorder_window
+                          : DynamicTo<LocalDOMWindow>(recorder_context);
+      Document* recorder_document =
+          recorder_target ? &recorder_target->GetDocument()
+                          : (recorder_document_window
+                                 ? recorder_document_window->document()
+                                 : nullptr);
+      a11y_recorder::RecordBlinkListenerRegistered(
+          reinterpret_cast<uintptr_t>(registered_listener),
+          recorder_registration_kind,
+          recorder_target ? a11y_recorder::kEventTargetKindNode
+                          : (recorder_window
+                                 ? a11y_recorder::kEventTargetKindWindow
+                                 : a11y_recorder::kEventTargetKindOther),
+          InterfaceName().Utf8().c_str(),
+          reinterpret_cast<uintptr_t>(this),
+          recorder_document ? recorder_document->GetDomNodeId() : 0,
+          recorder_target ? recorder_target->GetDomNodeId() : 0,
+          event_type.Utf8().c_str(),
+          recorder_target ? recorder_target->nodeName().Utf8().c_str() : "",
+          recorder_element
+              ? recorder_element->GetIdAttribute().Utf8().c_str()
+              : "",
+          registered_listener->Capture(),
+          registered_listener->Passive(),
+          registered_listener->Once(),
+          recorder_location ? recorder_location->Url().Utf8().c_str() : "",
+          recorder_location ? recorder_location->Function().Utf8().c_str() : "",
+          recorder_location ? recorder_location->ScriptId() : 0,
+          recorder_location ? static_cast<int>(recorder_location->LineNumber())
+                            : 0,
+          recorder_location
+              ? static_cast<int>(recorder_location->ColumnNumber())
+              : 0);
+    }
+"""
+
 HISTORICAL_LISTENER_HOOK_WITHOUT_REGISTRATION_KIND = """\
     {
       Node* recorder_target = ToNode();
@@ -2496,6 +2547,108 @@ class IntegrateTests(unittest.TestCase):
                 "recorder_location", HISTORICAL_LISTENER_HOOK_WITHOUT_LOCATION
             )
             path.write_text(without_location, encoding="utf-8")
+
+            INTEGRATE.patch_blink_event_target(path)
+
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_reports_the_world_each_listener_callback_belongs_to(self):
+        """Every listener record names the world its callback came from.
+
+        The world is read from the callback object, so it is the world the
+        registration was made from rather than whichever world was current when
+        the record was written. A listener Blink installed itself is not script
+        based and reports no world. Blink checks that the name accessors are
+        never called for the main world, so each call is guarded.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            patched = path.read_text(encoding="utf-8")
+
+            for include in (
+                INTEGRATE.BLINK_JS_BASED_EVENT_LISTENER_INCLUDE,
+                INTEGRATE.BLINK_DOM_WRAPPER_WORLD_INCLUDE,
+            ):
+                self.assertEqual(1, patched.count(include), include)
+
+            # One helper, and one world read per listener record.
+            self.assertEqual(
+                1, patched.count("const DOMWrapperWorld* RecorderListenerWorld(")
+            )
+            self.assertEqual(
+                1, patched.count("const char* RecorderExecutionWorldKind(")
+            )
+            self.assertEqual(
+                3, patched.count("RecorderListenerWorld(recorder_callback)")
+            )
+            self.assertEqual(
+                3,
+                patched.count(
+                    "recorder_world ? RecorderExecutionWorldKind(*recorder_world)"
+                ),
+            )
+            self.assertEqual(
+                3,
+                patched.count(
+                    "a11y_recorder::kExecutionWorldIdUnobserved"
+                ),
+            )
+
+            # Blink DCHECKs that neither name accessor is called for the main
+            # world, so no call may be reached with only a null check.
+            for accessor in (
+                "NonMainWorldHumanReadableName()",
+                "NonMainWorldStableId()",
+            ):
+                self.assertEqual(
+                    3, patched.count(f"recorder_world->{accessor}"), accessor
+                )
+            self.assertEqual(
+                6,
+                patched.count(
+                    "recorder_world && !recorder_world->IsMainWorld()"
+                ),
+            )
+
+            # The inspector's worlds are classified before isolated worlds
+            # generally, because Blink reports both as isolated.
+            self.assertLess(
+                patched.index("WorldType::kInspectorIsolated"),
+                patched.index("world.IsIsolatedWorld()"),
+            )
+
+            INTEGRATE.patch_blink_event_target(path)
+            self.assertEqual(patched, path.read_text(encoding="utf-8"))
+
+    def test_migrates_a_listener_hook_that_reported_no_world(self):
+        """A checkout patched before worlds were recorded upgrades.
+
+        The registration hook and the registration-kind helper already existed,
+        so both presence guards read the checkout as integrated. The hook region
+        is replaced and the world helper has its own guard, so an earlier
+        checkout converges on the current body instead of calling a helper it
+        does not define.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            current = path.read_text(encoding="utf-8")
+
+            without_world = current.replace(
+                INTEGRATE.BLINK_LISTENER_HOOK,
+                HISTORICAL_LISTENER_HOOK_WITHOUT_WORLD,
+                1,
+            ).replace(INTEGRATE.BLINK_LISTENER_WORLD_HELPER, "", 1)
+            self.assertNotEqual(current, without_world)
+            self.assertNotIn("recorder_world", HISTORICAL_LISTENER_HOOK_WITHOUT_WORLD)
+            self.assertIn("RecorderListenerRegistrationKind(", without_world)
+            self.assertNotIn(
+                "const DOMWrapperWorld* RecorderListenerWorld(", without_world
+            )
+            path.write_text(without_world, encoding="utf-8")
 
             INTEGRATE.patch_blink_event_target(path)
 

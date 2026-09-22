@@ -1170,6 +1170,17 @@ BLINK_CAPTURE_SOURCE_LOCATION_INCLUDE = (
 BLINK_SOURCE_LOCATION_INCLUDE = (
     '#include "third_party/blink/renderer/platform/bindings/source_location.h"'
 )
+
+# Reading the world a listener callback belongs to needs the script-based
+# listener definition that holds the world and the world type itself.
+BLINK_JS_BASED_EVENT_LISTENER_INCLUDE = (
+    '#include "third_party/blink/renderer/bindings/core/v8/'
+    'js_based_event_listener.h"'
+)
+BLINK_DOM_WRAPPER_WORLD_INCLUDE = (
+    '#include "third_party/blink/renderer/platform/bindings/'
+    'dom_wrapper_world.h"'
+)
 BLINK_LISTENER_KIND_HELPER = """\
 namespace {
 
@@ -1196,11 +1207,56 @@ const char* RecorderListenerRegistrationKind(const EventListener* listener) {
 }  // namespace
 
 """
+BLINK_LISTENER_WORLD_HELPER = """\
+namespace {
+
+// Reports the JavaScript world a listener callback belongs to. Blink holds the
+// world on the callback object, so this is the world the registration was made
+// from rather than whichever world happens to be current when a record is
+// written. A listener Blink installed itself is not script based and belongs to
+// no world, which is reported as no world rather than as the main world.
+const DOMWrapperWorld* RecorderListenerWorld(const EventListener* listener) {
+  const JSBasedEventListener* recorder_script_listener =
+      DynamicTo<JSBasedEventListener>(listener);
+  if (!recorder_script_listener) {
+    return nullptr;
+  }
+  return &recorder_script_listener->GetWorldForInspector();
+}
+
+// Reports the recorder's name for a world type. The inspector's isolated worlds
+// are tested before isolated worlds generally, because Blink classifies both as
+// isolated. A world type the recorder does not name is reported as other rather
+// than as one it is not.
+const char* RecorderExecutionWorldKind(const DOMWrapperWorld& world) {
+  if (world.IsMainWorld()) {
+    return a11y_recorder::kExecutionWorldKindMain;
+  }
+  if (world.GetWorldType() == DOMWrapperWorld::WorldType::kInspectorIsolated) {
+    return a11y_recorder::kExecutionWorldKindInspectorIsolated;
+  }
+  if (world.IsIsolatedWorld()) {
+    return a11y_recorder::kExecutionWorldKindIsolated;
+  }
+  if (world.IsWorkerOrWorkletWorld()) {
+    return a11y_recorder::kExecutionWorldKindWorkerOrWorklet;
+  }
+  if (world.IsShadowRealmWorld()) {
+    return a11y_recorder::kExecutionWorldKindShadowRealm;
+  }
+  return a11y_recorder::kExecutionWorldKindOther;
+}
+
+}  // namespace
+
+"""
 BLINK_LISTENER_HOOK = """\
     {
       const EventListener* recorder_callback = registered_listener->Callback();
       const char* recorder_registration_kind =
           RecorderListenerRegistrationKind(recorder_callback);
+      const DOMWrapperWorld* recorder_world =
+          RecorderListenerWorld(recorder_callback);
       Node* recorder_target = ToNode();
       LocalDOMWindow* recorder_window = ToLocalDOMWindow();
       Element* recorder_element = DynamicTo<Element>(recorder_target);
@@ -1241,7 +1297,16 @@ BLINK_LISTENER_HOOK = """\
                             : 0,
           recorder_location
               ? static_cast<int>(recorder_location->ColumnNumber())
-              : 0);
+              : 0,
+          recorder_world ? RecorderExecutionWorldKind(*recorder_world) : "",
+          recorder_world ? recorder_world->GetWorldId()
+                         : a11y_recorder::kExecutionWorldIdUnobserved,
+          recorder_world && !recorder_world->IsMainWorld()
+              ? recorder_world->NonMainWorldHumanReadableName().Utf8().c_str()
+              : "",
+          recorder_world && !recorder_world->IsMainWorld()
+              ? recorder_world->NonMainWorldStableId().Utf8().c_str()
+              : "");
     }
 """
 BLINK_LISTENER_REMOVED_HOOK = """\
@@ -1249,6 +1314,8 @@ BLINK_LISTENER_REMOVED_HOOK = """\
     const EventListener* recorder_callback = registered_listener->Callback();
     const char* recorder_registration_kind =
         RecorderListenerRegistrationKind(recorder_callback);
+    const DOMWrapperWorld* recorder_world =
+        RecorderListenerWorld(recorder_callback);
     Node* recorder_target = ToNode();
     LocalDOMWindow* recorder_window = ToLocalDOMWindow();
     Element* recorder_element = DynamicTo<Element>(recorder_target);
@@ -1288,7 +1355,16 @@ BLINK_LISTENER_REMOVED_HOOK = """\
         recorder_location ? static_cast<int>(recorder_location->LineNumber())
                           : 0,
         recorder_location ? static_cast<int>(recorder_location->ColumnNumber())
-                          : 0);
+                          : 0,
+        recorder_world ? RecorderExecutionWorldKind(*recorder_world) : "",
+        recorder_world ? recorder_world->GetWorldId()
+                       : a11y_recorder::kExecutionWorldIdUnobserved,
+        recorder_world && !recorder_world->IsMainWorld()
+            ? recorder_world->NonMainWorldHumanReadableName().Utf8().c_str()
+            : "",
+        recorder_world && !recorder_world->IsMainWorld()
+            ? recorder_world->NonMainWorldStableId().Utf8().c_str()
+            : "");
   }
 """
 BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_ANCHOR = """\
@@ -1309,6 +1385,8 @@ BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION = """\
       const EventListener* recorder_callback = listener;
       const char* recorder_registration_kind =
           RecorderListenerRegistrationKind(recorder_callback);
+      const DOMWrapperWorld* recorder_world =
+          RecorderListenerWorld(recorder_callback);
       Node* recorder_target = ToNode();
       LocalDOMWindow* recorder_window = ToLocalDOMWindow();
       Element* recorder_element = DynamicTo<Element>(recorder_target);
@@ -1349,7 +1427,16 @@ BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION = """\
                             : 0,
           recorder_location
               ? static_cast<int>(recorder_location->ColumnNumber())
-              : 0);
+              : 0,
+          recorder_world ? RecorderExecutionWorldKind(*recorder_world) : "",
+          recorder_world ? recorder_world->GetWorldId()
+                         : a11y_recorder::kExecutionWorldIdUnobserved,
+          recorder_world && !recorder_world->IsMainWorld()
+              ? recorder_world->NonMainWorldHumanReadableName().Utf8().c_str()
+              : "",
+          recorder_world && !recorder_world->IsMainWorld()
+              ? recorder_world->NonMainWorldStableId().Utf8().c_str()
+              : "");
     }
 """
 BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK = (
@@ -2784,6 +2871,8 @@ def patch_blink_event_target(path: Path) -> None:
     for include in (
         BLINK_CAPTURE_SOURCE_LOCATION_INCLUDE,
         BLINK_SOURCE_LOCATION_INCLUDE,
+        BLINK_JS_BASED_EVENT_LISTENER_INCLUDE,
+        BLINK_DOM_WRAPPER_WORLD_INCLUDE,
     ):
         if include in text:
             continue
@@ -2799,6 +2888,19 @@ def patch_blink_event_target(path: Path) -> None:
             text,
             anchor,
             f"{BLINK_LISTENER_KIND_HELPER}{anchor}",
+            path,
+        )
+    # A checkout patched before worlds were recorded already holds the
+    # registration-kind helper, so the world helper needs its own guard rather
+    # than riding along with that one. The guard reads the helper definition
+    # rather than a call to it, so a checkout that holds hook bodies from more
+    # than one revision still has the definition restored.
+    if "const DOMWrapperWorld* RecorderListenerWorld(" not in text:
+        anchor = "bool EventTarget::AddEventListenerInternal("
+        text = replace_once(
+            text,
+            anchor,
+            f"{BLINK_LISTENER_WORLD_HELPER}{anchor}",
             path,
         )
     if LEGACY_BLINK_LISTENER_INVOCATION_STARTED_HOOK in text:

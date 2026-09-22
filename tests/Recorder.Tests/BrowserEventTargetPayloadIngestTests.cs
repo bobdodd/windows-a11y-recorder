@@ -12,6 +12,8 @@ namespace Recorder.Tests;
 // fixtures mirror the JSON the bridge now writes for each kind. Protocol 0.19
 // adds the registration form a listener entered Blink with and a record for a
 // callback Blink replaced in place, so those shapes are covered here too.
+// Protocol 0.21 adds the JavaScript world a listener callback belongs to, which
+// a listener record carries as a world object and repeats in its context.
 public sealed class BrowserEventTargetPayloadIngestTests
 {
     private const string ContextJson = """
@@ -330,6 +332,143 @@ public sealed class BrowserEventTargetPayloadIngestTests
         Assert.Null(location.Column);
         Assert.Null(location.FunctionName);
         Assert.Equal(81, location.Line);
+    }
+
+    [Fact]
+    public void AcceptsTheIsolatedWorldAListenerWasRegisteredFrom()
+    {
+        var payload = Accept<BrowserListenerPayload>(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            $$"""
+            {
+              "context": {
+                "browserInstanceId": "browser-instance-1",
+                "processId": 3440,
+                "frameId": "frame-4",
+                "documentId": "dom-document-19",
+                "documentToken": "F8543F87A3AF6713E6DEADA760E49A6C",
+                "executionWorldId": "world-13"
+              },
+              "listenerId": "listener-11",
+              "eventName": "click",
+              "registrationKind": "add-event-listener",
+              "target": {{NodeTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": null,
+              "world": {
+                "kind": "isolated",
+                "blinkWorldId": 13,
+                "name": "recorder probe",
+                "stableId": "probe-world"
+              }
+            }
+            """);
+
+        Assert.Equal("world-13", payload.Context.ExecutionWorldId);
+        var world = Assert.IsType<BrowserExecutionWorld>(payload.World);
+        Assert.Equal(BrowserExecutionWorldKinds.Isolated, world.Kind);
+        Assert.Equal(13, world.BlinkWorldId);
+        Assert.Equal("recorder probe", world.Name);
+        Assert.Equal("probe-world", world.StableId);
+    }
+
+    // A main-world registration has neither a human readable name nor a stable
+    // identifier, because Blink only holds those for worlds other than the main
+    // world. A listener Blink installed itself belongs to no world at all, which
+    // the bridge reports as a null world rather than as the main world.
+    [Fact]
+    public void AcceptsAMainWorldAndAnUnobservedWorldAsWritten()
+    {
+        var main = Accept<BrowserListenerPayload>(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            $$"""
+            {
+              "context": {
+                "browserInstanceId": "browser-instance-1",
+                "processId": 3440,
+                "frameId": "frame-4",
+                "documentId": "dom-document-19",
+                "documentToken": "F8543F87A3AF6713E6DEADA760E49A6C",
+                "executionWorldId": "world-0"
+              },
+              "listenerId": "listener-12",
+              "eventName": "click",
+              "registrationKind": "event-handler-property",
+              "target": {{NodeTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": null,
+              "world": {
+                "kind": "main",
+                "blinkWorldId": 0,
+                "name": null,
+                "stableId": null
+              }
+            }
+            """);
+
+        var mainWorld = Assert.IsType<BrowserExecutionWorld>(main.World);
+        Assert.Equal(BrowserExecutionWorldKinds.Main, mainWorld.Kind);
+        Assert.Equal(0, mainWorld.BlinkWorldId);
+        Assert.Null(mainWorld.Name);
+        Assert.Null(mainWorld.StableId);
+
+        var unobserved = Accept<BrowserListenerPayload>(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRemoved,
+            $$"""
+            {
+              "context": {{ContextJson}},
+              "listenerId": "listener-12",
+              "eventName": "click",
+              "registrationKind": "add-event-listener",
+              "target": {{NodeTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": null,
+              "world": null
+            }
+            """);
+
+        Assert.Null(unobserved.World);
+        Assert.Null(unobserved.Context.ExecutionWorldId);
+    }
+
+    [Fact]
+    public void RejectsAWorldFieldNoContractMaps()
+    {
+        var payload = $$"""
+            {
+              "context": {{ContextJson}},
+              "listenerId": "listener-13",
+              "eventName": "click",
+              "registrationKind": "add-event-listener",
+              "target": {{NodeTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": null,
+              "world": {
+                "kind": "isolated",
+                "blinkWorldId": 13,
+                "worldOrigin": "https://example.test",
+                "name": null,
+                "stableId": null
+              }
+            }
+            """;
+
+        using var document = JsonDocument.Parse(payload);
+        Assert.ThrowsAny<JsonException>(() => BrowserProtocol.ValidateEvidencePayload(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            document.RootElement));
     }
 
     [Fact]

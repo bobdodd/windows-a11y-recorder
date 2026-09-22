@@ -177,9 +177,8 @@ the call site, and a registration reports `add-event-listener`,
 an existing attribute registration replaces that registration's callback in
 place, and Blink reports neither an addition nor a removal for it, so a
 `listener-callback-replaced` record carries the unchanged listener identity and
-the form of the callback Blink now holds. Worker global scopes, isolated-world
-identity, and dispatches whose original target is never a Node remain
-outstanding.
+the form of the callback Blink now holds. Worker global scopes and dispatches
+whose original target is never a Node remain outstanding.
 
 Protocol 0.20 reports where each listener registration,
 removal, and callback replacement came from. The location is captured from
@@ -191,7 +190,18 @@ reported as null rather than as a zero, and a record with nothing observed in
 any field reports a null location. A registration Blink creates while parsing an
 inline attribute reports the parser position Blink held rather than the position
 of the attribute text. The recorder does not read script text, so it reports no source
-hash. Isolated-world identity, worker global scopes, and dispatches whose
+hash.
+
+Protocol 0.21 reports the JavaScript world each listener callback belongs to.
+Blink holds the world on the callback object, so the world reported is the world
+the registration was made from rather than whichever world happened to be
+current when the record was written. Every `browser.listener` record carries a
+`world` with the world kind, Blink's numeric world identifier, and the human
+readable name and stable identifier Blink holds for a world other than the main
+world, and the same world is repeated as `executionWorldId` on the record's
+context so records from one world can be grouped. A listener Blink installed
+itself is not script based and belongs to no world, which is reported as a null
+world rather than as the main world. Worker global scopes and dispatches whose
 original target is never a Node remain outstanding.
 
 ## Project goals
