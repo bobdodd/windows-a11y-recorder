@@ -2167,11 +2167,30 @@ if ($isolatedWorldListener.context.documentId -ne $listener.context.documentId) 
 }
 # Nothing outside the listener channel observes a world in this protocol, so a
 # world identity on another channel would be a claim the recorder cannot support.
+# Not every channel carries a context, and strict mode treats reading an absent
+# property as an error, so each step of the path is checked before it is read.
+$hasExecutionWorldIdentity = {
+    param($Record)
+
+    $payload = $Record.PSObject.Properties["payload"]
+    if (-not $payload -or $null -eq $payload.Value) {
+        return $false
+    }
+    $context = $payload.Value.PSObject.Properties["context"]
+    if (-not $context -or $null -eq $context.Value) {
+        return $false
+    }
+    $worldId = $context.Value.PSObject.Properties["executionWorldId"]
+    if (-not $worldId) {
+        return $false
+    }
+    $null -ne $worldId.Value
+}
 $nonListenerWorldRecords = @(
     $records |
         Where-Object {
             $_.channel -ne "browser.listener" -and
-            $null -ne $_.payload.context.executionWorldId
+            (& $hasExecutionWorldIdentity $_)
         }
 )
 if ($nonListenerWorldRecords.Count -gt 0) {
