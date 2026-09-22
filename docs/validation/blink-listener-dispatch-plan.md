@@ -317,9 +317,24 @@ extension or client that owns an isolated world are not recorded, only the
 identity Blink holds for it. A stable identifier is stable within a Blink
 installation rather than across builds. Nothing here records which world a
 dispatch or an invocation ran in, only the world each listener registration,
-removal, and callback replacement was made from. Validating an isolated-world
-registration requires a world other than the main world to exist during the run,
-which the current fixture does not create.
+removal, and callback replacement was made from.
+
+A page's own script always runs in the main world, so a fixture cannot register a
+listener from another world by itself. The validation script therefore creates a
+world through the DevTools `Page.createIsolatedWorld` command on the fixture's
+main frame and evaluates a registration in it on `#isolated-world-target`, an
+element the document's own script never touches. Blink creates a DevTools world
+as an inspector isolated world, so that registration is the recorded
+`inspector-isolated` case, and the world's human readable name is the name the
+command asked for. The script also reads the marker the isolated script set back
+from the main world and requires it to be undefined, so a registration is only
+accepted as isolated when the two worlds were actually separate.
+
+What that validation does not establish: an isolated world an embedder or an
+extension creates, which Blink classifies as `isolated` rather than
+`inspector-isolated`, is still not exercised, and neither is a worker or worklet
+world or a shadow realm. A DevTools world has no stable identifier, so the
+recorded `stableId` is null in this run and the field is unexercised.
 
 ## Component boundary
 
@@ -427,7 +442,9 @@ Run the complete validation from a standard, non-elevated PowerShell window:
 
 The script tests and applies the integration, normalizes copied-file
 timestamps, builds Chromium, runs the managed test suite, captures the
-deterministic fixture, requires a valid archive, and runs
+deterministic fixture, creates an isolated world in the fixture frame over the
+DevTools endpoint and registers a listener in it, requires a valid archive, and
+runs
 `Verify-BlinkEvidence.ps1`. Its final output includes the session path and
 archive-validation counts. Preserve that output in the dated validation
 record.

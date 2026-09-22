@@ -1461,11 +1461,42 @@ class IntegrateTests(unittest.TestCase):
         ready_title = "Blink listener and dispatch fixture ready"
 
         self.assertIn(f'document.title = "{ready_title}"', fixture)
-        self.assertIn(f'$_.title -eq "{ready_title}"', runner)
+        self.assertIn(f'"{ready_title}"', runner)
+        self.assertIn('(Get-CdpProperty $_ "title") -eq $ReadyTitle', runner)
         self.assertLess(
             fixture.index('document.addEventListener("visibilitychange"'),
             fixture.index(f'document.title = "{ready_title}"'),
         )
+
+    def test_validation_registers_an_isolated_world_listener(self):
+        root = Path(__file__).parent.parent
+        fixture = (
+            root / "tests" / "fixtures" / "blink-listener-dispatch.html"
+        ).read_text(encoding="utf-8")
+        runner = (
+            root / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+        verifier = (
+            root / "scripts" / "Verify-BlinkEvidence.ps1"
+        ).read_text(encoding="utf-8")
+        world_name = "A11yRecorderValidationWorld"
+
+        # The registration target must exist in the fixture but must never be
+        # touched by the fixture's own script, or the recorded registration
+        # would not be the isolated world's alone.
+        self.assertIn('id="isolated-world-target"', fixture)
+        self.assertGreater(
+            fixture.index('id="isolated-world-target"'),
+            fixture.rindex("</script>"),
+        )
+
+        self.assertIn('"Page.createIsolatedWorld"', runner)
+        self.assertIn(f'"{world_name}"', runner)
+        self.assertIn("isolated-world-target", runner)
+        self.assertIn("__a11yRecorderIsolatedMarker", runner)
+
+        self.assertIn(f'$isolatedWorld.name -ne "{world_name}"', verifier)
+        self.assertIn('-ne "inspector-isolated"', verifier)
 
     def test_patches_scheduler_decision_boundary_idempotently(self):
         with tempfile.TemporaryDirectory() as directory:

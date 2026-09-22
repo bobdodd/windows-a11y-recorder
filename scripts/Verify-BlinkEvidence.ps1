@@ -2005,8 +2005,10 @@ if ($removalLocation.line -eq $listenerLocation.line) {
 # holds that world on the callback. A listener Blink installed itself is not
 # script based and belongs to no world, so it reports a null world and a null
 # execution world identity rather than claiming the main world. The fixture's own
-# registrations are made by page script, so each of them reports the main world,
-# which Blink numbers 0 and holds no name or stable identifier for.
+# script runs in the main world, which Blink numbers 0 and holds no name or
+# stable identifier for, and the validation script registers one listener from a
+# world DevTools created, which is the only registration here that can report a
+# world other than the main world.
 $listenerRecords = @(
     $records |
         Where-Object { $_.channel -eq "browser.listener" }
@@ -2030,25 +2032,6 @@ foreach ($listenerRecord in $listenerRecords) {
         }
         continue
     }
-    if ($world.kind -ne "main") {
-        throw (
-            "A $($listenerRecord.eventType) record reported the world kind " +
-            "$($world.kind) rather than main, which the fixture's page script " +
-            "cannot produce."
-        )
-    }
-    if ($world.blinkWorldId -ne 0) {
-        throw (
-            "A main-world listener record reported Blink world " +
-            "$($world.blinkWorldId) rather than 0."
-        )
-    }
-    if ($null -ne $world.name -or $null -ne $world.stableId) {
-        throw (
-            "A main-world listener record reported a name or stable " +
-            "identifier Blink holds only for other worlds."
-        )
-    }
     $expectedWorldId = "world-$($world.blinkWorldId)"
     if ($recordedWorldId -ne $expectedWorldId) {
         throw (
@@ -2057,10 +2040,40 @@ foreach ($listenerRecord in $listenerRecords) {
             "$expectedWorldId."
         )
     }
+    if ($world.kind -eq "main") {
+        if ($world.blinkWorldId -ne 0) {
+            throw (
+                "A main-world listener record reported Blink world " +
+                "$($world.blinkWorldId) rather than 0."
+            )
+        }
+        if ($null -ne $world.name -or $null -ne $world.stableId) {
+            throw (
+                "A main-world listener record reported a name or stable " +
+                "identifier Blink holds only for other worlds."
+            )
+        }
+        continue
+    }
+    # Only the registration the validation script makes over DevTools comes from
+    # a world other than the main world, and DevTools worlds are the
+    # inspector's.
+    if ($world.kind -ne "inspector-isolated") {
+        throw (
+            "A $($listenerRecord.eventType) record reported the world kind " +
+            "$($world.kind), which nothing in this validation creates."
+        )
+    }
+    if ($listenerRecord.payload.target.elementId -ne "isolated-world-target") {
+        throw (
+            "A non-main-world listener was recorded on " +
+            "$($listenerRecord.payload.target.elementId) rather than on the " +
+            "element the isolated-world script registers on."
+        )
+    }
 }
 # The fixture's own registrations are made by page script, so each of the
-# registrations the assertions above select must report a world rather than
-# leaving it unobserved.
+# registrations the assertions above select must report the main world.
 foreach ($scriptListener in @(
         $listener,
         $removal,
@@ -2074,6 +2087,69 @@ foreach ($scriptListener in @(
             "$($scriptListener.target.kind) reported no world."
         )
     }
+    if ($scriptListener.world.kind -ne "main") {
+        throw (
+            "A fixture registration for $($scriptListener.eventName) reported " +
+            "the world kind $($scriptListener.world.kind) rather than main."
+        )
+    }
+}
+# The validation script creates a world over DevTools and registers one click
+# listener in it on an element no document script touches, so exactly one
+# registration must report a world other than the main world. Blink creates a
+# DevTools world as an inspector isolated world and sets its human readable name
+# to the name the command asked for, and sets no stable identifier for it.
+$isolatedWorldRegistrations = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -eq "listener-registered" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.target.elementId -eq "isolated-world-target"
+        }
+)
+if ($isolatedWorldRegistrations.Count -ne 1) {
+    throw (
+        "$($isolatedWorldRegistrations.Count) isolated-world registrations " +
+        "were recorded rather than the one the validation script makes."
+    )
+}
+$isolatedWorldListener = $isolatedWorldRegistrations[0].payload
+$isolatedWorld = $isolatedWorldListener.world
+if ($null -eq $isolatedWorld) {
+    throw "The isolated-world registration reported no world."
+}
+if ($isolatedWorld.kind -ne "inspector-isolated") {
+    throw (
+        "The isolated-world registration reported the world kind " +
+        "$($isolatedWorld.kind) rather than inspector-isolated."
+    )
+}
+if ($isolatedWorld.blinkWorldId -le 0) {
+    throw (
+        "The isolated-world registration reported Blink world " +
+        "$($isolatedWorld.blinkWorldId), which is the main world or no world."
+    )
+}
+if ($isolatedWorld.name -ne "A11yRecorderValidationWorld") {
+    throw (
+        "The isolated world reported the name $($isolatedWorld.name) rather " +
+        "than the name the validation script asked DevTools for."
+    )
+}
+if ($isolatedWorldListener.context.executionWorldId -ne
+        "world-$($isolatedWorld.blinkWorldId)") {
+    throw (
+        "The isolated-world registration reported the execution world " +
+        "identity $($isolatedWorldListener.context.executionWorldId) rather " +
+        "than world-$($isolatedWorld.blinkWorldId)."
+    )
+}
+if ($isolatedWorldListener.context.documentId -ne $listener.context.documentId) {
+    throw (
+        "The isolated-world registration was recorded against a different " +
+        "document than the fixture's main-world registrations."
+    )
 }
 # Nothing outside the listener channel observes a world in this protocol, so a
 # world identity on another channel would be a claim the recorder cannot support.
@@ -2473,6 +2549,13 @@ if (
     ExternalScriptLocationScriptId = $externalScriptLocation.scriptId
     ListenerChannelRecords = $listenerRecords.Count
     ListenerWorldRecords = $listenerWorldRecords.Count
+    IsolatedWorldListenerId = $isolatedWorldListener.listenerId
+    IsolatedWorldKind = $isolatedWorld.kind
+    IsolatedWorldBlinkId = $isolatedWorld.blinkWorldId
+    IsolatedWorldName = $isolatedWorld.name
+    IsolatedWorldStableId = $isolatedWorld.stableId
+    IsolatedWorldExecutionWorldId =
+        $isolatedWorldListener.context.executionWorldId
     RegistrationWorldKind = $listener.world.kind
     RegistrationBlinkWorldId = $listener.world.blinkWorldId
     RegistrationExecutionWorldId = $listener.context.executionWorldId

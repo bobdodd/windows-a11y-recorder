@@ -209,5 +209,11 @@
       disclosure.setAttribute("data-long-value", "A".repeat(5000));
     }, 250);
   </script>
+  <!-- The isolated-world registration target is declared after the document's
+       own script so that adding it does not move any line the recorded source
+       locations above refer to. Nothing in the document registers a listener on
+       it, so a listener on it can only have come from the isolated world the
+       validation script creates. -->
+  <div id="isolated-world-target">Isolated-world registration target</div>
 </body>
 </html>

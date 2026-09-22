@@ -50,7 +50,11 @@ from the product version.
   holds a name and a stable identifier only for a world other than the main
   world, so both are null for a main-world registration. A world type the
   recorder does not name is reported as `other`, and a record whose world and
-  context disagree fails archive validation.
+  context disagree fails archive validation. A page's own script always runs in
+  the main world, so validation now creates a world over the DevTools endpoint
+  and registers a listener in it, and the evidence verifier requires that
+  registration to report an inspector isolated world whose identity its context
+  repeats.
 - Recorded how each listener entered Blink's listener map, as protocol 0.19.
 - Recorded where every listener registration, removal, and callback
   replacement came from, as protocol 0.20. Each `browser.listener` record

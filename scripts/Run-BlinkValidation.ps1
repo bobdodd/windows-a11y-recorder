@@ -95,6 +95,366 @@ function Get-PythonCommand {
     )
 }
 
+# Reads a property that a DevTools reply may omit. Strict mode treats reading an
+# absent property as an error, so every optional field is read through here.
+function Get-CdpProperty {
+    param(
+        $Value,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Name
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value.PSObject.Properties.Name -notcontains $Name) {
+        return $null
+    }
+    $Value.$Name
+}
+
+# Windows PowerShell 5.1 hands back a faulted task's failure as a
+# MethodInvocationException wrapping an AggregateException, which reports the
+# wrapper rather than the cause. This unwraps the chain so a failed DevTools
+# operation names what actually failed.
+function Wait-CdpTask {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Task,
+
+        [int] $TimeoutMilliseconds = 15000,
+
+        [string] $Description = "A DevTools operation"
+    )
+
+    $completed = $false
+    try {
+        $completed = $Task.Wait($TimeoutMilliseconds)
+    }
+    catch {
+        $chain = @()
+        $current = $_.Exception
+        while ($current) {
+            if ($current -is [System.AggregateException]) {
+                foreach ($inner in $current.Flatten().InnerExceptions) {
+                    $chain += (
+                        "{0}: {1}" -f $inner.GetType().FullName, $inner.Message
+                    )
+                }
+                $current = $current.Flatten().InnerExceptions[0].InnerException
+                continue
+            }
+            $chain += ("{0}: {1}" -f $current.GetType().FullName, $current.Message)
+            $current = $current.InnerException
+        }
+        throw ("$Description failed. " + ($chain -join " <- "))
+    }
+    if (-not $completed) {
+        throw "$Description timed out after $TimeoutMilliseconds ms."
+    }
+    $Task
+}
+
+# Windows PowerShell 5.1 returns a JSON array from one HTTP response as a single
+# object, so wrapping that response in an array can nest an Object[] inside a
+# one-item array. Filtering the nested value reads properties by member
+# enumeration, which joins every target's value into one string instead of
+# returning one target. Flattening one level before any filtering runs is what
+# keeps a filter operating on individual targets.
+function Expand-CdpTargets {
+    param($Response)
+
+    $flat = New-Object System.Collections.ArrayList
+    foreach ($chunk in @($Response)) {
+        if ($null -eq $chunk) {
+            continue
+        }
+        if ($chunk -isnot [string] -and
+            $chunk -is [System.Collections.IEnumerable]) {
+            foreach ($item in $chunk) {
+                [void]$flat.Add($item)
+            }
+        }
+        else {
+            [void]$flat.Add($chunk)
+        }
+    }
+    $flat.ToArray()
+}
+
+function Get-CdpTargetList {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase
+    )
+
+    $response = Invoke-WebRequest `
+        -Uri "$DevToolsBase/json/list" `
+        -UseBasicParsing `
+        -TimeoutSec 2
+    Expand-CdpTargets (ConvertFrom-Json $response.Content)
+}
+
+# Selects the fixture page target. A target is usable only when its own URL and
+# WebSocket URL are scalar strings, which rejects a collection that looks like a
+# single target under member access. The title gate is what the readiness poll
+# relies on, and matching the URL exactly keeps a browser-interface page such as
+# chrome://omnibox-popup.top-chrome from being selected.
+function Select-CdpFixtureTarget {
+    param(
+        $Targets,
+
+        [Parameter(Mandatory = $true)]
+        [string] $FixtureUri,
+
+        [Parameter(Mandatory = $true)]
+        [string] $ReadyTitle
+    )
+
+    @(
+        $Targets |
+            Where-Object {
+                (Get-CdpProperty $_ "type") -eq "page" -and
+                (Get-CdpProperty $_ "url") -is [string] -and
+                (Get-CdpProperty $_ "title") -eq $ReadyTitle -and
+                (Get-CdpProperty $_ "webSocketDebuggerUrl") -is [string] -and
+                $_.webSocketDebuggerUrl.Length -gt 0 -and
+                $_.url.StartsWith($FixtureUri)
+            }
+    )
+}
+
+function New-CdpSession {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $SocketUrl
+    )
+
+    if ($SocketUrl -notmatch '^wss?://[^\s]+$') {
+        throw (
+            "Unusable DevTools WebSocket URL '$SocketUrl'. More than one " +
+            "target was probably selected."
+        )
+    }
+
+    $socket = New-Object System.Net.WebSockets.ClientWebSocket
+    $source = New-Object System.Threading.CancellationTokenSource
+    $null = Wait-CdpTask `
+        $socket.ConnectAsync([Uri]$SocketUrl, $source.Token) `
+        15000 `
+        "Connecting to the fixture's DevTools endpoint"
+    if ($socket.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
+        throw "The DevTools socket state is $($socket.State) rather than Open."
+    }
+
+    [pscustomobject]@{
+        Socket = $socket
+        Source = $source
+        NextId = 1
+    }
+}
+
+function Send-CdpText {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Session,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Text
+    )
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList @(, $bytes)
+    $null = Wait-CdpTask `
+        $Session.Socket.SendAsync(
+            $segment,
+            [System.Net.WebSockets.WebSocketMessageType]::Text,
+            $true,
+            $Session.Source.Token) `
+        15000 `
+        "Sending a DevTools command"
+}
+
+function Receive-CdpText {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Session
+    )
+
+    $buffer = New-Object byte[] 65536
+    $builder = New-Object System.Text.StringBuilder
+    while ($true) {
+        $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList @(
+            $buffer, 0, $buffer.Length
+        )
+        $receive = Wait-CdpTask `
+            $Session.Socket.ReceiveAsync($segment, $Session.Source.Token) `
+            15000 `
+            "Reading a DevTools message"
+        $result = $receive.Result
+        if ($result.MessageType -eq
+            [System.Net.WebSockets.WebSocketMessageType]::Close) {
+            throw (
+                "The browser closed the DevTools socket: " +
+                "$($Session.Socket.CloseStatus) " +
+                "$($Session.Socket.CloseStatusDescription)"
+            )
+        }
+        [void]$builder.Append(
+            [System.Text.Encoding]::UTF8.GetString($buffer, 0, $result.Count)
+        )
+        if ($result.EndOfMessage) {
+            break
+        }
+    }
+    $builder.ToString()
+}
+
+# Sends one command and returns its reply. DevTools interleaves events with
+# replies on the same socket, so messages are read until the reply carrying this
+# command's identifier arrives.
+function Invoke-CdpCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Session,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Method,
+
+        [hashtable] $Parameters
+    )
+
+    $id = $Session.NextId
+    $Session.NextId = $id + 1
+    $command = @{ id = $id; method = $Method }
+    if ($Parameters) {
+        $command.params = $Parameters
+    }
+    Send-CdpText $Session (ConvertTo-Json $command -Depth 10 -Compress)
+
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        $message = ConvertFrom-Json (Receive-CdpText $Session)
+        if ((Get-CdpProperty $message "id") -ne $id) {
+            continue
+        }
+        $failure = Get-CdpProperty $message "error"
+        if ($failure) {
+            throw (
+                "$Method failed: $($failure.message) (code $($failure.code))"
+            )
+        }
+        return (Get-CdpProperty $message "result")
+    }
+
+    throw "No DevTools reply to $Method arrived."
+}
+
+function Close-CdpSession {
+    param($Session)
+
+    if (-not $Session) {
+        return
+    }
+    try {
+        if ($Session.Socket.State -eq
+            [System.Net.WebSockets.WebSocketState]::Open) {
+            $null = Wait-CdpTask `
+                $Session.Socket.CloseAsync(
+                    [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
+                    "done",
+                    $Session.Source.Token) `
+                5000 `
+                "Closing the DevTools socket"
+        }
+    }
+    catch {
+        Write-Host "Closing the DevTools socket failed: $($_.Exception.Message)"
+    }
+    finally {
+        $Session.Socket.Dispose()
+        $Session.Source.Dispose()
+    }
+}
+
+# Registers a listener in an isolated world so the capture contains a
+# registration the page's own script cannot make. The world is created in the
+# fixture's main frame, the listener is registered on an element no document
+# script touches, and the marker read from the main world afterwards is what
+# shows the two worlds were separate rather than one world under another name.
+function Add-IsolatedWorldListener {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Session,
+
+        [Parameter(Mandatory = $true)]
+        [string] $WorldName
+    )
+
+    $null = Invoke-CdpCommand $Session "Page.enable" $null
+    $null = Invoke-CdpCommand $Session "Runtime.enable" $null
+    $tree = Invoke-CdpCommand $Session "Page.getFrameTree" $null
+    $frameId = [string]$tree.frameTree.frame.id
+    if ([string]::IsNullOrWhiteSpace($frameId)) {
+        throw "The fixture frame tree reported no main frame identifier."
+    }
+
+    $world = Invoke-CdpCommand $Session "Page.createIsolatedWorld" @{
+        frameId = $frameId
+        worldName = $WorldName
+        grantUniversalAccess = $false
+    }
+    $contextId = Get-CdpProperty $world "executionContextId"
+    if (-not $contextId) {
+        throw "Creating the isolated world returned no execution context."
+    }
+
+    $registration = Invoke-CdpCommand $Session "Runtime.evaluate" @{
+        contextId = $contextId
+        returnByValue = $true
+        expression = @'
+(function () {
+  window.__a11yRecorderIsolatedMarker = "isolated";
+  var target = document.getElementById("isolated-world-target");
+  if (!target) {
+    return "no-target";
+  }
+  target.addEventListener("click", function () {}, false);
+  return "registered";
+})()
+'@
+    }
+    $failure = Get-CdpProperty $registration "exceptionDetails"
+    if ($failure) {
+        throw "The isolated-world registration failed: $($failure.text)"
+    }
+    $outcome = [string](Get-CdpProperty $registration.result "value")
+    if ($outcome -ne "registered") {
+        throw (
+            "The isolated-world script reported '$outcome' rather than a " +
+            "completed registration."
+        )
+    }
+
+    $mainWorld = Invoke-CdpCommand $Session "Runtime.evaluate" @{
+        returnByValue = $true
+        expression = "String(window.__a11yRecorderIsolatedMarker)"
+    }
+    $marker = [string](Get-CdpProperty $mainWorld.result "value")
+    if ($marker -ne "undefined") {
+        throw (
+            "The main world can see the isolated world's marker, so the " +
+            "registration was not made from a separate world."
+        )
+    }
+
+    [pscustomobject]@{
+        FrameId = $frameId
+        ExecutionContextId = $contextId
+    }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if ($principal.IsInRole(
@@ -351,23 +711,30 @@ try {
         if ($captureJob.State -eq "Failed") {
             break
         }
+        # Any failure here means the debugging endpoint is not serving a target
+        # list yet, which is expected until Chromium has started listening.
+        $candidates = @()
         try {
-            $targets = @(
-                Invoke-RestMethod `
-                    -Uri "$devToolsBase/json/list" `
-                    -TimeoutSec 1
+            $candidates = @(
+                Select-CdpFixtureTarget `
+                    (Get-CdpTargetList $devToolsBase) `
+                    $fixtureUri `
+                    "Blink listener and dispatch fixture ready"
             )
-            $fixtureTarget = $targets |
-                Where-Object {
-                    $_.url.StartsWith($fixtureUri) -and
-                    $_.title -eq "Blink listener and dispatch fixture ready"
-                } |
-                Select-Object -First 1
-            if ($fixtureTarget) {
-                break
-            }
         }
         catch {
+            $candidates = @()
+        }
+        if ($candidates.Count -gt 1) {
+            Stop-Job $captureJob -ErrorAction SilentlyContinue
+            throw (
+                "$($candidates.Count) DevTools targets match the fixture, so " +
+                "the fixture page cannot be identified."
+            )
+        }
+        if ($candidates.Count -eq 1) {
+            $fixtureTarget = $candidates[0]
+            break
         }
         Start-Sleep -Milliseconds 100
     }
@@ -377,6 +744,30 @@ try {
             "The lifecycle fixture did not report readiness in the DevTools " +
             "target list."
         )
+    }
+
+    # A registration made from an isolated world is the only way this fixture
+    # can produce a listener record for a world other than the main world,
+    # because a page's own script always runs in the main world. The world is
+    # created over the same debugging endpoint the readiness poll used.
+    $isolatedWorldSession = $null
+    try {
+        $isolatedWorldSession = New-CdpSession $fixtureTarget.webSocketDebuggerUrl
+        $isolatedWorld = Add-IsolatedWorldListener `
+            $isolatedWorldSession `
+            "A11yRecorderValidationWorld"
+        Write-Host (
+            "Registered an isolated-world listener in frame " +
+            "$($isolatedWorld.FrameId), execution context " +
+            "$($isolatedWorld.ExecutionContextId)."
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
+    finally {
+        Close-CdpSession $isolatedWorldSession
     }
 
     $backgroundTarget = Invoke-RestMethod `
