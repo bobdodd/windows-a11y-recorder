@@ -235,7 +235,7 @@ public sealed class SessionArchiveValidatorTests
             pageId = "page-1",
             frameId = "frame-1",
             documentId = "document-1",
-            executionWorldId = "main",
+            executionWorldId = "world-0",
             documentToken = (string?)null
         };
         var target = new
@@ -274,7 +274,8 @@ public sealed class SessionArchiveValidatorTests
                 capture = false,
                 passive = false,
                 once = false,
-                location
+                location,
+                world = MainWorld()
             });
         var directory = await CreateArchiveAsync([record]);
 
@@ -372,7 +373,7 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null,
+            executionWorldId = "world-0",
             documentToken = "document-token-8"
         };
         var window = new
@@ -402,7 +403,8 @@ public sealed class SessionArchiveValidatorTests
                 capture = false,
                 passive = false,
                 once = false,
-                location = (object?)null
+                location = (object?)null,
+                world = MainWorld()
             });
         var directory = await CreateArchiveAsync([record]);
 
@@ -1646,7 +1648,7 @@ public sealed class SessionArchiveValidatorTests
             pageId = (string?)null,
             frameId = (string?)null,
             documentId = "dom-document-8",
-            executionWorldId = (string?)null,
+            executionWorldId = "world-0",
             documentToken = "document-token-8"
         };
         var target = new
@@ -1671,7 +1673,8 @@ public sealed class SessionArchiveValidatorTests
             capture = false,
             passive = false,
             once = false,
-            location = (object?)null
+            location = (object?)null,
+            world = MainWorld()
         };
 
         var records = new[]
@@ -1989,6 +1992,20 @@ public sealed class SessionArchiveValidatorTests
         }
     }
 
+    // A registration made by a page's own script belongs to the main world,
+    // which Blink numbers 0 and holds no human readable name or stable
+    // identifier for. Every listener record reports the world its callback
+    // belongs to, so the fixtures below name the main world rather than
+    // leaving the world unreported.
+    private static object MainWorld() =>
+        new
+        {
+            kind = "main",
+            blinkWorldId = 0,
+            name = (string?)null,
+            stableId = (string?)null
+        };
+
     // Builds one listener registration whose context world identity, world kind
     // and Blink world identifier the caller chooses, so a test can state the
     // agreement or the contradiction it is about and nothing else.
@@ -2067,9 +2084,22 @@ public sealed class SessionArchiveValidatorTests
             elementId = "pointer-only",
             classes = Array.Empty<string>()
         };
+        var listenerContext = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = "dom-document-8",
+            executionWorldId = "world-0",
+            documentToken = "document-token-8"
+        };
         var listener = new
         {
-            context,
+            context = listenerContext,
             listenerId = "listener-1",
             eventName = "click",
             registrationKind = "add-event-listener",
@@ -2077,7 +2107,8 @@ public sealed class SessionArchiveValidatorTests
             capture = false,
             passive = false,
             once = false,
-            location = (object?)null
+            location = (object?)null,
+            world = MainWorld()
         };
         object Dispatch(
             string phase,
