@@ -54,7 +54,10 @@ from the product version.
   the main world, so validation now creates a world over the DevTools endpoint
   and registers a listener in it, and the evidence verifier requires that
   registration to report an inspector isolated world whose identity its context
-  repeats.
+  repeats. Validation recorded that world with the identifier 536870914, far
+  above the main world's 0 and above the range Blink uses for embedder isolated
+  worlds, so a consumer must treat a world identifier as an opaque number for
+  grouping rather than as a small index.
 - Recorded how each listener entered Blink's listener map, as protocol 0.19.
 - Recorded where every listener registration, removal, and callback
   replacement came from, as protocol 0.20. Each `browser.listener` record

@@ -968,3 +968,65 @@ observable location was not exercised, because every registration in the fixture
 had either a script stack or a parser position. The 448 recorded transitions with
 200 uncovered are the same population described under protocol 0.16 and are not a
 result of this slice.
+
+## JavaScript world validation result
+
+Reference platform, September 22, 2026, at repository revision `d1e713f`.
+Protocol 0.21. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, with a 20-second
+capture.
+
+The run passed after three harness failures that were all in the validation
+scripts and fixtures rather than in the recorder: four managed archive fixtures
+predated the required `world` property, the verifier read a variable that is
+bound further down the script, and the verifier read a context property on
+channels that carry no context, which strict mode rejects. The passing run
+reported 50 integration tests, 109 managed tests, a valid session archive,
+30,051 events and 92 artifacts validated, no network-service crashes, and exit
+code 0.
+
+Observed for this slice:
+
+| Field | Value |
+| --- | --- |
+| `ListenerChannelRecords` | 203 |
+| `ListenerWorldRecords` | 179 |
+| `IsolatedWorldListenerId` | `listener-22` |
+| `IsolatedWorldKind` | `inspector-isolated` |
+| `IsolatedWorldBlinkId` | 536870914 |
+| `IsolatedWorldName` | `A11yRecorderValidationWorld` |
+| `IsolatedWorldStableId` | null |
+| `IsolatedWorldExecutionWorldId` | `world-536870914` |
+| `RegistrationWorldKind` | `main` |
+| `RegistrationBlinkWorldId` | 0 |
+| `RegistrationExecutionWorldId` | `world-0` |
+
+What this establishes: a registration made outside the main world is recorded
+with a world identity that distinguishes it from the page's own registrations.
+The world created through `Page.createIsolatedWorld` is recorded as
+`inspector-isolated` rather than `isolated`, which matches Blink creating it
+through `EnsureInspectorIsolatedWorldWithName`, and it carries the requested
+human readable name through to the record. Its numeric identifier is far above
+the main world's 0 and above the range Blink uses for embedder isolated worlds,
+so a world identifier must be treated as an opaque number for grouping rather
+than a small index. The identifier appears in `executionWorldId` in the
+`world-<blinkWorldId>` form, so listener records can be grouped by world without
+reading the payload. Every registration, removal, and callback replacement made
+by the page's own script reported the main world with identifier 0 and null name
+and stable identifier, and no record outside the listener channel reported a
+world identity. The isolated world's listener was recorded against the same
+document as the page's registrations, so a world identity does not fragment
+document correlation. The main world could not read the marker the isolated
+world set, which confirms the registration was made from a genuinely separate
+world rather than from the main world under a different name.
+
+What this does not establish: 24 of the 203 listener channel records reported no
+world, which is the expected reporting for records that do not observe a
+callback world, but which world each of those records would have belonged to is
+not evidence this run produces. A stable identifier was null in every record, so
+the stable identifier path is still unexercised. Embedder and extension
+`isolated` worlds, worker and worklet worlds, and shadow realms remain
+unexercised, as does a world Blink classifies as a type the recorder does not
+name. Nothing here records the world a dispatch or an invocation ran in. The
+world name is read from the inspector's own naming of the world, so a world
+created without a name would report a null name and is not covered.
