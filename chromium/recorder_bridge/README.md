@@ -240,3 +240,14 @@ token. The clock record contains the mapping identifier, Chromium monotonic
 frequency, and estimated uncertainty in nanoseconds. A failed authentication or
 handshake produces `browser-connection-rejected` instead of either successful
 lifecycle record.
+
+Protocol 0.22 reports evidence the bridge could not write. `SendBlinkEvidence`
+holds a per-channel count of records whose write failed, guarded by its own lock
+because evidence is written from more than one thread, and reports that count on
+the same channel as a `collector-omission` record immediately before its next
+successful write. The record carries the process context, the reason
+`browser-evidence-write-failed`, and the number of records lost. The diagnostic
+line in the bridge log is kept, because a process that never writes again cannot
+report its own loss, and that log is then the only trace. A failure to write the
+omission record returns the held count unchanged, since the omission is not
+itself captured evidence.

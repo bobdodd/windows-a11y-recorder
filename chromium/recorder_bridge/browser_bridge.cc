@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <array>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -1037,6 +1038,64 @@ base::DictValue CreateTimerPayload(
   return payload;
 }
 
+inline constexpr char kOmissionEventType[] = "collector-omission";
+inline constexpr char kEvidenceWriteFailedOmissionReason[] =
+    "browser-evidence-write-failed";
+
+// A record whose write failed never reaches the archive, and a diagnostic line
+// in the bridge log is not evidence a reader of the archive can see. The count
+// of lost records is held per channel and stated by an omission record on that
+// same channel as soon as the pipe accepts a write again. A loss the process
+// never gets to report, because it is shutting down or its pipe never recovers,
+// stays unreported in the archive, which no in-process reporter can fix.
+base::Lock& OmittedEvidenceLock() {
+  static base::NoDestructor<base::Lock> lock;
+  return *lock;
+}
+
+std::map<std::string, int>& OmittedEvidenceCounts() {
+  static base::NoDestructor<std::map<std::string, int>> counts;
+  return *counts;
+}
+
+void HoldOmittedEvidence(const std::string& channel, int count) {
+  base::AutoLock lock(OmittedEvidenceLock());
+  OmittedEvidenceCounts()[channel] += count;
+}
+
+int TakeOmittedEvidence(const std::string& channel) {
+  base::AutoLock lock(OmittedEvidenceLock());
+  std::map<std::string, int>& counts = OmittedEvidenceCounts();
+  auto held = counts.find(channel);
+  if (held == counts.end()) {
+    return 0;
+  }
+  const int count = held->second;
+  counts.erase(held);
+  return count;
+}
+
+// The omission record is not itself captured evidence, so a failed omission
+// write returns the original count unchanged instead of counting the omission
+// as one more lost record.
+void ReportOmittedEvidence(RecorderPipeClient* client,
+                           const std::string& channel) {
+  const int count = TakeOmittedEvidence(channel);
+  if (count <= 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("reason", std::string(kEvidenceWriteFailedOmissionReason));
+  payload.Set("count", count);
+  std::string error;
+  if (!client->SendEvidence(QueryEvidenceTicks(), channel,
+                            std::string(kOmissionEventType),
+                            std::move(payload), base::ListValue(), &error)) {
+    HoldOmittedEvidence(channel, count);
+  }
+}
+
 void SendBlinkEvidence(std::string channel,
                        std::string event_type,
                        base::DictValue payload) {
@@ -1044,10 +1103,12 @@ void SendBlinkEvidence(std::string channel,
   if (!client) {
     return;
   }
+  ReportOmittedEvidence(client, channel);
   std::string error;
-  if (!client->SendEvidence(QueryEvidenceTicks(), std::move(channel),
+  if (!client->SendEvidence(QueryEvidenceTicks(), channel,
                             std::move(event_type), std::move(payload),
                             base::ListValue(), &error)) {
+    HoldOmittedEvidence(channel, 1);
     WriteDiagnosticLine("Blink evidence write failed: " + error);
   }
 }

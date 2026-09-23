@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.21";
+    public const string CurrentVersion = "0.22";
 }
 
 public static class BrowserEvidenceChannels
@@ -51,6 +51,17 @@ public static class BrowserEvidenceEventTypes
     public const string Omission = "collector-omission";
 }
 
+// Names the reasons a browser evidence record can be lost. A write that failed
+// on the renderer's own pipe is reported by the bridge once the pipe accepts
+// again. A record the recorder's event sink refused is reported by the receiver
+// once the sink accepts again. Both report how many records were lost, so the
+// archive states the loss instead of ending at a gap no reader can see.
+public static class BrowserEvidenceOmissionReasons
+{
+    public const string EvidenceWriteFailed = "browser-evidence-write-failed";
+    public const string SinkRefusedRecord = "browser-evidence-sink-refused";
+}
+
 public sealed record BrowserContext(
     string BrowserInstanceId,
     int ProcessId,
@@ -62,6 +73,14 @@ public sealed record BrowserContext(
     string? DocumentId,
     string? ExecutionWorldId,
     string? DocumentToken);
+
+// Reports browser evidence records that were lost rather than written. Context
+// is present when the reporter knows which browser process lost them and absent
+// when the loss is not attributable to one process.
+public sealed record BrowserOmissionPayload(
+    string Reason,
+    long Count,
+    BrowserContext? Context = null);
 
 public static class BrowserEventTargetKinds
 {

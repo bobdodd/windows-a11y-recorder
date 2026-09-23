@@ -392,7 +392,32 @@ worlds as isolated, so the inspector's worlds are tested first and reported as
 `other`, because an out-of-schema value would fail archive validation for the
 whole session.
 
-Live 0.21 connections require an exact protocol-version match.
+Protocol version 0.22 states browser evidence that was lost rather than
+captured. Two paths can lose a record. A renderer's own pipe write can fail,
+which previously produced a line in the bridge log and nothing in the archive,
+and the recorder's bounded event sink can refuse a record, which previously
+appeared only as degraded collector health and a count in the manifest. Neither
+loss was visible to a reader of the archive, who saw a gap indistinguishable
+from an event that never happened. Both reporters now hold the number of lost
+records per channel and emit a `collector-omission` record on that same channel
+as soon as a write succeeds again, carrying the reason, the count, and the
+browser process context when the reporter knows which process lost them. The
+bridge holds its counts behind a lock, because a renderer writes evidence from
+more than one thread, and it reports the loss immediately before its next
+successful write on that channel, so the omission precedes the first record that
+survived. An omission record is not itself captured evidence, so a failure to
+write the omission returns the held count unchanged rather than counting the
+omission as one more lost record.
+
+This reporting is bounded by where it runs. A process that loses records and
+then exits, or whose pipe never recovers, never gets to report the loss, and no
+reporter inside that process can fix that. An archive that reports no omission
+is therefore evidence of no observed loss rather than proof that nothing was
+lost. The reference run treats any stated loss as a failed run, because a
+reference run must be lossless, while the verifier reports the omission counts
+without failing, since a stated omission is a true account of what happened.
+
+Live 0.22 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

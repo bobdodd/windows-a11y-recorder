@@ -204,6 +204,16 @@ itself is not script based and belongs to no world, which is reported as a null
 world rather than as the main world. Worker global scopes and dispatches whose
 original target is never a Node remain outstanding.
 
+Protocol 0.22 states browser evidence that was lost rather than captured. A
+record that could not be written is counted per channel and reported on that
+channel by a `collector-omission` record as soon as writing succeeds again,
+naming the reason, how many records were lost, and the browser process that lost
+them when the reporter knows it. Both loss paths are covered: a renderer whose
+pipe write failed, and a record the recorder's event sink refused. A loss that a
+process never gets to report, because it is shutting down or its pipe never
+recovers, is still unstated in the archive, so an archive that reports no
+omission is evidence of no observed loss rather than proof of none.
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.

@@ -18,8 +18,31 @@ from the product version.
 
 ## Unreleased
 
+### Added
+
+- Report browser evidence that was lost instead of leaving a gap in the archive.
+  Protocol 0.22 carries a `collector-omission` record on any browser channel,
+  with the reason records were lost, how many were lost, and the browser process
+  context when the reporter knows which process lost them. A renderer whose own
+  pipe write failed holds the count per channel and states it on that channel as
+  soon as a write succeeds again, where before the loss appeared only as a line
+  in the bridge log. A record the recorder's event sink refused is stated the
+  same way once the sink accepts records again, where before it was visible only
+  as degraded collector health, which the archive does not carry. A loss a
+  process never gets to report, because it is shutting down or its pipe never
+  recovers, still goes unstated in the archive, which no reporter inside that
+  process can fix.
+
 ### Changed
 
+- Fail a reference validation run that lost evidence. The run reports
+  `OMITTED_EVIDENCE_RECORDS`, `SINK_REFUSED_EVENTS`, and
+  `OTHER_OMISSION_RECORDS`, and a lost record in either of the first two fails
+  the run, because a reference run must be lossless. An omission that does not
+  report a lost record, such as a rejected connection, is reported without
+  failing the run. The verifier reports `EvidenceOmissionRecords`,
+  `OmittedEvidenceRecords`, and `EvidenceOmissionReasons` without failing,
+  because a stated omission is a true account of what happened.
 - Stop printing a capture-job error record that carries no message. Such a
   record renders as a bare category line, which reads like a failure in a run
   that passed and made a real failure harder to see. A record with no message is

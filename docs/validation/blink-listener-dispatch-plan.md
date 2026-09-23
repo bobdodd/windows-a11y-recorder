@@ -1090,3 +1090,36 @@ not claim why a document produced no pass, since the verifier does not read
 navigation records for the documents involved. The hole and overlap conditions
 have not been observed in any run, so they are assertions that no measurement has
 yet exercised.
+
+## Evidence loss accounting
+
+Protocol 0.22 makes a lost browser record visible in the archive. Before it, a
+renderer whose pipe write failed wrote a line to the bridge log and nothing to
+the archive, and a record the recorder's bounded event sink refused appeared
+only as degraded collector health and a count in the session manifest. In both
+cases a reader of the archive saw a gap that looked exactly like an event that
+never happened. Each reporter now holds the number of lost records per channel
+and states it on that channel with a `collector-omission` record, carrying the
+reason, the count, and the process context when the reporter knows which process
+lost them.
+
+A run reports `OMITTED_EVIDENCE_RECORDS` from the omission records, and
+`SINK_REFUSED_EVENTS` from the manifest count of records the event sink refused.
+A lost record in either value fails the run, because a reference run must be
+lossless. `OTHER_OMISSION_RECORDS` counts omissions that do not report a lost
+record, such as a rejected connection, and is reported without failing the run.
+The verifier reports `EvidenceOmissionRecords`, `OmittedEvidenceRecords`, and
+`EvidenceOmissionReasons` and does not fail, because a stated omission is a true
+account of what happened and whether such a run can serve as a reference is a
+decision for the run.
+
+What this does not establish: no run has lost a record, so neither reporting
+path has been exercised by a real loss. The run-script accounting was exercised
+in isolation against synthetic archives covering a write failure, a sink
+refusal, an omission without a count, an omission reason that is not a loss, and
+an omission on a channel outside the browser collector, and the two counting
+paths in the bridge and the receiver are covered only by unit assertions. The
+accounting is also bounded by where it runs: a process that loses records and
+then exits, or whose pipe never recovers, never reports the loss, so an archive
+with no omission record is evidence of no observed loss rather than proof that
+nothing was lost.

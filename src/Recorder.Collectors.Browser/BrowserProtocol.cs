@@ -119,6 +119,18 @@ internal static class BrowserProtocol
             (BrowserEvidenceChannels.Cookie,
                 BrowserEvidenceEventTypes.CookieOperation) =>
                 payload.Deserialize<BrowserCookieOperationPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Lifecycle or
+                BrowserEvidenceChannels.Listener or
+                BrowserEvidenceChannels.Dispatch or
+                BrowserEvidenceChannels.Timer or
+                BrowserEvidenceChannels.Scheduler or
+                BrowserEvidenceChannels.Navigation or
+                BrowserEvidenceChannels.Dom or
+                BrowserEvidenceChannels.Accessibility or
+                BrowserEvidenceChannels.Cookie,
+                BrowserEvidenceEventTypes.Omission) =>
+                payload.Deserialize<BrowserOmissionPayload>(JsonOptions)
+                    as object,
             _ => throw new InvalidDataException(
                 $"Unsupported browser evidence event {channel}/{eventType}.")
         };

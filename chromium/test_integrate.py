@@ -1630,6 +1630,120 @@ class IntegrateTests(unittest.TestCase):
             runner,
         )
 
+    def test_bridge_reports_evidence_it_failed_to_write(self):
+        root = Path(__file__).parent.parent
+        bridge = (
+            root / "chromium" / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+
+        # A failed write used to leave nothing in the archive, so the loss was
+        # visible only in a local log file. The count is held per channel and
+        # reported on that channel as soon as the pipe accepts a write again.
+        self.assertIn("void HoldOmittedEvidence(", bridge)
+        self.assertIn("int TakeOmittedEvidence(", bridge)
+        self.assertIn("ReportOmittedEvidence(client, channel);", bridge)
+        self.assertIn('HoldOmittedEvidence(channel, 1);', bridge)
+        self.assertIn(
+            'kEvidenceWriteFailedOmissionReason[] =\n'
+            '    "browser-evidence-write-failed";',
+            bridge,
+        )
+
+        # The omission record is not captured evidence, so a failure to report
+        # the loss must return the held count unchanged rather than count the
+        # omission record itself as another lost record.
+        report = bridge[bridge.index("void ReportOmittedEvidence("):]
+        report = report[:report.index("void SendBlinkEvidence(")]
+        self.assertIn("HoldOmittedEvidence(channel, count);", report)
+        self.assertNotIn("count + 1", report)
+
+    def test_omission_records_have_a_managed_contract(self):
+        root = Path(__file__).parent.parent
+        contracts = (
+            root / "src" / "Recorder.Contracts" / "BrowserEvidenceContracts.cs"
+        ).read_text(encoding="utf-8")
+        protocol = (
+            root
+            / "src"
+            / "Recorder.Collectors.Browser"
+            / "BrowserProtocol.cs"
+        ).read_text(encoding="utf-8")
+        bridge_protocol = (
+            root / "chromium" / "recorder_bridge" / "recorder_protocol.h"
+        ).read_text(encoding="utf-8")
+
+        # A bridge record with no matching managed contract is rejected on
+        # ingest, which costs the rest of that renderer's evidence for the
+        # session, so the new record type is mapped before the bridge sends it.
+        self.assertIn(
+            "public sealed record BrowserOmissionPayload(", contracts
+        )
+        self.assertIn(
+            "BrowserEvidenceEventTypes.Omission) =>", protocol
+        )
+        self.assertIn(
+            "payload.Deserialize<BrowserOmissionPayload>(JsonOptions)",
+            protocol,
+        )
+
+        # The bridge and the recorder must agree on the protocol version, or
+        # every connection is refused.
+        self.assertIn('kProtocolVersion[] = "0.22"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.22"', contracts)
+
+    def test_validation_fails_when_the_run_lost_evidence(self):
+        root = Path(__file__).parent.parent
+        runner = (
+            root / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+        verifier = (
+            root / "scripts" / "Verify-BlinkEvidence.ps1"
+        ).read_text(encoding="utf-8")
+
+        # A reference run must be lossless, so a stated omission or a record the
+        # event sink refused fails the run instead of passing quietly.
+        self.assertIn('"browser-evidence-write-failed",', runner)
+        self.assertIn('"browser-evidence-sink-refused"', runner)
+        self.assertIn('$manifest.droppedEventCount', runner)
+        self.assertIn(
+            "This run lost evidence: $omittedRecords record(s) reported as ",
+            runner,
+        )
+        self.assertIn('Write-Host "OMITTED_EVIDENCE_RECORDS=', runner)
+        self.assertIn('Write-Host "SINK_REFUSED_EVENTS=', runner)
+
+        # An omission that does not report a lost record, such as a rejected
+        # connection, is reported without failing the run.
+        self.assertIn("$otherOmissionRecords++", runner)
+        self.assertIn('Write-Host "OTHER_OMISSION_RECORDS=', runner)
+
+        # The verifier reports the loss and leaves the decision to the runner,
+        # because the omission record is a true account of what happened.
+        self.assertIn("EvidenceOmissionRecords = $browserOmissions.Count", verifier)
+        self.assertIn("OmittedEvidenceRecords = $omittedRecordCount", verifier)
+        self.assertIn("EvidenceOmissionReasons = ", verifier)
+
+    def test_receiver_reports_records_the_sink_refused(self):
+        root = Path(__file__).parent.parent
+        receiver = (
+            root
+            / "src"
+            / "Recorder.Collectors.Browser"
+            / "BrowserEvidenceReceiver.cs"
+        ).read_text(encoding="utf-8")
+
+        # A record the sink refused was counted only as collector health, which
+        # the archive does not carry, so the loss is now stated on the channel
+        # that lost it as soon as the sink accepts records again.
+        self.assertIn("RecordRefusedRecord(message.Channel);", receiver)
+        self.assertIn("ReportRefusedRecords(message.Channel);", receiver)
+        self.assertIn(
+            "BrowserEvidenceOmissionReasons.SinkRefusedRecord", receiver
+        )
+        self.assertIn(
+            "ReturnRefusedRecords(channel, count);", receiver
+        )
+
     def test_validation_registers_an_isolated_world_listener(self):
         root = Path(__file__).parent.parent
         fixture = (

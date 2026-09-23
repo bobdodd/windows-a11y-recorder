@@ -508,6 +508,54 @@ public sealed class BrowserEventTargetPayloadIngestTests
 
     // Routes the payload the way the receive loop does, which rejects a field
     // no contract maps, then reads it as the contract type the assertions need.
+    // Protocol 0.22 lets a reporter state evidence that was lost instead of
+    // leaving a gap. The omission record travels on the channel that lost the
+    // records, so every browser channel must ingest it, and the bridge's own
+    // omission carries the process context that lost them.
+    [Fact]
+    public void AcceptsAnOmissionThatNamesTheProcessThatLostRecords()
+    {
+        var payload = Accept<BrowserOmissionPayload>(
+            BrowserEvidenceChannels.Dispatch,
+            BrowserEvidenceEventTypes.Omission,
+            $$"""
+            {
+              "context": {{ContextJson}},
+              "reason": "browser-evidence-write-failed",
+              "count": 7
+            }
+            """);
+
+        Assert.Equal(
+            BrowserEvidenceOmissionReasons.EvidenceWriteFailed,
+            payload.Reason);
+        Assert.Equal(7, payload.Count);
+        var context = Assert.IsType<BrowserContext>(payload.Context);
+        Assert.Equal(3440, context.ProcessId);
+    }
+
+    // A loss the reporter cannot attribute to one browser process carries no
+    // context rather than naming a process it did not observe.
+    [Fact]
+    public void AcceptsAnOmissionWithNoProcessContext()
+    {
+        var payload = Accept<BrowserOmissionPayload>(
+            BrowserEvidenceChannels.Timer,
+            BrowserEvidenceEventTypes.Omission,
+            """
+            {
+              "reason": "browser-evidence-sink-refused",
+              "count": 2
+            }
+            """);
+
+        Assert.Null(payload.Context);
+        Assert.Equal(
+            BrowserEvidenceOmissionReasons.SinkRefusedRecord,
+            payload.Reason);
+        Assert.Equal(2, payload.Count);
+    }
+
     private static T Accept<T>(
     string channel,
     string eventType,

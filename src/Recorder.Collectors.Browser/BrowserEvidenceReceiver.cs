@@ -12,6 +12,8 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
     private readonly BrowserEvidenceReceiverOptions _options;
     private readonly object _gate = new();
     private readonly object _eventWriteGate = new();
+    private readonly object _omissionGate = new();
+    private readonly Dictionary<string, long> _refusedRecordCounts = [];
     private readonly List<Task> _connections = [];
     private readonly ChromiumLauncher _launcher = new();
     private CollectorInitializationContext? _context;
@@ -478,6 +480,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                         "Browser event maps before the session clock origin.");
                 }
 
+                ReportRefusedRecords(message.Channel);
                 if (!WriteSequencedRecord(sequence => new RecorderEvent
                 {
                     SchemaVersion = RecorderEvent.CurrentSchemaVersion,
@@ -512,9 +515,75 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                     Analysis = null
                 }))
                 {
+                    RecordRefusedRecord(message.Channel);
                     HealthState = CollectorHealthState.Degraded;
                 }
             }
+        }
+    }
+
+    // A record the event sink refused is lost, because the sink is the only
+    // path into the archive. The count of lost records is held per channel
+    // until the sink accepts again, and is then stated by an omission record on
+    // the channel that lost them, so a reader sees the loss instead of a gap.
+    private void RecordRefusedRecord(string channel)
+    {
+        lock (_omissionGate)
+        {
+            _refusedRecordCounts.TryGetValue(channel, out var count);
+            _refusedRecordCounts[channel] = count + 1;
+        }
+    }
+
+    private long TakeRefusedRecords(string channel)
+    {
+        lock (_omissionGate)
+        {
+            return _refusedRecordCounts.Remove(channel, out var count)
+                ? count
+                : 0;
+        }
+    }
+
+    private void ReturnRefusedRecords(string channel, long count)
+    {
+        lock (_omissionGate)
+        {
+            _refusedRecordCounts.TryGetValue(channel, out var held);
+            _refusedRecordCounts[channel] = held + count;
+        }
+    }
+
+    private void ReportRefusedRecords(string channel)
+    {
+        if (_context is null)
+        {
+            return;
+        }
+
+        var count = TakeRefusedRecords(channel);
+        if (count == 0)
+        {
+            return;
+        }
+
+        // The omission record is not itself captured evidence, so a failure to
+        // write it returns the original count unchanged rather than counting
+        // the omission as another lost record.
+        if (!WriteSequencedRecord(sequence => RecorderEventFactory.Create(
+                _context.SessionId,
+                Descriptor,
+                channel,
+                sequence,
+                _context.Clock.GetElapsedNanoseconds(),
+                BrowserEvidenceEventTypes.Omission,
+                new
+                {
+                    reason = BrowserEvidenceOmissionReasons.SinkRefusedRecord,
+                    count
+                })))
+        {
+            ReturnRefusedRecords(channel, count);
         }
     }
 

@@ -631,6 +631,98 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsABrowserOmissionThatStatesLostRecords()
+    {
+        // An omission record is how the archive states evidence that was lost
+        // rather than captured, so it must validate on a browser channel both
+        // with the process context that lost the records and without one.
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = (string?)null,
+            executionWorldId = (string?)null,
+            documentToken = (string?)null
+        };
+        var attributed = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dispatch,
+            BrowserEvidenceEventTypes.Omission,
+            new
+            {
+                context,
+                reason = BrowserEvidenceOmissionReasons.EvidenceWriteFailed,
+                count = 7
+            });
+        var unattributed = CreateEvent(
+            1,
+            200,
+            BrowserEvidenceChannels.Timer,
+            BrowserEvidenceEventTypes.Omission,
+            new
+            {
+                reason = BrowserEvidenceOmissionReasons.SinkRefusedRecord,
+                count = 2
+            });
+        var directory = await CreateArchiveAsync([attributed, unattributed]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsABrowserOmissionThatReportsAnUnknownFact()
+    {
+        // The omission shape is closed, so a fact no reporter is defined to
+        // report fails validation instead of entering the archive unchecked.
+        var omission = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.Omission,
+            new
+            {
+                reason = BrowserEvidenceOmissionReasons.SinkRefusedRecord,
+                count = 1,
+                stream = "microphone"
+            });
+        var directory = await CreateArchiveAsync([omission]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "payload-property-unexpected");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsInstrumentedBrowserTimerEvidence()
     {
         var context = new

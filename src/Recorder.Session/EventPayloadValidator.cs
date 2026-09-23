@@ -161,6 +161,8 @@ internal static class EventPayloadValidator
             case ("graphics.desktop.frames", "collector-omission"):
             case ("audio.microphone", "collector-omission"):
             case ("audio.system", "collector-omission"):
+                ValidateOmission(payload, issues, lineNumber);
+                break;
             case ("browser.listener", "collector-omission"):
             case ("browser.dispatch", "collector-omission"):
             case ("browser.timer", "collector-omission"):
@@ -168,7 +170,7 @@ internal static class EventPayloadValidator
             case ("browser.navigation", "collector-omission"):
             case ("browser.dom", "collector-omission"):
             case ("browser.cookie", "collector-omission"):
-                ValidateOmission(payload, issues, lineNumber);
+                ValidateBrowserOmission(payload, issues, lineNumber);
                 break;
             default:
                 if (BuiltInChannels.Contains(channel))
@@ -1447,6 +1449,27 @@ internal static class EventPayloadValidator
             ],
             issues,
             line);
+
+    // A browser omission names how many records were lost and, when the
+    // reporter knows which browser process lost them, carries that process
+    // context. A reporter that cannot attribute the loss to one process omits
+    // the context rather than naming a process it did not observe.
+    private static void ValidateBrowserOmission(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("reason"),
+                OptionalInteger("count", nonnegative: true),
+                OptionalNullableObject("context")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+    }
 
     private static void ValidateIntegerRectangle(
         JsonElement value,

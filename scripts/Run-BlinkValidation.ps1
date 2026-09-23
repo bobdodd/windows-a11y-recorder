@@ -983,6 +983,57 @@ if ($networkServiceCrashes -gt 0) {
     )
 }
 
+# Evidence the recorder lost is now stated by an omission record instead of by a
+# silent gap, so a run that lost evidence is reported as a failed run rather
+# than passing quietly. The manifest count covers records the event sink
+# refused. An omission whose reason is not a lost record, such as a rejected
+# connection, is reported without failing the run.
+$lossReasons = @(
+    "browser-evidence-write-failed",
+    "browser-evidence-sink-refused"
+)
+$manifestPath = Join-Path $session.FullName "manifest.json"
+$sinkRefusedEvents = 0
+if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $sinkRefusedEvents = [int] $manifest.droppedEventCount
+}
+$omissionLines = @(
+    Select-String `
+        -LiteralPath (Join-Path $session.FullName "events.ndjson") `
+        -Pattern "collector-omission" `
+        -SimpleMatch `
+        -ErrorAction SilentlyContinue
+)
+$omittedRecords = 0
+$lossOmissionReasons = @()
+$otherOmissionRecords = 0
+foreach ($omissionLine in $omissionLines) {
+    $omission = $omissionLine.Line | ConvertFrom-Json
+    if ($omission.channel -notlike "browser.*") {
+        continue
+    }
+    $reason = $omission.payload.reason
+    if ($lossReasons -notcontains $reason) {
+        $otherOmissionRecords++
+        continue
+    }
+    $count = 1
+    if ($omission.payload.PSObject.Properties.Name -contains "count") {
+        $count = [int] $omission.payload.count
+    }
+    $omittedRecords += $count
+    $lossOmissionReasons += $reason
+}
+$lossOmissionReasons = @($lossOmissionReasons | Sort-Object -Unique)
+if ($omittedRecords -gt 0 -or $sinkRefusedEvents -gt 0) {
+    throw (
+        "This run lost evidence: $omittedRecords record(s) reported as " +
+        "omitted and $sinkRefusedEvents refused by the event sink. " +
+        "Reported reasons: " + ($lossOmissionReasons -join "; ")
+    )
+}
+
 Write-Host "`nBlink validation completed successfully."
 Write-Host "SESSION_PATH=$($session.FullName)"
 Write-Host "BRIDGE_LOG=$bridgeLog"
@@ -994,3 +1045,6 @@ Write-Host "NETWORK_SERVICE_CRASHES=$networkServiceCrashes"
 Write-Host "BRIDGE_CONNECT_WAITS=$bridgeConnectWaits"
 Write-Host "BRIDGE_WRITE_FAILURES=$bridgeWriteFailures"
 Write-Host "BRIDGE_INITIALIZATION_FAILURES=0"
+Write-Host "OMITTED_EVIDENCE_RECORDS=$omittedRecords"
+Write-Host "SINK_REFUSED_EVENTS=$sinkRefusedEvents"
+Write-Host "OTHER_OMISSION_RECORDS=$otherOmissionRecords"

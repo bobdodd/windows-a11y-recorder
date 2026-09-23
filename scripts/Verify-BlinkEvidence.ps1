@@ -2523,8 +2523,36 @@ if (
     throw "The child frame did not receive a distinct document identity."
 }
 
+# A browser omission record states evidence the session lost rather than
+# captured. The verifier reports the loss instead of failing on it, because the
+# record is a true account of what happened; whether a run that lost evidence
+# can serve as a reference run is decided by the run script.
+$browserOmissions = @(
+    $records |
+        Where-Object {
+            $_.channel -like "browser.*" -and
+            $_.eventType -eq "collector-omission"
+        }
+)
+$omittedRecordCount = 0
+foreach ($omission in $browserOmissions) {
+    $count = 1
+    if ($omission.payload.PSObject.Properties.Name -contains "count") {
+        $count = [int] $omission.payload.count
+    }
+    $omittedRecordCount += $count
+}
+$omissionReasons = @(
+    $browserOmissions |
+        ForEach-Object { $_.payload.reason } |
+        Sort-Object -Unique
+)
+
 [pscustomobject]@{
     SessionPath = (Resolve-Path -LiteralPath $SessionPath).Path
+    EvidenceOmissionRecords = $browserOmissions.Count
+    OmittedEvidenceRecords = $omittedRecordCount
+    EvidenceOmissionReasons = ($omissionReasons -join ", ")
     ListenerRecords = $listeners.Count
     DispatchRecords = $dispatches.Count
     InvocationRecords = $invocations.Count
