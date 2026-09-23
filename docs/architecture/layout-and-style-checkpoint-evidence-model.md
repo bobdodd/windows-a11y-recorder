@@ -109,11 +109,33 @@ Comments, processing instructions, and the document node are not recorded.
 
 ## Recorded computed-style properties
 
-The list is fixed in the integration script, recorded in every checkpoint
+The list holds 283 properties. It is fixed in the integration script, which
+generates the compiled property array from it, recorded in every checkpoint
 start, and checked by the integration tests against this document and the
-verifier. It holds longhand properties only, each supported by the reference
-Chromium without a runtime flag, so every value is available on every element
-Blink styles.
+verifier. Every listed property is one the reference Chromium reports through
+`getComputedStyle()` in a default build. The first 75 were chosen for
+geometry, visibility, and basic text presentation. The remaining 208 cover
+color and forced colors, text decoration, text layout, reading order and
+interaction, sizing and containment, transforms, scrolling, and SVG
+presentation, which were added so that later analysis does not depend on
+values the logger did not keep.
+
+Three kinds of entry need care when reading the values:
+
+- `text-decoration` is a shorthand. Blink reports it as a combined value; its
+  longhands are also listed.
+- Legacy `-webkit-` properties such as `-webkit-writing-mode` and
+  `-webkit-text-fill-color` are listed as Blink exposes them, alongside the
+  standard properties they overlap with.
+- These properties are enabled by runtime features that are on by default in
+  the reference build: `caret-animation`, `caret-shape`, `dynamic-range-limit`,
+  `forced-color-adjust`, `frame-sizing`, `margin-trim`, `overlay`,
+  `ruby-overhang`, `scroll-axis-lock`, `scroll-initial-target`,
+  `scroll-marker-group`, `scroll-target-group`, `scrollbar-color`,
+  `scrollbar-width`, `text-decoration-skip-spaces`, `text-fit`, and
+  `window-drag`. The hook reads them by identifier regardless of the feature
+  state. What Blink reports for one of them in a build with its feature turned
+  off has not been observed.
 
 | Properties | Recorded because |
 | --- | --- |
@@ -136,6 +158,48 @@ Blink styles.
 | `direction`, `writing-mode` | They give the text direction and orientation. |
 | `cursor`, `pointer-events` | They describe the pointer presentation and whether a box receives pointer events. |
 | `animation-name`, `animation-duration`, `transition-property`, `transition-duration` | They show whether a box was animating or transitioning, which explains checkpoints recorded frame by frame. |
+| `accent-color`, `caret-color`, `-webkit-tap-highlight-color`, `-webkit-text-fill-color` | They give the colors of form-control accents, the text caret, the tap highlight, and text fill, which can differ from `color`. |
+| `color-scheme`, `forced-color-adjust`, `print-color-adjust`, `dynamic-range-limit` | They state which color schemes an element supports, whether forced colors are applied to it, and how its colors are adjusted for output. |
+| `mix-blend-mode`, `background-blend-mode`, `isolation`, `backdrop-filter` | They change the colors actually drawn by blending with, or filtering, what lies behind. |
+| `text-decoration`, `text-decoration-color`, `text-decoration-style`, `text-decoration-thickness`, `text-decoration-skip-ink`, `text-decoration-skip-spaces`, `-webkit-text-decorations-in-effect` | They describe how a text decoration is drawn and which decorations apply, including those inherited from ancestors. |
+| `text-underline-offset`, `text-underline-position` | They give where an underline is placed. |
+| `-webkit-text-stroke-color`, `-webkit-text-stroke-width` | They describe an outline drawn around glyphs. |
+| `text-emphasis-color`, `text-emphasis-position`, `text-emphasis-style` | They describe emphasis marks drawn beside text. |
+| `word-break`, `overflow-wrap`, `line-break`, `-webkit-line-break`, `hyphens`, `hyphenate-character`, `hyphenate-limit-chars`, `text-wrap-style` | They determine where lines break and whether words are hyphenated. |
+| `text-align-last`, `text-justify`, `vertical-align`, `alignment-baseline`, `baseline-shift`, `baseline-source`, `dominant-baseline`, `text-anchor` | They determine how text and inline boxes are aligned. |
+| `tab-size`, `text-autospace`, `text-spacing-trim`, `initial-letter`, `text-box-edge`, `text-box-trim`, `text-fit` | They change the spacing and sizing of text beyond letter and word spacing. |
+| `unicode-bidi`, `-webkit-rtl-ordering`, `text-orientation`, `-webkit-text-orientation`, `text-combine-upright`, `-webkit-text-combine`, `-webkit-writing-mode` | They determine bidirectional ordering and how characters are set in vertical text. |
+| `ruby-align`, `ruby-overhang`, `ruby-position`, `-webkit-ruby-position` | They determine how ruby annotations are placed. |
+| `-webkit-line-clamp`, `orphans`, `widows` | They limit the number of lines shown or kept together. |
+| `content`, `quotes` | They give generated content and quotation marks where Blink reports them for the element. |
+| `-webkit-text-security` | It states whether text is drawn as masking characters. |
+| `reading-flow`, `reading-order` | They change the order in which items are read and navigated relative to source order. |
+| `interactivity`, `user-select`, `-webkit-user-modify`, `-webkit-user-drag`, `touch-action`, `resize` | They determine whether content is interactive, selectable, editable, draggable, resizable, and which touch gestures it handles. |
+| `interest-delay-start`, `interest-delay-end` | They give the delays before interest in an element is shown or lost. |
+| `appearance`, `field-sizing`, `caret-animation`, `caret-shape` | They determine how form controls and the text caret are presented and sized. |
+| `speak` | It states whether an element's content is to be spoken. |
+| `app-region`, `window-drag` | They mark regions that act as part of an application window frame. |
+| `aspect-ratio`, `object-fit`, `object-position`, `object-view-box`, `image-orientation`, `image-rendering`, `zoom`, `interpolate-size` | They determine the sizing and scaling of boxes and replaced content such as images. |
+| `contain`, `contain-intrinsic-size`, `contain-intrinsic-width`, `contain-intrinsic-height`, `container-name`, `container-type`, `will-change`, `buffered-rendering` | They state containment and rendering hints that can change what is laid out and when. |
+| `clear`, `shape-outside`, `shape-margin`, `shape-image-threshold`, `margin-trim` | They determine how content flows around floats and shapes and how edge margins are trimmed. |
+| `overflow-anchor`, `overflow-clip-margin` | They affect scroll anchoring and how far content can paint before it is clipped. |
+| `anchor-name`, `anchor-scope`, `position-anchor`, `position-area`, `position-try-fallbacks`, `position-try-order`, `position-visibility`, `overlay` | They determine where anchor-positioned boxes such as popovers are placed, whether they are shown, and whether a box is in the top layer. |
+| `list-style-type`, `list-style-position`, `list-style-image`, `counter-increment`, `counter-reset`, `counter-set` | They determine list markers and counter values. |
+| `table-layout`, `caption-side`, `empty-cells` | They determine table layout and presentation. |
+| `break-before`, `break-after`, `break-inside` | They determine page and column breaks. |
+| `frame-sizing` | It states how an embedded frame is sized to its content. |
+| `rotate`, `scale`, `translate`, `transform-origin`, `transform-box`, `transform-style`, `perspective`, `perspective-origin`, `backface-visibility` | They change where and how a box is drawn in two or three dimensions, alongside `transform`. |
+| `offset-path`, `offset-distance`, `offset-position`, `offset-anchor`, `offset-rotate` | They place a box along a motion path. |
+| `scroll-behavior`, `scroll-snap-type`, `scroll-snap-align`, `scroll-snap-stop`, `scroll-axis-lock`, `scroll-initial-target` | They determine how a scroll container scrolls, where it snaps, and where it starts. |
+| `scroll-margin-top`, `scroll-margin-right`, `scroll-margin-bottom`, `scroll-margin-left`, `scroll-margin-block-start`, `scroll-margin-block-end`, `scroll-margin-inline-start`, `scroll-margin-inline-end` | They give the margins used when a box is scrolled into view. |
+| `scroll-padding-top`, `scroll-padding-right`, `scroll-padding-bottom`, `scroll-padding-left`, `scroll-padding-block-start`, `scroll-padding-block-end`, `scroll-padding-inline-start`, `scroll-padding-inline-end` | They give the insets of a scroll container's optimal viewing region, such as the space under a fixed header. |
+| `overscroll-behavior-x`, `overscroll-behavior-y`, `overscroll-behavior-block`, `overscroll-behavior-inline` | They determine what happens when scrolling reaches a boundary. |
+| `scrollbar-width`, `scrollbar-color`, `scrollbar-gutter` | They determine scrollbar size, color, and reserved space. |
+| `scroll-marker-group`, `scroll-target-group`, `scroll-timeline-name`, `scroll-timeline-axis` | They link scroll containers to scroll markers and to scroll-driven timelines. |
+| `fill`, `fill-opacity`, `fill-rule`, `stroke`, `stroke-opacity`, `stroke-width`, `stroke-dasharray`, `stroke-dashoffset`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `paint-order`, `vector-effect` | They determine how SVG shapes and text are filled and stroked. |
+| `stop-color`, `stop-opacity`, `flood-color`, `flood-opacity`, `lighting-color`, `color-interpolation`, `color-interpolation-filters`, `color-rendering` | They give SVG gradient, filter, and color-processing colors. |
+| `marker-start`, `marker-mid`, `marker-end`, `clip-rule`, `shape-rendering` | They determine SVG markers, clipping rules, and shape rendering. |
+| `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `d` | They give SVG geometry. `d` carries the whole path data, which can be long. |
 
 Colors are reported as Blink resolves them, normally in `rgb()` or `rgba()`
 form. Lengths are reported in CSS pixels where Blink resolves them; for a box
@@ -192,8 +256,16 @@ value, as `getComputedStyle()` does.
   produces a checkpoint even if nothing visible changed. A forced layout is
   observed only at that next paint-clean update, not when the script forced
   it.
-- Computed-style values are recorded verbatim. `background-image` can carry a
-  URL, which follows the same policy as URLs in DOM attribute values.
+- Computed-style values are recorded verbatim. `background-image`,
+  `list-style-image`, `shape-outside`, and `content` can carry a URL, which
+  follows the same policy as URLs in DOM attribute values.
+- Each node is one record, and a record whose serialized form exceeds the 4 MiB
+  protocol message limit is not sent. The bridge counts it and reports a
+  `browser-evidence-write-failed` omission on the channel instead. Values such
+  as a long SVG path in `d` or a data URL in `background-image` make this
+  possible; it has not been observed.
+- An element's record holds 283 values rather than the first list's 75. The
+  volume with the full list is measured in the validation plan.
 
 ## Supported claims
 

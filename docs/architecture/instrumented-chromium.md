@@ -636,8 +636,8 @@ produced and never forces either. Three record types are emitted:
 
 The recorded facts are bounded as follows:
 
-- Only the 75 listed longhand properties are recorded. The list and the reason
-  for each property are in the evidence model.
+- Only the 283 listed properties are recorded. The list and the reason for
+  each property are in the evidence model.
 - Shadow-root content and pseudo-elements are not recorded.
 - The rectangle is the bounding box only; line boxes and fragments are not
   recorded separately.

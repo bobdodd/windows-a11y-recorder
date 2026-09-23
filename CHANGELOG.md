@@ -26,7 +26,7 @@ from the product version.
   the viewport size, scroll offset, device pixel ratio, and zoom, and, for each
   element and laid-out text node up to 100000 nodes, whether it has a layout
   object, whether a display lock prevents its layout, its viewport-relative
-  bounding rectangle, and, for elements, the resolved values of 75 defined
+  bounding rectangle, and, for elements, the resolved values of 283 defined
   computed-style properties. The hook reads only what Blink has already
   computed. The validation run serves a fixture page that widens a box and
   changes its color in a foreground tab, and the verifier requires complete,

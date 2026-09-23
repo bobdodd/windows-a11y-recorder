@@ -240,7 +240,7 @@ Protocol 0.25 records layout geometry and computed styles on the
 element style or performed layout, a checkpoint records the viewport size,
 scroll offset, device pixel ratio, and zoom, and, for each element and laid-out
 text node up to 100000 nodes, its viewport-relative bounding rectangle and, for
-elements, the resolved values of a defined list of 75 computed-style
+elements, the resolved values of a defined list of 283 computed-style
 properties. The hook reads only what Blink has already computed and never
 forces style or layout. Shadow-root content, pseudo-elements, and per-line
 geometry are not recorded; the property list and full limits are in

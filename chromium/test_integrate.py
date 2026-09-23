@@ -3950,6 +3950,65 @@ class LayoutIntegrationTests(unittest.TestCase):
             INTEGRATE.patch_blink_local_frame_view(path)
             self.assertEqual(current, path.read_text(encoding="utf-8"))
 
+    def test_upgrades_a_helper_that_records_an_earlier_property_list(self):
+        earlier_array = (
+            "constexpr CSSPropertyID kRecorderLayoutStyleProperties[] = {\n"
+            + "".join(
+                f"    CSSPropertyID::{INTEGRATE.blink_css_property_enum(name)},\n"
+                for name in INTEGRATE.LAYOUT_STYLE_PROPERTIES[:75]
+            )
+            + "};\n"
+        )
+        current_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        earlier_helper = current_helper.replace(
+            INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY, earlier_array, 1
+        )
+        indexed_helper = earlier_helper
+        for legacy, current in INTEGRATE.BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS:
+            indexed_helper = indexed_helper.replace(current, legacy, 1)
+        self.assertNotEqual(current_helper, earlier_helper)
+        self.assertNotEqual(earlier_helper, indexed_helper)
+        source = cookie_source(
+            self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "local_frame_view.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_local_frame_view(path)
+            current = path.read_text(encoding="utf-8")
+            for older_helper in (earlier_helper, indexed_helper):
+                with self.subTest(indexed=older_helper is indexed_helper):
+                    path.write_text(
+                        current.replace(current_helper, older_helper, 1),
+                        encoding="utf-8",
+                    )
+                    INTEGRATE.patch_blink_local_frame_view(path)
+                    self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_a_patched_tree_holds_exactly_one_property_array(self):
+        source = cookie_source(
+            self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "local_frame_view.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_local_frame_view(path)
+            current = path.read_text(encoding="utf-8")
+            path.write_text(
+                current.replace(
+                    INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
+                    INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY * 2,
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeError):
+                INTEGRATE.patch_blink_local_frame_view(path)
+
     def test_the_layout_helper_never_indexes_a_raw_array(self):
         # Blink compiles with unsafe buffer usage as an error.
         helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
