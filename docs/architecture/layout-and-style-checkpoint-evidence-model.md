@@ -94,8 +94,10 @@ Comments, processing instructions, and the document node are not recorded.
   zoom in the same way. Null for a node without a layout object.
 - `computedStyle`: for an element with a current computed style, an object
   holding each listed property's resolved value as the CSS text
-  `getComputedStyle()` would report, in list order. A property Blink produced
-  no value for is present with a null value. Null for a text node, for an
+  `getComputedStyle()` would report. The object has one member for each
+  listed property; its member order is not significant, and the checkpoint
+  start's `styleProperties` list gives the recorded order. A property Blink
+  produced no value for is present with a null value. Null for a text node, for an
   element with no computed style, and for an element whose style was computed
   only on demand inside a `display: none` subtree.
 

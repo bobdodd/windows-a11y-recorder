@@ -2077,9 +2077,14 @@ if ($removalLocation.line -eq $listenerLocation.line) {
 # stable identifier for, and the validation script registers one listener from a
 # world DevTools created, which is the only registration here that can report a
 # world other than the main world.
+# Collector omission records share the listener channel, for example when the
+# recorder cannot delete the browser's temporary profile, and carry no world.
 $listenerRecords = @(
     $records |
-        Where-Object { $_.channel -eq "browser.listener" }
+        Where-Object {
+            $_.channel -eq "browser.listener" -and
+            $_.eventType -ne "collector-omission"
+        }
 )
 $listenerWorldRecords = @(
     $listenerRecords |
@@ -2592,7 +2597,10 @@ $omissionReasons = @(
 # without its value. They say nothing about whether the page's cookie use is
 # appropriate.
 $cookieRecords = @(
-    $records | Where-Object { $_.channel -eq "browser.cookie" }
+    $records | Where-Object {
+            $_.channel -eq "browser.cookie" -and
+            $_.eventType -ne "collector-omission"
+        }
 )
 $cookieValueRecords = @(
     Get-Content -LiteralPath $eventPath |
@@ -2821,7 +2829,10 @@ foreach ($frameAccess in @($frameCookieChange, $frameCookieRead)) {
 # by script and none for a change made by input. They say nothing about whether
 # the page's focus handling or labelling is appropriate.
 $interactionRecords = @(
-    $records | Where-Object { $_.channel -eq "browser.interaction" }
+    $records | Where-Object {
+            $_.channel -eq "browser.interaction" -and
+            $_.eventType -ne "collector-omission"
+        }
 )
 
 function Select-InteractionFixtureRecord {
@@ -3212,25 +3223,25 @@ foreach ($start in $layoutStarts) {
                 $_.payload.checkpointId -eq $checkpointId
             }
     )
-    $completions = @(
+    $layoutCompletions = @(
         $layoutDocumentRecords |
             Where-Object {
                 $_.eventType -eq "layout-checkpoint-completed" -and
                 $_.payload.checkpointId -eq $checkpointId
             }
     )
-    if ($completions.Count -ne 1) {
+    if ($layoutCompletions.Count -ne 1) {
         throw (
-            "Layout checkpoint $checkpointId had $($completions.Count) " +
+            "Layout checkpoint $checkpointId had $($layoutCompletions.Count) " +
             "completions rather than one."
         )
     }
-    $completion = $completions[0].payload
-    if ($completion.truncated -or $completion.nodeCount -ne $nodes.Count) {
+    $layoutCompletion = $layoutCompletions[0].payload
+    if ($layoutCompletion.truncated -or $layoutCompletion.nodeCount -ne $nodes.Count) {
         throw (
             "Layout checkpoint $checkpointId completed with " +
-            "$($completion.nodeCount) nodes, truncated " +
-            "$($completion.truncated), but $($nodes.Count) node records " +
+            "$($layoutCompletion.nodeCount) nodes, truncated " +
+            "$($layoutCompletion.truncated), but $($nodes.Count) node records " +
             "were emitted."
         )
     }
@@ -3243,12 +3254,20 @@ foreach ($start in $layoutStarts) {
             )
         }
         if ($node.nodeType -eq "element" -and $null -ne $node.computedStyle) {
-            $styleNames = @($node.computedStyle.PSObject.Properties.Name)
-            if (($styleNames -join "|") -cne
-                ($expectedLayoutStyleProperties -join "|")) {
+            # The bridge serializes the style as a JSON object, whose member
+            # order is not significant and is not preserved; the start
+            # record's list carries the order.
+            $styleNames = @(
+                $node.computedStyle.PSObject.Properties.Name |
+                    Sort-Object -CaseSensitive
+            )
+            $sortedExpectedNames = @(
+                $expectedLayoutStyleProperties | Sort-Object -CaseSensitive
+            )
+            if (($styleNames -join "|") -cne ($sortedExpectedNames -join "|")) {
                 throw (
                     "A layout checkpoint node record in $checkpointId did not " +
-                    "report the defined computed-style properties in order."
+                    "report exactly the defined computed-style properties."
                 )
             }
         }
