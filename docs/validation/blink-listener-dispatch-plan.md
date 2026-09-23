@@ -1373,7 +1373,8 @@ support.
 ### Measured result
 
 Reference platform, September 23, 2026, at repository revision `8469bbe`.
-Protocol 0.24. Recorded on the same Windows 10.0.19045 host and instrumented
+The branch was rebased when it was merged, so the same tree is commit `ec7e030`
+on `main`. Protocol 0.24. Recorded on the same Windows 10.0.19045 host and instrumented
 Chromium build as the earlier results in this document, rebuilt with the
 interaction hooks, with a 25-second capture that validated 26,232 events and
 135 artifacts and reported no network-service crashes. The recorder accepted
