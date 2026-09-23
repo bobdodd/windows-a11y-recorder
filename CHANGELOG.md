@@ -43,6 +43,15 @@ from the product version.
   failing the run. The verifier reports `EvidenceOmissionRecords`,
   `OmittedEvidenceRecords`, and `EvidenceOmissionReasons` without failing,
   because a stated omission is a true account of what happened.
+- Stop printing a capture-job error record that reports nothing, including the
+  one that carries its own category line as its message. A blank line the
+  browser writes to standard error becomes a native-command error record, and
+  because an error record cannot carry an empty message the remoting wrapper
+  substitutes the record's category line, so the record arrives with the message
+  `NotSpecified: (:String) [], RemoteException`. The earlier suppression tested
+  for a blank message and therefore printed this record, which reads like a
+  failure in a run that passed. A record whose message is blank, or is its own
+  category line, is now counted and the count is reported.
 - Stop printing a capture-job error record that carries no message. Such a
   record renders as a bare category line, which reads like a failure in a run
   that passed and made a real failure harder to see. A record with no message is

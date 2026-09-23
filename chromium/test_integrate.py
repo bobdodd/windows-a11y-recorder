@@ -1621,9 +1621,16 @@ class IntegrateTests(unittest.TestCase):
         self.assertIn("$emptyCaptureErrors = 0", runner)
         self.assertIn("++$emptyCaptureErrors", runner)
         self.assertIn(
-            "record(s) with no message, which report nothing and are not ",
+            "record(s) that report nothing, which are not failures.",
             runner,
         )
+
+        # A blank line the browser wrote to standard error cannot carry an
+        # empty message through the remoting wrapper, so the record arrives
+        # carrying its own category line as its message. Comparing the two is
+        # what recognizes it.
+        self.assertIn("$categoryText = [string] $_.CategoryInfo", runner)
+        self.assertIn("$errorText -eq $categoryText", runner)
         self.assertNotIn(
             "$captureErrors |\n        ForEach-Object {\n            "
             "Write-Host $_\n        }",
