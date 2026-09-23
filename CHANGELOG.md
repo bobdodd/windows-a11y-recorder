@@ -20,6 +20,10 @@ from the product version.
 
 ### Changed
 
+- Stop printing a capture-job error record that carries no message. Such a
+  record renders as a bare category line, which reads like a failure in a run
+  that passed and made a real failure harder to see. A record with no message is
+  counted and the count is reported, so nothing is dropped without being stated.
 - Account for every recorded DOM transition in the reference verifier instead of
   reporting a bare uncovered count. Each uncovered transition is classified as
   one in a document that completed no delivery pass, or one recorded after the

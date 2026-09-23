@@ -1609,6 +1609,27 @@ class IntegrateTests(unittest.TestCase):
             runner,
         )
 
+    def test_validation_does_not_print_a_messageless_error_record(self):
+        root = Path(__file__).parent.parent
+        runner = (
+            root / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+
+        # A record with no message renders as a bare category line and reads
+        # like a failure in a run that passed, so it is counted rather than
+        # printed and the count is still reported.
+        self.assertIn("$emptyCaptureErrors = 0", runner)
+        self.assertIn("++$emptyCaptureErrors", runner)
+        self.assertIn(
+            "record(s) with no message, which report nothing and are not ",
+            runner,
+        )
+        self.assertNotIn(
+            "$captureErrors |\n        ForEach-Object {\n            "
+            "Write-Host $_\n        }",
+            runner,
+        )
+
     def test_validation_registers_an_isolated_world_listener(self):
         root = Path(__file__).parent.parent
         fixture = (

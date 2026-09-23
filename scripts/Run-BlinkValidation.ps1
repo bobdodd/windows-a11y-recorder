@@ -822,10 +822,34 @@ try {
             -ErrorAction SilentlyContinue `
             -ErrorVariable +captureErrors
     )
+    # A job's error stream can carry a record whose exception has no message,
+    # which renders as a bare category line such as the RemoteException category
+    # of the remoting wrapper. In a run that passed, that line reads like a
+    # failure. Such a record says nothing, so it is counted rather than printed,
+    # and the count is reported so nothing is dropped without being stated.
+    $emptyCaptureErrors = 0
     $captureErrors |
         ForEach-Object {
-            Write-Host $_
+            $errorText = ""
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $errorText = [string] $_.Exception.Message
+            }
+            else {
+                $errorText = [string] $_
+            }
+            if ([string]::IsNullOrWhiteSpace($errorText)) {
+                ++$emptyCaptureErrors
+                return
+            }
+            Write-Host $errorText
         }
+    if ($emptyCaptureErrors -gt 0) {
+        Write-Host (
+            "The capture job's error stream carried $emptyCaptureErrors " +
+            "record(s) with no message, which report nothing and are not " +
+            "failures."
+        )
+    }
     $captureResult = $captureOutput |
         Where-Object {
             $_.PSObject.Properties.Name -contains "CaptureExitCode"
