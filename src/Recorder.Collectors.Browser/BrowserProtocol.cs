@@ -148,6 +148,18 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.ActiveDescendantReferenceSet) =>
                 payload.Deserialize<BrowserActiveDescendantReferenceSetPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Layout,
+                BrowserEvidenceEventTypes.LayoutCheckpointStarted) =>
+                payload.Deserialize<BrowserLayoutCheckpointStartedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Layout,
+                BrowserEvidenceEventTypes.LayoutCheckpointNode) =>
+                payload.Deserialize<BrowserLayoutCheckpointNodePayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Layout,
+                BrowserEvidenceEventTypes.LayoutCheckpointCompleted) =>
+                payload.Deserialize<BrowserLayoutCheckpointCompletedPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or
                 BrowserEvidenceChannels.Dispatch or
@@ -157,7 +169,8 @@ internal static class BrowserProtocol
                 BrowserEvidenceChannels.Dom or
                 BrowserEvidenceChannels.Accessibility or
                 BrowserEvidenceChannels.Cookie or
-                BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceChannels.Interaction or
+                BrowserEvidenceChannels.Layout,
                 BrowserEvidenceEventTypes.Omission) =>
                 payload.Deserialize<BrowserOmissionPayload>(JsonOptions)
                     as object,

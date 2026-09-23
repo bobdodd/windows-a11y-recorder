@@ -20,6 +20,17 @@ from the product version.
 
 ### Added
 
+- Record layout geometry and computed styles on a new `browser.layout`
+  channel. Protocol 0.25 records a checkpoint after every rendering update in
+  which Blink resolved element style or performed layout for a document, with
+  the viewport size, scroll offset, device pixel ratio, and zoom, and, for each
+  element and laid-out text node up to 100000 nodes, whether it has a layout
+  object, whether a display lock prevents its layout, its viewport-relative
+  bounding rectangle, and, for elements, the resolved values of 75 defined
+  computed-style properties. The hook reads only what Blink has already
+  computed. The validation run serves a fixture page that widens a box and
+  changes its color in a foreground tab, and the verifier requires complete,
+  linked checkpoints whose values agree with what the page reported.
 - Record focus, selection, active descendant, and text-editing changes on a new
   `browser.interaction` channel. Protocol 0.24 records each focus change with
   the previous, requested, and resulting focused nodes, an outcome derived from

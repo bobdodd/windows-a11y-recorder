@@ -1429,3 +1429,52 @@ composition, `contenteditable` editing, and selection changes outside a text
 control have not been observed in a real run. The explanation that background
 input was dropped because the tab never painted is inferred from the missing
 dispatch record and the passing foreground run, not measured directly.
+
+## Layout and computed-style logging
+
+Protocol 0.25 records layout geometry and computed styles on the
+`browser.layout` channel. The run script serves a fourth fixture page at
+`/layout` from the loopback HTTP listener the cookie fixture uses, and opens it
+in a foreground tab after the interaction fixture, while the listener fixture
+page is still hidden behind the background target. Layout checkpoints are only
+recorded for a document whose rendering update reaches the paint-clean state,
+and a background tab is not painted, so the tab must be in the foreground. The
+background target is activated again before the tab closes. The page schedules
+no timers and registers no listeners. It holds a paragraph of text, a box
+styled 200 by 50 CSS pixels in `rgb(0, 0, 128)`, and a `span` with
+`display: none`. The harness calls three page functions in order:
+
+1. `settle` waits two animation frames.
+2. `widen` sets the box's width to 320 pixels and waits two animation frames.
+3. `recolor` sets only the box's color to `rgb(128, 0, 0)` and waits two
+   animation frames.
+
+After its frames, each function reports the box's `getBoundingClientRect()`
+values, the window's `innerWidth` and `innerHeight`, and the box's computed
+color. The harness stops the run if the widened box is not 320 pixels wide or
+the recolored box is not dark red, so a missing record is not confused with a
+step that never happened. The reports are passed to the verifier.
+
+The verifier identifies the fixture document from the committed main-frame
+navigation to the `/layout` URL and selects the layout records with that
+navigation's document token and renderer process. It requires at least three
+checkpoints, and for every checkpoint of the fixture document it requires one
+completion whose node count equals the node records emitted, no truncation,
+node indexes from zero without gaps, the `rendering-update` reason, a node
+limit of 100000, a `previousCheckpointId` naming the document's preceding
+checkpoint, counters that differ from the preceding checkpoint's, and the
+defined property list in order, both in the start record and as the keys of
+each element's computed style. It then finds, in order, a checkpoint with the
+box 200 pixels wide in navy, a later one with the box 320 pixels wide in navy,
+and a later one with the box 320 pixels wide in dark red, all with the same
+node identity. For each of those three it requires the recorded rectangle to
+equal the page's report to within 0.01 pixels, the recorded viewport to equal
+the page's `innerWidth` and `innerHeight` to within one pixel, and the recorded
+color to equal the page's. In the settled checkpoint it requires the
+`display: none` element without a layout object or rectangle and at least one
+laid-out text node with a rectangle and no computed style.
+
+These checks show that the logger emitted complete layout checkpoints and that
+the recorded geometry and styles agree with what the page itself reported.
+They do not evaluate the page's layout or styling. No measured result has been
+recorded yet.

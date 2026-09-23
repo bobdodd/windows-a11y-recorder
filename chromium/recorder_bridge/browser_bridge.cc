@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <array>
+#include <cmath>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -3027,6 +3028,203 @@ void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
   payload.Set("referencedNodeId", referenced_node_id);
   SetCookieCallOrigin(payload, std::move(origin));
   SendBlinkEvidence("browser.interaction", "active-descendant-reference-set",
+                    std::move(payload));
+}
+
+
+namespace {
+
+// The last counters each document reported to a layout checkpoint, keyed by
+// the document's DOM node identifier, which is unique within one renderer
+// process. A rendering update whose counters match is not recorded again.
+struct LayoutCheckpointStorage {
+  base::Lock lock;
+  uint64_t next_checkpoint_id = 1;
+  struct DocumentCounters {
+    unsigned style_resolution_count = 0;
+    unsigned layout_count = 0;
+    uint64_t checkpoint_sequence = 0;
+  };
+  std::unordered_map<int, DocumentCounters> documents;
+};
+
+LayoutCheckpointStorage& LayoutCheckpoints() {
+  static base::NoDestructor<LayoutCheckpointStorage> storage;
+  return *storage;
+}
+
+std::string LayoutCheckpointId(uint64_t checkpoint_sequence) {
+  return "layout-checkpoint-" + base::NumberToString(checkpoint_sequence);
+}
+
+bool IsFiniteNumber(double value) {
+  return std::isfinite(value);
+}
+
+base::DictValue CreateLayoutCheckpointBasePayload(
+    const RecorderPipeClient& client,
+    uint64_t checkpoint_sequence,
+    int document_node_id,
+    std::string document_token) {
+  base::DictValue payload;
+  payload.Set("context", CreateContext(client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("checkpointId", LayoutCheckpointId(checkpoint_sequence));
+  return payload;
+}
+
+}  // namespace
+
+uint64_t BeginBlinkLayoutCheckpoint(
+    int document_node_id,
+    std::string document_token,
+    unsigned style_resolution_count,
+    unsigned layout_count,
+    LayoutCheckpointFrame frame,
+    const std::vector<std::string>& style_properties,
+    int maximum_nodes) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      maximum_nodes <= 0 || style_properties.empty() ||
+      !IsFiniteNumber(frame.viewport_width) ||
+      !IsFiniteNumber(frame.viewport_height) ||
+      !IsFiniteNumber(frame.scroll_x) || !IsFiniteNumber(frame.scroll_y) ||
+      !IsFiniteNumber(frame.device_pixel_ratio) ||
+      !IsFiniteNumber(frame.layout_zoom_factor) ||
+      frame.viewport_width < 0 || frame.viewport_height < 0 ||
+      frame.device_pixel_ratio <= 0 || frame.layout_zoom_factor <= 0) {
+    return 0;
+  }
+  for (const std::string& property : style_properties) {
+    if (property.empty()) {
+      return 0;
+    }
+  }
+  uint64_t checkpoint_sequence = 0;
+  uint64_t previous_sequence = 0;
+  {
+    LayoutCheckpointStorage& storage = LayoutCheckpoints();
+    base::AutoLock lock(storage.lock);
+    auto found = storage.documents.find(document_node_id);
+    if (found != storage.documents.end()) {
+      if (found->second.style_resolution_count == style_resolution_count &&
+          found->second.layout_count == layout_count) {
+        return 0;
+      }
+      previous_sequence = found->second.checkpoint_sequence;
+    }
+    checkpoint_sequence = storage.next_checkpoint_id++;
+    storage.documents.insert_or_assign(
+        document_node_id,
+        LayoutCheckpointStorage::DocumentCounters{
+            style_resolution_count, layout_count, checkpoint_sequence});
+  }
+  base::DictValue payload = CreateLayoutCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("reason", "rendering-update");
+  payload.Set("previousCheckpointId",
+              previous_sequence == 0
+                  ? base::Value()
+                  : base::Value(LayoutCheckpointId(previous_sequence)));
+  payload.Set("styleResolutionCount",
+              base::saturated_cast<int>(style_resolution_count));
+  payload.Set("layoutCount", base::saturated_cast<int>(layout_count));
+  base::DictValue viewport;
+  viewport.Set("width", frame.viewport_width);
+  viewport.Set("height", frame.viewport_height);
+  payload.Set("viewport", std::move(viewport));
+  base::DictValue scroll;
+  scroll.Set("x", frame.scroll_x);
+  scroll.Set("y", frame.scroll_y);
+  payload.Set("scrollOffset", std::move(scroll));
+  payload.Set("devicePixelRatio", frame.device_pixel_ratio);
+  payload.Set("layoutZoomFactor", frame.layout_zoom_factor);
+  payload.Set("maximumNodes", maximum_nodes);
+  payload.Set("styleProperties", StringList(style_properties));
+  SendBlinkEvidence("browser.layout", "layout-checkpoint-started",
+                    std::move(payload));
+  return checkpoint_sequence;
+}
+
+void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
+                                     int document_node_id,
+                                     std::string document_token,
+                                     LayoutCheckpointNode node) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node.node_index < 0 || node.node_id <= 0 ||
+      node.node_name.empty() || (node.node_type != 1 && node.node_type != 3)) {
+    return;
+  }
+  // Text nodes carry no style of their own, and a text node is only recorded
+  // when it has a layout object.
+  if (node.node_type == 3 &&
+      (!node.layout_object_present || node.computed_style_present)) {
+    return;
+  }
+  if (node.layout_object_present &&
+      (!IsFiniteNumber(node.x) || !IsFiniteNumber(node.y) ||
+       !IsFiniteNumber(node.width) || !IsFiniteNumber(node.height) ||
+       node.width < 0 || node.height < 0)) {
+    return;
+  }
+  base::DictValue payload = CreateLayoutCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("nodeIndex", node.node_index);
+  payload.Set("nodeId", node.node_id);
+  payload.Set("nodeType", DomNodeTypeName(node.node_type));
+  payload.Set("nodeName", std::move(node.node_name));
+  payload.Set("layoutObjectPresent", node.layout_object_present);
+  payload.Set("displayLocked", node.display_locked);
+  if (node.layout_object_present) {
+    base::DictValue rect;
+    rect.Set("x", node.x);
+    rect.Set("y", node.y);
+    rect.Set("width", node.width);
+    rect.Set("height", node.height);
+    payload.Set("boundingClientRect", std::move(rect));
+  } else {
+    payload.Set("boundingClientRect", base::Value());
+  }
+  if (node.computed_style_present) {
+    base::DictValue style;
+    for (LayoutCheckpointStyleValue& entry : node.computed_style) {
+      if (entry.property_name.empty()) {
+        return;
+      }
+      style.Set(entry.property_name,
+                entry.value_present ? base::Value(std::move(entry.value))
+                                    : base::Value());
+    }
+    payload.Set("computedStyle", std::move(style));
+  } else {
+    payload.Set("computedStyle", base::Value());
+  }
+  SendBlinkEvidence("browser.layout", "layout-checkpoint-node",
+                    std::move(payload));
+}
+
+void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
+                                   int document_node_id,
+                                   std::string document_token,
+                                   int node_count,
+                                   bool truncated,
+                                   int maximum_nodes) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_count < 0 || maximum_nodes <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateLayoutCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("reason", "rendering-update");
+  payload.Set("nodeCount", node_count);
+  payload.Set("truncated", truncated);
+  payload.Set("maximumNodes", maximum_nodes);
+  SendBlinkEvidence("browser.layout", "layout-checkpoint-completed",
                     std::move(payload));
 }
 

@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -1735,8 +1736,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.24"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.24"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.25"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.25"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -3874,6 +3875,107 @@ class InteractionIntegrationTests(unittest.TestCase):
             with self.subTest(template=name):
                 self.assertNotIn(".Value()", getattr(INTEGRATE, name))
                 self.assertNotIn("->Value()", getattr(INTEGRATE, name))
+
+
+class LayoutIntegrationTests(unittest.TestCase):
+    """Proves the layout checkpoint hook is written once and never forces work."""
+
+    LOCAL_FRAME_VIEW_INCLUDE = (
+        '#include "third_party/blink/renderer/core/frame/local_frame_view.h"'
+    )
+
+    def patch_twice(self, source):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "local_frame_view.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_local_frame_view(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_local_frame_view(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def test_patches_the_local_frame_view_idempotently(self):
+        patched = self.patch_twice(
+            cookie_source(
+                self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+                INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+                INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+            )
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER)
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HOOK)
+        )
+        self.assertLess(
+            patched.index(INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER),
+            patched.index(INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HOOK),
+        )
+        for include_line in INTEGRATE.BLINK_LAYOUT_CHECKPOINT_INCLUDES:
+            with self.subTest(include=include_line):
+                self.assertEqual(1, patched.count(include_line + "\n"))
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", patched, signatures
+            ),
+        )
+
+    def test_the_layout_hook_fails_when_its_anchor_is_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "local_frame_view.cc"
+            path.write_text(
+                self.LOCAL_FRAME_VIEW_INCLUDE
+                + "\n"
+                + INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeError):
+                INTEGRATE.patch_blink_local_frame_view(path)
+
+    def test_the_layout_helper_never_requests_style_or_layout(self):
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        for forcing_call in (
+            "UpdateStyleAndLayout",
+            "EnsureComputedStyle",
+            "UpdateLifecycle",
+            "GetBoundingClientRect()",
+            "getBoundingClientRect",
+            "UpdateLayout",
+        ):
+            with self.subTest(call=forcing_call):
+                self.assertNotIn(forcing_call, helper)
+        self.assertIn("GetBoundingClientRectNoLifecycleUpdate()", helper)
+
+    def test_the_helper_records_the_documented_property_list(self):
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        identifiers = re.findall(r"CSSPropertyID::(k[A-Za-z]+),", helper)
+        expected = [
+            "k" + "".join(word.capitalize() for word in name.split("-"))
+            for name in INTEGRATE.LAYOUT_STYLE_PROPERTIES
+        ]
+        self.assertEqual(expected, identifiers)
+        self.assertEqual(
+            len(set(INTEGRATE.LAYOUT_STYLE_PROPERTIES)),
+            len(INTEGRATE.LAYOUT_STYLE_PROPERTIES),
+        )
+        root = Path(__file__).parent.parent
+        document = (
+            root / "docs" / "architecture"
+            / "layout-and-style-checkpoint-evidence-model.md"
+        ).read_text(encoding="utf-8")
+        verifier = (
+            root / "scripts" / "Verify-BlinkEvidence.ps1"
+        ).read_text(encoding="utf-8")
+        for name in INTEGRATE.LAYOUT_STYLE_PROPERTIES:
+            with self.subTest(property=name):
+                self.assertIn(f"`{name}`", document)
+                self.assertIn(f"'{name}'", verifier)
 
 
 if __name__ == "__main__":

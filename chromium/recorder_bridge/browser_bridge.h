@@ -808,6 +808,81 @@ void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
                                              int referenced_node_id,
                                              CookieCallOrigin origin);
 
+// Frame geometry read at a layout checkpoint. Viewport and scroll values are
+// in CSS pixels, the units of getBoundingClientRect, innerWidth, and scrollX.
+// The device pixel ratio is the value window.devicePixelRatio reports, and
+// the layout zoom factor is the browser zoom Blink applies to CSS pixels.
+struct LayoutCheckpointFrame {
+  double viewport_width = 0;
+  double viewport_height = 0;
+  double scroll_x = 0;
+  double scroll_y = 0;
+  double device_pixel_ratio = 0;
+  double layout_zoom_factor = 0;
+};
+
+// One computed-style value of an element. An absent value means Blink
+// produced no serialization for the property from the element's style.
+struct LayoutCheckpointStyleValue {
+  std::string property_name;
+  bool value_present = false;
+  std::string value;
+};
+
+// One element or text node at a layout checkpoint. The rectangle is the value
+// getBoundingClientRect would return at the checkpoint, in CSS pixels relative
+// to the frame's viewport, and is only meaningful when a layout object exists.
+// A display-locked node sits under a content-visibility ancestor that skipped
+// its layout, so its rectangle may be stale. The computed style is the style
+// Blink already held for the element; the checkpoint never computes one.
+struct LayoutCheckpointNode {
+  int node_index = -1;
+  int node_id = 0;
+  int node_type = 0;
+  std::string node_name;
+  bool layout_object_present = false;
+  bool display_locked = false;
+  double x = 0;
+  double y = 0;
+  double width = 0;
+  double height = 0;
+  bool computed_style_present = false;
+  std::vector<LayoutCheckpointStyleValue> computed_style;
+};
+
+// Starts one layout and computed-style checkpoint for a document whose
+// rendering update reached the paint-clean state. The two counters are Blink's
+// cumulative style resolution count for the document and layout count for its
+// frame view. Returns zero when the recorder is not connected or when neither
+// counter has changed since the previous checkpoint of the same document, so
+// an unchanged rendering update produces no evidence.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t BeginBlinkLayoutCheckpoint(
+    int document_node_id,
+    std::string document_token,
+    unsigned style_resolution_count,
+    unsigned layout_count,
+    LayoutCheckpointFrame frame,
+    const std::vector<std::string>& style_properties,
+    int maximum_nodes);
+
+// Records one element or text node of a started layout checkpoint in preorder.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
+                                     int document_node_id,
+                                     std::string document_token,
+                                     LayoutCheckpointNode node);
+
+// Completes the layout checkpoint and reports whether the node limit was
+// reached before every element and laid-out text node was recorded.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
+                                   int document_node_id,
+                                   std::string document_token,
+                                   int node_count,
+                                   bool truncated,
+                                   int maximum_nodes);
+
 }  // namespace a11y_recorder
 
 #endif  // WINDOWS_A11Y_RECORDER_CHROMIUM_RECORDER_BRIDGE_BROWSER_BRIDGE_H_

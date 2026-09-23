@@ -24,7 +24,8 @@ internal static class EventPayloadValidator
         "browser.dom",
         "browser.accessibility",
         "browser.cookie",
-        "browser.interaction"
+        "browser.interaction",
+        "browser.layout"
     ];
 
     public static void Validate(
@@ -213,6 +214,15 @@ internal static class EventPayloadValidator
                 ValidateBrowserActiveDescendantReferenceSet(
                     payload, issues, lineNumber);
                 break;
+            case ("browser.layout", "layout-checkpoint-started"):
+                ValidateBrowserLayoutCheckpointStarted(payload, issues, lineNumber);
+                break;
+            case ("browser.layout", "layout-checkpoint-node"):
+                ValidateBrowserLayoutCheckpointNode(payload, issues, lineNumber);
+                break;
+            case ("browser.layout", "layout-checkpoint-completed"):
+                ValidateBrowserLayoutCheckpointCompleted(payload, issues, lineNumber);
+                break;
             case ("window.foreground", "collector-omission"):
             case ("accessibility.uia.events", "collector-omission"):
             case ("graphics.desktop.frames", "collector-omission"):
@@ -230,6 +240,7 @@ internal static class EventPayloadValidator
             case ("browser.dom", "collector-omission"):
             case ("browser.cookie", "collector-omission"):
             case ("browser.interaction", "collector-omission"):
+            case ("browser.layout", "collector-omission"):
                 ValidateBrowserOmission(payload, issues, lineNumber);
                 break;
             default:
@@ -1000,6 +1011,194 @@ internal static class EventPayloadValidator
             issues,
             line);
         ValidateInteractionCommon(payload, issues, line);
+    }
+
+    private static void ValidateBrowserLayoutCheckpointStarted(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredEnum("reason", "rendering-update"),
+                NullableString("previousCheckpointId"),
+                RequiredInteger("styleResolutionCount", nonnegative: true),
+                RequiredInteger("layoutCount", nonnegative: true),
+                RequiredObject("viewport"),
+                RequiredObject("scrollOffset"),
+                RequiredNumber("devicePixelRatio", positive: true),
+                RequiredNumber("layoutZoomFactor", positive: true),
+                RequiredInteger("maximumNodes", positive: true),
+                RequiredStringArray("styleProperties")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        if (payload.TryGetProperty("viewport", out var viewport) &&
+            viewport.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                viewport,
+                [
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true)
+                ],
+                issues,
+                line,
+                "events.ndjson#/payload/viewport");
+        }
+        if (payload.TryGetProperty("scrollOffset", out var scroll) &&
+            scroll.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                scroll,
+                [RequiredNumber("x"), RequiredNumber("y")],
+                issues,
+                line,
+                "events.ndjson#/payload/scrollOffset");
+        }
+        var previous = ReadString(payload, "previousCheckpointId");
+        if (previous is not null && previous == ReadString(payload, "checkpointId"))
+        {
+            AddError(
+                issues,
+                "browser-layout-checkpoint-previous-self",
+                "events.ndjson#/payload/previousCheckpointId",
+                "A layout checkpoint names itself as its previous checkpoint.",
+                line);
+        }
+        if (payload.TryGetProperty("styleProperties", out var properties) &&
+            properties.ValueKind == JsonValueKind.Array)
+        {
+            var names = properties.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString())
+                .ToList();
+            if (names.Count == 0 || names.Distinct(StringComparer.Ordinal).Count() != names.Count)
+            {
+                AddError(
+                    issues,
+                    "browser-layout-style-properties-invalid",
+                    "events.ndjson#/payload/styleProperties",
+                    "The style property list must be nonempty and hold no duplicates.",
+                    line);
+            }
+        }
+    }
+
+    private static void ValidateBrowserLayoutCheckpointNode(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("nodeIndex", nonnegative: true),
+                RequiredInteger("nodeId", positive: true),
+                RequiredEnum("nodeType", "element", "text"),
+                RequiredString("nodeName"),
+                RequiredBoolean("layoutObjectPresent"),
+                RequiredBoolean("displayLocked"),
+                NullableObject("boundingClientRect"),
+                new PropertyRule(
+                    "computedStyle",
+                    true,
+                    true,
+                    value => value.ValueKind == JsonValueKind.Object &&
+                        value.EnumerateObject().All(entry =>
+                            entry.Name.Length > 0 &&
+                            entry.Value.ValueKind is
+                                JsonValueKind.String or JsonValueKind.Null),
+                    "must be an object of string or null values, or null")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+
+        var hasRect = payload.TryGetProperty("boundingClientRect", out var rect) &&
+            rect.ValueKind == JsonValueKind.Object;
+        if (hasRect)
+        {
+            ValidateShape(
+                rect,
+                [
+                    RequiredNumber("x"),
+                    RequiredNumber("y"),
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true)
+                ],
+                issues,
+                line,
+                "events.ndjson#/payload/boundingClientRect");
+        }
+        if (payload.TryGetProperty("layoutObjectPresent", out var layoutObject) &&
+            IsBoolean(layoutObject) &&
+            layoutObject.GetBoolean() != hasRect)
+        {
+            AddError(
+                issues,
+                "browser-layout-rect-inconsistent",
+                "events.ndjson#/payload/boundingClientRect",
+                "A bounding rectangle must be present exactly when the node has " +
+                    "a layout object.",
+                line);
+        }
+        if (ReadString(payload, "nodeType") == "text")
+        {
+            var hasStyle = payload.TryGetProperty("computedStyle", out var style) &&
+                style.ValueKind != JsonValueKind.Null;
+            if (hasStyle || !hasRect)
+            {
+                AddError(
+                    issues,
+                    "browser-layout-text-node-inconsistent",
+                    "events.ndjson#/payload/nodeType",
+                    "A text node record must have a layout object and no " +
+                        "computed style.",
+                    line);
+            }
+        }
+    }
+
+    private static void ValidateBrowserLayoutCheckpointCompleted(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredEnum("reason", "rendering-update"),
+                RequiredInteger("nodeCount", nonnegative: true),
+                RequiredBoolean("truncated"),
+                RequiredInteger("maximumNodes", positive: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        var count = ReadNullableInteger(payload, "nodeCount");
+        var maximum = ReadNullableInteger(payload, "maximumNodes");
+        if (count is not null && maximum is not null && count > maximum)
+        {
+            AddError(
+                issues,
+                "browser-layout-node-count-over-maximum",
+                "events.ndjson#/payload/nodeCount",
+                $"The checkpoint reports {count} nodes, more than the stated " +
+                    $"maximum of {maximum}.",
+                line);
+        }
     }
 
     private static long? ReadNullableInteger(JsonElement payload, string property) =>

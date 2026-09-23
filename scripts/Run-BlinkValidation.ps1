@@ -637,7 +637,12 @@ function Start-CookieFixtureServer {
         # The interaction logging fixture, served at /interaction. It shares
         # the cookie fixture's origin and sets no cookie of its own.
         [Parameter(Mandatory = $true)]
-        [string] $InteractionPage
+        [string] $InteractionPage,
+
+        # The layout logging fixture, served at /layout. It shares the cookie
+        # fixture's origin and sets no cookie of its own.
+        [Parameter(Mandatory = $true)]
+        [string] $LayoutPage
     )
 
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -645,7 +650,7 @@ function Start-CookieFixtureServer {
     $port = ([Net.IPEndPoint] $listener.LocalEndpoint).Port
     $server = [PowerShell]::Create()
     $null = $server.AddScript({
-            param($Listener, $Page, $CookieValue, $InteractionPage)
+            param($Listener, $Page, $CookieValue, $InteractionPage, $LayoutPage)
             $ascii = [Text.Encoding]::ASCII
             while ($true) {
                 try {
@@ -702,6 +707,11 @@ function Start-CookieFixtureServer {
                         $contentType = "text/html; charset=utf-8"
                         $body = $InteractionPage
                     }
+                    elseif ($path -eq "/layout") {
+                        $status = "200 OK"
+                        $contentType = "text/html; charset=utf-8"
+                        $body = $LayoutPage
+                    }
                     $bodyBytes = [Text.Encoding]::UTF8.GetBytes($body)
                     $head = (
                         "HTTP/1.1 $status`r`n" +
@@ -730,7 +740,7 @@ function Start-CookieFixtureServer {
             }
         }).AddArgument($listener).AddArgument($Page).AddArgument(
             $CookieValue
-        ).AddArgument($InteractionPage)
+        ).AddArgument($InteractionPage).AddArgument($LayoutPage)
     $handle = $server.BeginInvoke()
 
     [pscustomobject]@{
@@ -1217,6 +1227,262 @@ function Invoke-InteractionFixture {
     }
 }
 
+# The page the layout logging fixture serves. It holds a paragraph of text, a
+# box with a fixed size and color, and an element with display: none. Its
+# functions widen the box, which needs a new layout, and change only the box's
+# color, which needs a style update without a size change. Each function waits
+# two animation frames after its change and then reports what the page sees.
+# The page schedules no timers and registers no listeners.
+$layoutFixturePage = @'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Layout logging fixture loading</title>
+<style>
+#layout-box { width: 200px; height: 50px; color: rgb(0, 0, 128); }
+#layout-hidden { display: none; }
+</style>
+</head>
+<body>
+<p>Layout logging fixture.</p>
+<div id="layout-box">Box</div>
+<span id="layout-hidden">Hidden</span>
+<script>
+function layoutFixtureFrames() {
+  return new Promise(function (resolve) {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { resolve(); });
+    });
+  });
+}
+function layoutFixtureReport() {
+  const box = document.getElementById("layout-box");
+  const rect = box.getBoundingClientRect();
+  return JSON.stringify({
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    color: getComputedStyle(box).color
+  });
+}
+window.layoutFixture = {
+  settle: function () {
+    return layoutFixtureFrames().then(layoutFixtureReport);
+  },
+  widen: function () {
+    document.getElementById("layout-box").style.width = "320px";
+    return layoutFixtureFrames().then(layoutFixtureReport);
+  },
+  recolor: function () {
+    document.getElementById("layout-box").style.color = "rgb(128, 0, 0)";
+    return layoutFixtureFrames().then(layoutFixtureReport);
+  }
+};
+document.title = "Layout logging fixture ready";
+</script>
+</body>
+</html>
+'@
+
+# Runs one of the layout fixture page's functions, each of which returns a
+# promise, and returns the value the promise resolves to.
+function Invoke-LayoutFixtureCall {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Session,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Expression
+    )
+
+    $run = Invoke-CdpCommand $Session "Runtime.evaluate" @{
+        expression = $Expression
+        awaitPromise = $true
+        returnByValue = $true
+    }
+    $failure = Get-CdpProperty $run "exceptionDetails"
+    if ($failure) {
+        $description = Get-CdpProperty (
+            Get-CdpProperty $failure "exception"
+        ) "description"
+        throw (
+            "The layout logging fixture failed at ${Expression}: " +
+            "$($failure.text) $description"
+        )
+    }
+    Get-CdpProperty $run.result "value"
+}
+
+# Opens the layout logging fixture in a foreground tab, lets it paint, widens
+# one element, changes only the color of the same element, and closes the tab.
+# The recorder emits layout checkpoints only for a document whose rendering
+# update reaches the paint-clean state, and a tab opened in the background never
+# paints, so the tab must be in the foreground. Each page function waits two
+# animation frames after its change, so the change has been through a rendering
+# update before the function returns, and then reports the element's rectangle,
+# the viewport size, and the element's color as the page sees them. The caller
+# runs this step after the interaction fixture, with the listener fixture page
+# still hidden behind the background target, which is activated again before
+# this tab closes. This step only makes the page change layout and style so the
+# logger has updates to record; the verifier is what checks the records.
+function Invoke-LayoutFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase,
+
+        [Parameter(Mandatory = $true)]
+        [string] $FixtureUri,
+
+        # The tab to activate before the fixture tab closes.
+        [Parameter(Mandatory = $true)]
+        [string] $ReturnTargetId
+    )
+
+    $version = ConvertFrom-Json (
+        Invoke-WebRequest `
+            -Uri "$DevToolsBase/json/version" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+    ).Content
+    $browserSocket = Get-CdpProperty $version "webSocketDebuggerUrl"
+    if ($browserSocket -isnot [string] -or $browserSocket.Length -eq 0) {
+        throw "The DevTools version reply reported no browser endpoint."
+    }
+
+    $browserSession = $null
+    $pageSession = $null
+    $targetId = $null
+    try {
+        $browserSession = New-CdpSession $browserSocket
+        $created = Invoke-CdpCommand $browserSession "Target.createTarget" @{
+            url = $FixtureUri
+            background = $false
+        }
+        $targetId = [string](Get-CdpProperty $created "targetId")
+        if ([string]::IsNullOrWhiteSpace($targetId)) {
+            throw "Opening the layout logging fixture returned no target."
+        }
+
+        $target = $null
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $candidates = @()
+            try {
+                $candidates = @(
+                    Select-CdpFixtureTarget `
+                        (Get-CdpTargetList $DevToolsBase) `
+                        $FixtureUri `
+                        "Layout logging fixture ready" |
+                        Where-Object { (Get-CdpProperty $_ "id") -eq $targetId }
+                )
+            }
+            catch {
+                $candidates = @()
+            }
+            if ($candidates.Count -eq 1) {
+                $target = $candidates[0]
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $target) {
+            throw (
+                "The layout logging fixture did not report readiness in " +
+                "the DevTools target list."
+            )
+        }
+
+        $pageSession = New-CdpSession $target.webSocketDebuggerUrl
+        $activated = Invoke-WebRequest `
+            -Method Put `
+            -Uri "$DevToolsBase/json/activate/$targetId" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+        if ($activated.StatusCode -ne 200) {
+            throw (
+                "Activating the layout logging fixture reported status " +
+                "$($activated.StatusCode)."
+            )
+        }
+        $null = Invoke-CdpCommand $pageSession "Page.bringToFront" $null
+        $visibility = ""
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $visibility = [string](Invoke-LayoutFixtureCall $pageSession `
+                "String(document.visibilityState)")
+            if ($visibility -eq "visible") {
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if ($visibility -ne "visible") {
+            throw (
+                "The layout logging fixture reported visibility " +
+                "'$visibility' after being activated, so it cannot paint. " +
+                "A window that is minimized, occluded, or " +
+                "on an inactive desktop produces this."
+            )
+        }
+        $steps = [ordered]@{}
+        foreach ($step in @(
+                @{ Name = "Settle"; Call = "layoutFixture.settle()" },
+                @{ Name = "Widen"; Call = "layoutFixture.widen()" },
+                @{ Name = "Recolor"; Call = "layoutFixture.recolor()" }
+            )) {
+            $steps[$step.Name] = [string](
+                Invoke-LayoutFixtureCall $pageSession $step.Call
+            )
+        }
+        $widened = ConvertFrom-Json $steps.Widen
+        $recolored = ConvertFrom-Json $steps.Recolor
+        if ($widened.width -ne 320 -or $recolored.color -ne "rgb(128, 0, 0)") {
+            throw (
+                "The layout logging fixture reported $($steps.Widen) after " +
+                "widening and $($steps.Recolor) after recoloring."
+            )
+        }
+
+        [pscustomobject]@{
+            TargetId = $targetId
+            Steps = $steps
+        }
+    }
+    finally {
+        Close-CdpSession $pageSession
+        try {
+            $null = Invoke-WebRequest `
+                -Method Put `
+                -Uri "$DevToolsBase/json/activate/$ReturnTargetId" `
+                -UseBasicParsing `
+                -TimeoutSec 5
+        }
+        catch {
+            Write-Host (
+                "Activating the background target again failed: " +
+                "$($_.Exception.Message)"
+            )
+        }
+        if ($browserSession -and $targetId) {
+            try {
+                $null = Invoke-CdpCommand $browserSession "Target.closeTarget" @{
+                    targetId = $targetId
+                }
+            }
+            catch {
+                Write-Host (
+                    "Closing the layout logging fixture tab failed: " +
+                    "$($_.Exception.Message)"
+                )
+            }
+        }
+        Close-CdpSession $browserSession
+    }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if ($principal.IsInRole(
@@ -1481,17 +1747,22 @@ $cookieValue = "a11y-recorder-cookie-value-" + [Guid]::NewGuid().ToString("N")
 $cookieServer = $null
 $cookieFixtureUri = $null
 $interactionFixtureUri = $null
+$layoutFixtureUri = $null
+$layoutFixtureSteps = $null
 $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $bridgeLog
 $env:A11Y_RECORDER_CHROMIUM_LOG_FILE = $chromiumLog
 try {
     $cookieServer = Start-CookieFixtureServer `
         $cookieFixturePage `
         $cookieValue `
-        $interactionFixturePage
+        $interactionFixturePage `
+        $layoutFixturePage
     $cookieFixtureUri = $cookieServer.BaseUri
     $interactionFixtureUri = "$($cookieServer.BaseUri)interaction"
     Write-Host "Serving the cookie logging fixture at $cookieFixtureUri"
+    $layoutFixtureUri = "$($cookieServer.BaseUri)layout"
     Write-Host "Serving the interaction logging fixture at $interactionFixtureUri"
+    Write-Host "Serving the layout logging fixture at $layoutFixtureUri"
     Write-Host "`n== Capturing the deterministic Blink fixture =="
     $captureJob = Start-Job -ScriptBlock {
         param(
@@ -1676,6 +1947,29 @@ try {
         throw
     }
 
+    # The layout logging fixture makes a fourth page widen an element and then
+    # change only its color, so the capture holds layout checkpoints before and
+    # after each change for the logger to record. It runs in the foreground for
+    # the same reason as the interaction fixture: only a painted document
+    # produces layout checkpoints.
+    try {
+        $layoutRun = Invoke-LayoutFixture `
+            $devToolsBase `
+            $layoutFixtureUri `
+            $backgroundTargetId
+        $layoutFixtureSteps = ConvertTo-Json -Compress -InputObject (
+            [pscustomobject] $layoutRun.Steps
+        )
+        Write-Host (
+            "Ran the layout logging fixture in foreground target " +
+            "$($layoutRun.TargetId). The page reported: $layoutFixtureSteps"
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
+
     Wait-Job $captureJob | Out-Null
     $captureErrors = @()
     $captureOutput = @(
@@ -1791,7 +2085,9 @@ try {
         -SessionPath $session.FullName `
         -CookieFixtureUri $cookieFixtureUri `
         -CookieValue $cookieValue `
-        -InteractionFixtureUri $interactionFixtureUri
+        -InteractionFixtureUri $interactionFixtureUri `
+        -LayoutFixtureUri $layoutFixtureUri `
+        -LayoutFixtureSteps $layoutFixtureSteps
 }
 catch {
     if (Test-Path -LiteralPath $bridgeLog -PathType Leaf) {

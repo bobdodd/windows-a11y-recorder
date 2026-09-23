@@ -14,7 +14,17 @@ param(
 
     # The URL the run script served the interaction logging fixture from.
     [Parameter(Mandatory = $true)]
-    [string] $InteractionFixtureUri
+    [string] $InteractionFixtureUri,
+
+    # The URL the run script served the layout logging fixture from.
+    [Parameter(Mandatory = $true)]
+    [string] $LayoutFixtureUri,
+
+    # What the layout fixture page reported after each of its steps, as a JSON
+    # object whose Settle, Widen, and Recolor members each hold the page's own
+    # JSON report of its box rectangle, viewport size, and box color.
+    [Parameter(Mandatory = $true)]
+    [string] $LayoutFixtureSteps
 )
 
 $ErrorActionPreference = "Stop"
@@ -3010,6 +3020,422 @@ Test-InteractionScriptOrigin $clearedFocus "blur"
     BlurOutcome = $clearedFocus.payload.outcome
 } | Format-List
 
+# The run script serves a fourth page, on the cookie fixture's origin, in a
+# foreground tab. The page paints, widens a box from 200 to 320 CSS pixels, and
+# then changes only the box's color, waiting two animation frames after each
+# change and reporting what it sees. These checks establish that the logger
+# emitted complete, consistent layout checkpoints for that document and that
+# the recorded rectangle, viewport, and computed styles agree with what the page
+# reported. They say nothing about whether the page's layout or styling is
+# appropriate.
+$expectedLayoutStyleProperties = @(
+    'display',
+    'visibility',
+    'opacity',
+    'position',
+    'top',
+    'right',
+    'bottom',
+    'left',
+    'z-index',
+    'float',
+    'box-sizing',
+    'width',
+    'height',
+    'min-width',
+    'min-height',
+    'max-width',
+    'max-height',
+    'overflow-x',
+    'overflow-y',
+    'clip',
+    'clip-path',
+    'text-overflow',
+    'content-visibility',
+    'transform',
+    'filter',
+    'margin-top',
+    'margin-right',
+    'margin-bottom',
+    'margin-left',
+    'padding-top',
+    'padding-right',
+    'padding-bottom',
+    'padding-left',
+    'border-top-width',
+    'border-right-width',
+    'border-bottom-width',
+    'border-left-width',
+    'border-top-style',
+    'border-right-style',
+    'border-bottom-style',
+    'border-left-style',
+    'border-top-color',
+    'border-right-color',
+    'border-bottom-color',
+    'border-left-color',
+    'outline-style',
+    'outline-width',
+    'outline-color',
+    'outline-offset',
+    'box-shadow',
+    'text-shadow',
+    'color',
+    'background-color',
+    'background-image',
+    'font-family',
+    'font-size',
+    'font-weight',
+    'font-style',
+    'line-height',
+    'letter-spacing',
+    'word-spacing',
+    'text-transform',
+    'text-decoration-line',
+    'text-align',
+    'text-indent',
+    'white-space-collapse',
+    'text-wrap-mode',
+    'direction',
+    'writing-mode',
+    'cursor',
+    'pointer-events',
+    'animation-name',
+    'animation-duration',
+    'transition-property',
+    'transition-duration'
+)
+$layoutSteps = ConvertFrom-Json $LayoutFixtureSteps
+$layoutReports = [ordered]@{
+    Settle = ConvertFrom-Json ([string] $layoutSteps.Settle)
+    Widen = ConvertFrom-Json ([string] $layoutSteps.Widen)
+    Recolor = ConvertFrom-Json ([string] $layoutSteps.Recolor)
+}
+
+$layoutCommits = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.navigation" -and
+            $_.eventType -eq "navigation-completed" -and
+            ([string] $_.payload.url).StartsWith($LayoutFixtureUri) -and
+            $_.payload.frameType -eq "primary-main-frame" -and
+            $_.payload.committed -eq $true -and
+            $_.payload.sameDocument -eq $false
+        }
+)
+if ($layoutCommits.Count -ne 1) {
+    throw (
+        "$($layoutCommits.Count) committed navigations to the layout logging " +
+        "fixture were recorded rather than one."
+    )
+}
+$layoutCommit = $layoutCommits[0]
+$layoutDocumentToken = $layoutCommit.payload.context.documentToken
+$layoutProcessId = $layoutCommit.payload.rendererProcessId
+$layoutDocumentRecords = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.layout" -and
+            $_.payload.context.documentToken -eq $layoutDocumentToken -and
+            $_.payload.context.processId -eq $layoutProcessId
+        }
+)
+$layoutStarts = @(
+    $layoutDocumentRecords |
+        Where-Object { $_.eventType -eq "layout-checkpoint-started" }
+)
+if ($layoutStarts.Count -lt 3) {
+    throw (
+        "$($layoutStarts.Count) layout checkpoints were emitted for the layout " +
+        "logging fixture, fewer than one before and one after each of its " +
+        "two changes."
+    )
+}
+
+# Every checkpoint for the fixture document must be complete: one start, one
+# completion, and exactly the node records the completion counts, indexed from
+# zero without gaps. Each checkpoint names the document's previous checkpoint,
+# and no two consecutive checkpoints report the same counters, because the
+# logger only emits a checkpoint when style or layout work has happened.
+$layoutCheckpoints = New-Object System.Collections.ArrayList
+$previousLayoutStart = $null
+foreach ($start in $layoutStarts) {
+    $payload = $start.payload
+    $checkpointId = $payload.checkpointId
+    $expectedPrevious = if ($null -eq $previousLayoutStart) {
+        $null
+    } else {
+        $previousLayoutStart.payload.checkpointId
+    }
+    if ($payload.previousCheckpointId -ne $expectedPrevious) {
+        throw (
+            "Layout checkpoint $checkpointId named " +
+            "'$($payload.previousCheckpointId)' as its previous checkpoint " +
+            "rather than '$expectedPrevious'."
+        )
+    }
+    if ($null -ne $previousLayoutStart -and
+        $payload.styleResolutionCount -eq
+            $previousLayoutStart.payload.styleResolutionCount -and
+        $payload.layoutCount -eq $previousLayoutStart.payload.layoutCount) {
+        throw (
+            "Layout checkpoint $checkpointId reported the same style and " +
+            "layout counters as the checkpoint before it."
+        )
+    }
+    if ($payload.reason -ne "rendering-update" -or
+        $payload.maximumNodes -ne 100000) {
+        throw (
+            "Layout checkpoint $checkpointId reported reason " +
+            "'$($payload.reason)' and maximum $($payload.maximumNodes)."
+        )
+    }
+    $reportedProperties = @($payload.styleProperties)
+    if ($reportedProperties.Count -ne $expectedLayoutStyleProperties.Count -or
+        (@(
+            for ($index = 0; $index -lt $reportedProperties.Count; $index++) {
+                if ($reportedProperties[$index] -cne
+                    $expectedLayoutStyleProperties[$index]) {
+                    $index
+                }
+            }
+        ).Count -gt 0)) {
+        throw (
+            "Layout checkpoint $checkpointId did not list the defined " +
+            "computed-style properties in their defined order."
+        )
+    }
+    $nodes = @(
+        $layoutDocumentRecords |
+            Where-Object {
+                $_.eventType -eq "layout-checkpoint-node" -and
+                $_.payload.checkpointId -eq $checkpointId
+            }
+    )
+    $completions = @(
+        $layoutDocumentRecords |
+            Where-Object {
+                $_.eventType -eq "layout-checkpoint-completed" -and
+                $_.payload.checkpointId -eq $checkpointId
+            }
+    )
+    if ($completions.Count -ne 1) {
+        throw (
+            "Layout checkpoint $checkpointId had $($completions.Count) " +
+            "completions rather than one."
+        )
+    }
+    $completion = $completions[0].payload
+    if ($completion.truncated -or $completion.nodeCount -ne $nodes.Count) {
+        throw (
+            "Layout checkpoint $checkpointId completed with " +
+            "$($completion.nodeCount) nodes, truncated " +
+            "$($completion.truncated), but $($nodes.Count) node records " +
+            "were emitted."
+        )
+    }
+    for ($index = 0; $index -lt $nodes.Count; $index++) {
+        $node = $nodes[$index].payload
+        if ($node.nodeIndex -ne $index) {
+            throw (
+                "Layout checkpoint $checkpointId emitted node index " +
+                "$($node.nodeIndex) at position $index."
+            )
+        }
+        if ($node.nodeType -eq "element" -and $null -ne $node.computedStyle) {
+            $styleNames = @($node.computedStyle.PSObject.Properties.Name)
+            if (($styleNames -join "|") -cne
+                ($expectedLayoutStyleProperties -join "|")) {
+                throw (
+                    "A layout checkpoint node record in $checkpointId did not " +
+                    "report the defined computed-style properties in order."
+                )
+            }
+        }
+    }
+    [void] $layoutCheckpoints.Add([pscustomobject]@{
+            Start = $payload
+            Nodes = $nodes
+        })
+    $previousLayoutStart = $start
+}
+
+function Get-LayoutBoxRecord {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Checkpoint
+    )
+
+    @(
+        $Checkpoint.Nodes |
+            Where-Object {
+                $_.payload.nodeType -eq "element" -and
+                $_.payload.nodeName -eq "DIV" -and
+                $null -ne $_.payload.computedStyle -and
+                $_.payload.computedStyle.height -eq "50px"
+            }
+    )
+}
+
+# The box is the only DIV in the page, and its height is fixed at 50 pixels.
+# Only an element with a current computed style can match. The three states are found in order: 200 pixels wide and navy, then 320 pixels
+# wide and still navy, then 320 pixels wide and dark red.
+$layoutStates = @(
+    @{
+        Name = "Settle"
+        Width = "200px"
+        Color = "rgb(0, 0, 128)"
+    },
+    @{
+        Name = "Widen"
+        Width = "320px"
+        Color = "rgb(0, 0, 128)"
+    },
+    @{
+        Name = "Recolor"
+        Width = "320px"
+        Color = "rgb(128, 0, 0)"
+    }
+)
+$layoutBoxNodeId = $null
+$layoutStateCheckpoints = [ordered]@{}
+$searchFrom = 0
+foreach ($state in $layoutStates) {
+    $found = $null
+    for ($index = $searchFrom; $index -lt $layoutCheckpoints.Count; $index++) {
+        $boxes = @(Get-LayoutBoxRecord $layoutCheckpoints[$index])
+        # A checkpoint taken before the parser reached the box holds no record
+        # for it.
+        if ($boxes.Count -eq 0) {
+            continue
+        }
+        if ($boxes.Count -gt 1) {
+            throw (
+                "Layout checkpoint $($layoutCheckpoints[$index].Start.checkpointId) " +
+                "held $($boxes.Count) records for the fixture box rather than one."
+            )
+        }
+        $box = $boxes[0].payload
+        if ($null -ne $layoutBoxNodeId -and $box.nodeId -ne $layoutBoxNodeId) {
+            throw "The fixture box changed node identity between checkpoints."
+        }
+        $layoutBoxNodeId = $box.nodeId
+        if ($box.computedStyle.width -eq $state.Width -and
+            $box.computedStyle.color -eq $state.Color) {
+            $found = [pscustomobject]@{
+                Checkpoint = $layoutCheckpoints[$index]
+                Box = $box
+            }
+            $searchFrom = $index + 1
+            break
+        }
+    }
+    if ($null -eq $found) {
+        throw (
+            "No layout checkpoint after the previous state recorded the " +
+            "fixture box $($state.Width) wide in $($state.Color) for the " +
+            "$($state.Name) step."
+        )
+    }
+    $layoutStateCheckpoints[$state.Name] = $found
+}
+
+# The recorded rectangle and viewport must agree with what the page reported
+# after the frames that followed each change. The rectangle comes from the same
+# Blink geometry the page's getBoundingClientRect call reads. The viewport is
+# the media-query viewport, which, like innerWidth and innerHeight, includes
+# any scroll bar; the page's values are whole pixels, so one pixel of
+# difference is allowed.
+foreach ($name in $layoutStateCheckpoints.Keys) {
+    $state = $layoutStateCheckpoints[$name]
+    $report = $layoutReports[$name]
+    $rect = $state.Box.boundingClientRect
+    if ($null -eq $rect -or -not $state.Box.layoutObjectPresent) {
+        throw "The fixture box record for the $name step had no rectangle."
+    }
+    foreach ($axis in @("x", "y", "width", "height")) {
+        if ([Math]::Abs([double] $rect.$axis - [double] $report.$axis) -gt 0.01) {
+            throw (
+                "The fixture box record for the $name step reported $axis " +
+                "$($rect.$axis), but the page reported $($report.$axis)."
+            )
+        }
+    }
+    $viewport = $state.Checkpoint.Start.viewport
+    if ([Math]::Abs([double] $viewport.width - [double] $report.innerWidth) -gt 1 -or
+        [Math]::Abs([double] $viewport.height - [double] $report.innerHeight) -gt 1) {
+        throw (
+            "The $name checkpoint reported a viewport of " +
+            "$($viewport.width) by $($viewport.height), but the page reported " +
+            "$($report.innerWidth) by $($report.innerHeight)."
+        )
+    }
+    if ($state.Box.computedStyle.color -ne $report.color) {
+        throw (
+            "The fixture box record for the $name step reported color " +
+            "$($state.Box.computedStyle.color), but the page reported " +
+            "$($report.color)."
+        )
+    }
+}
+
+# The settled checkpoint must also hold the element with display: none, which
+# has no layout object and so no rectangle, and a laid-out text node with a
+# rectangle and no computed style.
+$settledNodes = $layoutStateCheckpoints["Settle"].Checkpoint.Nodes
+$hiddenSpans = @(
+    $settledNodes |
+        Where-Object {
+            $_.payload.nodeType -eq "element" -and
+            $_.payload.nodeName -eq "SPAN"
+        }
+)
+if ($hiddenSpans.Count -ne 1 -or
+    $hiddenSpans[0].payload.layoutObjectPresent -or
+    $null -ne $hiddenSpans[0].payload.boundingClientRect) {
+    throw (
+        "The settled layout checkpoint did not record the display: none " +
+        "element once, without a layout object or rectangle."
+    )
+}
+$layoutTextNodes = @(
+    $settledNodes |
+        Where-Object {
+            $_.payload.nodeType -eq "text" -and
+            $_.payload.layoutObjectPresent -and
+            $null -ne $_.payload.boundingClientRect -and
+            $_.payload.boundingClientRect.width -gt 0 -and
+            $null -eq $_.payload.computedStyle
+        }
+)
+if ($layoutTextNodes.Count -lt 1) {
+    throw "The settled layout checkpoint recorded no laid-out text node."
+}
+
+[pscustomobject]@{
+    LayoutRecords = $layoutDocumentRecords.Count
+    LayoutCheckpoints = $layoutCheckpoints.Count
+    LayoutBoxNodeId = $layoutBoxNodeId
+    SettledCheckpointId = $layoutStateCheckpoints["Settle"].Checkpoint.Start.checkpointId
+    WidenedCheckpointId = $layoutStateCheckpoints["Widen"].Checkpoint.Start.checkpointId
+    RecoloredCheckpointId = $layoutStateCheckpoints["Recolor"].Checkpoint.Start.checkpointId
+    SettledNodeCount = $settledNodes.Count
+    SettledBoxRect = (
+        "$($layoutStateCheckpoints['Settle'].Box.boundingClientRect.x)," +
+        "$($layoutStateCheckpoints['Settle'].Box.boundingClientRect.y) " +
+        "$($layoutStateCheckpoints['Settle'].Box.boundingClientRect.width)x" +
+        "$($layoutStateCheckpoints['Settle'].Box.boundingClientRect.height)"
+    )
+    WidenedBoxWidth = $layoutStateCheckpoints["Widen"].Box.boundingClientRect.width
+    RecoloredBoxColor = $layoutStateCheckpoints["Recolor"].Box.computedStyle.color
+    Viewport = (
+        "$($layoutStateCheckpoints['Settle'].Checkpoint.Start.viewport.width)x" +
+        "$($layoutStateCheckpoints['Settle'].Checkpoint.Start.viewport.height)"
+    )
+    DevicePixelRatio = $layoutStateCheckpoints["Settle"].Checkpoint.Start.devicePixelRatio
+    LayoutZoomFactor = $layoutStateCheckpoints["Settle"].Checkpoint.Start.layoutZoomFactor
+} | Format-List
+
 [pscustomobject]@{
     SessionPath = (Resolve-Path -LiteralPath $SessionPath).Path
     EvidenceOmissionRecords = $browserOmissions.Count
@@ -3160,6 +3586,6 @@ Write-Host (
     "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +
     "accessibility serialization checkpoint, cookie operation, and " +
-    "interaction-state " +
+    "interaction-state, and layout and computed-style checkpoint " +
     "evidence verified."
 )
