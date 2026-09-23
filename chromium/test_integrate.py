@@ -1468,6 +1468,46 @@ class IntegrateTests(unittest.TestCase):
             fixture.index(f'document.title = "{ready_title}"'),
         )
 
+    def test_validation_schedules_lifecycle_evidence_while_visible(self):
+        root = Path(__file__).parent.parent
+        fixture = (
+            root / "tests" / "fixtures" / "blink-listener-dispatch.html"
+        ).read_text(encoding="utf-8")
+        runner = (
+            root / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+
+        # A page's visibility during load depends on when its window is shown,
+        # so the fixture must not schedule its page-lifecycle timers at parse
+        # time. They belong to a function the harness calls once the page
+        # reports visible.
+        self.assertIn(
+            "window.recorderScheduleLifecycleEvidence = () => {", fixture
+        )
+        self.assertGreater(
+            fixture.index("}, 3000);"),
+            fixture.index("window.recorderScheduleLifecycleEvidence = () => {"),
+        )
+        self.assertGreater(
+            fixture.index("}, 3500);"),
+            fixture.index("window.recorderScheduleLifecycleEvidence = () => {"),
+        )
+
+        # The harness raises the page, requires its reported visibility, and
+        # schedules the timers before the page is hidden, so the schedule is
+        # recorded while visible and the callbacks enter while hidden.
+        self.assertIn('"Page.bringToFront"', runner)
+        self.assertIn("/json/activate/$TargetId", runner)
+        self.assertIn("String(document.visibilityState)", runner)
+        self.assertIn(
+            "String(window.recorderScheduleLifecycleEvidence())", runner
+        )
+        self.assertIn('if ($outcome -ne "visible") {', runner)
+        self.assertLess(
+            runner.index("Start-FixtureLifecycleEvidence `"),
+            runner.index("$backgroundTargetId = New-CdpBackgroundTarget"),
+        )
+
     def test_bridge_waits_for_a_busy_recorder_pipe(self):
         root = Path(__file__).parent.parent
         protocol = (

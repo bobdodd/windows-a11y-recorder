@@ -76,6 +76,10 @@ process-local timer ID. Therefore:
 ## Deterministic validation
 
 The Blink fixture schedules a short timeout after its document becomes hidden.
+The validation harness makes that transition deterministic: it raises the
+fixture page, requires the page's own reported visibility, schedules the
+page-lifecycle timers from outside the page, and only then hides it. See the
+page-lifecycle phase in `docs/validation/blink-listener-dispatch-plan.md`.
 Validation independently requires:
 
 - one correlated hidden-page timeout schedule and callback entry;

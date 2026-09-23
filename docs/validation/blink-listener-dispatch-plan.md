@@ -431,6 +431,29 @@ listeners call `preventDefault()`, remove the named listener, and call
 Because `HTMLElement.click()` dispatches a synthetic event, the expected
 `trusted` value is false.
 
+### Page-lifecycle phase
+
+The fixture does not schedule its page-lifecycle timers when it loads. A page's
+visibility during load depends on when Chromium shows its window, so a
+parse-time schedule recorded whichever visibility state the desktop happened to
+be in and made the lifecycle assertions depend on timing luck. Instead the
+fixture exposes `window.recorderScheduleLifecycleEvidence()`, which schedules
+the 3,000-millisecond lifecycle timeout, the 5,000-millisecond lifecycle
+interval, and the 3,500-millisecond timeout that clears that interval, and
+returns the visibility state it observed.
+
+`Run-BlinkValidation.ps1` drives that phase in a fixed order: it activates the
+fixture target, calls `Page.bringToFront`, waits for the page's own
+`document.visibilityState` to report `visible`, calls the scheduling function
+and requires the returned state to be `visible`, and then opens the background
+`about:blank` target that hides the fixture. The schedule is therefore recorded
+while the page reports visible and the callbacks enter while it is hidden, by
+construction rather than by timing. If the page does not report visible within
+the bounded wait, the run fails immediately with a message naming a minimized,
+occluded, or inactive-desktop window as the cause, instead of failing later in
+the verifier. The capture duration default is 25 seconds so that a slow launch
+still leaves room for the 3.5-second lifecycle phase.
+
 ## Windows validation procedure
 
 Run the complete validation from a standard, non-elevated PowerShell window:
@@ -443,8 +466,9 @@ Run the complete validation from a standard, non-elevated PowerShell window:
 The script tests and applies the integration, normalizes copied-file
 timestamps, builds Chromium, runs the managed test suite, captures the
 deterministic fixture, creates an isolated world in the fixture frame over the
-DevTools endpoint and registers a listener in it, requires a valid archive, and
-runs
+DevTools endpoint and registers a listener in it, schedules the fixture's
+page-lifecycle timers while the page reports visible and then hides it,
+requires a valid archive, and runs
 `Verify-BlinkEvidence.ps1`. Its final output includes the session path and
 archive-validation counts. Preserve that output in the dated validation
 record.

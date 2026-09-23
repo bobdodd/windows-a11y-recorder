@@ -35,6 +35,19 @@ from the product version.
 
 ### Changed
 
+- Schedule the validation fixture's page-lifecycle timers from the harness
+  instead of at page load. A page's visibility while it loads depends on when
+  Chromium shows its window, so the fixture used to record its lifecycle
+  schedule in whichever visibility state the desktop happened to be in, and a
+  run whose window was occluded during load failed in the verifier with a
+  message about a timeout that was not scheduled while the fixture was visible.
+  The fixture now exposes a scheduling function, and the validation script
+  activates the fixture target, raises it, requires the page's own reported
+  visibility, schedules the timers, and only then hides the page. The schedule
+  is recorded while visible and the callbacks enter while hidden by
+  construction. A page that cannot be made visible now fails immediately with a
+  message naming the window state as the cause. The default capture duration is
+  25 seconds so a slow launch still leaves room for the lifecycle phase.
 - Validate the payloads on the `browser.lifecycle` and `browser.accessibility`
   channels. Both channels carried records the archive validator did not check,
   so a malformed payload on either one passed validation silently. The two

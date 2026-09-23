@@ -169,16 +169,32 @@
       status.dataset.intervalTicks = String(intervalTicks);
       window.clearInterval(intervalId);
     }, 125);
-    window.setTimeout(() => {
-      status.dataset.lifecycleTimeoutFired = document.visibilityState;
-    }, 3000);
-    const lifecycleIntervalId = window.setInterval(() => {
-      status.dataset.lifecycleIntervalRan = "true";
-    }, 5000);
-    window.setTimeout(() => {
-      window.clearInterval(lifecycleIntervalId);
-      status.dataset.lifecycleIntervalCancelled = document.visibilityState;
-    }, 3500);
+    // The page-lifecycle timers are scheduled by the validation harness rather
+    // than at parse time, because a page's visibility during load depends on
+    // when its window is shown and is therefore not deterministic. The harness
+    // brings the page to the front, waits for it to report visible, calls this
+    // function, and only then hides the page, so the schedule is recorded while
+    // visible and the callbacks enter while hidden.
+    let lifecycleEvidenceScheduled = false;
+    window.recorderScheduleLifecycleEvidence = () => {
+      if (lifecycleEvidenceScheduled) {
+        return "already-scheduled";
+      }
+      lifecycleEvidenceScheduled = true;
+      const scheduleState = document.visibilityState;
+      window.setTimeout(() => {
+        status.dataset.lifecycleTimeoutFired = document.visibilityState;
+      }, 3000);
+      const lifecycleIntervalId = window.setInterval(() => {
+        status.dataset.lifecycleIntervalRan = "true";
+      }, 5000);
+      window.setTimeout(() => {
+        window.clearInterval(lifecycleIntervalId);
+        status.dataset.lifecycleIntervalCancelled = document.visibilityState;
+      }, 3500);
+      status.dataset.lifecycleEvidenceScheduled = scheduleState;
+      return scheduleState;
+    };
     window.setTimeout(() => {
       target.click();
       propertyHandler.click();

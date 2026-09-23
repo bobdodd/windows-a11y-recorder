@@ -15,8 +15,11 @@ param(
         Join-Path $env:USERPROFILE ".dotnet\dotnet.exe"
     ),
 
+    # The capture has to outlast the fixture's page-lifecycle phase, which is
+    # scheduled by this script after the page reports visible and completes
+    # 3.5 seconds later. The default leaves room for a slow launch.
     [ValidateRange(5, 300)]
-    [int] $DurationSeconds = 15
+    [int] $DurationSeconds = 25
 )
 
 $ErrorActionPreference = "Stop"
@@ -493,6 +496,81 @@ function Add-IsolatedWorldListener {
     }
 }
 
+# Schedules the fixture's page-lifecycle timers while the page is provably
+# visible. A page's visibility during load depends on when its window is shown,
+# so a fixture that scheduled these timers at parse time recorded whichever
+# state the desktop happened to be in. The fixture page is activated and raised
+# here, its own reported visibility is required to be visible before anything
+# is scheduled, and the caller hides the page immediately afterwards, so the
+# schedule is recorded while visible and the callbacks enter while hidden.
+function Start-FixtureLifecycleEvidence {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Session,
+
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase,
+
+        [Parameter(Mandatory = $true)]
+        [string] $TargetId
+    )
+
+    $activated = Invoke-WebRequest `
+        -Method Put `
+        -Uri "$DevToolsBase/json/activate/$TargetId" `
+        -UseBasicParsing `
+        -TimeoutSec 5
+    if ($activated.StatusCode -ne 200) {
+        throw (
+            "Activating the fixture target reported status " +
+            "$($activated.StatusCode)."
+        )
+    }
+    $null = Invoke-CdpCommand $Session "Page.bringToFront" $null
+
+    $state = ""
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        $reported = Invoke-CdpCommand $Session "Runtime.evaluate" @{
+            returnByValue = $true
+            expression = "String(document.visibilityState)"
+        }
+        $state = [string](Get-CdpProperty $reported.result "value")
+        if ($state -eq "visible") {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    if ($state -ne "visible") {
+        throw (
+            "The fixture page reported visibility '$state' after being " +
+            "activated and raised, so page-lifecycle evidence cannot be " +
+            "scheduled while visible. A window that is minimized, occluded, " +
+            "or on an inactive desktop produces this."
+        )
+    }
+
+    $scheduled = Invoke-CdpCommand $Session "Runtime.evaluate" @{
+        returnByValue = $true
+        expression = "String(window.recorderScheduleLifecycleEvidence())"
+    }
+    $failure = Get-CdpProperty $scheduled "exceptionDetails"
+    if ($failure) {
+        throw (
+            "Scheduling the fixture's page-lifecycle timers failed: " +
+            "$($failure.text)"
+        )
+    }
+    $outcome = [string](Get-CdpProperty $scheduled.result "value")
+    if ($outcome -ne "visible") {
+        throw (
+            "The fixture reported '$outcome' when it scheduled its " +
+            "page-lifecycle timers rather than scheduling them while visible."
+        )
+    }
+    return $outcome
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if ($principal.IsInRole(
@@ -806,6 +884,35 @@ try {
     }
     finally {
         Close-CdpSession $isolatedWorldSession
+    }
+
+    # The page-lifecycle timers are scheduled here, immediately before the page
+    # is hidden, so the schedule is recorded while the page reports visible and
+    # the callbacks enter while it is hidden. Scheduling them at parse time made
+    # both facts depend on when Chromium happened to show the fixture window.
+    $lifecycleSession = $null
+    try {
+        $lifecycleSession = New-CdpSession $fixtureTarget.webSocketDebuggerUrl
+        $fixtureTargetId = Get-CdpProperty $fixtureTarget "id"
+        if ($fixtureTargetId -isnot [string] -or
+                $fixtureTargetId.Length -eq 0) {
+            throw "The fixture target list reported no target identifier."
+        }
+        $lifecycleState = Start-FixtureLifecycleEvidence `
+            $lifecycleSession `
+            $devToolsBase `
+            $fixtureTargetId
+        Write-Host (
+            "Scheduled the fixture's page-lifecycle timers while the page " +
+            "reported $lifecycleState."
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
+    finally {
+        Close-CdpSession $lifecycleSession
     }
 
     $backgroundTargetId = New-CdpBackgroundTarget $devToolsBase
