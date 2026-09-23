@@ -1236,3 +1236,33 @@ contracts, and the higher event and artifact totals follow from the 25-second
 capture rather than from any new evidence type. Nothing here measures how
 Chromium decides page visibility during load, only that the harness no longer
 depends on that decision.
+
+## Cookie operation logging
+
+Protocol 0.23 records cookie operations on the `browser.cookie` channel. The run
+script serves a second fixture page from a loopback HTTP listener it starts for
+the run, because cookie APIs refuse the listener fixture's file URL and a
+Set-Cookie header needs an HTTP response. The page is opened in a background
+tab so the listener fixture stays in the foreground and its page-lifecycle
+evidence is unaffected, and it schedules no timers. The harness passes the page
+a value generated for the run, and the page writes and reads `document.cookie`,
+calls the Cookie Store `set`, `get`, `getAll`, and `delete` methods with a
+change listener registered, and fetches one response that sets a cookie and one
+request that sends it. The page document itself is served with a Set-Cookie
+header.
+
+The verifier requires a `document-cookie-write` and a `document-cookie-read`
+record with the fixture's names, a `cookie-store-request` for each of the four
+methods paired by `requestId` with a resolved `cookie-store-result`, two
+dispatched `cookie-store-change` records for the Cookie Store cookie, a
+navigation `cookie-access` record for the document's Set-Cookie header, and
+frame `cookie-access` records for the fetch that set a cookie and the fetch that
+sent it. The script-call records must report the fixture as their location and
+the main world. No line of the session's event file may contain the run's
+cookie value. The world check that previously rejected any world identity
+outside the listener channel now also admits the three cookie record types that
+are written at a script's call.
+
+These checks show that the logger emitted a record for each operation the page
+performed, with names and without values. They do not evaluate the page's cookie
+use. No measured result has been recorded yet.

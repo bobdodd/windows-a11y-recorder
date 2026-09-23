@@ -1,7 +1,16 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string] $SessionPath
+    [string] $SessionPath,
+
+    # The origin the run script served the cookie logging fixture from, ending
+    # in a slash.
+    [Parameter(Mandatory = $true)]
+    [string] $CookieFixtureUri,
+
+    # The value every fixture cookie carried, which no record may contain.
+    [Parameter(Mandatory = $true)]
+    [string] $CookieValue
 )
 
 $ErrorActionPreference = "Stop"
@@ -2210,8 +2219,11 @@ if ($isolatedWorldListener.context.documentId -ne $listener.context.documentId) 
         "document than the fixture's main-world registrations."
     )
 }
-# Nothing outside the listener channel observes a world in this protocol, so a
-# world identity on another channel would be a claim the recorder cannot support.
+# Outside the listener channel, only the cookie records written at a script's
+# cookie call observe a world in this protocol: the document.cookie read and
+# write records and the Cookie Store request record, which report the world
+# current at the call. A world identity on any other record would be a claim
+# the recorder cannot support.
 # Not every channel carries a context, and strict mode treats reading an absent
 # property as an error, so each step of the path is checked before it is read.
 $hasExecutionWorldIdentity = {
@@ -2235,13 +2247,22 @@ $nonListenerWorldRecords = @(
     $records |
         Where-Object {
             $_.channel -ne "browser.listener" -and
+            -not (
+                $_.channel -eq "browser.cookie" -and
+                $_.eventType -in @(
+                    "document-cookie-read",
+                    "document-cookie-write",
+                    "cookie-store-request"
+                )
+            ) -and
             (& $hasExecutionWorldIdentity $_)
         }
 )
 if ($nonListenerWorldRecords.Count -gt 0) {
     throw (
         "$($nonListenerWorldRecords.Count) records outside the listener " +
-        "channel reported an execution world identity."
+        "channel and the cookie call records reported an execution world " +
+        "identity."
     )
 }
 if ($listener.capture -or $listener.passive -or $listener.once) {
@@ -2548,6 +2569,234 @@ $omissionReasons = @(
         Sort-Object -Unique
 )
 
+# The run script serves a second page that uses document.cookie, the Cookie
+# Store API, and Set-Cookie response headers, and passes the page's origin and
+# the value every fixture cookie carries. These checks establish that the logger
+# emitted a record for each of those operations, with the cookie's name and
+# without its value. They say nothing about whether the page's cookie use is
+# appropriate.
+$cookieRecords = @(
+    $records | Where-Object { $_.channel -eq "browser.cookie" }
+)
+$cookieValueRecords = @(
+    Get-Content -LiteralPath $eventPath |
+        Where-Object { $_.Contains($CookieValue) }
+)
+if ($cookieValueRecords.Count -gt 0) {
+    throw (
+        "$($cookieValueRecords.Count) record(s) contain a fixture cookie " +
+        "value. Cookie records carry names and never values."
+    )
+}
+
+function Select-CookieFixtureRecord {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $EventType,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock] $Filter,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $selected = @(
+        $cookieRecords |
+            Where-Object { $_.eventType -eq $EventType } |
+            Where-Object $Filter
+    )
+    if ($selected.Count -eq 0) {
+        throw "No $EventType record was emitted for $Description."
+    }
+    $selected[0]
+}
+
+function Test-CookieFixtureOrigin {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Record,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $payload = $Record.payload
+    if ($null -eq $payload.world -or
+        $payload.world.kind -ne "main" -or
+        $payload.context.executionWorldId -ne
+            "world-$($payload.world.blinkWorldId)") {
+        throw "The $Description record did not report the main world."
+    }
+    if ($null -eq $payload.location -or
+        -not ([string] $payload.location.url).StartsWith($CookieFixtureUri)) {
+        throw (
+            "The $Description record did not report a location in the " +
+            "cookie logging fixture."
+        )
+    }
+}
+
+$documentCookieWrite = Select-CookieFixtureRecord `
+    "document-cookie-write" `
+    {
+        $_.payload.name -eq "a11y_recorder_document" -and
+        $_.payload.outcome -eq "sent-to-cookie-manager" -and
+        ([string] $_.payload.cookieUrl).StartsWith($CookieFixtureUri)
+    } `
+    "the fixture's document.cookie write"
+if ($documentCookieWrite.payload.attributes.path -ne "/" -or
+    $documentCookieWrite.payload.attributes.sameSite -ne "Lax" -or
+    @($documentCookieWrite.payload.attributes.attributeNames).Count -ne 2) {
+    throw (
+        "The document.cookie write record did not report the Path and " +
+        "SameSite attributes the fixture wrote."
+    )
+}
+Test-CookieFixtureOrigin $documentCookieWrite "document.cookie write"
+
+$documentCookieRead = Select-CookieFixtureRecord `
+    "document-cookie-read" `
+    {
+        $_.payload.outcome -eq "returned" -and
+        ([string] $_.payload.cookieUrl).StartsWith($CookieFixtureUri) -and
+        @($_.payload.cookieNames) -contains "a11y_recorder_document" -and
+        @($_.payload.cookieNames) -contains "a11y_recorder_response"
+    } `
+    "the fixture's document.cookie read"
+Test-CookieFixtureOrigin $documentCookieRead "document.cookie read"
+
+$cookieStoreRequests = @()
+foreach ($method in @("set", "get", "getAll", "delete")) {
+    $request = Select-CookieFixtureRecord `
+        "cookie-store-request" `
+        {
+            $_.payload.method -eq $method -and
+            $_.payload.contextKind -eq "window" -and
+            $_.payload.outcome -eq "sent-to-cookie-manager" -and
+            -not [string]::IsNullOrWhiteSpace($_.payload.requestId) -and
+            ($method -eq "getAll" -or
+                $_.payload.name -eq "a11y_recorder_store")
+        }.GetNewClosure() `
+        "the fixture's cookieStore.$method call"
+    Test-CookieFixtureOrigin $request "cookieStore.$method request"
+    $requestId = $request.payload.requestId
+    $result = Select-CookieFixtureRecord `
+        "cookie-store-result" `
+        {
+            $_.payload.requestId -eq $requestId -and
+            $_.payload.method -eq $method -and
+            $_.payload.outcome -eq "resolved"
+        }.GetNewClosure() `
+        "the fixture's cookieStore.$method result"
+    if ($method -in @("get", "getAll") -and
+        @($result.payload.cookieNames) -notcontains "a11y_recorder_store") {
+        throw (
+            "The cookieStore.$method result record did not name the cookie " +
+            "the fixture had set."
+        )
+    }
+    if ($method -in @("set", "delete") -and $result.payload.success -ne $true) {
+        throw (
+            "The cookieStore.$method result record did not report the " +
+            "browser's success."
+        )
+    }
+    $cookieStoreRequests += $request
+}
+
+$cookieStoreChanges = @(
+    $cookieRecords |
+        Where-Object {
+            $_.eventType -eq "cookie-store-change" -and
+            $_.payload.name -eq "a11y_recorder_store" -and
+            $_.payload.contextKind -eq "window" -and
+            $_.payload.dispatched -eq $true
+        }
+)
+if ($cookieStoreChanges.Count -lt 2) {
+    throw (
+        "$($cookieStoreChanges.Count) dispatched Cookie Store change " +
+        "record(s) were emitted for the fixture cookie rather than one for " +
+        "its insertion and one for its deletion."
+    )
+}
+
+$navigationCookieAccess = Select-CookieFixtureRecord `
+    "cookie-access" `
+    {
+        $_.payload.observer -eq "navigation" -and
+        $_.payload.accessType -eq "change" -and
+        ([string] $_.payload.url).StartsWith($CookieFixtureUri) -and
+        @(
+            $_.payload.cookies |
+                Where-Object { $_.name -eq "a11y_recorder_response" }
+        ).Count -gt 0
+    } `
+    "the fixture document's Set-Cookie response header"
+$responseCookie = @(
+    $navigationCookieAccess.payload.cookies |
+        Where-Object { $_.name -eq "a11y_recorder_response" }
+)[0]
+if ($responseCookie.parsed -ne $true -or $responseCookie.path -ne "/") {
+    throw (
+        "The navigation cookie-access record did not report the response " +
+        "cookie's attributes."
+    )
+}
+
+$frameCookieChange = Select-CookieFixtureRecord `
+    "cookie-access" `
+    {
+        $_.payload.observer -eq "frame" -and
+        $_.payload.accessType -eq "change" -and
+        ([string] $_.payload.url).StartsWith("$($CookieFixtureUri)set-cookie") -and
+        @(
+            $_.payload.cookies |
+                Where-Object { $_.name -eq "a11y_recorder_fetch" }
+        ).Count -gt 0
+    } `
+    "the fixture's fetch that received a Set-Cookie header"
+$frameCookieRead = Select-CookieFixtureRecord `
+    "cookie-access" `
+    {
+        $_.payload.observer -eq "frame" -and
+        $_.payload.accessType -eq "read" -and
+        ([string] $_.payload.url).StartsWith("$($CookieFixtureUri)echo") -and
+        @(
+            $_.payload.cookies |
+                Where-Object { $_.name -eq "a11y_recorder_fetch" }
+        ).Count -gt 0
+    } `
+    "the fixture's fetch that sent its cookies"
+foreach ($frameAccess in @($frameCookieChange, $frameCookieRead)) {
+    if ([string]::IsNullOrWhiteSpace(
+            $frameAccess.payload.context.documentId) -or
+        [string]::IsNullOrWhiteSpace(
+            $frameAccess.payload.context.documentToken)) {
+        throw "A frame cookie-access record reported no document identity."
+    }
+}
+
+[pscustomobject]@{
+    CookieRecords = $cookieRecords.Count
+    DocumentCookieWriteOutcome = $documentCookieWrite.payload.outcome
+    DocumentCookieReadServedFrom = $documentCookieRead.payload.servedFrom
+    DocumentCookieReadNames = @($documentCookieRead.payload.cookieNames) -join ", "
+    CookieStoreRequestIds = @(
+        $cookieStoreRequests | ForEach-Object { $_.payload.requestId }
+    ) -join ", "
+    CookieStoreChangeCauses = @(
+        $cookieStoreChanges | ForEach-Object { $_.payload.cause }
+    ) -join ", "
+    NavigationCookieAccessNames = @(
+        $navigationCookieAccess.payload.cookies | ForEach-Object { $_.name }
+    ) -join ", "
+    FrameCookieChangeUrl = $frameCookieChange.payload.url
+    FrameCookieReadUrl = $frameCookieRead.payload.url
+    RecordsContainingCookieValue = $cookieValueRecords.Count
+} | Format-List
+
 [pscustomobject]@{
     SessionPath = (Resolve-Path -LiteralPath $SessionPath).Path
     EvidenceOmissionRecords = $browserOmissions.Count
@@ -2697,6 +2946,6 @@ Write-Host (
     "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
     "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +
-    "accessibility serialization checkpoint " +
+    "accessibility serialization checkpoint, and cookie operation " +
     "evidence verified."
 )

@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.21` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.23` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -255,3 +255,27 @@ line in the bridge log is kept, because a process that never writes again cannot
 report its own loss, and that log is then the only trace. A failure to write the
 omission record returns the held count unchanged, since the omission is not
 itself captured evidence.
+
+Protocol 0.23 records cookie operations on the `browser.cookie` channel, with
+cookie names and never cookie values. `cookie_text.cc` holds the text readers:
+`ReadCookieNames` reads the names from a `document.cookie` string,
+`ReadCookieWriteRequest` reads the name and attributes from a written cookie
+string, `ReadCookieNameFromSetCookieLine` reads the name from a Set-Cookie line
+Chromium could not parse, and `ParseInclusionDebugString` splits Chromium's
+inclusion status into included, exclusion reasons, warning reasons, and
+exemption reason. Each reader copies only the name and attribute text into its
+result, so no value leaves the reader. `cookie_text_test.cc` exercises them and
+builds with any C++20 compiler outside Chromium; `test_integrate.py` compiles
+and runs it when `g++` or `clang++` is on the path.
+
+The Blink hooks in `cookie_jar.cc`, `document.cc`, and `cookie_store.cc` call
+`RecordBlinkDocumentCookieRead`, `RecordBlinkDocumentCookieWrite`,
+`RecordBlinkCookieStoreRead`, `RecordBlinkCookieStoreWrite`,
+`RecordBlinkCookieStoreReadResult`, `RecordBlinkCookieStoreWriteResult`, and
+`RecordBlinkCookieStoreChange`. A Cookie Store write notes its resolver with
+`NoteBlinkCookieStoreWriteResolver` just before it is sent, in a per-thread
+slot, so the request record and the later result record share a `requestId`.
+The browser hooks in `render_frame_host_impl.cc` and `navigation_request.cc`
+call `RecordBrowserFrameCookieAccess` and `RecordBrowserNavigationCookieAccess`
+with the entries Chromium's `CookieAccessDetails` holds. The record types and
+their limits are described in `docs/architecture/instrumented-chromium.md`.

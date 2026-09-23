@@ -181,8 +181,23 @@ internal static class EventPayloadValidator
             case ("browser.dom", "dom-character-data-changed"):
                 ValidateBrowserDomCharacterDataChanged(payload, issues, lineNumber);
                 break;
-            case ("browser.cookie", "cookie-operation"):
-                ValidateBrowserCookie(payload, issues, lineNumber);
+            case ("browser.cookie", "document-cookie-read"):
+                ValidateBrowserDocumentCookieRead(payload, issues, lineNumber);
+                break;
+            case ("browser.cookie", "document-cookie-write"):
+                ValidateBrowserDocumentCookieWrite(payload, issues, lineNumber);
+                break;
+            case ("browser.cookie", "cookie-store-request"):
+                ValidateBrowserCookieStoreRequest(payload, issues, lineNumber);
+                break;
+            case ("browser.cookie", "cookie-store-result"):
+                ValidateBrowserCookieStoreResult(payload, issues, lineNumber);
+                break;
+            case ("browser.cookie", "cookie-store-change"):
+                ValidateBrowserCookieStoreChange(payload, issues, lineNumber);
+                break;
+            case ("browser.cookie", "cookie-access"):
+                ValidateBrowserCookieAccess(payload, issues, lineNumber);
                 break;
             case ("window.foreground", "collector-omission"):
             case ("accessibility.uia.events", "collector-omission"):
@@ -750,7 +765,17 @@ internal static class EventPayloadValidator
         }
     }
 
-    private static void ValidateBrowserCookie(
+    // Cookie payloads are closed shapes with no field that can hold a cookie
+    // value. Because ValidateShape refuses any property a shape does not
+    // declare, a record that carried a value under any name would fail here
+    // rather than enter the archive.
+    private static readonly string[] CookieContextKinds =
+        ["window", "service-worker", "other"];
+
+    private static readonly string[] CookieStoreMethods =
+        ["get", "getAll", "set", "delete"];
+
+    private static void ValidateBrowserDocumentCookieRead(
         JsonElement payload,
         ICollection<ArchiveValidationIssue> issues,
         long line)
@@ -759,28 +784,349 @@ internal static class EventPayloadValidator
             payload,
             [
                 RequiredObject("context"),
+                RequiredString("accessId"),
+                NullableString("cookieUrl"),
                 RequiredEnum(
-                    "operation",
-                    "read",
-                    "write",
-                    "delete",
-                    "send",
-                    "receive",
-                    "block"),
-                RequiredString("name"),
-                NullableString("domain"),
-                NullableString("path"),
-                NullableString("sameSite"),
-                NullableBoolean("secure"),
-                NullableBoolean("httpOnly"),
-                NullableBoolean("partitioned"),
-                RequiredString("source"),
-                RequiredString("result"),
-                NullableString("blockedReason")
+                    "outcome",
+                    "returned",
+                    "not-attempted-no-cookie-url",
+                    "cookie-manager-call-failed",
+                    "refused-no-window-or-cookies-disabled",
+                    "refused-security-error"),
+                NullableEnum("servedFrom", "cookie-manager", "renderer-cache"),
+                RequiredInteger("cookieCount", nonnegative: true),
+                RequiredTextArray("cookieNames"),
+                RequiredBoolean("cookieNamesTruncated"),
+                NullableObject("location"),
+                NullableObject("world")
             ],
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
+        ValidateBrowserLocationProperty(payload, issues, line);
+        ValidateBrowserExecutionWorldProperty(payload, issues, line);
+        ValidateCookieNameCount(
+            payload, "cookieNames", "cookieNamesTruncated", issues, line);
+    }
+
+    private static void ValidateBrowserDocumentCookieWrite(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("accessId"),
+                NullableString("cookieUrl"),
+                RequiredEnum(
+                    "outcome",
+                    "sent-to-cookie-manager",
+                    "not-attempted-no-cookie-url",
+                    "refused-no-window-or-cookies-disabled",
+                    "refused-security-error"),
+                RequiredText("name"),
+                RequiredObject("attributes"),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateBrowserLocationProperty(payload, issues, line);
+        ValidateBrowserExecutionWorldProperty(payload, issues, line);
+        ValidateCookieWriteAttributes(payload, documentCookie: true, issues, line);
+    }
+
+    private static void ValidateBrowserCookieStoreRequest(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("requestId"),
+                RequiredEnum("method", CookieStoreMethods),
+                RequiredEnum("contextKind", CookieContextKinds),
+                RequiredEnum("outcome", "sent-to-cookie-manager", "threw"),
+                NullableText("name"),
+                NullableString("url"),
+                NullableObject("attributes"),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateBrowserLocationProperty(payload, issues, line);
+        ValidateBrowserExecutionWorldProperty(payload, issues, line);
+
+        var write = payload.TryGetProperty("method", out var method) &&
+            method.ValueKind == JsonValueKind.String &&
+            method.GetString() is "set" or "delete";
+        var hasAttributes = payload.TryGetProperty("attributes", out var attributes) &&
+            attributes.ValueKind == JsonValueKind.Object;
+        if (write != hasAttributes)
+        {
+            AddError(
+                issues,
+                "browser-cookie-store-attributes",
+                "events.ndjson#/payload/attributes",
+                "A Cookie Store write reports its attributes and a read reports null attributes.",
+                line);
+        }
+
+        if (hasAttributes)
+        {
+            ValidateCookieWriteAttributes(payload, documentCookie: false, issues, line);
+        }
+    }
+
+    private static void ValidateBrowserCookieStoreResult(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("requestId"),
+                RequiredEnum("method", CookieStoreMethods),
+                RequiredEnum("outcome", "resolved", "rejected", "context-destroyed"),
+                NullableBoolean("success"),
+                NullableInteger("cookieCount", nonnegative: true),
+                NullableTextArray("cookieNames"),
+                NullableBoolean("cookieNamesTruncated")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+
+        var read = payload.TryGetProperty("method", out var method) &&
+            method.ValueKind == JsonValueKind.String &&
+            method.GetString() is "get" or "getAll";
+        var hasNames = HasNonnullProperty(payload, "cookieNames") &&
+            HasNonnullProperty(payload, "cookieCount") &&
+            HasNonnullProperty(payload, "cookieNamesTruncated");
+        var hasSuccess = HasNonnullProperty(payload, "success");
+        if (read ? !hasNames || hasSuccess : hasNames || !hasSuccess)
+        {
+            AddError(
+                issues,
+                "browser-cookie-store-result-shape",
+                "events.ndjson#/payload",
+                "A Cookie Store read result reports cookie names and a write result reports success.",
+                line);
+        }
+
+        if (hasNames)
+        {
+            ValidateCookieNameCount(
+                payload, "cookieNames", "cookieNamesTruncated", issues, line);
+        }
+    }
+
+    private static void ValidateBrowserCookieStoreChange(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("contextKind", CookieContextKinds),
+                RequiredText("name"),
+                RequiredText("domain"),
+                RequiredText("path"),
+                RequiredString("cause"),
+                RequiredBoolean("dispatched")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+    }
+
+    private static void ValidateBrowserCookieAccess(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("observer", "frame", "navigation"),
+                NullableString("navigationId"),
+                NullableInteger("rendererProcessId", nonnegative: true),
+                RequiredEnum("accessType", "read", "change"),
+                RequiredString("url"),
+                NullableString("frameOrigin"),
+                NullableString("topFrameOrigin"),
+                NullableString("requestId"),
+                RequiredBoolean("adTagged"),
+                RequiredInteger("cookieCount", nonnegative: true),
+                RequiredObjectArray("cookies"),
+                RequiredBoolean("cookiesTruncated")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+
+        var navigationObserver = payload.TryGetProperty("observer", out var observer) &&
+            observer.ValueKind == JsonValueKind.String &&
+            observer.GetString() == "navigation";
+        if (navigationObserver != HasNonnullProperty(payload, "navigationId"))
+        {
+            AddError(
+                issues,
+                "browser-cookie-access-observer",
+                "events.ndjson#/payload/navigationId",
+                "A navigation-observed cookie access names its navigation and a frame-observed one does not.",
+                line);
+        }
+
+        if (!payload.TryGetProperty("cookies", out var cookies) ||
+            cookies.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var index = 0;
+        foreach (var cookie in cookies.EnumerateArray())
+        {
+            if (cookie.ValueKind == JsonValueKind.Object)
+            {
+                ValidateCookieAccessEntry(cookie, index, issues, line);
+            }
+
+            index++;
+        }
+
+        ValidateCookieNameCount(payload, "cookies", "cookiesTruncated", issues, line);
+    }
+
+    private static void ValidateCookieAccessEntry(
+        JsonElement cookie,
+        int index,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        var path = $"events.ndjson#/payload/cookies/{index}";
+        ValidateShape(
+            cookie,
+            [
+                RequiredText("name"),
+                RequiredBoolean("parsed"),
+                NullableText("domain"),
+                NullableText("path"),
+                NullableString("sameSite"),
+                NullableBoolean("secure"),
+                NullableBoolean("httpOnly"),
+                NullableBoolean("hostOnly"),
+                NullableBoolean("partitioned"),
+                NullableBoolean("persistent"),
+                NullableBoolean("expired"),
+                RequiredBoolean("included"),
+                RequiredStringArray("exclusionReasons"),
+                RequiredStringArray("warningReasons"),
+                NullableString("exemptionReason")
+            ],
+            issues,
+            line,
+            path);
+
+        var parsed = cookie.TryGetProperty("parsed", out var parsedValue) &&
+            parsedValue.ValueKind == JsonValueKind.True;
+        string[] attributes =
+        [
+            "domain", "path", "sameSite", "secure", "httpOnly", "hostOnly",
+            "partitioned", "persistent", "expired"
+        ];
+        foreach (var attribute in attributes)
+        {
+            if (parsed != HasNonnullProperty(cookie, attribute))
+            {
+                AddError(
+                    issues,
+                    "browser-cookie-access-entry-shape",
+                    $"{path}/{attribute}",
+                    "A parsed cookie reports every attribute and an unparsed Set-Cookie line reports none.",
+                    line);
+            }
+        }
+    }
+
+    private static void ValidateCookieWriteAttributes(
+        JsonElement payload,
+        bool documentCookie,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty("attributes", out var attributes) ||
+            attributes.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        List<PropertyRule> rules =
+        [
+            NullableString("domain"),
+            NullableString("path"),
+            NullableString("sameSite"),
+            RequiredBoolean("partitioned"),
+            RequiredBoolean("expiresPresent")
+        ];
+        if (documentCookie)
+        {
+            rules.Add(RequiredBoolean("secure"));
+            rules.Add(RequiredBoolean("httpOnly"));
+            rules.Add(RequiredBoolean("maxAgePresent"));
+            rules.Add(RequiredStringArray("attributeNames"));
+        }
+
+        ValidateShape(
+            attributes,
+            rules,
+            issues,
+            line,
+            "events.ndjson#/payload/attributes");
+    }
+
+    // A cookie list reports the full count and holds every entry unless it
+    // says it was cut, so a reader can tell a short list from a cut one.
+    private static void ValidateCookieNameCount(
+        JsonElement payload,
+        string listProperty,
+        string truncatedProperty,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty(listProperty, out var list) ||
+            list.ValueKind != JsonValueKind.Array ||
+            !payload.TryGetProperty("cookieCount", out var countValue) ||
+            !countValue.TryGetInt64(out var count) ||
+            !payload.TryGetProperty(truncatedProperty, out var truncatedValue) ||
+            truncatedValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return;
+        }
+
+        var length = list.GetArrayLength();
+        var truncated = truncatedValue.ValueKind == JsonValueKind.True;
+        if (truncated ? length >= count : length != count)
+        {
+            AddError(
+                issues,
+                "browser-cookie-count",
+                $"events.ndjson#/payload/{listProperty}",
+                "cookieCount must equal the listed cookies unless the list is marked truncated, in which case it must exceed them.",
+                line);
+        }
     }
 
     private static void ValidateBrowserNavigation(
@@ -1924,6 +2270,36 @@ internal static class EventPayloadValidator
             value => value.ValueKind == JsonValueKind.Array &&
                 value.EnumerateArray().All(IsNonemptyString),
             "must be an array of nonempty strings");
+
+    private static PropertyRule NullableText(string name) =>
+        new(name, true, true, IsString, "must be a string or null");
+
+    private static PropertyRule RequiredTextArray(string name) =>
+        new(
+            name,
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(IsString),
+            "must be an array of strings");
+
+    private static PropertyRule NullableTextArray(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(IsString),
+            "must be an array of strings or null");
+
+    private static PropertyRule NullableEnum(string name, params string[] values) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.String &&
+                values.Contains(value.GetString(), StringComparer.Ordinal),
+            $"must be null or one of: {string.Join(", ", values)}");
 
     private static PropertyRule NullableIntegerArray(string name) =>
         new(

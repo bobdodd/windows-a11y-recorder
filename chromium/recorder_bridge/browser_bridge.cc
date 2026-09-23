@@ -23,6 +23,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/win/windows_handle_util.h"
+#include "chromium/recorder_bridge/cookie_text.h"
 #include "chromium/recorder_bridge/recorder_protocol.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
 #include "components/version_info/version_info.h"
@@ -1186,6 +1187,215 @@ bool ReadChildBootstrap(const base::CommandLine& command_line,
   return true;
 }
 
+
+// Cookie records name at most this many cookies. Chromium allows far more
+// cookies per profile than one record can hold within the message limit, so a
+// record states its full count and whether its list was cut rather than
+// dropping the record or the excess silently.
+constexpr size_t kMaximumCookiesPerRecord = 256;
+
+struct CookieStoreRequestState {
+  std::string request_id;
+  std::string method;
+};
+
+struct CookieEvidenceStorage {
+  base::Lock lock;
+  uint64_t next_access_id = 1;
+  uint64_t next_request_id = 1;
+  // A Cookie Store API promise resolver stays alive until its reply arrives,
+  // so its address identifies one request between the call and the reply
+  // within one renderer process.
+  std::unordered_map<uintptr_t, CookieStoreRequestState> requests;
+};
+
+CookieEvidenceStorage& CookieEvidence() {
+  static base::NoDestructor<CookieEvidenceStorage> storage;
+  return *storage;
+}
+
+std::string AssignCookieAccessId() {
+  CookieEvidenceStorage& storage = CookieEvidence();
+  base::AutoLock lock(storage.lock);
+  return "cookie-access-" + base::NumberToString(storage.next_access_id++);
+}
+
+std::string AssignCookieStoreRequestId(uintptr_t resolver_identity,
+                                       const std::string& method) {
+  CookieEvidenceStorage& storage = CookieEvidence();
+  base::AutoLock lock(storage.lock);
+  std::string request_id = "cookie-store-request-" +
+                           base::NumberToString(storage.next_request_id++);
+  if (resolver_identity != 0) {
+    storage.requests.insert_or_assign(
+        resolver_identity, CookieStoreRequestState{request_id, method});
+  }
+  return request_id;
+}
+
+std::optional<CookieStoreRequestState> TakeCookieStoreRequest(
+    uintptr_t resolver_identity) {
+  CookieEvidenceStorage& storage = CookieEvidence();
+  base::AutoLock lock(storage.lock);
+  auto found = storage.requests.find(resolver_identity);
+  if (found == storage.requests.end()) {
+    return std::nullopt;
+  }
+  CookieStoreRequestState state = std::move(found->second);
+  storage.requests.erase(found);
+  return state;
+}
+
+// The resolver a Cookie Store API write noted just before it was sent. Blink
+// runs each CookieStore on one thread, and the write call records immediately
+// after its write path returns, so a per-thread slot pairs the two without a
+// lock.
+constinit thread_local uintptr_t g_pending_cookie_store_write_resolver = 0;
+
+base::Value OptionalString(bool present, std::string value) {
+  return present ? base::Value(std::move(value)) : base::Value();
+}
+
+base::Value NonEmptyString(std::string value) {
+  return value.empty() ? base::Value() : base::Value(std::move(value));
+}
+
+base::ListValue StringList(std::vector<std::string> values) {
+  base::ListValue list;
+  for (std::string& value : values) {
+    list.Append(std::move(value));
+  }
+  return list;
+}
+
+// Sets the cookie count, the names up to the record limit, and whether the
+// list was cut.
+void SetCookieNames(base::DictValue& payload,
+                    std::vector<std::string> cookie_names) {
+  const size_t count = cookie_names.size();
+  const bool truncated = count > kMaximumCookiesPerRecord;
+  if (truncated) {
+    cookie_names.resize(kMaximumCookiesPerRecord);
+  }
+  payload.Set("cookieCount", base::checked_cast<int>(count));
+  payload.Set("cookieNames", StringList(std::move(cookie_names)));
+  payload.Set("cookieNamesTruncated", truncated);
+}
+
+base::DictValue CreateCookieRendererContext(const RecorderPipeClient& client,
+                                            int document_node_id,
+                                            std::string document_token,
+                                            const CookieCallOrigin& origin) {
+  base::DictValue context =
+      CreateContext(client, document_node_id, std::move(document_token));
+  if (!NormalizeExecutionWorldKind(origin.world_kind).empty()) {
+    context.Set("executionWorldId", ExecutionWorldId(origin.world_id));
+  }
+  return context;
+}
+
+void SetCookieCallOrigin(base::DictValue& payload, CookieCallOrigin origin) {
+  const std::string world_kind =
+      NormalizeExecutionWorldKind(std::move(origin.world_kind));
+  payload.Set("location",
+              CreateScriptLocation(std::move(origin.script_url),
+                                   std::move(origin.function_name),
+                                   origin.script_id, origin.line_number,
+                                   origin.column_number));
+  payload.Set("world", CreateExecutionWorld(world_kind, origin.world_id,
+                                            std::move(origin.world_name),
+                                            std::move(origin.world_stable_id)));
+}
+
+base::DictValue CreateCookieWriteAttributes(CookieWriteRequest request,
+                                            bool include_script_only_flags) {
+  base::DictValue attributes;
+  attributes.Set("domain", OptionalString(request.domain_present,
+                                          std::move(request.domain)));
+  attributes.Set("path",
+                 OptionalString(request.path_present, std::move(request.path)));
+  attributes.Set("sameSite", OptionalString(request.same_site_present,
+                                            std::move(request.same_site)));
+  attributes.Set("partitioned", request.partitioned);
+  attributes.Set("expiresPresent", request.expires_present);
+  if (include_script_only_flags) {
+    attributes.Set("secure", request.secure);
+    attributes.Set("httpOnly", request.http_only);
+    attributes.Set("maxAgePresent", request.max_age_present);
+    attributes.Set("attributeNames",
+                   StringList(std::move(request.attribute_names)));
+  }
+  return attributes;
+}
+
+base::DictValue CreateCookieAccessEntry(CookieAccessEntry entry) {
+  const cookie_text::CookieInclusionText inclusion =
+      cookie_text::ParseInclusionDebugString(entry.inclusion_status);
+  base::DictValue cookie;
+  cookie.Set("name", std::move(entry.name));
+  cookie.Set("parsed", entry.parsed);
+  if (entry.parsed) {
+    cookie.Set("domain", std::move(entry.domain));
+    cookie.Set("path", std::move(entry.path));
+    cookie.Set("sameSite", std::move(entry.same_site));
+    cookie.Set("secure", entry.secure);
+    cookie.Set("httpOnly", entry.http_only);
+    cookie.Set("hostOnly", entry.host_only);
+    cookie.Set("partitioned", entry.partitioned);
+    cookie.Set("persistent", entry.persistent);
+    cookie.Set("expired", entry.expired);
+  } else {
+    for (const char* key :
+         {"domain", "path", "sameSite", "secure", "httpOnly", "hostOnly",
+          "partitioned", "persistent", "expired"}) {
+      cookie.Set(key, base::Value());
+    }
+  }
+  cookie.Set("included", inclusion.included);
+  cookie.Set("exclusionReasons", StringList(inclusion.exclusion_reasons));
+  cookie.Set("warningReasons", StringList(inclusion.warning_reasons));
+  cookie.Set("exemptionReason",
+             inclusion.exemption_reason
+                 ? base::Value(*inclusion.exemption_reason)
+                 : base::Value());
+  return cookie;
+}
+
+void SetCookieAccess(base::DictValue& payload,
+                     bool change,
+                     std::string url,
+                     std::string frame_origin,
+                     std::string top_frame_origin,
+                     std::string request_id,
+                     bool ad_tagged,
+                     std::vector<CookieAccessEntry> cookies) {
+  payload.Set("accessType", change ? "change" : "read");
+  payload.Set("url", std::move(url));
+  payload.Set("frameOrigin", NonEmptyString(std::move(frame_origin)));
+  payload.Set("topFrameOrigin", NonEmptyString(std::move(top_frame_origin)));
+  payload.Set("requestId", NonEmptyString(std::move(request_id)));
+  payload.Set("adTagged", ad_tagged);
+  const size_t count = cookies.size();
+  const bool truncated = count > kMaximumCookiesPerRecord;
+  if (truncated) {
+    cookies.resize(kMaximumCookiesPerRecord);
+  }
+  base::ListValue entries;
+  for (CookieAccessEntry& entry : cookies) {
+    entries.Append(CreateCookieAccessEntry(std::move(entry)));
+  }
+  payload.Set("cookieCount", base::checked_cast<int>(count));
+  payload.Set("cookies", std::move(entries));
+  payload.Set("cookiesTruncated", truncated);
+}
+
+std::string NormalizeCookieContextKind(std::string context_kind) {
+  if (context_kind == "window" || context_kind == "service-worker") {
+    return context_kind;
+  }
+  return "other";
+}
+
 }  // namespace
 
 void WriteRecorderBridgeDiagnostic(std::string_view message) {
@@ -2339,6 +2549,287 @@ void RecordBlinkDispatchCompleted(uintptr_t event_identity,
       DispatchOutcomeName(dispatch_result));
   SendBlinkEvidence("browser.dispatch", "dispatch-completed",
                     std::move(payload));
+}
+
+std::vector<std::string> ReadCookieNamesFromCookieString(
+    std::string_view cookie_string) {
+  return cookie_text::NamesFromCookieString(cookie_string);
+}
+
+CookieWriteRequest ReadCookieWriteRequest(std::string_view cookie_line) {
+  cookie_text::CookieWriteText text = cookie_text::ParseCookieWrite(cookie_line);
+  CookieWriteRequest request;
+  request.name = std::move(text.name);
+  request.domain_present = text.domain.has_value();
+  request.domain = text.domain.value_or(std::string());
+  request.path_present = text.path.has_value();
+  request.path = text.path.value_or(std::string());
+  request.same_site_present = text.same_site.has_value();
+  request.same_site = text.same_site.value_or(std::string());
+  request.secure = text.secure;
+  request.http_only = text.http_only;
+  request.partitioned = text.partitioned;
+  request.expires_present = text.expires_present;
+  request.max_age_present = text.max_age_present;
+  request.attribute_names = std::move(text.attribute_names);
+  return request;
+}
+
+std::string ReadCookieNameFromSetCookieLine(std::string_view cookie_line) {
+  return cookie_text::ParseCookieWrite(cookie_line).name;
+}
+
+void RecordBlinkDocumentCookieRead(int document_node_id,
+                                   std::string document_token,
+                                   std::string cookie_url,
+                                   std::string outcome,
+                                   std::string served_from,
+                                   std::vector<std::string> cookie_names,
+                                   CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("accessId", AssignCookieAccessId());
+  payload.Set("cookieUrl", NonEmptyString(std::move(cookie_url)));
+  payload.Set("outcome", std::move(outcome));
+  payload.Set("servedFrom", NonEmptyString(std::move(served_from)));
+  SetCookieNames(payload, std::move(cookie_names));
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.cookie", "document-cookie-read",
+                    std::move(payload));
+}
+
+void RecordBlinkDocumentCookieWrite(int document_node_id,
+                                    std::string document_token,
+                                    std::string cookie_url,
+                                    std::string outcome,
+                                    CookieWriteRequest request,
+                                    CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("accessId", AssignCookieAccessId());
+  payload.Set("cookieUrl", NonEmptyString(std::move(cookie_url)));
+  payload.Set("outcome", std::move(outcome));
+  payload.Set("name", request.name);
+  payload.Set("attributes",
+              CreateCookieWriteAttributes(std::move(request), true));
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.cookie", "document-cookie-write",
+                    std::move(payload));
+}
+
+void RecordBlinkCookieStoreRead(uintptr_t resolver_identity,
+                                std::string method,
+                                std::string context_kind,
+                                int document_node_id,
+                                std::string document_token,
+                                bool name_present,
+                                std::string name,
+                                bool url_present,
+                                std::string url,
+                                std::string outcome,
+                                CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  const bool sent = outcome == kCookieOutcomeSentToCookieManager;
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("requestId",
+              AssignCookieStoreRequestId(sent ? resolver_identity : 0,
+                                         method));
+  payload.Set("method", std::move(method));
+  payload.Set("contextKind", NormalizeCookieContextKind(std::move(context_kind)));
+  payload.Set("outcome", std::move(outcome));
+  payload.Set("name", OptionalString(name_present, std::move(name)));
+  payload.Set("url", OptionalString(url_present, std::move(url)));
+  payload.Set("attributes", base::Value());
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.cookie", "cookie-store-request",
+                    std::move(payload));
+}
+
+void NoteBlinkCookieStoreWriteResolver(uintptr_t resolver_identity) {
+  g_pending_cookie_store_write_resolver = resolver_identity;
+}
+
+void RecordBlinkCookieStoreWrite(std::string method,
+                                 std::string context_kind,
+                                 int document_node_id,
+                                 std::string document_token,
+                                 bool threw,
+                                 CookieWriteRequest request,
+                                 CookieCallOrigin origin) {
+  const uintptr_t resolver_identity = g_pending_cookie_store_write_resolver;
+  g_pending_cookie_store_write_resolver = 0;
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  // A write that threw was never sent, so any resolver noted on this thread
+  // belongs to no request and is not kept.
+  const bool sent = !threw && resolver_identity != 0;
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("requestId",
+              AssignCookieStoreRequestId(sent ? resolver_identity : 0,
+                                         method));
+  payload.Set("method", std::move(method));
+  payload.Set("contextKind", NormalizeCookieContextKind(std::move(context_kind)));
+  payload.Set("outcome", sent ? kCookieOutcomeSentToCookieManager
+                              : kCookieOutcomeThrew);
+  payload.Set("name", request.name);
+  payload.Set("url", base::Value());
+  payload.Set("attributes",
+              CreateCookieWriteAttributes(std::move(request), false));
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.cookie", "cookie-store-request",
+                    std::move(payload));
+}
+
+void RecordBlinkCookieStoreReadResult(uintptr_t resolver_identity,
+                                      bool context_valid,
+                                      std::vector<std::string> cookie_names) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  std::optional<CookieStoreRequestState> request =
+      TakeCookieStoreRequest(resolver_identity);
+  if (!client || !request) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("requestId", std::move(request->request_id));
+  payload.Set("method", std::move(request->method));
+  payload.Set("outcome", context_valid ? "resolved" : "context-destroyed");
+  payload.Set("success", base::Value());
+  SetCookieNames(payload, std::move(cookie_names));
+  SendBlinkEvidence("browser.cookie", "cookie-store-result",
+                    std::move(payload));
+}
+
+void RecordBlinkCookieStoreWriteResult(uintptr_t resolver_identity,
+                                       bool success) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  std::optional<CookieStoreRequestState> request =
+      TakeCookieStoreRequest(resolver_identity);
+  if (!client || !request) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("requestId", std::move(request->request_id));
+  payload.Set("method", std::move(request->method));
+  payload.Set("outcome", success ? "resolved" : "rejected");
+  payload.Set("success", success);
+  payload.Set("cookieCount", base::Value());
+  payload.Set("cookieNames", base::Value());
+  payload.Set("cookieNamesTruncated", base::Value());
+  SendBlinkEvidence("browser.cookie", "cookie-store-result",
+                    std::move(payload));
+}
+
+void RecordBlinkCookieStoreChange(std::string context_kind,
+                                  int document_node_id,
+                                  std::string document_token,
+                                  std::string name,
+                                  std::string domain,
+                                  std::string path,
+                                  std::string cause,
+                                  bool dispatched) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("contextKind", NormalizeCookieContextKind(std::move(context_kind)));
+  payload.Set("name", std::move(name));
+  payload.Set("domain", std::move(domain));
+  payload.Set("path", std::move(path));
+  payload.Set("cause", std::move(cause));
+  payload.Set("dispatched", dispatched);
+  SendBlinkEvidence("browser.cookie", "cookie-store-change",
+                    std::move(payload));
+}
+
+void RecordBrowserFrameCookieAccess(int page_frame_tree_node_id,
+                                    int frame_tree_node_id,
+                                    int64_t document_navigation_id,
+                                    std::string document_token,
+                                    int renderer_process_id,
+                                    bool change,
+                                    std::string url,
+                                    std::string frame_origin,
+                                    std::string top_frame_origin,
+                                    std::string request_id,
+                                    bool ad_tagged,
+                                    std::vector<CookieAccessEntry> cookies) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || page_frame_tree_node_id < 0 || frame_tree_node_id < 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateNavigationContext(*client, page_frame_tree_node_id,
+                                      frame_tree_node_id,
+                                      document_navigation_id,
+                                      std::move(document_token)));
+  payload.Set("observer", "frame");
+  payload.Set("navigationId", base::Value());
+  payload.Set("rendererProcessId", renderer_process_id > 0
+                                       ? base::Value(renderer_process_id)
+                                       : base::Value());
+  SetCookieAccess(payload, change, std::move(url), std::move(frame_origin),
+                  std::move(top_frame_origin), std::move(request_id),
+                  ad_tagged, std::move(cookies));
+  SendBlinkEvidence("browser.cookie", "cookie-access", std::move(payload));
+}
+
+void RecordBrowserNavigationCookieAccess(
+    int64_t navigation_id,
+    int page_frame_tree_node_id,
+    int frame_tree_node_id,
+    bool change,
+    std::string url,
+    std::string frame_origin,
+    std::string top_frame_origin,
+    std::string request_id,
+    bool ad_tagged,
+    std::vector<CookieAccessEntry> cookies) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || navigation_id <= 0 || page_frame_tree_node_id < 0 ||
+      frame_tree_node_id < 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateNavigationContext(*client, page_frame_tree_node_id,
+                                      frame_tree_node_id, 0, std::string()));
+  payload.Set("observer", "navigation");
+  payload.Set("navigationId",
+              "navigation-" + base::NumberToString(navigation_id));
+  payload.Set("rendererProcessId", base::Value());
+  SetCookieAccess(payload, change, std::move(url), std::move(frame_origin),
+                  std::move(top_frame_origin), std::move(request_id),
+                  ad_tagged, std::move(cookies));
+  SendBlinkEvidence("browser.cookie", "cookie-access", std::move(payload));
 }
 
 }  // namespace a11y_recorder
