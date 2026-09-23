@@ -594,7 +594,9 @@ The recorded facts are bounded as follows:
   records.
 
 The validation run serves a third fixture page from the loopback HTTP listener
-the cookie fixture uses, opened in a background tab. The page's script focuses
+the cookie fixture uses, opened in a foreground tab after the listener fixture
+has been hidden, because DevTools input reaches only a page that has painted.
+The page's script focuses
 a button, and a Tab key press sent as DevTools input moves focus to a text
 field. Text typed through DevTools input changes the field, the page's script
 sets the field and a textarea by value, focuses the textarea, and selects part

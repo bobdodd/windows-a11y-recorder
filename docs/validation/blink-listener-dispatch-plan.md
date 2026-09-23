@@ -1327,9 +1327,14 @@ run.
 Protocol 0.24 records focus, selection, text-control value, and
 element-reflected active descendant changes on the `browser.interaction`
 channel. The run script serves a third fixture page at `/interaction` from the
-loopback HTTP listener the cookie fixture uses, and opens it in a background
-tab so the listener fixture stays in the foreground and its page-lifecycle
-evidence is unaffected. The page schedules no timers and registers no
+loopback HTTP listener the cookie fixture uses. DevTools key and text input
+reaches a page only after its widget has painted, and a tab opened in the
+background never paints, so the page runs in a foreground tab. It is opened
+after the listener fixture has been hidden behind the background target, so it
+hides that target rather than the listener fixture, and the background target
+is activated again before the tab closes so the listener fixture stays hidden.
+The harness requires the page to report `visible` and waits two animation
+frames before sending input. The page schedules no timers and registers no
 listeners. The harness makes the page change interaction state in this order:
 
 1. The page's script focuses a button with `preventScroll`.
