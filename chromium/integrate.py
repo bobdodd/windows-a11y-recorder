@@ -5508,6 +5508,39 @@ BLINK_LAYOUT_CHECKPOINT_HOOK = """\
 """
 
 
+BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS = (
+    (
+        """\
+      for (size_t recorder_index = 0;
+           recorder_index < std::size(kRecorderLayoutStyleProperties);
+           ++recorder_index) {
+        const CSSValue* recorder_value =
+            CSSProperty::Get(kRecorderLayoutStyleProperties[recorder_index])
+                .CSSValueFromComputedStyle(""",
+        """\
+      size_t recorder_index = 0;
+      for (CSSPropertyID recorder_property_id :
+           kRecorderLayoutStyleProperties) {
+        const CSSValue* recorder_value =
+            CSSProperty::Get(recorder_property_id)
+                .CSSValueFromComputedStyle(""",
+    ),
+    (
+        """\
+        recorder_record.computed_style.push_back(std::move(recorder_entry));
+      }
+    }
+    a11y_recorder::RecordBlinkLayoutCheckpointNode(""",
+        """\
+        recorder_record.computed_style.push_back(std::move(recorder_entry));
+        ++recorder_index;
+      }
+    }
+    a11y_recorder::RecordBlinkLayoutCheckpointNode(""",
+    ),
+)
+
+
 def patch_blink_local_frame_view(path: Path) -> None:
     """Adds the layout checkpoint helper and its paint-clean hook."""
     text = read_source(path)
@@ -5517,6 +5550,12 @@ def patch_blink_local_frame_view(path: Path) -> None:
         BLINK_LAYOUT_CHECKPOINT_INCLUDES,
         path,
     )
+    # A tree patched by revision e459624 indexes the property array, which
+    # Blink rejects as unsafe buffer access. Upgrade that helper in place.
+    if "for (size_t recorder_index = 0;" in text:
+        text = upgrade_legacy_hooks(
+            text, BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS, path
+        )
     text = insert_before_once(
         text,
         BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
