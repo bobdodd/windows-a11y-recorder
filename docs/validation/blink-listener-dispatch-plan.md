@@ -1270,7 +1270,8 @@ use.
 ### Measured result
 
 Reference platform, September 23, 2026, at repository revision `4df0e4f`.
-Protocol 0.23. Recorded on the same Windows 10.0.19045 host and instrumented
+The branch was rebased when it was merged, so the same tree is commit `23da555`
+on `main`. Protocol 0.23. Recorded on the same Windows 10.0.19045 host and instrumented
 Chromium build as the earlier results in this document, rebuilt with the cookie
 hooks, with a 25-second capture that validated 43,695 events and 136 artifacts
 and reported no network-service crashes. The recorder accepted 43,695 records
