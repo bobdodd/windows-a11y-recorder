@@ -874,6 +874,44 @@ catch {
     throw
 }
 
+# A process whose bridge failed to initialize exits, so its evidence is missing
+# from the archive and nothing else in the run reports that it existed. The
+# archive can still validate and the verifier can still pass, so the bridge
+# trace is read here rather than only printed. A utility process reporting that
+# it received no bootstrap handle is the expected path for a process with no
+# evidence hooks and is not a failure.
+$bridgeLines = @()
+if (Test-Path -LiteralPath $bridgeLog -PathType Leaf) {
+    $bridgeLines = @(Get-Content -LiteralPath $bridgeLog)
+}
+$bridgeFailures = @(
+    $bridgeLines |
+        Where-Object {
+            $_ -match "bridge pipe connection failed" -or
+            $_ -match "bridge initialization failed" -or
+            $_ -match "bootstrap parsing failed" -or
+            $_ -match "bootstrap read failed"
+        }
+)
+# An evidence write that failed after the recorder closed its end of the pipe is
+# an ordinary shutdown race rather than lost evidence, so these are counted and
+# reported instead of failing the run.
+$bridgeWriteFailures = @(
+    $bridgeLines | Where-Object { $_ -match "evidence write failed" }
+).Count
+if ($bridgeFailures.Count -gt 0) {
+    Write-Host "`nNative recorder bridge trace:"
+    Get-Content -LiteralPath $bridgeLog
+    throw (
+        "$($bridgeFailures.Count) process(es) reported a recorder bridge " +
+        "failure, so their evidence is missing from this session: " +
+        ($bridgeFailures -join "; ")
+    )
+}
+$bridgeConnectWaits = @(
+    $bridgeLines | Where-Object { $_ -match "waited for a free pipe instance" }
+).Count
+
 $networkServiceCrashes = @(
     Select-String `
         -LiteralPath $chromiumLog `
@@ -895,3 +933,6 @@ Write-Host "ARCHIVE_VALID=$($validation.isValid)"
 Write-Host "EVENTS_VALIDATED=$($validation.eventsValidated)"
 Write-Host "ARTIFACTS_VALIDATED=$($validation.artifactsValidated)"
 Write-Host "NETWORK_SERVICE_CRASHES=$networkServiceCrashes"
+Write-Host "BRIDGE_CONNECT_WAITS=$bridgeConnectWaits"
+Write-Host "BRIDGE_WRITE_FAILURES=$bridgeWriteFailures"
+Write-Host "BRIDGE_INITIALIZATION_FAILURES=0"

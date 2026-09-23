@@ -152,6 +152,24 @@ establishes an independent clock mapping. Lifecycle records correlate the
 browser instance, OS process ID, browser OS process ID, Chromium child process
 ID, and process type.
 
+The recorder keeps one pending pipe instance at a time and creates the next one
+after a connection is accepted, so a process that opens the pipe while another
+process is being accepted is told the pipe is busy. Chromium starts several
+renderers at once, which makes that contention ordinary rather than a sign that
+the recorder has gone away. A single open attempt therefore cost a whole
+process: the bridge hook fails the process when initialization fails, so a
+renderer that lost the race exited, its evidence was absent from the archive,
+and nothing else in the session recorded that it had existed. A process now
+waits for a free instance until a 15 second deadline expires, retrying after
+both a busy pipe and a pipe that is momentarily absent, and treats every other
+error, an access denial above all, as a pipe it will never be allowed to open.
+A failure reports the Windows error and the time waited, because a bare message
+cannot distinguish contention that outlasted the deadline from a descriptor
+that excludes the caller. A connection that had to wait is recorded in the
+bridge startup log, and validation fails when any process reports a bridge
+initialization or connection failure, since the archive can otherwise validate
+and the deterministic verifier can otherwise pass with a process missing.
+
 Version 0.3 also adds listener `currentTarget` evidence and populates the
 ordered Node `composedPath` captured from Blink's dispatch path. Receivers
 continue to accept archived 0.2 dispatch payloads that omit `currentTarget`,

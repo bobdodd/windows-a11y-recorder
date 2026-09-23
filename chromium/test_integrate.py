@@ -1468,6 +1468,73 @@ class IntegrateTests(unittest.TestCase):
             fixture.index(f'document.title = "{ready_title}"'),
         )
 
+    def test_bridge_waits_for_a_busy_recorder_pipe(self):
+        root = Path(__file__).parent.parent
+        protocol = (
+            root / "chromium" / "recorder_bridge" / "recorder_protocol.cc"
+        ).read_text(encoding="utf-8")
+        header = (
+            root / "chromium" / "recorder_bridge" / "recorder_protocol.h"
+        ).read_text(encoding="utf-8")
+        connect = protocol.split(
+            "bool RecorderPipeClient::ConnectAndSynchronize", 1
+        )[1].split("base::DictValue hello;", 1)[0]
+
+        # A busy pipe is contention between processes starting at once, and a
+        # missing pipe can be the gap between server instances, so both are
+        # waited on. Anything else, an access denial above all, must be
+        # reported rather than retried until the deadline expires.
+        self.assertIn("ERROR_PIPE_BUSY", connect)
+        self.assertIn("ERROR_FILE_NOT_FOUND", connect)
+        self.assertIn("::WaitNamedPipeW(", connect)
+        self.assertIn("kPipeConnectTimeoutMilliseconds", connect)
+        self.assertIn(
+            "inline constexpr uint32_t kPipeConnectTimeoutMilliseconds",
+            header,
+        )
+        self.assertNotIn("ERROR_ACCESS_DENIED", connect)
+
+        # The failure a process reports must name the Windows error and the
+        # time waited, because a bare message cannot distinguish contention
+        # that outlasted the deadline from a pipe this process may not open.
+        self.assertIn(
+            "Could not connect to the recorder named pipe after ",
+            connect,
+        )
+        self.assertIn("Windows error ", connect)
+
+    def test_validation_fails_when_a_process_bridge_failed(self):
+        root = Path(__file__).parent.parent
+        runner = (
+            root / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+        bridge = (
+            root / "chromium" / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+
+        # The phrases the run treats as fatal must be phrases the bridge
+        # actually writes, or the check would pass a run that lost a process.
+        self.assertIn(
+            '$_ -match "bridge pipe connection failed"',
+            runner,
+        )
+        self.assertIn(
+            '"Recorder process bridge pipe connection failed: "',
+            bridge,
+        )
+        self.assertIn("reported a recorder bridge ", runner)
+        self.assertIn("BRIDGE_INITIALIZATION_FAILURES=0", runner)
+
+        # Contention that was waited out is reported without failing the run,
+        # so a session that had to wait is still distinguishable from one that
+        # did not.
+        self.assertIn(
+            '"Recorder process bridge waited for a free pipe instance "',
+            bridge,
+        )
+        self.assertIn('$_ -match "waited for a free pipe instance"', runner)
+        self.assertIn("BRIDGE_CONNECT_WAITS=$bridgeConnectWaits", runner)
+
     def test_validation_registers_an_isolated_world_listener(self):
         root = Path(__file__).parent.parent
         fixture = (

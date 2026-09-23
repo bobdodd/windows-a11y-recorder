@@ -210,13 +210,66 @@ bool RecorderPipeClient::ConnectAndSynchronize(
   process_type_ = process_type;
   const std::wstring path =
       L"\\\\.\\pipe\\" + base::UTF8ToWide(configuration_.pipe_name);
-  pipe_.Set(::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
-                          nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
-                          nullptr));
+  // The recorder keeps one pending pipe instance at a time, so a process that
+  // opens the pipe while another process is being accepted is told the pipe is
+  // busy. Chromium starts several renderers at once, so this is ordinary
+  // contention rather than a recorder that has gone away, and a single open
+  // attempt loses a whole process's evidence and, because the bridge hook
+  // fails the process, the process itself. Waiting for a free instance until a
+  // deadline expires makes contention cost a wait instead of a process.
+  const DWORD started_at = ::GetTickCount();
+  DWORD last_error = ERROR_SUCCESS;
+  for (;;) {
+    pipe_.Set(::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                            nullptr));
+    if (pipe_.is_valid()) {
+      break;
+    }
+    last_error = ::GetLastError();
+    // A busy pipe has instances that are all taken, and a pipe that is not
+    // found yet may be between instances. Every other error, an access denial
+    // above all, describes a pipe this process will never be allowed to open,
+    // so it is reported rather than retried.
+    if (last_error != ERROR_PIPE_BUSY && last_error != ERROR_FILE_NOT_FOUND) {
+      break;
+    }
+    const DWORD elapsed = ::GetTickCount() - started_at;
+    if (elapsed >= kPipeConnectTimeoutMilliseconds) {
+      break;
+    }
+    const DWORD remaining = kPipeConnectTimeoutMilliseconds - elapsed;
+    connect_wait_count_++;
+    if (last_error == ERROR_PIPE_BUSY) {
+      // WaitNamedPipe returns as soon as an instance is free, but the instance
+      // it saw can be taken by another process before this one opens it, so the
+      // result is a reason to try again rather than a guarantee.
+      if (!::WaitNamedPipeW(path.c_str(), remaining)) {
+        last_error = ::GetLastError();
+        if (last_error != ERROR_SEM_TIMEOUT &&
+            last_error != ERROR_FILE_NOT_FOUND) {
+          break;
+        }
+      }
+    } else {
+      // Nothing to wait on when the pipe is not there, so this backs off
+      // briefly instead of spinning on the open call.
+      ::Sleep(std::min<DWORD>(kPipeConnectRetryMilliseconds, remaining));
+    }
+  }
   if (!pipe_.is_valid()) {
-    *error = "Could not connect to the recorder named pipe.";
+    connect_wait_milliseconds_ =
+        static_cast<uint32_t>(::GetTickCount() - started_at);
+    *error = "Could not connect to the recorder named pipe after " +
+             base::NumberToString(connect_wait_milliseconds_) +
+             " ms: Windows error " +
+             base::NumberToString(static_cast<uint32_t>(last_error)) +
+             " after " + base::NumberToString(connect_wait_count_) +
+             " waits.";
     return false;
   }
+  connect_wait_milliseconds_ =
+      static_cast<uint32_t>(::GetTickCount() - started_at);
 
   base::DictValue hello;
   hello.Set("kind", "hello");

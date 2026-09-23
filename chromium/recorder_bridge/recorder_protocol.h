@@ -15,6 +15,11 @@ namespace a11y_recorder {
 
 inline constexpr char kProtocolVersion[] = "0.21";
 inline constexpr uint32_t kDefaultMaximumMessageBytes = 4 * 1024 * 1024;
+// How long a process waits for a free recorder pipe instance before it reports
+// that it could not connect, and how long it backs off between attempts while
+// the pipe is not there at all.
+inline constexpr uint32_t kPipeConnectTimeoutMilliseconds = 15000;
+inline constexpr uint32_t kPipeConnectRetryMilliseconds = 25;
 
 struct BootstrapConfiguration {
   std::string protocol_version;
@@ -64,6 +69,13 @@ class RecorderPipeClient {
     return configuration_.browser_instance_id;
   }
   const std::string& process_type() const { return process_type_; }
+  // How long this process spent opening the pipe, and how many times it had to
+  // wait for a free instance. Both are zero for a connection that was accepted
+  // on the first attempt.
+  uint32_t connect_wait_milliseconds() const {
+    return connect_wait_milliseconds_;
+  }
+  uint32_t connect_wait_count() const { return connect_wait_count_; }
 
  private:
   bool WriteMessage(base::DictValue message, std::string* error);
@@ -72,6 +84,8 @@ class RecorderPipeClient {
   BootstrapConfiguration configuration_;
   std::string process_type_;
   base::win::ScopedHandle pipe_;
+  uint32_t connect_wait_milliseconds_ = 0;
+  uint32_t connect_wait_count_ = 0;
   base::Lock write_lock_;
 };
 

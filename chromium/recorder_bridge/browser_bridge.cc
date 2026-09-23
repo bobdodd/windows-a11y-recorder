@@ -1243,6 +1243,15 @@ bool InitializeProcessBridge(std::string* error) {
                         *error);
     return false;
   }
+  // A connection that had to wait means several processes reached the pipe at
+  // once. It is not a failure, but it is the only trace that the contention
+  // happened, so it is recorded rather than left to be inferred from timing.
+  if (client->connect_wait_count() > 0) {
+    WriteDiagnosticLine(
+        "Recorder process bridge waited for a free pipe instance " +
+        base::NumberToString(client->connect_wait_count()) + " times over " +
+        base::NumberToString(client->connect_wait_milliseconds()) + " ms.");
+  }
   ProcessClientStorage() = std::move(client);
   WriteDiagnosticLine("Recorder process bridge initialized for " +
                       process_type + ".");

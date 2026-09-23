@@ -20,6 +20,22 @@ from the product version.
 
 ### Fixed
 
+- Wait for a free recorder pipe instance instead of failing a process that found
+  the pipe busy. The recorder keeps one pending pipe instance at a time, so a
+  process that opened the pipe while another process was being accepted was told
+  the pipe was busy, and a single open attempt gave up: the bridge hook fails a
+  process whose initialization failed, so that renderer exited, its evidence was
+  absent from the archive, and nothing else in the session recorded that it had
+  existed. A reference run recorded exactly this, with one renderer reporting
+  that it could not connect while every sibling connected. A process now waits
+  for a free instance until a 15 second deadline expires, retrying after both a
+  busy pipe and a pipe that is momentarily absent, and reports the Windows error
+  and the time waited when it gives up, because the previous message could not
+  distinguish contention from a pipe the caller may never open. A connection
+  that had to wait is recorded in the bridge startup log, and validation now
+  fails when any process reports a bridge initialization or connection failure,
+  which the archive validator and the deterministic verifier cannot detect
+  because a process that never connected leaves no record to check.
 - Stamp a collector's closing records with the session clock read when they are
   emitted rather than with the stop boundary captured before the collector's
   queued evidence was drained. A validation run whose UI Automation observation
