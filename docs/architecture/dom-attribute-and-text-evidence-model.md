@@ -198,7 +198,11 @@ transition are an overlap, and both fail the run. A run reports
 `UncoveredTransitionsAfterLastPass`, and `UncoveredTransitionDocuments`
 alongside the total. The classification states where a transition sits relative
 to its document's passes. It does not claim why a document produced no pass,
-because the verifier does not read navigation records for these documents.
+because the verifier does not read navigation records for these documents. The
+run at revision `326d755` measured 448 recorded transitions, 248 of them
+covered, and all 200 uncovered transitions in documents that completed no pass,
+from three documents, with no transition uncovered after its document's last
+pass.
 
 Correlating a checkpoint to its committed browser document is order-independent.
 A renderer finishes parsing a document before the browser process records the

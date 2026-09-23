@@ -1057,6 +1057,31 @@ A run now reports `CoveredTransitions`, `UncoveredTransitions`,
 `UncoveredTransitionsWithoutPass`, `UncoveredTransitionsAfterLastPass`, and
 `UncoveredTransitionDocuments`.
 
+### Measured result
+
+Reference platform, September 23, 2026, at repository revision `326d755`.
+Protocol 0.21. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, with a 15-second capture
+that validated 31,542 events and 85 artifacts and reported no network-service
+crashes.
+
+| Value | Result |
+| --- | --- |
+| `RecordedTransitions` | 448 |
+| `CoveredTransitions` | 248 |
+| `UncoveredTransitions` | 200 |
+| `UncoveredTransitionsWithoutPass` | 200 |
+| `UncoveredTransitionsAfterLastPass` | 0 |
+| `UncoveredTransitionDocuments` | 3 |
+
+What this establishes: the 200 uncovered transitions carried unchanged since
+protocol 0.16 are now a measured population rather than a described one. Every
+one of them is in a document that completed no delivery pass, and they come from
+three documents, which is the explanation the evidence model document gives for
+this population. No transition was uncovered after its document's last pass in
+this run, no document reported a hole inside a span its own passes claimed, and
+no two passes claimed the same transition.
+
 What this does not establish: the counts themselves are not asserted, because
 how many transitions a capture produces and how many documents Blink creates and
 discards are properties of the run rather than contracts. The classification

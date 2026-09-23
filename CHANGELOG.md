@@ -28,7 +28,10 @@ from the product version.
   document already claimed is a hole in the coverage, and two passes claiming
   one transition are an overlap, and both now fail a run. A run reports
   `CoveredTransitions`, `UncoveredTransitionsWithoutPass`,
-  `UncoveredTransitionsAfterLastPass`, and `UncoveredTransitionDocuments`.
+  `UncoveredTransitionsAfterLastPass`, and `UncoveredTransitionDocuments`. A
+  reference run measured 448 recorded transitions with 248 covered and all 200
+  uncovered transitions in the three documents that completed no pass, which
+  confirms by measurement the explanation previously given in prose.
 - Read the background DevTools target the same way as the target list. Windows
   PowerShell 5.1 does not enumerate a JSON array from `Invoke-RestMethod`, and
   the created target identifier is now required to be a scalar string, so a
