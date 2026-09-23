@@ -35,6 +35,20 @@ from the product version.
 
 ### Changed
 
+- Validate the payloads on the `browser.lifecycle` and `browser.accessibility`
+  channels. Both channels carried records the archive validator did not check,
+  so a malformed payload on either one passed validation silently. The two
+  lifecycle payloads and the three accessibility checkpoint payloads are now
+  closed shapes, an accessibility checkpoint must name a renderer process and
+  the Chromium document token it serialized, and a `collector-omission` record
+  on either channel is checked like the omissions on the other browser channels.
+  The validator states only what the bridge and the receiver already guarantee,
+  because a validator stricter than its emitters would fail whole runs.
+- Correct the documented account of a rejected browser connection. A failed
+  authentication or handshake writes no lifecycle record. The receiver states
+  the rejection as a `collector-omission` record with the reason
+  `browser-connection-rejected` on the `browser.listener` channel, which is what
+  the code does and what the archive contains.
 - Fail a reference validation run that lost evidence. The run reports
   `OMITTED_EVIDENCE_RECORDS`, `SINK_REFUSED_EVENTS`, and
   `OTHER_OMISSION_RECORDS`, and a lost record in either of the first two fails

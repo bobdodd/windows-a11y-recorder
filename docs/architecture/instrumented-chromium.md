@@ -479,8 +479,14 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 - Child-process hello messages are accepted only for renderer processes and
   must include positive browser parent and Chromium child process identifiers.
 - Neither record contains the authentication token.
-- A failed authentication or handshake produces
-  `browser-connection-rejected` instead of a successful lifecycle sequence.
+- A failed authentication or handshake produces no lifecycle record. The
+  rejection is stated as a `collector-omission` record with the reason
+  `browser-connection-rejected` on the `browser.listener` channel.
+- Both lifecycle payloads are closed shapes the archive validator checks, as are
+  the three accessibility checkpoint payloads. An accessibility checkpoint must
+  name a renderer process and the Chromium document token it serialized, and
+  carries no DOM document node identity, because the serialization is not taken
+  at a DOM checkpoint.
 
 ## Instrumentation sequence
 

@@ -15,12 +15,14 @@ internal static class EventPayloadValidator
         "graphics.desktop.frames",
         "audio.microphone",
         "audio.system",
+        "browser.lifecycle",
         "browser.listener",
         "browser.dispatch",
         "browser.timer",
         "browser.scheduler",
         "browser.navigation",
         "browser.dom",
+        "browser.accessibility",
         "browser.cookie"
     ];
 
@@ -91,6 +93,32 @@ internal static class EventPayloadValidator
             case ("audio.microphone", "audio-stream-error"):
             case ("audio.system", "audio-stream-error"):
                 ValidateAudioError(payload, issues, lineNumber);
+                break;
+            case ("browser.lifecycle", "browser-connected"):
+                ValidateBrowserConnected(payload, issues, lineNumber);
+                break;
+            case ("browser.lifecycle", "browser-clock-synchronized"):
+                ValidateBrowserClockSynchronized(payload, issues, lineNumber);
+                break;
+            case ("browser.accessibility", "accessibility-checkpoint-started"):
+                ValidateBrowserAccessibilityCheckpointStarted(
+                    payload,
+                    issues,
+                    lineNumber);
+                break;
+            case ("browser.accessibility", "accessibility-checkpoint-node"):
+                ValidateBrowserAccessibilityCheckpointNode(
+                    payload,
+                    issues,
+                    lineNumber);
+                break;
+            case (
+                "browser.accessibility",
+                "accessibility-checkpoint-completed"):
+                ValidateBrowserAccessibilityCheckpointCompleted(
+                    payload,
+                    issues,
+                    lineNumber);
                 break;
             case ("browser.listener", "listener-registered"):
             case ("browser.listener", "listener-removed"):
@@ -163,6 +191,8 @@ internal static class EventPayloadValidator
             case ("audio.system", "collector-omission"):
                 ValidateOmission(payload, issues, lineNumber);
                 break;
+            case ("browser.lifecycle", "collector-omission"):
+            case ("browser.accessibility", "collector-omission"):
             case ("browser.listener", "collector-omission"):
             case ("browser.dispatch", "collector-omission"):
             case ("browser.timer", "collector-omission"):
@@ -436,6 +466,123 @@ internal static class EventPayloadValidator
             ],
             issues,
             line);
+
+    // A lifecycle record states which process connected and what it spoke. The
+    // receiver already requires a browser process to carry neither a parent nor
+    // a child process identifier and a renderer to carry both, so both are
+    // present here and null for the browser process rather than absent.
+    private static void ValidateBrowserConnected(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredString("protocolVersion"),
+                RequiredString("browserInstanceId"),
+                RequiredInteger("processId", positive: true),
+                RequiredEnum("processType", "browser", "renderer"),
+                RequiredText("chromiumVersion"),
+                NullableInteger("parentProcessId", nonnegative: true),
+                NullableInteger("childProcessId", nonnegative: true)
+            ],
+            issues,
+            line);
+
+    // The clock record carries the mapping identity and the uncertainty the
+    // recorder estimated for it, which is a nonnegative half round trip rather
+    // than a signed offset. The browser's tick frequency is a decimal string,
+    // because it does not fit a JSON number on every platform.
+    private static void ValidateBrowserClockSynchronized(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredString("protocolVersion"),
+                RequiredString("browserInstanceId"),
+                RequiredInteger("processId", positive: true),
+                RequiredEnum("processType", "browser", "renderer"),
+                NullableInteger("parentProcessId", nonnegative: true),
+                NullableInteger("childProcessId", nonnegative: true),
+                RequiredString("clockMappingId"),
+                RequiredString("monotonicFrequency"),
+                RequiredInteger("uncertaintyNanoseconds", nonnegative: true)
+            ],
+            issues,
+            line);
+
+    private static void ValidateBrowserAccessibilityCheckpointStarted(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredEnum("reason", "renderer-serialization"),
+                RequiredInteger("maximumNodes", positive: true),
+                RequiredInteger("updateCount", nonnegative: true),
+                RequiredInteger("eventCount", nonnegative: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererTokenContext(payload, issues, line);
+    }
+
+    private static void ValidateBrowserAccessibilityCheckpointNode(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("nodeIndex", nonnegative: true),
+                RequiredInteger("accessibilityNodeId"),
+                NullableInteger("parentAccessibilityNodeId"),
+                NullableInteger("domNodeId", nonnegative: true),
+                RequiredInteger("role", nonnegative: true),
+                RequiredString("roleName"),
+                RequiredText("name"),
+                RequiredText("description"),
+                RequiredText("serializedProperties"),
+                RequiredBoolean("focused")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererTokenContext(payload, issues, line);
+    }
+
+    private static void ValidateBrowserAccessibilityCheckpointCompleted(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredEnum("reason", "renderer-serialization"),
+                RequiredInteger("nodeCount", nonnegative: true),
+                RequiredBoolean("truncated"),
+                RequiredInteger("maximumNodes", positive: true),
+                RequiredInteger("updateCount", nonnegative: true),
+                RequiredInteger("eventCount", nonnegative: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererTokenContext(payload, issues, line);
+    }
 
     private static void ValidateBrowserListener(
         JsonElement payload,
@@ -1198,6 +1345,32 @@ internal static class EventPayloadValidator
                 "browser-dom-context-invalid",
                 "events.ndjson#/payload/context",
                 "DOM checkpoint evidence must identify a renderer document and its Chromium document token.",
+                line);
+        }
+    }
+
+    // An accessibility checkpoint is taken by a renderer and names the Chromium
+    // document token it serialized, but it carries no DOM document node
+    // identity, because the serialization is not taken at a DOM checkpoint.
+    private static void ValidateRendererTokenContext(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty("context", out var context) ||
+            context.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        if (ReadString(context, "processType") != "renderer" ||
+            ReadString(context, "documentToken") is null)
+        {
+            AddError(
+                issues,
+                "browser-accessibility-context-invalid",
+                "events.ndjson#/payload/context",
+                "Accessibility checkpoint evidence must identify a renderer " +
+                    "and the Chromium document token it serialized.",
                 line);
         }
     }

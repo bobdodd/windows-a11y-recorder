@@ -238,8 +238,12 @@ Chromium-version metadata. Child records also contain the browser OS process ID
 and Chromium child process ID. No lifecycle record contains the authentication
 token. The clock record contains the mapping identifier, Chromium monotonic
 frequency, and estimated uncertainty in nanoseconds. A failed authentication or
-handshake produces `browser-connection-rejected` instead of either successful
-lifecycle record.
+handshake produces no lifecycle record. The receiver states the rejection as a
+`collector-omission` record with the reason `browser-connection-rejected`, which
+it writes on the `browser.listener` channel. Both lifecycle payloads are closed
+shapes that the archive validator checks, so a record carrying a property the
+receiver is not defined to send fails validation rather than entering the
+archive unchecked.
 
 Protocol 0.22 reports evidence the bridge could not write. `SendBlinkEvidence`
 holds a per-channel count of records whose write failed, guarded by its own lock

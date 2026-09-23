@@ -723,6 +723,289 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsBrowserLifecycleEvidence()
+    {
+        var connected = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Lifecycle,
+            BrowserEvidenceEventTypes.Connected,
+            new
+            {
+                protocolVersion = BrowserEvidenceProtocol.CurrentVersion,
+                browserInstanceId = "browser-1",
+                processId = 4321,
+                processType = "renderer",
+                chromiumVersion = "142.0.0.0",
+                parentProcessId = (int?)1000,
+                childProcessId = (int?)4321
+            });
+        var synchronized = CreateEvent(
+            1,
+            200,
+            BrowserEvidenceChannels.Lifecycle,
+            BrowserEvidenceEventTypes.ClockSynchronized,
+            new
+            {
+                protocolVersion = BrowserEvidenceProtocol.CurrentVersion,
+                browserInstanceId = "browser-1",
+                processId = 1000,
+                processType = "browser",
+                parentProcessId = (int?)null,
+                childProcessId = (int?)null,
+                clockMappingId = "chromium:browser-1:1000",
+                monotonicFrequency = "10000000",
+                uncertaintyNanoseconds = 12_500L
+            });
+        var directory = await CreateArchiveAsync([connected, synchronized]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsBrowserLifecycleEvidenceThatReportsAnUnknownFact()
+    {
+        // The lifecycle shape is closed, so a fact the receiver is not defined
+        // to report fails validation instead of entering the archive unchecked.
+        var connected = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Lifecycle,
+            BrowserEvidenceEventTypes.Connected,
+            new
+            {
+                protocolVersion = BrowserEvidenceProtocol.CurrentVersion,
+                browserInstanceId = "browser-1",
+                processId = 4321,
+                processType = "renderer",
+                chromiumVersion = "142.0.0.0",
+                parentProcessId = (int?)1000,
+                childProcessId = (int?)4321,
+                commandLine = "--headless"
+            });
+        var directory = await CreateArchiveAsync([connected]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "payload-property-unexpected");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AcceptsBrowserAccessibilityCheckpointEvidence()
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 4321,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = (string?)null,
+            executionWorldId = (string?)null,
+            documentToken = "document-token-1"
+        };
+        var started = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Accessibility,
+            BrowserEvidenceEventTypes.AccessibilityCheckpointStarted,
+            new
+            {
+                context,
+                checkpointId = "accessibility-checkpoint-1",
+                reason = "renderer-serialization",
+                maximumNodes = 100_000,
+                updateCount = 1,
+                eventCount = 0
+            });
+        var node = CreateEvent(
+            1,
+            200,
+            BrowserEvidenceChannels.Accessibility,
+            BrowserEvidenceEventTypes.AccessibilityCheckpointNode,
+            new
+            {
+                context,
+                checkpointId = "accessibility-checkpoint-1",
+                nodeIndex = 0,
+                accessibilityNodeId = 12,
+                parentAccessibilityNodeId = (int?)null,
+                domNodeId = (int?)null,
+                role = 7,
+                roleName = "button",
+                name = "Search",
+                description = string.Empty,
+                serializedProperties = "{}",
+                focused = false
+            });
+        var completed = CreateEvent(
+            2,
+            300,
+            BrowserEvidenceChannels.Accessibility,
+            BrowserEvidenceEventTypes.AccessibilityCheckpointCompleted,
+            new
+            {
+                context,
+                checkpointId = "accessibility-checkpoint-1",
+                reason = "renderer-serialization",
+                nodeCount = 1,
+                truncated = false,
+                maximumNodes = 100_000,
+                updateCount = 1,
+                eventCount = 0
+            });
+        var directory = await CreateArchiveAsync([started, node, completed]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsValid);
+            Assert.Empty(result.Issues);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsAnAccessibilityNodeThatReportsAnUnknownFact()
+    {
+        // The node shape is closed, so a property the bridge is not defined to
+        // send fails validation instead of entering the archive unchecked.
+        var node = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Accessibility,
+            BrowserEvidenceEventTypes.AccessibilityCheckpointNode,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 4321,
+                    processType = "renderer",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = (string?)null,
+                    frameId = (string?)null,
+                    documentId = (string?)null,
+                    executionWorldId = (string?)null,
+                    documentToken = "document-token-1"
+                },
+                checkpointId = "accessibility-checkpoint-1",
+                nodeIndex = 0,
+                accessibilityNodeId = 12,
+                parentAccessibilityNodeId = (int?)null,
+                domNodeId = (int?)null,
+                role = 7,
+                roleName = "button",
+                name = "Search",
+                description = string.Empty,
+                serializedProperties = "{}",
+                focused = false,
+                violation = "missing-accessible-name"
+            });
+        var directory = await CreateArchiveAsync([node]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "payload-property-unexpected");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsAnAccessibilityCheckpointFromOutsideARenderer()
+    {
+        // A checkpoint states which renderer document was serialized, so a
+        // record that names the browser process instead is not usable evidence.
+        var started = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Accessibility,
+            BrowserEvidenceEventTypes.AccessibilityCheckpointStarted,
+            new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 1000,
+                    processType = "browser",
+                    profileId = (string?)null,
+                    browserContextId = (string?)null,
+                    pageId = (string?)null,
+                    frameId = (string?)null,
+                    documentId = (string?)null,
+                    executionWorldId = (string?)null,
+                    documentToken = (string?)null
+                },
+                checkpointId = "accessibility-checkpoint-1",
+                reason = "renderer-serialization",
+                maximumNodes = 100_000,
+                updateCount = 1,
+                eventCount = 0
+            });
+        var directory = await CreateArchiveAsync([started]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue =>
+                    issue.Code == "browser-accessibility-context-invalid");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AcceptsInstrumentedBrowserTimerEvidence()
     {
         var context = new
