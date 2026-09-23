@@ -529,7 +529,9 @@ void RecordBlinkDispatchCompleted(uintptr_t event_identity,
 // the reading functions first and forwards only what they return.
 
 // Where a renderer cookie call came from and which JavaScript world made it,
-// as Blink reported them at the call. The fields follow the same conventions
+// as Blink reported them at the call. The focus, selection, and text-control
+// records of the interaction channel report their script origin in the same
+// shape. The fields follow the same conventions
 // as the trailing location and world parameters of the listener entry points:
 // an empty string or a zero identifier, line, or column means not observed, and
 // an empty world kind means Blink reported no current world.
@@ -730,6 +732,81 @@ void RecordBrowserNavigationCookieAccess(int64_t navigation_id,
                                          std::string request_id,
                                          bool ad_tagged,
                                          std::vector<CookieAccessEntry> cookies);
+
+// Records the outcome of one Document::SetFocusedElement call that could change
+// focus, once the call has returned and every blur, focusout, focus, and focusin
+// handler it ran has finished. The previous node is the element focused when
+// the call started, the requested node is the element the call was asked to
+// focus, and the focused node is the element focused when it returned. A zero
+// node identifier means no element. The active descendant is the element the
+// focused element's aria-activedescendant resolved to when the call returned,
+// through either the content attribute or an element set by reflection.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkFocusChanged(int document_node_id,
+                             std::string document_token,
+                             int previous_node_id,
+                             int requested_node_id,
+                             int focused_node_id,
+                             int active_descendant_node_id,
+                             std::string focus_type,
+                             std::string focus_trigger,
+                             bool prevent_scroll,
+                             bool focus_visible_present,
+                             bool focus_visible,
+                             CookieCallOrigin origin);
+
+// Records a frame selection Blink committed, after focus has followed it and
+// before Blink notifies accessibility, the compositor, and page event handlers.
+// The anchor and focus are container nodes and offsets as Blink holds them in
+// the DOM tree, which inside a text control are nodes of the control's
+// user-agent shadow tree. A zero text-control identifier means the selection
+// anchor is not inside a text control, and its offsets and direction are then
+// not reported.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkSelectionChanged(int document_node_id,
+                                 std::string document_token,
+                                 std::string set_by,
+                                 std::string selection_type,
+                                 int anchor_node_id,
+                                 int anchor_offset,
+                                 int focus_node_id,
+                                 int focus_offset,
+                                 bool directional,
+                                 int text_control_node_id,
+                                 int text_control_selection_start,
+                                 int text_control_selection_end,
+                                 std::string text_control_selection_direction,
+                                 CookieCallOrigin origin);
+
+// Records the value of a text control after a value set or a user edit changed
+// it. The value is bounded by the caller, which reports the full length in
+// UTF-16 code units and whether the recorded value was cut. The selection
+// offsets and direction are the control's own, read when the record is made.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkTextControlValueChanged(int document_node_id,
+                                        std::string document_token,
+                                        int node_id,
+                                        std::string control_type,
+                                        std::string source,
+                                        std::string value,
+                                        int value_length,
+                                        bool value_truncated,
+                                        int maximum_value_length,
+                                        int selection_start,
+                                        int selection_end,
+                                        std::string selection_direction,
+                                        CookieCallOrigin origin);
+
+// Records an element Blink stored as an element's aria-activedescendant
+// through element reflection. Reflection writes an empty content attribute and
+// keeps the element itself outside the DOM attribute state, so the referenced
+// element is only observable here.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
+                                             std::string document_token,
+                                             int node_id,
+                                             int referenced_node_id,
+                                             CookieCallOrigin origin);
 
 }  // namespace a11y_recorder
 

@@ -632,7 +632,12 @@ function Start-CookieFixtureServer {
         [string] $Page,
 
         [Parameter(Mandatory = $true)]
-        [string] $CookieValue
+        [string] $CookieValue,
+
+        # The interaction logging fixture, served at /interaction. It shares
+        # the cookie fixture's origin and sets no cookie of its own.
+        [Parameter(Mandatory = $true)]
+        [string] $InteractionPage
     )
 
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -640,7 +645,7 @@ function Start-CookieFixtureServer {
     $port = ([Net.IPEndPoint] $listener.LocalEndpoint).Port
     $server = [PowerShell]::Create()
     $null = $server.AddScript({
-            param($Listener, $Page, $CookieValue)
+            param($Listener, $Page, $CookieValue, $InteractionPage)
             $ascii = [Text.Encoding]::ASCII
             while ($true) {
                 try {
@@ -692,6 +697,11 @@ function Start-CookieFixtureServer {
                         $status = "200 OK"
                         $body = "echo"
                     }
+                    elseif ($path -eq "/interaction") {
+                        $status = "200 OK"
+                        $contentType = "text/html; charset=utf-8"
+                        $body = $InteractionPage
+                    }
                     $bodyBytes = [Text.Encoding]::UTF8.GetBytes($body)
                     $head = (
                         "HTTP/1.1 $status`r`n" +
@@ -718,7 +728,9 @@ function Start-CookieFixtureServer {
                     $client.Close()
                 }
             }
-        }).AddArgument($listener).AddArgument($Page).AddArgument($CookieValue)
+        }).AddArgument($listener).AddArgument($Page).AddArgument(
+            $CookieValue
+        ).AddArgument($InteractionPage)
     $handle = $server.BeginInvoke()
 
     [pscustomobject]@{
@@ -895,6 +907,254 @@ function Invoke-CookieFixture {
     }
 }
 
+# The page the interaction logging fixture serves. Its functions move focus,
+# set text-control values and a selection, and set an active descendant by
+# element reflection, so the capture holds each kind of interaction-state
+# record. Key presses and typed text are sent through DevTools input commands,
+# which Blink handles as user input rather than as script. The page schedules
+# no timers and registers no listeners.
+$interactionFixturePage = @'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Interaction logging fixture loading</title>
+</head>
+<body>
+<p>Interaction logging fixture.</p>
+<button id="first" type="button">First</button>
+<input id="field" type="text" aria-label="Field">
+<textarea id="notes" aria-label="Notes"></textarea>
+<div id="choices" role="listbox" tabindex="0" aria-label="Choices">
+<div id="choice-one" role="option">One</div>
+<div id="choice-two" role="option">Two</div>
+</div>
+<script>
+window.interactionFixture = {
+  focusFirst: function () {
+    document.getElementById("first").focus({ preventScroll: true });
+    return document.activeElement.id;
+  },
+  activeId: function () {
+    return document.activeElement ? document.activeElement.id : "";
+  },
+  fieldValue: function () {
+    return document.getElementById("field").value;
+  },
+  setValues: function () {
+    const field = document.getElementById("field");
+    const notes = document.getElementById("notes");
+    field.value = "set by script";
+    notes.value = "notes set by script";
+    notes.focus();
+    notes.setSelectionRange(1, 4, "forward");
+    return JSON.stringify({
+      active: document.activeElement.id,
+      start: notes.selectionStart,
+      end: notes.selectionEnd
+    });
+  },
+  notesValue: function () {
+    return document.getElementById("notes").value;
+  },
+  setActiveDescendant: function () {
+    const choices = document.getElementById("choices");
+    choices.ariaActiveDescendantElement =
+        document.getElementById("choice-two");
+    choices.focus();
+    const focused = document.activeElement.id;
+    document.activeElement.blur();
+    return JSON.stringify({
+      focused: focused,
+      afterBlur: document.activeElement === document.body ? "body" : "other"
+    });
+  }
+};
+document.title = "Interaction logging fixture ready";
+</script>
+</body>
+</html>
+'@
+
+# Runs one of the interaction fixture page's functions and returns its value.
+function Invoke-InteractionFixtureCall {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Session,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Expression
+    )
+
+    $run = Invoke-CdpCommand $Session "Runtime.evaluate" @{
+        expression = $Expression
+        returnByValue = $true
+    }
+    $failure = Get-CdpProperty $run "exceptionDetails"
+    if ($failure) {
+        $description = Get-CdpProperty (
+            Get-CdpProperty $failure "exception"
+        ) "description"
+        throw (
+            "The interaction logging fixture failed at ${Expression}: " +
+            "$($failure.text) $description"
+        )
+    }
+    Get-CdpProperty $run.result "value"
+}
+
+# Opens the interaction logging fixture in a background tab, moves focus by
+# script and by the Tab key, types into a text field and a textarea, sets values
+# and a selection by script, sets an active descendant by element reflection,
+# and closes the tab. The tab is opened in the background so the listener
+# fixture page stays in the foreground and its page-lifecycle evidence is
+# unaffected. This step only makes the page change interaction state so the
+# logger has changes to record; the verifier is what checks the records.
+function Invoke-InteractionFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase,
+
+        [Parameter(Mandatory = $true)]
+        [string] $FixtureUri
+    )
+
+    $version = ConvertFrom-Json (
+        Invoke-WebRequest `
+            -Uri "$DevToolsBase/json/version" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+    ).Content
+    $browserSocket = Get-CdpProperty $version "webSocketDebuggerUrl"
+    if ($browserSocket -isnot [string] -or $browserSocket.Length -eq 0) {
+        throw "The DevTools version reply reported no browser endpoint."
+    }
+
+    $browserSession = $null
+    $pageSession = $null
+    $targetId = $null
+    try {
+        $browserSession = New-CdpSession $browserSocket
+        $created = Invoke-CdpCommand $browserSession "Target.createTarget" @{
+            url = $FixtureUri
+            background = $true
+        }
+        $targetId = [string](Get-CdpProperty $created "targetId")
+        if ([string]::IsNullOrWhiteSpace($targetId)) {
+            throw "Opening the interaction logging fixture returned no target."
+        }
+
+        $target = $null
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $candidates = @()
+            try {
+                $candidates = @(
+                    Select-CdpFixtureTarget `
+                        (Get-CdpTargetList $DevToolsBase) `
+                        $FixtureUri `
+                        "Interaction logging fixture ready" |
+                        Where-Object { (Get-CdpProperty $_ "id") -eq $targetId }
+                )
+            }
+            catch {
+                $candidates = @()
+            }
+            if ($candidates.Count -eq 1) {
+                $target = $candidates[0]
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $target) {
+            throw (
+                "The interaction logging fixture did not report readiness in " +
+                "the DevTools target list."
+            )
+        }
+
+        $pageSession = New-CdpSession $target.webSocketDebuggerUrl
+        $steps = [ordered]@{}
+
+        $steps.ScriptFocus = Invoke-InteractionFixtureCall $pageSession `
+            "interactionFixture.focusFirst()"
+        if ($steps.ScriptFocus -ne "first") {
+            throw "The fixture's script focus left '$($steps.ScriptFocus)' focused."
+        }
+
+        foreach ($type in @("rawKeyDown", "keyUp")) {
+            $null = Invoke-CdpCommand $pageSession "Input.dispatchKeyEvent" @{
+                type = $type
+                key = "Tab"
+                code = "Tab"
+                windowsVirtualKeyCode = 9
+                nativeVirtualKeyCode = 9
+            }
+        }
+        $steps.TabFocus = Invoke-InteractionFixtureCall $pageSession `
+            "interactionFixture.activeId()"
+        if ($steps.TabFocus -ne "field") {
+            throw "The Tab key left '$($steps.TabFocus)' focused, not the field."
+        }
+
+        $null = Invoke-CdpCommand $pageSession "Input.insertText" @{
+            text = "typed"
+        }
+        $steps.TypedField = Invoke-InteractionFixtureCall $pageSession `
+            "interactionFixture.fieldValue()"
+        if ($steps.TypedField -ne "typed") {
+            throw "Typing into the field left the value '$($steps.TypedField)'."
+        }
+
+        $steps.ScriptValues = Invoke-InteractionFixtureCall $pageSession `
+            "interactionFixture.setValues()"
+        $values = ConvertFrom-Json ([string] $steps.ScriptValues)
+        if ($values.active -ne "notes" -or $values.start -ne 1 -or
+            $values.end -ne 4) {
+            throw "The fixture's value and selection step reported $($steps.ScriptValues)."
+        }
+
+        $null = Invoke-CdpCommand $pageSession "Input.insertText" @{
+            text = "X"
+        }
+        $steps.TypedNotes = Invoke-InteractionFixtureCall $pageSession `
+            "interactionFixture.notesValue()"
+        if ($steps.TypedNotes -ne "nXs set by script") {
+            throw "Typing into the textarea left the value '$($steps.TypedNotes)'."
+        }
+
+        $steps.ActiveDescendant = Invoke-InteractionFixtureCall $pageSession `
+            "interactionFixture.setActiveDescendant()"
+        $descendant = ConvertFrom-Json ([string] $steps.ActiveDescendant)
+        if ($descendant.focused -ne "choices" -or
+            $descendant.afterBlur -ne "body") {
+            throw "The fixture's active descendant step reported $($steps.ActiveDescendant)."
+        }
+
+        [pscustomobject]@{
+            TargetId = $targetId
+            Steps = $steps
+        }
+    }
+    finally {
+        Close-CdpSession $pageSession
+        if ($browserSession -and $targetId) {
+            try {
+                $null = Invoke-CdpCommand $browserSession "Target.closeTarget" @{
+                    targetId = $targetId
+                }
+            }
+            catch {
+                Write-Host (
+                    "Closing the interaction logging fixture tab failed: " +
+                    "$($_.Exception.Message)"
+                )
+            }
+        }
+        Close-CdpSession $browserSession
+    }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if ($principal.IsInRole(
@@ -1043,6 +1303,31 @@ $integratedFiles = @(
     ),
     (
         Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\dom\element.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\editing\frame_selection.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\html\forms\html_input_element.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\html\forms\text_field_input_type.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\html\forms\html_text_area_element.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
             "third_party\blink\renderer\modules\cookie_store\" +
             "cookie_store.cc"
         )
@@ -1133,12 +1418,18 @@ $captureJob = $null
 $cookieValue = "a11y-recorder-cookie-value-" + [Guid]::NewGuid().ToString("N")
 $cookieServer = $null
 $cookieFixtureUri = $null
+$interactionFixtureUri = $null
 $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $bridgeLog
 $env:A11Y_RECORDER_CHROMIUM_LOG_FILE = $chromiumLog
 try {
-    $cookieServer = Start-CookieFixtureServer $cookieFixturePage $cookieValue
+    $cookieServer = Start-CookieFixtureServer `
+        $cookieFixturePage `
+        $cookieValue `
+        $interactionFixturePage
     $cookieFixtureUri = $cookieServer.BaseUri
+    $interactionFixtureUri = "$($cookieServer.BaseUri)interaction"
     Write-Host "Serving the cookie logging fixture at $cookieFixtureUri"
+    Write-Host "Serving the interaction logging fixture at $interactionFixtureUri"
     Write-Host "`n== Capturing the deterministic Blink fixture =="
     $captureJob = Start-Job -ScriptBlock {
         param(
@@ -1257,6 +1548,28 @@ try {
             "$($cookieRun.TargetId). The page read the cookie names " +
             "$($cookieRun.DocumentCookieNames -join ', ') and observed the " +
             "Cookie Store changes $($cookieRun.CookieStoreChanges -join ', ')."
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
+
+    # The interaction logging fixture makes a third page change focus,
+    # selection, text-control values, and an element-reflected active
+    # descendant so the capture holds interaction-state changes for the logger
+    # to record.
+    try {
+        $interactionRun = Invoke-InteractionFixture `
+            $devToolsBase `
+            $interactionFixtureUri
+        Write-Host (
+            "Ran the interaction logging fixture in background target " +
+            "$($interactionRun.TargetId). The page reported: " +
+            (@(
+                $interactionRun.Steps.GetEnumerator() |
+                    ForEach-Object { "$($_.Key)=$($_.Value)" }
+            ) -join "; ")
         )
     }
     catch {
@@ -1413,7 +1726,8 @@ try {
     & $verifier `
         -SessionPath $session.FullName `
         -CookieFixtureUri $cookieFixtureUri `
-        -CookieValue $cookieValue
+        -CookieValue $cookieValue `
+        -InteractionFixtureUri $interactionFixtureUri
 }
 catch {
     if (Test-Path -LiteralPath $bridgeLog -PathType Leaf) {

@@ -4699,6 +4699,466 @@ def patch_content_navigation_cookie_access(path: Path) -> None:
         CONTENT_NAVIGATION_COOKIE_ACCESS_HOOK,
     )
 
+# Interaction-state hooks. Each hook reports focus, selection, an element set
+# as an active descendant by reflection, or a text-control value as Blink holds
+# it once the change is committed. The script origin helper shared with the
+# cookie hooks reports the calling script and world, and reports none for a
+# change no script made.
+BLINK_EXECUTION_CONTEXT_INCLUDE = (
+    '#include "third_party/blink/renderer/core/execution_context/'
+    'execution_context.h"'
+)
+BLINK_INTERACTION_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    *BLINK_COOKIE_ORIGIN_INCLUDES,
+    BLINK_EXECUTION_CONTEXT_INCLUDE,
+)
+
+BLINK_FOCUS_CHANGE_HELPER = """\
+namespace {
+
+// Defined with the cookie hooks further down this file, in the same unnamed
+// namespace.
+a11y_recorder::CookieCallOrigin
+RecorderCookieCallOrigin(ExecutionContext* context);
+
+const char* RecorderFocusTypeName(mojom::blink::FocusType type) {
+  switch (type) {
+    case mojom::blink::FocusType::kNone:
+      return "none";
+    case mojom::blink::FocusType::kScript:
+      return "script";
+    case mojom::blink::FocusType::kForward:
+      return "forward";
+    case mojom::blink::FocusType::kBackward:
+      return "backward";
+    case mojom::blink::FocusType::kSpatialNavigation:
+      return "spatial-navigation";
+    case mojom::blink::FocusType::kMouse:
+      return "mouse";
+    case mojom::blink::FocusType::kAccessKey:
+      return "access-key";
+    case mojom::blink::FocusType::kPage:
+      return "page";
+  }
+  return "none";
+}
+
+int RecorderFocusNodeId(Element* element) {
+  return element ? static_cast<int>(element->GetDomNodeId()) : 0;
+}
+
+// Records the outcome of one SetFocusedElement call when the call returns.
+// Blur, focusout, focus, and focusin handlers run inside the call and can move
+// focus again, and the call has several return paths, so the outcome is read
+// from the document on the way out rather than at any one of them. The call's
+// script origin is read on the way in, while the calling script is current.
+class RecorderFocusChangeScope {
+  STACK_ALLOCATED();
+
+ public:
+  RecorderFocusChangeScope(Document& document,
+                           Element* previous,
+                           Element* requested,
+                           const FocusParams& params)
+      : document_(document),
+        previous_node_id_(RecorderFocusNodeId(previous)),
+        requested_node_id_(RecorderFocusNodeId(requested)),
+        focus_type_(RecorderFocusTypeName(params.type)),
+        focus_trigger_(params.focus_trigger == FocusTrigger::kUserGesture
+                           ? "user-gesture"
+                           : "script"),
+        prevent_scroll_(params.options && params.options->preventScroll()),
+        focus_visible_present_(params.options &&
+                               params.options->hasFocusVisible()),
+        focus_visible_(focus_visible_present_ &&
+                       params.options->focusVisible()),
+        origin_(RecorderCookieCallOrigin(document.GetExecutionContext())) {}
+  RecorderFocusChangeScope(const RecorderFocusChangeScope&) = delete;
+  RecorderFocusChangeScope& operator=(const RecorderFocusChangeScope&) =
+      delete;
+
+  ~RecorderFocusChangeScope() {
+    const int document_node_id =
+        static_cast<int>(document_.GetDomNodeId());
+    if (document_node_id <= 0) {
+      return;
+    }
+    Element* focused = document_.FocusedElement();
+    Element* active_descendant =
+        focused ? focused->GetElementAttribute(
+                      html_names::kAriaActivedescendantAttr)
+                : nullptr;
+    a11y_recorder::RecordBlinkFocusChanged(
+        document_node_id, document_.Token().ToString(), previous_node_id_,
+        requested_node_id_, RecorderFocusNodeId(focused),
+        RecorderFocusNodeId(active_descendant), focus_type_, focus_trigger_,
+        prevent_scroll_, focus_visible_present_, focus_visible_,
+        std::move(origin_));
+  }
+
+ private:
+  Document& document_;
+  const int previous_node_id_;
+  const int requested_node_id_;
+  const char* const focus_type_;
+  const char* const focus_trigger_;
+  const bool prevent_scroll_;
+  const bool focus_visible_present_;
+  const bool focus_visible_;
+  a11y_recorder::CookieCallOrigin origin_;
+};
+
+}  // namespace
+
+"""
+BLINK_FOCUS_CHANGE_HELPER_MARKER = "class RecorderFocusChangeScope {"
+BLINK_FOCUS_CHANGE_HELPER_ANCHOR = (
+    "void Document::SetLastFocusType(mojom::blink::FocusType last_focus_type) "
+    "{\n"
+)
+BLINK_FOCUS_CHANGE_ANCHOR = """\
+  bool focus_change_blocked = false;
+  Element* old_focused_element = focused_element_;
+"""
+BLINK_FOCUS_CHANGE_HOOK = """\
+  // Reports this focus change once every return path below has been taken.
+  RecorderFocusChangeScope recorder_focus_change_scope(
+      *this, focused_element_.Get(), new_focused_element, params);
+  bool focus_change_blocked = false;
+  Element* old_focused_element = focused_element_;
+"""
+
+BLINK_SELECTION_CHANGE_HELPER = """\
+namespace {
+
+int RecorderSelectionNodeId(const Position& position) {
+  Node* node = position.ComputeContainerNode();
+  return node ? static_cast<int>(node->GetDomNodeId()) : 0;
+}
+
+int RecorderSelectionOffset(const Position& position) {
+  return position.IsNull()
+             ? 0
+             : static_cast<int>(position.ComputeOffsetInContainerNode());
+}
+
+// Records the selection the frame holds once a set-selection call has been
+// committed and focus has followed it.
+void RecorderRecordSelectionChanged(Document& document,
+                                    const SelectionInDomTree& selection,
+                                    bool set_by_user,
+                                    bool directional) {
+  const int document_node_id = static_cast<int>(document.GetDomNodeId());
+  if (document_node_id <= 0) {
+    return;
+  }
+  const char* selection_type = selection.IsNone()    ? "none"
+                               : selection.IsCaret() ? "caret"
+                                                     : "range";
+  TextControlElement* text_control =
+      selection.IsNone() ? nullptr : EnclosingTextControl(selection.Anchor());
+  if (text_control && !text_control->IsTextControl()) {
+    text_control = nullptr;
+  }
+  a11y_recorder::RecordBlinkSelectionChanged(
+      document_node_id, document.Token().ToString(),
+      set_by_user ? "user" : "system", selection_type,
+      RecorderSelectionNodeId(selection.Anchor()),
+      RecorderSelectionOffset(selection.Anchor()),
+      RecorderSelectionNodeId(selection.Focus()),
+      RecorderSelectionOffset(selection.Focus()), directional,
+      text_control ? static_cast<int>(text_control->GetDomNodeId()) : 0,
+      text_control ? static_cast<int>(text_control->selectionStart()) : 0,
+      text_control ? static_cast<int>(text_control->selectionEnd()) : 0,
+      text_control ? text_control->selectionDirection().Utf8()
+                   : std::string(),
+      RecorderCookieCallOrigin(document.GetExecutionContext()));
+}
+
+}  // namespace
+
+"""
+BLINK_SELECTION_CHANGE_HELPER_MARKER = "void RecorderRecordSelectionChanged("
+BLINK_SELECTION_CHANGE_HELPER_ANCHOR = (
+    "void FrameSelection::DidSetSelectionDeprecated(\n"
+)
+BLINK_SELECTION_CHANGE_ANCHOR = """\
+  NotifyAccessibilityForSelectionChange();
+  NotifyCompositorForSelectionChange();
+  NotifyEventHandlerForSelectionChange();
+"""
+BLINK_SELECTION_CHANGE_HOOK = """\
+  RecorderRecordSelectionChanged(GetDocument(), GetSelectionInDomTree(),
+                                 set_selection_by == SetSelectionBy::kUser,
+                                 options.IsDirectional());
+  NotifyAccessibilityForSelectionChange();
+  NotifyCompositorForSelectionChange();
+  NotifyEventHandlerForSelectionChange();
+"""
+
+BLINK_TEXT_CONTROL_VALUE_HELPER = """\
+namespace {
+
+// Records a text control's value after a value set or a user edit changed it.
+// The value is recorded verbatim up to the DOM value bound, as DOM attribute
+// values and character data are, so a password typed during a test session is
+// recorded.
+void RecorderRecordTextControlValue(TextControlElement& control,
+                                    const char* source) {
+  constexpr int kRecorderMaximumTextControlValueLength = 4096;
+  if (!control.IsTextControl()) {
+    return;
+  }
+  Document& document = control.GetDocument();
+  const int document_node_id = static_cast<int>(document.GetDomNodeId());
+  if (document_node_id <= 0) {
+    return;
+  }
+  const String value = control.Value();
+  const int value_length = static_cast<int>(value.length());
+  const bool value_truncated =
+      value_length > kRecorderMaximumTextControlValueLength;
+  const String recorded_value =
+      value_truncated ? value.substr(0, kRecorderMaximumTextControlValueLength)
+                      : value;
+  a11y_recorder::RecordBlinkTextControlValueChanged(
+      document_node_id, document.Token().ToString(),
+      static_cast<int>(control.GetDomNodeId()),
+      control.FormControlTypeAsString().Utf8(), source,
+      recorded_value.Utf8(), value_length, value_truncated,
+      kRecorderMaximumTextControlValueLength,
+      static_cast<int>(control.selectionStart()),
+      static_cast<int>(control.selectionEnd()),
+      control.selectionDirection().Utf8(),
+      RecorderCookieCallOrigin(document.GetExecutionContext()));
+}
+
+}  // namespace
+
+"""
+BLINK_TEXT_CONTROL_VALUE_HELPER_MARKER = "void RecorderRecordTextControlValue("
+
+BLINK_INPUT_SET_VALUE_HELPER_ANCHOR = (
+    "void HTMLInputElement::SetValue(const String& value,\n"
+)
+BLINK_INPUT_SET_VALUE_ANCHOR = """\
+    input_type_view_->DidSetValue(sanitized_value, value_changed);
+"""
+BLINK_INPUT_SET_VALUE_HOOK = """\
+    input_type_view_->DidSetValue(sanitized_value, value_changed);
+    if (value_changed && IsTextField()) {
+      RecorderRecordTextControlValue(*this, "value-set");
+    }
+"""
+
+BLINK_TEXT_FIELD_EDIT_HELPER_ANCHOR = (
+    "void TextFieldInputType::SubtreeHasChanged() {\n"
+)
+BLINK_TEXT_FIELD_EDIT_ANCHOR = """\
+  GetElement().SetValueFromRenderer(SanitizeUserInputValue(
+      ConvertFromVisibleValue(GetElement().InnerEditorValue())));
+"""
+BLINK_TEXT_FIELD_EDIT_HOOK = """\
+  GetElement().SetValueFromRenderer(SanitizeUserInputValue(
+      ConvertFromVisibleValue(GetElement().InnerEditorValue())));
+  RecorderRecordTextControlValue(GetElement(), "user-edit");
+"""
+
+BLINK_TEXT_AREA_HELPER_ANCHOR = "void HTMLTextAreaElement::SubtreeHasChanged() {\n"
+BLINK_TEXT_AREA_EDIT_ANCHOR = """\
+  UpdateValue();
+  CheckIfValueWasReverted(Value());
+"""
+BLINK_TEXT_AREA_EDIT_HOOK = """\
+  UpdateValue();
+  CheckIfValueWasReverted(Value());
+  RecorderRecordTextControlValue(*this, "user-edit");
+"""
+BLINK_TEXT_AREA_SET_VALUE_ANCHOR = """\
+  SetAutofillState(autofill_state);
+  NotifyFormStateChanged();
+  switch (event_behavior) {
+"""
+BLINK_TEXT_AREA_SET_VALUE_HOOK = """\
+  SetAutofillState(autofill_state);
+  NotifyFormStateChanged();
+  RecorderRecordTextControlValue(*this, "value-set");
+  switch (event_behavior) {
+"""
+
+BLINK_ACTIVE_DESCENDANT_HELPER = """\
+namespace {
+
+// Records an element stored as an aria-activedescendant by reflection. The
+// content attribute reflection writes is empty, so the referenced element is
+// not part of the recorded attribute state.
+void RecorderRecordActiveDescendantReferenceSet(Element& element,
+                                                Element& referenced) {
+  Document& document = element.GetDocument();
+  const int document_node_id = static_cast<int>(document.GetDomNodeId());
+  if (document_node_id <= 0) {
+    return;
+  }
+  a11y_recorder::RecordBlinkActiveDescendantReferenceSet(
+      document_node_id, document.Token().ToString(),
+      static_cast<int>(element.GetDomNodeId()),
+      static_cast<int>(referenced.GetDomNodeId()),
+      RecorderCookieCallOrigin(document.GetExecutionContext()));
+}
+
+}  // namespace
+
+"""
+BLINK_ACTIVE_DESCENDANT_HELPER_MARKER = (
+    "void RecorderRecordActiveDescendantReferenceSet("
+)
+BLINK_ACTIVE_DESCENDANT_HELPER_ANCHOR = (
+    "void Element::SetElementAttribute(const QualifiedName& name, "
+    "Element* element) {\n"
+)
+BLINK_ACTIVE_DESCENDANT_ANCHOR = """\
+  result.stored_value->value->insert(element);
+"""
+BLINK_ACTIVE_DESCENDANT_HOOK = """\
+  result.stored_value->value->insert(element);
+  if (name == html_names::kAriaActivedescendantAttr) {
+    RecorderRecordActiveDescendantReferenceSet(*this, *element);
+  }
+"""
+
+
+def patch_blink_interaction_source(
+    path: Path,
+    own_include: str | None,
+    helpers: tuple[tuple[str, str, str], ...],
+    hooks: tuple[tuple[str, str], ...],
+) -> None:
+    """Adds the interaction-state helpers and hooks to one Blink source.
+
+    Each helper is written before its anchor unless its marker is present, and
+    each hook contains its anchor, so a second run leaves the source unchanged.
+    """
+    text = read_source(path)
+    if own_include is None:
+        text = add_includes_after(
+            text,
+            BLINK_BRIDGE_INCLUDE,
+            BLINK_INTERACTION_INCLUDES[1:],
+            path,
+        )
+    else:
+        text = add_includes_after(
+            text, own_include, BLINK_INTERACTION_INCLUDES, path
+        )
+    for anchor, helper, marker in helpers:
+        text = insert_before_once(text, anchor, helper, marker, path)
+    for anchor, hook in hooks:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_blink_document_focus(path: Path) -> None:
+    # The cookie patch has already given this file the bridge include and the
+    # script origin helper, which the focus helper declares ahead of its use.
+    patch_blink_interaction_source(
+        path,
+        None,
+        (
+            (
+                BLINK_FOCUS_CHANGE_HELPER_ANCHOR,
+                BLINK_FOCUS_CHANGE_HELPER,
+                BLINK_FOCUS_CHANGE_HELPER_MARKER,
+            ),
+        ),
+        ((BLINK_FOCUS_CHANGE_ANCHOR, BLINK_FOCUS_CHANGE_HOOK),),
+    )
+
+
+def patch_blink_frame_selection(path: Path) -> None:
+    patch_blink_interaction_source(
+        path,
+        '#include "third_party/blink/renderer/core/editing/frame_selection.h"',
+        (
+            (
+                BLINK_SELECTION_CHANGE_HELPER_ANCHOR,
+                BLINK_COOKIE_ORIGIN_HELPER,
+                BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+            ),
+            (
+                BLINK_SELECTION_CHANGE_HELPER_ANCHOR,
+                BLINK_SELECTION_CHANGE_HELPER,
+                BLINK_SELECTION_CHANGE_HELPER_MARKER,
+            ),
+        ),
+        ((BLINK_SELECTION_CHANGE_ANCHOR, BLINK_SELECTION_CHANGE_HOOK),),
+    )
+
+
+def text_control_helpers(anchor: str) -> tuple[tuple[str, str, str], ...]:
+    return (
+        (anchor, BLINK_COOKIE_ORIGIN_HELPER, BLINK_COOKIE_ORIGIN_HELPER_MARKER),
+        (
+            anchor,
+            BLINK_TEXT_CONTROL_VALUE_HELPER,
+            BLINK_TEXT_CONTROL_VALUE_HELPER_MARKER,
+        ),
+    )
+
+
+def patch_blink_input_element(path: Path) -> None:
+    patch_blink_interaction_source(
+        path,
+        '#include "third_party/blink/renderer/core/html/forms/'
+        'html_input_element.h"',
+        text_control_helpers(BLINK_INPUT_SET_VALUE_HELPER_ANCHOR),
+        ((BLINK_INPUT_SET_VALUE_ANCHOR, BLINK_INPUT_SET_VALUE_HOOK),),
+    )
+
+
+def patch_blink_text_field_input_type(path: Path) -> None:
+    patch_blink_interaction_source(
+        path,
+        '#include "third_party/blink/renderer/core/html/forms/'
+        'text_field_input_type.h"',
+        text_control_helpers(BLINK_TEXT_FIELD_EDIT_HELPER_ANCHOR),
+        ((BLINK_TEXT_FIELD_EDIT_ANCHOR, BLINK_TEXT_FIELD_EDIT_HOOK),),
+    )
+
+
+def patch_blink_text_area_element(path: Path) -> None:
+    patch_blink_interaction_source(
+        path,
+        '#include "third_party/blink/renderer/core/html/forms/'
+        'html_text_area_element.h"',
+        text_control_helpers(BLINK_TEXT_AREA_HELPER_ANCHOR),
+        (
+            (BLINK_TEXT_AREA_EDIT_ANCHOR, BLINK_TEXT_AREA_EDIT_HOOK),
+            (BLINK_TEXT_AREA_SET_VALUE_ANCHOR, BLINK_TEXT_AREA_SET_VALUE_HOOK),
+        ),
+    )
+
+
+def patch_blink_element_active_descendant(path: Path) -> None:
+    # The DOM attribute patch has already given this file the bridge include.
+    patch_blink_interaction_source(
+        path,
+        None,
+        (
+            (
+                BLINK_ACTIVE_DESCENDANT_HELPER_ANCHOR,
+                BLINK_COOKIE_ORIGIN_HELPER,
+                BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+            ),
+            (
+                BLINK_ACTIVE_DESCENDANT_HELPER_ANCHOR,
+                BLINK_ACTIVE_DESCENDANT_HELPER,
+                BLINK_ACTIVE_DESCENDANT_HELPER_MARKER,
+            ),
+        ),
+        ((BLINK_ACTIVE_DESCENDANT_ANCHOR, BLINK_ACTIVE_DESCENDANT_HOOK),),
+    )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -4795,6 +5255,14 @@ def main() -> int:
         / "dom"
         / "document.cc"
     )
+    blink_core = source / "third_party" / "blink" / "renderer" / "core"
+    patch_blink_document_focus(blink_core / "dom" / "document.cc")
+    patch_blink_element_active_descendant(blink_core / "dom" / "element.cc")
+    patch_blink_frame_selection(blink_core / "editing" / "frame_selection.cc")
+    forms = blink_core / "html" / "forms"
+    patch_blink_input_element(forms / "html_input_element.cc")
+    patch_blink_text_field_input_type(forms / "text_field_input_type.cc")
+    patch_blink_text_area_element(forms / "html_text_area_element.cc")
     patch_blink_cookie_jar(
         source
         / "third_party"

@@ -10,7 +10,11 @@ param(
 
     # The value every fixture cookie carried, which no record may contain.
     [Parameter(Mandatory = $true)]
-    [string] $CookieValue
+    [string] $CookieValue,
+
+    # The URL the run script served the interaction logging fixture from.
+    [Parameter(Mandatory = $true)]
+    [string] $InteractionFixtureUri
 )
 
 $ErrorActionPreference = "Stop"
@@ -2222,8 +2226,9 @@ if ($isolatedWorldListener.context.documentId -ne $listener.context.documentId) 
 # Outside the listener channel, only the cookie records written at a script's
 # cookie call observe a world in this protocol: the document.cookie read and
 # write records and the Cookie Store request record, which report the world
-# current at the call. A world identity on any other record would be a claim
-# the recorder cannot support.
+# current at the call. The interaction records report the world of the script
+# that made a change, when one did. A world identity on any other record would
+# be a claim the recorder cannot support.
 # Not every channel carries a context, and strict mode treats reading an absent
 # property as an error, so each step of the path is checked before it is read.
 $hasExecutionWorldIdentity = {
@@ -2255,14 +2260,15 @@ $nonListenerWorldRecords = @(
                     "cookie-store-request"
                 )
             ) -and
+            $_.channel -ne "browser.interaction" -and
             (& $hasExecutionWorldIdentity $_)
         }
 )
 if ($nonListenerWorldRecords.Count -gt 0) {
     throw (
         "$($nonListenerWorldRecords.Count) records outside the listener " +
-        "channel and the cookie call records reported an execution world " +
-        "identity."
+        "channel, the cookie call records, and the interaction records " +
+        "reported an execution world identity."
     )
 }
 if ($listener.capture -or $listener.passive -or $listener.once) {
@@ -2797,6 +2803,213 @@ foreach ($frameAccess in @($frameCookieChange, $frameCookieRead)) {
     RecordsContainingCookieValue = $cookieValueRecords.Count
 } | Format-List
 
+# The run script serves a third page, on the cookie fixture's origin, whose
+# functions move focus, set text-control values and a selection, and set an
+# active descendant by element reflection, and it sends a Tab key press and
+# typed text as DevTools input. These checks establish that the logger emitted
+# a record for each of those changes, with the script origin for a change made
+# by script and none for a change made by input. They say nothing about whether
+# the page's focus handling or labelling is appropriate.
+$interactionRecords = @(
+    $records | Where-Object { $_.channel -eq "browser.interaction" }
+)
+
+function Select-InteractionFixtureRecord {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $EventType,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock] $Filter,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $selected = @(
+        $interactionRecords |
+            Where-Object { $_.eventType -eq $EventType } |
+            Where-Object $Filter
+    )
+    if ($selected.Count -eq 0) {
+        throw "No $EventType record was emitted for $Description."
+    }
+    $selected[0]
+}
+
+function Test-InteractionScriptOrigin {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Record,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $payload = $Record.payload
+    if ($null -eq $payload.world -or
+        $payload.world.kind -ne "main" -or
+        $payload.context.executionWorldId -ne
+            "world-$($payload.world.blinkWorldId)") {
+        throw "The $Description record did not report the main world."
+    }
+    if ($null -eq $payload.location) {
+        throw "The $Description record did not report a script location."
+    }
+}
+
+function Test-InteractionInputOrigin {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Record,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $payload = $Record.payload
+    if ($null -ne $payload.location -or $null -ne $payload.world -or
+        $null -ne $payload.context.executionWorldId) {
+        throw (
+            "The $Description record reported a script origin for a change " +
+            "made by input."
+        )
+    }
+}
+
+# The fixture document is identified by the record of its script focus, whose
+# location names the fixture page. Every later record must name the same
+# document.
+$scriptFocus = Select-InteractionFixtureRecord `
+    "focus-changed" `
+    {
+        $_.payload.focusType -eq "script" -and
+        $_.payload.focusTrigger -eq "script" -and
+        $_.payload.outcome -eq "focused" -and
+        $_.payload.preventScroll -eq $true -and
+        $null -ne $_.payload.location -and
+        ([string] $_.payload.location.url).StartsWith($InteractionFixtureUri)
+    } `
+    "the fixture's script focus of its button"
+Test-InteractionScriptOrigin $scriptFocus "script focus"
+$interactionDocumentId = $scriptFocus.payload.context.documentId
+$buttonNodeId = $scriptFocus.payload.focusedNodeId
+$fixtureInteractionRecords = @(
+    $interactionRecords |
+        Where-Object { $_.payload.context.documentId -eq $interactionDocumentId }
+)
+$interactionRecords = $fixtureInteractionRecords
+
+$tabFocus = Select-InteractionFixtureRecord `
+    "focus-changed" `
+    {
+        $_.payload.focusType -eq "forward" -and
+        $_.payload.focusTrigger -eq "user-gesture" -and
+        $_.payload.outcome -eq "focused" -and
+        $_.payload.previousNodeId -eq $buttonNodeId
+    } `
+    "the Tab key press that moved focus from the fixture's button"
+Test-InteractionInputOrigin $tabFocus "Tab focus"
+$fieldNodeId = $tabFocus.payload.focusedNodeId
+
+$typedField = Select-InteractionFixtureRecord `
+    "text-control-value-changed" `
+    {
+        $_.payload.nodeId -eq $fieldNodeId -and
+        $_.payload.source -eq "user-edit" -and
+        $_.payload.value -eq "typed" -and
+        $_.payload.controlType -eq "text"
+    } `
+    "the text typed into the fixture's field"
+Test-InteractionInputOrigin $typedField "typed field value"
+
+$scriptField = Select-InteractionFixtureRecord `
+    "text-control-value-changed" `
+    {
+        $_.payload.nodeId -eq $fieldNodeId -and
+        $_.payload.source -eq "value-set" -and
+        $_.payload.value -eq "set by script"
+    } `
+    "the fixture's script value set on its field"
+Test-InteractionScriptOrigin $scriptField "script field value"
+
+$scriptNotes = Select-InteractionFixtureRecord `
+    "text-control-value-changed" `
+    {
+        $_.payload.controlType -eq "textarea" -and
+        $_.payload.source -eq "value-set" -and
+        $_.payload.value -eq "notes set by script"
+    } `
+    "the fixture's script value set on its textarea"
+Test-InteractionScriptOrigin $scriptNotes "script textarea value"
+$notesNodeId = $scriptNotes.payload.nodeId
+
+$notesSelection = Select-InteractionFixtureRecord `
+    "selection-changed" `
+    {
+        $_.payload.textControlNodeId -eq $notesNodeId -and
+        $_.payload.textControlSelectionStart -eq 1 -and
+        $_.payload.textControlSelectionEnd -eq 4 -and
+        $_.payload.textControlSelectionDirection -eq "forward" -and
+        $_.payload.selectionType -eq "range"
+    } `
+    "the fixture's setSelectionRange call on its textarea"
+Test-InteractionScriptOrigin $notesSelection "textarea selection"
+
+$typedNotes = Select-InteractionFixtureRecord `
+    "text-control-value-changed" `
+    {
+        $_.payload.nodeId -eq $notesNodeId -and
+        $_.payload.source -eq "user-edit" -and
+        $_.payload.value -eq "nXs set by script"
+    } `
+    "the text typed over the fixture's textarea selection"
+Test-InteractionInputOrigin $typedNotes "typed textarea value"
+
+$activeDescendant = Select-InteractionFixtureRecord `
+    "active-descendant-reference-set" `
+    { $_.payload.referencedNodeId -gt 0 } `
+    "the fixture's ariaActiveDescendantElement assignment"
+Test-InteractionScriptOrigin $activeDescendant "active descendant"
+$listboxNodeId = $activeDescendant.payload.nodeId
+
+$listboxFocus = Select-InteractionFixtureRecord `
+    "focus-changed" `
+    {
+        $_.payload.focusedNodeId -eq $listboxNodeId -and
+        $_.payload.activeDescendantNodeId -eq
+            $activeDescendant.payload.referencedNodeId
+    } `
+    "the fixture's focus of its listbox with an active descendant"
+Test-InteractionScriptOrigin $listboxFocus "listbox focus"
+
+$clearedFocus = Select-InteractionFixtureRecord `
+    "focus-changed" `
+    {
+        $_.payload.previousNodeId -eq $listboxNodeId -and
+        $_.payload.outcome -eq "cleared" -and
+        $null -eq $_.payload.focusedNodeId
+    } `
+    "the fixture's blur of its listbox"
+Test-InteractionScriptOrigin $clearedFocus "blur"
+
+[pscustomobject]@{
+    InteractionRecords = $interactionRecords.Count
+    InteractionDocumentId = $interactionDocumentId
+    ScriptFocusNodeId = $buttonNodeId
+    TabFocusNodeId = $fieldNodeId
+    TypedFieldValue = $typedField.payload.value
+    ScriptTextareaNodeId = $notesNodeId
+    TextareaSelection = (
+        "$($notesSelection.payload.textControlSelectionStart)-" +
+        "$($notesSelection.payload.textControlSelectionEnd)"
+    )
+    TypedTextareaValue = $typedNotes.payload.value
+    ActiveDescendantNodeId = $activeDescendant.payload.referencedNodeId
+    ListboxFocusOutcome = $listboxFocus.payload.outcome
+    BlurOutcome = $clearedFocus.payload.outcome
+} | Format-List
+
 [pscustomobject]@{
     SessionPath = (Resolve-Path -LiteralPath $SessionPath).Path
     EvidenceOmissionRecords = $browserOmissions.Count
@@ -2946,6 +3159,7 @@ Write-Host (
     "animation-frame, idle-callback, page-lifecycle, and scheduler-decision " +
     "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +
-    "accessibility serialization checkpoint, and cookie operation " +
+    "accessibility serialization checkpoint, cookie operation, and " +
+    "interaction-state " +
     "evidence verified."
 )

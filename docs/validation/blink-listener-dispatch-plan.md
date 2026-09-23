@@ -1321,3 +1321,46 @@ type name in this run, because Windows PowerShell 5.1 does not enumerate a
 parsed JSON array; the verifier reads the changes from the archive, so the
 result does not depend on that report, and the parsing was corrected after the
 run.
+
+## Interaction-state logging
+
+Protocol 0.24 records focus, selection, text-control value, and
+element-reflected active descendant changes on the `browser.interaction`
+channel. The run script serves a third fixture page at `/interaction` from the
+loopback HTTP listener the cookie fixture uses, and opens it in a background
+tab so the listener fixture stays in the foreground and its page-lifecycle
+evidence is unaffected. The page schedules no timers and registers no
+listeners. The harness makes the page change interaction state in this order:
+
+1. The page's script focuses a button with `preventScroll`.
+2. A Tab key press sent as DevTools input moves focus to a text field.
+3. Text typed through DevTools input changes the field's value.
+4. The page's script sets the field's and a textarea's values, focuses the
+   textarea, and selects part of its text with `setSelectionRange`.
+5. Text typed through DevTools input replaces the selection.
+6. The page's script assigns `ariaActiveDescendantElement` on a listbox,
+   focuses the listbox, and blurs it.
+
+The harness reads the page's state back after each step and stops the run if a
+step did not take effect, so a missing record is not confused with a step that
+never happened.
+
+The verifier identifies the fixture document from the script focus record,
+whose location names the fixture page, and then requires, within that
+document, a `focus-changed` record for the script focus, for the Tab key press
+with the `forward` focus type, the `user-gesture` trigger, and the button as
+the previous node, for the listbox focus with the referenced option as its
+active descendant, and for the blur with the `cleared` outcome. It requires a
+`text-control-value-changed` record for each typed value with the `user-edit`
+source and for each script value with the `value-set` source, a
+`selection-changed` record with the textarea's selection offsets, and an
+`active-descendant-reference-set` record. The records of changes made by script
+must report a script location and the main world. The records of changes made
+by input must report no location and no world. The world check that rejects a
+world identity outside the listener channel and the cookie call records now
+also admits the interaction records, which report the world of the script that
+made a change.
+
+These checks show that the logger emitted a record for each change the page
+made. They do not evaluate the page's focus handling, labelling, or keyboard
+support. No measured result has been recorded yet.

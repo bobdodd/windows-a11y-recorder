@@ -81,7 +81,7 @@ Consent presentation must:
 - Use ordinary text and controls exposed through UI Automation.
 - Be fully operable by keyboard and screen reader.
 - Identify every enabled channel in plain language.
-- Explain that raw keyboard capture can include passwords and private text.
+- Explain that raw keyboard capture and browser interaction records can include passwords and private text.
 - Explain whether the whole display or one window is recorded.
 - Explain that audio can include other people and unrelated applications.
 - Explain that UI Automation can expose text not obvious in the image.
@@ -147,6 +147,7 @@ Resume after a secure transition requires explicit confirmation when the recorde
 - Drop cookie values at source. The instrumented browser reads cookie names from `document.cookie` strings, written cookie strings, and unparsed Set-Cookie lines inside the hook or the recorder bridge, and no cookie record carries a value. A nameless cookie whose value contains `=` is the one case where value text can be reported as a name, because Chromium stores it with an empty name and the text before the first `=` is indistinguishable from a name.
 - Treat DOM, page source, script locations, computed styles, accessibility trees, URLs, titles, and rendered frames as sensitive tested-content evidence.
 - Record DOM attribute values and character data verbatim, bounded by a per-record length limit that reports truncation, because withheld page text remains visible in the display recording while its absence removes the evidence an auditor needs. This covers values in credential fields entered during a test session, whose acceptance and error handling are themselves evidence, and does not extend to the browser's own credential store.
+- Apply the same rule to the `browser.interaction` channel, which records text-control values after each value set or user edit, including password field values, bounded to 4096 UTF-16 code units per record. The channel's purpose is a record of focus, selection, active descendant, and text-editing state as the page held it. Its sensitivity is that of accessibility state, which is critical. Its consent impact is that participants are told browser interaction records, like raw keyboard capture, can include passwords and private text. Its records are retained, encrypted, and redacted with the rest of the session. The threat it adds is typed text held in a structured, searchable form rather than only as key transitions or display frames, which the existing reviewed-redaction rule for export covers.
 - Manage the residual risk of recording a production system with real personal data through purpose and scope configuration before capture, retention limits, encryption at rest, and reviewed redaction before export, not through capture-time withholding of individual fields.
 - Do not record process command lines unless a later requirement and review justify them.
 - Store executable hashes and product metadata only when needed for provenance.

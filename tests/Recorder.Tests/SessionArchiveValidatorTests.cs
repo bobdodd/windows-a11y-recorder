@@ -2723,6 +2723,186 @@ public sealed class SessionArchiveValidatorTests
         }
     }
 
+    public static TheoryData<string, string> InteractionRecords()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (eventType, json) in BrowserInteractionPayloads.All())
+        {
+            data.Add(eventType, json);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(InteractionRecords))]
+    public async Task AcceptsEveryInteractionRecordShape(string eventType, string json)
+    {
+        var issues = await ValidateInteractionRecordAsync(
+            eventType, JsonNode.Parse(json)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [MemberData(nameof(InteractionRecords))]
+    public async Task RejectsAnUndeclaredInteractionProperty(
+        string eventType,
+        string json)
+    {
+        var payload = JsonNode.Parse(json)!;
+        payload["undeclared"] = 1;
+
+        var issues = await ValidateInteractionRecordAsync(eventType, payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/undeclared", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsAFocusOutcomeTheNodesDoNotSupport()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.ScriptFocusChanged)!;
+        payload["focusedNodeId"] = 45;
+
+        var issues = await ValidateInteractionRecordAsync("focus-changed", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-focus-outcome-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAnActiveDescendantWithoutFocus()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.FocusCleared)!;
+        payload["activeDescendantNodeId"] = 52;
+
+        var issues = await ValidateInteractionRecordAsync("focus-changed", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-focus-active-descendant-without-focus");
+    }
+
+    [Fact]
+    public async Task RejectsAnEmptySelectionThatReportsPositions()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.TextControlSelection)!;
+        payload["selectionType"] = "none";
+
+        var issues = await ValidateInteractionRecordAsync("selection-changed", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-selection-positions-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAPartialTextControlSelection()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.TextControlSelection)!;
+        payload["textControlSelectionDirection"] = null;
+
+        var issues = await ValidateInteractionRecordAsync("selection-changed", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-selection-text-control-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAReversedTextControlValueSelection()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.UserEditedValue)!;
+        payload["selectionStart"] = 3;
+        payload["selectionEnd"] = 1;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "text-control-value-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-selection-range-reversed");
+    }
+
+    [Fact]
+    public async Task RejectsATextControlValueLengthThatDisagreesWithTheValue()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.UserEditedValue)!;
+        payload["valueLength"] = 4;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "text-control-value-changed", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-dom-text-truncation-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsARecordedValueLongerThanItsMaximum()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.UserEditedValue)!;
+        payload["maximumValueLength"] = 2;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "text-control-value-changed", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-text-control-value-over-maximum");
+    }
+
+    [Fact]
+    public async Task AcceptsAnInteractionOmissionRecord()
+    {
+        var payload = JsonNode.Parse("""
+            {
+              "context": {
+                "browserInstanceId": "browser-1",
+                "processId": 3440,
+                "processType": "renderer",
+                "profileId": null,
+                "browserContextId": null,
+                "pageId": null,
+                "frameId": null,
+                "documentId": null,
+                "executionWorldId": null,
+                "documentToken": null
+              },
+              "reason": "browser-evidence-write-failed",
+              "count": 2
+            }
+            """)!;
+
+        var issues = await ValidateInteractionRecordAsync("collector-omission", payload);
+
+        Assert.Empty(issues);
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidateInteractionRecordAsync(string eventType, JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Interaction,
+            eventType,
+            document.RootElement.Clone());
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            return result.Issues.ToList();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task AllowsExtensionChannelWithCustomPayload()
     {

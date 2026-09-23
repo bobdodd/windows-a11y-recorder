@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.23` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.24` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -279,3 +279,16 @@ The browser hooks in `render_frame_host_impl.cc` and `navigation_request.cc`
 call `RecordBrowserFrameCookieAccess` and `RecordBrowserNavigationCookieAccess`
 with the entries Chromium's `CookieAccessDetails` holds. The record types and
 their limits are described in `docs/architecture/instrumented-chromium.md`.
+
+Protocol 0.24 records interaction-state changes on the `browser.interaction`
+channel. The Blink hooks in `document.cc`, `frame_selection.cc`,
+`html_input_element.cc`, `text_field_input_type.cc`,
+`html_text_area_element.cc`, and `element.cc` call `RecordBlinkFocusChanged`,
+`RecordBlinkSelectionChanged`, `RecordBlinkTextControlValueChanged`, and
+`RecordBlinkActiveDescendantReferenceSet`. The focus hook is a scope object
+declared after the early checks of `Document::SetFocusedElement`, so it reports
+the focused element on every later return path. The bridge derives the focus
+outcome from the previous, requested, and resulting node identities, checks
+every enumerated value, and drops a call it cannot represent. Script origin is
+read with the same helper the cookie records use. The record types and their
+limits are described in `docs/architecture/instrumented-chromium.md`.

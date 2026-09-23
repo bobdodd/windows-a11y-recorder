@@ -1735,8 +1735,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.23"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.23"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.24"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.24"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -3711,6 +3711,169 @@ class CookieIntegrationTests(unittest.TestCase):
                 check=True,
             )
             subprocess.run([str(binary)], check=True)
+
+
+class InteractionIntegrationTests(unittest.TestCase):
+    """Proves the interaction-state hooks are written once and match the bridge."""
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def assert_bridge_calls_match(self, text):
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", text, signatures),
+        )
+
+    def assert_patched(self, name, include, anchors, patch, hooks, markers):
+        patched = self.patch_twice(
+            name, cookie_source(include, *anchors), patch
+        )
+        for hook in hooks:
+            self.assertEqual(1, patched.count(hook))
+        for marker in markers:
+            self.assertEqual(1, patched.count(marker))
+            self.assertLess(patched.index(marker), patched.index(hooks[0]))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE))
+        for include_line in INTEGRATE.BLINK_INTERACTION_INCLUDES:
+            self.assertEqual(1, patched.count(include_line))
+        self.assert_bridge_calls_match(patched)
+        return patched
+
+    def test_patches_document_focus_changes_idempotently(self):
+        patched = self.assert_patched(
+            "document.cc",
+            INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n",
+            (
+                INTEGRATE.BLINK_FOCUS_CHANGE_HELPER_ANCHOR,
+                INTEGRATE.BLINK_FOCUS_CHANGE_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_document_focus,
+            (INTEGRATE.BLINK_FOCUS_CHANGE_HOOK,),
+            (INTEGRATE.BLINK_FOCUS_CHANGE_HELPER_MARKER,),
+        )
+        # The focus helper only declares the script origin helper, so the
+        # cookie patch still writes the definition later in the file.
+        self.assertNotIn(INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER, patched)
+
+    def test_patches_frame_selection_changes_idempotently(self):
+        self.assert_patched(
+            "frame_selection.cc",
+            '#include "third_party/blink/renderer/core/editing/'
+            'frame_selection.h"\n',
+            (
+                INTEGRATE.BLINK_SELECTION_CHANGE_HELPER_ANCHOR,
+                INTEGRATE.BLINK_SELECTION_CHANGE_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_frame_selection,
+            (INTEGRATE.BLINK_SELECTION_CHANGE_HOOK,),
+            (
+                INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+                INTEGRATE.BLINK_SELECTION_CHANGE_HELPER_MARKER,
+            ),
+        )
+
+    def test_patches_text_control_values_idempotently(self):
+        cases = (
+            (
+                "html_input_element.cc",
+                "html_input_element.h",
+                (
+                    INTEGRATE.BLINK_INPUT_SET_VALUE_HELPER_ANCHOR,
+                    INTEGRATE.BLINK_INPUT_SET_VALUE_ANCHOR,
+                ),
+                INTEGRATE.patch_blink_input_element,
+                (INTEGRATE.BLINK_INPUT_SET_VALUE_HOOK,),
+            ),
+            (
+                "text_field_input_type.cc",
+                "text_field_input_type.h",
+                (
+                    INTEGRATE.BLINK_TEXT_FIELD_EDIT_HELPER_ANCHOR,
+                    INTEGRATE.BLINK_TEXT_FIELD_EDIT_ANCHOR,
+                ),
+                INTEGRATE.patch_blink_text_field_input_type,
+                (INTEGRATE.BLINK_TEXT_FIELD_EDIT_HOOK,),
+            ),
+            (
+                "html_text_area_element.cc",
+                "html_text_area_element.h",
+                (
+                    INTEGRATE.BLINK_TEXT_AREA_HELPER_ANCHOR,
+                    INTEGRATE.BLINK_TEXT_AREA_EDIT_ANCHOR,
+                    INTEGRATE.BLINK_TEXT_AREA_SET_VALUE_ANCHOR,
+                ),
+                INTEGRATE.patch_blink_text_area_element,
+                (
+                    INTEGRATE.BLINK_TEXT_AREA_EDIT_HOOK,
+                    INTEGRATE.BLINK_TEXT_AREA_SET_VALUE_HOOK,
+                ),
+            ),
+        )
+        for name, header, anchors, patch, hooks in cases:
+            with self.subTest(source=name):
+                self.assert_patched(
+                    name,
+                    '#include "third_party/blink/renderer/core/html/forms/'
+                    + header
+                    + '"\n',
+                    anchors,
+                    patch,
+                    hooks,
+                    (
+                        INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+                        INTEGRATE.BLINK_TEXT_CONTROL_VALUE_HELPER_MARKER,
+                    ),
+                )
+
+    def test_patches_active_descendant_references_idempotently(self):
+        self.assert_patched(
+            "element.cc",
+            INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n",
+            (
+                INTEGRATE.BLINK_ACTIVE_DESCENDANT_HELPER_ANCHOR,
+                INTEGRATE.BLINK_ACTIVE_DESCENDANT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_element_active_descendant,
+            (INTEGRATE.BLINK_ACTIVE_DESCENDANT_HOOK,),
+            (
+                INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+                INTEGRATE.BLINK_ACTIVE_DESCENDANT_HELPER_MARKER,
+            ),
+        )
+
+    def test_an_interaction_hook_fails_when_its_anchor_is_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "frame_selection.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/core/editing/'
+                'frame_selection.h"\n'
+                + INTEGRATE.BLINK_SELECTION_CHANGE_HELPER_ANCHOR,
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeError):
+                INTEGRATE.patch_blink_frame_selection(path)
+
+    def test_only_the_text_control_hook_reads_a_control_value(self):
+        for name in (
+            "BLINK_FOCUS_CHANGE_HELPER",
+            "BLINK_SELECTION_CHANGE_HELPER",
+            "BLINK_ACTIVE_DESCENDANT_HELPER",
+        ):
+            with self.subTest(template=name):
+                self.assertNotIn(".Value()", getattr(INTEGRATE, name))
+                self.assertNotIn("->Value()", getattr(INTEGRATE, name))
 
 
 if __name__ == "__main__":

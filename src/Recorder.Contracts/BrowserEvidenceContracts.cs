@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.23";
+    public const string CurrentVersion = "0.24";
 }
 
 public static class BrowserEvidenceChannels
@@ -16,6 +16,7 @@ public static class BrowserEvidenceChannels
     public const string Dom = "browser.dom";
     public const string Accessibility = "browser.accessibility";
     public const string Cookie = "browser.cookie";
+    public const string Interaction = "browser.interaction";
 }
 
 public static class BrowserEvidenceEventTypes
@@ -53,6 +54,11 @@ public static class BrowserEvidenceEventTypes
     public const string CookieStoreResult = "cookie-store-result";
     public const string CookieStoreChange = "cookie-store-change";
     public const string CookieAccess = "cookie-access";
+    public const string FocusChanged = "focus-changed";
+    public const string SelectionChanged = "selection-changed";
+    public const string TextControlValueChanged = "text-control-value-changed";
+    public const string ActiveDescendantReferenceSet =
+        "active-descendant-reference-set";
     public const string Omission = "collector-omission";
 }
 
@@ -452,3 +458,86 @@ public sealed record BrowserCookieAccessPayload(
     int CookieCount,
     IReadOnlyList<BrowserCookieAccessEntry> Cookies,
     bool CookiesTruncated);
+
+// Interaction-state records report focus, selection, text-control values, and
+// element-reflected active descendants as Blink holds them once a change is
+// committed. Node identities are Blink DOM node ids, the same identities DOM
+// checkpoint and mutation records carry. Location and World report the script
+// that made the change, and are null for a change no script made.
+
+// Names how one focus change ended, derived from the requested and the
+// resulting focused node.
+public static class BrowserFocusOutcomes
+{
+    public const string Focused = "focused";
+    public const string Cleared = "cleared";
+    public const string Redirected = "redirected";
+    public const string NotFocused = "not-focused";
+}
+
+// Records the outcome of one request to change the focused element of a
+// document. PreviousNodeId, RequestedNodeId, and FocusedNodeId are null when no
+// element held or was given focus. ActiveDescendantNodeId is the element the
+// focused element's aria-activedescendant resolved to at that moment, and is
+// null when none resolved or nothing is focused. FocusVisible is null when the
+// request did not state it.
+public sealed record BrowserFocusChangedPayload(
+    BrowserContext Context,
+    int? PreviousNodeId,
+    int? RequestedNodeId,
+    int? FocusedNodeId,
+    string Outcome,
+    int? ActiveDescendantNodeId,
+    string FocusType,
+    string FocusTrigger,
+    bool PreventScroll,
+    bool? FocusVisible,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+// Records the selection a frame holds once a set-selection call is committed.
+// The anchor and focus are container nodes and offsets in the DOM tree and are
+// null for no selection. The text-control fields are null unless the anchor is
+// inside a text control, and then report the control's own selection offsets.
+public sealed record BrowserSelectionChangedPayload(
+    BrowserContext Context,
+    string SetBy,
+    string SelectionType,
+    int? AnchorNodeId,
+    int? AnchorOffset,
+    int? FocusNodeId,
+    int? FocusOffset,
+    bool Directional,
+    int? TextControlNodeId,
+    int? TextControlSelectionStart,
+    int? TextControlSelectionEnd,
+    string? TextControlSelectionDirection,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+// Records a text control's value after a value set or a user edit changed it.
+// The value is bounded to MaximumValueLength UTF-16 code units; ValueLength
+// reports the full length.
+public sealed record BrowserTextControlValueChangedPayload(
+    BrowserContext Context,
+    int NodeId,
+    string ControlType,
+    string Source,
+    string Value,
+    int ValueLength,
+    bool ValueTruncated,
+    int MaximumValueLength,
+    int SelectionStart,
+    int SelectionEnd,
+    string SelectionDirection,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+// Records an element set as an element's aria-activedescendant through element
+// reflection, which leaves the referenced element out of the attribute state.
+public sealed record BrowserActiveDescendantReferenceSetPayload(
+    BrowserContext Context,
+    int NodeId,
+    int ReferencedNodeId,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
