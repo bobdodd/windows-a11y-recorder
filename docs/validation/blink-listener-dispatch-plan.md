@@ -1098,6 +1098,9 @@ crashes.
 | `UncoveredTransitionsAfterLastPass` | 0 |
 | `UncoveredTransitionDocuments` | 3 |
 
+The latest measurement of these values is recorded under the page-lifecycle
+determinism result at the end of this document.
+
 What this establishes: the 200 uncovered transitions carried unchanged since
 protocol 0.16 are now a measured population rather than a described one. Every
 one of them is in a document that completed no delivery pass, and they come from
@@ -1154,6 +1157,9 @@ crashes.
 | `OmittedEvidenceRecords` | 0 |
 | `EvidenceOmissionReasons` | none |
 
+The latest measurement of the three run-level loss values is recorded under the
+page-lifecycle determinism result at the end of this document.
+
 The recorder reported 37,656 records accepted and none dropped, which agrees
 with the manifest count the run reads, and every existing measurement in this
 document held, including 448 recorded transitions with 248 covered and 200
@@ -1175,3 +1181,58 @@ accounting is also bounded by where it runs: a process that loses records and
 then exits, or whose pipe never recovers, never reports the loss, so an archive
 with no omission record is evidence of no observed loss rather than proof that
 nothing was lost.
+
+## Page-lifecycle determinism validation result
+
+Reference platform, September 23, 2026, at repository revision `eebbc7f`.
+Protocol 0.22. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, with a 25-second capture
+that validated 41,972 events and 143 artifacts and reported no network-service
+crashes. The complete script exited with code 0. This is the first run in which
+the harness scheduled the fixture's page-lifecycle timers itself, and the first
+in which the archive validator checked the `browser.lifecycle` and
+`browser.accessibility` payload shapes against a real archive.
+
+The validated session is:
+
+`C:\Users\Public\Documents\A11yRecorderBlinkValidation\20260923-155014-33fd84573bf14503947fe7e5bee9c09a`
+
+| Value | Result |
+| --- | --- |
+| `LifecycleTimeoutScheduledState` | `visible` |
+| `LifecycleTimeoutFiredState` | `hidden` |
+| `LifecycleIntervalScheduledState` | `visible` |
+| `LifecycleIntervalCancelledState` | `hidden` |
+| `LifecycleThrottlingObserved` | none |
+| `SchedulerDeferrals` | 8 |
+| `AccessibilityCheckpoints` | 2 |
+| `AccessibilityCheckpointNodes` | 58 |
+| `AccessibilityCheckpointsTruncated` | 0 |
+| `RecordedTransitions` | 449 |
+| `CoveredTransitions` | 249 |
+| `UncoveredTransitions` | 200 |
+| `UncoveredTransitionsWithoutPass` | 200 |
+| `UncoveredTransitionsAfterLastPass` | 0 |
+| `UncoveredTransitionDocuments` | 3 |
+| `OMITTED_EVIDENCE_RECORDS` | 0 |
+| `SINK_REFUSED_EVENTS` | 0 |
+| `OTHER_OMISSION_RECORDS` | 0 |
+
+What this establishes: the page-lifecycle precondition now holds because the
+harness produces it rather than because the desktop happened to supply it. The
+harness reported the fixture page visible before it scheduled anything, and the
+recorded schedule states, callback-entry states, and cancellation state are the
+four the assertions require. The stricter archive validation for the two
+previously unchecked browser channels passed against an archive that contains
+both lifecycle and accessibility records, so the closed payload shapes match
+what the bridge and the receiver actually emit. The transition accounting held
+at the longer capture duration, with the uncovered population unchanged at 200
+across three documents and nothing uncovered after a document's last pass.
+
+What this does not establish: a run whose window cannot be brought to the front
+has not been observed, so the early failure path is covered only by the bounded
+wait and its message. The recorded counts are properties of this run rather than
+contracts, and the higher event and artifact totals follow from the 25-second
+capture rather than from any new evidence type. Nothing here measures how
+Chromium decides page visibility during load, only that the harness no longer
+depends on that decision.
