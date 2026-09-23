@@ -571,6 +571,328 @@ function Start-FixtureLifecycleEvidence {
     return $outcome
 }
 
+# The page the cookie logging fixture serves. It takes the value it writes as an
+# argument rather than holding it, so the value appears in no document text a
+# DOM checkpoint could capture, and the verifier can require that no record in
+# the session contains it. The page schedules no timers, so it adds nothing to
+# the timer records the listener fixture is verified against.
+$cookieFixturePage = @'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cookie logging fixture loading</title>
+</head>
+<body>
+<p>Cookie logging fixture.</p>
+<script>
+window.cookieFixtureChanges = [];
+cookieStore.addEventListener("change", function (event) {
+  for (const cookie of event.changed) {
+    window.cookieFixtureChanges.push("changed:" + cookie.name);
+  }
+  for (const cookie of event.deleted) {
+    window.cookieFixtureChanges.push("deleted:" + cookie.name);
+  }
+});
+async function runCookieFixture(value) {
+  document.cookie =
+      "a11y_recorder_document=" + value + "; Path=/; SameSite=Lax";
+  const documentCookieNames = document.cookie
+      .split("; ")
+      .filter(function (entry) { return entry.length > 0; })
+      .map(function (entry) { return entry.split("=")[0]; });
+  await cookieStore.set("a11y_recorder_store", value);
+  await cookieStore.get("a11y_recorder_store");
+  await cookieStore.getAll();
+  await fetch("/set-cookie", { cache: "no-store" });
+  await fetch("/echo", { cache: "no-store" });
+  await cookieStore.delete("a11y_recorder_store");
+  return JSON.stringify({
+    outcome: "completed",
+    documentCookieNames: documentCookieNames
+  });
+}
+document.title = "Cookie logging fixture ready";
+</script>
+</body>
+</html>
+'@
+
+# Serves the cookie logging fixture over HTTP on the loopback interface. Cookie
+# APIs refuse a file URL and a response header is the only way to set a cookie
+# from outside script, so the fixture needs an origin the listener fixture's
+# file URL cannot provide. The listener runs in its own runspace so the capture
+# is not blocked, answers one request per connection, and drops a connection
+# that sends no request within two seconds, which is what a speculative
+# connection opened by the browser does.
+function Start-CookieFixtureServer {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Page,
+
+        [Parameter(Mandatory = $true)]
+        [string] $CookieValue
+    )
+
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $port = ([Net.IPEndPoint] $listener.LocalEndpoint).Port
+    $server = [PowerShell]::Create()
+    $null = $server.AddScript({
+            param($Listener, $Page, $CookieValue)
+            $ascii = [Text.Encoding]::ASCII
+            while ($true) {
+                try {
+                    $client = $Listener.AcceptTcpClient()
+                }
+                catch {
+                    break
+                }
+                try {
+                    $client.ReceiveTimeout = 2000
+                    $client.SendTimeout = 2000
+                    $stream = $client.GetStream()
+                    $reader = New-Object IO.StreamReader(
+                        $stream, $ascii, $false, 1024, $true
+                    )
+                    $requestLine = $reader.ReadLine()
+                    while ($true) {
+                        $line = $reader.ReadLine()
+                        if ($null -eq $line -or $line.Length -eq 0) {
+                            break
+                        }
+                    }
+                    $path = ""
+                    if ($requestLine -match '^[A-Z]+ (\S+) HTTP/') {
+                        $path = $Matches[1]
+                    }
+                    $status = "404 Not Found"
+                    $contentType = "text/plain; charset=utf-8"
+                    $body = "not found"
+                    $setCookie = $null
+                    if ($path -eq "/") {
+                        $status = "200 OK"
+                        $contentType = "text/html; charset=utf-8"
+                        $body = $Page
+                        $setCookie = (
+                            "a11y_recorder_response=$CookieValue; " +
+                            "Path=/; SameSite=Lax"
+                        )
+                    }
+                    elseif ($path -eq "/set-cookie") {
+                        $status = "200 OK"
+                        $body = "set"
+                        $setCookie = (
+                            "a11y_recorder_fetch=$CookieValue; " +
+                            "Path=/; SameSite=Strict"
+                        )
+                    }
+                    elseif ($path -eq "/echo") {
+                        $status = "200 OK"
+                        $body = "echo"
+                    }
+                    $bodyBytes = [Text.Encoding]::UTF8.GetBytes($body)
+                    $head = (
+                        "HTTP/1.1 $status`r`n" +
+                        "Content-Type: $contentType`r`n" +
+                        "Content-Length: $($bodyBytes.Length)`r`n" +
+                        "Cache-Control: no-store`r`n" +
+                        "Connection: close`r`n"
+                    )
+                    if ($setCookie) {
+                        $head += "Set-Cookie: $setCookie`r`n"
+                    }
+                    $head += "`r`n"
+                    $headBytes = $ascii.GetBytes($head)
+                    $stream.Write($headBytes, 0, $headBytes.Length)
+                    $stream.Write($bodyBytes, 0, $bodyBytes.Length)
+                    $stream.Flush()
+                }
+                catch {
+                    # A connection that sent no request or closed early is
+                    # dropped. The fixture step fails on its own if the page
+                    # it needed was never served.
+                }
+                finally {
+                    $client.Close()
+                }
+            }
+        }).AddArgument($listener).AddArgument($Page).AddArgument($CookieValue)
+    $handle = $server.BeginInvoke()
+
+    [pscustomobject]@{
+        Listener = $listener
+        PowerShell = $server
+        Handle = $handle
+        BaseUri = "http://127.0.0.1:$port/"
+    }
+}
+
+function Stop-CookieFixtureServer {
+    param($Server)
+
+    if (-not $Server) {
+        return
+    }
+    try {
+        $Server.Listener.Stop()
+        $null = $Server.Handle.AsyncWaitHandle.WaitOne(5000)
+    }
+    finally {
+        $Server.PowerShell.Dispose()
+    }
+}
+
+# Opens the cookie logging fixture in a background tab, runs its cookie calls,
+# waits for the page to report the Cookie Store changes it was sent, and closes
+# the tab. The tab is opened in the background so the listener fixture page
+# stays in the foreground and its page-lifecycle evidence is unaffected. This
+# step only makes the page use cookies so the logger has operations to record;
+# the verifier is what checks the records.
+function Invoke-CookieFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase,
+
+        [Parameter(Mandatory = $true)]
+        [string] $FixtureUri,
+
+        [Parameter(Mandatory = $true)]
+        [string] $CookieValue
+    )
+
+    $version = ConvertFrom-Json (
+        Invoke-WebRequest `
+            -Uri "$DevToolsBase/json/version" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+    ).Content
+    $browserSocket = Get-CdpProperty $version "webSocketDebuggerUrl"
+    if ($browserSocket -isnot [string] -or $browserSocket.Length -eq 0) {
+        throw "The DevTools version reply reported no browser endpoint."
+    }
+
+    $browserSession = $null
+    $pageSession = $null
+    $targetId = $null
+    try {
+        $browserSession = New-CdpSession $browserSocket
+        $created = Invoke-CdpCommand $browserSession "Target.createTarget" @{
+            url = $FixtureUri
+            background = $true
+        }
+        $targetId = [string](Get-CdpProperty $created "targetId")
+        if ([string]::IsNullOrWhiteSpace($targetId)) {
+            throw "Opening the cookie logging fixture returned no target."
+        }
+
+        $target = $null
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $candidates = @()
+            try {
+                $candidates = @(
+                    Select-CdpFixtureTarget `
+                        (Get-CdpTargetList $DevToolsBase) `
+                        $FixtureUri `
+                        "Cookie logging fixture ready" |
+                        Where-Object { (Get-CdpProperty $_ "id") -eq $targetId }
+                )
+            }
+            catch {
+                $candidates = @()
+            }
+            if ($candidates.Count -eq 1) {
+                $target = $candidates[0]
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $target) {
+            throw (
+                "The cookie logging fixture did not report readiness in the " +
+                "DevTools target list."
+            )
+        }
+
+        $pageSession = New-CdpSession $target.webSocketDebuggerUrl
+        $argument = ConvertTo-Json $CookieValue -Compress
+        $run = Invoke-CdpCommand $pageSession "Runtime.evaluate" @{
+            expression = "runCookieFixture($argument)"
+            awaitPromise = $true
+            returnByValue = $true
+        }
+        $failure = Get-CdpProperty $run "exceptionDetails"
+        if ($failure) {
+            $description = Get-CdpProperty (
+                Get-CdpProperty $failure "exception"
+            ) "description"
+            throw (
+                "The cookie logging fixture failed: $($failure.text) " +
+                "$description"
+            )
+        }
+        $report = ConvertFrom-Json (
+            [string](Get-CdpProperty $run.result "value")
+        )
+        if ((Get-CdpProperty $report "outcome") -ne "completed") {
+            throw "The cookie logging fixture did not report completion."
+        }
+
+        # Cookie Store change events arrive on their own channel, so they can
+        # follow the delete call's resolution. The page is polled for them
+        # rather than asked to wait on a timer of its own.
+        $expectedChanges = @(
+            "changed:a11y_recorder_store",
+            "deleted:a11y_recorder_store"
+        )
+        $changes = @()
+        $deadline = (Get-Date).AddSeconds(10)
+        while ((Get-Date) -lt $deadline) {
+            $reported = Invoke-CdpCommand $pageSession "Runtime.evaluate" @{
+                expression = "JSON.stringify(window.cookieFixtureChanges)"
+                returnByValue = $true
+            }
+            $changes = @(
+                ConvertFrom-Json (
+                    [string](Get-CdpProperty $reported.result "value")
+                )
+            )
+            $missing = @(
+                $expectedChanges | Where-Object { $changes -notcontains $_ }
+            )
+            if ($missing.Count -eq 0) {
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+
+        [pscustomobject]@{
+            TargetId = $targetId
+            DocumentCookieNames = @($report.documentCookieNames)
+            CookieStoreChanges = $changes
+        }
+    }
+    finally {
+        Close-CdpSession $pageSession
+        if ($browserSession -and $targetId) {
+            try {
+                $null = Invoke-CdpCommand $browserSession "Target.closeTarget" @{
+                    targetId = $targetId
+                }
+            }
+            catch {
+                Write-Host (
+                    "Closing the cookie logging fixture tab failed: " +
+                    "$($_.Exception.Message)"
+                )
+            }
+        }
+        Close-CdpSession $browserSession
+    }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if ($principal.IsInRole(
@@ -714,6 +1036,32 @@ $integratedFiles = @(
     ),
     (
         Join-Path $chromiumSource (
+            "third_party\blink\renderer\core\loader\cookie_jar.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\modules\cookie_store\" +
+            "cookie_store.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "third_party\blink\renderer\modules\cookie_store\BUILD.gn"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "content\browser\renderer_host\render_frame_host_impl.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
+            "content\browser\renderer_host\navigation_request.cc"
+        )
+    ),
+    (
+        Join-Path $chromiumSource (
             "third_party\blink\renderer\platform\scheduler\common\" +
             "throttling\task_queue_throttler.h"
         )
@@ -778,9 +1126,17 @@ Remove-Item -LiteralPath $chromiumLog -Force -ErrorAction SilentlyContinue
 $previousBridgeLog = $env:A11Y_RECORDER_BRIDGE_LOG_FILE
 $previousChromiumLog = $env:A11Y_RECORDER_CHROMIUM_LOG_FILE
 $captureJob = $null
+# The value every fixture cookie carries. It is generated per run so the
+# verifier can require that no record in the session contains it.
+$cookieValue = "a11y-recorder-cookie-value-" + [Guid]::NewGuid().ToString("N")
+$cookieServer = $null
+$cookieFixtureUri = $null
 $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $bridgeLog
 $env:A11Y_RECORDER_CHROMIUM_LOG_FILE = $chromiumLog
 try {
+    $cookieServer = Start-CookieFixtureServer $cookieFixturePage $cookieValue
+    $cookieFixtureUri = $cookieServer.BaseUri
+    Write-Host "Serving the cookie logging fixture at $cookieFixtureUri"
     Write-Host "`n== Capturing the deterministic Blink fixture =="
     $captureJob = Start-Job -ScriptBlock {
         param(
@@ -886,6 +1242,26 @@ try {
         Close-CdpSession $isolatedWorldSession
     }
 
+    # The cookie logging fixture makes a second page use document.cookie, the
+    # Cookie Store API, and Set-Cookie response headers so the capture holds
+    # cookie operations for the logger to record.
+    try {
+        $cookieRun = Invoke-CookieFixture `
+            $devToolsBase `
+            $cookieFixtureUri `
+            $cookieValue
+        Write-Host (
+            "Ran the cookie logging fixture in background target " +
+            "$($cookieRun.TargetId). The page read the cookie names " +
+            "$($cookieRun.DocumentCookieNames -join ', ') and observed the " +
+            "Cookie Store changes $($cookieRun.CookieStoreChanges -join ', ')."
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
+
     # The page-lifecycle timers are scheduled here, immediately before the page
     # is hidden, so the schedule is recorded while the page reports visible and
     # the callbacks enter while it is hidden. Scheduling them at parse time made
@@ -987,6 +1363,7 @@ finally {
     if ($captureJob) {
         Remove-Job $captureJob -Force -ErrorAction SilentlyContinue
     }
+    Stop-CookieFixtureServer $cookieServer
     if ($null -eq $previousBridgeLog) {
         Remove-Item `
             Env:A11Y_RECORDER_BRIDGE_LOG_FILE `
@@ -1031,7 +1408,10 @@ if (-not $validation.isValid) {
 }
 
 try {
-    & $verifier -SessionPath $session.FullName
+    & $verifier `
+        -SessionPath $session.FullName `
+        -CookieFixtureUri $cookieFixtureUri `
+        -CookieValue $cookieValue
 }
 catch {
     if (Test-Path -LiteralPath $bridgeLog -PathType Leaf) {

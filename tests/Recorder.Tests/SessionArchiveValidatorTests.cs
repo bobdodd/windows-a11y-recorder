@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Recorder.Contracts;
 using Recorder.Session;
 
@@ -2561,42 +2562,152 @@ public sealed class SessionArchiveValidatorTests
         }
     }
 
-    [Fact]
-    public async Task RejectsCookieValuesAtTheArchiveBoundary()
+    public static TheoryData<string, string> CookieRecords()
     {
+        var data = new TheoryData<string, string>();
+        foreach (var (eventType, json) in BrowserCookiePayloads.All())
+        {
+            data.Add(eventType, json);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(CookieRecords))]
+    public async Task AcceptsEveryCookieRecordShape(string eventType, string json)
+    {
+        var issues = await ValidateCookieRecordAsync(eventType, JsonNode.Parse(json)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [MemberData(nameof(CookieRecords))]
+    public async Task RejectsCookieValuesAtTheArchiveBoundary(
+        string eventType,
+        string json)
+    {
+        var payload = JsonNode.Parse(json)!;
+        payload["value"] = "must-not-be-recorded";
+
+        var issues = await ValidateCookieRecordAsync(eventType, payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/value", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsCookieValuesInsideCookieAccessEntries()
+    {
+        var payload = JsonNode.Parse(BrowserCookiePayloads.CookieAccess)!;
+        payload["cookies"]![1]!["value"] = "must-not-be-recorded";
+
+        var issues = await ValidateCookieRecordAsync("cookie-access", payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/cookies/1/value", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsACookieCountThatDisagreesWithItsList()
+    {
+        var payload = JsonNode.Parse(BrowserCookiePayloads.DocumentCookieRead)!;
+        payload["cookieCount"] = 3;
+
+        var issues = await ValidateCookieRecordAsync("document-cookie-read", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-cookie-count");
+    }
+
+    [Fact]
+    public async Task AcceptsATruncatedCookieListWithALargerCount()
+    {
+        var payload = JsonNode.Parse(BrowserCookiePayloads.DocumentCookieRead)!;
+        payload["cookieCount"] = 300;
+        payload["cookieNamesTruncated"] = true;
+
+        var issues = await ValidateCookieRecordAsync("document-cookie-read", payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public async Task RejectsAnUnparsedCookieAccessEntryThatReportsAttributes()
+    {
+        var payload = JsonNode.Parse(BrowserCookiePayloads.CookieAccess)!;
+        payload["cookies"]![1]!["domain"] = "example.test";
+
+        var issues = await ValidateCookieRecordAsync("cookie-access", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-cookie-access-entry-shape");
+    }
+
+    [Fact]
+    public async Task RejectsACookieStoreReadThatReportsWriteAttributes()
+    {
+        var payload = JsonNode.Parse(BrowserCookiePayloads.CookieStoreWriteRequest)!;
+        payload["method"] = "get";
+
+        var issues = await ValidateCookieRecordAsync("cookie-store-request", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-cookie-store-attributes");
+    }
+
+    [Fact]
+    public async Task RejectsACookieStoreWriteResultThatReportsNames()
+    {
+        var payload = JsonNode.Parse(BrowserCookiePayloads.CookieStoreReadResult)!;
+        payload["method"] = "set";
+
+        var issues = await ValidateCookieRecordAsync("cookie-store-result", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-cookie-store-result-shape");
+    }
+
+    [Fact]
+    public async Task RejectsANavigationCookieAccessWithoutItsNavigation()
+    {
+        var payload = JsonNode.Parse(BrowserCookiePayloads.CookieAccess)!;
+        payload["observer"] = "navigation";
+
+        var issues = await ValidateCookieRecordAsync("cookie-access", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-cookie-access-observer");
+    }
+
+    [Fact]
+    public async Task RejectsTheRetiredCookieOperationRecord()
+    {
+        var payload = JsonNode.Parse(BrowserCookiePayloads.DocumentCookieRead)!;
+
+        var issues = await ValidateCookieRecordAsync("cookie-operation", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "event-type-unsupported");
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidateCookieRecordAsync(string eventType, JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(
             0,
             100,
             BrowserEvidenceChannels.Cookie,
-            BrowserEvidenceEventTypes.CookieOperation,
-            new
-            {
-                context = new
-                {
-                    browserInstanceId = "browser-1",
-                    processId = 1200,
-                    processType = "renderer",
-                    profileId = "test-profile",
-                    browserContextId = "context-1",
-                    pageId = "page-1",
-                    frameId = "frame-1",
-                    documentId = "document-1",
-                    executionWorldId = "main",
-                    documentToken = (string?)null
-                },
-                operation = "read",
-                name = "consent",
-                domain = "example.test",
-                path = "/",
-                sameSite = "Lax",
-                secure = true,
-                httpOnly = false,
-                partitioned = false,
-                source = "document-cookie",
-                result = "returned",
-                blockedReason = (string?)null,
-                value = "must-not-be-recorded"
-            });
+            eventType,
+            document.RootElement.Clone());
         var directory = await CreateArchiveAsync([record]);
 
         try
@@ -2604,13 +2715,7 @@ public sealed class SessionArchiveValidatorTests
             var result = await SessionArchiveValidator.ValidateAsync(
                 directory,
                 TestContext.Current.CancellationToken);
-
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "payload-property-unexpected" &&
-                    issue.Path.EndsWith("/value", StringComparison.Ordinal));
+            return result.Issues.ToList();
         }
         finally
         {

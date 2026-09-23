@@ -5,6 +5,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "base/component_export.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
@@ -520,6 +521,215 @@ void RecordBlinkDispatchCompleted(uintptr_t event_identity,
                                   bool default_prevented,
                                   bool propagation_stopped,
                                   bool immediate_propagation_stopped);
+
+// Cookie evidence. Every cookie entry point below takes cookie names and
+// non-value attributes only; none has a parameter that could carry a cookie
+// value, so values are excluded by the shape of the interface rather than by a
+// filter applied later. A hook that holds cookie text passes it through one of
+// the reading functions first and forwards only what they return.
+
+// Where a renderer cookie call came from and which JavaScript world made it,
+// as Blink reported them at the call. The fields follow the same conventions
+// as the trailing location and world parameters of the listener entry points:
+// an empty string or a zero identifier, line, or column means not observed, and
+// an empty world kind means Blink reported no current world.
+struct CookieCallOrigin {
+  std::string script_url;
+  std::string function_name;
+  int script_id = 0;
+  int line_number = 0;
+  int column_number = 0;
+  std::string world_kind;
+  int world_id = kExecutionWorldIdUnobserved;
+  std::string world_name;
+  std::string world_stable_id;
+};
+
+// The requested name and attributes of one cookie write, as script wrote them.
+// Optional attributes use an empty string with a false presence flag for an
+// attribute that was not written.
+struct CookieWriteRequest {
+  std::string name;
+  bool domain_present = false;
+  std::string domain;
+  bool path_present = false;
+  std::string path;
+  bool same_site_present = false;
+  std::string same_site;
+  bool secure = false;
+  bool http_only = false;
+  bool partitioned = false;
+  bool expires_present = false;
+  bool max_age_present = false;
+  std::vector<std::string> attribute_names;
+};
+
+// One cookie in a browser-process cookie access notification. A cookie Chromium
+// parsed carries its canonical attributes; a Set-Cookie line Chromium could not
+// parse carries only the name read from the line, and parsed is false. The
+// inclusion status is Chromium's CookieInclusionStatus debug string, which the
+// bridge splits into inclusion, exclusion reasons, warning reasons, and an
+// exemption before recording.
+struct CookieAccessEntry {
+  bool parsed = false;
+  std::string name;
+  std::string domain;
+  std::string path;
+  std::string same_site;
+  bool secure = false;
+  bool http_only = false;
+  bool host_only = false;
+  bool partitioned = false;
+  bool persistent = false;
+  bool expired = false;
+  std::string inclusion_status;
+};
+
+// Names the renderer cookie outcomes a hook can report. These are header
+// constants for the same reason the target kinds are.
+inline constexpr char kCookieOutcomeReturned[] = "returned";
+inline constexpr char kCookieOutcomeSentToCookieManager[] =
+    "sent-to-cookie-manager";
+inline constexpr char kCookieOutcomeNoCookieUrl[] = "not-attempted-no-cookie-url";
+inline constexpr char kCookieOutcomeCookieManagerCallFailed[] =
+    "cookie-manager-call-failed";
+inline constexpr char kCookieOutcomeCookiesDisabled[] =
+    "refused-no-window-or-cookies-disabled";
+inline constexpr char kCookieOutcomeSecurityError[] = "refused-security-error";
+inline constexpr char kCookieOutcomeThrew[] = "threw";
+inline constexpr char kCookieServedFromCookieManager[] = "cookie-manager";
+inline constexpr char kCookieServedFromRendererCache[] = "renderer-cache";
+
+// Returns the cookie names in a document.cookie getter string. The string is
+// read once and not kept.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::vector<std::string> ReadCookieNamesFromCookieString(
+    std::string_view cookie_string);
+
+// Returns the requested name and attributes of a document.cookie assignment.
+// The assignment is read once and its value is not kept.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+CookieWriteRequest ReadCookieWriteRequest(std::string_view cookie_line);
+
+// Returns the cookie name of a Set-Cookie line Chromium could not parse. The
+// line is read once and its value is not kept.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::string ReadCookieNameFromSetCookieLine(std::string_view cookie_line);
+
+// Records one document.cookie read. An empty served-from means the read did
+// not reach the cookie jar's cache or cookie manager, and the outcome names
+// why.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDocumentCookieRead(int document_node_id,
+                                   std::string document_token,
+                                   std::string cookie_url,
+                                   std::string outcome,
+                                   std::string served_from,
+                                   std::vector<std::string> cookie_names,
+                                   CookieCallOrigin origin);
+
+// Records one document.cookie assignment. The renderer sends a write to the
+// cookie manager without waiting for a reply, so the stored result is reported
+// by the browser-process cookie access record rather than here.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDocumentCookieWrite(int document_node_id,
+                                    std::string document_token,
+                                    std::string cookie_url,
+                                    std::string outcome,
+                                    CookieWriteRequest request,
+                                    CookieCallOrigin origin);
+
+// Records a Cookie Store API read call once Blink has either sent it to the
+// cookie manager or thrown. A sent call passes the address of its promise
+// resolver, which later identifies the matching result; a thrown call passes
+// zero. The name and URL are the call's filters, empty when absent.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkCookieStoreRead(uintptr_t resolver_identity,
+                                std::string method,
+                                std::string context_kind,
+                                int document_node_id,
+                                std::string document_token,
+                                bool name_present,
+                                std::string name,
+                                bool url_present,
+                                std::string url,
+                                std::string outcome,
+                                CookieCallOrigin origin);
+
+// Notes the promise resolver of a Cookie Store API write just before Blink
+// sends the write to the cookie manager. The write call that follows takes the
+// noted resolver on the same thread, so a set and a delete, which share one
+// Blink write path, are told apart at the call rather than inferred from their
+// attributes.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void NoteBlinkCookieStoreWriteResolver(uintptr_t resolver_identity);
+
+// Records a Cookie Store API write call once Blink has either sent it to the
+// cookie manager or thrown.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkCookieStoreWrite(std::string method,
+                                 std::string context_kind,
+                                 int document_node_id,
+                                 std::string document_token,
+                                 bool threw,
+                                 CookieWriteRequest request,
+                                 CookieCallOrigin origin);
+
+// Records the cookie manager's reply to a Cookie Store API read before Blink
+// resolves the promise. A reply that arrives after its script context was
+// destroyed is recorded with context_valid false, since Blink then drops it.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkCookieStoreReadResult(uintptr_t resolver_identity,
+                                      bool context_valid,
+                                      std::vector<std::string> cookie_names);
+
+// Records the cookie manager's reply to a Cookie Store API write.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkCookieStoreWriteResult(uintptr_t resolver_identity,
+                                       bool success);
+
+// Records one cookie change the cookie manager reported to a CookieStore that
+// has change listeners, and whether Blink dispatched a change event for it.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkCookieStoreChange(std::string context_kind,
+                                  int document_node_id,
+                                  std::string document_token,
+                                  std::string name,
+                                  std::string domain,
+                                  std::string path,
+                                  std::string cause,
+                                  bool dispatched);
+
+// Records one cookie access notification the network service sent to the
+// browser for a frame's document. A read is cookies attached to a request or
+// returned to script; a change is cookies set by a response or by script.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserFrameCookieAccess(int page_frame_tree_node_id,
+                                    int frame_tree_node_id,
+                                    int64_t document_navigation_id,
+                                    std::string document_token,
+                                    int renderer_process_id,
+                                    bool change,
+                                    std::string url,
+                                    std::string frame_origin,
+                                    std::string top_frame_origin,
+                                    std::string request_id,
+                                    bool ad_tagged,
+                                    std::vector<CookieAccessEntry> cookies);
+
+// Records one cookie access notification for a navigation request, before the
+// navigation has committed a document.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserNavigationCookieAccess(int64_t navigation_id,
+                                         int page_frame_tree_node_id,
+                                         int frame_tree_node_id,
+                                         bool change,
+                                         std::string url,
+                                         std::string frame_origin,
+                                         std::string top_frame_origin,
+                                         std::string request_id,
+                                         bool ad_tagged,
+                                         std::vector<CookieAccessEntry> cookies);
 
 }  // namespace a11y_recorder
 

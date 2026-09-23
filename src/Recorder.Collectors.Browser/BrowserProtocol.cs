@@ -117,8 +117,23 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.AccessibilityCheckpointCompleted) =>
                 payload.Deserialize<BrowserAccessibilityCheckpointCompletedPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Cookie,
-                BrowserEvidenceEventTypes.CookieOperation) =>
-                payload.Deserialize<BrowserCookieOperationPayload>(JsonOptions) as object,
+                BrowserEvidenceEventTypes.DocumentCookieRead) =>
+                payload.Deserialize<BrowserDocumentCookieReadPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Cookie,
+                BrowserEvidenceEventTypes.DocumentCookieWrite) =>
+                payload.Deserialize<BrowserDocumentCookieWritePayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Cookie,
+                BrowserEvidenceEventTypes.CookieStoreRequest) =>
+                payload.Deserialize<BrowserCookieStoreRequestPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Cookie,
+                BrowserEvidenceEventTypes.CookieStoreResult) =>
+                payload.Deserialize<BrowserCookieStoreResultPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Cookie,
+                BrowserEvidenceEventTypes.CookieStoreChange) =>
+                payload.Deserialize<BrowserCookieStoreChangePayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Cookie,
+                BrowserEvidenceEventTypes.CookieAccess) =>
+                payload.Deserialize<BrowserCookieAccessPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or
                 BrowserEvidenceChannels.Dispatch or

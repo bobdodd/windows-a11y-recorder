@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.22";
+    public const string CurrentVersion = "0.23";
 }
 
 public static class BrowserEvidenceChannels
@@ -47,7 +47,12 @@ public static class BrowserEvidenceEventTypes
         "accessibility-checkpoint-node";
     public const string AccessibilityCheckpointCompleted =
         "accessibility-checkpoint-completed";
-    public const string CookieOperation = "cookie-operation";
+    public const string DocumentCookieRead = "document-cookie-read";
+    public const string DocumentCookieWrite = "document-cookie-write";
+    public const string CookieStoreRequest = "cookie-store-request";
+    public const string CookieStoreResult = "cookie-store-result";
+    public const string CookieStoreChange = "cookie-store-change";
+    public const string CookieAccess = "cookie-access";
     public const string Omission = "collector-omission";
 }
 
@@ -310,16 +315,140 @@ public sealed record BrowserAccessibilityCheckpointCompletedPayload(
     int UpdateCount,
     int EventCount);
 
-public sealed record BrowserCookieOperationPayload(
+// Cookie records carry cookie names and non-value attributes only. No cookie
+// payload has a field that could hold a cookie value, so a value cannot enter
+// the archive through these shapes; the validator also refuses any payload
+// that carries a field these shapes do not declare.
+
+// Names the outcomes of a document.cookie read or write as Blink reached them.
+public static class BrowserDocumentCookieOutcomes
+{
+    public const string Returned = "returned";
+    public const string SentToCookieManager = "sent-to-cookie-manager";
+    public const string NoCookieUrl = "not-attempted-no-cookie-url";
+    public const string CookieManagerCallFailed = "cookie-manager-call-failed";
+    public const string CookiesDisabled = "refused-no-window-or-cookies-disabled";
+    public const string SecurityError = "refused-security-error";
+}
+
+// Records one document.cookie read. ServedFrom is null when the read did not
+// reach the renderer cookie cache or the cookie manager.
+public sealed record BrowserDocumentCookieReadPayload(
     BrowserContext Context,
-    string Operation,
+    string AccessId,
+    string? CookieUrl,
+    string Outcome,
+    string? ServedFrom,
+    int CookieCount,
+    IReadOnlyList<string> CookieNames,
+    bool CookieNamesTruncated,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+// The attributes script wrote with a cookie. Domain, Path, and SameSite are
+// null when not written. The document.cookie-only flags are null on a Cookie
+// Store API write, which cannot set them.
+public sealed record BrowserCookieWriteAttributes(
+    string? Domain,
+    string? Path,
+    string? SameSite,
+    bool Partitioned,
+    bool ExpiresPresent,
+    bool? Secure = null,
+    bool? HttpOnly = null,
+    bool? MaxAgePresent = null,
+    IReadOnlyList<string>? AttributeNames = null);
+
+// Records one document.cookie assignment. Whether the cookie manager stored
+// the cookie is reported by the browser-process cookie-access record.
+public sealed record BrowserDocumentCookieWritePayload(
+    BrowserContext Context,
+    string AccessId,
+    string? CookieUrl,
+    string Outcome,
     string Name,
+    BrowserCookieWriteAttributes Attributes,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+public static class BrowserCookieStoreMethods
+{
+    public const string Get = "get";
+    public const string GetAll = "getAll";
+    public const string Set = "set";
+    public const string Delete = "delete";
+}
+
+// Records one Cookie Store API call. Name and Url are the call's filters for a
+// read and the cookie name for a write. Attributes are null for a read.
+public sealed record BrowserCookieStoreRequestPayload(
+    BrowserContext Context,
+    string RequestId,
+    string Method,
+    string ContextKind,
+    string Outcome,
+    string? Name,
+    string? Url,
+    BrowserCookieWriteAttributes? Attributes,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+// Records the cookie manager's reply to a Cookie Store API call. A read reports
+// the names the cookie manager returned, of which get resolves only the first
+// to script; a write reports whether it succeeded.
+public sealed record BrowserCookieStoreResultPayload(
+    BrowserContext Context,
+    string RequestId,
+    string Method,
+    string Outcome,
+    bool? Success,
+    int? CookieCount,
+    IReadOnlyList<string>? CookieNames,
+    bool? CookieNamesTruncated);
+
+// Records one cookie change reported to a CookieStore with change listeners.
+public sealed record BrowserCookieStoreChangePayload(
+    BrowserContext Context,
+    string ContextKind,
+    string Name,
+    string Domain,
+    string Path,
+    string Cause,
+    bool Dispatched);
+
+// One cookie in a browser-process cookie access notification. A Set-Cookie
+// line Chromium could not parse reports its name and inclusion only, with the
+// attribute fields null. Reason names are Chromium's own.
+public sealed record BrowserCookieAccessEntry(
+    string Name,
+    bool Parsed,
     string? Domain,
     string? Path,
     string? SameSite,
     bool? Secure,
     bool? HttpOnly,
+    bool? HostOnly,
     bool? Partitioned,
-    string Source,
-    string Result,
-    string? BlockedReason);
+    bool? Persistent,
+    bool? Expired,
+    bool Included,
+    IReadOnlyList<string> ExclusionReasons,
+    IReadOnlyList<string> WarningReasons,
+    string? ExemptionReason);
+
+// Records one cookie access notification the network service sent to the
+// browser, observed for a committed frame document or for a navigation.
+public sealed record BrowserCookieAccessPayload(
+    BrowserContext Context,
+    string Observer,
+    string? NavigationId,
+    int? RendererProcessId,
+    string AccessType,
+    string Url,
+    string? FrameOrigin,
+    string? TopFrameOrigin,
+    string? RequestId,
+    bool AdTagged,
+    int CookieCount,
+    IReadOnlyList<BrowserCookieAccessEntry> Cookies,
+    bool CookiesTruncated);

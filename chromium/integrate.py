@@ -3841,6 +3841,865 @@ def patch_blink_scheduler_build(path: Path) -> None:
     write_patched(path, text)
 
 
+# Cookie operations. Every cookie hook forwards names and non-value attributes
+# only. A hook that holds cookie text passes it through one of the bridge's
+# reading functions, which return names and attributes and keep no value.
+BLINK_COOKIE_ORIGIN_INCLUDES = (
+    BLINK_CAPTURE_SOURCE_LOCATION_INCLUDE,
+    BLINK_SOURCE_LOCATION_INCLUDE,
+    BLINK_DOM_WRAPPER_WORLD_INCLUDE,
+    '#include "v8/include/v8-isolate.h"',
+)
+BLINK_COOKIE_ORIGIN_HELPER = """\
+namespace {
+
+// Reports the recorder's name for a world type, following the listener hooks.
+// The inspector's isolated worlds are tested before isolated worlds generally,
+// because Blink classifies both as isolated.
+const char* RecorderCookieWorldKind(const DOMWrapperWorld& world) {
+  if (world.IsMainWorld()) {
+    return a11y_recorder::kExecutionWorldKindMain;
+  }
+  if (world.GetWorldType() == DOMWrapperWorld::WorldType::kInspectorIsolated) {
+    return a11y_recorder::kExecutionWorldKindInspectorIsolated;
+  }
+  if (world.IsIsolatedWorld()) {
+    return a11y_recorder::kExecutionWorldKindIsolated;
+  }
+  if (world.IsWorkerOrWorkletWorld()) {
+    return a11y_recorder::kExecutionWorldKindWorkerOrWorklet;
+  }
+  if (world.IsShadowRealmWorld()) {
+    return a11y_recorder::kExecutionWorldKindShadowRealm;
+  }
+  return a11y_recorder::kExecutionWorldKindOther;
+}
+
+// Reads where a cookie call came from and which JavaScript world was current
+// when it was made. A call made while no script context is entered reports no
+// location and no world rather than the main world.
+a11y_recorder::CookieCallOrigin RecorderCookieCallOrigin(
+    ExecutionContext* context) {
+  a11y_recorder::CookieCallOrigin origin;
+  if (!context) {
+    return origin;
+  }
+  v8::Isolate* isolate = context->GetIsolate();
+  if (!isolate || !isolate->InContext()) {
+    return origin;
+  }
+  if (SourceLocation* location = CaptureSourceLocation(context)) {
+    origin.script_url = location->Url().Utf8();
+    origin.function_name = location->Function().Utf8();
+    origin.script_id = location->ScriptId();
+    origin.line_number = static_cast<int>(location->LineNumber());
+    origin.column_number = static_cast<int>(location->ColumnNumber());
+  }
+  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
+  origin.world_kind = RecorderCookieWorldKind(world);
+  origin.world_id = world.GetWorldId();
+  if (!world.IsMainWorld()) {
+    origin.world_name = world.NonMainWorldHumanReadableName().Utf8();
+    origin.world_stable_id = world.NonMainWorldStableId().Utf8();
+  }
+  return origin;
+}
+
+}  // namespace
+
+"""
+BLINK_DOCUMENT_COOKIE_HELPER = """\
+namespace {
+
+// Records one document.cookie read. The cookie string passes through the
+// bridge's reader, which returns the names and keeps no value.
+void RecorderRecordDocumentCookieRead(const Document& document,
+                                      const char* outcome,
+                                      const char* served_from,
+                                      const String& cookie_string) {
+  a11y_recorder::RecordBlinkDocumentCookieRead(
+      const_cast<Document&>(document).GetDomNodeId(),
+      document.Token().ToString(), document.CookieURL().GetString().Utf8(),
+      outcome, served_from,
+      a11y_recorder::ReadCookieNamesFromCookieString(cookie_string.Utf8()),
+      RecorderCookieCallOrigin(document.GetExecutionContext()));
+}
+
+// Records one document.cookie assignment. The assignment passes through the
+// bridge's reader, which returns the name and attributes and keeps no value.
+void RecorderRecordDocumentCookieWrite(const Document& document,
+                                       const char* outcome,
+                                       const String& cookie_line) {
+  a11y_recorder::RecordBlinkDocumentCookieWrite(
+      const_cast<Document&>(document).GetDomNodeId(),
+      document.Token().ToString(), document.CookieURL().GetString().Utf8(),
+      outcome, a11y_recorder::ReadCookieWriteRequest(cookie_line.Utf8()),
+      RecorderCookieCallOrigin(document.GetExecutionContext()));
+}
+
+}  // namespace
+
+"""
+BLINK_DOCUMENT_COOKIE_HELPER_MARKER = "void RecorderRecordDocumentCookieRead("
+BLINK_COOKIE_ORIGIN_HELPER_MARKER = (
+    "a11y_recorder::CookieCallOrigin RecorderCookieCallOrigin("
+)
+
+# Cookie jar anchors, in the order Blink reaches them.
+BLINK_COOKIE_JAR_READ_NO_URL_ANCHOR = """\
+  if (cookie_url.IsEmpty())
+    return String();
+"""
+BLINK_COOKIE_JAR_READ_NO_URL_HOOK = """\
+  if (cookie_url.IsEmpty()) {
+    RecorderRecordDocumentCookieRead(
+        *document_, a11y_recorder::kCookieOutcomeNoCookieUrl, "", String());
+    return String();
+  }
+"""
+BLINK_COOKIE_JAR_READ_FAILED_ANCHOR = """\
+      InvalidateCache();
+      return g_empty_string;
+"""
+BLINK_COOKIE_JAR_READ_FAILED_HOOK = """\
+      InvalidateCache();
+      RecorderRecordDocumentCookieRead(
+          *document_, a11y_recorder::kCookieOutcomeCookieManagerCallFailed, "",
+          String());
+      return g_empty_string;
+"""
+BLINK_COOKIE_JAR_READ_RETURNED_ANCHOR = """\
+  return last_cookies_;
+}
+
+bool CookieJar::CookiesEnabled() {
+"""
+BLINK_COOKIE_JAR_READ_RETURNED_HOOK = """\
+  RecorderRecordDocumentCookieRead(
+      *document_, a11y_recorder::kCookieOutcomeReturned,
+      ipc_needed ? a11y_recorder::kCookieServedFromCookieManager
+                 : a11y_recorder::kCookieServedFromRendererCache,
+      last_cookies_);
+  return last_cookies_;
+}
+
+bool CookieJar::CookiesEnabled() {
+"""
+BLINK_COOKIE_JAR_WRITE_NO_URL_ANCHOR = """\
+  if (cookie_url.IsEmpty()) {
+    return false;
+  }
+"""
+BLINK_COOKIE_JAR_WRITE_NO_URL_HOOK = """\
+  if (cookie_url.IsEmpty()) {
+    RecorderRecordDocumentCookieWrite(
+        *document_, a11y_recorder::kCookieOutcomeNoCookieUrl, value);
+    return false;
+  }
+"""
+BLINK_COOKIE_JAR_WRITE_SENT_ANCHOR = """\
+      is_ad_tagged, apply_devtools_overrides, value);
+  last_operation_was_set_ = true;
+"""
+BLINK_COOKIE_JAR_WRITE_SENT_HOOK = """\
+      is_ad_tagged, apply_devtools_overrides, value);
+  last_operation_was_set_ = true;
+  RecorderRecordDocumentCookieWrite(
+      *document_, a11y_recorder::kCookieOutcomeSentToCookieManager, value);
+"""
+
+# Document anchors for the refusals Blink makes before the cookie jar is
+# reached.
+BLINK_DOCUMENT_COOKIE_READ_DISABLED_ANCHOR = """\
+  if (!dom_window_ || !GetSettings()->GetCookieEnabled())
+    return String();
+
+  CountUse(WebFeature::kCookieGet);
+"""
+BLINK_DOCUMENT_COOKIE_READ_DISABLED_HOOK = """\
+  if (!dom_window_ || !GetSettings()->GetCookieEnabled()) {
+    RecorderRecordDocumentCookieRead(
+        *this, a11y_recorder::kCookieOutcomeCookiesDisabled, "", String());
+    return String();
+  }
+
+  CountUse(WebFeature::kCookieGet);
+"""
+BLINK_DOCUMENT_COOKIE_READ_SECURITY_ANCHOR = """\
+    return String();
+  } else if (dom_window_->GetSecurityOrigin()->IsLocal()) {
+    CountUse(WebFeature::kFileAccessedCookies);
+"""
+BLINK_DOCUMENT_COOKIE_READ_SECURITY_HOOK = """\
+    RecorderRecordDocumentCookieRead(
+        *this, a11y_recorder::kCookieOutcomeSecurityError, "", String());
+    return String();
+  } else if (dom_window_->GetSecurityOrigin()->IsLocal()) {
+    CountUse(WebFeature::kFileAccessedCookies);
+"""
+BLINK_DOCUMENT_COOKIE_WRITE_DISABLED_ANCHOR = """\
+  if (!dom_window_ || !GetSettings()->GetCookieEnabled())
+    return;
+
+  UseCounter::Count(*this, WebFeature::kCookieSet);
+"""
+BLINK_DOCUMENT_COOKIE_WRITE_DISABLED_HOOK = """\
+  if (!dom_window_ || !GetSettings()->GetCookieEnabled()) {
+    RecorderRecordDocumentCookieWrite(
+        *this, a11y_recorder::kCookieOutcomeCookiesDisabled, value);
+    return;
+  }
+
+  UseCounter::Count(*this, WebFeature::kCookieSet);
+"""
+BLINK_DOCUMENT_COOKIE_WRITE_SECURITY_ANCHOR = """\
+    return;
+  } else if (dom_window_->GetSecurityOrigin()->IsLocal()) {
+    UseCounter::Count(*this, WebFeature::kFileAccessedCookies);
+"""
+BLINK_DOCUMENT_COOKIE_WRITE_SECURITY_HOOK = """\
+    RecorderRecordDocumentCookieWrite(
+        *this, a11y_recorder::kCookieOutcomeSecurityError, value);
+    return;
+  } else if (dom_window_->GetSecurityOrigin()->IsLocal()) {
+    UseCounter::Count(*this, WebFeature::kFileAccessedCookies);
+"""
+BLINK_DOCUMENT_COOKIE_HELPER_ANCHOR = (
+    "String Document::cookie(ExceptionState& exception_state) const {\n"
+)
+
+BLINK_COOKIE_STORE_HELPER = """\
+namespace {
+
+// Names the kind of script context a CookieStore belongs to.
+const char* RecorderCookieStoreContextKind(ExecutionContext* context) {
+  if (IsA<LocalDOMWindow>(context)) {
+    return "window";
+  }
+  if (IsA<ServiceWorkerGlobalScope>(context)) {
+    return "service-worker";
+  }
+  return "other";
+}
+
+// Returns the document of a window CookieStore. A service worker CookieStore
+// has no document.
+Document* RecorderCookieStoreDocument(ExecutionContext* context) {
+  LocalDOMWindow* window = DynamicTo<LocalDOMWindow>(context);
+  return window ? window->document() : nullptr;
+}
+
+// Records one Cookie Store API read call. A call that threw passes no
+// resolver, since no result will follow it.
+void RecorderRecordCookieStoreRead(uintptr_t resolver_identity,
+                                   const char* method,
+                                   ScriptState* script_state,
+                                   const CookieStoreGetOptions* options,
+                                   bool threw) {
+  ExecutionContext* context = ExecutionContext::From(script_state);
+  Document* document = RecorderCookieStoreDocument(context);
+  a11y_recorder::RecordBlinkCookieStoreRead(
+      threw ? 0 : resolver_identity, method,
+      RecorderCookieStoreContextKind(context),
+      document ? document->GetDomNodeId() : 0,
+      document ? document->Token().ToString() : std::string(),
+      options->hasName(),
+      options->hasName() ? options->name().Utf8() : std::string(),
+      options->hasUrl(),
+      options->hasUrl() ? options->url().Utf8() : std::string(),
+      threw ? a11y_recorder::kCookieOutcomeThrew
+            : a11y_recorder::kCookieOutcomeSentToCookieManager,
+      RecorderCookieCallOrigin(context));
+}
+
+// Reads the name and attributes of the write Blink built for a set or delete
+// call. The value is never read.
+a11y_recorder::CookieWriteRequest RecorderCookieStoreWriteRequest(
+    const CookieInit* options) {
+  a11y_recorder::CookieWriteRequest request;
+  request.name = options->name().Utf8();
+  request.domain_present = !options->domain().IsNull();
+  request.domain = options->domain().Utf8();
+  request.path_present = options->hasPath();
+  request.path = options->path().Utf8();
+  request.same_site_present = true;
+  switch (options->sameSite().AsEnum()) {
+    case V8CookieSameSite::Enum::kStrict:
+      request.same_site = "strict";
+      break;
+    case V8CookieSameSite::Enum::kLax:
+      request.same_site = "lax";
+      break;
+    case V8CookieSameSite::Enum::kNone:
+      request.same_site = "none";
+      break;
+  }
+  request.partitioned = options->partitioned();
+  request.expires_present = options->expires().has_value();
+  request.max_age_present = options->hasMaxAge();
+  return request;
+}
+
+// Records one Cookie Store API write call after Blink has either sent it to
+// the cookie manager or thrown.
+void RecorderRecordCookieStoreWrite(const char* method,
+                                    ScriptState* script_state,
+                                    const CookieInit* options,
+                                    bool threw) {
+  ExecutionContext* context = ExecutionContext::From(script_state);
+  Document* document = RecorderCookieStoreDocument(context);
+  a11y_recorder::RecordBlinkCookieStoreWrite(
+      method, RecorderCookieStoreContextKind(context),
+      document ? document->GetDomNodeId() : 0,
+      document ? document->Token().ToString() : std::string(), threw,
+      RecorderCookieStoreWriteRequest(options),
+      RecorderCookieCallOrigin(context));
+}
+
+// Records the names the cookie manager returned to a Cookie Store API read.
+void RecorderRecordCookieStoreReadResult(
+    uintptr_t resolver_identity,
+    bool context_valid,
+    const Vector<network::mojom::blink::CookieWithAccessResultPtr>&
+        backend_cookies) {
+  std::vector<std::string> recorder_names;
+  recorder_names.reserve(backend_cookies.size());
+  for (const auto& backend_cookie : backend_cookies) {
+    recorder_names.push_back(backend_cookie->cookie.Name());
+  }
+  a11y_recorder::RecordBlinkCookieStoreReadResult(
+      resolver_identity, context_valid, std::move(recorder_names));
+}
+
+// Names a cookie change cause. A cause this revision does not name is
+// reported as other rather than as one it is not.
+const char* RecorderCookieChangeCause(
+    ::network::mojom::CookieChangeCause cause) {
+  using Cause = ::network::mojom::CookieChangeCause;
+  if (cause == Cause::INSERTED) {
+    return "inserted";
+  }
+  if (cause == Cause::EXPLICIT) {
+    return "explicit";
+  }
+  if (cause == Cause::UNKNOWN_DELETION) {
+    return "unknown-deletion";
+  }
+  if (cause == Cause::OVERWRITE) {
+    return "overwrite";
+  }
+  if (cause == Cause::EXPIRED) {
+    return "expired";
+  }
+  if (cause == Cause::EVICTED) {
+    return "evicted";
+  }
+  if (cause == Cause::EXPIRED_OVERWRITE) {
+    return "expired-overwrite";
+  }
+  if (cause == Cause::INSERTED_NO_CHANGE_OVERWRITE) {
+    return "inserted-no-change-overwrite";
+  }
+  if (cause == Cause::INSERTED_NO_VALUE_CHANGE_OVERWRITE) {
+    return "inserted-no-value-change-overwrite";
+  }
+  return "other";
+}
+
+// Records one cookie change reported to a CookieStore with change listeners.
+void RecorderRecordCookieStoreChange(
+    ExecutionContext* context,
+    const network::mojom::blink::CookieChangeInfoPtr& change,
+    bool dispatched) {
+  Document* document = RecorderCookieStoreDocument(context);
+  a11y_recorder::RecordBlinkCookieStoreChange(
+      RecorderCookieStoreContextKind(context),
+      document ? document->GetDomNodeId() : 0,
+      document ? document->Token().ToString() : std::string(),
+      change->cookie.Name(), change->cookie.Domain(), change->cookie.Path(),
+      RecorderCookieChangeCause(change->cause), dispatched);
+}
+
+}  // namespace
+
+"""
+BLINK_COOKIE_STORE_HELPER_MARKER = "void RecorderRecordCookieStoreRead("
+BLINK_COOKIE_STORE_HELPER_ANCHOR = """\
+ScriptPromise<IDLSequence<CookieListItem>> CookieStore::getAll(
+    ScriptState* script_state,
+    const String& name,
+"""
+BLINK_COOKIE_STORE_GET_ALL_ANCHOR = """\
+         BindOnce(&CookieStore::GetAllForUrlToGetAllResult,
+                  WrapPersistent(resolver)),
+         exception_state);
+"""
+BLINK_COOKIE_STORE_GET_ALL_HOOK = """\
+         BindOnce(&CookieStore::GetAllForUrlToGetAllResult,
+                  WrapPersistent(resolver)),
+         exception_state);
+  RecorderRecordCookieStoreRead(reinterpret_cast<uintptr_t>(resolver),
+                                "getAll", script_state, options,
+                                exception_state.HadException());
+"""
+BLINK_COOKIE_STORE_GET_EMPTY_ANCHOR = """\
+    exception_state.ThrowTypeError("CookieStoreGetOptions must not be empty");
+"""
+BLINK_COOKIE_STORE_GET_EMPTY_HOOK = """\
+    exception_state.ThrowTypeError("CookieStoreGetOptions must not be empty");
+    RecorderRecordCookieStoreRead(0, "get", script_state, options, true);
+"""
+BLINK_COOKIE_STORE_GET_ANCHOR = """\
+      BindOnce(&CookieStore::GetAllForUrlToGetResult, WrapPersistent(resolver)),
+      exception_state);
+"""
+BLINK_COOKIE_STORE_GET_HOOK = """\
+      BindOnce(&CookieStore::GetAllForUrlToGetResult, WrapPersistent(resolver)),
+      exception_state);
+  RecorderRecordCookieStoreRead(reinterpret_cast<uintptr_t>(resolver), "get",
+                                script_state, options,
+                                exception_state.HadException());
+"""
+BLINK_COOKIE_STORE_SET_ANCHOR = """\
+                    WebFeature::kCookieStoreAPI);
+
+  return DoWrite(script_state, options, exception_state);
+}
+"""
+BLINK_COOKIE_STORE_SET_HOOK = """\
+                    WebFeature::kCookieStoreAPI);
+
+  auto recorder_promise = DoWrite(script_state, options, exception_state);
+  RecorderRecordCookieStoreWrite("set", script_state, options,
+                                 exception_state.HadException());
+  return recorder_promise;
+}
+"""
+BLINK_COOKIE_STORE_DELETE_NAME_ANCHOR = """\
+  set_options->setExpires(0);
+  return DoWrite(script_state, set_options, exception_state);
+}
+
+ScriptPromise<IDLUndefined> CookieStore::Delete(
+"""
+BLINK_COOKIE_STORE_DELETE_NAME_HOOK = """\
+  set_options->setExpires(0);
+  auto recorder_promise = DoWrite(script_state, set_options, exception_state);
+  RecorderRecordCookieStoreWrite("delete", script_state, set_options,
+                                 exception_state.HadException());
+  return recorder_promise;
+}
+
+ScriptPromise<IDLUndefined> CookieStore::Delete(
+"""
+BLINK_COOKIE_STORE_DELETE_OPTIONS_ANCHOR = """\
+  set_options->setPartitioned(options->partitioned());
+  return DoWrite(script_state, set_options, exception_state);
+}
+"""
+BLINK_COOKIE_STORE_DELETE_OPTIONS_HOOK = """\
+  set_options->setPartitioned(options->partitioned());
+  auto recorder_promise = DoWrite(script_state, set_options, exception_state);
+  RecorderRecordCookieStoreWrite("delete", script_state, set_options,
+                                 exception_state.HadException());
+  return recorder_promise;
+}
+"""
+BLINK_COOKIE_STORE_READ_ALL_RESULT_ANCHOR = """\
+void CookieStore::GetAllForUrlToGetAllResult(
+    ScriptPromiseResolver<IDLSequence<CookieListItem>>* resolver,
+    const Vector<network::mojom::blink::CookieWithAccessResultPtr>
+        backend_cookies) {
+"""
+BLINK_COOKIE_STORE_READ_ONE_RESULT_ANCHOR = """\
+void CookieStore::GetAllForUrlToGetResult(
+    ScriptPromiseResolver<IDLNullable<CookieListItem>>* resolver,
+    const Vector<network::mojom::blink::CookieWithAccessResultPtr>
+        backend_cookies) {
+"""
+BLINK_COOKIE_STORE_READ_RESULT_HOOK = """\
+  RecorderRecordCookieStoreReadResult(
+      reinterpret_cast<uintptr_t>(resolver),
+      resolver->GetScriptState()->ContextIsValid(), backend_cookies);
+"""
+BLINK_COOKIE_STORE_WRITE_NOTE_ANCHOR = """\
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver<IDLUndefined>>(
+      script_state, exception_state.GetContext());
+  backend_->SetCanonicalCookie(
+"""
+BLINK_COOKIE_STORE_WRITE_NOTE_HOOK = """\
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver<IDLUndefined>>(
+      script_state, exception_state.GetContext());
+  a11y_recorder::NoteBlinkCookieStoreWriteResolver(
+      reinterpret_cast<uintptr_t>(resolver));
+  backend_->SetCanonicalCookie(
+"""
+BLINK_COOKIE_STORE_WRITE_RESULT_ANCHOR = """\
+    ScriptPromiseResolver<IDLUndefined>* resolver,
+    bool backend_success) {
+"""
+BLINK_COOKIE_STORE_WRITE_RESULT_HOOK = """\
+    ScriptPromiseResolver<IDLUndefined>* resolver,
+    bool backend_success) {
+  a11y_recorder::RecordBlinkCookieStoreWriteResult(
+      reinterpret_cast<uintptr_t>(resolver), backend_success);
+"""
+BLINK_COOKIE_STORE_CHANGE_ANCHOR = """\
+  CookieChangeEvent::ToEventInfo(change, changed, deleted);
+"""
+BLINK_COOKIE_STORE_CHANGE_HOOK = """\
+  CookieChangeEvent::ToEventInfo(change, changed, deleted);
+  RecorderRecordCookieStoreChange(GetExecutionContext(), change,
+                                  !(changed.empty() && deleted.empty()));
+"""
+BLINK_COOKIE_STORE_BUILD_DEPS = (
+    '  deps = [ "//third_party/blink/renderer/platform" ]\n'
+)
+BLINK_COOKIE_STORE_BUILD_PATCHED_DEPS = """\
+  deps = [
+    "//chromium/recorder_bridge",
+    "//third_party/blink/renderer/platform",
+  ]
+"""
+
+CONTENT_COOKIE_ACCESS_INCLUDES = (
+    '#include "net/cookies/canonical_cookie.h"',
+    '#include "net/cookies/cookie_constants.h"',
+    '#include "net/cookies/cookie_inclusion_status.h"',
+)
+CONTENT_COOKIE_ACCESS_HELPER = """\
+namespace {
+
+// Copies the cookies of one network service access notification into the
+// bridge's entry shape. A cookie Chromium parsed contributes its canonical
+// attributes; a Set-Cookie line it could not parse contributes only the name
+// read from the line. No cookie value is read.
+std::vector<a11y_recorder::CookieAccessEntry> RecorderCookieAccessEntries(
+    const network::mojom::CookieAccessDetailsPtr& details) {
+  std::vector<a11y_recorder::CookieAccessEntry> entries;
+  entries.reserve(details->cookie_list.size());
+  const base::Time now = base::Time::Now();
+  for (const auto& item : details->cookie_list) {
+    a11y_recorder::CookieAccessEntry entry;
+    if (item->cookie_or_line->is_cookie()) {
+      const net::CanonicalCookie& cookie = item->cookie_or_line->get_cookie();
+      entry.parsed = true;
+      entry.name = cookie.Name();
+      entry.domain = cookie.Domain();
+      entry.path = cookie.Path();
+      entry.same_site = net::CookieSameSiteToString(cookie.SameSite());
+      entry.secure = cookie.SecureAttribute();
+      entry.http_only = cookie.IsHttpOnly();
+      entry.host_only = cookie.IsHostCookie();
+      entry.partitioned = cookie.IsPartitioned();
+      entry.persistent = cookie.IsPersistent();
+      entry.expired = cookie.IsExpired(now);
+    } else {
+      entry.name = a11y_recorder::ReadCookieNameFromSetCookieLine(
+          item->cookie_or_line->get_cookie_string());
+    }
+    entry.inclusion_status = item->access_result.status.GetDebugString();
+    entries.push_back(std::move(entry));
+  }
+  return entries;
+}
+
+}  // namespace
+
+"""
+CONTENT_COOKIE_ACCESS_HELPER_MARKER = (
+    "std::vector<a11y_recorder::CookieAccessEntry> RecorderCookieAccessEntries("
+)
+CONTENT_FRAME_COOKIE_ACCESS_ANCHOR = """\
+    EmitCookieWarningsAndMetrics(/*rfh=*/this, details);
+"""
+CONTENT_FRAME_COOKIE_ACCESS_HOOK = """\
+    {
+      const base::Process& recorder_process = GetProcess()->GetProcess();
+      a11y_recorder::RecordBrowserFrameCookieAccess(
+          GetMainFrame()->GetFrameTreeNodeId().GetUnsafeValue(),
+          GetFrameTreeNodeId().GetUnsafeValue(), GetNavigationId(),
+          GetDocumentToken().ToString(),
+          recorder_process.IsValid()
+              ? static_cast<int>(recorder_process.Pid())
+              : 0,
+          details->type == network::mojom::CookieAccessDetails::Type::kChange,
+          details->url.spec(),
+          details->frame_origin ? details->frame_origin->Serialize()
+                                : std::string(),
+          details->top_frame_origin.Serialize(),
+          details->devtools_request_id.value_or(std::string()),
+          details->is_ad_tagged, RecorderCookieAccessEntries(details));
+    }
+    EmitCookieWarningsAndMetrics(/*rfh=*/this, details);
+"""
+CONTENT_FRAME_COOKIE_HELPER_ANCHOR = "void RenderFrameHostImpl::NotifyCookiesAccessed(\n"
+CONTENT_NAVIGATION_COOKIE_ACCESS_ANCHOR = """\
+    EmitCookieWarningsAndMetrics(frame_tree_node()->current_frame_host(),
+                                 details);
+"""
+CONTENT_NAVIGATION_COOKIE_ACCESS_HOOK = """\
+    {
+      int recorder_page_frame_tree_node_id =
+          GetFrameTreeNodeId().GetUnsafeValue();
+      if (RenderFrameHostImpl* recorder_parent = GetParentFrame()) {
+        recorder_page_frame_tree_node_id =
+            recorder_parent->GetMainFrame()->GetFrameTreeNodeId()
+                .GetUnsafeValue();
+      }
+      a11y_recorder::RecordBrowserNavigationCookieAccess(
+          GetNavigationId(), recorder_page_frame_tree_node_id,
+          GetFrameTreeNodeId().GetUnsafeValue(),
+          details->type == network::mojom::CookieAccessDetails::Type::kChange,
+          details->url.spec(),
+          details->frame_origin ? details->frame_origin->Serialize()
+                                : std::string(),
+          details->top_frame_origin.Serialize(),
+          details->devtools_request_id.value_or(std::string()),
+          details->is_ad_tagged, RecorderCookieAccessEntries(details));
+    }
+    EmitCookieWarningsAndMetrics(frame_tree_node()->current_frame_host(),
+                                 details);
+"""
+CONTENT_NAVIGATION_COOKIE_HELPER_ANCHOR = "void NavigationRequest::NotifyCookiesAccessed(\n"
+
+
+def apply_cookie_hook(
+    text: str, anchor: str, hook: str, path: Path
+) -> str:
+    """Replaces a cookie anchor with its hook unless the hook is present.
+
+    Each cookie hook contains the text of its anchor or rewrites it in place,
+    so the finished hook is its own presence guard and a second run leaves the
+    source unchanged.
+    """
+    if hook in text:
+        return text
+    return replace_once(text, anchor, hook, path)
+
+
+def add_includes_after(
+    text: str, after: str, includes: tuple[str, ...], path: Path
+) -> str:
+    # Each include is written directly after the anchor, so they are visited
+    # in reverse to leave them in the order given.
+    for include in reversed(includes):
+        if f"{include}\n" in text:
+            continue
+        text = replace_once(text, f"{after}\n", f"{after}\n{include}\n", path)
+    return text
+
+
+def insert_before_once(
+    text: str, anchor: str, block: str, marker: str, path: Path
+) -> str:
+    if marker in text:
+        return text
+    return replace_once(text, anchor, f"{block}{anchor}", path)
+
+
+def patch_blink_cookie_jar(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/loader/cookie_jar.h"',
+        (BLINK_BRIDGE_INCLUDE, *BLINK_COOKIE_ORIGIN_INCLUDES),
+        path,
+    )
+    anchor = "// Controls whether we apply an artificial delay to priming the"
+    text = insert_before_once(
+        text,
+        anchor,
+        BLINK_COOKIE_ORIGIN_HELPER,
+        BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        anchor,
+        BLINK_DOCUMENT_COOKIE_HELPER,
+        BLINK_DOCUMENT_COOKIE_HELPER_MARKER,
+        path,
+    )
+    for cookie_anchor, hook in (
+        (BLINK_COOKIE_JAR_READ_NO_URL_ANCHOR, BLINK_COOKIE_JAR_READ_NO_URL_HOOK),
+        (BLINK_COOKIE_JAR_READ_FAILED_ANCHOR, BLINK_COOKIE_JAR_READ_FAILED_HOOK),
+        (
+            BLINK_COOKIE_JAR_READ_RETURNED_ANCHOR,
+            BLINK_COOKIE_JAR_READ_RETURNED_HOOK,
+        ),
+        (
+            BLINK_COOKIE_JAR_WRITE_NO_URL_ANCHOR,
+            BLINK_COOKIE_JAR_WRITE_NO_URL_HOOK,
+        ),
+        (BLINK_COOKIE_JAR_WRITE_SENT_ANCHOR, BLINK_COOKIE_JAR_WRITE_SENT_HOOK),
+    ):
+        text = apply_cookie_hook(text, cookie_anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_blink_document_cookie(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_BRIDGE_INCLUDE,
+        BLINK_COOKIE_ORIGIN_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_DOCUMENT_COOKIE_HELPER_ANCHOR,
+        BLINK_COOKIE_ORIGIN_HELPER,
+        BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_DOCUMENT_COOKIE_HELPER_ANCHOR,
+        BLINK_DOCUMENT_COOKIE_HELPER,
+        BLINK_DOCUMENT_COOKIE_HELPER_MARKER,
+        path,
+    )
+    for cookie_anchor, hook in (
+        (
+            BLINK_DOCUMENT_COOKIE_READ_DISABLED_ANCHOR,
+            BLINK_DOCUMENT_COOKIE_READ_DISABLED_HOOK,
+        ),
+        (
+            BLINK_DOCUMENT_COOKIE_READ_SECURITY_ANCHOR,
+            BLINK_DOCUMENT_COOKIE_READ_SECURITY_HOOK,
+        ),
+        (
+            BLINK_DOCUMENT_COOKIE_WRITE_DISABLED_ANCHOR,
+            BLINK_DOCUMENT_COOKIE_WRITE_DISABLED_HOOK,
+        ),
+        (
+            BLINK_DOCUMENT_COOKIE_WRITE_SECURITY_ANCHOR,
+            BLINK_DOCUMENT_COOKIE_WRITE_SECURITY_HOOK,
+        ),
+    ):
+        text = apply_cookie_hook(text, cookie_anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_blink_cookie_store(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/modules/cookie_store/'
+        'cookie_store.h"',
+        (BLINK_BRIDGE_INCLUDE, *BLINK_COOKIE_ORIGIN_INCLUDES),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_COOKIE_STORE_HELPER_ANCHOR,
+        BLINK_COOKIE_ORIGIN_HELPER,
+        BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_COOKIE_STORE_HELPER_ANCHOR,
+        BLINK_COOKIE_STORE_HELPER,
+        BLINK_COOKIE_STORE_HELPER_MARKER,
+        path,
+    )
+    for cookie_anchor, hook in (
+        (BLINK_COOKIE_STORE_GET_ALL_ANCHOR, BLINK_COOKIE_STORE_GET_ALL_HOOK),
+        (BLINK_COOKIE_STORE_GET_EMPTY_ANCHOR, BLINK_COOKIE_STORE_GET_EMPTY_HOOK),
+        (BLINK_COOKIE_STORE_GET_ANCHOR, BLINK_COOKIE_STORE_GET_HOOK),
+        (BLINK_COOKIE_STORE_SET_ANCHOR, BLINK_COOKIE_STORE_SET_HOOK),
+        (
+            BLINK_COOKIE_STORE_DELETE_NAME_ANCHOR,
+            BLINK_COOKIE_STORE_DELETE_NAME_HOOK,
+        ),
+        (
+            BLINK_COOKIE_STORE_DELETE_OPTIONS_ANCHOR,
+            BLINK_COOKIE_STORE_DELETE_OPTIONS_HOOK,
+        ),
+        (
+            BLINK_COOKIE_STORE_READ_ALL_RESULT_ANCHOR,
+            BLINK_COOKIE_STORE_READ_ALL_RESULT_ANCHOR
+            + BLINK_COOKIE_STORE_READ_RESULT_HOOK,
+        ),
+        (
+            BLINK_COOKIE_STORE_READ_ONE_RESULT_ANCHOR,
+            BLINK_COOKIE_STORE_READ_ONE_RESULT_ANCHOR
+            + BLINK_COOKIE_STORE_READ_RESULT_HOOK,
+        ),
+        (
+            BLINK_COOKIE_STORE_WRITE_NOTE_ANCHOR,
+            BLINK_COOKIE_STORE_WRITE_NOTE_HOOK,
+        ),
+        (
+            BLINK_COOKIE_STORE_WRITE_RESULT_ANCHOR,
+            BLINK_COOKIE_STORE_WRITE_RESULT_HOOK,
+        ),
+        (BLINK_COOKIE_STORE_CHANGE_ANCHOR, BLINK_COOKIE_STORE_CHANGE_HOOK),
+    ):
+        text = apply_cookie_hook(text, cookie_anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_blink_cookie_store_build(path: Path) -> None:
+    text = read_source(path)
+    if '"//chromium/recorder_bridge"' in text:
+        return
+    text = replace_once(
+        text,
+        BLINK_COOKIE_STORE_BUILD_DEPS,
+        BLINK_COOKIE_STORE_BUILD_PATCHED_DEPS,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_content_cookie_access(
+    path: Path,
+    own_include: str,
+    helper_anchor: str,
+    hook_anchor: str,
+    hook: str,
+) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        own_include,
+        (CONTENT_NAVIGATION_INCLUDE, *CONTENT_COOKIE_ACCESS_INCLUDES),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        helper_anchor,
+        CONTENT_COOKIE_ACCESS_HELPER,
+        CONTENT_COOKIE_ACCESS_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(text, hook_anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_content_frame_cookie_access(path: Path) -> None:
+    patch_content_cookie_access(
+        path,
+        '#include "content/browser/renderer_host/render_frame_host_impl.h"',
+        CONTENT_FRAME_COOKIE_HELPER_ANCHOR,
+        CONTENT_FRAME_COOKIE_ACCESS_ANCHOR,
+        CONTENT_FRAME_COOKIE_ACCESS_HOOK,
+    )
+
+
+def patch_content_navigation_cookie_access(path: Path) -> None:
+    patch_content_cookie_access(
+        path,
+        '#include "content/browser/renderer_host/navigation_request.h"',
+        CONTENT_NAVIGATION_COOKIE_HELPER_ANCHOR,
+        CONTENT_NAVIGATION_COOKIE_ACCESS_ANCHOR,
+        CONTENT_NAVIGATION_COOKIE_ACCESS_HOOK,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -3926,6 +4785,37 @@ def main() -> int:
         / "core"
         / "dom"
         / "document.cc"
+    )
+    patch_blink_document_cookie(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "document.cc"
+    )
+    patch_blink_cookie_jar(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "loader"
+        / "cookie_jar.cc"
+    )
+    cookie_store = (
+        source / "third_party" / "blink" / "renderer" / "modules"
+        / "cookie_store"
+    )
+    patch_blink_cookie_store(cookie_store / "cookie_store.cc")
+    patch_blink_cookie_store_build(cookie_store / "BUILD.gn")
+    renderer_host = source / "content" / "browser" / "renderer_host"
+    patch_content_frame_cookie_access(
+        renderer_host / "render_frame_host_impl.cc"
+    )
+    patch_content_navigation_cookie_access(
+        renderer_host / "navigation_request.cc"
     )
     patch_blink_mutation_observer_header(
         source

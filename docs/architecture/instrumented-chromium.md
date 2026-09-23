@@ -73,6 +73,10 @@ Cookie evidence includes:
 - Request, response, document, frame, and navigation correlation.
 - Whether the operation succeeded or was blocked and the reason.
 
+Protocol 0.23 implements the cookie part of this evidence on the
+`browser.cookie` channel. The record types and their limits are described under
+protocol version 0.23 below.
+
 Cookie values are never recorded. Authorization values, saved credentials, request bodies, and response bodies are not recorded.
 
 Network evidence includes request and response metadata, initiator, resource type, redirect chain, status, cache behavior, timing, and cookie names associated with the transaction.
@@ -417,7 +421,102 @@ lost. The reference run treats any stated loss as a failed run, because a
 reference run must be lossless, while the verifier reports the omission counts
 without failing, since a stated omission is a true account of what happened.
 
-Live 0.22 connections require an exact protocol-version match.
+Protocol version 0.23 records cookie operations on the `browser.cookie` channel.
+Cookie values are never recorded. Every record carries cookie names and the
+non-value facts of the operation, and the value is dropped inside the hook or
+the bridge before a record is built.
+
+Six record types are emitted:
+
+- `document-cookie-read`: a `document.cookie` read. Written from
+  `CookieJar::Cookies` and from the refusal branches of `Document::cookie`. It
+  carries the outcome (`returned`, `not-attempted-no-cookie-url`,
+  `cookie-manager-call-failed`, `refused-no-window-or-cookies-disabled`, or
+  `refused-security-error`), whether the names came from the cookie manager or
+  from the renderer's cookie cache, and the names returned.
+- `document-cookie-write`: a `document.cookie` write. Written from
+  `CookieJar::SetCookie` and from the refusal branches of `Document::setCookie`.
+  It carries the outcome, the cookie name, and the attributes the written string
+  named (Domain, Path, SameSite, Partitioned, and whether Expires, Max-Age,
+  Secure, or HttpOnly were present), with the attribute names in the order they
+  were written.
+- `cookie-store-request`: a Cookie Store API call (`get`, `getAll`, `set`, or
+  `delete`). It carries a request identifier, the method, the context kind
+  (`window`, `service-worker`, or `other`), the outcome (`sent-to-cookie-manager`
+  or `threw`), the requested name and URL when given, and for a write the
+  requested attributes.
+- `cookie-store-result`: the resolution of a Cookie Store request that was sent,
+  paired to its request by `requestId`. A read reports the names the cookie
+  manager returned. A write reports whether the browser reported success.
+- `cookie-store-change`: a change delivered to a Cookie Store change
+  subscription, with the name, domain, path, Chromium's change cause, and
+  whether a change event was dispatched to the page.
+- `cookie-access`: a cookie access the browser process observed, from
+  `RenderFrameHostImpl::NotifyCookiesAccessed` (`observer` is `frame`) and from
+  `NavigationRequest::NotifyCookiesAccessed` (`observer` is `navigation`). This
+  covers cookies sent with and set by HTTP responses, including Set-Cookie
+  headers. It carries the access type (`read` or `change`), the URL, the frame
+  and top-frame origins, the request identifier when Chromium supplies one,
+  whether the frame is ad tagged, and for each cookie its name, domain, path,
+  SameSite, Secure, HttpOnly, host-only, partitioned, persistent, and expired
+  flags, whether it was included, and Chromium's exclusion, warning, and
+  exemption reasons.
+
+The renderer records (`document-cookie-read`, `document-cookie-write`, and
+`cookie-store-request`) also report the script location of the call and the
+JavaScript world current at the call, in the same `location` and `world` shapes
+the listener records use, and repeat the world as the context's
+`executionWorldId`. These are the only records outside the listener channel
+that report a world.
+
+The recorded facts are bounded as follows:
+
+- The network service skips a consecutive duplicate access and batches its
+  notifications, so a `cookie-access` record is not a one-to-one count of
+  requests.
+- An excluded cookie is reported only when Chromium reports it to the
+  observer.
+- Service worker and shared worker cookie observers are not hooked, so their
+  network cookie accesses produce no `cookie-access` record.
+- A Cookie Store call made from a service worker has no document, so its
+  document fields are null.
+- Exclusion, warning, and exemption reasons are Chromium's debug names. They
+  are not a cross-version contract.
+- A nameless cookie whose value contains `=` cannot be told apart from a named
+  cookie, so the name reported for it is the text before the first `=`.
+- `navigator.cookieEnabled` is not recorded.
+- Name and cookie lists are capped at 256 entries. The record reports the full
+  count and whether the list was truncated.
+- A `cookie-store-result` record has no document context. It is correlated with
+  its request by `requestId`.
+- A `document-cookie-write` outcome of `sent-to-cookie-manager` states that the
+  write was sent. Whether the browser stored it is stated by the matching
+  `cookie-access` record, when Chromium reports one.
+- `secure`, `httpOnly`, `maxAgePresent`, and `attributeNames` appear only in a
+  `document-cookie-write` record. The Cookie Store attribute shape omits them,
+  so a Cookie Store write that set a maximum age is not distinguished from one
+  that did not.
+- A Cookie Store `delete` reports the attributes of the expiring write Blink
+  builds for it (expiry at time zero and SameSite strict), not attributes the
+  script supplied.
+- A Cookie Store `get` result lists every name the cookie manager returned,
+  although Blink resolves the promise with only the first.
+- Whether a `cookie-access` came from a network request or from a script call
+  is not recorded.
+- The location and world reported are those current when the call is made. A
+  call made while no script context is entered reports a null location and a
+  null world rather than the main world.
+
+The validation run serves a second fixture page over HTTP on the loopback
+interface, because cookie APIs refuse a file URL and a Set-Cookie header needs
+an HTTP response. The page writes and reads `document.cookie`, calls each Cookie
+Store method with a change listener registered, and fetches one response that
+sets a cookie and one request that sends it. The verifier requires a record of
+each of those operations and requires that no record in the session contains
+the value the fixture cookies carried. The fixture shows that the logger emits
+records; it does not evaluate the page's cookie use.
+
+Live 0.23 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
@@ -499,7 +598,9 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 5. Add document, DOM, style, layout, accessibility, and rendered-frame
    checkpoints. The bounded parser-complete DOM structure checkpoint is the
    first implemented part of this stage.
-6. Add cookie operations and network metadata with prohibited values removed at source.
+6. Add cookie operations and network metadata with prohibited values removed at
+   source. Cookie operations are implemented in protocol 0.23. Network metadata
+   remains outstanding.
 7. Add browser-chrome and compositor correlation needed by test scenarios.
 8. Package the browser and recorder as one installable application.
 

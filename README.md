@@ -214,6 +214,16 @@ process never gets to report, because it is shutting down or its pipe never
 recovers, is still unstated in the archive, so an archive that reports no
 omission is evidence of no observed loss rather than proof of none.
 
+Protocol 0.23 records cookie operations: `document.cookie` reads and writes,
+Cookie Store API requests, results, and change deliveries, and the cookie
+accesses the browser process observes for frames and navigations, including
+cookies sent with requests and set by Set-Cookie response headers. Records carry
+cookie names, attributes, outcomes, and Chromium's inclusion reasons, and never
+cookie values. Script calls also report the call's source location and
+JavaScript world. Worker cookie observers and `navigator.cookieEnabled` are not
+covered; the full list of limits is in
+[the instrumented Chromium architecture](docs/architecture/instrumented-chromium.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.

@@ -1735,8 +1735,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.22"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.22"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.23"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.23"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -3482,6 +3482,235 @@ class IntegrateTests(unittest.TestCase):
                     self.assertNotIn(".Left(", first)
                     self.assertNotIn(intermediate, first)
                     self.assertIn(current, first)
+
+
+def cookie_source(*parts: str) -> str:
+    """Joins anchor text into a small source that holds each part once."""
+    return "\n// separator\n".join(parts)
+
+
+class CookieIntegrationTests(unittest.TestCase):
+    """Proves the cookie hooks are written once and hold no value read."""
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def assert_bridge_calls_match(self, text):
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", text, signatures),
+        )
+
+    def test_patches_the_cookie_jar_idempotently(self):
+        source = cookie_source(
+            '#include "third_party/blink/renderer/core/loader/cookie_jar.h"\n',
+            "// Controls whether we apply an artificial delay to priming the\n",
+            INTEGRATE.BLINK_COOKIE_JAR_WRITE_NO_URL_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_JAR_WRITE_SENT_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_JAR_READ_NO_URL_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_JAR_READ_FAILED_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_JAR_READ_RETURNED_ANCHOR,
+        )
+        patched = self.patch_twice(
+            "cookie_jar.cc", source, INTEGRATE.patch_blink_cookie_jar
+        )
+        for hook in (
+            INTEGRATE.BLINK_COOKIE_JAR_WRITE_NO_URL_HOOK,
+            INTEGRATE.BLINK_COOKIE_JAR_WRITE_SENT_HOOK,
+            INTEGRATE.BLINK_COOKIE_JAR_READ_NO_URL_HOOK,
+            INTEGRATE.BLINK_COOKIE_JAR_READ_FAILED_HOOK,
+            INTEGRATE.BLINK_COOKIE_JAR_READ_RETURNED_HOOK,
+        ):
+            self.assertEqual(1, patched.count(hook))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE))
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER)
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_DOCUMENT_COOKIE_HELPER_MARKER)
+        )
+        self.assertLess(
+            patched.index(INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER),
+            patched.index(INTEGRATE.BLINK_DOCUMENT_COOKIE_HELPER_MARKER),
+        )
+        self.assert_bridge_calls_match(patched)
+
+    def test_patches_document_cookie_refusals_idempotently(self):
+        source = cookie_source(
+            INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n",
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_HELPER_ANCHOR,
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_READ_DISABLED_ANCHOR,
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_READ_SECURITY_ANCHOR,
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_WRITE_DISABLED_ANCHOR,
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_WRITE_SECURITY_ANCHOR,
+        )
+        patched = self.patch_twice(
+            "document.cc", source, INTEGRATE.patch_blink_document_cookie
+        )
+        for hook in (
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_READ_DISABLED_HOOK,
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_READ_SECURITY_HOOK,
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_WRITE_DISABLED_HOOK,
+            INTEGRATE.BLINK_DOCUMENT_COOKIE_WRITE_SECURITY_HOOK,
+        ):
+            self.assertEqual(1, patched.count(hook))
+        for include in INTEGRATE.BLINK_COOKIE_ORIGIN_INCLUDES:
+            self.assertEqual(1, patched.count(include))
+        self.assert_bridge_calls_match(patched)
+
+    def test_patches_the_cookie_store_idempotently(self):
+        source = cookie_source(
+            '#include "third_party/blink/renderer/modules/cookie_store/'
+            'cookie_store.h"\n',
+            INTEGRATE.BLINK_COOKIE_STORE_HELPER_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_GET_ALL_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_GET_EMPTY_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_GET_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_SET_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_DELETE_NAME_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_DELETE_OPTIONS_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_READ_ALL_RESULT_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_READ_ONE_RESULT_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_WRITE_NOTE_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_WRITE_RESULT_ANCHOR,
+            INTEGRATE.BLINK_COOKIE_STORE_CHANGE_ANCHOR,
+        )
+        patched = self.patch_twice(
+            "cookie_store.cc", source, INTEGRATE.patch_blink_cookie_store
+        )
+        for hook in (
+            INTEGRATE.BLINK_COOKIE_STORE_GET_ALL_HOOK,
+            INTEGRATE.BLINK_COOKIE_STORE_GET_EMPTY_HOOK,
+            INTEGRATE.BLINK_COOKIE_STORE_GET_HOOK,
+            INTEGRATE.BLINK_COOKIE_STORE_SET_HOOK,
+            INTEGRATE.BLINK_COOKIE_STORE_DELETE_NAME_HOOK,
+            INTEGRATE.BLINK_COOKIE_STORE_DELETE_OPTIONS_HOOK,
+            INTEGRATE.BLINK_COOKIE_STORE_WRITE_NOTE_HOOK,
+            INTEGRATE.BLINK_COOKIE_STORE_WRITE_RESULT_HOOK,
+            INTEGRATE.BLINK_COOKIE_STORE_CHANGE_HOOK,
+        ):
+            self.assertEqual(1, patched.count(hook))
+        self.assertEqual(
+            2, patched.count(INTEGRATE.BLINK_COOKIE_STORE_READ_RESULT_HOOK)
+        )
+        self.assert_bridge_calls_match(patched)
+
+    def test_a_cookie_hook_fails_when_its_anchor_is_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cookie_store.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/modules/cookie_store/'
+                'cookie_store.h"\n'
+                + INTEGRATE.BLINK_COOKIE_STORE_HELPER_ANCHOR,
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeError):
+                INTEGRATE.patch_blink_cookie_store(path)
+
+    def test_patches_the_cookie_store_build_idempotently(self):
+        source = (
+            'blink_modules_sources("cookie_store") {\n'
+            '  sources = [ "cookie_store.cc" ]\n\n'
+            + INTEGRATE.BLINK_COOKIE_STORE_BUILD_DEPS
+            + "}\n"
+        )
+        patched = self.patch_twice(
+            "BUILD.gn", source, INTEGRATE.patch_blink_cookie_store_build
+        )
+        self.assertIn(INTEGRATE.BLINK_COOKIE_STORE_BUILD_PATCHED_DEPS, patched)
+
+    def test_patches_browser_cookie_access_idempotently(self):
+        cases = (
+            (
+                "render_frame_host_impl.cc",
+                '#include "content/browser/renderer_host/'
+                'render_frame_host_impl.h"\n',
+                INTEGRATE.CONTENT_FRAME_COOKIE_HELPER_ANCHOR,
+                INTEGRATE.CONTENT_FRAME_COOKIE_ACCESS_ANCHOR,
+                INTEGRATE.CONTENT_FRAME_COOKIE_ACCESS_HOOK,
+                INTEGRATE.patch_content_frame_cookie_access,
+            ),
+            (
+                "navigation_request.cc",
+                '#include "content/browser/renderer_host/'
+                'navigation_request.h"\n',
+                INTEGRATE.CONTENT_NAVIGATION_COOKIE_HELPER_ANCHOR,
+                INTEGRATE.CONTENT_NAVIGATION_COOKIE_ACCESS_ANCHOR,
+                INTEGRATE.CONTENT_NAVIGATION_COOKIE_ACCESS_HOOK,
+                INTEGRATE.patch_content_navigation_cookie_access,
+            ),
+        )
+        for name, include, helper_anchor, anchor, hook, patch in cases:
+            with self.subTest(source=name):
+                patched = self.patch_twice(
+                    name,
+                    cookie_source(include, helper_anchor, anchor),
+                    patch,
+                )
+                self.assertEqual(1, patched.count(hook))
+                self.assertEqual(
+                    1,
+                    patched.count(INTEGRATE.CONTENT_COOKIE_ACCESS_HELPER_MARKER),
+                )
+                self.assertLess(
+                    patched.index(INTEGRATE.CONTENT_COOKIE_ACCESS_HELPER_MARKER),
+                    patched.index(hook),
+                )
+                self.assert_bridge_calls_match(patched)
+
+    def test_no_cookie_template_reads_a_cookie_value(self):
+        names = [
+            name
+            for name in dir(INTEGRATE)
+            if name.isupper()
+            and "COOKIE" in name
+            and isinstance(getattr(INTEGRATE, name), str)
+        ]
+        self.assertTrue(names)
+        for name in names:
+            with self.subTest(template=name):
+                text = getattr(INTEGRATE, name)
+                self.assertNotIn(".Value()", text)
+                self.assertNotIn("->value()", text)
+                self.assertNotIn("options->value", text)
+
+    def test_cookie_text_readers_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "cookie_text_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "cookie_text.cc"),
+                    str(bridge / "cookie_text_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
 
 
 if __name__ == "__main__":

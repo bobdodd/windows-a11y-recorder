@@ -20,6 +20,17 @@ from the product version.
 
 ### Added
 
+- Record cookie operations on a new `browser.cookie` channel. Protocol 0.23
+  records `document.cookie` reads and writes with their outcome and the names
+  read or the name and attributes written, Cookie Store API requests paired
+  with their results by request identifier, Cookie Store change deliveries,
+  and the cookie accesses the browser process observes for frames and
+  navigations, including Set-Cookie response headers, with each cookie's
+  attributes and Chromium's inclusion reasons. Script calls report the source
+  location and JavaScript world of the call. Cookie values are never recorded.
+  The validation run serves a loopback HTTP fixture page that uses each of
+  these paths, and the verifier requires a record for each and requires that no
+  record contains the fixture's cookie value.
 - Report browser evidence that was lost instead of leaving a gap in the archive.
   Protocol 0.22 carries a `collector-omission` record on any browser channel,
   with the reason records were lost, how many were lost, and the browser process

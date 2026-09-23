@@ -159,34 +159,9 @@ public sealed class BrowserEvidenceReceiverTests
                 protocolVersion = BrowserEvidenceProtocol.CurrentVersion,
                 browserTimestampTicks = "10200",
                 channel = BrowserEvidenceChannels.Cookie,
-                eventType = BrowserEvidenceEventTypes.CookieOperation,
-                payload = new
-                {
-                    context = new
-                    {
-                        browserInstanceId = "browser-1",
-                        processId = 1234,
-                        processType = "renderer",
-                        profileId = "profile-1",
-                        browserContextId = "context-1",
-                        pageId = "page-1",
-                        frameId = "frame-1",
-                        documentId = "document-1",
-                        executionWorldId = "main",
-                        documentToken = (string?)null
-                    },
-                    operation = "read",
-                    name = "consent",
-                    domain = "example.test",
-                    path = "/",
-                    sameSite = "Lax",
-                    secure = true,
-                    httpOnly = false,
-                    partitioned = false,
-                    source = "document-cookie",
-                    result = "returned",
-                    blockedReason = (string?)null
-                },
+                eventType = BrowserEvidenceEventTypes.DocumentCookieRead,
+                payload = JsonDocument.Parse(
+                    BrowserCookiePayloads.DocumentCookieRead).RootElement,
                 qualityFlags = Array.Empty<string>()
             });
 
@@ -195,9 +170,11 @@ public sealed class BrowserEvidenceReceiverTests
             TestContext.Current.CancellationToken);
         Assert.Equal(BrowserEvidenceChannels.Cookie, record.Channel);
         Assert.Equal(
-            BrowserEvidenceEventTypes.CookieOperation,
+            BrowserEvidenceEventTypes.DocumentCookieRead,
             record.EventType);
-        Assert.Equal("consent", record.Payload.GetProperty("name").GetString());
+        Assert.Equal(
+            "session",
+            record.Payload.GetProperty("cookieNames")[0].GetString());
         Assert.False(record.Payload.TryGetProperty("value", out _));
         Assert.Equal("chromium-monotonic", record.NativeTimestamp?.Domain);
         Assert.StartsWith("chromium:browser-1:1234", record.ClockMappingId);
