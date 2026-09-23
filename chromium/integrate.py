@@ -5456,11 +5456,11 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_record.computed_style_present = true;
       recorder_record.computed_style.reserve(
           std::size(kRecorderLayoutStyleProperties));
-      for (size_t recorder_index = 0;
-           recorder_index < std::size(kRecorderLayoutStyleProperties);
-           ++recorder_index) {
+      size_t recorder_index = 0;
+      for (CSSPropertyID recorder_property_id :
+           kRecorderLayoutStyleProperties) {
         const CSSValue* recorder_value =
-            CSSProperty::Get(kRecorderLayoutStyleProperties[recorder_index])
+            CSSProperty::Get(recorder_property_id)
                 .CSSValueFromComputedStyle(*recorder_style,
                                            recorder_layout_object,
                                            /*allow_visited_style=*/false,
@@ -5472,6 +5472,7 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
           recorder_entry.value = recorder_value->CssText().Utf8();
         }
         recorder_record.computed_style.push_back(std::move(recorder_entry));
+        ++recorder_index;
       }
     }
     a11y_recorder::RecordBlinkLayoutCheckpointNode(
