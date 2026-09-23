@@ -1463,9 +1463,10 @@ completion whose node count equals the node records emitted, no truncation,
 node indexes from zero without gaps, the `rendering-update` reason, a node
 limit of 100000, a `previousCheckpointId` naming the document's preceding
 checkpoint, counters that differ from the preceding checkpoint's, and the
-defined property list in order, both in the start record and as the keys of
-each element's computed style. It then finds, in order, a checkpoint with the
-box 200 pixels wide in navy, a later one with the box 320 pixels wide in navy,
+defined property list, in order in the start record and as exactly the keys
+of each element's computed style, whose member order JSON does not preserve.
+It then finds, in order, a checkpoint with the box 200 pixels wide in navy, a
+later one with the box 320 pixels wide in navy,
 and a later one with the box 320 pixels wide in dark red, all with the same
 node identity. For each of those three it requires the recorded rectangle to
 equal the page's report to within 0.01 pixels, the recorded viewport to equal
