@@ -225,6 +225,44 @@ function Select-CdpFixtureTarget {
     )
 }
 
+# Opens a second page and brings it to the front so the fixture page becomes
+# hidden, which is what the page-lifecycle evidence needs. The identifier is
+# read the same way as the target list rather than through Invoke-RestMethod,
+# which does not enumerate a JSON array under Windows PowerShell 5.1, and the
+# identifier is required to be a scalar string so that a response shape other
+# than a single target fails here instead of producing an activate request for
+# a target that does not exist.
+function New-CdpBackgroundTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase
+    )
+
+    $created = ConvertFrom-Json (
+        Invoke-WebRequest `
+            -Method Put `
+            -Uri "$DevToolsBase/json/new?about%3Ablank" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+    ).Content
+    $targetId = Get-CdpProperty $created "id"
+    if ($targetId -isnot [string] -or $targetId.Length -eq 0) {
+        throw "Opening a background DevTools target returned no identifier."
+    }
+    $activated = Invoke-WebRequest `
+        -Method Put `
+        -Uri "$DevToolsBase/json/activate/$targetId" `
+        -UseBasicParsing `
+        -TimeoutSec 5
+    if ($activated.StatusCode -ne 200) {
+        throw (
+            "Activating the background DevTools target reported status " +
+            "$($activated.StatusCode)."
+        )
+    }
+    return $targetId
+}
+
 function New-CdpSession {
     param(
         [Parameter(Mandatory = $true)]
@@ -770,15 +808,11 @@ try {
         Close-CdpSession $isolatedWorldSession
     }
 
-    $backgroundTarget = Invoke-RestMethod `
-        -Method Put `
-        -Uri "$devToolsBase/json/new?about%3Ablank" `
-        -TimeoutSec 5
-    Invoke-RestMethod `
-        -Method Put `
-        -Uri "$devToolsBase/json/activate/$($backgroundTarget.id)" `
-        -TimeoutSec 5 |
-        Out-Null
+    $backgroundTargetId = New-CdpBackgroundTarget $devToolsBase
+    Write-Host (
+        "Activated background target $backgroundTargetId so the fixture page " +
+        "becomes hidden."
+    )
 
     Wait-Job $captureJob | Out-Null
     $captureErrors = @()

@@ -1030,3 +1030,38 @@ unexercised, as does a world Blink classifies as a type the recorder does not
 name. Nothing here records the world a dispatch or an invocation ran in. The
 world name is read from the inspector's own naming of the world, so a world
 created without a name would report a null name and is not covered.
+
+## Transition coverage accounting
+
+Earlier results in this document repeated the uncovered transition count as a
+caveat, noting that it was the same population first described under protocol
+0.16 and not a result of the slice being reported. The verifier now asserts the
+structure of that population instead, so a future result states a bound rather
+than restating a caveat.
+
+Every recorded transition is accounted for as one of three cases. A transition
+inside a range one of its document's completed delivery passes claimed is
+covered. A transition in a document that completed no pass covering transitions
+is uncovered because no pass ever ran there. A transition after the last
+transition its document's passes claimed is uncovered because no later pass ran
+before the capture ended. The two uncovered classes are required to sum to the
+reported total, so a transition cannot be dropped from the accounting.
+
+Two cases fail a run. A transition that lies inside the span its own document
+already claimed is a hole in the coverage rather than a fact about the page, and
+two passes in one document that claim the same transition are an overlap. Both
+describe coverage the passes report incorrectly, which is the condition a bare
+count could not separate from ordinary uncovered evidence.
+
+A run now reports `CoveredTransitions`, `UncoveredTransitions`,
+`UncoveredTransitionsWithoutPass`, `UncoveredTransitionsAfterLastPass`, and
+`UncoveredTransitionDocuments`.
+
+What this does not establish: the counts themselves are not asserted, because
+how many transitions a capture produces and how many documents Blink creates and
+discards are properties of the run rather than contracts. The classification
+states where a transition sits relative to its document's passes, and it does
+not claim why a document produced no pass, since the verifier does not read
+navigation records for the documents involved. The hole and overlap conditions
+have not been observed in any run, so they are assertions that no measurement has
+yet exercised.

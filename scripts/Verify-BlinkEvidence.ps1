@@ -1361,10 +1361,15 @@ if ($stateCheckpointCompletion.payload.attributeCount -ne
     $stateCheckpointAttributes.Count) {
     throw "The fixture checkpoint attribute count does not match its records."
 }
-# Coverage across the whole archive, reported so a run states how much of its
-# transition evidence a checkpoint actually accounts for. A transition in a
-# document that produced no checkpoint is uncovered, which is a fact about the
-# recorded page rather than a defect in the join.
+# Coverage across the whole archive. Every transition is accounted for as one of
+# three cases rather than reported as a bare uncovered count. A transition in a
+# document that completed no delivery pass is uncovered because no pass ever ran
+# there, and a transition recorded after a document's last completed pass is
+# uncovered because no later pass ran before the capture ended. Both are facts
+# about the recorded page. A transition that lies inside the span the document's
+# own passes already claimed is a hole in the coverage rather than a fact about
+# the page, so it fails the run, as does a document whose passes claim the same
+# transition twice.
 $allTransitions = @(@($attributeChanges) + @($characterDataChanges))
 $coverageRanges = @{}
 foreach ($completion in $allCheckpointCompletions) {
@@ -1382,7 +1387,28 @@ foreach ($completion in $allCheckpointCompletions) {
             Last = Get-TransitionSequence $completion.payload.coveredTransitionLastId
         })
 }
+# Two passes in one document may not claim the same transition, so the ranges of
+# a document are required to be disjoint and are read in order below.
+$coverageLast = @{}
+foreach ($scope in @($coverageRanges.Keys)) {
+    $ordered = @($coverageRanges[$scope] | Sort-Object First, Last)
+    for ($index = 1; $index -lt $ordered.Count; ++$index) {
+        if ($ordered[$index].First -le $ordered[$index - 1].Last) {
+            throw (
+                "Two delivery passes in one document claimed overlapping " +
+                "transition ranges, $($ordered[$index - 1].First) to " +
+                "$($ordered[$index - 1].Last) and $($ordered[$index].First) " +
+                "to $($ordered[$index].Last)."
+            )
+        }
+    }
+    $coverageRanges[$scope] = $ordered
+    $coverageLast[$scope] = $ordered[$ordered.Count - 1].Last
+}
 $uncoveredTransitions = 0
+$uncoveredWithoutPass = 0
+$uncoveredAfterLastPass = 0
+$uncoveredScopes = @{}
 foreach ($transition in $allTransitions) {
     $scope = "$($transition.payload.context.processId)|" +
         "$($transition.payload.context.documentId)"
@@ -1396,9 +1422,28 @@ foreach ($transition in $allTransitions) {
             }
         }
     }
-    if (-not $covered) {
-        ++$uncoveredTransitions
+    if ($covered) {
+        continue
     }
+    ++$uncoveredTransitions
+    $uncoveredScopes[$scope] = $true
+    if (-not $coverageRanges.ContainsKey($scope)) {
+        ++$uncoveredWithoutPass
+        continue
+    }
+    if ($sequence -gt $coverageLast[$scope]) {
+        ++$uncoveredAfterLastPass
+        continue
+    }
+    throw (
+        "Transition $($transition.payload.transitionId) is not covered by any " +
+        "delivery pass even though its own document covered transitions up to " +
+        "$($coverageLast[$scope]), so the coverage its passes report has a hole."
+    )
+}
+if (($uncoveredWithoutPass + $uncoveredAfterLastPass) -ne
+    $uncoveredTransitions) {
+    throw "The uncovered transitions were not fully accounted for."
 }
 
 $disclosureNodeId = $truncatedChange.payload.nodeId
@@ -2550,7 +2595,11 @@ if (
     StateCheckpointCoveredTransitions =
         $stateCheckpointCompletion.payload.coveredTransitionCount
     RecordedTransitions = $allTransitions.Count
+    CoveredTransitions = $allTransitions.Count - $uncoveredTransitions
     UncoveredTransitions = $uncoveredTransitions
+    UncoveredTransitionsWithoutPass = $uncoveredWithoutPass
+    UncoveredTransitionsAfterLastPass = $uncoveredAfterLastPass
+    UncoveredTransitionDocuments = $uncoveredScopes.Count
     HiddenTimeoutTimerId = $scheduledHiddenTimeout.payload.timerId
     TimeoutTimerId = $scheduledTimeout.payload.timerId
     IntervalTimerId = $scheduledInterval.payload.timerId

@@ -18,6 +18,23 @@ from the product version.
 
 ## Unreleased
 
+### Changed
+
+- Account for every recorded DOM transition in the reference verifier instead of
+  reporting a bare uncovered count. Each uncovered transition is classified as
+  one in a document that completed no delivery pass, or one recorded after the
+  last transition its own document's passes claimed, and the two classes are
+  required to sum to the reported total. A transition inside the span its
+  document already claimed is a hole in the coverage, and two passes claiming
+  one transition are an overlap, and both now fail a run. A run reports
+  `CoveredTransitions`, `UncoveredTransitionsWithoutPass`,
+  `UncoveredTransitionsAfterLastPass`, and `UncoveredTransitionDocuments`.
+- Read the background DevTools target the same way as the target list. Windows
+  PowerShell 5.1 does not enumerate a JSON array from `Invoke-RestMethod`, and
+  the created target identifier is now required to be a scalar string, so a
+  response shape other than a single target fails where it happens instead of
+  activating a target that does not exist.
+
 ### Fixed
 
 - Wait for a free recorder pipe instance instead of failing a process that found

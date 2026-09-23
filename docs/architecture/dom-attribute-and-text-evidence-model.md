@@ -186,6 +186,20 @@ by omission, which is the accurate claim: the change was observed, and no tree
 snapshot followed it. A consumer computes the uncovered set exactly, and the
 reference verifier reports it as `UncoveredTransitions` on every run.
 
+A count alone cannot distinguish evidence about the page from a defect in the
+join, so the verifier accounts for every uncovered transition rather than only
+counting it. An uncovered transition is either in a document that completed no
+delivery pass covering transitions, or after the last transition its own
+document's passes claimed. Those two classes are required to sum to the reported
+total. A transition that lies inside the span its document already claimed is a
+hole in the coverage, and two passes in one document that claim the same
+transition are an overlap, and both fail the run. A run reports
+`CoveredTransitions`, `UncoveredTransitionsWithoutPass`,
+`UncoveredTransitionsAfterLastPass`, and `UncoveredTransitionDocuments`
+alongside the total. The classification states where a transition sits relative
+to its document's passes. It does not claim why a document produced no pass,
+because the verifier does not read navigation records for these documents.
+
 Correlating a checkpoint to its committed browser document is order-independent.
 A renderer finishes parsing a document before the browser process records the
 commit, and the two channels are merged into one archive, so which record appears

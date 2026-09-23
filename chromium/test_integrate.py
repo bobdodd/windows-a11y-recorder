@@ -1535,6 +1535,80 @@ class IntegrateTests(unittest.TestCase):
         self.assertIn('$_ -match "waited for a free pipe instance"', runner)
         self.assertIn("BRIDGE_CONNECT_WAITS=$bridgeConnectWaits", runner)
 
+    def test_verifier_accounts_for_every_recorded_transition(self):
+        root = Path(__file__).parent.parent
+        verifier = (
+            root / "scripts" / "Verify-BlinkEvidence.ps1"
+        ).read_text(encoding="utf-8")
+
+        # An uncovered transition is reported in one of exactly two classes, and
+        # the classes are required to sum to the reported total, so a transition
+        # can no longer be dropped from the accounting without failing.
+        self.assertIn("$uncoveredWithoutPass = 0", verifier)
+        self.assertIn("$uncoveredAfterLastPass = 0", verifier)
+        self.assertIn(
+            "if (($uncoveredWithoutPass + $uncoveredAfterLastPass) -ne",
+            verifier,
+        )
+        self.assertIn(
+            "The uncovered transitions were not fully accounted for.",
+            verifier,
+        )
+
+        # The counts reach the run summary, which is what turns the bound from a
+        # caveat repeated in prose into a value a run reports.
+        for key in (
+            "CoveredTransitions =",
+            "UncoveredTransitionsWithoutPass = $uncoveredWithoutPass",
+            "UncoveredTransitionsAfterLastPass = $uncoveredAfterLastPass",
+            "UncoveredTransitionDocuments = $uncoveredScopes.Count",
+        ):
+            self.assertIn(key, verifier)
+
+    def test_verifier_rejects_a_hole_in_transition_coverage(self):
+        root = Path(__file__).parent.parent
+        verifier = (
+            root / "scripts" / "Verify-BlinkEvidence.ps1"
+        ).read_text(encoding="utf-8")
+
+        # A transition inside the span its own document already claimed is a
+        # defect in the coverage rather than a fact about the page, and two
+        # passes may not claim one transition twice.
+        self.assertIn(
+            "so the coverage its passes report has a hole.",
+            verifier,
+        )
+        self.assertIn(
+            "claimed overlapping ",
+            verifier,
+        )
+        self.assertIn("if ($sequence -gt $coverageLast[$scope]) {", verifier)
+
+    def test_validation_reads_the_background_target_without_rest_method(self):
+        root = Path(__file__).parent.parent
+        runner = (
+            root / "scripts" / "Run-BlinkValidation.ps1"
+        ).read_text(encoding="utf-8")
+
+        # Invoke-RestMethod does not enumerate a JSON array under Windows
+        # PowerShell 5.1, so every DevTools HTTP read parses the content itself
+        # and requires the identifier it uses to be a scalar string.
+        invocations = [
+            line
+            for line in runner.splitlines()
+            if "Invoke-RestMethod" in line and not line.strip().startswith("#")
+        ]
+        self.assertEqual([], invocations)
+        self.assertIn("function New-CdpBackgroundTarget {", runner)
+        self.assertIn(
+            "Opening a background DevTools target returned no identifier.",
+            runner,
+        )
+        self.assertIn(
+            "if ($activated.StatusCode -ne 200) {",
+            runner,
+        )
+
     def test_validation_registers_an_isolated_world_listener(self):
         root = Path(__file__).parent.parent
         fixture = (
