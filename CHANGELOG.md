@@ -20,6 +20,17 @@ from the product version.
 
 ### Added
 
+- Record focus, selection, active descendant, and text-editing changes on a new
+  `browser.interaction` channel. Protocol 0.24 records each focus change with
+  the previous, requested, and resulting focused nodes, an outcome derived from
+  them, the focus type and trigger, and the active descendant the focused
+  element resolved to; each selection a frame commits, with the control's own
+  offsets when the selection is in a text control; text-control values after a
+  value set or a user edit, bounded to 4096 UTF-16 code units; and elements
+  assigned as an active descendant through element reflection. Changes made by
+  script report the script's source location and JavaScript world. The
+  validation run serves a fixture page that makes each of these changes by
+  script and by DevTools input, and the verifier requires a record for each.
 - Record cookie operations on a new `browser.cookie` channel. Protocol 0.23
   records `document.cookie` reads and writes with their outcome and the names
   read or the name and attributes written, Cookie Store API requests paired

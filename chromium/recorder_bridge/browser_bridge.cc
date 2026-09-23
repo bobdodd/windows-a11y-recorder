@@ -3,10 +3,12 @@
 #include <windows.h>
 
 #include <array>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -2830,6 +2832,202 @@ void RecordBrowserNavigationCookieAccess(
                   std::move(top_frame_origin), std::move(request_id),
                   ad_tagged, std::move(cookies));
   SendBlinkEvidence("browser.cookie", "cookie-access", std::move(payload));
+}
+
+namespace {
+
+bool IsOneOf(const std::string& value,
+             std::initializer_list<std::string_view> allowed) {
+  for (std::string_view candidate : allowed) {
+    if (value == candidate) {
+      return true;
+    }
+  }
+  return false;
+}
+
+base::Value OptionalNodeId(int node_id) {
+  return node_id > 0 ? base::Value(node_id) : base::Value();
+}
+
+}  // namespace
+
+void RecordBlinkFocusChanged(int document_node_id,
+                             std::string document_token,
+                             int previous_node_id,
+                             int requested_node_id,
+                             int focused_node_id,
+                             int active_descendant_node_id,
+                             std::string focus_type,
+                             std::string focus_trigger,
+                             bool prevent_scroll,
+                             bool focus_visible_present,
+                             bool focus_visible,
+                             CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      !IsOneOf(focus_type, {"none", "script", "forward", "backward",
+                            "spatial-navigation", "mouse", "access-key",
+                            "page"}) ||
+      !IsOneOf(focus_trigger, {"script", "user-gesture"})) {
+    return;
+  }
+  // The outcome is derived from the three node identities rather than from
+  // the return path Blink took, so it cannot disagree with them.
+  const char* outcome = "focused";
+  if (requested_node_id <= 0) {
+    outcome = focused_node_id <= 0 ? "cleared" : "redirected";
+  } else if (focused_node_id <= 0) {
+    outcome = "not-focused";
+  } else if (focused_node_id != requested_node_id) {
+    outcome = "redirected";
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("previousNodeId", OptionalNodeId(previous_node_id));
+  payload.Set("requestedNodeId", OptionalNodeId(requested_node_id));
+  payload.Set("focusedNodeId", OptionalNodeId(focused_node_id));
+  payload.Set("outcome", outcome);
+  payload.Set("activeDescendantNodeId",
+              OptionalNodeId(focused_node_id > 0 ? active_descendant_node_id
+                                                 : 0));
+  payload.Set("focusType", std::move(focus_type));
+  payload.Set("focusTrigger", std::move(focus_trigger));
+  payload.Set("preventScroll", prevent_scroll);
+  payload.Set("focusVisible", focus_visible_present ? base::Value(focus_visible)
+                                                    : base::Value());
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.interaction", "focus-changed",
+                    std::move(payload));
+}
+
+void RecordBlinkSelectionChanged(int document_node_id,
+                                 std::string document_token,
+                                 std::string set_by,
+                                 std::string selection_type,
+                                 int anchor_node_id,
+                                 int anchor_offset,
+                                 int focus_node_id,
+                                 int focus_offset,
+                                 bool directional,
+                                 int text_control_node_id,
+                                 int text_control_selection_start,
+                                 int text_control_selection_end,
+                                 std::string text_control_selection_direction,
+                                 CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      !IsOneOf(set_by, {"user", "system"}) ||
+      !IsOneOf(selection_type, {"none", "caret", "range"})) {
+    return;
+  }
+  const bool has_positions = selection_type != "none";
+  if (has_positions && (anchor_node_id <= 0 || focus_node_id <= 0 ||
+                        anchor_offset < 0 || focus_offset < 0)) {
+    return;
+  }
+  const bool has_text_control = has_positions && text_control_node_id > 0;
+  if (has_text_control &&
+      (text_control_selection_start < 0 ||
+       text_control_selection_end < text_control_selection_start ||
+       !IsOneOf(text_control_selection_direction,
+                {"none", "forward", "backward"}))) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("setBy", std::move(set_by));
+  payload.Set("selectionType", selection_type);
+  payload.Set("anchorNodeId", has_positions ? base::Value(anchor_node_id)
+                                            : base::Value());
+  payload.Set("anchorOffset", has_positions ? base::Value(anchor_offset)
+                                            : base::Value());
+  payload.Set("focusNodeId", has_positions ? base::Value(focus_node_id)
+                                           : base::Value());
+  payload.Set("focusOffset", has_positions ? base::Value(focus_offset)
+                                           : base::Value());
+  payload.Set("directional", directional);
+  payload.Set("textControlNodeId", has_text_control
+                                       ? base::Value(text_control_node_id)
+                                       : base::Value());
+  payload.Set("textControlSelectionStart",
+              has_text_control ? base::Value(text_control_selection_start)
+                               : base::Value());
+  payload.Set("textControlSelectionEnd",
+              has_text_control ? base::Value(text_control_selection_end)
+                               : base::Value());
+  payload.Set("textControlSelectionDirection",
+              has_text_control
+                  ? base::Value(std::move(text_control_selection_direction))
+                  : base::Value());
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.interaction", "selection-changed",
+                    std::move(payload));
+}
+
+void RecordBlinkTextControlValueChanged(int document_node_id,
+                                        std::string document_token,
+                                        int node_id,
+                                        std::string control_type,
+                                        std::string source,
+                                        std::string value,
+                                        int value_length,
+                                        bool value_truncated,
+                                        int maximum_value_length,
+                                        int selection_start,
+                                        int selection_end,
+                                        std::string selection_direction,
+                                        CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || control_type.empty() ||
+      !IsOneOf(source, {"value-set", "user-edit"}) || value_length < 0 ||
+      maximum_value_length <= 0 || selection_start < 0 ||
+      selection_end < selection_start ||
+      !IsOneOf(selection_direction, {"none", "forward", "backward"})) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("nodeId", node_id);
+  payload.Set("controlType", std::move(control_type));
+  payload.Set("source", std::move(source));
+  SetTruncatedTextProperties(payload, "value", "valueLength", "valueTruncated",
+                             std::move(value), value_length, value_truncated);
+  payload.Set("maximumValueLength", maximum_value_length);
+  payload.Set("selectionStart", selection_start);
+  payload.Set("selectionEnd", selection_end);
+  payload.Set("selectionDirection", std::move(selection_direction));
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.interaction", "text-control-value-changed",
+                    std::move(payload));
+}
+
+void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
+                                             std::string document_token,
+                                             int node_id,
+                                             int referenced_node_id,
+                                             CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || referenced_node_id <= 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("nodeId", node_id);
+  payload.Set("referencedNodeId", referenced_node_id);
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.interaction", "active-descendant-reference-set",
+                    std::move(payload));
 }
 
 }  // namespace a11y_recorder

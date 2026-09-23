@@ -63,6 +63,11 @@ At policy-controlled checkpoints, record:
 
 Snapshots must carry document, frame, navigation, and checkpoint identifiers so later analysis does not combine incompatible states.
 
+Protocol 0.24 implements the change records for focus, selection, active
+descendant, and text-editing state on the `browser.interaction` channel. The
+record types and their limits are described under protocol version 0.24 below.
+Checkpoint-time snapshots of that state are not yet recorded.
+
 ### Cookies and network
 
 Cookie evidence includes:
@@ -516,7 +521,91 @@ each of those operations and requires that no record in the session contains
 the value the fixture cookies carried. The fixture shows that the logger emits
 records; it does not evaluate the page's cookie use.
 
-Live 0.23 connections require an exact protocol-version match.
+Protocol version 0.24 records focus, selection, text-control value, and
+element-reflected active descendant changes on the `browser.interaction`
+channel. Each record reports the state Blink holds once the change is
+committed. Node identities are Blink DOM node ids, the same identities the DOM
+checkpoint and mutation records carry, so a record can be joined to the DOM
+structure of the same document. Every record carries the document context the
+cookie records use, and reports the script location and JavaScript world of the
+script that made the change, in the `location` and `world` shapes the listener
+records use, with the world repeated as the context's `executionWorldId`. Both
+are null for a change no script made, such as a key press, a click, or typed
+text.
+
+Four record types are emitted:
+
+- `focus-changed`: one request to change a document's focused element, written
+  on every return from `Document::SetFocusedElement` after its early checks. It carries the node that
+  held focus before, the node focus was requested for, the node that holds
+  focus afterwards, and an outcome derived from those three: `focused` when the
+  requested node holds focus, `cleared` when no node was requested and none
+  holds focus, `not-focused` when a node was requested and none holds focus,
+  and `redirected` when a node other than the requested one holds focus. It also carries Blink's focus type
+  (`none`, `script`, `forward`, `backward`, `spatial-navigation`, `mouse`,
+  `access-key`, or `page`), the focus trigger (`script` or `user-gesture`),
+  `preventScroll`, `focusVisible` when the request stated it, and the node the
+  focused element's `aria-activedescendant` resolved to at that moment.
+- `selection-changed`: the selection a frame holds once
+  `FrameSelection::SetSelection` commits a change. It carries whether the user
+  or the system set it, the selection type (`none`, `caret`, or `range`), the
+  anchor and focus container nodes and offsets, and whether the selection is
+  directional. When the anchor is inside a text control it also carries the
+  control's node and the control's own selection start, end, and direction.
+- `text-control-value-changed`: a text control's value after a value set or a
+  user edit. Written from `HTMLInputElement::SetValue`,
+  `HTMLTextAreaElement::SetValue`, `TextFieldInputType::SubtreeHasChanged`, and
+  `HTMLTextAreaElement::SubtreeHasChanged`. It carries the control's node, its
+  form control type, the source (`value-set` or `user-edit`), the value, and the
+  control's selection start, end, and direction after the change.
+- `active-descendant-reference-set`: an element assigned to
+  `ariaActiveDescendantElement`, written from `Element::SetElementAttribute` for
+  that attribute. Element reflection leaves the referenced element out of the
+  attribute state that the DOM records report, so this record is the only
+  account of the reference. It carries the element's node and the referenced
+  node.
+
+The recorded facts are bounded as follows:
+
+- Text-control values are recorded verbatim, including the values of password
+  fields, under the policy that already applies to DOM attribute values and
+  character data. A value is bounded to 4096 UTF-16 code units. The record
+  reports the full length and whether the value was truncated.
+- Focus cleared while a document shuts down is not recorded.
+- A focus request for the element that already holds focus, for an element in
+  another document, or for an element being removed returns before the hook
+  and produces no record.
+- A selection that Blink adjusts because the DOM around it was mutated or
+  removed, without a call to `FrameSelection::SetSelection`, is not recorded.
+- A `selection-changed` record reports positions in the DOM tree. It does not
+  carry the selected text.
+- `aria-activedescendant` set as an ID-referencing attribute is reported by the
+  DOM attribute records rather than by this channel. A `focus-changed` record
+  reports what the reference resolved to only at the moment of the focus
+  change.
+- Element reflection for other element and element-array attributes, such as
+  `ariaControlsElements` and `ariaLabelledByElements`, is not recorded.
+- Text-control values are not included in DOM checkpoints, and these records do
+  not trigger a DOM checkpoint.
+- A focus change in a document whose DOM node identity is not yet assigned
+  produces no record.
+- Checkpoint-time snapshots of focus, selection, and text-editing state are not
+  recorded. The state at a given moment is reconstructed from the change
+  records.
+
+The validation run serves a third fixture page from the loopback HTTP listener
+the cookie fixture uses, opened in a background tab. The page's script focuses
+a button, and a Tab key press sent as DevTools input moves focus to a text
+field. Text typed through DevTools input changes the field, the page's script
+sets the field and a textarea by value, focuses the textarea, and selects part
+of it, and typed text replaces the selection. The script then assigns an
+active descendant to a listbox by element reflection, focuses the listbox, and
+blurs it. The verifier requires a record of each of those changes, requires the
+script location and main world on the changes made by script, and requires no
+script origin on the changes made by input. The fixture shows that the logger
+emits records; it does not evaluate the page's focus handling.
+
+Live 0.24 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
@@ -597,7 +686,8 @@ Successful connections are persisted on the `browser.lifecycle` channel:
    followed by scheduler-throttling evidence.
 5. Add document, DOM, style, layout, accessibility, and rendered-frame
    checkpoints. The bounded parser-complete DOM structure checkpoint is the
-   first implemented part of this stage.
+   first implemented part of this stage. Focus, selection, active descendant,
+   and text-editing change records are implemented in protocol 0.24.
 6. Add cookie operations and network metadata with prohibited values removed at
    source. Cookie operations are implemented in protocol 0.23. Network metadata
    remains outstanding.

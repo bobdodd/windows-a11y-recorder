@@ -134,6 +134,20 @@ internal static class BrowserProtocol
             (BrowserEvidenceChannels.Cookie,
                 BrowserEvidenceEventTypes.CookieAccess) =>
                 payload.Deserialize<BrowserCookieAccessPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.FocusChanged) =>
+                payload.Deserialize<BrowserFocusChangedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.SelectionChanged) =>
+                payload.Deserialize<BrowserSelectionChangedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.TextControlValueChanged) =>
+                payload.Deserialize<BrowserTextControlValueChangedPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.ActiveDescendantReferenceSet) =>
+                payload.Deserialize<BrowserActiveDescendantReferenceSetPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or
                 BrowserEvidenceChannels.Dispatch or
@@ -142,7 +156,8 @@ internal static class BrowserProtocol
                 BrowserEvidenceChannels.Navigation or
                 BrowserEvidenceChannels.Dom or
                 BrowserEvidenceChannels.Accessibility or
-                BrowserEvidenceChannels.Cookie,
+                BrowserEvidenceChannels.Cookie or
+                BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceEventTypes.Omission) =>
                 payload.Deserialize<BrowserOmissionPayload>(JsonOptions)
                     as object,

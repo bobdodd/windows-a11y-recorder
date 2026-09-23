@@ -224,6 +224,17 @@ JavaScript world. Worker cookie observers and `navigator.cookieEnabled` are not
 covered; the full list of limits is in
 [the instrumented Chromium architecture](docs/architecture/instrumented-chromium.md).
 
+Protocol 0.24 records interaction-state changes on the `browser.interaction`
+channel: each focus change with the previous, requested, and resulting focused
+nodes, the focus type and trigger, and the resolved active descendant; each
+selection a frame commits, with text-control selection offsets; text-control
+values after a value set or a user edit; and elements assigned as an active
+descendant through element reflection. Changes made by script report the
+script's source location and JavaScript world. Text-control values are recorded
+verbatim, bounded to 4096 UTF-16 code units. Checkpoint-time snapshots of this
+state are not recorded; the full list of limits is in
+[the instrumented Chromium architecture](docs/architecture/instrumented-chromium.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.

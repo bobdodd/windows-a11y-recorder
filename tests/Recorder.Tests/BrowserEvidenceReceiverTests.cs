@@ -179,6 +179,27 @@ public sealed class BrowserEvidenceReceiverTests
         Assert.Equal("chromium-monotonic", record.NativeTimestamp?.Domain);
         Assert.StartsWith("chromium:browser-1:1234", record.ClockMappingId);
 
+        await WriteFrameAsync(
+            client,
+            new
+            {
+                kind = "evidence",
+                protocolVersion = BrowserEvidenceProtocol.CurrentVersion,
+                browserTimestampTicks = "10300",
+                channel = BrowserEvidenceChannels.Interaction,
+                eventType = BrowserEvidenceEventTypes.FocusChanged,
+                payload = JsonDocument.Parse(
+                    BrowserInteractionPayloads.ScriptFocusChanged).RootElement,
+                qualityFlags = Array.Empty<string>()
+            });
+
+        var focus = await sink.WaitForRecordAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(BrowserEvidenceChannels.Interaction, focus.Channel);
+        Assert.Equal(BrowserEvidenceEventTypes.FocusChanged, focus.EventType);
+        Assert.Equal(44, focus.Payload.GetProperty("focusedNodeId").GetInt32());
+
         client.Close();
         var stopped = await receiver.StopAsync(
             new SessionBoundary(

@@ -23,7 +23,8 @@ internal static class EventPayloadValidator
         "browser.navigation",
         "browser.dom",
         "browser.accessibility",
-        "browser.cookie"
+        "browser.cookie",
+        "browser.interaction"
     ];
 
     public static void Validate(
@@ -199,6 +200,19 @@ internal static class EventPayloadValidator
             case ("browser.cookie", "cookie-access"):
                 ValidateBrowserCookieAccess(payload, issues, lineNumber);
                 break;
+            case ("browser.interaction", "focus-changed"):
+                ValidateBrowserFocusChanged(payload, issues, lineNumber);
+                break;
+            case ("browser.interaction", "selection-changed"):
+                ValidateBrowserSelectionChanged(payload, issues, lineNumber);
+                break;
+            case ("browser.interaction", "text-control-value-changed"):
+                ValidateBrowserTextControlValueChanged(payload, issues, lineNumber);
+                break;
+            case ("browser.interaction", "active-descendant-reference-set"):
+                ValidateBrowserActiveDescendantReferenceSet(
+                    payload, issues, lineNumber);
+                break;
             case ("window.foreground", "collector-omission"):
             case ("accessibility.uia.events", "collector-omission"):
             case ("graphics.desktop.frames", "collector-omission"):
@@ -215,6 +229,7 @@ internal static class EventPayloadValidator
             case ("browser.navigation", "collector-omission"):
             case ("browser.dom", "collector-omission"):
             case ("browser.cookie", "collector-omission"):
+            case ("browser.interaction", "collector-omission"):
                 ValidateBrowserOmission(payload, issues, lineNumber);
                 break;
             default:
@@ -774,6 +789,269 @@ internal static class EventPayloadValidator
 
     private static readonly string[] CookieStoreMethods =
         ["get", "getAll", "set", "delete"];
+
+    private static readonly string[] FocusTypes =
+    [
+        "none",
+        "script",
+        "forward",
+        "backward",
+        "spatial-navigation",
+        "mouse",
+        "access-key",
+        "page"
+    ];
+
+    private static readonly string[] SelectionDirections =
+        ["none", "forward", "backward"];
+
+    private static void ValidateInteractionCommon(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        ValidateBrowserLocationProperty(payload, issues, line);
+        ValidateBrowserExecutionWorldProperty(payload, issues, line);
+    }
+
+    private static void ValidateBrowserFocusChanged(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableInteger("previousNodeId", nonnegative: true),
+                NullableInteger("requestedNodeId", nonnegative: true),
+                NullableInteger("focusedNodeId", nonnegative: true),
+                RequiredEnum(
+                    "outcome", "focused", "cleared", "redirected", "not-focused"),
+                NullableInteger("activeDescendantNodeId", nonnegative: true),
+                RequiredEnum("focusType", FocusTypes),
+                RequiredEnum("focusTrigger", "script", "user-gesture"),
+                RequiredBoolean("preventScroll"),
+                NullableBoolean("focusVisible"),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues,
+            line);
+        ValidateInteractionCommon(payload, issues, line);
+
+        var requested = ReadNullableInteger(payload, "requestedNodeId");
+        var focused = ReadNullableInteger(payload, "focusedNodeId");
+        var expected = requested is null
+            ? focused is null ? "cleared" : "redirected"
+            : focused is null
+                ? "not-focused"
+                : focused == requested ? "focused" : "redirected";
+        var outcome = ReadString(payload, "outcome");
+        if (outcome is not null && outcome != expected)
+        {
+            AddError(
+                issues,
+                "browser-focus-outcome-inconsistent",
+                "events.ndjson#/payload/outcome",
+                $"Outcome '{outcome}' does not follow from the requested and " +
+                    $"focused nodes, which give '{expected}'.",
+                line);
+        }
+        if (focused is null &&
+            ReadNullableInteger(payload, "activeDescendantNodeId") is not null)
+        {
+            AddError(
+                issues,
+                "browser-focus-active-descendant-without-focus",
+                "events.ndjson#/payload/activeDescendantNodeId",
+                "An active descendant is reported while no element is focused.",
+                line);
+        }
+    }
+
+    private static void ValidateBrowserSelectionChanged(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("setBy", "user", "system"),
+                RequiredEnum("selectionType", "none", "caret", "range"),
+                NullableInteger("anchorNodeId", nonnegative: true),
+                NullableInteger("anchorOffset", nonnegative: true),
+                NullableInteger("focusNodeId", nonnegative: true),
+                NullableInteger("focusOffset", nonnegative: true),
+                RequiredBoolean("directional"),
+                NullableInteger("textControlNodeId", nonnegative: true),
+                NullableInteger("textControlSelectionStart", nonnegative: true),
+                NullableInteger("textControlSelectionEnd", nonnegative: true),
+                NullableEnum("textControlSelectionDirection", SelectionDirections),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues,
+            line);
+        ValidateInteractionCommon(payload, issues, line);
+
+        var selectionType = ReadString(payload, "selectionType");
+        if (selectionType is not null)
+        {
+            var hasPositions = selectionType != "none";
+            ValidateAllOrNone(
+                payload,
+                ["anchorNodeId", "anchorOffset", "focusNodeId", "focusOffset"],
+                hasPositions,
+                "browser-selection-positions-inconsistent",
+                $"Selection positions must be present exactly when the " +
+                    $"selection type is not 'none'; it is '{selectionType}'.",
+                issues,
+                line);
+        }
+        string[] textControl =
+        [
+            "textControlNodeId",
+            "textControlSelectionStart",
+            "textControlSelectionEnd",
+            "textControlSelectionDirection"
+        ];
+        var textControlPresent = textControl.Count(property =>
+            payload.TryGetProperty(property, out var value) &&
+            value.ValueKind != JsonValueKind.Null);
+        if (textControlPresent is not (0 or 4))
+        {
+            AddError(
+                issues,
+                "browser-selection-text-control-inconsistent",
+                "events.ndjson#/payload/textControlNodeId",
+                "Text-control selection fields must be all present or all null.",
+                line);
+        }
+        ValidateOrderedRange(
+            payload,
+            "textControlSelectionStart",
+            "textControlSelectionEnd",
+            issues,
+            line);
+    }
+
+    private static void ValidateBrowserTextControlValueChanged(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("nodeId", positive: true),
+                RequiredString("controlType"),
+                RequiredEnum("source", "value-set", "user-edit"),
+                RequiredText("value"),
+                RequiredInteger("valueLength", nonnegative: true),
+                RequiredBoolean("valueTruncated"),
+                RequiredInteger("maximumValueLength", positive: true),
+                RequiredInteger("selectionStart", nonnegative: true),
+                RequiredInteger("selectionEnd", nonnegative: true),
+                RequiredEnum("selectionDirection", SelectionDirections),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues,
+            line);
+        ValidateInteractionCommon(payload, issues, line);
+        ValidateTruncatedText(
+            payload, "value", "valueLength", "valueTruncated", issues, line);
+        ValidateOrderedRange(
+            payload, "selectionStart", "selectionEnd", issues, line);
+        var value = ReadString(payload, "value");
+        var maximum = ReadNullableInteger(payload, "maximumValueLength");
+        if (value is not null && maximum is not null && value.Length > maximum)
+        {
+            AddError(
+                issues,
+                "browser-text-control-value-over-maximum",
+                "events.ndjson#/payload/value",
+                $"The recorded value holds {value.Length} units, more than " +
+                    $"the stated maximum of {maximum}.",
+                line);
+        }
+    }
+
+    private static void ValidateBrowserActiveDescendantReferenceSet(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("nodeId", positive: true),
+                RequiredInteger("referencedNodeId", positive: true),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues,
+            line);
+        ValidateInteractionCommon(payload, issues, line);
+    }
+
+    private static long? ReadNullableInteger(JsonElement payload, string property) =>
+        payload.TryGetProperty(property, out var value) &&
+        value.ValueKind == JsonValueKind.Number &&
+        value.TryGetInt64(out var number)
+            ? number
+            : null;
+
+    private static void ValidateAllOrNone(
+        JsonElement payload,
+        IReadOnlyList<string> properties,
+        bool present,
+        string code,
+        string message,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        var consistent = properties.All(property =>
+            (payload.TryGetProperty(property, out var value) &&
+                value.ValueKind != JsonValueKind.Null) == present);
+        if (!consistent)
+        {
+            AddError(
+                issues,
+                code,
+                $"events.ndjson#/payload/{properties[0]}",
+                message,
+                line);
+        }
+    }
+
+    private static void ValidateOrderedRange(
+        JsonElement payload,
+        string startProperty,
+        string endProperty,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        var start = ReadNullableInteger(payload, startProperty);
+        var end = ReadNullableInteger(payload, endProperty);
+        if (start is not null && end is not null && end < start)
+        {
+            AddError(
+                issues,
+                "browser-selection-range-reversed",
+                $"events.ndjson#/payload/{endProperty}",
+                $"Property '{endProperty}' ({end}) precedes " +
+                    $"'{startProperty}' ({start}).",
+                line);
+        }
+    }
 
     private static void ValidateBrowserDocumentCookieRead(
         JsonElement payload,
