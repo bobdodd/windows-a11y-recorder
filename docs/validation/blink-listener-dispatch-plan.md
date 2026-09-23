@@ -1368,4 +1368,63 @@ made a change.
 
 These checks show that the logger emitted a record for each change the page
 made. They do not evaluate the page's focus handling, labelling, or keyboard
-support. No measured result has been recorded yet.
+support.
+
+### Measured result
+
+Reference platform, September 23, 2026, at repository revision `8469bbe`.
+Protocol 0.24. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, rebuilt with the
+interaction hooks, with a 25-second capture that validated 26,232 events and
+135 artifacts and reported no network-service crashes. The recorder accepted
+26,232 records and dropped none. The complete script exited with code 0.
+
+The validated session is:
+
+`C:\Users\Public\Downloads\A11yRecorderInteractionLogging\sessions\20260923-205955-320e37dd1deb4b26869ffd61177169e9`
+
+| Value | Result |
+| --- | --- |
+| `InteractionRecords` | 16 |
+| `InteractionDocumentId` | `dom-document-28` |
+| `ScriptFocusNodeId` | 46 |
+| `TabFocusNodeId` | 49 |
+| `TypedFieldValue` | `typed` |
+| `ScriptTextareaNodeId` | 51 |
+| `TextareaSelection` | 1-4 |
+| `TypedTextareaValue` | `nXs set by script` |
+| `ActiveDescendantNodeId` | 58 |
+| `ListboxFocusOutcome` | `focused` |
+| `BlurOutcome` | `cleared` |
+| `CookieRecords` | 27 |
+| `RecordsContainingCookieValue` | 0 |
+| `OMITTED_EVIDENCE_RECORDS` | 0 |
+| `SINK_REFUSED_EVENTS` | 0 |
+| `OTHER_OMISSION_RECORDS` | 0 |
+
+What this establishes: the interaction hooks applied to the reference Chromium
+tree, built, and emitted records that the recorder accepted under the closed
+0.24 payload shapes. Each change the fixture made produced its record: the
+script focus, the Tab key focus move, the typed field value, the script values,
+the textarea selection, the typed replacement of that selection, the
+element-reflected active descendant, the listbox focus that reported it, and
+the blur. Every earlier measurement in this document held, including the cookie
+records with no cookie value in the event file, the page-lifecycle states, and
+200 uncovered transitions across three documents with none after a document's
+last pass.
+
+The first attempt, at revision `61e0372`, stopped at the harness step that
+checks the Tab key press, before verification. That session holds the script
+focus record for the fixture document but no `keydown` dispatch there, so the
+key never reached the page. The fixture tab had been opened in the background,
+and revision `8469bbe` runs it in a foreground tab as described above. The same
+session also holds interaction records from Chromium's own WebUI pages, such as
+the omnibox popup, because the hooks log every renderer document.
+
+What this does not establish: the fixture exercises only the main world, a
+single top-level document, light DOM controls, and one Tab press, so records
+for focus moves across frames or shadow roots, focus by pointer, IME
+composition, `contenteditable` editing, and selection changes outside a text
+control have not been observed in a real run. The explanation that background
+input was dropped because the tab never painted is inferred from the missing
+dispatch record and the passing foreground run, not measured directly.
