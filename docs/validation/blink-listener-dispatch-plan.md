@@ -1113,6 +1113,34 @@ The verifier reports `EvidenceOmissionRecords`, `OmittedEvidenceRecords`, and
 account of what happened and whether such a run can serve as a reference is a
 decision for the run.
 
+### Measured result
+
+Reference platform, September 23, 2026, at repository revision `17d442a`.
+Protocol 0.22. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, with a 15-second capture
+that validated 37,656 events and 91 artifacts and reported no network-service
+crashes.
+
+| Value | Result |
+| --- | --- |
+| `OMITTED_EVIDENCE_RECORDS` | 0 |
+| `SINK_REFUSED_EVENTS` | 0 |
+| `OTHER_OMISSION_RECORDS` | 0 |
+| `EvidenceOmissionRecords` | 0 |
+| `OmittedEvidenceRecords` | 0 |
+| `EvidenceOmissionReasons` | none |
+
+The recorder reported 37,656 records accepted and none dropped, which agrees
+with the manifest count the run reads, and every existing measurement in this
+document held, including 448 recorded transitions with 248 covered and 200
+uncovered across three documents.
+
+What this establishes: the protocol bump is live and lossless. The bridge and
+the recorder agreed on 0.22 at connect, the new browser omission contract did
+not reject any record on ingest, and no renderer lost the rest of its evidence,
+which is the failure mode a new record type risks. The run reports evidence loss
+as three explicit zeros rather than by the absence of a symptom.
+
 What this does not establish: no run has lost a record, so neither reporting
 path has been exercised by a real loss. The run-script accounting was exercised
 in isolation against synthetic archives covering a write failure, a sink
