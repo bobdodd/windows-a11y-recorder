@@ -1003,20 +1003,29 @@ function Invoke-InteractionFixtureCall {
     Get-CdpProperty $run.result "value"
 }
 
-# Opens the interaction logging fixture in a background tab, moves focus by
+# Opens the interaction logging fixture in a foreground tab, moves focus by
 # script and by the Tab key, types into a text field and a textarea, sets values
 # and a selection by script, sets an active descendant by element reflection,
-# and closes the tab. The tab is opened in the background so the listener
-# fixture page stays in the foreground and its page-lifecycle evidence is
-# unaffected. This step only makes the page change interaction state so the
-# logger has changes to record; the verifier is what checks the records.
+# and closes the tab. DevTools key and text input reaches a page only once its
+# widget has painted, and a tab opened in the background never paints, so the
+# tab must be in the foreground. The caller runs this step after the listener
+# fixture page has been hidden behind the background target, so bringing this
+# tab forward hides the background target rather than the fixture page. The
+# background target is activated again before this tab closes, so closing it
+# cannot make the fixture page visible. This step only makes the page change
+# interaction state so the logger has changes to record; the verifier is what
+# checks the records.
 function Invoke-InteractionFixture {
     param(
         [Parameter(Mandatory = $true)]
         [string] $DevToolsBase,
 
         [Parameter(Mandatory = $true)]
-        [string] $FixtureUri
+        [string] $FixtureUri,
+
+        # The tab to activate before the fixture tab closes.
+        [Parameter(Mandatory = $true)]
+        [string] $ReturnTargetId
     )
 
     $version = ConvertFrom-Json (
@@ -1037,7 +1046,7 @@ function Invoke-InteractionFixture {
         $browserSession = New-CdpSession $browserSocket
         $created = Invoke-CdpCommand $browserSession "Target.createTarget" @{
             url = $FixtureUri
-            background = $true
+            background = $false
         }
         $targetId = [string](Get-CdpProperty $created "targetId")
         if ([string]::IsNullOrWhiteSpace($targetId)) {
@@ -1074,6 +1083,46 @@ function Invoke-InteractionFixture {
         }
 
         $pageSession = New-CdpSession $target.webSocketDebuggerUrl
+        $activated = Invoke-WebRequest `
+            -Method Put `
+            -Uri "$DevToolsBase/json/activate/$targetId" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+        if ($activated.StatusCode -ne 200) {
+            throw (
+                "Activating the interaction logging fixture reported status " +
+                "$($activated.StatusCode)."
+            )
+        }
+        $null = Invoke-CdpCommand $pageSession "Page.bringToFront" $null
+        $visibility = ""
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $visibility = [string](Invoke-InteractionFixtureCall $pageSession `
+                "String(document.visibilityState)")
+            if ($visibility -eq "visible") {
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if ($visibility -ne "visible") {
+            throw (
+                "The interaction logging fixture reported visibility " +
+                "'$visibility' after being activated, so DevTools input " +
+                "cannot reach it. A window that is minimized, occluded, or " +
+                "on an inactive desktop produces this."
+            )
+        }
+        # A visible page paints on its next frame. Waiting for two animation
+        # frames ensures the widget has painted before input is sent.
+        $null = Invoke-CdpCommand $pageSession "Runtime.evaluate" @{
+            expression = (
+                "new Promise(r => requestAnimationFrame(() => " +
+                "requestAnimationFrame(() => r(true))))"
+            )
+            awaitPromise = $true
+            returnByValue = $true
+        }
         $steps = [ordered]@{}
 
         $steps.ScriptFocus = Invoke-InteractionFixtureCall $pageSession `
@@ -1138,6 +1187,19 @@ function Invoke-InteractionFixture {
     }
     finally {
         Close-CdpSession $pageSession
+        try {
+            $null = Invoke-WebRequest `
+                -Method Put `
+                -Uri "$DevToolsBase/json/activate/$ReturnTargetId" `
+                -UseBasicParsing `
+                -TimeoutSec 5
+        }
+        catch {
+            Write-Host (
+                "Activating the background target again failed: " +
+                "$($_.Exception.Message)"
+            )
+        }
         if ($browserSession -and $targetId) {
             try {
                 $null = Invoke-CdpCommand $browserSession "Target.closeTarget" @{
@@ -1555,28 +1617,6 @@ try {
         throw
     }
 
-    # The interaction logging fixture makes a third page change focus,
-    # selection, text-control values, and an element-reflected active
-    # descendant so the capture holds interaction-state changes for the logger
-    # to record.
-    try {
-        $interactionRun = Invoke-InteractionFixture `
-            $devToolsBase `
-            $interactionFixtureUri
-        Write-Host (
-            "Ran the interaction logging fixture in background target " +
-            "$($interactionRun.TargetId). The page reported: " +
-            (@(
-                $interactionRun.Steps.GetEnumerator() |
-                    ForEach-Object { "$($_.Key)=$($_.Value)" }
-            ) -join "; ")
-        )
-    }
-    catch {
-        Stop-Job $captureJob -ErrorAction SilentlyContinue
-        throw
-    }
-
     # The page-lifecycle timers are scheduled here, immediately before the page
     # is hidden, so the schedule is recorded while the page reports visible and
     # the callbacks enter while it is hidden. Scheduling them at parse time made
@@ -1611,6 +1651,30 @@ try {
         "Activated background target $backgroundTargetId so the fixture page " +
         "becomes hidden."
     )
+
+    # The interaction logging fixture makes a third page change focus,
+    # selection, text-control values, and an element-reflected active
+    # descendant so the capture holds interaction-state changes for the logger
+    # to record. It runs once the fixture page is hidden, because its tab must
+    # be in the foreground for DevTools input to reach it.
+    try {
+        $interactionRun = Invoke-InteractionFixture `
+            $devToolsBase `
+            $interactionFixtureUri `
+            $backgroundTargetId
+        Write-Host (
+            "Ran the interaction logging fixture in foreground target " +
+            "$($interactionRun.TargetId). The page reported: " +
+            (@(
+                $interactionRun.Steps.GetEnumerator() |
+                    ForEach-Object { "$($_.Key)=$($_.Value)" }
+            ) -join "; ")
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
 
     Wait-Job $captureJob | Out-Null
     $captureErrors = @()
