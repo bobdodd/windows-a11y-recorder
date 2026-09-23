@@ -3926,6 +3926,35 @@ class LayoutIntegrationTests(unittest.TestCase):
             ),
         )
 
+    def test_upgrades_a_helper_that_indexes_the_property_array(self):
+        legacy_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        for legacy, current in INTEGRATE.BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS:
+            legacy_helper = legacy_helper.replace(current, legacy, 1)
+        self.assertRegex(legacy_helper, r"kRecorderLayoutStyleProperties\[\w")
+        source = cookie_source(
+            self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "local_frame_view.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_local_frame_view(path)
+            current = path.read_text(encoding="utf-8")
+            path.write_text(
+                current.replace(
+                    INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER, legacy_helper, 1
+                ),
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_local_frame_view(path)
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_the_layout_helper_never_indexes_a_raw_array(self):
+        # Blink compiles with unsafe buffer usage as an error.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertNotRegex(helper, r"kRecorderLayoutStyleProperties\[\w")
+
     def test_the_layout_hook_fails_when_its_anchor_is_absent(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "local_frame_view.cc"
