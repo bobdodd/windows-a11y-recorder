@@ -235,6 +235,17 @@ verbatim, bounded to 4096 UTF-16 code units. Checkpoint-time snapshots of this
 state are not recorded; the full list of limits is in
 [the instrumented Chromium architecture](docs/architecture/instrumented-chromium.md).
 
+Protocol 0.25 records layout geometry and computed styles on the
+`browser.layout` channel. After every rendering update in which Blink resolved
+element style or performed layout, a checkpoint records the viewport size,
+scroll offset, device pixel ratio, and zoom, and, for each element and laid-out
+text node up to 100000 nodes, its viewport-relative bounding rectangle and, for
+elements, the resolved values of a defined list of 75 computed-style
+properties. The hook reads only what Blink has already computed and never
+forces style or layout. Shadow-root content, pseudo-elements, and per-line
+geometry are not recorded; the property list and full limits are in
+[the layout and computed-style checkpoint evidence model](docs/architecture/layout-and-style-checkpoint-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.

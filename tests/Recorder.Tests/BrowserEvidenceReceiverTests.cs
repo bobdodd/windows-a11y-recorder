@@ -200,6 +200,29 @@ public sealed class BrowserEvidenceReceiverTests
         Assert.Equal(BrowserEvidenceEventTypes.FocusChanged, focus.EventType);
         Assert.Equal(44, focus.Payload.GetProperty("focusedNodeId").GetInt32());
 
+        await WriteFrameAsync(
+            client,
+            new
+            {
+                kind = "evidence",
+                protocolVersion = BrowserEvidenceProtocol.CurrentVersion,
+                browserTimestampTicks = "10400",
+                channel = BrowserEvidenceChannels.Layout,
+                eventType = BrowserEvidenceEventTypes.LayoutCheckpointNode,
+                payload = JsonDocument.Parse(
+                    BrowserLayoutPayloads.ElementNode).RootElement,
+                qualityFlags = Array.Empty<string>()
+            });
+
+        var layout = await sink.WaitForRecordAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(BrowserEvidenceChannels.Layout, layout.Channel);
+        Assert.Equal(BrowserEvidenceEventTypes.LayoutCheckpointNode, layout.EventType);
+        Assert.Equal(
+            "120px",
+            layout.Payload.GetProperty("computedStyle").GetProperty("width").GetString());
+
         client.Close();
         var stopped = await receiver.StopAsync(
             new SessionBoundary(

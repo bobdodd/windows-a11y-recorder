@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.24";
+    public const string CurrentVersion = "0.25";
 }
 
 public static class BrowserEvidenceChannels
@@ -17,6 +17,7 @@ public static class BrowserEvidenceChannels
     public const string Accessibility = "browser.accessibility";
     public const string Cookie = "browser.cookie";
     public const string Interaction = "browser.interaction";
+    public const string Layout = "browser.layout";
 }
 
 public static class BrowserEvidenceEventTypes
@@ -59,6 +60,9 @@ public static class BrowserEvidenceEventTypes
     public const string TextControlValueChanged = "text-control-value-changed";
     public const string ActiveDescendantReferenceSet =
         "active-descendant-reference-set";
+    public const string LayoutCheckpointStarted = "layout-checkpoint-started";
+    public const string LayoutCheckpointNode = "layout-checkpoint-node";
+    public const string LayoutCheckpointCompleted = "layout-checkpoint-completed";
     public const string Omission = "collector-omission";
 }
 
@@ -541,3 +545,58 @@ public sealed record BrowserActiveDescendantReferenceSetPayload(
     int ReferencedNodeId,
     BrowserScriptLocation? Location,
     BrowserExecutionWorld? World);
+
+// Layout checkpoint records report the geometry and a defined list of computed
+// styles Blink already held for a document once a rendering update reached the
+// paint-clean state. Viewport, scroll, and rectangle values are CSS pixels.
+// Node identities are Blink DOM node ids, the same identities DOM checkpoint
+// records carry.
+
+public sealed record BrowserLayoutSize(double Width, double Height);
+
+public sealed record BrowserLayoutPoint(double X, double Y);
+
+public sealed record BrowserLayoutRect(double X, double Y, double Width, double Height);
+
+// Starts one layout checkpoint. StyleResolutionCount and LayoutCount are
+// Blink's cumulative counters for the document and its frame view, and
+// PreviousCheckpointId names the document's previous layout checkpoint, which
+// is null for the first. StyleProperties lists the computed-style properties
+// every element record reports, in order.
+public sealed record BrowserLayoutCheckpointStartedPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    string Reason,
+    string? PreviousCheckpointId,
+    int StyleResolutionCount,
+    int LayoutCount,
+    BrowserLayoutSize Viewport,
+    BrowserLayoutPoint ScrollOffset,
+    double DevicePixelRatio,
+    double LayoutZoomFactor,
+    int MaximumNodes,
+    IReadOnlyList<string> StyleProperties);
+
+// Records one element or laid-out text node. BoundingClientRect is null when
+// the node has no layout object. ComputedStyle maps each listed property to its
+// resolved value, or to null when Blink produced none, and is null for a text
+// node or an element without a current computed style.
+public sealed record BrowserLayoutCheckpointNodePayload(
+    BrowserContext Context,
+    string CheckpointId,
+    int NodeIndex,
+    long NodeId,
+    string NodeType,
+    string NodeName,
+    bool LayoutObjectPresent,
+    bool DisplayLocked,
+    BrowserLayoutRect? BoundingClientRect,
+    IReadOnlyDictionary<string, string?>? ComputedStyle);
+
+public sealed record BrowserLayoutCheckpointCompletedPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    string Reason,
+    int NodeCount,
+    bool Truncated,
+    int MaximumNodes);

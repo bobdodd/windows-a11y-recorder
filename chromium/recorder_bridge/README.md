@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.24` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.25` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -292,3 +292,15 @@ outcome from the previous, requested, and resulting node identities, checks
 every enumerated value, and drops a call it cannot represent. Script origin is
 read with the same helper the cookie records use. The record types and their
 limits are described in `docs/architecture/instrumented-chromium.md`.
+
+Protocol 0.25 records layout geometry and computed styles on the
+`browser.layout` channel. The Blink hook in `local_frame_view.cc` runs after
+the lifecycle observers are told that a paint-clean update finished, and calls
+`BeginBlinkLayoutCheckpoint`, `RecordBlinkLayoutCheckpointNode`, and
+`CompleteBlinkLayoutCheckpoint` for each local frame view that is not
+throttled. The bridge keeps the last style-resolution and layout counters it
+saw for each document and returns no checkpoint when neither changed, so a
+checkpoint is only recorded after style or layout work. It rejects
+non-finite geometry, negative sizes, and a text node reported with a style.
+The record types and their limits are described in
+`docs/architecture/layout-and-style-checkpoint-evidence-model.md`.

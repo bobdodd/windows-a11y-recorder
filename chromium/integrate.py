@@ -5160,6 +5160,375 @@ def patch_blink_element_active_descendant(path: Path) -> None:
     )
 
 
+# The computed-style properties a layout checkpoint records, in the order the
+# checkpoint lists them. The list and its rationale are documented in
+# docs/architecture/layout-and-style-checkpoint-evidence-model.md, and the
+# verifier compares the recorded list against the same names.
+LAYOUT_STYLE_PROPERTIES = (
+    "display",
+    "visibility",
+    "opacity",
+    "position",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "z-index",
+    "float",
+    "box-sizing",
+    "width",
+    "height",
+    "min-width",
+    "min-height",
+    "max-width",
+    "max-height",
+    "overflow-x",
+    "overflow-y",
+    "clip",
+    "clip-path",
+    "text-overflow",
+    "content-visibility",
+    "transform",
+    "filter",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "border-top-style",
+    "border-right-style",
+    "border-bottom-style",
+    "border-left-style",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+    "outline-style",
+    "outline-width",
+    "outline-color",
+    "outline-offset",
+    "box-shadow",
+    "text-shadow",
+    "color",
+    "background-color",
+    "background-image",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "line-height",
+    "letter-spacing",
+    "word-spacing",
+    "text-transform",
+    "text-decoration-line",
+    "text-align",
+    "text-indent",
+    "white-space-collapse",
+    "text-wrap-mode",
+    "direction",
+    "writing-mode",
+    "cursor",
+    "pointer-events",
+    "animation-name",
+    "animation-duration",
+    "transition-property",
+    "transition-duration",
+)
+
+BLINK_LAYOUT_CHECKPOINT_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    "#include <string>",
+    "#include <vector>",
+    '#include "base/no_destructor.h"',
+    '#include "third_party/blink/renderer/core/css/css_value.h"',
+    '#include "third_party/blink/renderer/core/css/properties/css_property.h"',
+    '#include "third_party/blink/renderer/core/css/style_engine.h"',
+    '#include "third_party/blink/renderer/core/display_lock/'
+    'display_lock_utilities.h"',
+    BLINK_DOCUMENT_INCLUDE,
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/dom/node_traversal.h"',
+    '#include "third_party/blink/renderer/core/layout/layout_object.h"',
+    '#include "ui/gfx/geometry/quad_f.h"',
+    '#include "ui/gfx/geometry/rect_f.h"',
+)
+BLINK_LAYOUT_CHECKPOINT_HELPER_MARKER = "RecorderRecordLayoutCheckpoint("
+BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR = """\
+bool LocalFrameView::UpdateLifecyclePhases(
+    DocumentLifecycle::LifecycleState target_state,
+"""
+BLINK_LAYOUT_CHECKPOINT_HELPER = """\
+namespace {
+
+// The computed-style properties recorded for each element, in recorded order.
+constexpr CSSPropertyID kRecorderLayoutStyleProperties[] = {
+    CSSPropertyID::kDisplay,
+    CSSPropertyID::kVisibility,
+    CSSPropertyID::kOpacity,
+    CSSPropertyID::kPosition,
+    CSSPropertyID::kTop,
+    CSSPropertyID::kRight,
+    CSSPropertyID::kBottom,
+    CSSPropertyID::kLeft,
+    CSSPropertyID::kZIndex,
+    CSSPropertyID::kFloat,
+    CSSPropertyID::kBoxSizing,
+    CSSPropertyID::kWidth,
+    CSSPropertyID::kHeight,
+    CSSPropertyID::kMinWidth,
+    CSSPropertyID::kMinHeight,
+    CSSPropertyID::kMaxWidth,
+    CSSPropertyID::kMaxHeight,
+    CSSPropertyID::kOverflowX,
+    CSSPropertyID::kOverflowY,
+    CSSPropertyID::kClip,
+    CSSPropertyID::kClipPath,
+    CSSPropertyID::kTextOverflow,
+    CSSPropertyID::kContentVisibility,
+    CSSPropertyID::kTransform,
+    CSSPropertyID::kFilter,
+    CSSPropertyID::kMarginTop,
+    CSSPropertyID::kMarginRight,
+    CSSPropertyID::kMarginBottom,
+    CSSPropertyID::kMarginLeft,
+    CSSPropertyID::kPaddingTop,
+    CSSPropertyID::kPaddingRight,
+    CSSPropertyID::kPaddingBottom,
+    CSSPropertyID::kPaddingLeft,
+    CSSPropertyID::kBorderTopWidth,
+    CSSPropertyID::kBorderRightWidth,
+    CSSPropertyID::kBorderBottomWidth,
+    CSSPropertyID::kBorderLeftWidth,
+    CSSPropertyID::kBorderTopStyle,
+    CSSPropertyID::kBorderRightStyle,
+    CSSPropertyID::kBorderBottomStyle,
+    CSSPropertyID::kBorderLeftStyle,
+    CSSPropertyID::kBorderTopColor,
+    CSSPropertyID::kBorderRightColor,
+    CSSPropertyID::kBorderBottomColor,
+    CSSPropertyID::kBorderLeftColor,
+    CSSPropertyID::kOutlineStyle,
+    CSSPropertyID::kOutlineWidth,
+    CSSPropertyID::kOutlineColor,
+    CSSPropertyID::kOutlineOffset,
+    CSSPropertyID::kBoxShadow,
+    CSSPropertyID::kTextShadow,
+    CSSPropertyID::kColor,
+    CSSPropertyID::kBackgroundColor,
+    CSSPropertyID::kBackgroundImage,
+    CSSPropertyID::kFontFamily,
+    CSSPropertyID::kFontSize,
+    CSSPropertyID::kFontWeight,
+    CSSPropertyID::kFontStyle,
+    CSSPropertyID::kLineHeight,
+    CSSPropertyID::kLetterSpacing,
+    CSSPropertyID::kWordSpacing,
+    CSSPropertyID::kTextTransform,
+    CSSPropertyID::kTextDecorationLine,
+    CSSPropertyID::kTextAlign,
+    CSSPropertyID::kTextIndent,
+    CSSPropertyID::kWhiteSpaceCollapse,
+    CSSPropertyID::kTextWrapMode,
+    CSSPropertyID::kDirection,
+    CSSPropertyID::kWritingMode,
+    CSSPropertyID::kCursor,
+    CSSPropertyID::kPointerEvents,
+    CSSPropertyID::kAnimationName,
+    CSSPropertyID::kAnimationDuration,
+    CSSPropertyID::kTransitionProperty,
+    CSSPropertyID::kTransitionDuration,
+};
+
+const std::vector<std::string>& RecorderLayoutStylePropertyNames() {
+  static const base::NoDestructor<std::vector<std::string>> names([] {
+    std::vector<std::string> result;
+    for (CSSPropertyID id : kRecorderLayoutStyleProperties) {
+      result.push_back(CSSProperty::Get(id).GetPropertyNameString().Utf8());
+    }
+    return result;
+  }());
+  return *names;
+}
+
+// Records the layout geometry and computed styles of one frame view's document
+// after a rendering update reached the paint-clean state. Everything is read
+// from the style and layout Blink already produced; nothing here requests a
+// style recalculation or a layout.
+void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
+  constexpr int kRecorderMaximumLayoutCheckpointNodes = 100000;
+  LocalFrame& recorder_frame = frame_view.GetFrame();
+  Document* recorder_document = recorder_frame.GetDocument();
+  if (!recorder_document || !recorder_document->IsActive() ||
+      !frame_view.GetLayoutView() ||
+      recorder_document->Lifecycle().GetState() !=
+          DocumentLifecycle::kPaintClean) {
+    return;
+  }
+  const float recorder_zoom = recorder_frame.LayoutZoomFactor();
+  if (recorder_zoom <= 0) {
+    return;
+  }
+  a11y_recorder::LayoutCheckpointFrame recorder_geometry;
+  const gfx::SizeF recorder_viewport =
+      frame_view.ViewportSizeForMediaQueries();
+  recorder_geometry.viewport_width = recorder_viewport.width();
+  recorder_geometry.viewport_height = recorder_viewport.height();
+  if (PaintLayerScrollableArea* recorder_scroller =
+          frame_view.LayoutViewport()) {
+    const ScrollOffset recorder_offset = recorder_scroller->GetScrollOffset();
+    recorder_geometry.scroll_x = recorder_offset.x() / recorder_zoom;
+    recorder_geometry.scroll_y = recorder_offset.y() / recorder_zoom;
+  }
+  recorder_geometry.device_pixel_ratio = recorder_frame.DevicePixelRatio();
+  recorder_geometry.layout_zoom_factor = recorder_zoom;
+  const int recorder_document_node_id = recorder_document->GetDomNodeId();
+  const std::string recorder_document_token =
+      recorder_document->Token().ToString();
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkLayoutCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_document->GetStyleEngine().StyleForElementCount(),
+          frame_view.LayoutCountForTesting(), recorder_geometry,
+          RecorderLayoutStylePropertyNames(),
+          kRecorderMaximumLayoutCheckpointNodes);
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+  const std::vector<std::string>& recorder_property_names =
+      RecorderLayoutStylePropertyNames();
+  int recorder_node_count = 0;
+  bool recorder_truncated = false;
+  for (Node& recorder_node :
+       NodeTraversal::InclusiveDescendantsOf(*recorder_document)) {
+    Element* recorder_element = DynamicTo<Element>(recorder_node);
+    const bool recorder_is_text = recorder_node.IsTextNode();
+    if (!recorder_element && !recorder_is_text) {
+      continue;
+    }
+    LayoutObject* recorder_layout_object = recorder_node.GetLayoutObject();
+    if (recorder_is_text && !recorder_layout_object) {
+      continue;
+    }
+    if (recorder_node_count >= kRecorderMaximumLayoutCheckpointNodes) {
+      recorder_truncated = true;
+      break;
+    }
+    a11y_recorder::LayoutCheckpointNode recorder_record;
+    recorder_record.node_index = recorder_node_count;
+    recorder_record.node_id = recorder_node.GetDomNodeId();
+    recorder_record.node_type = static_cast<int>(recorder_node.getNodeType());
+    recorder_record.node_name = recorder_node.nodeName().Utf8();
+    recorder_record.layout_object_present = recorder_layout_object != nullptr;
+    recorder_record.display_locked =
+        DisplayLockUtilities::LockedAncestorPreventingLayout(recorder_node) !=
+        nullptr;
+    if (recorder_layout_object) {
+      gfx::RectF recorder_rect;
+      if (recorder_element) {
+        recorder_rect =
+            recorder_element->GetBoundingClientRectNoLifecycleUpdate();
+      } else {
+        Vector<gfx::QuadF> recorder_quads;
+        recorder_layout_object->AbsoluteQuads(recorder_quads);
+        for (const gfx::QuadF& recorder_quad : recorder_quads) {
+          recorder_rect.Union(recorder_quad.BoundingBox());
+        }
+        if (recorder_rect != gfx::RectF()) {
+          recorder_document->AdjustRectForScrollAndAbsoluteZoom(
+              recorder_rect, *recorder_layout_object);
+        }
+      }
+      recorder_record.x = recorder_rect.x();
+      recorder_record.y = recorder_rect.y();
+      recorder_record.width = recorder_rect.width();
+      recorder_record.height = recorder_rect.height();
+    }
+    const ComputedStyle* recorder_style =
+        recorder_element ? recorder_element->GetComputedStyle() : nullptr;
+    if (recorder_style && !recorder_style->IsEnsuredInDisplayNone()) {
+      recorder_record.computed_style_present = true;
+      recorder_record.computed_style.reserve(
+          std::size(kRecorderLayoutStyleProperties));
+      for (size_t recorder_index = 0;
+           recorder_index < std::size(kRecorderLayoutStyleProperties);
+           ++recorder_index) {
+        const CSSValue* recorder_value =
+            CSSProperty::Get(kRecorderLayoutStyleProperties[recorder_index])
+                .CSSValueFromComputedStyle(*recorder_style,
+                                           recorder_layout_object,
+                                           /*allow_visited_style=*/false,
+                                           CSSValuePhase::kResolvedValue);
+        a11y_recorder::LayoutCheckpointStyleValue recorder_entry;
+        recorder_entry.property_name = recorder_property_names[recorder_index];
+        recorder_entry.value_present = recorder_value != nullptr;
+        if (recorder_value) {
+          recorder_entry.value = recorder_value->CssText().Utf8();
+        }
+        recorder_record.computed_style.push_back(std::move(recorder_entry));
+      }
+    }
+    a11y_recorder::RecordBlinkLayoutCheckpointNode(
+        recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token, std::move(recorder_record));
+    ++recorder_node_count;
+  }
+  a11y_recorder::CompleteBlinkLayoutCheckpoint(
+      recorder_checkpoint_sequence, recorder_document_node_id,
+      recorder_document_token, recorder_node_count, recorder_truncated,
+      kRecorderMaximumLayoutCheckpointNodes);
+}
+
+}  // namespace
+
+"""
+BLINK_LAYOUT_CHECKPOINT_ANCHOR = """\
+    ForAllNonThrottledLocalFrameViews([](LocalFrameView& frame_view) {
+      auto lifecycle_observers = frame_view.lifecycle_observers_;
+      for (auto& observer : lifecycle_observers)
+        observer->DidFinishLifecycleUpdate(frame_view);
+    });
+"""
+BLINK_LAYOUT_CHECKPOINT_HOOK = """\
+    ForAllNonThrottledLocalFrameViews([](LocalFrameView& frame_view) {
+      auto lifecycle_observers = frame_view.lifecycle_observers_;
+      for (auto& observer : lifecycle_observers)
+        observer->DidFinishLifecycleUpdate(frame_view);
+    });
+    ForAllNonThrottledLocalFrameViews([](LocalFrameView& frame_view) {
+      RecorderRecordLayoutCheckpoint(frame_view);
+    });
+"""
+
+
+def patch_blink_local_frame_view(path: Path) -> None:
+    """Adds the layout checkpoint helper and its paint-clean hook."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/frame/local_frame_view.h"',
+        BLINK_LAYOUT_CHECKPOINT_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+        BLINK_LAYOUT_CHECKPOINT_HELPER,
+        BLINK_LAYOUT_CHECKPOINT_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_LAYOUT_CHECKPOINT_ANCHOR, BLINK_LAYOUT_CHECKPOINT_HOOK, path
+    )
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -5263,6 +5632,7 @@ def main() -> int:
     patch_blink_input_element(forms / "html_input_element.cc")
     patch_blink_text_field_input_type(forms / "text_field_input_type.cc")
     patch_blink_text_area_element(forms / "html_text_area_element.cc")
+    patch_blink_local_frame_view(blink_core / "frame" / "local_frame_view.cc")
     patch_blink_cookie_jar(
         source
         / "third_party"

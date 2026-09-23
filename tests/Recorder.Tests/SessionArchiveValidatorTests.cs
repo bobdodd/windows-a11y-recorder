@@ -2878,6 +2878,171 @@ public sealed class SessionArchiveValidatorTests
         Assert.Empty(issues);
     }
 
+    public static TheoryData<string, string> LayoutRecords()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (eventType, json) in BrowserLayoutPayloads.All())
+        {
+            data.Add(eventType, json);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(LayoutRecords))]
+    public async Task AcceptsEveryLayoutRecordShape(string eventType, string json)
+    {
+        var issues = await ValidateLayoutRecordAsync(eventType, JsonNode.Parse(json)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [MemberData(nameof(LayoutRecords))]
+    public async Task RejectsAnUndeclaredLayoutProperty(string eventType, string json)
+    {
+        var payload = JsonNode.Parse(json)!;
+        payload["undeclared"] = 1;
+
+        var issues = await ValidateLayoutRecordAsync(eventType, payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/undeclared", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsAnUndeclaredViewportProperty()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.FirstCheckpointStarted)!;
+        payload["viewport"]!["depth"] = 1;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-started", payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/viewport/depth", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsADuplicatedStyleProperty()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.FirstCheckpointStarted)!;
+        payload["styleProperties"] = new JsonArray("display", "display");
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-started", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-layout-style-properties-invalid");
+    }
+
+    [Fact]
+    public async Task RejectsACheckpointThatNamesItselfAsPrevious()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.LaterCheckpointStarted)!;
+        payload["previousCheckpointId"] = "layout-checkpoint-2";
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-started", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-layout-checkpoint-previous-self");
+    }
+
+    [Fact]
+    public async Task RejectsARectangleWithoutALayoutObject()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
+        payload["layoutObjectPresent"] = false;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-rect-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsANegativeRectangleSize()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
+        payload["boundingClientRect"]!["width"] = -1;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/boundingClientRect/width", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsANonStringStyleValue()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
+        payload["computedStyle"]!["width"] = 120;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/computedStyle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsATextNodeWithAComputedStyle()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.TextNode)!;
+        payload["computedStyle"] = new JsonObject { ["color"] = "rgb(0, 0, 0)" };
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-layout-text-node-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsANodeCountAboveTheMaximum()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.CheckpointCompleted)!;
+        payload["maximumNodes"] = 5;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-completed", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-layout-node-count-over-maximum");
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidateLayoutRecordAsync(string eventType, JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Layout,
+            eventType,
+            document.RootElement.Clone());
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            return result.Issues.ToList();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static async Task<IReadOnlyList<ArchiveValidationIssue>>
         ValidateInteractionRecordAsync(string eventType, JsonNode payload)
     {

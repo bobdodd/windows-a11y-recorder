@@ -68,6 +68,12 @@ descendant, and text-editing state on the `browser.interaction` channel. The
 record types and their limits are described under protocol version 0.24 below.
 Checkpoint-time snapshots of that state are not yet recorded.
 
+Protocol 0.25 implements layout geometry and a defined list of computed styles
+on the `browser.layout` channel, recorded after every rendering update in which
+style or layout work happened. The record types and their limits are described
+under protocol version 0.25 below and in
+[the layout and computed-style checkpoint evidence model](layout-and-style-checkpoint-evidence-model.md).
+
 ### Cookies and network
 
 Cookie evidence includes:
@@ -607,7 +613,51 @@ script location and main world on the changes made by script, and requires no
 script origin on the changes made by input. The fixture shows that the logger
 emits records; it does not evaluate the page's focus handling.
 
-Live 0.24 connections require an exact protocol-version match.
+Protocol version 0.25 records layout geometry and computed styles on the
+`browser.layout` channel. A hook in `LocalFrameView::UpdateLifecyclePhases`
+runs after each lifecycle update that reached the paint-clean state and, for
+every local frame view that is not throttled, records a checkpoint when Blink
+has resolved element style or performed layout for the document since its
+previous checkpoint. The hook reads only style and layout Blink has already
+produced and never forces either. Three record types are emitted:
+
+- `layout-checkpoint-started`: the checkpoint identity, the document's previous
+  checkpoint, Blink's style-resolution and layout counters, the viewport size
+  and scroll offset in CSS pixels, the device pixel ratio, the layout zoom
+  factor, the node limit of 100000, and the list of recorded computed-style
+  properties.
+- `layout-checkpoint-node`: one element, or one text node that has a layout
+  object, in light-DOM tree order, with its Blink DOM node identity, whether it
+  has a layout object, whether a display lock prevents its layout, its
+  viewport-relative bounding rectangle, and, for an element with a current
+  computed style, the resolved value of each listed property.
+- `layout-checkpoint-completed`: the node count and whether the node limit
+  truncated the checkpoint.
+
+The recorded facts are bounded as follows:
+
+- Only the 75 listed longhand properties are recorded. The list and the reason
+  for each property are in the evidence model.
+- Shadow-root content and pseudo-elements are not recorded.
+- The rectangle is the bounding box only; line boxes and fragments are not
+  recorded separately.
+- Documents that are not painted, such as those in background tabs, and frames
+  whose rendering is throttled produce no checkpoints until they are rendered.
+- A page that changes style or layout on every frame produces a full
+  checkpoint on every frame.
+- A layout a script forces is observed at the next paint-clean update, not at
+  the moment it was forced.
+
+The validation run serves a fourth fixture page from the loopback HTTP listener
+the cookie fixture uses, opened in a foreground tab after the interaction
+fixture, because only a painted document produces layout checkpoints. The page
+widens a box and then changes only its color, reporting the box's rectangle,
+the viewport size, and the box's color after each change. The verifier requires
+complete, linked checkpoints for the fixture document whose recorded values
+agree with what the page reported. The fixture shows that the logger emits
+records; it does not evaluate the page's layout or styling.
+
+Live 0.25 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
@@ -689,7 +739,9 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 5. Add document, DOM, style, layout, accessibility, and rendered-frame
    checkpoints. The bounded parser-complete DOM structure checkpoint is the
    first implemented part of this stage. Focus, selection, active descendant,
-   and text-editing change records are implemented in protocol 0.24.
+   and text-editing change records are implemented in protocol 0.24. Layout
+   geometry and computed-style checkpoints are implemented in protocol 0.25.
+   Rendered-frame checkpoints remain outstanding.
 6. Add cookie operations and network metadata with prohibited values removed at
    source. Cookie operations are implemented in protocol 0.23. Network metadata
    remains outstanding.
