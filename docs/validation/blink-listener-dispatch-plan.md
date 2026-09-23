@@ -1477,5 +1477,77 @@ laid-out text node with a rectangle and no computed style.
 
 These checks show that the logger emitted complete layout checkpoints and that
 the recorded geometry and styles agree with what the page itself reported.
-They do not evaluate the page's layout or styling. No measured result has been
-recorded yet.
+They do not evaluate the page's layout or styling.
+
+### Measured result
+
+Reference platform, September 23, 2026, at repository revision `841eff1`.
+Protocol 0.25. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, rebuilt with the
+layout hook, with a 25-second capture that validated 57,355 events and 137
+artifacts and reported no network-service crashes. The recorder accepted
+57,355 records and dropped none. The complete script exited with code 0.
+
+The validated session is:
+
+`C:\Users\Public\Downloads\A11yRecorderLayoutLogging\sessions\20260923-223319-5211199eac264a59901ca54b33f3e34d`
+
+| Value | Result |
+| --- | --- |
+| `LayoutRecords` | 42 |
+| `LayoutCheckpoints` | 3 |
+| `LayoutBoxNodeId` | 83 |
+| `SettledCheckpointId` | `layout-checkpoint-8` |
+| `WidenedCheckpointId` | `layout-checkpoint-9` |
+| `RecoloredCheckpointId` | `layout-checkpoint-10` |
+| `SettledNodeCount` | 12 |
+| `SettledBoxRect` | 8,50 200x50 |
+| `WidenedBoxWidth` | 320 |
+| `RecoloredBoxColor` | `rgb(128, 0, 0)` |
+| `Viewport` | 929x925 |
+| `DevicePixelRatio` | 1 |
+| `LayoutZoomFactor` | 1 |
+| `InteractionRecords` | 16 |
+| `CookieRecords` | 28 |
+| `RecordsContainingCookieValue` | 0 |
+| `OMITTED_EVIDENCE_RECORDS` | 0 |
+| `SINK_REFUSED_EVENTS` | 0 |
+| `OTHER_OMISSION_RECORDS` | 0 |
+
+What this establishes: the layout hook applied to the reference Chromium tree,
+built, and emitted records that the recorder accepted under the closed 0.25
+payload shapes. The fixture document produced exactly three checkpoints, one
+for each state the page created, each complete, untruncated, and linked to its
+predecessor, and the recorded box rectangle, viewport size, and box color in
+each agreed with what the page reported through `getBoundingClientRect()`,
+`innerWidth`, `innerHeight`, and `getComputedStyle()`. Every earlier
+measurement in this document held, including the interaction records, the
+cookie records with no cookie value in the event file, and 200 uncovered
+transitions across three documents with none after a document's last pass.
+
+Three earlier attempts did not complete. Revision `e459624` did not compile,
+because Blink builds with unsafe buffer usage as an error and the hook indexed
+its property array. Revision `e8cf1aa` iterated the array instead, but the
+integration inserts the helper only when it is absent, so the tree kept the
+indexed loop and failed the same way; revision `5de598b` upgrades that helper
+in place. That run captured and recorded all four fixtures, and the verifier
+then stopped on three faults of its own, corrected in revision `841eff1`: it
+read an execution world from a collector omission record on the listener
+channel, it required the computed-style members in list order although the
+bridge's JSON serialization sorts them, and its layout section overwrote a
+variable the final summary reads. The verifier as corrected accepted the
+`5de598b` session before the `841eff1` run.
+
+The omission record in the `5de598b` session reported
+`ephemeral-browser-profile-delete-failed`: the recorder could not delete the
+temporary browser profile after Chromium stopped. The `841eff1` run reported no
+such record. The cause of the single failure has not been determined.
+
+What this does not establish: the fixture exercises one light-DOM box in one
+top-level document at a device pixel ratio and zoom of 1, so records for
+shadow-root content, subframes, fragmented or wrapped inline boxes, zoomed or
+high-density displays, display-locked content, and documents near the node
+limit have not been observed in a real run. The hook logs every rendered
+document: the `5de598b` session held 2,420 layout records, of which 42 belonged
+to the fixture document and the rest to the other documents Chromium rendered
+during the capture. The volume of the `841eff1` session was not counted.
