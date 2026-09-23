@@ -854,11 +854,13 @@ function Invoke-CookieFixture {
                 expression = "JSON.stringify(window.cookieFixtureChanges)"
                 returnByValue = $true
             }
-            $changes = @(
-                ConvertFrom-Json (
-                    [string](Get-CdpProperty $reported.result "value")
-                )
+            # Windows PowerShell 5.1 returns a parsed JSON array as one object
+            # rather than enumerating it, so the parsed value is assigned first
+            # and then enumerated into a flat list of change strings.
+            $parsedChanges = ConvertFrom-Json (
+                [string](Get-CdpProperty $reported.result "value")
             )
+            $changes = @($parsedChanges | ForEach-Object { $_ })
             $missing = @(
                 $expectedChanges | Where-Object { $changes -notcontains $_ }
             )

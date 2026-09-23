@@ -1265,4 +1265,58 @@ are written at a script's call.
 
 These checks show that the logger emitted a record for each operation the page
 performed, with names and without values. They do not evaluate the page's cookie
-use. No measured result has been recorded yet.
+use.
+
+### Measured result
+
+Reference platform, September 23, 2026, at repository revision `4df0e4f`.
+Protocol 0.23. Recorded on the same Windows 10.0.19045 host and instrumented
+Chromium build as the earlier results in this document, rebuilt with the cookie
+hooks, with a 25-second capture that validated 43,695 events and 136 artifacts
+and reported no network-service crashes. The recorder accepted 43,695 records
+and dropped none. The complete script exited with code 0.
+
+The validated session is:
+
+`C:\Users\Public\Downloads\A11yRecorderCookieLogging\sessions\20260923-175231-685e0a6d327f4688899a3fccd31a4ccf`
+
+| Value | Result |
+| --- | --- |
+| `CookieRecords` | 26 |
+| `DocumentCookieWriteOutcome` | `sent-to-cookie-manager` |
+| `DocumentCookieReadServedFrom` | `cookie-manager` |
+| `DocumentCookieReadNames` | `a11y_recorder_response`, `a11y_recorder_document` |
+| `CookieStoreRequestIds` | `cookie-store-request-1` to `cookie-store-request-4` |
+| `CookieStoreChangeCauses` | `inserted`, `expired-overwrite` |
+| `NavigationCookieAccessNames` | `a11y_recorder_response` |
+| `FrameCookieChangeUrl` | `http://127.0.0.1:53690/set-cookie` |
+| `FrameCookieReadUrl` | `http://127.0.0.1:53690/echo` |
+| `RecordsContainingCookieValue` | 0 |
+| `OMITTED_EVIDENCE_RECORDS` | 0 |
+| `SINK_REFUSED_EVENTS` | 0 |
+| `OTHER_OMISSION_RECORDS` | 0 |
+
+What this establishes: all six cookie hooks applied to the reference Chromium
+tree, built, and emitted records that the recorder accepted under the closed
+0.23 payload shapes. Each operation the fixture performed produced its record:
+the `document.cookie` write and read, a paired request and result for each of
+the four Cookie Store methods, change deliveries for the Cookie Store write and
+delete, the navigation access for the document's Set-Cookie header, and the
+frame accesses for the fetch that set a cookie and the fetch that sent it. The
+run's cookie value appeared in no line of the event file. Every earlier
+measurement in this document held, including the world check with the cookie
+call records admitted, the page-lifecycle states, and 200 uncovered transitions
+across three documents with none after a document's last pass. The listener
+fixture's page-lifecycle evidence was unaffected by the background cookie tab.
+
+What this does not establish: the fixture exercises only the main world, a
+window context, and first-party cookies on a loopback origin, so records for a
+Cookie Store call from a service worker, a cookie call from an isolated world,
+a third-party or partitioned cookie, and an excluded cookie with its reasons
+have not been observed in a real run. The refusal outcomes and the
+renderer-cache read path are covered only by the source patches and their
+tests. The harness's own report of the page's Cookie Store changes printed as a
+type name in this run, because Windows PowerShell 5.1 does not enumerate a
+parsed JSON array; the verifier reads the changes from the archive, so the
+result does not depend on that report, and the parsing was corrected after the
+run.
