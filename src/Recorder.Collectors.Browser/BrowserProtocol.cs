@@ -192,6 +192,58 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.NetworkNavigationResponse) =>
                 payload.Deserialize<BrowserNetworkNavigationResponsePayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebSocketCreated) =>
+                payload.Deserialize<BrowserNetworkWebSocketCreatedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebSocketHandshakeRequest) =>
+                payload.Deserialize<BrowserNetworkWebSocketHandshakeRequestPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebSocketHandshakeResponse) =>
+                payload.Deserialize<BrowserNetworkWebSocketHandshakeResponsePayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebSocketMessageSent) =>
+                payload.Deserialize<BrowserNetworkWebSocketMessagePayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebSocketMessageReceived) =>
+                payload.Deserialize<BrowserNetworkWebSocketMessagePayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebSocketCloseRequested) =>
+                payload.Deserialize<BrowserNetworkWebSocketCloseRequestedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebSocketError) =>
+                payload.Deserialize<BrowserNetworkWebSocketErrorPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebSocketClosed) =>
+                payload.Deserialize<BrowserNetworkWebSocketClosedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkEventSourceMessage) =>
+                payload.Deserialize<BrowserNetworkEventSourceMessagePayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebTransportCreated) =>
+                payload.Deserialize<BrowserNetworkWebTransportCreatedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebTransportEstablished) =>
+                payload.Deserialize<BrowserNetworkWebTransportEstablishedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebTransportCloseRequested) =>
+                payload.Deserialize<BrowserNetworkWebTransportCloseRequestedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkWebTransportClosed) =>
+                payload.Deserialize<BrowserNetworkWebTransportClosedPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or
                 BrowserEvidenceChannels.Dispatch or

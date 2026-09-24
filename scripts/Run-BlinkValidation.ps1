@@ -624,9 +624,16 @@ document.title = "Cookie logging fixture ready";
 # with credential-bearing and plain request headers, follows a redirected
 # fetch, sends a fetch to a closed loopback port so the request fails, loads the
 # same cacheable script twice so the second load is served from the memory
-# cache, and starts a dedicated worker that sends a fetch of its own. The
-# credential values are generated per run and passed in by the run script so
-# the verifier can require that no record contains them.
+# cache, and starts a dedicated worker that sends a fetch of its own. It then
+# runs the realtime steps: it opens a WebSocket to the fixture server, receives
+# its greeting, sends a text message carrying a credential-named field and a
+# binary message, receives both echoed back, and closes the socket; it reads
+# two events from an event stream, one carrying a credential-named field; and
+# it creates a WebTransport session to a closed loopback port and closes it
+# while it is still connecting. The fixture server has no HTTP/3 endpoint, so
+# no WebTransport session is established. The credential values are generated
+# per run and passed in by the run script so the verifier can require that no
+# record contains them.
 $networkFixturePage = @'
 <!doctype html>
 <html lang="en">
@@ -649,6 +656,98 @@ function networkFixtureScript(targetDocument) {
     script.onerror = function () { reject(new Error("script load failed")); };
     targetDocument.head.appendChild(script);
   });
+}
+// Settles with the promise, or rejects once ten seconds pass so a realtime
+// step that never completes fails the run rather than stalling it.
+function realtimeWithin(promise, what) {
+  return Promise.race([
+    promise,
+    new Promise(function (resolve, reject) {
+      setTimeout(function () { reject(new Error(what + " timed out")); }, 10000);
+    })
+  ]);
+}
+async function runRealtimeFixture(values) {
+  const socketUrl = new URL("/network/socket", location.href);
+  socketUrl.protocol = "ws:";
+  const socket = new WebSocket(socketUrl.href, "a11y-recorder-fixture");
+  socket.binaryType = "arraybuffer";
+  const received = [];
+  let waiter = null;
+  socket.onmessage = function (event) {
+    received.push(event.data);
+    if (waiter) {
+      const wake = waiter;
+      waiter = null;
+      wake();
+    }
+  };
+  function nextMessage() {
+    if (received.length > 0) {
+      return Promise.resolve(received.shift());
+    }
+    return realtimeWithin(new Promise(function (resolve) {
+      waiter = function () { resolve(received.shift()); };
+    }), "WebSocket message");
+  }
+  await realtimeWithin(new Promise(function (resolve, reject) {
+    socket.onopen = function () { resolve(); };
+    socket.onerror = function () { reject(new Error("WebSocket failed")); };
+  }), "WebSocket open");
+  const greeting = await nextMessage();
+  const sentText = JSON.stringify({
+    type: "auth",
+    token: values.realtimeToken,
+    room: "lobby"
+  });
+  socket.send(sentText);
+  const echoedText = await nextMessage();
+  socket.send(new Uint8Array([1, 2, 3, 4]));
+  const echoedBinary = await nextMessage();
+  const closed = realtimeWithin(new Promise(function (resolve) {
+    socket.onclose = function (event) { resolve(event); };
+  }), "WebSocket close");
+  socket.close(1000, "fixture done");
+  const closeEvent = await closed;
+
+  const source = new EventSource("/network/events");
+  const events = await realtimeWithin(new Promise(function (resolve, reject) {
+    const seen = [];
+    source.addEventListener("status", function (event) {
+      seen.push("status:" + event.lastEventId);
+    });
+    source.onmessage = function (event) {
+      seen.push("message:" + event.data);
+      resolve(seen);
+    };
+    source.onerror = function () {
+      if (seen.length === 0) {
+        reject(new Error("EventSource failed"));
+      }
+    };
+  }), "EventSource events");
+  source.close();
+
+  let transport = "unavailable";
+  if (typeof WebTransport === "function") {
+    const session = new WebTransport(values.transportUrl);
+    session.ready.catch(function () {});
+    session.close({ closeCode: 7, reason: "fixture close" });
+    transport = await realtimeWithin(session.closed.then(
+      function () { return "closed"; },
+      function () { return "rejected"; }
+    ), "WebTransport close");
+  }
+  return {
+    greeting: greeting,
+    echoedTextMatches: echoedText === sentText,
+    echoedBinaryLength: echoedBinary instanceof ArrayBuffer ?
+      echoedBinary.byteLength : -1,
+    closeCode: closeEvent.code,
+    closeWasClean: closeEvent.wasClean,
+    events: events,
+    transport: transport
+  };
 }
 async function runNetworkFixture(values) {
   const data = await fetch("/network/data", {
@@ -679,6 +778,7 @@ async function runNetworkFixture(values) {
     worker.onerror = function () { reject(new Error("worker failed")); };
   });
   worker.terminate();
+  const realtime = await runRealtimeFixture(values);
   return JSON.stringify({
     outcome: "completed",
     dataStatus: data.status,
@@ -689,7 +789,8 @@ async function runNetworkFixture(values) {
     refused: refused,
     cachedRuns: (window.networkFixtureCachedRuns || 0) +
       (frame.contentWindow.networkFixtureCachedRuns || 0),
-    workerText: workerText
+    workerText: workerText,
+    realtime: realtime
   });
 }
 document.title = "Network logging fixture ready";
@@ -742,7 +843,12 @@ function Start-CookieFixtureServer {
         # The value of the credential-named response header the network
         # fixture's data response carries, which no record may contain.
         [Parameter(Mandatory = $true)]
-        [string] $NetworkSessionValue
+        [string] $NetworkSessionValue,
+
+        # The value of the credential-named field in the event stream's first
+        # event, which no record may contain.
+        [Parameter(Mandatory = $true)]
+        [string] $RealtimeEventValue
     )
 
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -758,9 +864,46 @@ function Start-CookieFixtureServer {
                 $LayoutPage,
                 $NetworkPage,
                 $NetworkWorker,
-                $NetworkSessionValue
+                $NetworkSessionValue,
+                $RealtimeEventValue
             )
             $ascii = [Text.Encoding]::ASCII
+            # Reads exactly Count bytes from the stream.
+            $readExact = {
+                param($Stream, [int] $Count)
+
+                $buffer = New-Object byte[] $Count
+                $offset = 0
+                while ($offset -lt $Count) {
+                    $read = $Stream.Read($buffer, $offset, $Count - $offset)
+                    if ($read -le 0) {
+                        throw "The WebSocket connection closed early."
+                    }
+                    $offset += $read
+                }
+                , $buffer
+            }
+            # Writes one unmasked, final WebSocket frame, as a server does.
+            $writeFrame = {
+                param($Stream, [int] $Opcode, [byte[]] $Payload)
+
+                $header = New-Object 'Collections.Generic.List[byte]'
+                $header.Add([byte] (0x80 -bor $Opcode))
+                if ($Payload.Length -lt 126) {
+                    $header.Add([byte] $Payload.Length)
+                }
+                else {
+                    $header.Add([byte] 126)
+                    $header.Add([byte] (($Payload.Length -shr 8) -band 0xFF))
+                    $header.Add([byte] ($Payload.Length -band 0xFF))
+                }
+                $headerBytes = $header.ToArray()
+                $Stream.Write($headerBytes, 0, $headerBytes.Length)
+                if ($Payload.Length -gt 0) {
+                    $Stream.Write($Payload, 0, $Payload.Length)
+                }
+                $Stream.Flush()
+            }
             while ($true) {
                 try {
                     $client = $Listener.AcceptTcpClient()
@@ -776,10 +919,17 @@ function Start-CookieFixtureServer {
                         $stream, $ascii, $false, 1024, $true
                     )
                     $requestLine = $reader.ReadLine()
+                    $requestHeaders = @{}
                     while ($true) {
                         $line = $reader.ReadLine()
                         if ($null -eq $line -or $line.Length -eq 0) {
                             break
+                        }
+                        $separator = $line.IndexOf(":")
+                        if ($separator -gt 0) {
+                            $requestHeaders[
+                                $line.Substring(0, $separator).Trim().ToLowerInvariant()
+                            ] = $line.Substring($separator + 1).Trim()
                         }
                     }
                     $path = ""
@@ -792,6 +942,66 @@ function Start-CookieFixtureServer {
                     $setCookie = $null
                     $cacheControl = "no-store"
                     $extraHeaders = @()
+                    if ($path -eq "/network/socket" -and
+                        $requestHeaders.ContainsKey("sec-websocket-key")) {
+                        # The realtime WebSocket. The handshake sets a cookie,
+                        # the server sends a greeting, echoes every text and
+                        # binary message, and answers the page's close frame.
+                        # The browser sends no frame before the handshake
+                        # response, so the request reader holds none.
+                        $client.ReceiveTimeout = 10000
+                        $sha1 = [Security.Cryptography.SHA1]::Create()
+                        $accept = [Convert]::ToBase64String(
+                            $sha1.ComputeHash($ascii.GetBytes(
+                                    $requestHeaders["sec-websocket-key"] +
+                                    "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+                                ))
+                        )
+                        $sha1.Dispose()
+                        $upgrade = (
+                            "HTTP/1.1 101 Switching Protocols`r`n" +
+                            "Upgrade: websocket`r`n" +
+                            "Connection: Upgrade`r`n" +
+                            "Sec-WebSocket-Accept: $accept`r`n" +
+                            "Sec-WebSocket-Protocol: a11y-recorder-fixture`r`n" +
+                            "Set-Cookie: a11y_recorder_socket=$CookieValue; " +
+                            "Path=/; SameSite=Lax`r`n`r`n"
+                        )
+                        $upgradeBytes = $ascii.GetBytes($upgrade)
+                        $stream.Write($upgradeBytes, 0, $upgradeBytes.Length)
+                        & $writeFrame $stream 1 (
+                            [Text.Encoding]::UTF8.GetBytes("fixture greeting")
+                        )
+                        for ($frame = 0; $frame -lt 8; $frame++) {
+                            $frameHead = & $readExact $stream 2
+                            $opcode = $frameHead[0] -band 0x0F
+                            $length = [int] ($frameHead[1] -band 0x7F)
+                            if ($length -eq 126) {
+                                $extended = & $readExact $stream 2
+                                $length = ([int] $extended[0] -shl 8) -bor
+                                    [int] $extended[1]
+                            }
+                            elseif ($length -eq 127) {
+                                throw "The fixture WebSocket received a large frame."
+                            }
+                            $mask = & $readExact $stream 4
+                            $payload = [byte[]] @()
+                            if ($length -gt 0) {
+                                $payload = & $readExact $stream $length
+                                for ($i = 0; $i -lt $length; $i++) {
+                                    $payload[$i] = $payload[$i] -bxor $mask[$i % 4]
+                                }
+                            }
+                            if ($opcode -eq 1 -or $opcode -eq 2) {
+                                & $writeFrame $stream $opcode $payload
+                            }
+                            elseif ($opcode -eq 8) {
+                                & $writeFrame $stream 8 $payload
+                                break
+                            }
+                        }
+                        continue
+                    }
                     if ($path -eq "/") {
                         $status = "200 OK"
                         $contentType = "text/html; charset=utf-8"
@@ -868,6 +1078,20 @@ function Start-CookieFixtureServer {
                         $status = "200 OK"
                         $body = "worker data"
                     }
+                    elseif ($path -eq "/network/events") {
+                        # The realtime event stream: a named event carrying
+                        # a credential-named field, then a plain message. The
+                        # long retry keeps the page's EventSource from
+                        # reconnecting before it closes.
+                        $status = "200 OK"
+                        $contentType = "text/event-stream; charset=utf-8"
+                        $body = (
+                            "retry: 600000`n`n" +
+                            "id: 7`nevent: status`n" +
+                            "data: {`"access_token`":`"$RealtimeEventValue`"}" +
+                            "`n`ndata: plain event`n`n"
+                        )
+                    }
                     $bodyBytes = [Text.Encoding]::UTF8.GetBytes($body)
                     $head = (
                         "HTTP/1.1 $status`r`n" +
@@ -901,7 +1125,9 @@ function Start-CookieFixtureServer {
             $CookieValue
         ).AddArgument($InteractionPage).AddArgument($LayoutPage).AddArgument(
             $NetworkPage
-        ).AddArgument($NetworkWorker).AddArgument($NetworkSessionValue)
+        ).AddArgument($NetworkWorker).AddArgument(
+            $NetworkSessionValue
+        ).AddArgument($RealtimeEventValue)
     $handle = $server.BeginInvoke()
 
     [pscustomobject]@{
@@ -2041,7 +2267,10 @@ $networkValues = @{
         [Guid]::NewGuid().ToString("N")
     apiKey = "a11y-recorder-api-key-" + [Guid]::NewGuid().ToString("N")
     scheme = "a11y-recorder-scheme-" + [Guid]::NewGuid().ToString("N")
+    realtimeToken = "a11y-recorder-socket-token-" +
+        [Guid]::NewGuid().ToString("N")
     refusedUrl = $null
+    transportUrl = $null
 }
 $networkSessionValue = "a11y-recorder-session-" +
     [Guid]::NewGuid().ToString("N")
@@ -2055,6 +2284,12 @@ $closedPortListener.Start()
 $closedPort = ([Net.IPEndPoint] $closedPortListener.LocalEndpoint).Port
 $closedPortListener.Stop()
 $networkValues.refusedUrl = "http://127.0.0.1:$closedPort/network-refused"
+$networkValues.transportUrl = (
+    "https://127.0.0.1:$closedPort/network-transport"
+)
+# The value of the credential-named field in the realtime event stream.
+$realtimeEventValue = "a11y-recorder-event-token-" +
+    [Guid]::NewGuid().ToString("N")
 $networkStartUri = $null
 $networkFixtureUri = $null
 $networkFixtureReport = $null
@@ -2068,7 +2303,8 @@ try {
         $layoutFixturePage `
         $networkFixturePage `
         $networkFixtureWorker `
-        $networkSessionValue
+        $networkSessionValue `
+        $realtimeEventValue
     $cookieFixtureUri = $cookieServer.BaseUri
     $interactionFixtureUri = "$($cookieServer.BaseUri)interaction"
     Write-Host "Serving the cookie logging fixture at $cookieFixtureUri"
@@ -2430,12 +2666,15 @@ try {
         -NetworkFixtureUri $networkFixtureUri `
         -NetworkStartUri $networkStartUri `
         -NetworkRefusedUri $networkValues.refusedUrl `
+        -NetworkTransportUri $networkValues.transportUrl `
         -NetworkFixtureReport $networkFixtureReport `
         -NetworkSecretValues @(
             $networkValues.authorization,
             $networkValues.apiKey,
             $networkValues.scheme,
-            $networkSessionValue
+            $networkSessionValue,
+            $networkValues.realtimeToken,
+            $realtimeEventValue
         )
 }
 catch {

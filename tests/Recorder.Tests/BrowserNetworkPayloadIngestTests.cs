@@ -63,6 +63,48 @@ public sealed class BrowserNetworkPayloadIngestTests
     }
 
     [Fact]
+    public void ReadsRealtimeRecordsAsWritten()
+    {
+        using var sent = JsonDocument.Parse(BrowserNetworkPayloads.WebSocketMessageSent);
+        var message = BrowserProtocol.Deserialize<BrowserNetworkWebSocketMessagePayload>(
+            sent.RootElement);
+        Assert.Equal("31", message.InspectorId);
+        Assert.Equal("text", message.Opcode);
+        var withheld = Assert.Single(message.Payload!.Withheld);
+        Assert.Equal(24, withheld.Offset);
+        Assert.Equal("credential-value", withheld.Reason);
+        Assert.Equal("main", message.World!.Kind);
+
+        using var received = JsonDocument.Parse(
+            BrowserNetworkPayloads.WebSocketBinaryMessageReceived);
+        var binary = BrowserProtocol.Deserialize<BrowserNetworkWebSocketMessagePayload>(
+            received.RootElement);
+        Assert.Null(binary.Payload);
+        Assert.Null(binary.Location);
+
+        using var response = JsonDocument.Parse(
+            BrowserNetworkPayloads.WebSocketHandshakeResponse);
+        var handshake = BrowserProtocol.Deserialize<
+            BrowserNetworkWebSocketHandshakeResponsePayload>(response.RootElement);
+        Assert.Equal(["room_pref"], handshake.SetCookieNames);
+        Assert.Null(Assert.Single(handshake.Headers, header => header.Name == "Set-Cookie").Value);
+    }
+
+    [Fact]
+    public void RejectsAnUndeclaredMemberInARecordedText()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.EventSourceMessage)!.AsObject();
+        payload["data"]!["raw"] = "text";
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+
+        Assert.ThrowsAny<Exception>(() =>
+            BrowserProtocol.ValidateEvidencePayload(
+                BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkEventSourceMessage,
+                document.RootElement));
+    }
+
+    [Fact]
     public void ReadsNetworkRecordsAsWritten()
     {
         using var sent = JsonDocument.Parse(BrowserNetworkPayloads.RequestWillBeSent);

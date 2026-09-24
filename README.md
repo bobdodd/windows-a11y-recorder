@@ -256,6 +256,18 @@ headers, and of headers whose name or value marks them as a credential, are
 withheld at source. URLs are kept in full. The record types and limits are in
 [the network metadata evidence model](docs/architecture/network-metadata-evidence-model.md).
 
+Protocol 0.27 adds realtime channels to the `browser.network` channel: each
+WebSocket's creation, handshake, messages, close request, failure, and closure;
+each EventSource event; and each WebTransport session's creation,
+establishment, close request, and closure. Handshake cookies are listed by
+name. Message text, event data, and close reasons are kept up to 4096 UTF-16
+code units with any part that looks like a credential withheld, and binary
+message content is never recorded. In a recording browser the network service
+reports WebSocket handshake cookie headers to the renderer with their values
+replaced, so no cookie value leaves the network service. The record types and
+limits are in
+[the realtime network evidence model](docs/architecture/realtime-network-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.
@@ -330,8 +342,9 @@ Completed:
 
 Remaining:
 
-1. Extend network logging to traffic that does not pass through Blink's
-   resource fetcher: WebSocket, EventSource, and WebTransport.
+1. Validate WebSocket, EventSource, and WebTransport logging (protocol 0.27)
+   on Windows. The code and its tests are in place; the Windows validation run
+   has not yet been made.
 2. Extend DOM and layout capture to shadow-root content and pseudo-elements.
 3. Record interaction state at each checkpoint, not only its changes.
 4. Extend listener and dispatch evidence to shadow-adjusted dispatch paths,

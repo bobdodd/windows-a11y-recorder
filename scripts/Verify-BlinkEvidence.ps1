@@ -43,6 +43,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $NetworkFixtureReport,
 
+    # The URL of the WebTransport session the network logging fixture creates
+    # to a closed loopback port.
+    [Parameter(Mandatory = $true)]
+    [string] $NetworkTransportUri,
+
     # The credential values the network fixture sent in request headers and
     # received in a response header, none of which any record may contain.
     [Parameter(Mandatory = $true)]
@@ -2265,9 +2270,12 @@ if ($isolatedWorldListener.context.documentId -ne $listener.context.documentId) 
 # write records and the Cookie Store request record, which report the world
 # current at the call. The interaction records report the world of the script
 # that made a change, when one did. The network request records report the
-# world of the script current when Blink issued the request, when one was. A
-# world identity on any other record would
-# be a claim the recorder cannot support.
+# world of the script current when Blink issued the request, when one was, and
+# the realtime records written at a script's call, which are the WebSocket
+# creation, sent message, and close request records and the WebTransport
+# creation and close request records, report the world current at that call. A
+# world identity on any other record would be a claim the recorder cannot
+# support.
 # Not every channel carries a context, and strict mode treats reading an absent
 # property as an error, so each step of the path is checked before it is read.
 $hasExecutionWorldIdentity = {
@@ -2302,7 +2310,14 @@ $nonListenerWorldRecords = @(
             $_.channel -ne "browser.interaction" -and
             -not (
                 $_.channel -eq "browser.network" -and
-                $_.eventType -eq "request-will-be-sent"
+                $_.eventType -in @(
+                    "request-will-be-sent",
+                    "websocket-created",
+                    "websocket-message-sent",
+                    "websocket-close-requested",
+                    "web-transport-created",
+                    "web-transport-close-requested"
+                )
             ) -and
             (& $hasExecutionWorldIdentity $_)
         }
@@ -2311,7 +2326,7 @@ if ($nonListenerWorldRecords.Count -gt 0) {
     throw (
         "$($nonListenerWorldRecords.Count) records outside the listener " +
         "channel, the cookie call records, the interaction records, and " +
-        "the network request records " +
+        "the network request records, and the realtime call records " +
         "reported an execution world identity."
     )
 }
@@ -3707,6 +3722,17 @@ if ($networkReport.dataStatus -ne 200 -or
     $networkReport.workerText -ne "worker data") {
     throw "The network fixture page reported: $NetworkFixtureReport"
 }
+$realtimeReport = $networkReport.realtime
+if ($null -eq $realtimeReport -or
+    $realtimeReport.greeting -ne "fixture greeting" -or
+    $realtimeReport.echoedTextMatches -ne $true -or
+    $realtimeReport.echoedBinaryLength -ne 4 -or
+    $realtimeReport.closeCode -ne 1000 -or
+    $realtimeReport.closeWasClean -ne $true -or
+    (@($realtimeReport.events) -join "|") -ne "status:7|message:plain event" -or
+    $realtimeReport.transport -ne "rejected") {
+    throw "The network fixture page reported realtime results: $NetworkFixtureReport"
+}
 
 foreach ($secret in $NetworkSecretValues) {
     $secretRecords = @(
@@ -4040,6 +4066,240 @@ if ($null -eq $networkNavigation.payload.response -or
     throw "The network fixture navigation recorded no response or timing."
 }
 
+# The realtime steps. These checks establish that the logger emitted a record
+# for each WebSocket, event stream, and WebTransport step the page took, with
+# handshake cookies listed by name, credential-named message fields withheld,
+# and the call records carrying the world of the fixture's script.
+$socketUri = ($NetworkFixtureUri -replace "^http:", "ws:") + "/socket"
+function Test-RealtimeCallWorld {
+    param($Record, [string] $Description)
+
+    $payload = $Record.payload
+    if ($null -eq $payload.world -or $payload.world.kind -ne "main" -or
+        $payload.context.executionWorldId -ne
+            "world-$($payload.world.blinkWorldId)" -or
+        $null -eq $payload.location) {
+        throw "The $Description record did not report the main world and a location."
+    }
+}
+function Test-RealtimeText {
+    param(
+        $Text,
+        [string] $Expected,
+        [int] $Withheld,
+        [string] $Description
+    )
+
+    if ($null -eq $Text) {
+        throw "The $Description record carried no text."
+    }
+    $withheldCount = @($Text.withheld).Count
+    if (($Expected -and $Text.text -ne $Expected) -or
+        $Text.truncated -ne $false -or $withheldCount -ne $Withheld) {
+        throw (
+            "The $Description record carried the text '$($Text.text)' with " +
+            "$withheldCount withheld part(s)."
+        )
+    }
+    foreach ($part in @($Text.withheld)) {
+        if ($Text.text.Substring($part.offset).StartsWith("[withheld]") -ne $true) {
+            throw "The $Description record placed a withheld marker at the wrong offset."
+        }
+    }
+}
+
+$socketCreated = Select-NetworkRecord "websocket-created" {
+    $_.payload.url -eq $socketUri
+} "the realtime WebSocket"
+if ($socketCreated.payload.requestedProtocols -ne "a11y-recorder-fixture") {
+    throw (
+        "The WebSocket creation reported the protocols " +
+        "'$($socketCreated.payload.requestedProtocols)'."
+    )
+}
+Test-RealtimeCallWorld $socketCreated "WebSocket creation"
+$socketId = $socketCreated.payload.inspectorId
+$socketDocument = $socketCreated.payload.context.documentToken
+$socketFilter = {
+    $_.payload.inspectorId -eq $socketId -and
+    $_.payload.context.documentToken -eq $socketDocument
+}
+
+$socketRequest = Select-NetworkRecord "websocket-handshake-request" `
+    $socketFilter "the realtime WebSocket"
+$socketCookieNames = @($socketRequest.payload.cookieNames)
+if ($socketCookieNames -notcontains "a11y_recorder_response") {
+    throw (
+        "The WebSocket handshake request listed the cookies " +
+        "'$($socketCookieNames -join ', ')' without a11y_recorder_response."
+    )
+}
+Test-NetworkHeaderRedacted @($socketRequest.payload.headers) "Cookie" `
+    "credential-header" "WebSocket handshake request"
+Test-NetworkHeaderRedacted @($socketRequest.payload.headers) `
+    "Sec-WebSocket-Key" "credential-name" "WebSocket handshake request"
+
+$socketResponse = Select-NetworkRecord "websocket-handshake-response" `
+    $socketFilter "the realtime WebSocket"
+$socketSetCookieNames = @($socketResponse.payload.setCookieNames)
+if ($socketResponse.payload.status -ne 101 -or
+    $socketResponse.payload.selectedProtocol -ne "a11y-recorder-fixture" -or
+    $socketSetCookieNames -notcontains "a11y_recorder_socket") {
+    throw (
+        "The WebSocket handshake response reported status " +
+        "$($socketResponse.payload.status), protocol " +
+        "'$($socketResponse.payload.selectedProtocol)', and set cookies " +
+        "'$($socketSetCookieNames -join ', ')'."
+    )
+}
+Test-NetworkHeaderRedacted @($socketResponse.payload.headers) "Set-Cookie" `
+    "credential-header" "WebSocket handshake response"
+
+$socketMessages = @(
+    $networkRecords | Where-Object {
+        $_.eventType -in @("websocket-message-sent", "websocket-message-received")
+    } | Where-Object $socketFilter
+)
+$greetingRecord = @(
+    $socketMessages | Where-Object {
+        $_.eventType -eq "websocket-message-received" -and
+        $_.payload.opcode -eq "text" -and
+        $_.payload.payload.text -eq "fixture greeting"
+    }
+)
+if ($greetingRecord.Count -ne 1) {
+    throw "$($greetingRecord.Count) WebSocket greeting records were emitted."
+}
+Test-RealtimeText $greetingRecord[0].payload.payload "fixture greeting" 0 `
+    "WebSocket greeting"
+$sentText = @(
+    $socketMessages | Where-Object {
+        $_.eventType -eq "websocket-message-sent" -and
+        $_.payload.opcode -eq "text"
+    }
+)
+$echoText = @(
+    $socketMessages | Where-Object {
+        $_.eventType -eq "websocket-message-received" -and
+        $_.payload.opcode -eq "text" -and
+        $_.payload.payload.text -ne "fixture greeting"
+    }
+)
+if ($sentText.Count -ne 1 -or $echoText.Count -ne 1) {
+    throw (
+        "$($sentText.Count) sent and $($echoText.Count) echoed WebSocket " +
+        "text records were emitted rather than one each."
+    )
+}
+$withheldMessage = '{"type":"auth","token":"[withheld]","room":"lobby"}'
+Test-RealtimeText $sentText[0].payload.payload $withheldMessage 1 `
+    "WebSocket sent text"
+Test-RealtimeText $echoText[0].payload.payload $withheldMessage 1 `
+    "WebSocket echoed text"
+Test-RealtimeCallWorld $sentText[0] "WebSocket sent text"
+$binaryMessages = @(
+    $socketMessages | Where-Object { $_.payload.opcode -eq "binary" }
+)
+if ($binaryMessages.Count -ne 2 -or
+    @($binaryMessages | Where-Object {
+            $_.payload.payloadLength -ne 4 -or $null -ne $_.payload.payload
+        }).Count -ne 0) {
+    throw (
+        "$($binaryMessages.Count) WebSocket binary records were emitted " +
+        "rather than two of four bytes without content."
+    )
+}
+
+$socketCloseRequest = Select-NetworkRecord "websocket-close-requested" `
+    $socketFilter "the realtime WebSocket"
+if ($socketCloseRequest.payload.code -ne 1000) {
+    throw "The WebSocket close request reported code $($socketCloseRequest.payload.code)."
+}
+Test-RealtimeText $socketCloseRequest.payload.reason "fixture done" 0 `
+    "WebSocket close request"
+Test-RealtimeCallWorld $socketCloseRequest "WebSocket close request"
+$socketClosed = Select-NetworkRecord "websocket-closed" $socketFilter `
+    "the realtime WebSocket"
+if ($socketClosed.payload.cause -ne "dropped" -or
+    $socketClosed.payload.wasClean -ne $true -or
+    $socketClosed.payload.code -ne 1000) {
+    throw (
+        "The WebSocket closure reported cause " +
+        "'$($socketClosed.payload.cause)', clean " +
+        "$($socketClosed.payload.wasClean), and code " +
+        "$($socketClosed.payload.code)."
+    )
+}
+
+$eventsUri = "$NetworkFixtureUri/events"
+$eventRecords = @(
+    $networkRecords | Where-Object {
+        $_.eventType -eq "event-source-message" -and $_.payload.url -eq $eventsUri
+    }
+)
+$statusEvents = @($eventRecords | Where-Object { $_.payload.eventType -eq "status" })
+$plainEvents = @($eventRecords | Where-Object { $_.payload.eventType -eq "message" })
+if ($statusEvents.Count -ne 1 -or $plainEvents.Count -ne 1) {
+    throw (
+        "$($statusEvents.Count) status and $($plainEvents.Count) message " +
+        "event records were emitted rather than one each."
+    )
+}
+Test-RealtimeText $statusEvents[0].payload.data `
+    '{"access_token":"[withheld]"}' 1 "event stream status event"
+Test-RealtimeText $statusEvents[0].payload.lastEventId "7" 0 `
+    "event stream status event"
+Test-RealtimeText $plainEvents[0].payload.data "plain event" 0 `
+    "event stream message event"
+
+$transportCreated = Select-NetworkRecord "web-transport-created" {
+    $_.payload.url -eq $NetworkTransportUri
+} "the realtime WebTransport session"
+Test-RealtimeCallWorld $transportCreated "WebTransport creation"
+$transportId = $transportCreated.payload.transportId
+$transportDocument = $transportCreated.payload.context.documentToken
+$transportFilter = {
+    $_.payload.transportId -eq $transportId -and
+    $_.payload.context.documentToken -eq $transportDocument
+}
+$transportCloseRequest = Select-NetworkRecord "web-transport-close-requested" `
+    $transportFilter "the realtime WebTransport session"
+if ($transportCloseRequest.payload.code -ne 7) {
+    throw (
+        "The WebTransport close request reported code " +
+        "$($transportCloseRequest.payload.code)."
+    )
+}
+Test-RealtimeText $transportCloseRequest.payload.reason "fixture close" 0 `
+    "WebTransport close request"
+Test-RealtimeCallWorld $transportCloseRequest "WebTransport close request"
+$transportClosed = Select-NetworkRecord "web-transport-closed" `
+    $transportFilter "the realtime WebTransport session"
+if ($transportClosed.payload.abrupt -ne $true -or
+    $null -ne $transportClosed.payload.code -or
+    $null -ne $transportClosed.payload.reason) {
+    throw "The WebTransport closure was not reported as abrupt without a code."
+}
+$transportEstablished = @(
+    $networkRecords | Where-Object {
+        $_.eventType -eq "web-transport-established"
+    } | Where-Object $transportFilter
+)
+if ($transportEstablished.Count -ne 0) {
+    throw "A WebTransport session to a closed port was reported as established."
+}
+
+[pscustomobject]@{
+    WebSocketInspectorId = $socketId
+    WebSocketHandshakeCookieNames = $socketCookieNames -join ", "
+    WebSocketSetCookieNames = $socketSetCookieNames -join ", "
+    WebSocketMessages = $socketMessages.Count
+    WebSocketClosedCode = $socketClosed.payload.code
+    EventSourceMessages = $eventRecords.Count
+    WebTransportId = $transportId
+    WebTransportClosedAbrupt = $transportClosed.payload.abrupt
+} | Format-List
+
 [pscustomobject]@{
     NetworkRecords = $networkRecords.Count
     DataFetchInspectorId = $dataInspectorId
@@ -4205,5 +4465,5 @@ Write-Host (
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +
     "accessibility serialization checkpoint, cookie operation, and " +
     "interaction-state, layout and computed-style checkpoint, and network " +
-    "metadata evidence verified."
+    "metadata and realtime channel evidence verified."
 )

@@ -3104,6 +3104,89 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task RejectsAWithheldOffsetThatMissesTheMarker()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.WebSocketMessageSent)!;
+        payload["payload"]!["withheld"]![0]!["offset"] = 3;
+
+        var issues = await ValidateNetworkRecordAsync("websocket-message-sent", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-withheld-offset");
+    }
+
+    [Fact]
+    public async Task RejectsARecordedTextOverTheLimit()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.EventSourceMessage)!;
+        payload["data"]!["text"] = new string('a', 4097);
+
+        var issues = await ValidateNetworkRecordAsync("event-source-message", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-text-too-long");
+    }
+
+    [Fact]
+    public async Task RejectsABinaryMessageThatCarriesText()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.WebSocketBinaryMessageReceived)!;
+        payload["payload"] = JsonNode.Parse(
+            """{ "text": "x", "truncated": false, "withheld": [] }""");
+
+        var issues = await ValidateNetworkRecordAsync("websocket-message-received", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-realtime-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsADisconnectedChannelThatReportsACloseCode()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.WebSocketDisconnected)!;
+        payload["code"] = 1006;
+
+        var issues = await ValidateNetworkRecordAsync("websocket-closed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-realtime-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAnAbruptWebTransportCloseWithACode()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.WebTransportClosed)!;
+        payload["code"] = 0.0;
+
+        var issues = await ValidateNetworkRecordAsync("web-transport-closed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-realtime-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsARecordedSetCookieValueOnAHandshake()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.WebSocketHandshakeResponse)!;
+        var cookie = payload["headers"]![1]!;
+        cookie["value"] = "room_pref=blue";
+        cookie["valueRedacted"] = false;
+        cookie["redactionReason"] = null;
+
+        var issues = await ValidateNetworkRecordAsync("websocket-handshake-response", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-network-credential-header-value");
+    }
+
+    [Fact]
+    public async Task RejectsANonDecimalTransportId()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.WebTransportCreated)!;
+        payload["transportId"] = "wt-1";
+
+        var issues = await ValidateNetworkRecordAsync("web-transport-created", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-inspector-id-invalid");
+    }
+
+    [Fact]
     public async Task RejectsANonDecimalInspectorId()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.RequestFinished)!;

@@ -1557,6 +1557,17 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
     WriteDiagnosticLine("Recorder child bootstrap metadata was unavailable.");
     return true;
   }
+  if (process_type == kChromiumUtilityProcess &&
+      command_line->GetSwitchValueASCII(kChromiumUtilitySubTypeSwitch) ==
+          kChromiumNetworkServiceSubType &&
+      !command_line->HasSwitch(kRecordingNetworkServiceSwitch)) {
+    // The network service takes no recorder connection. The switch only
+    // tells it to report handshake cookies by name.
+    command_line->AppendSwitch(kRecordingNetworkServiceSwitch);
+    WriteDiagnosticLine(
+        "Recorder marked network service child " +
+        base::NumberToString(child_process_id) + " as recording.");
+  }
   if (!IsSupportedChildProcess(process_type)) {
     WriteDiagnosticLine(
         "Recorder child bootstrap skipped unsupported process type " +
@@ -3750,6 +3761,330 @@ void RecordBrowserNavigationResponse(int64_t navigation_id,
   }
   payload.Set("timing", CreateNavigationResponseTiming(facts.timing));
   SendBlinkEvidence("browser.network", "navigation-response",
+                    std::move(payload));
+}
+
+
+namespace {
+
+bool EqualsIgnoringAsciiCase(std::string_view a, std::string_view b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t index = 0; index < a.size(); ++index) {
+    const char left = a[index] >= 'A' && a[index] <= 'Z'
+                          ? static_cast<char>(a[index] - 'A' + 'a')
+                          : a[index];
+    const char right = b[index] >= 'A' && b[index] <= 'Z'
+                           ? static_cast<char>(b[index] - 'A' + 'a')
+                           : b[index];
+    if (left != right) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The names of the cookies a handshake's Cookie headers sent, or its
+// Set-Cookie headers set. Only the names are read; the values are skipped.
+base::ListValue HandshakeCookieNames(const std::vector<NetworkHeader>& headers,
+                                     bool request) {
+  base::ListValue names;
+  for (const NetworkHeader& header : headers) {
+    if (request && EqualsIgnoringAsciiCase(header.name, "cookie")) {
+      for (std::string& name :
+           cookie_text::NamesFromCookieString(header.value)) {
+        names.Append(std::move(name));
+      }
+    } else if (!request && EqualsIgnoringAsciiCase(header.name, "set-cookie")) {
+      names.Append(cookie_text::ParseCookieWrite(header.value).name);
+    }
+  }
+  return names;
+}
+
+// The recordable part of a message, event, or close reason.
+base::DictValue CreateMessageText(std::string_view text) {
+  network_text::MessageText read = network_text::ReadMessageText(text);
+  base::DictValue value;
+  value.Set("text", std::move(read.text));
+  value.Set("truncated", read.truncated);
+  base::ListValue withheld;
+  for (const network_text::WithheldText& part : read.withheld) {
+    base::DictValue entry;
+    entry.Set("offset", base::checked_cast<int>(part.offset));
+    entry.Set("reason",
+              std::string(network_text::HeaderRedactionName(part.reason)));
+    withheld.Append(std::move(entry));
+  }
+  value.Set("withheld", std::move(withheld));
+  return value;
+}
+
+base::DictValue CreateRealtimePayload(const RecorderPipeClient& client,
+                                      NetworkScope scope,
+                                      const CookieCallOrigin* origin) {
+  base::DictValue payload;
+  payload.Set("context", CreateNetworkRendererContext(client, scope, origin));
+  payload.Set("scope", CreateNetworkScope(std::move(scope)));
+  return payload;
+}
+
+void SetHandshakeResponse(base::DictValue& payload,
+                          RealtimeHandshakeResponseFacts response) {
+  payload.Set("url", NonEmptyString(std::move(response.url)));
+  payload.Set("httpVersion", NonEmptyString(std::move(response.http_version)));
+  payload.Set("status", response.status_code);
+  payload.Set("statusText", NonEmptyString(std::move(response.status_text)));
+  payload.Set("remoteAddress", CreateRemoteAddress(std::move(response.remote_ip),
+                                                   response.remote_port));
+  payload.Set("selectedProtocol",
+              NonEmptyString(std::move(response.selected_protocol)));
+  payload.Set("setCookieNames",
+              HandshakeCookieNames(response.headers, /*request=*/false));
+  SetNetworkHeaders(payload, "headers", "headerCount", "headersTruncated",
+                    std::move(response.headers));
+}
+
+}  // namespace
+
+void RecordBlinkWebSocketCreated(NetworkScope scope,
+                                 uint64_t inspector_id,
+                                 std::string url,
+                                 std::string requested_protocols,
+                                 CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), &origin);
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("url", std::move(url));
+  payload.Set("requestedProtocols",
+              NonEmptyString(std::move(requested_protocols)));
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.network", "websocket-created", std::move(payload));
+}
+
+void RecordBlinkWebSocketHandshakeRequest(NetworkScope scope,
+                                          uint64_t inspector_id,
+                                          std::string url,
+                                          std::vector<NetworkHeader> headers) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), nullptr);
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("url", std::move(url));
+  payload.Set("cookieNames", HandshakeCookieNames(headers, /*request=*/true));
+  SetNetworkHeaders(payload, "headers", "headerCount", "headersTruncated",
+                    std::move(headers));
+  SendBlinkEvidence("browser.network", "websocket-handshake-request",
+                    std::move(payload));
+}
+
+void RecordBlinkWebSocketHandshakeResponse(
+    NetworkScope scope,
+    uint64_t inspector_id,
+    RealtimeHandshakeResponseFacts response) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), nullptr);
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("extensions", NonEmptyString(std::move(response.extensions)));
+  SetHandshakeResponse(payload, std::move(response));
+  SendBlinkEvidence("browser.network", "websocket-handshake-response",
+                    std::move(payload));
+}
+
+void RecordBlinkWebSocketMessage(NetworkScope scope,
+                                 uint64_t inspector_id,
+                                 bool sent,
+                                 std::string opcode,
+                                 int64_t payload_length,
+                                 std::string text,
+                                 CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  const bool is_text = opcode == "text";
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), sent ? &origin : nullptr);
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("opcode", is_text ? "text" : "binary");
+  payload.Set("payloadLength", NetworkQuantity(payload_length));
+  payload.Set("payload", is_text ? base::Value(CreateMessageText(text))
+                                 : base::Value());
+  if (sent) {
+    SetCookieCallOrigin(payload, std::move(origin));
+  }
+  SendBlinkEvidence("browser.network",
+                    sent ? "websocket-message-sent"
+                         : "websocket-message-received",
+                    std::move(payload));
+}
+
+void RecordBlinkWebSocketCloseRequested(NetworkScope scope,
+                                        uint64_t inspector_id,
+                                        int code,
+                                        std::string reason,
+                                        CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), &origin);
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("code", code < 0 ? base::Value() : base::Value(code));
+  payload.Set("reason", CreateMessageText(reason));
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.network", "websocket-close-requested",
+                    std::move(payload));
+}
+
+void RecordBlinkWebSocketError(NetworkScope scope,
+                               uint64_t inspector_id,
+                               std::string message) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), nullptr);
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("message", std::move(message));
+  SendBlinkEvidence("browser.network", "websocket-error", std::move(payload));
+}
+
+void RecordBlinkWebSocketClosed(NetworkScope scope,
+                                uint64_t inspector_id,
+                                std::string cause,
+                                bool was_clean,
+                                int code,
+                                std::string reason) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  const bool dropped = cause == "dropped";
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), nullptr);
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("cause", dropped ? "dropped" : "disconnected");
+  payload.Set("wasClean", dropped ? base::Value(was_clean) : base::Value());
+  payload.Set("code", dropped ? base::Value(code) : base::Value());
+  payload.Set("reason", dropped ? base::Value(CreateMessageText(reason))
+                                : base::Value());
+  SendBlinkEvidence("browser.network", "websocket-closed", std::move(payload));
+}
+
+void RecordBlinkEventSourceMessage(NetworkScope scope,
+                                   uint64_t inspector_id,
+                                   std::string url,
+                                   std::string event_type,
+                                   std::string last_event_id,
+                                   std::string data) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), nullptr);
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("url", std::move(url));
+  payload.Set("eventType", std::move(event_type));
+  payload.Set("lastEventId", CreateMessageText(last_event_id));
+  payload.Set("dataLength", NetworkQuantity(static_cast<int64_t>(data.size())));
+  payload.Set("data", CreateMessageText(data));
+  SendBlinkEvidence("browser.network", "event-source-message",
+                    std::move(payload));
+}
+
+void RecordBlinkWebTransportCreated(NetworkScope scope,
+                                    uint64_t transport_id,
+                                    std::string url,
+                                    CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), &origin);
+  payload.Set("transportId", InspectorId(transport_id));
+  payload.Set("url", std::move(url));
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.network", "web-transport-created",
+                    std::move(payload));
+}
+
+void RecordBlinkWebTransportEstablished(
+    NetworkScope scope,
+    uint64_t transport_id,
+    RealtimeHandshakeResponseFacts response) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), nullptr);
+  payload.Set("transportId", InspectorId(transport_id));
+  payload.Set("maxDatagramSize", response.max_datagram_size < 0
+                                     ? base::Value()
+                                     : NetworkQuantity(
+                                           response.max_datagram_size));
+  SetHandshakeResponse(payload, std::move(response));
+  SendBlinkEvidence("browser.network", "web-transport-established",
+                    std::move(payload));
+}
+
+void RecordBlinkWebTransportCloseRequested(NetworkScope scope,
+                                           uint64_t transport_id,
+                                           bool close_info_present,
+                                           int64_t code,
+                                           std::string reason,
+                                           CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), &origin);
+  payload.Set("transportId", InspectorId(transport_id));
+  payload.Set("code", close_info_present ? NetworkQuantity(code)
+                                         : base::Value());
+  payload.Set("reason", close_info_present
+                            ? base::Value(CreateMessageText(reason))
+                            : base::Value());
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.network", "web-transport-close-requested",
+                    std::move(payload));
+}
+
+void RecordBlinkWebTransportClosed(NetworkScope scope,
+                                   uint64_t transport_id,
+                                   bool abrupt,
+                                   int64_t code,
+                                   std::string reason) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload =
+      CreateRealtimePayload(*client, std::move(scope), nullptr);
+  payload.Set("transportId", InspectorId(transport_id));
+  payload.Set("abrupt", abrupt);
+  payload.Set("code", abrupt ? base::Value() : NetworkQuantity(code));
+  payload.Set("reason", abrupt ? base::Value()
+                               : base::Value(CreateMessageText(reason)));
+  SendBlinkEvidence("browser.network", "web-transport-closed",
                     std::move(payload));
 }
 

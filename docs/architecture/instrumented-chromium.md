@@ -99,6 +99,13 @@ credential, are withheld at source. The record types and their limits are
 described under protocol version 0.26 below and in
 [the network metadata evidence model](network-metadata-evidence-model.md).
 
+Protocol 0.27 adds WebSocket, EventSource, and WebTransport records to the
+same channel. Handshake cookies are listed by name, message text is kept with
+any part that looks like a credential withheld, and binary message content is
+not recorded. The record types and their limits are described under protocol
+version 0.27 below and in
+[the realtime network evidence model](realtime-network-evidence-model.md).
+
 ## Process architecture
 
 ```text
@@ -716,7 +723,49 @@ credential value absent from the session and a fixture cookie listed by name.
 The fixture shows that the logger emits records; it does not evaluate the
 page's network use.
 
-Live 0.26 connections require an exact protocol-version match.
+Protocol version 0.27 records the realtime channels a page opens on the
+`browser.network` channel. Hooks in Blink's WebSocket channel, EventSource,
+and WebTransport implementations, at the points where Blink reports each
+channel to DevTools, emit thirteen record types:
+
+- `websocket-created`, `websocket-handshake-request`,
+  `websocket-handshake-response`, `websocket-message-sent`,
+  `websocket-message-received`, `websocket-close-requested`,
+  `websocket-error`, and `websocket-closed`.
+- `event-source-message`: each event a stream dispatches.
+- `web-transport-created`, `web-transport-established`,
+  `web-transport-close-requested`, and `web-transport-closed`.
+
+The recorded facts are bounded as follows:
+
+- Handshake headers follow the protocol 0.26 header value rules, and the
+  handshake records list the cookies sent and set by name.
+- Message text, event data, last event identifiers, and close reasons are kept
+  up to 4096 UTF-16 code units from the first 65536 bytes. A part that looks
+  like a credential, such as a JSON Web Token, an HTTP authentication
+  credential, or the value of a field whose name holds a credential word, is
+  replaced by `[withheld]` and its offset and reason are recorded.
+- Binary message content is not recorded; its length is.
+- WebTransport stream and datagram data is not observed.
+
+The network service removes cookie headers from the WebSocket handshake it
+reports to the renderer unless the renderer has raw header access. In a
+recording browser, a hook in the network service reports those headers with
+every value replaced instead, so the names reach the renderer and no value
+leaves the network service. The browser process marks the network service
+utility process with a non-secret switch while the recorder is connected;
+without it the network service behaves as stock. `Authorization` headers stay
+removed.
+
+The network logging fixture page also opens a WebSocket to the loopback
+listener, whose handshake sets a cookie, exchanges text and binary messages
+with it, and closes it; reads two events from an event stream; and creates a
+WebTransport session to a closed port and closes it while connecting. The
+generated credential values it sends and receives must be absent from the
+session. The fixture has no HTTP/3 server, so WebTransport establishment is not
+covered by the validation run.
+
+Live 0.27 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
@@ -803,7 +852,8 @@ Successful connections are persisted on the `browser.lifecycle` channel:
    Rendered-frame checkpoints remain outstanding.
 6. Add cookie operations and network metadata with prohibited values removed at
    source. Cookie operations are implemented in protocol 0.23. Network metadata
-   is implemented in protocol 0.26.
+   is implemented in protocol 0.26, and WebSocket, EventSource, and
+   WebTransport records in protocol 0.27.
 7. Add browser-chrome and compositor correlation needed by test scenarios.
 8. Package the browser and recorder as one installable application.
 

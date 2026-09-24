@@ -250,6 +250,21 @@ internal static class EventPayloadValidator
             case ("browser.network", "navigation-response"):
                 ValidateBrowserNetworkNavigationResponse(payload, issues, lineNumber);
                 break;
+            case ("browser.network", "websocket-created"):
+            case ("browser.network", "websocket-handshake-request"):
+            case ("browser.network", "websocket-handshake-response"):
+            case ("browser.network", "websocket-message-sent"):
+            case ("browser.network", "websocket-message-received"):
+            case ("browser.network", "websocket-close-requested"):
+            case ("browser.network", "websocket-error"):
+            case ("browser.network", "websocket-closed"):
+            case ("browser.network", "event-source-message"):
+            case ("browser.network", "web-transport-created"):
+            case ("browser.network", "web-transport-established"):
+            case ("browser.network", "web-transport-close-requested"):
+            case ("browser.network", "web-transport-closed"):
+                ValidateBrowserNetworkRealtime(payload, eventType, issues, lineNumber);
+                break;
             case ("window.foreground", "collector-omission"):
             case ("accessibility.uia.events", "collector-omission"):
             case ("graphics.desktop.frames", "collector-omission"):
@@ -1344,6 +1359,323 @@ internal static class EventPayloadValidator
                 path),
             issues,
             line);
+    }
+
+    // The most UTF-16 code units a recorded message, event field, or close
+    // reason holds, and the marker written where a credential was withheld.
+    private const int RealtimeTextLimit = 4096;
+    private const string RealtimeWithheldMarker = "[withheld]";
+
+    private static readonly string[] RealtimeWithheldReasons =
+        ["credential-name", "credential-value"];
+
+    private static void ValidateBrowserNetworkRealtime(
+        JsonElement payload,
+        string eventType,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        List<PropertyRule> rules =
+        [
+            RequiredObject("context"),
+            RequiredObject("scope")
+        ];
+        var scriptCall = eventType is "websocket-created" or "websocket-message-sent"
+            or "websocket-close-requested" or "web-transport-created"
+            or "web-transport-close-requested";
+        if (scriptCall)
+        {
+            rules.Add(NullableObject("location"));
+            rules.Add(NullableObject("world"));
+        }
+
+        var transport = eventType.StartsWith("web-transport-", StringComparison.Ordinal);
+        rules.Add(RequiredString(transport ? "transportId" : "inspectorId"));
+        string[] textProperties = [];
+        switch (eventType)
+        {
+            case "websocket-created":
+                rules.Add(RequiredText("url"));
+                rules.Add(NullableString("requestedProtocols"));
+                break;
+            case "websocket-handshake-request":
+                rules.Add(RequiredText("url"));
+                rules.Add(RequiredTextArray("cookieNames"));
+                AddRealtimeHeaderRules(rules);
+                break;
+            case "websocket-handshake-response":
+                AddRealtimeResponseRules(rules);
+                rules.Add(NullableString("extensions"));
+                break;
+            case "websocket-message-sent":
+            case "websocket-message-received":
+                rules.Add(RequiredEnum("opcode", "text", "binary"));
+                rules.Add(RequiredNumber("payloadLength", nonnegative: true));
+                rules.Add(NullableObject("payload"));
+                textProperties = ["payload"];
+                break;
+            case "websocket-close-requested":
+                rules.Add(NullableInteger("code"));
+                rules.Add(RequiredObject("reason"));
+                textProperties = ["reason"];
+                break;
+            case "websocket-error":
+                rules.Add(RequiredText("message"));
+                break;
+            case "websocket-closed":
+                rules.Add(RequiredEnum("cause", "dropped", "disconnected"));
+                rules.Add(NullableBoolean("wasClean"));
+                rules.Add(NullableInteger("code"));
+                rules.Add(NullableObject("reason"));
+                textProperties = ["reason"];
+                break;
+            case "event-source-message":
+                rules.Add(RequiredText("url"));
+                rules.Add(RequiredText("eventType"));
+                rules.Add(RequiredObject("lastEventId"));
+                rules.Add(RequiredNumber("dataLength", nonnegative: true));
+                rules.Add(RequiredObject("data"));
+                textProperties = ["lastEventId", "data"];
+                break;
+            case "web-transport-created":
+                rules.Add(RequiredText("url"));
+                break;
+            case "web-transport-established":
+                AddRealtimeResponseRules(rules);
+                rules.Add(RequiredNullableNumber("maxDatagramSize", nonnegative: true));
+                break;
+            case "web-transport-close-requested":
+                rules.Add(RequiredNullableNumber("code", nonnegative: true));
+                rules.Add(NullableObject("reason"));
+                textProperties = ["reason"];
+                break;
+            case "web-transport-closed":
+                rules.Add(RequiredBoolean("abrupt"));
+                rules.Add(RequiredNullableNumber("code", nonnegative: true));
+                rules.Add(NullableObject("reason"));
+                textProperties = ["reason"];
+                break;
+        }
+
+        ValidateShape(payload, rules, issues, line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateNetworkScopeProperty(payload, issues, line);
+        if (scriptCall)
+        {
+            ValidateBrowserLocationProperty(payload, issues, line);
+            ValidateBrowserExecutionWorldProperty(payload, issues, line);
+        }
+
+        ValidateRealtimeId(payload, transport ? "transportId" : "inspectorId", issues, line);
+        foreach (var property in textProperties)
+        {
+            ValidateOptionalObject(payload, property, ValidateRealtimeText, issues, line);
+        }
+
+        if (payload.TryGetProperty("headers", out _))
+        {
+            ValidateNetworkHeaders(
+                payload,
+                "headers",
+                "headerCount",
+                "headersTruncated",
+                issues,
+                line,
+                "events.ndjson#/payload");
+        }
+
+        ValidateOptionalObject(
+            payload, "remoteAddress", ValidateNetworkRemoteAddress, issues, line);
+        ValidateRealtimeConsistency(payload, eventType, issues, line);
+    }
+
+    private static void AddRealtimeHeaderRules(List<PropertyRule> rules)
+    {
+        rules.Add(RequiredInteger("headerCount", nonnegative: true));
+        rules.Add(RequiredObjectArray("headers"));
+        rules.Add(RequiredBoolean("headersTruncated"));
+    }
+
+    private static void AddRealtimeResponseRules(List<PropertyRule> rules)
+    {
+        rules.Add(NullableString("url"));
+        rules.Add(NullableString("httpVersion"));
+        rules.Add(RequiredInteger("status", nonnegative: true));
+        rules.Add(NullableString("statusText"));
+        rules.Add(NullableObject("remoteAddress"));
+        rules.Add(NullableString("selectedProtocol"));
+        rules.Add(RequiredTextArray("setCookieNames"));
+        AddRealtimeHeaderRules(rules);
+    }
+
+    private static void ValidateRealtimeId(
+        JsonElement payload,
+        string property,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        var id = ReadString(payload, property);
+        if (id is not null && !ulong.TryParse(
+                id,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out _))
+        {
+            AddError(
+                issues,
+                "browser-network-inspector-id-invalid",
+                $"events.ndjson#/payload/{property}",
+                $"{property} must be an unsigned decimal integer string.",
+                line);
+        }
+    }
+
+    // Checks one recorded text: its length, and that each withheld part is
+    // reported, in order, where the text carries the withheld marker.
+    private static void ValidateRealtimeText(
+        JsonElement value,
+        ICollection<ArchiveValidationIssue> issues,
+        long line,
+        string path)
+    {
+        ValidateShape(
+            value,
+            [
+                RequiredText("text"),
+                RequiredBoolean("truncated"),
+                RequiredObjectArray("withheld")
+            ],
+            issues,
+            line,
+            path);
+        var text = ReadString(value, "text");
+        if (text is null)
+        {
+            return;
+        }
+
+        if (text.Length > RealtimeTextLimit)
+        {
+            AddError(
+                issues,
+                "browser-network-text-too-long",
+                $"{path}/text",
+                $"A recorded text holds at most {RealtimeTextLimit} UTF-16 code units.",
+                line);
+        }
+
+        if (!value.TryGetProperty("withheld", out var withheld) ||
+            withheld.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var index = 0;
+        var next = 0;
+        foreach (var part in withheld.EnumerateArray())
+        {
+            var partPath = $"{path}/withheld/{index}";
+            index++;
+            if (part.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            ValidateShape(
+                part,
+                [
+                    RequiredInteger("offset", nonnegative: true),
+                    RequiredEnum("reason", RealtimeWithheldReasons)
+                ],
+                issues,
+                line,
+                partPath);
+            if (!part.TryGetProperty("offset", out var offsetValue) ||
+                !offsetValue.TryGetInt32(out var offset) || offset < 0)
+            {
+                continue;
+            }
+
+            if (offset < next ||
+                offset > text.Length - RealtimeWithheldMarker.Length ||
+                string.CompareOrdinal(
+                    text, offset, RealtimeWithheldMarker, 0,
+                    RealtimeWithheldMarker.Length) != 0)
+            {
+                AddError(
+                    issues,
+                    "browser-network-withheld-offset",
+                    $"{partPath}/offset",
+                    "A withheld part is reported in order at an offset where the text holds the withheld marker.",
+                    line);
+                continue;
+            }
+
+            next = offset + RealtimeWithheldMarker.Length;
+        }
+    }
+
+    private static void ValidateRealtimeConsistency(
+        JsonElement payload,
+        string eventType,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        string? problem = null;
+        string property = "payload";
+        switch (eventType)
+        {
+            case "websocket-message-sent":
+            case "websocket-message-received":
+                if ((ReadString(payload, "opcode") == "text") !=
+                    HasNonnullProperty(payload, "payload"))
+                {
+                    problem = "A text message carries its payload text and a binary message carries none.";
+                }
+
+                break;
+            case "websocket-closed":
+                var dropped = ReadString(payload, "cause") == "dropped";
+                property = "cause";
+                if (dropped != HasNonnullProperty(payload, "wasClean") ||
+                    dropped != HasNonnullProperty(payload, "code") ||
+                    dropped != HasNonnullProperty(payload, "reason"))
+                {
+                    problem = "A dropped channel reports whether it closed cleanly, its code, and its reason; a disconnected one reports none.";
+                }
+
+                break;
+            case "web-transport-close-requested":
+                property = "code";
+                if (HasNonnullProperty(payload, "code") !=
+                    HasNonnullProperty(payload, "reason"))
+                {
+                    problem = "A close request reports both its code and its reason, or neither.";
+                }
+
+                break;
+            case "web-transport-closed":
+                var abrupt = payload.TryGetProperty("abrupt", out var abruptValue) &&
+                    abruptValue.ValueKind == JsonValueKind.True;
+                property = "abrupt";
+                if (abrupt == HasNonnullProperty(payload, "code") ||
+                    abrupt == HasNonnullProperty(payload, "reason"))
+                {
+                    problem = "An abrupt close reports no code or reason, and a clean close reports both.";
+                }
+
+                break;
+        }
+
+        if (problem is not null)
+        {
+            AddError(
+                issues,
+                "browser-network-realtime-inconsistent",
+                $"events.ndjson#/payload/{property}",
+                problem,
+                line);
+        }
     }
 
     private static void ValidateNetworkScopeProperty(

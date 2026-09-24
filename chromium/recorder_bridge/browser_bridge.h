@@ -1158,6 +1158,130 @@ void RecordBrowserNavigationResponse(int64_t navigation_id,
                                      std::string document_token,
                                      NavigationResponseFacts facts);
 
+// Traffic outside the resource loader. WebSocket, EventSource, and
+// WebTransport records share the browser.network channel. Message, event, and
+// close-reason text passes through network_text::ReadMessageText, which keeps
+// up to network_text::kMessageTextLimit UTF-16 code units and replaces the
+// parts that look like a credential. Binary messages record their length only.
+// Handshake headers follow the header rules above, and the names of cookies in
+// Cookie and Set-Cookie headers are recorded without their values.
+
+// One WebSocket or WebTransport handshake response as Blink received it.
+struct RealtimeHandshakeResponseFacts {
+  std::string url;
+  std::string http_version;
+  int status_code = 0;
+  std::string status_text;
+  std::string remote_ip;
+  int remote_port = 0;
+  std::string selected_protocol;
+  std::string extensions;
+  // Negative when the response set no maximum.
+  int64_t max_datagram_size = -1;
+  std::vector<NetworkHeader> headers;
+};
+
+// Records a WebSocket Blink is about to connect, with the script call that
+// constructed it.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebSocketCreated(NetworkScope scope,
+                                 uint64_t inspector_id,
+                                 std::string url,
+                                 std::string requested_protocols,
+                                 CookieCallOrigin origin);
+
+// Records the opening handshake request the network service reported.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebSocketHandshakeRequest(NetworkScope scope,
+                                          uint64_t inspector_id,
+                                          std::string url,
+                                          std::vector<NetworkHeader> headers);
+
+// Records the opening handshake response that established a connection.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebSocketHandshakeResponse(
+    NetworkScope scope,
+    uint64_t inspector_id,
+    RealtimeHandshakeResponseFacts response);
+
+// Records one message a script sent or Blink received. The opcode is "text" or
+// "binary". The text is read only for a text message. A received message has
+// no script call, so its origin is empty.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebSocketMessage(NetworkScope scope,
+                                 uint64_t inspector_id,
+                                 bool sent,
+                                 std::string opcode,
+                                 int64_t payload_length,
+                                 std::string text,
+                                 CookieCallOrigin origin);
+
+// Records a script's close() call. A negative code means the script gave none.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebSocketCloseRequested(NetworkScope scope,
+                                        uint64_t inspector_id,
+                                        int code,
+                                        std::string reason,
+                                        CookieCallOrigin origin);
+
+// Records a failure Blink reported for a connection, with Blink's message.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebSocketError(NetworkScope scope,
+                               uint64_t inspector_id,
+                               std::string message);
+
+// Records the end of a connection. The cause is "dropped" when the network
+// service closed the channel, which reports whether the close was clean, the
+// code, and the reason, or "disconnected" when Blink disposed of the channel.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebSocketClosed(NetworkScope scope,
+                                uint64_t inspector_id,
+                                std::string cause,
+                                bool was_clean,
+                                int code,
+                                std::string reason);
+
+// Records one event an EventSource is about to dispatch. The inspector id is
+// the one the stream's request carries on the network channel.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkEventSourceMessage(NetworkScope scope,
+                                   uint64_t inspector_id,
+                                   std::string url,
+                                   std::string event_type,
+                                   std::string last_event_id,
+                                   std::string data);
+
+// Records a WebTransport session a script constructed.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebTransportCreated(NetworkScope scope,
+                                    uint64_t transport_id,
+                                    std::string url,
+                                    CookieCallOrigin origin);
+
+// Records that a WebTransport session was established.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebTransportEstablished(
+    NetworkScope scope,
+    uint64_t transport_id,
+    RealtimeHandshakeResponseFacts response);
+
+// Records a script's close() call on an open or connecting session.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebTransportCloseRequested(NetworkScope scope,
+                                           uint64_t transport_id,
+                                           bool close_info_present,
+                                           int64_t code,
+                                           std::string reason,
+                                           CookieCallOrigin origin);
+
+// Records the end of a session. An abrupt end carries no close information.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkWebTransportClosed(NetworkScope scope,
+                                   uint64_t transport_id,
+                                   bool abrupt,
+                                   int64_t code,
+                                   std::string reason);
+
 }  // namespace a11y_recorder
 
 #endif  // WINDOWS_A11Y_RECORDER_CHROMIUM_RECORDER_BRIDGE_BROWSER_BRIDGE_H_

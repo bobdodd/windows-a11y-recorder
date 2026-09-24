@@ -1736,8 +1736,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.26"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.26"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.27"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.27"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -4368,6 +4368,316 @@ class LayoutIntegrationTests(unittest.TestCase):
             with self.subTest(property=name):
                 self.assertIn(f"`{name}`", document)
                 self.assertIn(f"'{name}'", verifier)
+
+
+class RealtimeIntegrationTests(unittest.TestCase):
+    """Proves the realtime channel hooks are written once and match the bridge."""
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            try:
+                patch(path)
+                first = path.read_text(encoding="utf-8")
+                patch(path)
+                self.assertEqual(first, path.read_text(encoding="utf-8"))
+            finally:
+                if path in INTEGRATE._INTEGRATED_PATHS:
+                    INTEGRATE._INTEGRATED_PATHS.remove(path)
+            return first
+
+    def assert_bridge_calls_match(self, text):
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", text, signatures),
+        )
+
+    def module_source(self, include, helper_anchor, hooks):
+        return (
+            f"{include}\n\nnamespace blink {{\n\n{helper_anchor}  return;\n}}\n\n"
+            + "".join(f"void F() {{\n{anchor}}}\n\n" for anchor, _ in hooks)
+            + "}  // namespace blink\n"
+        )
+
+    def cases(self):
+        return (
+            (
+                "websocket_channel_impl.cc",
+                '#include "third_party/blink/renderer/modules/websockets/'
+                'websocket_channel_impl.h"',
+                "bool WebSocketChannelImpl::Connect(\n",
+                INTEGRATE.BLINK_WEBSOCKET_HOOKS,
+                INTEGRATE.patch_blink_websocket_channel,
+                True,
+            ),
+            (
+                "event_source.cc",
+                '#include "third_party/blink/renderer/modules/eventsource/'
+                'event_source.h"',
+                "void EventSource::OnMessageEvent(const AtomicString& "
+                "event_type,\n",
+                (
+                    (
+                        INTEGRATE.BLINK_EVENT_SOURCE_MESSAGE_ANCHOR,
+                        INTEGRATE.BLINK_EVENT_SOURCE_MESSAGE_HOOK,
+                    ),
+                ),
+                INTEGRATE.patch_blink_event_source,
+                False,
+            ),
+            (
+                "web_transport.cc",
+                '#include "third_party/blink/renderer/modules/webtransport/'
+                'web_transport.h"',
+                "// RecentlyForgottenStreamIdSet implementation\n",
+                INTEGRATE.BLINK_WEB_TRANSPORT_HOOKS,
+                INTEGRATE.patch_blink_web_transport,
+                True,
+            ),
+        )
+
+    def test_patches_each_realtime_source_idempotently(self):
+        for name, include, helper_anchor, hooks, patch, origin in self.cases():
+            with self.subTest(source=name):
+                patched = self.patch_twice(
+                    name, self.module_source(include, helper_anchor, hooks), patch
+                )
+                for _, hook in hooks:
+                    self.assertEqual(1, patched.count(hook))
+                self.assertEqual(
+                    1, patched.count(INTEGRATE.BLINK_REALTIME_HELPER_MARKER)
+                )
+                self.assertEqual(
+                    1 if origin else 0,
+                    patched.count(INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER),
+                )
+                self.assertLess(
+                    patched.index(INTEGRATE.BLINK_REALTIME_HELPER_MARKER),
+                    patched.index(helper_anchor),
+                )
+                self.assert_bridge_calls_match(patched)
+
+    def test_a_realtime_hook_fails_when_its_anchor_is_absent(self):
+        for name, include, helper_anchor, hooks, patch, _ in self.cases():
+            with self.subTest(source=name):
+                source = self.module_source(include, helper_anchor, hooks[:-1])
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / name
+                    path.write_text(source, encoding="utf-8")
+                    with self.assertRaises(RuntimeError):
+                        patch(path)
+
+    def test_only_script_calls_carry_a_script_origin(self):
+        # A received message, a handshake, a failure, and a close the network
+        # reported have no script call, so their hooks read no origin.
+        without_origin = (
+            INTEGRATE.BLINK_WEBSOCKET_RECEIVE_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_HANDSHAKE_REQUEST_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_HANDSHAKE_RESPONSE_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_FAIL_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_DISCONNECT_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_DROP_HOOK,
+            INTEGRATE.BLINK_EVENT_SOURCE_MESSAGE_HOOK,
+            INTEGRATE.BLINK_WEB_TRANSPORT_ESTABLISHED_HOOK,
+            INTEGRATE.BLINK_WEB_TRANSPORT_CLEANUP_HOOK,
+        )
+        with_origin = (
+            INTEGRATE.BLINK_WEBSOCKET_CREATED_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_SEND_TEXT_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_SEND_BLOB_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_SEND_BUFFER_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_CLOSE_HOOK,
+            INTEGRATE.BLINK_WEB_TRANSPORT_CREATED_HOOK,
+            INTEGRATE.BLINK_WEB_TRANSPORT_CLOSE_HOOK,
+        )
+        for hook in without_origin:
+            self.assertNotIn("RecorderCookieCallOrigin", hook)
+        for hook in with_origin:
+            self.assertIn("RecorderCookieCallOrigin", hook)
+
+    def test_binary_payloads_are_not_read(self):
+        for hook in (
+            INTEGRATE.BLINK_WEBSOCKET_SEND_BLOB_HOOK,
+            INTEGRATE.BLINK_WEBSOCKET_SEND_BUFFER_HOOK,
+        ):
+            self.assertNotIn("ByteSpan", hook.split("if (a11y_recorder")[1])
+            self.assertIn("std::string()", hook)
+        self.assertIn(
+            "receiving_message_type_is_text_ ? RecorderRealtimeChunksText",
+            INTEGRATE.BLINK_WEBSOCKET_RECEIVE_HOOK,
+        )
+
+    def test_patches_the_realtime_builds_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            modules = Path(directory)
+            sources = {
+                "websockets": (
+                    'blink_modules_sources("websockets") {\n'
+                    '  sources = [ "websocket_channel_impl.cc" ]\n\n'
+                    + INTEGRATE.BLINK_WEBSOCKETS_BUILD_DEPS
+                    + "}\n"
+                ),
+                "eventsource": (
+                    'blink_modules_sources("eventsource") {\n  sources = [\n'
+                    + INTEGRATE.BLINK_EVENT_SOURCE_BUILD_ANCHOR
+                ),
+                "webtransport": (
+                    'blink_modules_sources("webtransport") {\n  sources = [\n'
+                    + INTEGRATE.BLINK_WEB_TRANSPORT_BUILD_ANCHOR
+                    + '\nsource_set("unit_tests") {\n}\n'
+                ),
+            }
+            for name, text in sources.items():
+                (modules / name).mkdir()
+                (modules / name / "BUILD.gn").write_text(text, encoding="utf-8")
+            paths = [modules / name / "BUILD.gn" for name in sources]
+            try:
+                INTEGRATE.patch_blink_realtime_builds(modules)
+                first = [path.read_text(encoding="utf-8") for path in paths]
+                INTEGRATE.patch_blink_realtime_builds(modules)
+                self.assertEqual(
+                    first, [path.read_text(encoding="utf-8") for path in paths]
+                )
+            finally:
+                for path in paths:
+                    if path in INTEGRATE._INTEGRATED_PATHS:
+                        INTEGRATE._INTEGRATED_PATHS.remove(path)
+            self.assertIn(INTEGRATE.BLINK_WEBSOCKETS_BUILD_PATCHED_DEPS, first[0])
+            for text in first[1:]:
+                self.assertEqual(1, text.count('"//chromium/recorder_bridge"'))
+                self.assertIn('  deps = [ "//chromium/recorder_bridge" ]\n}\n', text)
+
+
+class NetworkServiceCookieNameTests(unittest.TestCase):
+    """Proves the network service reports handshake cookies by name only."""
+
+    SOURCE = (
+        '#include "services/network/websocket.h"\n\n'
+        '#include "build/build_config.h"\n'
+        '#include "net/base/auth.h"\n\n'
+        "namespace network {\nnamespace {\n\n"
+        "mojom::WebSocketHandshakeResponsePtr ToMojo(\n"
+        "    std::unique_ptr<net::WebSocketHandshakeResponseInfo> response,\n"
+        "    bool has_raw_headers_access) {\n"
+        "  while (response->headers->EnumerateHeaderLines(&iter, &name, &value)) {\n"
+        "  }\n}\n\n}  // namespace\n\n"
+        "void Handler::OnStartOpeningHandshake() {\n"
+        "  while (it.GetNext()) {\n  }\n}\n\n}  // namespace network\n"
+    )
+    BUILD = (
+        'component("network_service") {\n'
+        '  deps = [\n    "//base",\n    "//base:build_time",\n'
+        '    "//net",\n    "//url",\n  ]\n\n'
+        "  if (is_linux) {\n    deps += [ \":sandbox\" ]\n  }\n}\n"
+    )
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            try:
+                patch(path)
+                first = path.read_text(encoding="utf-8")
+                patch(path)
+                self.assertEqual(first, path.read_text(encoding="utf-8"))
+            finally:
+                if path in INTEGRATE._INTEGRATED_PATHS:
+                    INTEGRATE._INTEGRATED_PATHS.remove(path)
+            return first
+
+    def test_patches_the_websocket_source_idempotently(self):
+        text = self.patch_twice(
+            "websocket.cc", self.SOURCE, INTEGRATE.patch_network_websocket
+        )
+        self.assertEqual(1, text.count("bool RecorderReportsCookieNames() {"))
+        self.assertEqual(1, text.count("RecorderSetCookieName(value)"))
+        self.assertEqual(1, text.count("RecorderCookieHeaderNames(it.value())"))
+        # BUILDFLAG is only defined once the build configuration is included.
+        self.assertLess(
+            text.index('#include "build/build_config.h"'),
+            text.index("#if BUILDFLAG(IS_WIN)"),
+        )
+        # The helpers live in the anonymous namespace ToMojo uses.
+        self.assertLess(
+            text.index("bool RecorderReportsCookieNames() {"),
+            text.index("mojom::WebSocketHandshakeResponsePtr ToMojo("),
+        )
+
+    def test_hooks_run_only_without_raw_header_access(self):
+        self.assertIn(
+            "!has_raw_headers_access && RecorderReportsCookieNames()",
+            INTEGRATE.NETWORK_WEBSOCKET_RESPONSE_HOOK,
+        )
+        self.assertIn(
+            "!impl_->has_raw_headers_access_ && RecorderReportsCookieNames()",
+            INTEGRATE.NETWORK_WEBSOCKET_REQUEST_HOOK,
+        )
+        # Only Cookie and Set-Cookie are reported. Authorization headers keep
+        # being stripped by Chromium's own filter.
+        for hook in (
+            INTEGRATE.NETWORK_WEBSOCKET_RESPONSE_HOOK,
+            INTEGRATE.NETWORK_WEBSOCKET_REQUEST_HOOK,
+        ):
+            self.assertNotIn("Authorization", hook)
+
+    def test_the_hooks_forward_no_original_value(self):
+        # Each forwarded header is built from the name-only text alone.
+        self.assertIn(
+            "mojom::HttpHeader::New(name, names_only)",
+            INTEGRATE.NETWORK_WEBSOCKET_RESPONSE_HOOK,
+        )
+        self.assertIn(
+            "mojom::HttpHeader::New(it.name(), names_only)",
+            INTEGRATE.NETWORK_WEBSOCKET_REQUEST_HOOK,
+        )
+
+    def test_the_switch_names_match_the_bridge(self):
+        switches = (
+            MODULE_PATH.parent / "recorder_bridge" / "recorder_switches.h"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'kRecordingNetworkServiceSwitch[] =\n'
+            '    "a11y-recorder-recording-network-service";',
+            switches,
+        )
+        self.assertIn(
+            '"network.mojom.NetworkService"', switches
+        )
+
+    def test_fails_when_a_websocket_anchor_is_absent(self):
+        source = self.SOURCE.replace("  while (it.GetNext()) {\n", "")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "websocket.cc"
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                INTEGRATE.patch_network_websocket(path)
+
+    def test_appends_the_build_dependency_after_the_deps_list(self):
+        text = self.patch_twice(
+            "BUILD.gn", self.BUILD, INTEGRATE.patch_network_service_build
+        )
+        self.assertEqual(
+            1, text.count('"//chromium/recorder_bridge:cookie_names"')
+        )
+        self.assertLess(
+            text.index('    "//url",\n  ]\n'),
+            text.index('deps += [ "//chromium/recorder_bridge:cookie_names" ]'),
+        )
+
+    def test_the_cookie_name_target_needs_no_chromium_dependency(self):
+        build = (
+            MODULE_PATH.parent / "recorder_bridge" / "BUILD.gn"
+        ).read_text(encoding="utf-8")
+        start = build.index('source_set("cookie_names") {')
+        target = build[start:build.index("\n}\n", start)]
+        self.assertNotIn("deps", target)
+        self.assertIn('"cookie_text.cc"', target)
+        self.assertIn('public_deps = [ ":cookie_names" ]', build)
 
 
 if __name__ == "__main__":

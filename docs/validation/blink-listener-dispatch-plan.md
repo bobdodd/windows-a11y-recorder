@@ -1705,3 +1705,70 @@ crossed the network, which the archive validator rejected, so that length is
 now recorded as null. A document's repeated request for a resource it already
 holds does not consult the memory cache, so the fixture's second script load
 now goes into a new frame.
+
+## Realtime network logging
+
+Protocol 0.27 records WebSocket, EventSource, and WebTransport channels on the
+`browser.network` channel. The network logging fixture page runs the realtime
+steps after its fetch steps, from the same page function. For each run the
+script generates a socket credential value and an event credential value, and
+reuses the released loopback port as a WebTransport destination. The fixture
+listener serves two more paths, and the page:
+
+1. opens a WebSocket to `/network/socket` requesting the
+   `a11y-recorder-fixture` subprotocol; the listener completes the handshake
+   with that subprotocol and a `Set-Cookie` header for `a11y_recorder_socket`,
+   and sends the text message `fixture greeting`;
+2. sends the text message
+   `{"type":"auth","token":"<socket value>","room":"lobby"}` and a four-byte
+   binary message, both of which the listener echoes;
+3. closes the socket with code 1000 and the reason `fixture done`, which the
+   listener answers with a close frame;
+4. opens an EventSource for `/network/events`, which carries an event of type
+   `status` with the identifier `7` and the data
+   `{"access_token":"<event value>"}`, then a plain message `plain event`, and
+   closes it after both; and
+5. creates a WebTransport session to the released port over `https` and closes
+   it with code 7 and the reason `fixture close` while it is still connecting.
+
+The page reports the greeting, whether each echo matched what it sent, the
+close code and whether the close was clean, the events it received, and
+whether the WebTransport session's `closed` promise rejected. The verifier
+stops if any of those differs from what the steps should produce.
+
+The verifier adds both credential values to those no line of the event log may
+contain. For the WebSocket it requires a `websocket-created` record for the
+socket URL with the requested subprotocol, the fixture script's main world,
+and a source location; and, with the same inspector identifier and document, a
+handshake request whose cookie names include `a11y_recorder_response` and whose
+`Cookie` and `Sec-WebSocket-Key` values are withheld, a handshake response with
+status 101, the selected subprotocol, `a11y_recorder_socket` among the set
+cookie names, and its `Set-Cookie` value withheld, one received greeting, one
+sent and one echoed text message each recorded as
+`{"type":"auth","token":"[withheld]","room":"lobby"}` with one withheld part at
+the marker, two binary messages of four bytes without content, a close request
+with code 1000 and reason `fixture done` in the main world, and a `dropped`
+closure that was clean with code 1000. For the event stream it requires one
+`status` event whose data is `{"access_token":"[withheld]"}` with last event
+identifier `7`, and one `message` event whose data is `plain event`. For
+WebTransport it requires a creation record for the session URL and, with the
+same identifier and document, a close request with code 7 and reason
+`fixture close`, an abrupt closure without code or reason, and no
+establishment record.
+
+The world check now also admits the realtime records written at a script's
+call: `websocket-created`, `websocket-message-sent`,
+`websocket-close-requested`, `web-transport-created`, and
+`web-transport-close-requested`.
+
+The fixture has no HTTP/3 server, so the run does not cover WebTransport
+establishment, and it sends no message large enough to be cut. Those are
+covered by the archive validator and receiver tests only.
+
+These checks show that the logger emitted linked realtime records, listed
+handshake cookies by name, and withheld credential values. They do not
+evaluate the page's network use.
+
+### Measured result
+
+Not yet run on Windows.
