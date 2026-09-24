@@ -335,26 +335,23 @@ Completed:
     JavaScript world (protocols 0.18 to 0.21).
 16. State lost browser evidence in the archive (protocol 0.22).
 17. Record and validate cookie operations, interaction-state changes, layout
-    geometry and computed styles, and network metadata (protocols 0.23 to
-    0.26).
+    geometry and computed styles, network metadata, and WebSocket,
+    EventSource, and WebTransport channels (protocols 0.23 to 0.27).
 18. Launch instrumented Chromium from the recorder application and record its
     evidence alongside the desktop, input, and UI Automation channels.
 
 Remaining:
 
-1. Validate WebSocket, EventSource, and WebTransport logging (protocol 0.27)
-   on Windows. The code and its tests are in place; the Windows validation run
-   has not yet been made.
-2. Extend DOM and layout capture to shadow-root content and pseudo-elements.
-3. Record interaction state at each checkpoint, not only its changes.
-4. Extend listener and dispatch evidence to shadow-adjusted dispatch paths,
+1. Extend DOM and layout capture to shadow-root content and pseudo-elements.
+2. Record interaction state at each checkpoint, not only its changes.
+3. Extend listener and dispatch evidence to shadow-adjusted dispatch paths,
    worker global scopes, and dispatches whose original target is never a Node.
-5. Record rendered frame or compositor correlation identifiers.
-6. Record an application-launched session with the cookie, interaction,
+4. Record rendered frame or compositor correlation identifiers.
+5. Record an application-launched session with the cookie, interaction,
    layout, and network channels.
-7. Record representative NVDA, JAWS, and Narrator sessions.
-8. Add evidence correlation and screen-reader behavior analysis.
-9. Investigate touch and gesture coverage on representative hardware.
+6. Record representative NVDA, JAWS, and Narrator sessions.
+7. Add evidence correlation and screen-reader behavior analysis.
+8. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 
