@@ -191,3 +191,7 @@ withheld; that the WebTransport session has creation, close request, and
 abrupt closure records and no establishment record; and that the call records
 carry the fixture script's main world and a source location. The fixture shows
 that the logger emits records; it does not evaluate the page's network use.
+
+Revision `cc62135` passed this validation on Windows on September 24, 2026.
+The measured result is in
+[the Blink listener dispatch validation plan](../validation/blink-listener-dispatch-plan.md#realtime-network-logging).

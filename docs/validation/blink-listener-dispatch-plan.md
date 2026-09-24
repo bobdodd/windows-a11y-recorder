@@ -1771,4 +1771,45 @@ evaluate the page's network use.
 
 ### Measured result
 
-Not yet run on Windows.
+Revision `cc62135` was run with the complete script on the same host,
+September 24, 2026. The run followed a rebuild of Chromium with the protocol
+0.27 integration, including the network service hook. The 30-second capture
+validated 61,522 events and 164 artifacts and reported no network-service
+crashes. The recorder accepted 61,522 records and dropped none. The complete
+script exited with code 0, with no omission records of any kind, no bridge
+connection waits, and no bridge write or initialization failures. No defect was
+found; the first Windows run passed.
+
+The validated session is:
+
+`C:\Users\Public\Downloads\A11yRecorderRealtimeLogging\sessions\20260924-181352-8c6f39f26d7745eb997e9427fc4cd590`
+
+The verifier reported:
+
+| Value | Result |
+| --- | --- |
+| WebSocket inspector identifier | 15 |
+| Handshake request cookie names | `a11y_recorder_response`, `a11y_recorder_document`, `a11y_recorder_fetch` |
+| Handshake response set cookie names | `a11y_recorder_socket` |
+| WebSocket messages | 5 |
+| WebSocket closure code | 1000 |
+| EventSource events | 2 |
+| WebTransport identifier | 17 |
+| WebTransport closure abrupt | yes |
+| Records containing a credential value or a cookie value | 0 |
+
+The handshake request cookie names show that the network service hook reported
+the handshake `Cookie` header to the renderer by name: without the hook the
+network service removes that header, and the renderer would have no names to
+record.
+
+Of the 306 network records, 15 were realtime records: 3
+`websocket-message-received`, 2 `websocket-message-sent`, 2
+`event-source-message`, and one each of `websocket-created`,
+`websocket-handshake-request`, `websocket-handshake-response`,
+`websocket-close-requested`, `websocket-closed`, `web-transport-created`,
+`web-transport-close-requested`, and `web-transport-closed`. No
+`websocket-error` or `web-transport-established` record was emitted, as the
+fixture expects. The 15 records held 23,627 bytes of the 82,534,822-byte event
+file. All of them describe the fixture's own channels, so these figures do not
+predict the volume of an application that keeps a socket open.
