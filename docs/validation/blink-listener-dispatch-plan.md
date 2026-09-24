@@ -1655,5 +1655,52 @@ the cookie call records, and the interaction records now also admits the
 when Blink issued the request.
 
 These checks show that the logger emitted linked network records and withheld
-credential values. They do not evaluate the page's network use. No measured
-result has been recorded yet.
+credential values. They do not evaluate the page's network use.
+
+### Measured result
+
+Revision `45389e0` was run with the complete script on the same host,
+September 23, 2026, after rebuilding Chromium with the protocol 0.26
+integration. The 30-second capture validated 32,008 events and 161 artifacts
+and reported no network-service crashes. The recorder accepted 32,008 records
+and dropped none. The complete script exited with code 0, with no omission
+records of any kind, no bridge connection waits, and no bridge write or
+initialization failures.
+
+The validated session is:
+
+`C:\Users\Public\Downloads\A11yRecorderNetworkLogging\sessions\20260924-034349-1d78073514fc42c5a1ce2a6d63c6a4a1`
+
+The network fixture page reported data status 200, a redirected second fetch,
+a rejected fetch to the closed port, two runs of the cached script, and the
+worker's text. The verifier reported:
+
+| Value | Result |
+| --- | --- |
+| Network records | 286 |
+| Data fetch inspector identifier | 8 |
+| Data fetch wire cookie names | `a11y_recorder_response`, `a11y_recorder_document`, `a11y_recorder_fetch` |
+| Redirected fetch inspector identifier | 9 |
+| Refused fetch network error | -102, `ERR_CONNECTION_REFUSED` |
+| Memory cache hit URL | `/network/cached.js` |
+| Navigation redirect chain | `/network-start` then `/network` |
+| Records containing a credential value or the cookie value | 0 |
+
+The 286 records were 78 `request-will-be-sent`, 78 `response-received`, 76
+`request-finished`, 17 `navigation-response`, 15 `request-headers-sent`, 15
+`response-headers-received`, 4 `memory-cache-hit`, and 3 `request-failed`
+records. Together they held 1,089,032 bytes of the 46,560,119-byte event file,
+about 2 percent. Most of them describe Chromium's own pages and resources
+rather than the fixture's, and `request-headers-sent` and
+`response-headers-received` appear only for requests the network service
+handled. The session is short and its pages small, so these figures do not
+predict the volume of an application under test.
+
+Three defects were found and corrected on the way to this run. A worker
+request read an isolated world's name off the main thread, which failed a
+Blink check and ended the renderer, so world names are now read only on the
+main thread. Chromium reports an encoded data length of -1 when no data
+crossed the network, which the archive validator rejected, so that length is
+now recorded as null. A document's repeated request for a resource it already
+holds does not consult the memory cache, so the fixture's second script load
+now goes into a new frame.
