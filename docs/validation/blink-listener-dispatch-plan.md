@@ -1660,7 +1660,8 @@ credential values. They do not evaluate the page's network use.
 ### Measured result
 
 Revision `45389e0` was run with the complete script on the same host,
-September 23, 2026, after rebuilding Chromium with the protocol 0.26
+September 23, 2026. The branch was rebased when it was merged, so the same
+tree is commit `1f241da` on `main`. The run followed a rebuild of Chromium with the protocol 0.26
 integration. The 30-second capture validated 32,008 events and 161 artifacts
 and reported no network-service crashes. The recorder accepted 32,008 records
 and dropped none. The complete script exited with code 0, with no omission
