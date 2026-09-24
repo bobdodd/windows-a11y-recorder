@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.26";
+    public const string CurrentVersion = "0.27";
 }
 
 public static class BrowserEvidenceChannels
@@ -72,6 +72,19 @@ public static class BrowserEvidenceEventTypes
     public const string NetworkRequestHeadersSent = "request-headers-sent";
     public const string NetworkResponseHeadersReceived = "response-headers-received";
     public const string NetworkNavigationResponse = "navigation-response";
+    public const string NetworkWebSocketCreated = "websocket-created";
+    public const string NetworkWebSocketHandshakeRequest = "websocket-handshake-request";
+    public const string NetworkWebSocketHandshakeResponse = "websocket-handshake-response";
+    public const string NetworkWebSocketMessageSent = "websocket-message-sent";
+    public const string NetworkWebSocketMessageReceived = "websocket-message-received";
+    public const string NetworkWebSocketCloseRequested = "websocket-close-requested";
+    public const string NetworkWebSocketError = "websocket-error";
+    public const string NetworkWebSocketClosed = "websocket-closed";
+    public const string NetworkEventSourceMessage = "event-source-message";
+    public const string NetworkWebTransportCreated = "web-transport-created";
+    public const string NetworkWebTransportEstablished = "web-transport-established";
+    public const string NetworkWebTransportCloseRequested = "web-transport-close-requested";
+    public const string NetworkWebTransportClosed = "web-transport-closed";
     public const string Omission = "collector-omission";
 }
 
@@ -864,3 +877,150 @@ public sealed record BrowserNetworkNavigationResponsePayload(
     bool RequestHeadersTruncated,
     BrowserNavigationResponseHead? Response,
     BrowserNavigationResponseTiming? Timing);
+
+// A withheld part of a recorded text. Offset counts UTF-16 code units into the
+// recorded text, where the withheld marker stands in for the credential.
+public sealed record BrowserNetworkWithheldText(int Offset, string Reason);
+
+// The recordable part of a message, event field, or close reason: text up to
+// the recorder's length limit, with each credential-looking part withheld.
+public sealed record BrowserNetworkText(
+    string Text,
+    bool Truncated,
+    IReadOnlyList<BrowserNetworkWithheldText> Withheld);
+
+// Records a script creating a WebSocket. InspectorId is the identifier Blink
+// gives the channel, shared by every later record for it.
+public sealed record BrowserNetworkWebSocketCreatedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string Url,
+    string? RequestedProtocols,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+// Records the opening handshake request as the network service reported it to
+// the renderer. CookieNames lists the cookies named in its Cookie header. The
+// network service of a recording browser reports that header, and each
+// Set-Cookie header of the response, with every value replaced, so the names
+// are available without any value reaching the renderer. The list is empty when
+// the handshake sent no cookie.
+public sealed record BrowserNetworkWebSocketHandshakeRequestPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string Url,
+    IReadOnlyList<string> CookieNames,
+    int HeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> Headers,
+    bool HeadersTruncated);
+
+public sealed record BrowserNetworkWebSocketHandshakeResponsePayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string? Extensions,
+    string? Url,
+    string? HttpVersion,
+    int Status,
+    string? StatusText,
+    BrowserNetworkRemoteAddress? RemoteAddress,
+    string? SelectedProtocol,
+    IReadOnlyList<string> SetCookieNames,
+    int HeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> Headers,
+    bool HeadersTruncated);
+
+// Records one WebSocket message. Payload is null for a binary message, whose
+// content is not recorded. Location and World are present only for a message
+// a script sent.
+public sealed record BrowserNetworkWebSocketMessagePayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string Opcode,
+    double PayloadLength,
+    BrowserNetworkText? Payload,
+    BrowserScriptLocation? Location = null,
+    BrowserExecutionWorld? World = null);
+
+public sealed record BrowserNetworkWebSocketCloseRequestedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    int? Code,
+    BrowserNetworkText Reason,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+public sealed record BrowserNetworkWebSocketErrorPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string Message);
+
+// Records the end of a WebSocket channel. A dropped channel reports how it
+// closed; a disconnected one, closed because its context went away, reports
+// only the cause.
+public sealed record BrowserNetworkWebSocketClosedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string Cause,
+    bool? WasClean,
+    int? Code,
+    BrowserNetworkText? Reason);
+
+public sealed record BrowserNetworkEventSourceMessagePayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string Url,
+    string EventType,
+    BrowserNetworkText LastEventId,
+    double DataLength,
+    BrowserNetworkText Data);
+
+// Records a script creating a WebTransport session. TransportId is a
+// recorder-assigned identifier shared by every later record for the session.
+public sealed record BrowserNetworkWebTransportCreatedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string TransportId,
+    string Url,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+public sealed record BrowserNetworkWebTransportEstablishedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string TransportId,
+    double? MaxDatagramSize,
+    string? Url,
+    string? HttpVersion,
+    int Status,
+    string? StatusText,
+    BrowserNetworkRemoteAddress? RemoteAddress,
+    string? SelectedProtocol,
+    IReadOnlyList<string> SetCookieNames,
+    int HeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> Headers,
+    bool HeadersTruncated);
+
+public sealed record BrowserNetworkWebTransportCloseRequestedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string TransportId,
+    double? Code,
+    BrowserNetworkText? Reason,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+public sealed record BrowserNetworkWebTransportClosedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string TransportId,
+    bool Abrupt,
+    double? Code,
+    BrowserNetworkText? Reason);

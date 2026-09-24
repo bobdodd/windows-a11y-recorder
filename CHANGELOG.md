@@ -20,6 +20,22 @@ from the product version.
 
 ### Added
 
+- Record WebSocket, EventSource, and WebTransport channels on the
+  `browser.network` channel. Protocol 0.27 records each WebSocket's creation,
+  handshake request and response, messages sent and received, close request,
+  failure, and closure; each EventSource event; and each WebTransport session's
+  creation, establishment, close request, and closure. Handshake cookies are
+  listed by name. Message text, event data, and close reasons are kept up to
+  4096 UTF-16 code units, with JSON Web Tokens, HTTP authentication credentials,
+  and the values of credential-named fields replaced at source by a
+  `[withheld]` marker whose offset and reason are recorded. Binary message
+  content is not recorded. In a recording browser, the network service reports
+  WebSocket handshake cookie headers to the renderer with every value replaced,
+  so the names are available and no value leaves the network service. The
+  validation run extends the network fixture page with a WebSocket exchange,
+  an event stream, and a WebTransport session closed while connecting, and the
+  verifier requires linked records for each and no generated credential value
+  anywhere in the session.
 - Record network metadata on a new `browser.network` channel. Protocol 0.26
   records each renderer request and redirect, response, finish, failure, and
   memory cache use, with the initiating document or worker and script; the

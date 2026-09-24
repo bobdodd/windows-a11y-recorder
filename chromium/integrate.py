@@ -6983,6 +6983,677 @@ def patch_web_contents_navigation_response(path: Path) -> None:
     write_patched(path, text)
 
 
+# Realtime network channels. WebSocket, EventSource, and WebTransport traffic
+# does not pass through the resource load observers, so each is read where its
+# module reports it to DevTools. The hooks sit beside the DevTools probes, so
+# each record describes what DevTools would see at the same point.
+BLINK_REALTIME_INCLUDES = (
+    "#include <algorithm>",
+    "#include <string>",
+    "#include <vector>",
+    BLINK_BRIDGE_INCLUDE,
+    *BLINK_COOKIE_ORIGIN_INCLUDES,
+    BLINK_EXECUTION_CONTEXT_INCLUDE,
+    BLINK_DOCUMENT_INCLUDE,
+    '#include \"third_party/blink/renderer/core/frame/local_dom_window.h\"',
+    '#include \"third_party/blink/renderer/core/workers/'
+    'worker_or_worklet_global_scope.h\"',
+    '#include \"base/strings/string_number_conversions.h\"',
+    '#include \"net/http/http_version.h\"',
+)
+BLINK_REALTIME_HELPER_MARKER = (
+    "a11y_recorder::NetworkScope RecorderRealtimeNetworkScope("
+)
+BLINK_REALTIME_HELPER = """\
+namespace {
+
+// Names the script context a realtime channel belongs to. A window's channels
+// belong to its document; a worker's channels belong to its global scope,
+// which has no document.
+a11y_recorder::NetworkScope RecorderRealtimeNetworkScope(
+    ExecutionContext* context) {
+  a11y_recorder::NetworkScope scope;
+  scope.context_kind = "other";
+  if (!context) {
+    return scope;
+  }
+  if (auto* window = DynamicTo<LocalDOMWindow>(context)) {
+    scope.context_kind = "window";
+    if (Document* document = window->document()) {
+      scope.document_node_id = document->GetDomNodeId();
+      scope.document_token = document->Token().ToString();
+    }
+    return scope;
+  }
+  if (context->IsDedicatedWorkerGlobalScope()) {
+    scope.context_kind = "dedicated-worker";
+  } else if (context->IsSharedWorkerGlobalScope()) {
+    scope.context_kind = "shared-worker";
+  } else if (context->IsServiceWorkerGlobalScope()) {
+    scope.context_kind = "service-worker";
+  } else if (context->IsWorkletGlobalScope()) {
+    scope.context_kind = "worklet";
+  }
+  if (auto* global = DynamicTo<WorkerOrWorkletGlobalScope>(context)) {
+    const base::UnguessableToken& token = global->GetDevToolsToken();
+    if (!token.is_empty()) {
+      scope.worker_token = token.ToString();
+    }
+  }
+  scope.global_object_url = context->Url().GetString().Utf8();
+  return scope;
+}
+
+// Reads a version the network service reported. Blink receives a WebSocket
+// handshake's version as a Mojo structure and a WebTransport response's
+// version as the network stack's own type.
+[[maybe_unused]] std::string RecorderRealtimeHttpVersion(
+    const net::HttpVersion& version) {
+  return base::NumberToString(version.major_value()) + "." +
+         base::NumberToString(version.minor_value());
+}
+
+template <typename MojoVersion>
+[[maybe_unused]] std::string RecorderRealtimeHttpVersion(
+    const MojoVersion& version) {
+  if (!version) {
+    return std::string();
+  }
+  return base::NumberToString(version->major_value) + "." +
+         base::NumberToString(version->minor_value);
+}
+
+// Copies header names and values. The bridge withholds credential values.
+template <typename Headers>
+[[maybe_unused]] std::vector<a11y_recorder::NetworkHeader>
+RecorderRealtimeMojoHeaders(const Headers& headers) {
+  std::vector<a11y_recorder::NetworkHeader> copied;
+  for (const auto& header : headers) {
+    copied.push_back({header->name.Utf8(), header->value.Utf8()});
+  }
+  return copied;
+}
+
+// Joins the chunks of a received text message, reading no further than the
+// bridge scans for credentials.
+[[maybe_unused]] std::string RecorderRealtimeChunksText(
+    const Vector<base::span<const uint8_t>>& chunks) {
+  constexpr size_t kScanLimit = 65536;
+  std::string text;
+  for (const base::span<const uint8_t>& chunk : chunks) {
+    if (text.size() >= kScanLimit) {
+      break;
+    }
+    const size_t take = std::min(chunk.size(), kScanLimit - text.size());
+    text.append(reinterpret_cast<const char*>(chunk.data()), take);
+  }
+  return text;
+}
+
+}  // namespace
+
+"""
+
+BLINK_WEBSOCKET_SCOPE = "RecorderRealtimeNetworkScope(execution_context_.Get())"
+BLINK_WEBSOCKET_ORIGIN = "RecorderCookieCallOrigin(execution_context_.Get())"
+
+BLINK_WEBSOCKET_CREATED_ANCHOR = """\
+  probe::WillCreateWebSocket(execution_context_, identifier_, url, protocol,
+                             &devtools_throttling_token);
+"""
+BLINK_WEBSOCKET_CREATED_HOOK = BLINK_WEBSOCKET_CREATED_ANCHOR + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebSocketCreated(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_,
+        url.GetString().Utf8(), protocol.Utf8(),
+        {BLINK_WEBSOCKET_ORIGIN});
+  }}
+"""
+
+BLINK_WEBSOCKET_SEND_TEXT_ANCHOR = """\
+  probe::DidSendWebSocketMessage(execution_context_, identifier_,
+                                 WebSocketOpCode::kOpCodeText, true,
+                                 base::as_byte_span(message));
+"""
+BLINK_WEBSOCKET_SEND_TEXT_HOOK = BLINK_WEBSOCKET_SEND_TEXT_ANCHOR + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebSocketMessage(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_,
+        /*sent=*/true, "text", base::checked_cast<int64_t>(message.size()),
+        message, {BLINK_WEBSOCKET_ORIGIN});
+  }}
+"""
+
+BLINK_WEBSOCKET_SEND_BLOB_ANCHOR = """\
+  probe::DidSendWebSocketMessage(execution_context_, identifier_,
+                                 WebSocketOpCode::kOpCodeBinary, true,
+                                 base::byte_span_from_cstring(""));
+"""
+BLINK_WEBSOCKET_SEND_BLOB_HOOK = BLINK_WEBSOCKET_SEND_BLOB_ANCHOR + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebSocketMessage(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_,
+        /*sent=*/true, "binary",
+        base::checked_cast<int64_t>(blob_data_handle->size()), std::string(),
+        {BLINK_WEBSOCKET_ORIGIN});
+  }}
+"""
+
+BLINK_WEBSOCKET_SEND_BUFFER_ANCHOR = """\
+  probe::DidSendWebSocketMessage(
+      execution_context_, identifier_, WebSocketOpCode::kOpCodeBinary, true,
+      buffer.ByteSpan().subspan(byte_offset, byte_length));
+"""
+BLINK_WEBSOCKET_SEND_BUFFER_HOOK = BLINK_WEBSOCKET_SEND_BUFFER_ANCHOR + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebSocketMessage(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_,
+        /*sent=*/true, "binary", base::checked_cast<int64_t>(byte_length),
+        std::string(), {BLINK_WEBSOCKET_ORIGIN});
+  }}
+"""
+
+BLINK_WEBSOCKET_CLOSE_ANCHOR = """\
+  DVLOG(1) << this << " Close(" << code << ", " << reason << ")";
+"""
+BLINK_WEBSOCKET_CLOSE_HOOK = BLINK_WEBSOCKET_CLOSE_ANCHOR + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebSocketCloseRequested(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_,
+        code == kCloseEventCodeNotSpecified ? -1 : code, reason.Utf8(),
+        {BLINK_WEBSOCKET_ORIGIN});
+  }}
+"""
+
+BLINK_WEBSOCKET_FAIL_ANCHOR = """\
+  probe::DidReceiveWebSocketMessageError(execution_context_, identifier_,
+                                         reason);
+"""
+BLINK_WEBSOCKET_FAIL_HOOK = BLINK_WEBSOCKET_FAIL_ANCHOR + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebSocketError(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_, reason.Utf8());
+  }}
+"""
+
+BLINK_WEBSOCKET_DISCONNECT_ANCHOR = """\
+    probe::DidCloseWebSocket(execution_context_.Get(), identifier_);
+"""
+BLINK_WEBSOCKET_DISCONNECT_HOOK = BLINK_WEBSOCKET_DISCONNECT_ANCHOR + f"""\
+    if (a11y_recorder::IsRecorderActive()) {{
+      a11y_recorder::RecordBlinkWebSocketClosed(
+          {BLINK_WEBSOCKET_SCOPE}, identifier_,
+          "disconnected", false, 0, std::string());
+    }}
+"""
+
+BLINK_WEBSOCKET_HANDSHAKE_REQUEST_ANCHOR = """\
+  probe::WillSendWebSocketHandshakeRequest(execution_context_, identifier_,
+                                           request.get());
+"""
+BLINK_WEBSOCKET_HANDSHAKE_REQUEST_HOOK = (
+    BLINK_WEBSOCKET_HANDSHAKE_REQUEST_ANCHOR
+    + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebSocketHandshakeRequest(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_,
+        request->url.GetString().Utf8(),
+        RecorderRealtimeMojoHeaders(request->headers));
+  }}
+"""
+)
+
+BLINK_WEBSOCKET_HANDSHAKE_RESPONSE_ANCHOR = """\
+  probe::DidReceiveWebSocketHandshakeResponse(execution_context_, identifier_,
+                                              handshake_request_.get(),
+                                              response.get());
+"""
+BLINK_WEBSOCKET_HANDSHAKE_RESPONSE_HOOK = (
+    BLINK_WEBSOCKET_HANDSHAKE_RESPONSE_ANCHOR
+    + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RealtimeHandshakeResponseFacts recorder_response;
+    recorder_response.url = response->url.GetString().Utf8();
+    recorder_response.http_version =
+        RecorderRealtimeHttpVersion(response->http_version);
+    recorder_response.status_code = response->status_code;
+    recorder_response.status_text = response->status_text.Utf8();
+    if (response->remote_endpoint.address().IsValid()) {{
+      recorder_response.remote_ip =
+          response->remote_endpoint.address().ToString();
+      recorder_response.remote_port = response->remote_endpoint.port();
+    }}
+    recorder_response.selected_protocol = protocol.Utf8();
+    recorder_response.extensions = extensions.Utf8();
+    recorder_response.headers = RecorderRealtimeMojoHeaders(response->headers);
+    a11y_recorder::RecordBlinkWebSocketHandshakeResponse(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_,
+        std::move(recorder_response));
+  }}
+"""
+)
+
+BLINK_WEBSOCKET_DROP_ANCHOR = """\
+    probe::DidCloseWebSocket(execution_context_, identifier_);
+    identifier_ = 0;
+"""
+BLINK_WEBSOCKET_DROP_HOOK = f"""\
+    probe::DidCloseWebSocket(execution_context_, identifier_);
+    if (a11y_recorder::IsRecorderActive()) {{
+      a11y_recorder::RecordBlinkWebSocketClosed(
+          {BLINK_WEBSOCKET_SCOPE}, identifier_,
+          "dropped", was_clean, code, reason.Utf8());
+    }}
+    identifier_ = 0;
+"""
+
+BLINK_WEBSOCKET_RECEIVE_ANCHOR = """\
+  probe::DidReceiveWebSocketMessage(execution_context_, identifier_, opcode,
+                                    false, chunks);
+"""
+BLINK_WEBSOCKET_RECEIVE_HOOK = BLINK_WEBSOCKET_RECEIVE_ANCHOR + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebSocketMessage(
+        {BLINK_WEBSOCKET_SCOPE}, identifier_,
+        /*sent=*/false, receiving_message_type_is_text_ ? "text" : "binary",
+        base::checked_cast<int64_t>(message_size),
+        receiving_message_type_is_text_ ? RecorderRealtimeChunksText(chunks)
+                                        : std::string(),
+        /*origin=*/{{}});
+  }}
+"""
+
+# In source order.
+BLINK_WEBSOCKET_HOOKS = (
+    (BLINK_WEBSOCKET_CREATED_ANCHOR, BLINK_WEBSOCKET_CREATED_HOOK),
+    (BLINK_WEBSOCKET_SEND_TEXT_ANCHOR, BLINK_WEBSOCKET_SEND_TEXT_HOOK),
+    (BLINK_WEBSOCKET_SEND_BLOB_ANCHOR, BLINK_WEBSOCKET_SEND_BLOB_HOOK),
+    (BLINK_WEBSOCKET_SEND_BUFFER_ANCHOR, BLINK_WEBSOCKET_SEND_BUFFER_HOOK),
+    (BLINK_WEBSOCKET_CLOSE_ANCHOR, BLINK_WEBSOCKET_CLOSE_HOOK),
+    (BLINK_WEBSOCKET_FAIL_ANCHOR, BLINK_WEBSOCKET_FAIL_HOOK),
+    (BLINK_WEBSOCKET_DISCONNECT_ANCHOR, BLINK_WEBSOCKET_DISCONNECT_HOOK),
+    (
+        BLINK_WEBSOCKET_HANDSHAKE_REQUEST_ANCHOR,
+        BLINK_WEBSOCKET_HANDSHAKE_REQUEST_HOOK,
+    ),
+    (
+        BLINK_WEBSOCKET_HANDSHAKE_RESPONSE_ANCHOR,
+        BLINK_WEBSOCKET_HANDSHAKE_RESPONSE_HOOK,
+    ),
+    (BLINK_WEBSOCKET_DROP_ANCHOR, BLINK_WEBSOCKET_DROP_HOOK),
+    (BLINK_WEBSOCKET_RECEIVE_ANCHOR, BLINK_WEBSOCKET_RECEIVE_HOOK),
+)
+
+BLINK_EVENT_SOURCE_MESSAGE_ANCHOR = """\
+  probe::WillDispatchEventSourceEvent(GetExecutionContext(),
+                                      resource_identifier_, event_type,
+                                      last_event_id, data);
+"""
+BLINK_EVENT_SOURCE_MESSAGE_HOOK = BLINK_EVENT_SOURCE_MESSAGE_ANCHOR + """\
+  if (a11y_recorder::IsRecorderActive()) {
+    a11y_recorder::RecordBlinkEventSourceMessage(
+        RecorderRealtimeNetworkScope(GetExecutionContext()),
+        resource_identifier_, url_.GetString().Utf8(), event_type.Utf8(),
+        last_event_id.Utf8(), data.Utf8());
+  }
+"""
+
+BLINK_WEB_TRANSPORT_SCOPE = "RecorderRealtimeNetworkScope(GetExecutionContext())"
+
+BLINK_WEB_TRANSPORT_CLOSE_ANCHOR = """\
+    // This session has been closed or errored.
+    return;
+  }
+
+"""
+BLINK_WEB_TRANSPORT_CLOSE_HOOK = BLINK_WEB_TRANSPORT_CLOSE_ANCHOR + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebTransportCloseRequested(
+        {BLINK_WEB_TRANSPORT_SCOPE}, inspector_transport_id_,
+        close_info != nullptr,
+        close_info ? static_cast<int64_t>(close_info->closeCode()) : 0,
+        close_info ? close_info->reason().Utf8() : std::string(),
+        RecorderCookieCallOrigin(GetExecutionContext()));
+  }}
+
+"""
+
+BLINK_WEB_TRANSPORT_ESTABLISHED_ANCHOR = """\
+  probe::WebTransportConnectionEstablished(GetExecutionContext(),
+                                           inspector_transport_id_);
+"""
+BLINK_WEB_TRANSPORT_ESTABLISHED_HOOK = (
+    BLINK_WEB_TRANSPORT_ESTABLISHED_ANCHOR
+    + f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RealtimeHandshakeResponseFacts recorder_response;
+    recorder_response.url = url_.GetString().Utf8();
+    if (response_headers) {{
+      recorder_response.http_version =
+          RecorderRealtimeHttpVersion(response_headers->GetHttpVersion());
+      recorder_response.status_code = response_headers->response_code();
+      recorder_response.status_text = response_headers->GetStatusText();
+      size_t recorder_iter = 0;
+      std::string recorder_name;
+      std::string recorder_value;
+      while (response_headers->EnumerateHeaderLines(
+          &recorder_iter, &recorder_name, &recorder_value)) {{
+        recorder_response.headers.push_back({{recorder_name, recorder_value}});
+      }}
+    }}
+    recorder_response.selected_protocol =
+        selected_application_protocol.Utf8();
+    if (max_datagram_size) {{
+      recorder_response.max_datagram_size = *max_datagram_size;
+    }}
+    a11y_recorder::RecordBlinkWebTransportEstablished(
+        {BLINK_WEB_TRANSPORT_SCOPE}, inspector_transport_id_,
+        std::move(recorder_response));
+  }}
+"""
+)
+
+BLINK_WEB_TRANSPORT_CREATED_ANCHOR = """\
+  probe::WebTransportCreated(execution_context, inspector_transport_id_, url_);
+"""
+BLINK_WEB_TRANSPORT_CREATED_HOOK = BLINK_WEB_TRANSPORT_CREATED_ANCHOR + """\
+  if (a11y_recorder::IsRecorderActive()) {
+    a11y_recorder::RecordBlinkWebTransportCreated(
+        RecorderRealtimeNetworkScope(execution_context),
+        inspector_transport_id_, url_.GetString().Utf8(),
+        RecorderCookieCallOrigin(execution_context));
+  }
+"""
+
+BLINK_WEB_TRANSPORT_CLEANUP_ANCHOR = """\
+  CHECK_EQ(!info, abruptly);
+  cleanup_started_ = true;
+"""
+BLINK_WEB_TRANSPORT_CLEANUP_HOOK = f"""\
+  CHECK_EQ(!info, abruptly);
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkWebTransportClosed(
+        {BLINK_WEB_TRANSPORT_SCOPE}, inspector_transport_id_,
+        abruptly, info ? static_cast<int64_t>(info->closeCode()) : 0,
+        info ? info->reason().Utf8() : std::string());
+  }}
+  cleanup_started_ = true;
+"""
+
+# In source order.
+BLINK_WEB_TRANSPORT_HOOKS = (
+    (BLINK_WEB_TRANSPORT_CLOSE_ANCHOR, BLINK_WEB_TRANSPORT_CLOSE_HOOK),
+    (
+        BLINK_WEB_TRANSPORT_ESTABLISHED_ANCHOR,
+        BLINK_WEB_TRANSPORT_ESTABLISHED_HOOK,
+    ),
+    (BLINK_WEB_TRANSPORT_CREATED_ANCHOR, BLINK_WEB_TRANSPORT_CREATED_HOOK),
+    (BLINK_WEB_TRANSPORT_CLEANUP_ANCHOR, BLINK_WEB_TRANSPORT_CLEANUP_HOOK),
+)
+
+BLINK_WEBSOCKETS_BUILD_DEPS = (
+    '  deps = [ "//services/network/public/mojom:websocket_mojom" ]\n'
+)
+BLINK_WEBSOCKETS_BUILD_PATCHED_DEPS = """\
+  deps = [
+    "//chromium/recorder_bridge",
+    "//services/network/public/mojom:websocket_mojom",
+  ]
+"""
+BLINK_EVENT_SOURCE_BUILD_ANCHOR = """\
+    "event_source_parser.h",
+  ]
+}
+"""
+BLINK_WEB_TRANSPORT_BUILD_ANCHOR = """\
+    "web_transport_send_stream.h",
+  ]
+}
+"""
+BLINK_MODULE_BRIDGE_DEPS = """\
+
+  deps = [ "//chromium/recorder_bridge" ]
+}
+"""
+
+
+def patch_blink_realtime_source(
+    path: Path,
+    own_include: str,
+    helper_anchor: str,
+    hooks: tuple[tuple[str, str], ...],
+    reads_script_origin: bool = True,
+) -> None:
+    # An EventSource event has no script call, so that source does not take
+    # the origin helper, which would otherwise be an unused function.
+    text = read_source(path)
+    text = add_includes_after(text, own_include, BLINK_REALTIME_INCLUDES, path)
+    helpers = [(BLINK_REALTIME_HELPER, BLINK_REALTIME_HELPER_MARKER)]
+    if reads_script_origin:
+        helpers.insert(
+            0, (BLINK_COOKIE_ORIGIN_HELPER, BLINK_COOKIE_ORIGIN_HELPER_MARKER)
+        )
+    for helper, marker in helpers:
+        text = insert_before_once(text, helper_anchor, helper, marker, path)
+    for anchor, hook in hooks:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_blink_websocket_channel(path: Path) -> None:
+    patch_blink_realtime_source(
+        path,
+        '#include "third_party/blink/renderer/modules/websockets/'
+        'websocket_channel_impl.h"',
+        "bool WebSocketChannelImpl::Connect(\n",
+        BLINK_WEBSOCKET_HOOKS,
+    )
+
+
+def patch_blink_event_source(path: Path) -> None:
+    patch_blink_realtime_source(
+        path,
+        '#include "third_party/blink/renderer/modules/eventsource/'
+        'event_source.h"',
+        "void EventSource::OnMessageEvent(const AtomicString& event_type,\n",
+        ((BLINK_EVENT_SOURCE_MESSAGE_ANCHOR, BLINK_EVENT_SOURCE_MESSAGE_HOOK),),
+        reads_script_origin=False,
+    )
+
+
+def patch_blink_web_transport(path: Path) -> None:
+    patch_blink_realtime_source(
+        path,
+        '#include "third_party/blink/renderer/modules/webtransport/'
+        'web_transport.h"',
+        "// RecentlyForgottenStreamIdSet implementation\n",
+        BLINK_WEB_TRANSPORT_HOOKS,
+    )
+
+
+def patch_blink_module_build(path: Path, old: str, new: str) -> None:
+    text = read_source(path)
+    if '"//chromium/recorder_bridge"' in text:
+        return
+    text = replace_once(text, old, new, path)
+    write_patched(path, text)
+
+
+def patch_blink_realtime_builds(modules: Path) -> None:
+    patch_blink_module_build(
+        modules / "websockets" / "BUILD.gn",
+        BLINK_WEBSOCKETS_BUILD_DEPS,
+        BLINK_WEBSOCKETS_BUILD_PATCHED_DEPS,
+    )
+    patch_blink_module_build(
+        modules / "eventsource" / "BUILD.gn",
+        BLINK_EVENT_SOURCE_BUILD_ANCHOR,
+        BLINK_EVENT_SOURCE_BUILD_ANCHOR[: -len("}\n")] + BLINK_MODULE_BRIDGE_DEPS,
+    )
+    patch_blink_module_build(
+        modules / "webtransport" / "BUILD.gn",
+        BLINK_WEB_TRANSPORT_BUILD_ANCHOR,
+        BLINK_WEB_TRANSPORT_BUILD_ANCHOR[: -len("}\n")]
+        + BLINK_MODULE_BRIDGE_DEPS,
+    )
+
+
+# The network service strips cookie headers from the WebSocket handshake it
+# reports to the renderer unless the renderer has raw header access, which
+# only DevTools normally grants. In a recording browser it reports those
+# headers with each value replaced, so the renderer, and the recorder after
+# it, learn which cookies a handshake sent and set without any value leaving
+# the network service. Authorization headers stay stripped.
+NETWORK_WEBSOCKET_INCLUDES = """\
+#if BUILDFLAG(IS_WIN)
+#include "base/command_line.h"
+#include "chromium/recorder_bridge/cookie_text.h"
+#include "chromium/recorder_bridge/recorder_switches.h"
+#endif
+"""
+NETWORK_WEBSOCKET_HELPER_MARKER = "bool RecorderReportsCookieNames() {"
+NETWORK_WEBSOCKET_HELPER = """\
+#if BUILDFLAG(IS_WIN)
+// Windows A11y Recorder: the text that stands in for a withheld cookie value.
+constexpr char kRecorderWithheldCookieValue[] = "[withheld]";
+
+// Whether a recording browser started this network service, either as its own
+// utility process or inside the browser process.
+bool RecorderReportsCookieNames() {
+  static const bool reports = [] {
+    const base::CommandLine& command_line =
+        *base::CommandLine::ForCurrentProcess();
+    return command_line.HasSwitch(
+               a11y_recorder::kRecordingNetworkServiceSwitch) ||
+           command_line.HasSwitch(a11y_recorder::kBootstrapSwitch);
+  }();
+  return reports;
+}
+
+std::string RecorderCookieNameText(const std::string& name) {
+  // A nameless cookie is written as its value alone, so it stays nameless
+  // when the recorder reads the replaced text back.
+  return name.empty()
+             ? std::string(kRecorderWithheldCookieValue)
+             : base::StrCat({name, "=", kRecorderWithheldCookieValue});
+}
+
+// A Cookie request header with every value replaced.
+std::string RecorderCookieHeaderNames(std::string_view value) {
+  std::vector<std::string> pairs;
+  for (const std::string& name :
+       a11y_recorder::cookie_text::NamesFromCookieString(value)) {
+    pairs.push_back(RecorderCookieNameText(name));
+  }
+  return base::JoinString(pairs, "; ");
+}
+
+// A Set-Cookie line reduced to its cookie name. Its attributes are dropped.
+std::string RecorderSetCookieName(std::string_view value) {
+  return RecorderCookieNameText(
+      a11y_recorder::cookie_text::ParseCookieWrite(value).name);
+}
+#endif
+
+"""
+NETWORK_WEBSOCKET_HELPER_ANCHOR = (
+    "mojom::WebSocketHandshakeResponsePtr ToMojo(\n"
+)
+NETWORK_WEBSOCKET_RESPONSE_ANCHOR = (
+    "  while (response->headers->EnumerateHeaderLines(&iter, &name, &value)) {\n"
+)
+NETWORK_WEBSOCKET_RESPONSE_HOOK = """\
+#if BUILDFLAG(IS_WIN)
+    if (!has_raw_headers_access && RecorderReportsCookieNames() &&
+        base::EqualsCaseInsensitiveASCII(name, "set-cookie")) {
+      const std::string names_only = RecorderSetCookieName(value);
+      response_to_pass->headers.push_back(
+          mojom::HttpHeader::New(name, names_only));
+      base::StrAppend(&headers_text, {name, ": ", names_only, "\\r\\n"});
+      continue;
+    }
+#endif
+"""
+NETWORK_WEBSOCKET_REQUEST_ANCHOR = "  while (it.GetNext()) {\n"
+NETWORK_WEBSOCKET_REQUEST_HOOK = """\
+#if BUILDFLAG(IS_WIN)
+    if (!impl_->has_raw_headers_access_ && RecorderReportsCookieNames() &&
+        base::EqualsCaseInsensitiveASCII(it.name(),
+                                         net::HttpRequestHeaders::kCookie)) {
+      const std::string names_only = RecorderCookieHeaderNames(it.value());
+      request_to_pass->headers.push_back(
+          mojom::HttpHeader::New(it.name(), names_only));
+      headers_text.append(base::StringPrintf(
+          "%s: %s\\r\\n", it.name().c_str(), names_only.c_str()));
+      continue;
+    }
+#endif
+"""
+NETWORK_WEBSOCKET_HOOK_MARKERS = (
+    (NETWORK_WEBSOCKET_RESPONSE_ANCHOR, NETWORK_WEBSOCKET_RESPONSE_HOOK,
+     "RecorderSetCookieName(value)"),
+    (NETWORK_WEBSOCKET_REQUEST_ANCHOR, NETWORK_WEBSOCKET_REQUEST_HOOK,
+     "RecorderCookieHeaderNames(it.value())"),
+)
+# The network service component's deps list, which the recorder dependency is
+# appended after. The list starts and ends with these lines.
+NETWORK_SERVICE_BUILD_ANCHOR = """\
+  deps = [
+    "//base",
+    "//base:build_time",
+"""
+NETWORK_SERVICE_BUILD_DEPS_END = """\
+    "//url",
+  ]
+"""
+NETWORK_SERVICE_BUILD_DEPS = """\
+
+  if (is_win) {
+    deps += [ "//chromium/recorder_bridge:cookie_names" ]
+  }
+"""
+
+
+def patch_network_websocket(path: Path) -> None:
+    text = read_source(path)
+    if '#include "chromium/recorder_bridge/cookie_text.h"' not in text:
+        # BUILDFLAG needs the build configuration header first.
+        config = '#include "build/build_config.h"\n'
+        text = replace_once(
+            text, config, config + NETWORK_WEBSOCKET_INCLUDES, path
+        )
+    text = insert_before_once(
+        text,
+        NETWORK_WEBSOCKET_HELPER_ANCHOR,
+        NETWORK_WEBSOCKET_HELPER,
+        NETWORK_WEBSOCKET_HELPER_MARKER,
+        path,
+    )
+    for anchor, hook, marker in NETWORK_WEBSOCKET_HOOK_MARKERS:
+        if marker in text:
+            continue
+        text = replace_once(text, anchor, anchor + hook, path)
+    write_patched(path, text)
+
+
+def patch_network_service_build(path: Path) -> None:
+    text = read_source(path)
+    if '"//chromium/recorder_bridge:cookie_names"' in text:
+        return
+    if text.count(NETWORK_SERVICE_BUILD_ANCHOR) != 1:
+        raise RuntimeError(
+            f"{path}: expected exactly one integration anchor, found "
+            f"{text.count(NETWORK_SERVICE_BUILD_ANCHOR)}"
+        )
+    start = text.index(NETWORK_SERVICE_BUILD_ANCHOR)
+    end = text.find(NETWORK_SERVICE_BUILD_DEPS_END, start)
+    if end < 0 or "\n  ]\n" in text[start:end]:
+        raise RuntimeError(f"{path}: network service deps list end not found")
+    end += len(NETWORK_SERVICE_BUILD_DEPS_END)
+    text = text[:end] + NETWORK_SERVICE_BUILD_DEPS + text[end:]
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -7235,6 +7906,16 @@ def main() -> int:
         source / "content" / "browser" / "web_contents"
         / "web_contents_impl.cc"
     )
+    modules = source / "third_party" / "blink" / "renderer" / "modules"
+    patch_blink_websocket_channel(
+        modules / "websockets" / "websocket_channel_impl.cc"
+    )
+    patch_blink_event_source(modules / "eventsource" / "event_source.cc")
+    patch_blink_web_transport(modules / "webtransport" / "web_transport.cc")
+    patch_blink_realtime_builds(modules)
+    network = source / "services" / "network"
+    patch_network_websocket(network / "websocket.cc")
+    patch_network_service_build(network / "BUILD.gn")
     verify_integrated_sources(signatures)
     print(f"Recorder bridge installed in {source}")
     return 0

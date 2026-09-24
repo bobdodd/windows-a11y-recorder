@@ -88,12 +88,26 @@ void TestInclusion() {
          "exemption");
 }
 
+// The network service of a recording browser replaces every WebSocket
+// handshake cookie value with "[withheld]". The replaced text must read back
+// as the same names, including a nameless cookie.
+void TestWithheldHandshakeText() {
+  Expect((NamesFromCookieString("sid=[withheld]; [withheld]; theme=[withheld]") ==
+          std::vector<std::string>{"sid", "", "theme"}),
+         "withheld request cookie names");
+  Expect(ParseCookieWrite("sid=[withheld]").name == "sid",
+         "withheld set-cookie name");
+  Expect(ParseCookieWrite("[withheld]").name.empty(),
+         "withheld nameless set-cookie");
+}
+
 }  // namespace
 
 int main() {
   TestNames();
   TestWrite();
   TestInclusion();
+  TestWithheldHandshakeText();
   if (failures == 0) {
     std::puts("cookie_text: all checks passed");
   }

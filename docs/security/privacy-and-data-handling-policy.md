@@ -38,6 +38,10 @@ No record carries a cookie value, on any channel.
 - `Cookie` and `Set-Cookie` header values are cookie values. Network records
   report the cookie names a transaction carried and withhold the header
   values.
+- WebSocket handshake cookie headers are reported to the renderer by the
+  network service. In a recording browser, the network service replaces every
+  value in them with `[withheld]` before reporting them, so the renderer and
+  the recorder receive the names and no value leaves the network service.
 
 ## API keys and similar secrets
 
@@ -84,6 +88,19 @@ reason. A credential can still reach the archive through network records in:
 
 - Request, response, redirect, and referrer URLs, which are recorded in full.
 - A header whose name and value match none of those rules.
+
+WebSocket message text, EventSource event data, and realtime close reasons are
+recorded as bounded text. At source, the bridge replaces with a `[withheld]`
+marker any JSON Web Token, any HTTP authentication credential such as a
+`Bearer` token, and the value of any JSON member, query or form pair, or colon
+pair whose name contains a credential word, and records the marker's offset and
+the reason. Binary message content is never recorded. A credential can still
+reach the archive through realtime records in:
+
+- WebSocket and WebTransport URLs, which are recorded in full.
+- Message text in a field or format none of those rules describe.
+- A credential that begins within the recorded text and continues past the
+  first 65536 bytes of a message.
 
 ## Diagnostic logs
 

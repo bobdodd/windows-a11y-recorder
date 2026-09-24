@@ -1,19 +1,29 @@
 assert(is_win)
 
+# Cookie-name parsing and the recorder's switch names. These depend on the C++
+# standard library alone, so the network service can read cookie names and
+# recognise a recording browser without linking the recorder connection.
+source_set("cookie_names") {
+  sources = [
+    "cookie_text.cc",
+    "cookie_text.h",
+    "recorder_switches.h",
+  ]
+}
+
 component("recorder_bridge") {
   defines = [ "IS_RECORDER_BRIDGE_IMPL" ]
 
   sources = [
     "browser_bridge.cc",
     "browser_bridge.h",
-    "cookie_text.cc",
-    "cookie_text.h",
     "network_text.cc",
     "network_text.h",
     "recorder_protocol.cc",
     "recorder_protocol.h",
-    "recorder_switches.h",
   ]
+
+  public_deps = [ ":cookie_names" ]
 
   deps = [
     "//base",

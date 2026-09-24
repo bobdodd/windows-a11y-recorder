@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.26` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.27` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -28,7 +28,10 @@ when updating an existing checkout. The instrumented browser:
    module boundaries without relying on duplicated static storage.
 5. Starts renderer process bridge connections using the inherited capability.
    GPU and utility processes are deliberately excluded because the current
-   evidence hooks run only in Blink renderers. Renderer command lines contain
+   evidence hooks run only in Blink renderers. The network service utility
+   process receives only the non-secret
+   `--a11y-recorder-recording-network-service` switch, which tells it to report
+   WebSocket handshake cookie headers by name, and no capability. Renderer command lines contain
    only shared-memory handle metadata and the non-secret Chromium child process
    identifier. The internal metadata environment marker is removed from each
    child environment.
@@ -323,3 +326,23 @@ cookie and authorization header values and values whose header name or shape
 marks them as a credential; `network_text_test.cc` covers the classifier. The
 record types and their limits are described in
 `docs/architecture/network-metadata-evidence-model.md`.
+
+Protocol 0.27 records WebSocket, EventSource, and WebTransport channels on the
+`browser.network` channel. Hooks in `websocket_channel_impl.cc` call
+`RecordBlinkWebSocketCreated`, `RecordBlinkWebSocketHandshakeRequest`,
+`RecordBlinkWebSocketHandshakeResponse`, `RecordBlinkWebSocketMessage`,
+`RecordBlinkWebSocketCloseRequested`, `RecordBlinkWebSocketError`, and
+`RecordBlinkWebSocketClosed`; a hook in `event_source.cc` calls
+`RecordBlinkEventSourceMessage`; and hooks in `web_transport.cc` call
+`RecordBlinkWebTransportCreated`, `RecordBlinkWebTransportEstablished`,
+`RecordBlinkWebTransportCloseRequested`, and `RecordBlinkWebTransportClosed`.
+Message text, event data, and close reasons pass through
+`network_text::ReadMessageText`, which keeps up to 4096 UTF-16 code units and
+replaces any part that looks like a credential with `[withheld]`. A hook in
+`services/network/websocket.cc` makes the network service of a recording
+browser report the WebSocket handshake `Cookie` and `Set-Cookie` headers to
+the renderer with every value replaced, using the `cookie_names` source set,
+which holds `cookie_text.cc` and `recorder_switches.h` and depends only on the
+C++ standard library. `cookie_text_test.cc` covers reading names back from the
+replaced headers. The record types and their limits are described in
+`docs/architecture/realtime-network-evidence-model.md`.

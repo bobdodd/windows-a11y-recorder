@@ -1,6 +1,6 @@
 namespace Recorder.Tests;
 
-// The JSON the bridge writes for each browser.network record in protocol 0.26,
+// The JSON the bridge writes for each browser.network record in protocol 0.27,
 // shared by the ingest and archive tests so both check the same shapes. Byte
 // counts are written as JSON doubles. No shape has a field for a body, and a
 // withheld header value is null.
@@ -457,6 +457,201 @@ internal static class BrowserNetworkPayloads
         }
         """;
 
+    private const string RealtimeHeadersJson = """
+        "headerCount": 2,
+        "headers": [
+          { "name": "Upgrade", "value": "websocket", "valueRedacted": false, "redactionReason": null },
+          { "name": "Sec-WebSocket-Key", "value": null, "valueRedacted": true, "redactionReason": "credential-name" }
+        ],
+        "headersTruncated": false
+        """;
+
+    public static readonly string WebSocketCreated = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "31",
+          "url": "ws://127.0.0.1:8123/socket?room=lobby",
+          "requestedProtocols": "chat",
+          "location": {{LocationJson}},
+          "world": {{WorldJson}}
+        }
+        """;
+
+    public static readonly string WebSocketHandshakeRequest = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "31",
+          "url": "ws://127.0.0.1:8123/socket?room=lobby",
+          "cookieNames": [],
+          {{RealtimeHeadersJson}}
+        }
+        """;
+
+    public static readonly string WebSocketHandshakeResponse = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "31",
+          "extensions": null,
+          "url": "ws://127.0.0.1:8123/socket?room=lobby",
+          "httpVersion": "1.1",
+          "status": 101,
+          "statusText": "Switching Protocols",
+          "remoteAddress": { "ip": "127.0.0.1", "port": 8123 },
+          "selectedProtocol": "chat",
+          "setCookieNames": ["room_pref"],
+          "headerCount": 2,
+          "headers": [
+            { "name": "Upgrade", "value": "websocket", "valueRedacted": false, "redactionReason": null },
+            { "name": "Set-Cookie", "value": null, "valueRedacted": true, "redactionReason": "credential-header" }
+          ],
+          "headersTruncated": false
+        }
+        """;
+
+    // The token value in the sent text was withheld and the marker written in
+    // its place.
+    public static readonly string WebSocketMessageSent = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "31",
+          "opcode": "text",
+          "payloadLength": 58.0,
+          "payload": {
+            "text": "{\"type\":\"auth\",\"token\":\"[withheld]\",\"room\":\"lobby\"}",
+            "truncated": false,
+            "withheld": [{ "offset": 24, "reason": "credential-value" }]
+          },
+          "location": {{LocationJson}},
+          "world": {{WorldJson}}
+        }
+        """;
+
+    public static readonly string WebSocketBinaryMessageReceived = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "31",
+          "opcode": "binary",
+          "payloadLength": 1024.0,
+          "payload": null
+        }
+        """;
+
+    public static readonly string WebSocketCloseRequested = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "31",
+          "code": 1000,
+          "reason": { "text": "done", "truncated": false, "withheld": [] },
+          "location": {{LocationJson}},
+          "world": {{WorldJson}}
+        }
+        """;
+
+    public static readonly string WebSocketError = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "32",
+          "message": "WebSocket connection to 'ws://127.0.0.1:1/' failed"
+        }
+        """;
+
+    public static readonly string WebSocketClosed = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "31",
+          "cause": "dropped",
+          "wasClean": true,
+          "code": 1000,
+          "reason": { "text": "done", "truncated": false, "withheld": [] }
+        }
+        """;
+
+    public static readonly string WebSocketDisconnected = $$"""
+        {
+          "context": {{WorkerContextJson}},
+          "scope": {{WorkerScopeJson}},
+          "inspectorId": "33",
+          "cause": "disconnected",
+          "wasClean": null,
+          "code": null,
+          "reason": null
+        }
+        """;
+
+    public static readonly string EventSourceMessage = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "inspectorId": "34",
+          "url": "http://127.0.0.1:8123/events",
+          "eventType": "message",
+          "lastEventId": { "text": "7", "truncated": false, "withheld": [] },
+          "dataLength": 11.0,
+          "data": { "text": "status=open", "truncated": false, "withheld": [] }
+        }
+        """;
+
+    public static readonly string WebTransportCreated = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "transportId": "1",
+          "url": "https://127.0.0.1:4433/wt",
+          "location": {{LocationJson}},
+          "world": {{WorldJson}}
+        }
+        """;
+
+    public static readonly string WebTransportEstablished = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "transportId": "1",
+          "maxDatagramSize": 1200.0,
+          "url": null,
+          "httpVersion": "3.0",
+          "status": 200,
+          "statusText": null,
+          "remoteAddress": null,
+          "selectedProtocol": null,
+          "setCookieNames": [],
+          "headerCount": 0,
+          "headers": [],
+          "headersTruncated": false
+        }
+        """;
+
+    public static readonly string WebTransportCloseRequested = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "transportId": "1",
+          "code": null,
+          "reason": null,
+          "location": {{LocationJson}},
+          "world": {{WorldJson}}
+        }
+        """;
+
+    public static readonly string WebTransportClosed = $$"""
+        {
+          "context": {{RendererContextJson}},
+          "scope": {{WindowScopeJson}},
+          "transportId": "1",
+          "abrupt": true,
+          "code": null,
+          "reason": null
+        }
+        """;
+
     public static IEnumerable<(string EventType, string Json)> All()
     {
         yield return ("request-will-be-sent", RequestWillBeSent);
@@ -469,5 +664,19 @@ internal static class BrowserNetworkPayloads
         yield return ("response-headers-received", ResponseHeadersReceived);
         yield return ("navigation-response", NavigationResponse);
         yield return ("navigation-response", FailedNavigationResponse);
+        yield return ("websocket-created", WebSocketCreated);
+        yield return ("websocket-handshake-request", WebSocketHandshakeRequest);
+        yield return ("websocket-handshake-response", WebSocketHandshakeResponse);
+        yield return ("websocket-message-sent", WebSocketMessageSent);
+        yield return ("websocket-message-received", WebSocketBinaryMessageReceived);
+        yield return ("websocket-close-requested", WebSocketCloseRequested);
+        yield return ("websocket-error", WebSocketError);
+        yield return ("websocket-closed", WebSocketClosed);
+        yield return ("websocket-closed", WebSocketDisconnected);
+        yield return ("event-source-message", EventSourceMessage);
+        yield return ("web-transport-created", WebTransportCreated);
+        yield return ("web-transport-established", WebTransportEstablished);
+        yield return ("web-transport-close-requested", WebTransportCloseRequested);
+        yield return ("web-transport-closed", WebTransportClosed);
     }
 }
