@@ -87,7 +87,10 @@ a form, and the request headers Blink holds.
 
 `location` and `world` report the script that was current when Blink issued
 the request, read with the helper the cookie records use, and are null when no
-script was running, as for a parser-inserted image.
+script was running, as for a parser-inserted image. Blink keeps the names and
+stable identifiers of isolated worlds only on the main thread, so a request a
+worker script makes reports its world kind and identifier without a name or
+stable identifier.
 
 ### Response received
 

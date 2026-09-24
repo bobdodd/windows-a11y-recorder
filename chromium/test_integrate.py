@@ -3972,6 +3972,23 @@ class NetworkIntegrationTests(unittest.TestCase):
                 self.assertNotIn("GetBody", text)
                 self.assertNotIn("cookie_line", text)
 
+    def test_world_names_are_read_only_on_the_main_thread(self):
+        # Blink keeps isolated world names and stable identifiers in maps that
+        # assert the main thread, and worker loads and listeners run hooks on
+        # worker threads, so every read is guarded by the thread test.
+        source = Path(INTEGRATE.__file__).read_text(encoding="utf-8")
+        lines = source.splitlines()
+        reads = [
+            index
+            for index, line in enumerate(lines)
+            if "NonMainWorldHumanReadableName()" in line
+            or "NonMainWorldStableId()" in line
+        ]
+        self.assertGreater(len(reads), 0)
+        for index in reads:
+            context = "\n".join(lines[max(0, index - 4) : index + 1])
+            self.assertIn("IsMainThread()", context, lines[index])
+
 
 class InteractionIntegrationTests(unittest.TestCase):
     """Proves the interaction-state hooks are written once and match the bridge."""
