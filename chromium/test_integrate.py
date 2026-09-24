@@ -3975,20 +3975,48 @@ class NetworkIntegrationTests(unittest.TestCase):
     def test_world_names_are_read_only_on_the_main_thread(self):
         # Blink keeps isolated world names and stable identifiers in maps that
         # assert the main thread, and worker loads and listeners run hooks on
-        # worker threads, so every read is guarded by the thread test.
-        source = Path(INTEGRATE.__file__).read_text(encoding="utf-8")
-        lines = source.splitlines()
-        reads = [
-            index
-            for index, line in enumerate(lines)
-            if "NonMainWorldHumanReadableName()" in line
-            or "NonMainWorldStableId()" in line
+        # worker threads, so every template read is guarded by the thread test.
+        templates = [
+            (name, value)
+            for name, value in vars(INTEGRATE).items()
+            if isinstance(value, str)
+            and not name.startswith("STALE_")
+            and INTEGRATE.UNGUARDED_WORLD_NAME_READ.search(value)
         ]
-        self.assertGreater(len(reads), 0)
-        for index in reads:
-            context = "\n".join(lines[max(0, index - 4) : index + 1])
-            self.assertIn("IsMainThread()", context, lines[index])
+        self.assertGreater(len(templates), 0)
+        for name, value in templates:
+            self.assertEqual(
+                INTEGRATE.describe_unguarded_world_name_reads(name, value), []
+            )
 
+    def test_stale_world_name_guards_are_upgraded_in_place(self):
+        stale = (
+            "          recorder_world && !recorder_world->IsMainWorld()\n"
+            "              ? recorder_world->NonMainWorldHumanReadableName()"
+            ".Utf8().c_str()\n"
+            "              : \"\",\n"
+            "  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);\n"
+            + INTEGRATE.STALE_ORIGIN_WORLD_NAME_GUARD
+            + "    origin.world_stable_id = world.NonMainWorldStableId().Utf8();\n"
+            "  }\n"
+        )
+        self.assertNotEqual(
+            INTEGRATE.describe_unguarded_world_name_reads("stale", stale), []
+        )
+        upgraded = INTEGRATE.upgrade_world_name_guards(stale)
+        self.assertEqual(
+            INTEGRATE.describe_unguarded_world_name_reads("upgraded", upgraded),
+            [],
+        )
+        self.assertEqual(INTEGRATE.upgrade_world_name_guards(upgraded), upgraded)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "resource_load_observer_for_worker.cc"
+            path.write_text(stale, encoding="utf-8")
+            try:
+                self.assertEqual(INTEGRATE.read_source(path), upgraded)
+                self.assertEqual(path.read_text(encoding="utf-8"), upgraded)
+            finally:
+                INTEGRATE._INTEGRATED_PATHS.remove(path)
 
 class InteractionIntegrationTests(unittest.TestCase):
     """Proves the interaction-state hooks are written once and match the bridge."""

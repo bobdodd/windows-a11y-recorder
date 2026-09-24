@@ -2028,7 +2028,55 @@ def read_source(path: Path) -> str:
     """
     if path not in _INTEGRATED_PATHS:
         _INTEGRATED_PATHS.append(path)
-    return path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    upgraded = upgrade_world_name_guards(text)
+    if upgraded != text:
+        write_patched(path, upgraded)
+    return upgraded
+
+
+# Revisions before the main-thread guard read isolated world names on any
+# thread. A presence guard leaves those hook bodies in place, so the old guards
+# are rewritten wherever a read source still holds them.
+STALE_LISTENER_WORLD_NAME_GUARD = re.compile(
+    r"recorder_world && !recorder_world->IsMainWorld\(\)(?! && IsMainThread\(\))"
+)
+STALE_ORIGIN_WORLD_NAME_GUARD = (
+    "  if (!world.IsMainWorld()) {\n"
+    "    origin.world_name = world.NonMainWorldHumanReadableName().Utf8();\n"
+)
+ORIGIN_WORLD_NAME_GUARD = (
+    "  // Blink keeps isolated world names and stable identifiers in main-thread\n"
+    "  // maps, so a worker world reports neither.\n"
+    "  if (!world.IsMainWorld() && IsMainThread()) {\n"
+    "    origin.world_name = world.NonMainWorldHumanReadableName().Utf8();\n"
+)
+UNGUARDED_WORLD_NAME_READ = re.compile(
+    r"(NonMainWorldHumanReadableName|NonMainWorldStableId)\(\)"
+)
+
+
+def upgrade_world_name_guards(text: str) -> str:
+    text = STALE_LISTENER_WORLD_NAME_GUARD.sub(
+        "recorder_world && !recorder_world->IsMainWorld() && IsMainThread()",
+        text,
+    )
+    return text.replace(STALE_ORIGIN_WORLD_NAME_GUARD, ORIGIN_WORLD_NAME_GUARD)
+
+
+def describe_unguarded_world_name_reads(path: str, text: str) -> list[str]:
+    lines = text.splitlines()
+    problems: list[str] = []
+    for index, line in enumerate(lines):
+        if not UNGUARDED_WORLD_NAME_READ.search(line):
+            continue
+        context = "\n".join(lines[max(0, index - 4) : index + 1])
+        if "IsMainThread()" not in context:
+            problems.append(
+                f"{path}:{index + 1} reads a world name without the "
+                "main-thread guard"
+            )
+    return problems
 
 
 def write_patched(path: Path, text: str) -> None:
@@ -2229,6 +2277,7 @@ def verify_integrated_sources(signatures: dict[str, int]) -> None:
         problems.extend(
             describe_signature_mismatches(str(path), text, signatures)
         )
+        problems.extend(describe_unguarded_world_name_reads(str(path), text))
     if problems:
         raise RuntimeError(
             "patched Chromium sources disagree with the recorder bridge:\n  "
