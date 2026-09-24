@@ -1131,7 +1131,7 @@ internal static class EventPayloadValidator
                 RequiredObject("context"),
                 RequiredObject("scope"),
                 RequiredString("inspectorId"),
-                RequiredNumber("encodedDataLength", nonnegative: true),
+                RequiredNullableNumber("encodedDataLength", nonnegative: true),
                 RequiredNumber("decodedBodyLength", nonnegative: true),
                 RequiredNullableNumber("finishBeforeRecordMilliseconds")
             ],
@@ -1492,7 +1492,7 @@ internal static class EventPayloadValidator
                 RequiredBoolean("fromArchive"),
                 RequiredBoolean("cookieInRequest"),
                 RequiredString("responseType"),
-                RequiredNumber("encodedDataLength", nonnegative: true),
+                RequiredNullableNumber("encodedDataLength", nonnegative: true),
                 RequiredNumber("expectedContentLength"),
                 RequiredInteger("headerCount", nonnegative: true),
                 RequiredObjectArray("headers"),

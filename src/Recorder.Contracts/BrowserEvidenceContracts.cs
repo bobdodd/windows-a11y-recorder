@@ -718,7 +718,7 @@ public sealed record BrowserNetworkResponse(
     bool FromArchive,
     bool CookieInRequest,
     string ResponseType,
-    double EncodedDataLength,
+    double? EncodedDataLength,
     double ExpectedContentLength,
     int HeaderCount,
     IReadOnlyList<BrowserNetworkHeader> Headers,
@@ -749,7 +749,7 @@ public sealed record BrowserNetworkRequestFinishedPayload(
     BrowserContext Context,
     BrowserNetworkScope Scope,
     string InspectorId,
-    double EncodedDataLength,
+    double? EncodedDataLength,
     double DecodedBodyLength,
     double? FinishBeforeRecordMilliseconds);
 

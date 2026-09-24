@@ -3115,6 +3115,27 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsAnUnreportedTransferredLengthAndRejectsANegativeOne()
+    {
+        var response = JsonNode.Parse(BrowserNetworkPayloads.ResponseReceived)!;
+        response["response"]!["encodedDataLength"] = null;
+        var finished = JsonNode.Parse(BrowserNetworkPayloads.RequestFinished)!;
+        finished["encodedDataLength"] = null;
+
+        Assert.Empty(await ValidateNetworkRecordAsync("response-received", response));
+        Assert.Empty(await ValidateNetworkRecordAsync("request-finished", finished));
+
+        finished["encodedDataLength"] = -1.0;
+        var issues = await ValidateNetworkRecordAsync("request-finished", finished);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/encodedDataLength", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RejectsAnUndeclaredTimingPhase()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.ResponseReceived)!;
