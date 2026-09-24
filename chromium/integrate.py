@@ -5743,6 +5743,1184 @@ def patch_blink_local_frame_view(path: Path) -> None:
     write_patched(path, text)
 
 
+# Network metadata. The Blink hooks record request and response metadata at
+# the resource load observers, which see every load a frame or worker makes
+# once it has an inspector identifier. The browser hooks record the headers the
+# network service reports sending and receiving, and each finished
+# navigation's request and response. No hook reads a body. Header values pass
+# through the bridge's classifier, which withholds credential values.
+def recorder_enum_value_name(enumerator: str) -> str:
+    """Returns the recorder's kebab-case name for a Chromium enumerator."""
+    body = enumerator[1:] if enumerator.startswith("k") else enumerator
+    words = re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+", body)
+    return "-".join(word.lower() for word in words)
+
+
+def recorder_enum_name_function(
+    function: str, value_type: str, enumerators: tuple[str, ...]
+) -> str:
+    """Writes a function naming each enumerator, with "unknown" otherwise.
+
+    The chain is written as comparisons rather than a switch, so an enumerator
+    Chromium adds later reads as unknown rather than failing the build.
+    """
+    lines = [f"const char* {function}({value_type} value) {{"]
+    for enumerator in enumerators:
+        lines.append(f"  if (value == {value_type}::{enumerator}) {{")
+        lines.append(f'    return "{recorder_enum_value_name(enumerator)}";')
+        lines.append("  }")
+    lines.append('  return "unknown";')
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+BLINK_NETWORK_ENUMS = (
+    (
+        "RecorderNetworkPriorityName",
+        "ResourceLoadPriority",
+        ("kUnresolved", "kVeryLow", "kLow", "kMedium", "kHigh", "kVeryHigh"),
+    ),
+    (
+        "RecorderNetworkRequestModeName",
+        "network::mojom::RequestMode",
+        (
+            "kSameOrigin",
+            "kNoCors",
+            "kCors",
+            "kCorsWithForcedPreflight",
+            "kNavigate",
+        ),
+    ),
+    (
+        "RecorderNetworkRedirectModeName",
+        "network::mojom::RedirectMode",
+        ("kFollow", "kError", "kManual"),
+    ),
+    (
+        "RecorderNetworkCredentialsModeName",
+        "network::mojom::CredentialsMode",
+        ("kOmit", "kSameOrigin", "kInclude", "kOmitBug_775438_Workaround"),
+    ),
+    (
+        "RecorderNetworkCacheModeName",
+        "mojom::blink::FetchCacheMode",
+        (
+            "kDefault",
+            "kNoStore",
+            "kBypassCache",
+            "kValidateCache",
+            "kForceCache",
+            "kOnlyIfCached",
+            "kUnspecifiedOnlyIfCachedStrict",
+            "kUnspecifiedForceCacheMiss",
+        ),
+    ),
+    (
+        "RecorderNetworkFetchPriorityHintName",
+        "mojom::blink::FetchPriorityHint",
+        ("kLow", "kAuto", "kHigh"),
+    ),
+    (
+        "RecorderNetworkRenderBlockingName",
+        "RenderBlockingBehavior",
+        (
+            "kUnset",
+            "kBlocking",
+            "kNonBlocking",
+            "kNonBlockingDynamic",
+            "kPotentiallyBlocking",
+            "kInBodyParserBlocking",
+        ),
+    ),
+    (
+        "RecorderNetworkResponseTypeName",
+        "network::mojom::FetchResponseType",
+        ("kBasic", "kCors", "kDefault", "kError", "kOpaque", "kOpaqueRedirect"),
+    ),
+    (
+        "RecorderNetworkResponseSourceName",
+        "network::mojom::FetchResponseSource",
+        ("kUnspecified", "kNetwork", "kHttpCache", "kCacheStorage"),
+    ),
+    (
+        "RecorderNetworkBlockedReasonName",
+        "ResourceRequestBlockedReason",
+        (
+            "kOther",
+            "kCSP",
+            "kMixedContent",
+            "kOrigin",
+            "kInspector",
+            "kIntegrity",
+            "kSubresourceFilter",
+            "kContentType",
+            "kCoepFrameResourceNeedsCoepHeader",
+            "kCoopSandboxedIFrameCannotNavigateToCoopPage",
+            "kCorpNotSameOrigin",
+            "kCorpNotSameOriginAfterDefaultedToSameOriginByCoep",
+            "kCorpNotSameOriginAfterDefaultedToSameOriginByDip",
+            "kCorpNotSameOriginAfterDefaultedToSameOriginByCoepAndDip",
+            "kCorpNotSameSite",
+            "kConversionRequest",
+            "kSRIMessageSignatureMismatch",
+        ),
+    ),
+    (
+        "RecorderNetworkCorsErrorName",
+        "network::mojom::CorsError",
+        (
+            "kDisallowedByMode",
+            "kInvalidResponse",
+            "kWildcardOriginNotAllowed",
+            "kMissingAllowOriginHeader",
+            "kMultipleAllowOriginValues",
+            "kInvalidAllowOriginValue",
+            "kAllowOriginMismatch",
+            "kInvalidAllowCredentials",
+            "kCorsDisabledScheme",
+            "kPreflightInvalidStatus",
+            "kPreflightDisallowedRedirect",
+            "kPreflightWildcardOriginNotAllowed",
+            "kPreflightMissingAllowOriginHeader",
+            "kPreflightMultipleAllowOriginValues",
+            "kPreflightInvalidAllowOriginValue",
+            "kPreflightAllowOriginMismatch",
+            "kPreflightInvalidAllowCredentials",
+            "kInvalidAllowMethodsPreflightResponse",
+            "kInvalidAllowHeadersPreflightResponse",
+            "kMethodDisallowedByPreflightResponse",
+            "kHeaderDisallowedByPreflightResponse",
+            "kRedirectContainsCredentials",
+            "kInsecureLocalNetwork",
+            "kInvalidLocalNetworkAccess",
+            "kLocalNetworkAccessPermissionDenied",
+        ),
+    ),
+)
+
+BLINK_NETWORK_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    *BLINK_COOKIE_ORIGIN_INCLUDES,
+    BLINK_EXECUTION_CONTEXT_INCLUDE,
+    '#include "net/base/ip_endpoint.h"',
+    '#include "net/base/net_errors.h"',
+    '#include "services/network/public/cpp/cors/cors_error_status.h"',
+    '#include "services/network/public/cpp/request_destination.h"',
+    '#include "services/network/public/mojom/cors.mojom-shared.h"',
+    '#include "services/network/public/mojom/fetch_api.mojom-shared.h"',
+    '#include "third_party/blink/public/platform/'
+    'resource_request_blocked_reason.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/'
+    'fetch_initiator_info.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/'
+    'fetch_initiator_type_names.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/'
+    'render_blocking_behavior.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/resource.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/'
+    'resource_error.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/'
+    'resource_load_timing.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/'
+    'resource_request.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/'
+    'resource_response.h"',
+    '#include "third_party/blink/renderer/platform/network/http_header_map.h"',
+    '#include "third_party/blink/renderer/platform/weborigin/'
+    'security_policy.h"',
+)
+
+BLINK_NETWORK_HELPER_MARKER = (
+    "a11y_recorder::NetworkRequestFacts RecorderNetworkRequestFacts("
+)
+BLINK_NETWORK_HELPER = (
+    "namespace {\n\n"
+    "// Names the Chromium enumerations a network record carries. Each name is\n"
+    "// the enumerator in kebab case.\n"
+    + "\n".join(
+        recorder_enum_name_function(function, value_type, enumerators)
+        for function, value_type, enumerators in BLINK_NETWORK_ENUMS
+    )
+    + """
+// Copies a header map. Values are copied as Blink holds them; the bridge
+// withholds the value of a header that carries a credential.
+std::vector<a11y_recorder::NetworkHeader> RecorderNetworkHeaders(
+    const HTTPHeaderMap& map) {
+  std::vector<a11y_recorder::NetworkHeader> headers;
+  for (const auto& header : map) {
+    a11y_recorder::NetworkHeader entry;
+    entry.name = header.key.Utf8();
+    entry.value = header.value.Utf8();
+    headers.push_back(std::move(entry));
+  }
+  return headers;
+}
+
+int64_t RecorderNetworkMicrosecondsAfter(base::TimeTicks start,
+                                         base::TimeTicks time) {
+  if (start.is_null() || time.is_null()) {
+    return a11y_recorder::kNetworkTimeUnobserved;
+  }
+  return (time - start).InMicroseconds();
+}
+
+int64_t RecorderNetworkMicrosecondsBeforeNow(base::TimeTicks time) {
+  if (time.is_null()) {
+    return a11y_recorder::kNetworkTimeUnobserved;
+  }
+  return (base::TimeTicks::Now() - time).InMicroseconds();
+}
+
+a11y_recorder::NetworkLoadTiming RecorderNetworkLoadTiming(
+    const ResourceLoadTiming* timing) {
+  a11y_recorder::NetworkLoadTiming facts;
+  if (!timing || timing->RequestTime().is_null()) {
+    return facts;
+  }
+  const base::TimeTicks start = timing->RequestTime();
+  facts.present = true;
+  facts.request_start_before_record =
+      RecorderNetworkMicrosecondsBeforeNow(start);
+  facts.proxy_start =
+      RecorderNetworkMicrosecondsAfter(start, timing->ProxyStart());
+  facts.proxy_end = RecorderNetworkMicrosecondsAfter(start, timing->ProxyEnd());
+  facts.domain_lookup_start =
+      RecorderNetworkMicrosecondsAfter(start, timing->DomainLookupStart());
+  facts.domain_lookup_end =
+      RecorderNetworkMicrosecondsAfter(start, timing->DomainLookupEnd());
+  facts.connect_start =
+      RecorderNetworkMicrosecondsAfter(start, timing->ConnectStart());
+  facts.connect_end =
+      RecorderNetworkMicrosecondsAfter(start, timing->ConnectEnd());
+  facts.ssl_start = RecorderNetworkMicrosecondsAfter(start, timing->SslStart());
+  facts.ssl_end = RecorderNetworkMicrosecondsAfter(start, timing->SslEnd());
+  facts.worker_start =
+      RecorderNetworkMicrosecondsAfter(start, timing->WorkerStart());
+  facts.worker_ready =
+      RecorderNetworkMicrosecondsAfter(start, timing->WorkerReady());
+  facts.worker_fetch_start =
+      RecorderNetworkMicrosecondsAfter(start, timing->WorkerFetchStart());
+  facts.worker_respond_with_settled = RecorderNetworkMicrosecondsAfter(
+      start, timing->WorkerRespondWithSettled());
+  facts.worker_router_evaluation_start = RecorderNetworkMicrosecondsAfter(
+      start, timing->WorkerRouterEvaluationStart());
+  facts.worker_cache_lookup_start = RecorderNetworkMicrosecondsAfter(
+      start, timing->WorkerCacheLookupStart());
+  facts.send_start = RecorderNetworkMicrosecondsAfter(start, timing->SendStart());
+  facts.send_end = RecorderNetworkMicrosecondsAfter(start, timing->SendEnd());
+  facts.receive_headers_start =
+      RecorderNetworkMicrosecondsAfter(start, timing->ReceiveHeadersStart());
+  facts.receive_headers_end =
+      RecorderNetworkMicrosecondsAfter(start, timing->ReceiveHeadersEnd());
+  facts.receive_non_informational_headers_start =
+      RecorderNetworkMicrosecondsAfter(
+          start, timing->ReceiveNonInformationalHeadersStart());
+  facts.receive_early_hints_start = RecorderNetworkMicrosecondsAfter(
+      start, timing->ReceiveEarlyHintsStart());
+  facts.push_start = RecorderNetworkMicrosecondsAfter(start, timing->PushStart());
+  facts.push_end = RecorderNetworkMicrosecondsAfter(start, timing->PushEnd());
+  facts.response_end =
+      RecorderNetworkMicrosecondsAfter(start, timing->ResponseEnd());
+  return facts;
+}
+
+// Reads one request. The initiator position is recorded one-based, and is
+// absent when Blink recorded none.
+a11y_recorder::NetworkRequestFacts RecorderNetworkRequestFacts(
+    const ResourceRequest& request,
+    ResourceType resource_type,
+    const FetchInitiatorInfo& initiator,
+    RenderBlockingBehavior render_blocking_behavior) {
+  a11y_recorder::NetworkRequestFacts facts;
+  facts.inspector_id = request.InspectorId();
+  facts.request_id = request.GetDevToolsId().Utf8();
+  facts.url = request.Url().GetString().Utf8();
+  facts.method = request.HttpMethod().Utf8();
+  if (const char* type_name =
+          Resource::ResourceTypeToString(resource_type, initiator.name)) {
+    facts.resource_type = type_name;
+  }
+  facts.initiator_type = initiator.name.Utf8();
+  facts.initiator_url = initiator.initiator_url.GetString().Utf8();
+  if (!(initiator.position == TextPosition::BelowRangePosition())) {
+    facts.initiator_line = initiator.position.line_.OneBasedInt();
+    facts.initiator_column = initiator.position.column_.OneBasedInt();
+  }
+  facts.link_preload = initiator.is_link_preload;
+  facts.internal = initiator.name == fetch_initiator_type_names::kInternal;
+  facts.destination = network::RequestDestinationToString(
+      request.GetRequestDestination(),
+      network::EmptyRequestDestinationOption::kUseFiveCharEmptyString);
+  facts.mode = RecorderNetworkRequestModeName(request.GetMode());
+  facts.credentials_mode =
+      RecorderNetworkCredentialsModeName(request.GetCredentialsMode());
+  facts.redirect_mode =
+      RecorderNetworkRedirectModeName(request.GetRedirectMode());
+  facts.cache_mode = RecorderNetworkCacheModeName(request.GetCacheMode());
+  facts.priority = RecorderNetworkPriorityName(request.Priority());
+  facts.initial_priority =
+      RecorderNetworkPriorityName(request.InitialPriority());
+  facts.fetch_priority_hint =
+      RecorderNetworkFetchPriorityHintName(request.GetFetchPriorityHint());
+  facts.render_blocking =
+      RecorderNetworkRenderBlockingName(render_blocking_behavior);
+  facts.referrer = request.ReferrerString().Utf8();
+  facts.referrer_policy =
+      SecurityPolicy::ReferrerPolicyAsString(request.GetReferrerPolicy())
+          .Utf8();
+  facts.keepalive = request.GetKeepalive();
+  facts.user_gesture = request.HasUserGesture();
+  facts.ad_resource = request.IsAdResource();
+  facts.form_submission = request.IsFormSubmission();
+  facts.headers = RecorderNetworkHeaders(request.HttpHeaderFields());
+  return facts;
+}
+
+a11y_recorder::NetworkResponseFacts RecorderNetworkResponseFacts(
+    const ResourceResponse& response) {
+  a11y_recorder::NetworkResponseFacts facts;
+  facts.url = response.CurrentRequestUrl().GetString().Utf8();
+  facts.response_url = response.ResponseUrl().GetString().Utf8();
+  facts.status_code = response.HttpStatusCode();
+  facts.status_text = response.HttpStatusText().Utf8();
+  facts.mime_type = response.MimeType().Utf8();
+  facts.charset = response.TextEncodingName().Utf8();
+  facts.alpn_protocol = response.AlpnNegotiatedProtocol().Utf8();
+  facts.connection_info = response.ConnectionInfoString().Utf8();
+  const net::IPEndPoint& remote = response.RemoteIPEndpoint();
+  if (remote.address().IsValid()) {
+    facts.remote_ip = remote.address().ToString();
+    facts.remote_port = remote.port();
+  }
+  facts.connection_id = response.ConnectionID();
+  facts.connection_reused = response.ConnectionReused();
+  facts.was_cached = response.WasCached();
+  facts.fetched_via_service_worker = response.WasFetchedViaServiceWorker();
+  facts.service_worker_response_source = RecorderNetworkResponseSourceName(
+      response.GetServiceWorkerResponseSource());
+  facts.in_prefetch_cache = response.WasInPrefetchCache();
+  facts.network_accessed = response.NetworkAccessed();
+  facts.from_archive = response.FromArchive();
+  facts.cookie_in_request = response.WasCookieInRequest();
+  facts.response_type = RecorderNetworkResponseTypeName(response.GetType());
+  facts.encoded_data_length = response.EncodedDataLength();
+  facts.expected_content_length = response.ExpectedContentLength();
+  facts.headers = RecorderNetworkHeaders(response.HttpHeaderFields());
+  facts.timing = RecorderNetworkLoadTiming(response.GetResourceLoadTiming());
+  return facts;
+}
+
+a11y_recorder::NetworkFailureFacts RecorderNetworkFailureFacts(
+    const ResourceError& error,
+    bool internal) {
+  a11y_recorder::NetworkFailureFacts facts;
+  facts.url = error.FailingURL().Utf8();
+  facts.net_error = error.ErrorCode();
+  if (error.ErrorCode() != 0) {
+    facts.net_error_name = net::ErrorToShortString(error.ErrorCode());
+  }
+  facts.cancellation = error.IsCancellation();
+  facts.timeout = error.IsTimeout();
+  facts.access_check = error.IsAccessCheck();
+  facts.blocked_by_response = error.WasBlockedByResponse();
+  facts.blocked_by_orb = error.WasBlockedByORB();
+  facts.has_copy_in_cache = error.HasCopyInCache();
+  facts.cancelled_from_http_error = error.IsCancelledFromHttpError();
+  facts.internal = internal;
+  if (std::optional<ResourceRequestBlockedReason> reason =
+          error.GetResourceRequestBlockedReason()) {
+    facts.blocked_reason = RecorderNetworkBlockedReasonName(*reason);
+  }
+  if (std::optional<network::CorsErrorStatus> cors =
+          error.CorsErrorStatus()) {
+    facts.cors_error = RecorderNetworkCorsErrorName(cors->cors_error);
+    facts.cors_failed_parameter = cors->failed_parameter;
+  }
+  return facts;
+}
+
+}  // namespace
+
+"""
+)
+
+# Each observer names the script context its loads belong to. A frame's loads
+# belong to its document; a worker's loads belong to the worker global scope,
+# which has no document.
+BLINK_FRAME_NETWORK_SCOPE_HELPER_MARKER = (
+    "a11y_recorder::NetworkScope RecorderFrameNetworkScope("
+)
+BLINK_FRAME_NETWORK_SCOPE_HELPER = """\
+namespace {
+
+a11y_recorder::NetworkScope RecorderFrameNetworkScope(Document& document) {
+  a11y_recorder::NetworkScope scope;
+  scope.context_kind = "window";
+  scope.document_node_id = document.GetDomNodeId();
+  scope.document_token = document.Token().ToString();
+  return scope;
+}
+
+}  // namespace
+
+"""
+BLINK_WORKER_NETWORK_SCOPE_HELPER_MARKER = (
+    "a11y_recorder::NetworkScope RecorderWorkerNetworkScope("
+)
+BLINK_WORKER_NETWORK_SCOPE_HELPER = """\
+namespace {
+
+a11y_recorder::NetworkScope RecorderWorkerNetworkScope(
+    ExecutionContext* context,
+    const base::UnguessableToken& worker_token,
+    const KURL& global_object_url) {
+  a11y_recorder::NetworkScope scope;
+  scope.context_kind = "other";
+  if (context && context->IsDedicatedWorkerGlobalScope()) {
+    scope.context_kind = "dedicated-worker";
+  } else if (context && context->IsSharedWorkerGlobalScope()) {
+    scope.context_kind = "shared-worker";
+  } else if (context && context->IsServiceWorkerGlobalScope()) {
+    scope.context_kind = "service-worker";
+  } else if (context && context->IsWorkletGlobalScope()) {
+    scope.context_kind = "worklet";
+  }
+  if (!worker_token.is_empty()) {
+    scope.worker_token = worker_token.ToString();
+  }
+  scope.global_object_url = global_object_url.GetString().Utf8();
+  return scope;
+}
+
+}  // namespace
+
+"""
+
+BLINK_FRAME_NETWORK_SCOPE = "RecorderFrameNetworkScope(*document_)"
+BLINK_WORKER_NETWORK_SCOPE = (
+    "RecorderWorkerNetworkScope(\n"
+    "            worker_fetch_context_->GetExecutionContext(),\n"
+    "            devtools_worker_token_,\n"
+    "            fetcher_properties_->GetFetchClientSettingsObject()\n"
+    "                .GlobalObjectUrl())"
+)
+
+
+def blink_network_request_hook(scope: str, origin_context: str) -> str:
+    return f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkNetworkRequest(
+        {scope},
+        RecorderNetworkRequestFacts(request, resource_type,
+                                    options.initiator_info,
+                                    render_blocking_behavior),
+        !redirect_response.IsNull(),
+        RecorderNetworkResponseFacts(redirect_response),
+        RecorderCookieCallOrigin({origin_context}));
+  }}
+"""
+
+
+def blink_network_response_hook(scope: str) -> str:
+    return f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkNetworkResponse(
+        {scope},
+        identifier, request.GetDevToolsId().Utf8(),
+        response_source == ResponseSource::kFromMemoryCache,
+        RecorderNetworkResponseFacts(response));
+  }}
+"""
+
+
+def blink_network_finished_hook(scope: str) -> str:
+    return f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkNetworkFinished(
+        {scope},
+        identifier, encoded_data_length, decoded_body_length,
+        RecorderNetworkMicrosecondsBeforeNow(finish_time));
+  }}
+"""
+
+
+def blink_network_failed_hook(scope: str) -> str:
+    return f"""\
+  if (a11y_recorder::IsRecorderActive()) {{
+    a11y_recorder::RecordBlinkNetworkFailed(
+        {scope},
+        identifier,
+        RecorderNetworkFailureFacts(error, is_internal_request.value()));
+  }}
+"""
+
+
+def blink_network_memory_cache_definition(observer: str, scope: str) -> str:
+    return f"""\
+void {observer}::RecordMemoryCacheUseForRecorder(
+    const ResourceRequest& request,
+    const Resource& resource,
+    RenderBlockingBehavior render_blocking_behavior,
+    bool is_static_data) {{
+  if (!a11y_recorder::IsRecorderActive()) {{
+    return;
+  }}
+  a11y_recorder::RecordBlinkMemoryCacheUse(
+      {scope},
+      is_static_data,
+      RecorderNetworkRequestFacts(request, resource.GetType(),
+                                  resource.Options().initiator_info,
+                                  render_blocking_behavior),
+      RecorderNetworkResponseFacts(resource.GetResponse()));
+}}
+
+"""
+
+
+BLINK_FRAME_NETWORK_REQUEST_HOOK = blink_network_request_hook(
+    BLINK_FRAME_NETWORK_SCOPE, "document_->GetExecutionContext()"
+)
+BLINK_FRAME_NETWORK_RESPONSE_HOOK = blink_network_response_hook(
+    BLINK_FRAME_NETWORK_SCOPE
+)
+BLINK_FRAME_NETWORK_FINISHED_HOOK = blink_network_finished_hook(
+    BLINK_FRAME_NETWORK_SCOPE
+)
+BLINK_FRAME_NETWORK_FAILED_HOOK = blink_network_failed_hook(
+    BLINK_FRAME_NETWORK_SCOPE
+)
+BLINK_FRAME_MEMORY_CACHE_DEFINITION = blink_network_memory_cache_definition(
+    "ResourceLoadObserverForFrame", BLINK_FRAME_NETWORK_SCOPE
+)
+BLINK_WORKER_NETWORK_REQUEST_HOOK = blink_network_request_hook(
+    BLINK_WORKER_NETWORK_SCOPE, "worker_fetch_context_->GetExecutionContext()"
+)
+BLINK_WORKER_NETWORK_RESPONSE_HOOK = blink_network_response_hook(
+    BLINK_WORKER_NETWORK_SCOPE
+)
+BLINK_WORKER_NETWORK_FINISHED_HOOK = blink_network_finished_hook(
+    BLINK_WORKER_NETWORK_SCOPE
+)
+BLINK_WORKER_NETWORK_FAILED_HOOK = blink_network_failed_hook(
+    BLINK_WORKER_NETWORK_SCOPE
+)
+BLINK_WORKER_MEMORY_CACHE_DEFINITION = blink_network_memory_cache_definition(
+    "ResourceLoadObserverForWorker", BLINK_WORKER_NETWORK_SCOPE
+)
+
+BLINK_MEMORY_CACHE_OBSERVER_DECLARATION = """\
+  // Called once for every use of a resource from Blink's memory cache,
+  // whether or not DevTools is attached, so that the recorder observes uses
+  // that send no request.
+  virtual void RecordMemoryCacheUseForRecorder(
+      const ResourceRequest&,
+      const Resource&,
+      RenderBlockingBehavior,
+      bool is_static_data) {}
+
+"""
+BLINK_MEMORY_CACHE_OVERRIDE_DECLARATION = """\
+  void RecordMemoryCacheUseForRecorder(const ResourceRequest&,
+                                       const Resource&,
+                                       RenderBlockingBehavior,
+                                       bool is_static_data) override;
+"""
+BLINK_MEMORY_CACHE_FETCHER_ANCHOR = """\
+  if (!is_static_data) {
+    MarkEarlyHintConsumedIfNeeded(request.InspectorId(), resource,
+                                  resource->GetResponse());
+  }
+"""
+BLINK_MEMORY_CACHE_FETCHER_HOOK = BLINK_MEMORY_CACHE_FETCHER_ANCHOR + """\
+  resource_load_observer_->RecordMemoryCacheUseForRecorder(
+      request, *resource, render_blocking_behavior, is_static_data);
+"""
+
+# Request identifiers. The network service reports a request's wire headers
+# only for a request that carries a DevTools request identifier, and Blink
+# assigns one only while DevTools is attached. While the recorder is connected
+# these hooks assign the identifier DevTools would assign, so that wire
+# headers are reported for every recorded request. A request Blink marks as
+# internal is left without one, as DevTools leaves it.
+BLINK_FRAME_REQUEST_ID_ANCHOR = """\
+  if (!GetResourceFetcherProperties().IsDetached()) {
+    probe::SetDevToolsIds(Probe(), request, options.initiator_info);
+  }
+"""
+BLINK_FRAME_REQUEST_ID_HOOK = BLINK_FRAME_REQUEST_ID_ANCHOR + """\
+  if (a11y_recorder::IsRecorderActive() && request.GetDevToolsId().IsNull() &&
+      options.initiator_info.name != fetch_initiator_type_names::kInternal) {
+    request.SetDevToolsId(
+        IdentifiersFactory::SubresourceRequestId(request.InspectorId()));
+  }
+"""
+BLINK_WORKER_REQUEST_ID_ANCHOR = """\
+  if (!GetResourceFetcherProperties().IsDetached()) {
+    probe::SetDevToolsIds(Probe(), out_request, options.initiator_info);
+  }
+"""
+BLINK_WORKER_REQUEST_ID_HOOK = BLINK_WORKER_REQUEST_ID_ANCHOR + """\
+  if (a11y_recorder::IsRecorderActive() &&
+      out_request.GetDevToolsId().IsNull() &&
+      options.initiator_info.name != fetch_initiator_type_names::kInternal) {
+    out_request.SetDevToolsId(
+        IdentifiersFactory::SubresourceRequestId(out_request.InspectorId()));
+  }
+"""
+BLINK_REQUEST_ID_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/inspector/identifiers_factory.h"',
+    '#include "third_party/blink/renderer/platform/loader/fetch/'
+    'fetch_initiator_type_names.h"',
+)
+CONTENT_NAVIGATION_REQUEST_ID_ANCHOR = """\
+  devtools_instrumentation::MaybeAssignResourceRequestId(
+      frame_tree_node, request_info.devtools_navigation_token.ToString(),
+      *new_request);
+"""
+CONTENT_NAVIGATION_REQUEST_ID_HOOK = CONTENT_NAVIGATION_REQUEST_ID_ANCHOR + """\
+  if (a11y_recorder::IsRecorderActive() && !new_request->devtools_request_id) {
+    new_request->devtools_request_id =
+        request_info.devtools_navigation_token.ToString();
+  }
+"""
+
+CONTENT_NETWORK_HEADERS_INCLUDES = (
+    CONTENT_NAVIGATION_INCLUDE,
+    '#include "content/browser/renderer_host/render_frame_host_impl.h"',
+    *CONTENT_COOKIE_ACCESS_INCLUDES,
+    '#include "net/cookies/cookie_access_result.h"',
+)
+CONTENT_NETWORK_HEADERS_HELPER_MARKER = (
+    "std::vector<a11y_recorder::NetworkHeader> RecorderNetworkRawHeaders("
+)
+CONTENT_NETWORK_HEADERS_HELPER = """\
+namespace {
+
+// Copies the headers the network service reported. The bridge withholds the
+// value of a header that carries a credential.
+std::vector<a11y_recorder::NetworkHeader> RecorderNetworkRawHeaders(
+    const std::vector<network::mojom::HttpRawHeaderPairPtr>& raw_headers) {
+  std::vector<a11y_recorder::NetworkHeader> headers;
+  headers.reserve(raw_headers.size());
+  for (const auto& raw_header : raw_headers) {
+    a11y_recorder::NetworkHeader header;
+    header.name = raw_header->key;
+    header.value = raw_header->value;
+    headers.push_back(std::move(header));
+  }
+  return headers;
+}
+
+a11y_recorder::CookieAccessEntry RecorderNetworkCookieEntry(
+    const net::CanonicalCookie& cookie,
+    const base::Time& now) {
+  a11y_recorder::CookieAccessEntry entry;
+  entry.parsed = true;
+  entry.name = cookie.Name();
+  entry.domain = cookie.Domain();
+  entry.path = cookie.Path();
+  entry.same_site = net::CookieSameSiteToString(cookie.SameSite());
+  entry.secure = cookie.SecureAttribute();
+  entry.http_only = cookie.IsHttpOnly();
+  entry.host_only = cookie.IsHostCookie();
+  entry.partitioned = cookie.IsPartitioned();
+  entry.persistent = cookie.IsPersistent();
+  entry.expired = cookie.IsExpired(now);
+  return entry;
+}
+
+// Copies the cookies the network service attached to or excluded from a
+// request. No cookie value is read.
+std::vector<a11y_recorder::CookieAccessEntry> RecorderNetworkRequestCookies(
+    const net::CookieAccessResultList& cookies) {
+  std::vector<a11y_recorder::CookieAccessEntry> entries;
+  entries.reserve(cookies.size());
+  const base::Time now = base::Time::Now();
+  for (const auto& item : cookies) {
+    a11y_recorder::CookieAccessEntry entry =
+        RecorderNetworkCookieEntry(item.cookie, now);
+    entry.inclusion_status = item.access_result.status.GetDebugString();
+    entries.push_back(std::move(entry));
+  }
+  return entries;
+}
+
+// Copies the cookies a response set or tried to set. A Set-Cookie line the
+// network service could not parse contributes only the name read from it.
+std::vector<a11y_recorder::CookieAccessEntry> RecorderNetworkResponseCookies(
+    const net::CookieAndLineAccessResultList& cookies) {
+  std::vector<a11y_recorder::CookieAccessEntry> entries;
+  entries.reserve(cookies.size());
+  const base::Time now = base::Time::Now();
+  for (const auto& item : cookies) {
+    a11y_recorder::CookieAccessEntry entry;
+    if (item.cookie) {
+      entry = RecorderNetworkCookieEntry(*item.cookie, now);
+    } else {
+      entry.name =
+          a11y_recorder::ReadCookieNameFromSetCookieLine(item.cookie_string);
+    }
+    entry.inclusion_status = item.access_result.status.GetDebugString();
+    entries.push_back(std::move(entry));
+  }
+  return entries;
+}
+
+// Reads the frame an observer was made for, and its page. A worker's
+// observer has no frame, and a frame that no longer exists is reported as
+// none.
+void RecorderNetworkFrameIds(FrameTreeNodeId frame_tree_node_id,
+                             int* page_frame_tree_node_id,
+                             int* recorded_frame_tree_node_id) {
+  *page_frame_tree_node_id = -1;
+  *recorded_frame_tree_node_id = -1;
+  if (frame_tree_node_id.is_null()) {
+    return;
+  }
+  FrameTreeNode* node = FrameTreeNode::GloballyFindByID(frame_tree_node_id);
+  if (!node) {
+    return;
+  }
+  *recorded_frame_tree_node_id = frame_tree_node_id.GetUnsafeValue();
+  *page_frame_tree_node_id = *recorded_frame_tree_node_id;
+  if (RenderFrameHostImpl* current = node->current_frame_host()) {
+    *page_frame_tree_node_id =
+        current->GetMainFrame()->GetFrameTreeNodeId().GetUnsafeValue();
+  }
+}
+
+}  // namespace
+
+"""
+CONTENT_NETWORK_HEADERS_HELPER_ANCHOR = (
+    "NetworkServiceDevToolsObserver::NetworkServiceDevToolsObserver(\n"
+)
+CONTENT_RAW_REQUEST_ANCHOR = """\
+        applied_network_conditions_id) {
+  auto* host = GetDevToolsAgentHost();
+"""
+CONTENT_RAW_REQUEST_HOOK = """\
+        applied_network_conditions_id) {
+  if (a11y_recorder::IsRecorderActive()) {
+    int recorder_page_frame_tree_node_id = -1;
+    int recorder_frame_tree_node_id = -1;
+    RecorderNetworkFrameIds(frame_tree_node_id_,
+                            &recorder_page_frame_tree_node_id,
+                            &recorder_frame_tree_node_id);
+    a11y_recorder::RecordBrowserNetworkRequestHeaders(
+        recorder_page_frame_tree_node_id, recorder_frame_tree_node_id,
+        devtools_agent_id_, devtools_request_id,
+        timestamp.is_null() ? a11y_recorder::kNetworkTimeUnobserved
+                            : (base::TimeTicks::Now() - timestamp)
+                                  .InMicroseconds(),
+        RecorderNetworkRawHeaders(request_headers),
+        RecorderNetworkRequestCookies(request_cookie_list));
+  }
+  auto* host = GetDevToolsAgentHost();
+"""
+CONTENT_RAW_RESPONSE_ANCHOR = """\
+    const std::optional<net::CookiePartitionKey>& cookie_partition_key) {
+  auto* host = GetDevToolsAgentHost();
+"""
+CONTENT_RAW_RESPONSE_HOOK = """\
+    const std::optional<net::CookiePartitionKey>& cookie_partition_key) {
+  if (a11y_recorder::IsRecorderActive()) {
+    int recorder_page_frame_tree_node_id = -1;
+    int recorder_frame_tree_node_id = -1;
+    RecorderNetworkFrameIds(frame_tree_node_id_,
+                            &recorder_page_frame_tree_node_id,
+                            &recorder_frame_tree_node_id);
+    a11y_recorder::RecordBrowserNetworkResponseHeaders(
+        recorder_page_frame_tree_node_id, recorder_frame_tree_node_id,
+        devtools_agent_id_, devtools_request_id, http_status_code,
+        RecorderNetworkRawHeaders(response_headers),
+        RecorderNetworkResponseCookies(response_cookie_list));
+  }
+  auto* host = GetDevToolsAgentHost();
+"""
+
+CONTENT_NAVIGATION_RESPONSE_INCLUDES = (
+    '#include "content/public/browser/navigation_handle_timing.h"',
+    '#include "net/base/ip_endpoint.h"',
+    '#include "net/base/net_errors.h"',
+    '#include "net/http/http_connection_info.h"',
+    '#include "net/http/http_request_headers.h"',
+    '#include "net/http/http_response_headers.h"',
+    '#include "services/network/public/mojom/url_response_head.mojom.h"',
+)
+CONTENT_NAVIGATION_RESPONSE_HOOK = """\
+  if (a11y_recorder::IsRecorderActive()) {
+    a11y_recorder::NavigationResponseFacts recorder_response;
+    recorder_response.request_id =
+        NavigationRequest::From(navigation_handle)
+            ->devtools_navigation_token()
+            .ToString();
+    recorder_response.url = navigation_handle->GetURL().spec();
+    recorder_response.method = navigation_handle->GetRequestMethod();
+    recorder_response.committed = navigation_handle->HasCommitted();
+    recorder_response.error_page =
+        navigation_handle->HasCommitted() && navigation_handle->IsErrorPage();
+    recorder_response.same_document = navigation_handle->IsSameDocument();
+    recorder_response.download = navigation_handle->IsDownload();
+    recorder_response.back_forward_cache =
+        navigation_handle->IsServedFromBackForwardCache();
+    recorder_response.net_error = navigation_handle->GetNetErrorCode();
+    if (recorder_response.net_error != net::OK) {
+      recorder_response.net_error_name =
+          net::ErrorToShortString(recorder_response.net_error);
+    }
+    for (const GURL& recorder_url : navigation_handle->GetRedirectChain()) {
+      recorder_response.redirect_chain.push_back(recorder_url.spec());
+    }
+    for (const auto& recorder_header :
+         navigation_handle->GetRequestHeaders().GetHeaderVector()) {
+      a11y_recorder::NetworkHeader recorder_entry;
+      recorder_entry.name = recorder_header.key;
+      recorder_entry.value = recorder_header.value;
+      recorder_response.request_headers.push_back(std::move(recorder_entry));
+    }
+    if (const net::HttpResponseHeaders* recorder_headers =
+            navigation_handle->GetResponseHeaders()) {
+      recorder_response.response_present = true;
+      recorder_response.status_code = recorder_headers->response_code();
+      recorder_response.status_text = recorder_headers->GetStatusText();
+      std::string recorder_mime_type;
+      if (recorder_headers->GetMimeType(&recorder_mime_type)) {
+        recorder_response.mime_type = recorder_mime_type;
+      }
+      size_t recorder_iterator = 0;
+      std::string recorder_name;
+      std::string recorder_value;
+      while (recorder_headers->EnumerateHeaderLines(
+          &recorder_iterator, &recorder_name, &recorder_value)) {
+        a11y_recorder::NetworkHeader recorder_entry;
+        recorder_entry.name = recorder_name;
+        recorder_entry.value = recorder_value;
+        recorder_response.response_headers.push_back(
+            std::move(recorder_entry));
+      }
+      recorder_response.was_cached = navigation_handle->WasResponseCached();
+      // The response head is read directly rather than through
+      // GetSocketAddress, which asserts a navigation state that a failed
+      // navigation with a response need not have reached.
+      if (const network::mojom::URLResponseHead* recorder_head =
+              NavigationRequest::From(navigation_handle)->response()) {
+        const net::IPEndPoint& recorder_socket = recorder_head->remote_endpoint;
+        if (recorder_socket.address().IsValid()) {
+          recorder_response.remote_ip = recorder_socket.address().ToString();
+          recorder_response.remote_port = recorder_socket.port();
+        }
+      }
+      recorder_response.connection_info = std::string(
+          net::HttpConnectionInfoToString(
+              navigation_handle->GetConnectionInfo()));
+    }
+    const base::TimeTicks recorder_start = navigation_handle->NavigationStart();
+    if (!recorder_start.is_null()) {
+      const NavigationHandleTiming& recorder_timing =
+          navigation_handle->GetNavigationHandleTiming();
+      auto recorder_after = [&recorder_start](base::TimeTicks time) {
+        return time.is_null() ? a11y_recorder::kNetworkTimeUnobserved
+                              : (time - recorder_start).InMicroseconds();
+      };
+      a11y_recorder::NavigationResponseTiming& recorder_facts =
+          recorder_response.timing;
+      recorder_facts.present = true;
+      recorder_facts.navigation_start_before_record =
+          (base::TimeTicks::Now() - recorder_start).InMicroseconds();
+      recorder_facts.loader_start =
+          recorder_after(recorder_timing.loader_start_time);
+      recorder_facts.first_request_start =
+          recorder_after(recorder_timing.first_request_start_time);
+      recorder_facts.first_response_start =
+          recorder_after(recorder_timing.first_response_start_time);
+      recorder_facts.first_loader_callback =
+          recorder_after(recorder_timing.first_loader_callback_time);
+      recorder_facts.final_request_start =
+          recorder_after(recorder_timing.final_request_start_time);
+      recorder_facts.final_response_start =
+          recorder_after(recorder_timing.final_response_start_time);
+      recorder_facts.final_non_informational_response_start = recorder_after(
+          recorder_timing.final_non_informational_response_start_time);
+      recorder_facts.final_loader_callback =
+          recorder_after(recorder_timing.final_loader_callback_time);
+      recorder_facts.request_failed =
+          recorder_after(recorder_timing.request_failed_time);
+      recorder_facts.commit_sent =
+          recorder_after(recorder_timing.navigation_commit_sent_time);
+      recorder_facts.commit_received =
+          recorder_after(recorder_timing.navigation_commit_received_time);
+      recorder_facts.commit_reply_sent =
+          recorder_after(recorder_timing.navigation_commit_reply_sent_time);
+      recorder_facts.did_commit =
+          recorder_after(recorder_timing.navigation_did_commit_time);
+      recorder_facts.final_request_domain_lookup_start = recorder_after(
+          recorder_timing.final_request_domain_lookup_start_time);
+      recorder_facts.final_request_domain_lookup_end = recorder_after(
+          recorder_timing.final_request_domain_lookup_end_time);
+      recorder_facts.final_request_connect_start = recorder_after(
+          recorder_timing.final_request_connect_start_time);
+      recorder_facts.final_request_connect_end = recorder_after(
+          recorder_timing.final_request_connect_end_time);
+      recorder_facts.final_request_ssl_start = recorder_after(
+          recorder_timing.final_request_ssl_start_time);
+    }
+    a11y_recorder::RecordBrowserNavigationResponse(
+        navigation_handle->GetNavigationId(),
+        recorder_page_frame_tree_node_id,
+        navigation_handle->GetFrameTreeNodeId().GetUnsafeValue(),
+        recorder_document_navigation_id, recorder_document_token,
+        std::move(recorder_response));
+  }
+"""
+
+
+def apply_network_hooks(
+    text: str, hooks: tuple[tuple[str, str], ...], path: Path
+) -> str:
+    """Writes each hook after the opening line of its anchor.
+
+    Each anchor is a function's last signature line and the first line of its
+    body. The written text holds the anchor's signature line, the hook, and the
+    anchor's body line, so it is its own presence guard.
+    """
+    for anchor, replacement in hooks:
+        text = apply_cookie_hook(text, anchor, replacement, path)
+    return text
+
+
+def network_hook(signature_line: str, hook: str, body_line: str) -> tuple[str, str]:
+    return (signature_line + body_line, signature_line + hook + body_line)
+
+
+def renamed_network_hook(
+    old_signature_line: str, new_signature_line: str, hook: str, body_line: str
+) -> tuple[str, str]:
+    return (old_signature_line + body_line, new_signature_line + hook + body_line)
+
+
+# Each entry is an anchor and its replacement, in source order.
+BLINK_FRAME_NETWORK_HOOKS = (
+    network_hook(
+        "    const Resource* resource) {\n",
+        BLINK_FRAME_NETWORK_REQUEST_HOOK,
+        "  LocalFrame* frame = document_->GetFrame();\n",
+    ),
+    network_hook(
+        "    ResponseSource response_source) {\n",
+        BLINK_FRAME_NETWORK_RESPONSE_HOOK,
+        "  LocalFrame* frame = document_->GetFrame();\n",
+    ),
+    network_hook(
+        "    int64_t decoded_body_length) {\n",
+        BLINK_FRAME_NETWORK_FINISHED_HOOK,
+        "  LocalFrame* frame = document_->GetFrame();\n",
+    ),
+    network_hook(
+        "    IsInternalRequest is_internal_request) {\n",
+        BLINK_FRAME_NETWORK_FAILED_HOOK,
+        "  LocalFrame* frame = document_->GetFrame();\n",
+    ),
+    )
+BLINK_WORKER_NETWORK_HOOKS = (
+    network_hook(
+        "    const Resource* resource) {\n",
+        BLINK_WORKER_NETWORK_REQUEST_HOOK,
+        "  probe::WillSendRequest(\n",
+    ),
+    renamed_network_hook(
+        "    ResponseSource) {\n",
+        "    ResponseSource response_source) {\n",
+        BLINK_WORKER_NETWORK_RESPONSE_HOOK,
+        "  RecordPrivateNetworkAccessFeature(\n",
+    ),
+    network_hook(
+        "    int64_t decoded_body_length) {\n",
+        BLINK_WORKER_NETWORK_FINISHED_HOOK,
+        "  probe::DidFinishLoading(probe_, identifier, nullptr, "
+        "finish_time,\n",
+    ),
+    renamed_network_hook(
+        "                                                   "
+        "IsInternalRequest) {\n",
+        "                                                   "
+        "IsInternalRequest is_internal_request) {\n",
+        BLINK_WORKER_NETWORK_FAILED_HOOK,
+        "  probe::DidFailLoading(probe_, identifier, nullptr, error,\n",
+    ),
+    )
+
+
+def patch_blink_frame_network_observer(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/loader/'
+        'resource_load_observer_for_frame.h"',
+        (*BLINK_NETWORK_INCLUDES, BLINK_DOCUMENT_INCLUDE),
+        path,
+    )
+    anchor = "ResourceLoadObserverForFrame::ResourceLoadObserverForFrame(\n"
+    for helper, marker in (
+        (BLINK_COOKIE_ORIGIN_HELPER, BLINK_COOKIE_ORIGIN_HELPER_MARKER),
+        (BLINK_NETWORK_HELPER, BLINK_NETWORK_HELPER_MARKER),
+        (
+            BLINK_FRAME_NETWORK_SCOPE_HELPER,
+            BLINK_FRAME_NETWORK_SCOPE_HELPER_MARKER,
+        ),
+    ):
+        text = insert_before_once(text, anchor, helper, marker, path)
+    text = apply_network_hooks(text, BLINK_FRAME_NETWORK_HOOKS, path)
+    text = insert_before_once(
+        text,
+        "bool ResourceLoadObserverForFrame::InterestedInAllRequests() {\n",
+        BLINK_FRAME_MEMORY_CACHE_DEFINITION,
+        "ResourceLoadObserverForFrame::RecordMemoryCacheUseForRecorder(",
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_worker_network_observer(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/loader/'
+        'resource_load_observer_for_worker.h"',
+        BLINK_NETWORK_INCLUDES,
+        path,
+    )
+    anchor = "ResourceLoadObserverForWorker::ResourceLoadObserverForWorker(\n"
+    for helper, marker in (
+        (BLINK_COOKIE_ORIGIN_HELPER, BLINK_COOKIE_ORIGIN_HELPER_MARKER),
+        (BLINK_NETWORK_HELPER, BLINK_NETWORK_HELPER_MARKER),
+        (
+            BLINK_WORKER_NETWORK_SCOPE_HELPER,
+            BLINK_WORKER_NETWORK_SCOPE_HELPER_MARKER,
+        ),
+    ):
+        text = insert_before_once(text, anchor, helper, marker, path)
+    text = apply_network_hooks(text, BLINK_WORKER_NETWORK_HOOKS, path)
+    text = insert_before_once(
+        text,
+        "bool ResourceLoadObserverForWorker::InterestedInAllRequests() {\n",
+        BLINK_WORKER_MEMORY_CACHE_DEFINITION,
+        "ResourceLoadObserverForWorker::RecordMemoryCacheUseForRecorder(",
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_network_observer_header(path: Path) -> None:
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        "  bool InterestedInAllRequests() override;\n",
+        BLINK_MEMORY_CACHE_OVERRIDE_DECLARATION,
+        "  void RecordMemoryCacheUseForRecorder(",
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_resource_load_observer(path: Path) -> None:
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        "  virtual bool InterestedInAllRequests() = 0;\n",
+        BLINK_MEMORY_CACHE_OBSERVER_DECLARATION,
+        "  virtual void RecordMemoryCacheUseForRecorder(",
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_resource_fetcher_memory_cache(path: Path) -> None:
+    text = read_source(path)
+    text = apply_cookie_hook(
+        text,
+        BLINK_MEMORY_CACHE_FETCHER_ANCHOR,
+        BLINK_MEMORY_CACHE_FETCHER_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_fetch_context_request_ids(
+    path: Path, own_include: str, anchor: str, hook: str
+) -> None:
+    text = read_source(path)
+    text = add_includes_after(text, own_include, BLINK_REQUEST_ID_INCLUDES, path)
+    text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_content_navigation_request_id(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "content/browser/loader/navigation_url_loader_impl.h"',
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_NAVIGATION_REQUEST_ID_ANCHOR,
+        CONTENT_NAVIGATION_REQUEST_ID_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_content_network_headers(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "content/browser/devtools/'
+        'network_service_devtools_observer.h"',
+        CONTENT_NETWORK_HEADERS_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_NETWORK_HEADERS_HELPER_ANCHOR,
+        CONTENT_NETWORK_HEADERS_HELPER,
+        CONTENT_NETWORK_HEADERS_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, CONTENT_RAW_REQUEST_ANCHOR, CONTENT_RAW_REQUEST_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text, CONTENT_RAW_RESPONSE_ANCHOR, CONTENT_RAW_RESPONSE_HOOK, path
+    )
+    write_patched(path, text)
+
+
+def patch_web_contents_navigation_response(path: Path) -> None:
+    """Adds the navigation-response record after the completed record.
+
+    The completed hook is written by patch_web_contents_navigation, which runs
+    first, so its text is the anchor. The response hook is its own guard.
+    """
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CONTENT_NAVIGATION_INCLUDE,
+        CONTENT_NAVIGATION_RESPONSE_INCLUDES,
+        path,
+    )
+    if CONTENT_NAVIGATION_RESPONSE_HOOK not in text:
+        text = replace_once(
+            text,
+            CONTENT_NAVIGATION_COMPLETED_HOOK,
+            CONTENT_NAVIGATION_COMPLETED_HOOK + CONTENT_NAVIGATION_RESPONSE_HOOK,
+            path,
+        )
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -5944,6 +7122,57 @@ def main() -> int:
         scheduler / "main_thread" / "frame_scheduler_impl.h"
     )
     patch_blink_scheduler_build(scheduler / "BUILD.gn")
+    blink_core_loader = (
+        source / "third_party" / "blink" / "renderer" / "core" / "loader"
+    )
+    blink_platform_fetch = (
+        source / "third_party" / "blink" / "renderer" / "platform" / "loader"
+        / "fetch"
+    )
+    patch_blink_frame_network_observer(
+        blink_core_loader / "resource_load_observer_for_frame.cc"
+    )
+    patch_blink_worker_network_observer(
+        blink_core_loader / "resource_load_observer_for_worker.cc"
+    )
+    patch_blink_network_observer_header(
+        blink_core_loader / "resource_load_observer_for_frame.h"
+    )
+    patch_blink_network_observer_header(
+        blink_core_loader / "resource_load_observer_for_worker.h"
+    )
+    patch_blink_resource_load_observer(
+        blink_platform_fetch / "resource_load_observer.h"
+    )
+    patch_blink_resource_fetcher_memory_cache(
+        blink_platform_fetch / "resource_fetcher.cc"
+    )
+    patch_blink_fetch_context_request_ids(
+        blink_core_loader / "frame_fetch_context.cc",
+        '#include "third_party/blink/renderer/core/loader/'
+        'frame_fetch_context.h"',
+        BLINK_FRAME_REQUEST_ID_ANCHOR,
+        BLINK_FRAME_REQUEST_ID_HOOK,
+    )
+    patch_blink_fetch_context_request_ids(
+        blink_core_loader / "worker_fetch_context.cc",
+        '#include "third_party/blink/renderer/core/loader/'
+        'worker_fetch_context.h"',
+        BLINK_WORKER_REQUEST_ID_ANCHOR,
+        BLINK_WORKER_REQUEST_ID_HOOK,
+    )
+    patch_content_navigation_request_id(
+        source / "content" / "browser" / "loader"
+        / "navigation_url_loader_impl.cc"
+    )
+    patch_content_network_headers(
+        source / "content" / "browser" / "devtools"
+        / "network_service_devtools_observer.cc"
+    )
+    patch_web_contents_navigation_response(
+        source / "content" / "browser" / "web_contents"
+        / "web_contents_impl.cc"
+    )
     verify_integrated_sources(signatures)
     print(f"Recorder bridge installed in {source}")
     return 0

@@ -24,7 +24,29 @@ param(
     # object whose Settle, Widen, and Recolor members each hold the page's own
     # JSON report of its box rectangle, viewport size, and box color.
     [Parameter(Mandatory = $true)]
-    [string] $LayoutFixtureSteps
+    [string] $LayoutFixtureSteps,
+
+    # The URL the run script served the network logging fixture page from.
+    # The page's data, script, and worker URLs all begin with it.
+    [Parameter(Mandatory = $true)]
+    [string] $NetworkFixtureUri,
+
+    # The URL the network fixture tab opened, which redirects to the page.
+    [Parameter(Mandatory = $true)]
+    [string] $NetworkStartUri,
+
+    # The closed loopback URL the network fixture fetched so the request fails.
+    [Parameter(Mandatory = $true)]
+    [string] $NetworkRefusedUri,
+
+    # What the network fixture page reported, as its own JSON report.
+    [Parameter(Mandatory = $true)]
+    [string] $NetworkFixtureReport,
+
+    # The credential values the network fixture sent in request headers and
+    # received in a response header, none of which any record may contain.
+    [Parameter(Mandatory = $true)]
+    [string[]] $NetworkSecretValues
 )
 
 $ErrorActionPreference = "Stop"
@@ -3663,6 +3685,367 @@ if ($layoutTextNodes.Count -lt 1) {
     LayoutZoomFactor = $layoutStateCheckpoints["Settle"].Checkpoint.Start.layoutZoomFactor
 } | Format-List
 
+# The run script serves a fifth page that sends a fetch with credential-bearing
+# and plain request headers, follows a redirected fetch, fails a fetch to a
+# closed port, loads one cacheable script twice, and fetches from a dedicated
+# worker, after reaching the page itself through a redirect. These checks
+# establish that the logger emitted a network record for each of those
+# requests, with header values kept except credentials and cookies listed by
+# name. They say nothing about whether the page's network use is appropriate.
+$networkReport = ConvertFrom-Json $NetworkFixtureReport
+if ($networkReport.dataStatus -ne 200 -or
+    $networkReport.hopRedirected -ne $true -or
+    $networkReport.refused -ne "rejected" -or
+    $networkReport.cachedRuns -ne 2 -or
+    $networkReport.workerText -ne "worker data") {
+    throw "The network fixture page reported: $NetworkFixtureReport"
+}
+
+foreach ($secret in $NetworkSecretValues) {
+    $secretRecords = @(
+        Get-Content -LiteralPath $eventPath |
+            Where-Object { $_.Contains($secret) }
+    )
+    if ($secretRecords.Count -gt 0) {
+        throw (
+            "$($secretRecords.Count) record(s) contain a network fixture " +
+            "credential value. Credential header values are withheld."
+        )
+    }
+}
+
+$networkRecords = @(
+    $records | Where-Object {
+            $_.channel -eq "browser.network" -and
+            $_.eventType -ne "collector-omission"
+        }
+)
+if ($networkRecords.Count -eq 0) {
+    throw "No network record was emitted."
+}
+
+# Every header entry in every network record, with the record it came from.
+$credentialHeaderNames = @(
+    "cookie",
+    "set-cookie",
+    "set-cookie2",
+    "authorization",
+    "proxy-authorization"
+)
+function Get-NetworkHeaderLists {
+    param($Payload)
+
+    if ($null -ne $Payload.PSObject.Properties["headers"]) {
+        , @($Payload.headers)
+    }
+    if ($null -ne $Payload.PSObject.Properties["requestHeaders"]) {
+        , @($Payload.requestHeaders)
+    }
+    foreach ($member in @("request", "response", "redirectResponse")) {
+        $property = $Payload.PSObject.Properties[$member]
+        if ($null -ne $property -and $null -ne $property.Value -and
+            $null -ne $property.Value.PSObject.Properties["headers"]) {
+            , @($property.Value.headers)
+        }
+    }
+}
+foreach ($record in $networkRecords) {
+    foreach ($list in @(Get-NetworkHeaderLists $record.payload)) {
+        foreach ($header in @($list)) {
+            if ($null -eq $header) {
+                continue
+            }
+            $lowered = ([string] $header.name).ToLowerInvariant()
+            if ($credentialHeaderNames -contains $lowered -and
+                ($null -ne $header.value -or
+                    $header.valueRedacted -ne $true -or
+                    $header.redactionReason -ne "credential-header")) {
+                throw (
+                    "A $($record.eventType) record carried header " +
+                    "'$($header.name)' without withholding its value."
+                )
+            }
+        }
+    }
+}
+
+function Find-NetworkHeader {
+    param(
+        $Headers,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $found = @(
+        @($Headers) | Where-Object {
+            $null -ne $_ -and
+            ([string] $_.name).ToLowerInvariant() -eq $Name.ToLowerInvariant()
+        }
+    )
+    if ($found.Count -eq 0) {
+        throw "The $Description did not include the $Name header."
+    }
+    $found[0]
+}
+
+function Test-NetworkHeaderRedacted {
+    param(
+        $Headers,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Reason,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $header = Find-NetworkHeader $Headers $Name $Description
+    if ($null -ne $header.value -or $header.valueRedacted -ne $true -or
+        $header.redactionReason -ne $Reason) {
+        throw (
+            "The $Description reported the $Name header with redaction " +
+            "'$($header.redactionReason)' rather than withholding its value " +
+            "as $Reason."
+        )
+    }
+}
+
+function Test-NetworkHeaderValue {
+    param(
+        $Headers,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Value,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $header = Find-NetworkHeader $Headers $Name $Description
+    if ($header.value -ne $Value -or $header.valueRedacted -ne $false) {
+        throw (
+            "The $Description reported the $Name header value " +
+            "'$($header.value)' rather than '$Value'."
+        )
+    }
+}
+
+function Select-NetworkRecord {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $EventType,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock] $Filter,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Description
+    )
+
+    $selected = @(
+        $networkRecords |
+            Where-Object { $_.eventType -eq $EventType } |
+            Where-Object $Filter
+    )
+    if ($selected.Count -eq 0) {
+        throw "No $EventType record was emitted for $Description."
+    }
+    $selected[0]
+}
+
+$networkDataUri = "$NetworkFixtureUri/data"
+$networkHopTargetUri = "$NetworkFixtureUri/data?hop=1"
+
+# The page's fetch with credential-bearing headers, from the window.
+$dataRequest = Select-NetworkRecord "request-will-be-sent" {
+    $_.payload.request.url -eq $networkDataUri -and
+    $_.payload.redirect -eq $false -and
+    $_.payload.scope.contextKind -eq "window"
+} "the network fixture's data fetch"
+$dataRequestHeaders = @($dataRequest.payload.request.headers)
+Test-NetworkHeaderRedacted $dataRequestHeaders "Authorization" `
+    "credential-header" "data fetch request"
+Test-NetworkHeaderRedacted $dataRequestHeaders "X-Api-Key" `
+    "credential-name" "data fetch request"
+Test-NetworkHeaderRedacted $dataRequestHeaders "X-Fixture-Scheme" `
+    "credential-value" "data fetch request"
+Test-NetworkHeaderValue $dataRequestHeaders "X-Fixture-Plain" `
+    "network-fixture-plain" "data fetch request"
+if ($dataRequest.payload.request.method -ne "GET" -or
+    [string]::IsNullOrWhiteSpace($dataRequest.payload.request.requestId)) {
+    throw (
+        "The data fetch request reported method " +
+        "'$($dataRequest.payload.request.method)' and request ID " +
+        "'$($dataRequest.payload.request.requestId)'."
+    )
+}
+$dataInspectorId = $dataRequest.payload.request.inspectorId
+$dataRequestId = $dataRequest.payload.request.requestId
+$dataDocumentToken = $dataRequest.payload.context.documentToken
+
+$dataResponse = Select-NetworkRecord "response-received" {
+    $_.payload.inspectorId -eq $dataInspectorId -and
+    $_.payload.context.documentToken -eq $dataDocumentToken
+} "the network fixture's data fetch"
+if ($dataResponse.payload.response.status -ne 200 -or
+    $dataResponse.payload.responseSource -ne "loader") {
+    throw (
+        "The data fetch response reported status " +
+        "$($dataResponse.payload.response.status) from " +
+        "'$($dataResponse.payload.responseSource)'."
+    )
+}
+$dataResponseHeaders = @($dataResponse.payload.response.headers)
+Test-NetworkHeaderValue $dataResponseHeaders "X-Fixture-Response" `
+    "network-fixture-response" "data fetch response"
+Test-NetworkHeaderRedacted $dataResponseHeaders "X-Session-Id" `
+    "credential-name" "data fetch response"
+
+$dataFinished = Select-NetworkRecord "request-finished" {
+    $_.payload.inspectorId -eq $dataInspectorId -and
+    $_.payload.context.documentToken -eq $dataDocumentToken
+} "the network fixture's data fetch"
+if ($dataFinished.payload.decodedBodyLength -ne 12) {
+    throw (
+        "The data fetch finish reported a decoded body of " +
+        "$($dataFinished.payload.decodedBodyLength) bytes rather than 12."
+    )
+}
+
+# The headers the network service put on the wire for the same request,
+# matched by the request ID the renderer record carries.
+$dataWireRequest = Select-NetworkRecord "request-headers-sent" {
+    $_.payload.requestId -eq $dataRequestId
+} "the network fixture's data fetch"
+$dataWireHeaders = @($dataWireRequest.payload.headers)
+Test-NetworkHeaderRedacted $dataWireHeaders "Authorization" `
+    "credential-header" "data fetch wire request"
+Test-NetworkHeaderRedacted $dataWireHeaders "Cookie" `
+    "credential-header" "data fetch wire request"
+Test-NetworkHeaderValue $dataWireHeaders "X-Fixture-Plain" `
+    "network-fixture-plain" "data fetch wire request"
+$dataWireCookieNames = @(
+    @($dataWireRequest.payload.cookies) | ForEach-Object { $_.name }
+)
+if ($dataWireCookieNames -notcontains "a11y_recorder_response") {
+    throw (
+        "The data fetch wire request listed the cookies " +
+        "'$($dataWireCookieNames -join ', ')' without " +
+        "a11y_recorder_response."
+    )
+}
+$dataWireResponse = Select-NetworkRecord "response-headers-received" {
+    $_.payload.requestId -eq $dataRequestId
+} "the network fixture's data fetch"
+if ($dataWireResponse.payload.status -ne 200) {
+    throw (
+        "The data fetch wire response reported status " +
+        "$($dataWireResponse.payload.status)."
+    )
+}
+Test-NetworkHeaderRedacted @($dataWireResponse.payload.headers) `
+    "X-Session-Id" "credential-name" "data fetch wire response"
+
+# The redirected fetch: its redirect is recorded as a second request record
+# for the same request, carrying the redirect response.
+$hopRedirect = Select-NetworkRecord "request-will-be-sent" {
+    $_.payload.redirect -eq $true -and
+    $_.payload.request.url -eq $networkHopTargetUri -and
+    $null -ne $_.payload.redirectResponse -and
+    $_.payload.redirectResponse.status -eq 302
+} "the network fixture's redirected fetch"
+Test-NetworkHeaderValue @($hopRedirect.payload.redirectResponse.headers) `
+    "Location" "/network/data?hop=1" "redirect response"
+$null = Select-NetworkRecord "request-finished" {
+    $_.payload.inspectorId -eq $hopRedirect.payload.request.inspectorId
+} "the network fixture's redirected fetch"
+
+# The fetch to a closed loopback port.
+$refusedRecord = Select-NetworkRecord "request-failed" {
+    $_.payload.url -eq $NetworkRefusedUri
+} "the network fixture's refused fetch"
+if ($refusedRecord.payload.netError -ge 0) {
+    throw (
+        "The refused fetch reported network error " +
+        "$($refusedRecord.payload.netError)."
+    )
+}
+
+# The second load of the cacheable script.
+$cachedScriptUri = "$NetworkFixtureUri/cached.js"
+$cacheHit = Select-NetworkRecord "memory-cache-hit" {
+    $_.payload.request.url -eq $cachedScriptUri
+} "the network fixture's second script load"
+if ($cacheHit.payload.response.status -ne 200) {
+    throw (
+        "The memory cache hit reported status " +
+        "$($cacheHit.payload.response.status)."
+    )
+}
+
+# The dedicated worker's fetch.
+$workerRequest = Select-NetworkRecord "request-will-be-sent" {
+    $_.payload.request.url -eq "$NetworkFixtureUri/worker-data" -and
+    $_.payload.scope.contextKind -eq "dedicated-worker"
+} "the network fixture worker's fetch"
+if ($workerRequest.payload.scope.globalObjectUrl -ne
+        "$NetworkFixtureUri/worker.js" -or
+    [string]::IsNullOrWhiteSpace($workerRequest.payload.scope.workerToken)) {
+    throw (
+        "The worker fetch reported worker script " +
+        "'$($workerRequest.payload.scope.globalObjectUrl)' and token " +
+        "'$($workerRequest.payload.scope.workerToken)'."
+    )
+}
+$null = Select-NetworkRecord "request-finished" {
+    $_.payload.inspectorId -eq $workerRequest.payload.request.inspectorId -and
+    $_.payload.scope.contextKind -eq "dedicated-worker"
+} "the network fixture worker's fetch"
+
+# The fixture page's own navigation, reached through a redirect.
+$networkNavigation = Select-NetworkRecord "navigation-response" {
+    $_.payload.url -eq $NetworkFixtureUri -and
+    $_.payload.committed -eq $true
+} "the network fixture page navigation"
+$networkRedirectChain = @($networkNavigation.payload.redirectChain)
+if ($networkRedirectChain.Count -ne 2 -or
+    $networkRedirectChain[0] -ne $NetworkStartUri -or
+    $networkRedirectChain[1] -ne $NetworkFixtureUri) {
+    throw (
+        "The network fixture navigation reported the redirect chain " +
+        "'$($networkRedirectChain -join ', ')'."
+    )
+}
+if ($null -eq $networkNavigation.payload.response -or
+    $networkNavigation.payload.response.status -ne 200 -or
+    $null -eq $networkNavigation.payload.timing) {
+    throw "The network fixture navigation recorded no response or timing."
+}
+
+[pscustomobject]@{
+    NetworkRecords = $networkRecords.Count
+    DataFetchInspectorId = $dataInspectorId
+    DataFetchRequestId = $dataRequestId
+    DataFetchWireCookieNames = $dataWireCookieNames -join ", "
+    RedirectedFetchInspectorId = $hopRedirect.payload.request.inspectorId
+    RefusedFetchNetError = $refusedRecord.payload.netError
+    RefusedFetchNetErrorName = $refusedRecord.payload.netErrorName
+    MemoryCacheHitUrl = $cacheHit.payload.request.url
+    WorkerFetchRequestId = $workerRequest.payload.request.requestId
+    NavigationRequestId = $networkNavigation.payload.requestId
+    NavigationRedirectChain = $networkRedirectChain -join " -> "
+} | Format-List
+
 [pscustomobject]@{
     SessionPath = (Resolve-Path -LiteralPath $SessionPath).Path
     EvidenceOmissionRecords = $browserOmissions.Count
@@ -3813,6 +4196,6 @@ Write-Host (
     "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +
     "accessibility serialization checkpoint, cookie operation, and " +
-    "interaction-state, and layout and computed-style checkpoint " +
-    "evidence verified."
+    "interaction-state, layout and computed-style checkpoint, and network " +
+    "metadata evidence verified."
 )

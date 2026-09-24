@@ -27,6 +27,7 @@
 #include "base/synchronization/lock.h"
 #include "base/win/windows_handle_util.h"
 #include "chromium/recorder_bridge/cookie_text.h"
+#include "chromium/recorder_bridge/network_text.h"
 #include "chromium/recorder_bridge/recorder_protocol.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
 #include "components/version_info/version_info.h"
@@ -3225,6 +3226,518 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
   payload.Set("truncated", truncated);
   payload.Set("maximumNodes", maximum_nodes);
   SendBlinkEvidence("browser.layout", "layout-checkpoint-completed",
+                    std::move(payload));
+}
+
+
+namespace {
+
+// Network records name the Blink loader's per-process request counter as a
+// decimal string, since it is a 64-bit value.
+std::string InspectorId(uint64_t inspector_id) {
+  return base::NumberToString(inspector_id);
+}
+
+// A byte count or other 64-bit quantity as a JSON number. Values up to 2^53
+// are exact.
+base::Value NetworkQuantity(int64_t value) {
+  return base::Value(static_cast<double>(value));
+}
+
+// A microsecond offset as milliseconds, or null for an unobserved time.
+base::Value NetworkMilliseconds(int64_t microseconds) {
+  if (microseconds == kNetworkTimeUnobserved) {
+    return base::Value();
+  }
+  return base::Value(static_cast<double>(microseconds) / 1000.0);
+}
+
+// Sets a header list, its full length, and whether it was cut. A value the
+// classifier withholds is dropped here, before it reaches any record.
+void SetNetworkHeaders(base::DictValue& payload,
+                       const char* list_key,
+                       const char* count_key,
+                       const char* truncated_key,
+                       std::vector<NetworkHeader> headers) {
+  const size_t count = headers.size();
+  const bool truncated = count > kMaximumNetworkHeadersPerRecord;
+  if (truncated) {
+    headers.resize(kMaximumNetworkHeadersPerRecord);
+  }
+  base::ListValue list;
+  for (NetworkHeader& header : headers) {
+    const network_text::HeaderRedaction redaction =
+        network_text::ClassifyHeader(header.name, header.value);
+    base::DictValue entry;
+    entry.Set("name", std::move(header.name));
+    if (redaction == network_text::HeaderRedaction::kNone) {
+      entry.Set("value", std::move(header.value));
+      entry.Set("valueRedacted", false);
+      entry.Set("redactionReason", base::Value());
+    } else {
+      entry.Set("value", base::Value());
+      entry.Set("valueRedacted", true);
+      entry.Set("redactionReason",
+                std::string(network_text::HeaderRedactionName(redaction)));
+    }
+    list.Append(std::move(entry));
+  }
+  payload.Set(count_key, base::checked_cast<int>(count));
+  payload.Set(list_key, std::move(list));
+  payload.Set(truncated_key, truncated);
+}
+
+void SetNetworkCookies(base::DictValue& payload,
+                       std::vector<CookieAccessEntry> cookies) {
+  const size_t count = cookies.size();
+  const bool truncated = count > kMaximumCookiesPerRecord;
+  if (truncated) {
+    cookies.resize(kMaximumCookiesPerRecord);
+  }
+  base::ListValue entries;
+  for (CookieAccessEntry& entry : cookies) {
+    entries.Append(CreateCookieAccessEntry(std::move(entry)));
+  }
+  payload.Set("cookieCount", base::checked_cast<int>(count));
+  payload.Set("cookies", std::move(entries));
+  payload.Set("cookiesTruncated", truncated);
+}
+
+std::string NormalizeNetworkContextKind(std::string context_kind) {
+  if (IsOneOf(context_kind, {"window", "dedicated-worker", "shared-worker",
+                             "service-worker", "worklet"})) {
+    return context_kind;
+  }
+  return "other";
+}
+
+base::DictValue CreateNetworkRendererContext(const RecorderPipeClient& client,
+                                             const NetworkScope& scope,
+                                             const CookieCallOrigin* origin) {
+  base::DictValue context =
+      CreateContext(client, scope.document_node_id, scope.document_token);
+  if (origin && !NormalizeExecutionWorldKind(origin->world_kind).empty()) {
+    context.Set("executionWorldId", ExecutionWorldId(origin->world_id));
+  }
+  return context;
+}
+
+base::DictValue CreateNetworkScope(NetworkScope scope) {
+  base::DictValue value;
+  value.Set("contextKind",
+            NormalizeNetworkContextKind(std::move(scope.context_kind)));
+  value.Set("workerToken", NonEmptyString(std::move(scope.worker_token)));
+  value.Set("globalObjectUrl",
+            NonEmptyString(std::move(scope.global_object_url)));
+  return value;
+}
+
+base::Value CreateNetworkLoadTiming(const NetworkLoadTiming& timing) {
+  if (!timing.present) {
+    return base::Value();
+  }
+  base::DictValue value;
+  value.Set("requestStartBeforeRecordMilliseconds",
+            NetworkMilliseconds(timing.request_start_before_record));
+  value.Set("proxyStart", NetworkMilliseconds(timing.proxy_start));
+  value.Set("proxyEnd", NetworkMilliseconds(timing.proxy_end));
+  value.Set("domainLookupStart",
+            NetworkMilliseconds(timing.domain_lookup_start));
+  value.Set("domainLookupEnd", NetworkMilliseconds(timing.domain_lookup_end));
+  value.Set("connectStart", NetworkMilliseconds(timing.connect_start));
+  value.Set("connectEnd", NetworkMilliseconds(timing.connect_end));
+  value.Set("sslStart", NetworkMilliseconds(timing.ssl_start));
+  value.Set("sslEnd", NetworkMilliseconds(timing.ssl_end));
+  value.Set("workerStart", NetworkMilliseconds(timing.worker_start));
+  value.Set("workerReady", NetworkMilliseconds(timing.worker_ready));
+  value.Set("workerFetchStart",
+            NetworkMilliseconds(timing.worker_fetch_start));
+  value.Set("workerRespondWithSettled",
+            NetworkMilliseconds(timing.worker_respond_with_settled));
+  value.Set("workerRouterEvaluationStart",
+            NetworkMilliseconds(timing.worker_router_evaluation_start));
+  value.Set("workerCacheLookupStart",
+            NetworkMilliseconds(timing.worker_cache_lookup_start));
+  value.Set("sendStart", NetworkMilliseconds(timing.send_start));
+  value.Set("sendEnd", NetworkMilliseconds(timing.send_end));
+  value.Set("receiveHeadersStart",
+            NetworkMilliseconds(timing.receive_headers_start));
+  value.Set("receiveHeadersEnd",
+            NetworkMilliseconds(timing.receive_headers_end));
+  value.Set("receiveNonInformationalHeadersStart",
+            NetworkMilliseconds(timing.receive_non_informational_headers_start));
+  value.Set("receiveEarlyHintsStart",
+            NetworkMilliseconds(timing.receive_early_hints_start));
+  value.Set("pushStart", NetworkMilliseconds(timing.push_start));
+  value.Set("pushEnd", NetworkMilliseconds(timing.push_end));
+  value.Set("responseEnd", NetworkMilliseconds(timing.response_end));
+  return base::Value(std::move(value));
+}
+
+base::Value CreateRemoteAddress(std::string ip, int port) {
+  if (ip.empty()) {
+    return base::Value();
+  }
+  base::DictValue address;
+  address.Set("ip", std::move(ip));
+  address.Set("port", port);
+  return base::Value(std::move(address));
+}
+
+base::DictValue CreateNetworkRequest(NetworkRequestFacts request) {
+  base::DictValue value;
+  value.Set("inspectorId", InspectorId(request.inspector_id));
+  value.Set("requestId", NonEmptyString(std::move(request.request_id)));
+  value.Set("url", std::move(request.url));
+  value.Set("method", std::move(request.method));
+  value.Set("resourceType", std::move(request.resource_type));
+  base::DictValue initiator;
+  initiator.Set("type", NonEmptyString(std::move(request.initiator_type)));
+  initiator.Set("url", NonEmptyString(std::move(request.initiator_url)));
+  initiator.Set("line", request.initiator_line > 0
+                            ? base::Value(request.initiator_line)
+                            : base::Value());
+  initiator.Set("column", request.initiator_column > 0
+                              ? base::Value(request.initiator_column)
+                              : base::Value());
+  initiator.Set("linkPreload", request.link_preload);
+  value.Set("initiator", std::move(initiator));
+  value.Set("internal", request.internal);
+  value.Set("destination", std::move(request.destination));
+  value.Set("mode", std::move(request.mode));
+  value.Set("credentialsMode", std::move(request.credentials_mode));
+  value.Set("redirectMode", std::move(request.redirect_mode));
+  value.Set("cacheMode", std::move(request.cache_mode));
+  value.Set("priority", std::move(request.priority));
+  value.Set("initialPriority", std::move(request.initial_priority));
+  value.Set("fetchPriorityHint", std::move(request.fetch_priority_hint));
+  value.Set("renderBlocking", std::move(request.render_blocking));
+  value.Set("referrer", NonEmptyString(std::move(request.referrer)));
+  value.Set("referrerPolicy", std::move(request.referrer_policy));
+  value.Set("keepalive", request.keepalive);
+  value.Set("userGesture", request.user_gesture);
+  value.Set("adResource", request.ad_resource);
+  value.Set("formSubmission", request.form_submission);
+  SetNetworkHeaders(value, "headers", "headerCount", "headersTruncated",
+                    std::move(request.headers));
+  return value;
+}
+
+base::DictValue CreateNetworkResponse(NetworkResponseFacts response) {
+  base::DictValue value;
+  value.Set("url", std::move(response.url));
+  value.Set("responseUrl", NonEmptyString(std::move(response.response_url)));
+  value.Set("status", response.status_code);
+  value.Set("statusText", std::move(response.status_text));
+  value.Set("mimeType", std::move(response.mime_type));
+  value.Set("charset", NonEmptyString(std::move(response.charset)));
+  value.Set("alpnProtocol", NonEmptyString(std::move(response.alpn_protocol)));
+  value.Set("connectionInfo",
+            NonEmptyString(std::move(response.connection_info)));
+  value.Set("remoteAddress", CreateRemoteAddress(std::move(response.remote_ip),
+                                                 response.remote_port));
+  value.Set("connectionId", NetworkQuantity(response.connection_id));
+  value.Set("connectionReused", response.connection_reused);
+  value.Set("wasCached", response.was_cached);
+  value.Set("fetchedViaServiceWorker", response.fetched_via_service_worker);
+  value.Set("serviceWorkerResponseSource",
+            std::move(response.service_worker_response_source));
+  value.Set("inPrefetchCache", response.in_prefetch_cache);
+  value.Set("networkAccessed", response.network_accessed);
+  value.Set("fromArchive", response.from_archive);
+  value.Set("cookieInRequest", response.cookie_in_request);
+  value.Set("responseType", std::move(response.response_type));
+  value.Set("encodedDataLength", NetworkQuantity(response.encoded_data_length));
+  value.Set("expectedContentLength",
+            NetworkQuantity(response.expected_content_length));
+  SetNetworkHeaders(value, "headers", "headerCount", "headersTruncated",
+                    std::move(response.headers));
+  value.Set("timing", CreateNetworkLoadTiming(response.timing));
+  return value;
+}
+
+base::Value CreateNavigationResponseTiming(
+    const NavigationResponseTiming& timing) {
+  if (!timing.present) {
+    return base::Value();
+  }
+  base::DictValue value;
+  value.Set("navigationStartBeforeRecordMilliseconds",
+            NetworkMilliseconds(timing.navigation_start_before_record));
+  value.Set("loaderStart", NetworkMilliseconds(timing.loader_start));
+  value.Set("firstRequestStart",
+            NetworkMilliseconds(timing.first_request_start));
+  value.Set("firstResponseStart",
+            NetworkMilliseconds(timing.first_response_start));
+  value.Set("firstLoaderCallback",
+            NetworkMilliseconds(timing.first_loader_callback));
+  value.Set("finalRequestStart",
+            NetworkMilliseconds(timing.final_request_start));
+  value.Set("finalResponseStart",
+            NetworkMilliseconds(timing.final_response_start));
+  value.Set("finalNonInformationalResponseStart",
+            NetworkMilliseconds(timing.final_non_informational_response_start));
+  value.Set("finalLoaderCallback",
+            NetworkMilliseconds(timing.final_loader_callback));
+  value.Set("requestFailed", NetworkMilliseconds(timing.request_failed));
+  value.Set("commitSent", NetworkMilliseconds(timing.commit_sent));
+  value.Set("commitReceived", NetworkMilliseconds(timing.commit_received));
+  value.Set("commitReplySent", NetworkMilliseconds(timing.commit_reply_sent));
+  value.Set("didCommit", NetworkMilliseconds(timing.did_commit));
+  value.Set("finalRequestDomainLookupStart",
+            NetworkMilliseconds(timing.final_request_domain_lookup_start));
+  value.Set("finalRequestDomainLookupEnd",
+            NetworkMilliseconds(timing.final_request_domain_lookup_end));
+  value.Set("finalRequestConnectStart",
+            NetworkMilliseconds(timing.final_request_connect_start));
+  value.Set("finalRequestConnectEnd",
+            NetworkMilliseconds(timing.final_request_connect_end));
+  value.Set("finalRequestSslStart",
+            NetworkMilliseconds(timing.final_request_ssl_start));
+  return base::Value(std::move(value));
+}
+
+// Browser network records carry the frame the network service observer was
+// made for. A worker's observer has no frame and carries its DevTools agent
+// id instead.
+base::DictValue CreateBrowserNetworkContext(const RecorderPipeClient& client,
+                                            int page_frame_tree_node_id,
+                                            int frame_tree_node_id) {
+  if (page_frame_tree_node_id < 0 || frame_tree_node_id < 0) {
+    return CreateContext(client, 0);
+  }
+  return CreateNavigationContext(client, page_frame_tree_node_id,
+                                 frame_tree_node_id, 0, std::string());
+}
+
+}  // namespace
+
+bool IsRecorderActive() {
+  return GetProcessRecorderClient() != nullptr;
+}
+
+void RecordBlinkNetworkRequest(NetworkScope scope,
+                               NetworkRequestFacts request,
+                               bool redirect,
+                               NetworkResponseFacts redirect_response,
+                               CookieCallOrigin origin) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateNetworkRendererContext(*client, scope, &origin));
+  payload.Set("scope", CreateNetworkScope(std::move(scope)));
+  payload.Set("request", CreateNetworkRequest(std::move(request)));
+  payload.Set("redirect", redirect);
+  payload.Set("redirectResponse",
+              redirect ? base::Value(CreateNetworkResponse(
+                             std::move(redirect_response)))
+                       : base::Value());
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.network", "request-will-be-sent",
+                    std::move(payload));
+}
+
+void RecordBlinkNetworkResponse(NetworkScope scope,
+                                uint64_t inspector_id,
+                                std::string request_id,
+                                bool from_memory_cache,
+                                NetworkResponseFacts response) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateNetworkRendererContext(*client, scope, nullptr));
+  payload.Set("scope", CreateNetworkScope(std::move(scope)));
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("requestId", NonEmptyString(std::move(request_id)));
+  payload.Set("responseSource",
+              from_memory_cache ? "memory-cache" : "loader");
+  payload.Set("response", CreateNetworkResponse(std::move(response)));
+  SendBlinkEvidence("browser.network", "response-received",
+                    std::move(payload));
+}
+
+void RecordBlinkNetworkFinished(NetworkScope scope,
+                                uint64_t inspector_id,
+                                int64_t encoded_data_length,
+                                int64_t decoded_body_length,
+                                int64_t finish_before_record) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateNetworkRendererContext(*client, scope, nullptr));
+  payload.Set("scope", CreateNetworkScope(std::move(scope)));
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("encodedDataLength", NetworkQuantity(encoded_data_length));
+  payload.Set("decodedBodyLength", NetworkQuantity(decoded_body_length));
+  payload.Set("finishBeforeRecordMilliseconds",
+              NetworkMilliseconds(finish_before_record));
+  SendBlinkEvidence("browser.network", "request-finished", std::move(payload));
+}
+
+void RecordBlinkNetworkFailed(NetworkScope scope,
+                              uint64_t inspector_id,
+                              NetworkFailureFacts failure) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateNetworkRendererContext(*client, scope, nullptr));
+  payload.Set("scope", CreateNetworkScope(std::move(scope)));
+  payload.Set("inspectorId", InspectorId(inspector_id));
+  payload.Set("url", std::move(failure.url));
+  payload.Set("netError", failure.net_error);
+  payload.Set("netErrorName", NonEmptyString(std::move(failure.net_error_name)));
+  payload.Set("cancellation", failure.cancellation);
+  payload.Set("timeout", failure.timeout);
+  payload.Set("accessCheck", failure.access_check);
+  payload.Set("blockedByResponse", failure.blocked_by_response);
+  payload.Set("blockedByOrb", failure.blocked_by_orb);
+  payload.Set("hasCopyInCache", failure.has_copy_in_cache);
+  payload.Set("cancelledFromHttpError", failure.cancelled_from_http_error);
+  payload.Set("internal", failure.internal);
+  payload.Set("blockedReason", NonEmptyString(std::move(failure.blocked_reason)));
+  if (failure.cors_error.empty()) {
+    payload.Set("corsError", base::Value());
+  } else {
+    base::DictValue cors;
+    cors.Set("error", std::move(failure.cors_error));
+    cors.Set("failedParameter",
+             NonEmptyString(std::move(failure.cors_failed_parameter)));
+    payload.Set("corsError", std::move(cors));
+  }
+  SendBlinkEvidence("browser.network", "request-failed", std::move(payload));
+}
+
+void RecordBlinkMemoryCacheUse(NetworkScope scope,
+                               bool static_data,
+                               NetworkRequestFacts request,
+                               NetworkResponseFacts response) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateNetworkRendererContext(*client, scope, nullptr));
+  payload.Set("scope", CreateNetworkScope(std::move(scope)));
+  payload.Set("staticData", static_data);
+  payload.Set("request", CreateNetworkRequest(std::move(request)));
+  payload.Set("response", CreateNetworkResponse(std::move(response)));
+  SendBlinkEvidence("browser.network", "memory-cache-hit", std::move(payload));
+}
+
+void RecordBrowserNetworkRequestHeaders(int page_frame_tree_node_id,
+                                        int frame_tree_node_id,
+                                        std::string devtools_agent_id,
+                                        std::string request_id,
+                                        int64_t sent_before_record,
+                                        std::vector<NetworkHeader> headers,
+                                        std::vector<CookieAccessEntry> cookies) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || request_id.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateBrowserNetworkContext(*client, page_frame_tree_node_id,
+                                          frame_tree_node_id));
+  payload.Set("devtoolsAgentId",
+              NonEmptyString(std::move(devtools_agent_id)));
+  payload.Set("requestId", std::move(request_id));
+  payload.Set("sentBeforeRecordMilliseconds",
+              NetworkMilliseconds(sent_before_record));
+  SetNetworkHeaders(payload, "headers", "headerCount", "headersTruncated",
+                    std::move(headers));
+  SetNetworkCookies(payload, std::move(cookies));
+  SendBlinkEvidence("browser.network", "request-headers-sent",
+                    std::move(payload));
+}
+
+void RecordBrowserNetworkResponseHeaders(
+    int page_frame_tree_node_id,
+    int frame_tree_node_id,
+    std::string devtools_agent_id,
+    std::string request_id,
+    int status_code,
+    std::vector<NetworkHeader> headers,
+    std::vector<CookieAccessEntry> cookies) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || request_id.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateBrowserNetworkContext(*client, page_frame_tree_node_id,
+                                          frame_tree_node_id));
+  payload.Set("devtoolsAgentId",
+              NonEmptyString(std::move(devtools_agent_id)));
+  payload.Set("requestId", std::move(request_id));
+  payload.Set("status", status_code);
+  SetNetworkHeaders(payload, "headers", "headerCount", "headersTruncated",
+                    std::move(headers));
+  SetNetworkCookies(payload, std::move(cookies));
+  SendBlinkEvidence("browser.network", "response-headers-received",
+                    std::move(payload));
+}
+
+void RecordBrowserNavigationResponse(int64_t navigation_id,
+                                     int page_frame_tree_node_id,
+                                     int frame_tree_node_id,
+                                     int64_t document_navigation_id,
+                                     std::string document_token,
+                                     NavigationResponseFacts facts) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || navigation_id <= 0 || page_frame_tree_node_id < 0 ||
+      frame_tree_node_id < 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateNavigationContext(*client, page_frame_tree_node_id,
+                                      frame_tree_node_id,
+                                      document_navigation_id,
+                                      std::move(document_token)));
+  payload.Set("navigationId",
+              "navigation-" + base::NumberToString(navigation_id));
+  payload.Set("requestId", NonEmptyString(std::move(facts.request_id)));
+  payload.Set("url", std::move(facts.url));
+  payload.Set("method", std::move(facts.method));
+  payload.Set("committed", facts.committed);
+  payload.Set("errorPage", facts.error_page);
+  payload.Set("sameDocument", facts.same_document);
+  payload.Set("download", facts.download);
+  payload.Set("backForwardCache", facts.back_forward_cache);
+  payload.Set("netError", facts.net_error);
+  payload.Set("netErrorName", NonEmptyString(std::move(facts.net_error_name)));
+  payload.Set("redirectChain", StringList(std::move(facts.redirect_chain)));
+  SetNetworkHeaders(payload, "requestHeaders", "requestHeaderCount",
+                    "requestHeadersTruncated",
+                    std::move(facts.request_headers));
+  if (facts.response_present) {
+    base::DictValue response;
+    response.Set("status", facts.status_code);
+    response.Set("statusText", std::move(facts.status_text));
+    response.Set("mimeType", NonEmptyString(std::move(facts.mime_type)));
+    response.Set("wasCached", facts.was_cached);
+    response.Set("remoteAddress",
+                 CreateRemoteAddress(std::move(facts.remote_ip),
+                                     facts.remote_port));
+    response.Set("connectionInfo",
+                 NonEmptyString(std::move(facts.connection_info)));
+    SetNetworkHeaders(response, "headers", "headerCount", "headersTruncated",
+                      std::move(facts.response_headers));
+    payload.Set("response", std::move(response));
+  } else {
+    payload.Set("response", base::Value());
+  }
+  payload.Set("timing", CreateNavigationResponseTiming(facts.timing));
+  SendBlinkEvidence("browser.network", "navigation-response",
                     std::move(payload));
 }
 

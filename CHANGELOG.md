@@ -20,6 +20,20 @@ from the product version.
 
 ### Added
 
+- Record network metadata on a new `browser.network` channel. Protocol 0.26
+  records each renderer request and redirect, response, finish, failure, and
+  memory cache use, with the initiating document or worker and script; the
+  request and response headers the network service reports on the wire, with
+  the cookies attached or set listed by name; and each finished navigation's
+  redirect chain, headers, response head, and timing. No body is recorded.
+  Header values are kept except those of cookie and authorization headers and
+  of headers whose name or value marks them as a credential, which are
+  withheld at source with the reason recorded. While the recorder is connected,
+  requests without a DevTools request identifier are given one so that wire
+  headers are reported. The validation run serves a fixture page that makes
+  credential-bearing, redirected, failing, cached, and worker requests, and the
+  verifier requires linked records for each and no credential value anywhere
+  in the session.
 - Record layout geometry and computed styles on a new `browser.layout`
   channel. Protocol 0.25 records a checkpoint after every rendering update in
   which Blink resolved element style or performed layout for a document, with

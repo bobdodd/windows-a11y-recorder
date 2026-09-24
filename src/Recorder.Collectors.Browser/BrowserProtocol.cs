@@ -160,6 +160,38 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.LayoutCheckpointCompleted) =>
                 payload.Deserialize<BrowserLayoutCheckpointCompletedPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkRequestWillBeSent) =>
+                payload.Deserialize<BrowserNetworkRequestWillBeSentPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkResponseReceived) =>
+                payload.Deserialize<BrowserNetworkResponseReceivedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkRequestFinished) =>
+                payload.Deserialize<BrowserNetworkRequestFinishedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkRequestFailed) =>
+                payload.Deserialize<BrowserNetworkRequestFailedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkMemoryCacheHit) =>
+                payload.Deserialize<BrowserNetworkMemoryCacheHitPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkRequestHeadersSent) =>
+                payload.Deserialize<BrowserNetworkRequestHeadersSentPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkResponseHeadersReceived) =>
+                payload.Deserialize<BrowserNetworkResponseHeadersReceivedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Network,
+                BrowserEvidenceEventTypes.NetworkNavigationResponse) =>
+                payload.Deserialize<BrowserNetworkNavigationResponsePayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or
                 BrowserEvidenceChannels.Dispatch or
@@ -170,7 +202,8 @@ internal static class BrowserProtocol
                 BrowserEvidenceChannels.Accessibility or
                 BrowserEvidenceChannels.Cookie or
                 BrowserEvidenceChannels.Interaction or
-                BrowserEvidenceChannels.Layout,
+                BrowserEvidenceChannels.Layout or
+                BrowserEvidenceChannels.Network,
                 BrowserEvidenceEventTypes.Omission) =>
                 payload.Deserialize<BrowserOmissionPayload>(JsonOptions)
                     as object,

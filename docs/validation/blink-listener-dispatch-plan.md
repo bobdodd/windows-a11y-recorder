@@ -1590,3 +1590,64 @@ as `HEAD`, `SCRIPT`, and the fixture's hidden `SPAN`, and the SVG `g` and
 computed style for those elements after a rendering update, and the hook does
 not request one. The sessions are short and their pages small, so these
 figures do not predict the volume of a styled application page.
+
+## Network metadata logging
+
+Protocol 0.26 records network metadata on the `browser.network` channel. The
+run script serves a fifth fixture page at `/network` from the loopback HTTP
+listener the cookie fixture uses, and opens `/network-start` in a background
+tab after the layout fixture. `/network-start` answers with a 302 redirect to
+`/network`, so the page's own navigation has a redirect chain. The page does
+not need to be painted. The listener fixture's cookies are still set in the
+profile, so requests to the shared origin carry a `Cookie` header.
+
+For each run the script generates three request credential values and one
+response credential value, and binds and releases a loopback port so that a
+connection to it is refused. The harness then calls one page function, which:
+
+1. fetches `/network/data` with an `Authorization` header holding `Bearer` and
+   the first value, an `X-Api-Key` header holding the second, an
+   `X-Fixture-Scheme` header holding `Bearer` and the third, and an
+   `X-Fixture-Plain` header holding `network-fixture-plain`; the response
+   carries `X-Fixture-Response: network-fixture-response` and an
+   `X-Session-Id` header holding the response credential value;
+2. fetches `/network/hop`, which redirects to `/network/data?hop=1`;
+3. fetches the closed port in `no-cors` mode and catches the rejection;
+4. adds a script element for `/network/cached.js`, served with
+   `Cache-Control: max-age=600`, waits for it to load, and does so again, so
+   the second load is served from Blink's memory cache; and
+5. starts a dedicated worker from `/network/worker.js`, which fetches
+   `/network/worker-data` and posts the text back.
+
+The page reports the data status, whether the second fetch was redirected, the
+refused fetch's outcome, how many times the cached script ran, and the worker's
+text. The verifier stops if any of those differs from what the steps should
+produce, so a missing record is not confused with a step that never happened.
+
+The verifier requires that no line of the session's event log contains any of
+the four credential values or the cookie fixture's value, and that every
+`Cookie`, `Set-Cookie`, `Set-Cookie2`, `Authorization`, and
+`Proxy-Authorization` header in every network record has its value withheld
+with the `credential-header` reason. For the first fetch it requires a
+window-scope `request-will-be-sent` record with a request identifier in which
+`Authorization` is withheld as `credential-header`, `X-Api-Key` as
+`credential-name`, `X-Fixture-Scheme` as `credential-value`, and
+`X-Fixture-Plain` keeps its value; `response-received` and `request-finished`
+records with the same inspector identifier and document, the response from the
+loader with status 200, `X-Fixture-Response` kept, `X-Session-Id` withheld, and
+a decoded body of 12 bytes; and `request-headers-sent` and
+`response-headers-received` records with the same request identifier, in which
+`Authorization` and `Cookie` are withheld, `X-Fixture-Plain` is kept, the
+cookie list names `a11y_recorder_response`, and `X-Session-Id` is withheld. It
+requires a redirect record for `/network/data?hop=1` carrying the 302 response
+and its `Location` value, and a finish for the same load; a `request-failed`
+record for the closed port with a negative network error; a `memory-cache-hit`
+record for `/network/cached.js` with status 200; a dedicated-worker
+`request-will-be-sent` record for `/network/worker-data` naming the worker
+script and a worker token, and its finish; and a committed
+`navigation-response` record for `/network` whose redirect chain is
+`/network-start` then `/network`, with a status 200 response and timing.
+
+These checks show that the logger emitted linked network records and withheld
+credential values. They do not evaluate the page's network use. No measured
+result has been recorded yet.

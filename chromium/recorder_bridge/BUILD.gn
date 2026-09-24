@@ -8,6 +8,8 @@ component("recorder_bridge") {
     "browser_bridge.h",
     "cookie_text.cc",
     "cookie_text.h",
+    "network_text.cc",
+    "network_text.h",
     "recorder_protocol.cc",
     "recorder_protocol.h",
     "recorder_switches.h",

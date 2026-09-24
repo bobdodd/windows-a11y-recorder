@@ -25,7 +25,8 @@ internal static class EventPayloadValidator
         "browser.accessibility",
         "browser.cookie",
         "browser.interaction",
-        "browser.layout"
+        "browser.layout",
+        "browser.network"
     ];
 
     public static void Validate(
@@ -223,6 +224,32 @@ internal static class EventPayloadValidator
             case ("browser.layout", "layout-checkpoint-completed"):
                 ValidateBrowserLayoutCheckpointCompleted(payload, issues, lineNumber);
                 break;
+            case ("browser.network", "request-will-be-sent"):
+                ValidateBrowserNetworkRequestWillBeSent(payload, issues, lineNumber);
+                break;
+            case ("browser.network", "response-received"):
+                ValidateBrowserNetworkResponseReceived(payload, issues, lineNumber);
+                break;
+            case ("browser.network", "request-finished"):
+                ValidateBrowserNetworkRequestFinished(payload, issues, lineNumber);
+                break;
+            case ("browser.network", "request-failed"):
+                ValidateBrowserNetworkRequestFailed(payload, issues, lineNumber);
+                break;
+            case ("browser.network", "memory-cache-hit"):
+                ValidateBrowserNetworkMemoryCacheHit(payload, issues, lineNumber);
+                break;
+            case ("browser.network", "request-headers-sent"):
+            case ("browser.network", "response-headers-received"):
+                ValidateBrowserNetworkWireHeaders(
+                    payload,
+                    eventType == "response-headers-received",
+                    issues,
+                    lineNumber);
+                break;
+            case ("browser.network", "navigation-response"):
+                ValidateBrowserNetworkNavigationResponse(payload, issues, lineNumber);
+                break;
             case ("window.foreground", "collector-omission"):
             case ("accessibility.uia.events", "collector-omission"):
             case ("graphics.desktop.frames", "collector-omission"):
@@ -241,6 +268,7 @@ internal static class EventPayloadValidator
             case ("browser.cookie", "collector-omission"):
             case ("browser.interaction", "collector-omission"):
             case ("browser.layout", "collector-omission"):
+            case ("browser.network", "collector-omission"):
                 ValidateBrowserOmission(payload, issues, lineNumber);
                 break;
             default:
@@ -1011,6 +1039,614 @@ internal static class EventPayloadValidator
             issues,
             line);
         ValidateInteractionCommon(payload, issues, line);
+    }
+
+    private static readonly string[] NetworkContextKinds =
+    [
+        "window", "dedicated-worker", "shared-worker", "service-worker",
+        "worklet", "other"
+    ];
+
+    private static readonly string[] NetworkRedactionReasons =
+        ["credential-header", "credential-name", "credential-value"];
+
+    // Header names whose values the recorder never writes.
+    private static readonly HashSet<string> NetworkCredentialHeaders =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "cookie", "set-cookie", "set-cookie2", "authorization",
+            "proxy-authorization"
+        };
+
+    private static void ValidateBrowserNetworkRequestWillBeSent(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredObject("scope"),
+                RequiredObject("request"),
+                RequiredBoolean("redirect"),
+                NullableObject("redirectResponse"),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateNetworkScopeProperty(payload, issues, line);
+        ValidateBrowserLocationProperty(payload, issues, line);
+        ValidateBrowserExecutionWorldProperty(payload, issues, line);
+        ValidateOptionalObject(payload, "request", ValidateNetworkRequest, issues, line);
+        ValidateOptionalObject(
+            payload, "redirectResponse", ValidateNetworkResponse, issues, line);
+
+        var redirect = payload.TryGetProperty("redirect", out var redirectValue) &&
+            redirectValue.ValueKind == JsonValueKind.True;
+        if (redirect != HasNonnullProperty(payload, "redirectResponse"))
+        {
+            AddError(
+                issues,
+                "browser-network-redirect-response",
+                "events.ndjson#/payload/redirectResponse",
+                "A redirect reports its redirect response and a first request reports none.",
+                line);
+        }
+    }
+
+    private static void ValidateBrowserNetworkResponseReceived(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredObject("scope"),
+                RequiredString("inspectorId"),
+                NullableString("requestId"),
+                RequiredEnum("responseSource", "memory-cache", "loader"),
+                RequiredObject("response")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateNetworkScopeProperty(payload, issues, line);
+        ValidateInspectorId(payload, issues, line);
+        ValidateOptionalObject(payload, "response", ValidateNetworkResponse, issues, line);
+    }
+
+    private static void ValidateBrowserNetworkRequestFinished(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredObject("scope"),
+                RequiredString("inspectorId"),
+                RequiredNumber("encodedDataLength", nonnegative: true),
+                RequiredNumber("decodedBodyLength", nonnegative: true),
+                RequiredNullableNumber("finishBeforeRecordMilliseconds")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateNetworkScopeProperty(payload, issues, line);
+        ValidateInspectorId(payload, issues, line);
+    }
+
+    private static void ValidateBrowserNetworkRequestFailed(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredObject("scope"),
+                RequiredString("inspectorId"),
+                RequiredText("url"),
+                RequiredInteger("netError"),
+                NullableString("netErrorName"),
+                RequiredBoolean("cancellation"),
+                RequiredBoolean("timeout"),
+                RequiredBoolean("accessCheck"),
+                RequiredBoolean("blockedByResponse"),
+                RequiredBoolean("blockedByOrb"),
+                RequiredBoolean("hasCopyInCache"),
+                RequiredBoolean("cancelledFromHttpError"),
+                RequiredBoolean("internal"),
+                NullableString("blockedReason"),
+                NullableObject("corsError")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateNetworkScopeProperty(payload, issues, line);
+        ValidateInspectorId(payload, issues, line);
+        ValidateOptionalObject(
+            payload,
+            "corsError",
+            (value, list, number, path) => ValidateShape(
+                value,
+                [RequiredString("error"), NullableString("failedParameter")],
+                list,
+                number,
+                path),
+            issues,
+            line);
+    }
+
+    private static void ValidateBrowserNetworkMemoryCacheHit(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredObject("scope"),
+                RequiredBoolean("staticData"),
+                RequiredObject("request"),
+                RequiredObject("response")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateNetworkScopeProperty(payload, issues, line);
+        ValidateOptionalObject(payload, "request", ValidateNetworkRequest, issues, line);
+        ValidateOptionalObject(payload, "response", ValidateNetworkResponse, issues, line);
+    }
+
+    private static void ValidateBrowserNetworkWireHeaders(
+        JsonElement payload,
+        bool response,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        List<PropertyRule> rules =
+        [
+            RequiredObject("context"),
+            NullableString("devtoolsAgentId"),
+            RequiredString("requestId"),
+            RequiredInteger("headerCount", nonnegative: true),
+            RequiredObjectArray("headers"),
+            RequiredBoolean("headersTruncated"),
+            RequiredInteger("cookieCount", nonnegative: true),
+            RequiredObjectArray("cookies"),
+            RequiredBoolean("cookiesTruncated")
+        ];
+        rules.Add(
+            response
+                ? RequiredInteger("status", nonnegative: true)
+                : RequiredNullableNumber("sentBeforeRecordMilliseconds"));
+        ValidateShape(payload, rules, issues, line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateNetworkHeaders(
+            payload,
+            "headers",
+            "headerCount",
+            "headersTruncated",
+            issues,
+            line,
+            "events.ndjson#/payload");
+
+        if (payload.TryGetProperty("cookies", out var cookies) &&
+            cookies.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var cookie in cookies.EnumerateArray())
+            {
+                if (cookie.ValueKind == JsonValueKind.Object)
+                {
+                    ValidateCookieAccessEntry(cookie, index, issues, line);
+                }
+
+                index++;
+            }
+
+            ValidateCookieNameCount(payload, "cookies", "cookiesTruncated", issues, line);
+        }
+    }
+
+    private static void ValidateBrowserNetworkNavigationResponse(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("navigationId"),
+                NullableString("requestId"),
+                RequiredText("url"),
+                RequiredString("method"),
+                RequiredBoolean("committed"),
+                RequiredBoolean("errorPage"),
+                RequiredBoolean("sameDocument"),
+                RequiredBoolean("download"),
+                RequiredBoolean("backForwardCache"),
+                RequiredInteger("netError"),
+                NullableString("netErrorName"),
+                RequiredTextArray("redirectChain"),
+                RequiredInteger("requestHeaderCount", nonnegative: true),
+                RequiredObjectArray("requestHeaders"),
+                RequiredBoolean("requestHeadersTruncated"),
+                NullableObject("response"),
+                NullableObject("timing")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateNetworkHeaders(
+            payload,
+            "requestHeaders",
+            "requestHeaderCount",
+            "requestHeadersTruncated",
+            issues,
+            line,
+            "events.ndjson#/payload");
+        ValidateOptionalObject(
+            payload,
+            "response",
+            (value, list, number, path) =>
+            {
+                ValidateShape(
+                    value,
+                    [
+                        RequiredInteger("status", nonnegative: true),
+                        RequiredText("statusText"),
+                        NullableString("mimeType"),
+                        RequiredBoolean("wasCached"),
+                        NullableObject("remoteAddress"),
+                        NullableString("connectionInfo"),
+                        RequiredInteger("headerCount", nonnegative: true),
+                        RequiredObjectArray("headers"),
+                        RequiredBoolean("headersTruncated")
+                    ],
+                    list,
+                    number,
+                    path);
+                ValidateOptionalObject(
+                    value, "remoteAddress", ValidateNetworkRemoteAddress, list, number, path);
+                ValidateNetworkHeaders(
+                    value, "headers", "headerCount", "headersTruncated", list, number, path);
+            },
+            issues,
+            line);
+        ValidateOptionalObject(
+            payload,
+            "timing",
+            (value, list, number, path) => ValidateNetworkTiming(
+                value,
+                "navigationStartBeforeRecordMilliseconds",
+                [
+                    "loaderStart", "firstRequestStart", "firstResponseStart",
+                    "firstLoaderCallback", "finalRequestStart", "finalResponseStart",
+                    "finalNonInformationalResponseStart", "finalLoaderCallback",
+                    "requestFailed", "commitSent", "commitReceived",
+                    "commitReplySent", "didCommit", "finalRequestDomainLookupStart",
+                    "finalRequestDomainLookupEnd", "finalRequestConnectStart",
+                    "finalRequestConnectEnd", "finalRequestSslStart"
+                ],
+                list,
+                number,
+                path),
+            issues,
+            line);
+    }
+
+    private static void ValidateNetworkScopeProperty(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateOptionalObject(
+            payload,
+            "scope",
+            (value, list, number, path) =>
+            {
+                ValidateShape(
+                    value,
+                    [
+                        RequiredEnum("contextKind", NetworkContextKinds),
+                        NullableString("workerToken"),
+                        NullableString("globalObjectUrl")
+                    ],
+                    list,
+                    number,
+                    path);
+                if (ReadString(value, "contextKind") == "window" &&
+                    HasNonnullProperty(value, "workerToken"))
+                {
+                    AddError(
+                        list,
+                        "browser-network-scope-invalid",
+                        $"{path}/workerToken",
+                        "A window scope carries no worker token.",
+                        number);
+                }
+            },
+            issues,
+            line);
+    }
+
+    private static void ValidateInspectorId(
+        JsonElement value,
+        ICollection<ArchiveValidationIssue> issues,
+        long line,
+        string path = "events.ndjson#/payload")
+    {
+        var id = ReadString(value, "inspectorId");
+        if (id is not null && !ulong.TryParse(
+                id,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out _))
+        {
+            AddError(
+                issues,
+                "browser-network-inspector-id-invalid",
+                $"{path}/inspectorId",
+                "An inspector id must be an unsigned decimal integer string.",
+                line);
+        }
+    }
+
+    private static void ValidateNetworkRequest(
+        JsonElement value,
+        ICollection<ArchiveValidationIssue> issues,
+        long line,
+        string path)
+    {
+        ValidateShape(
+            value,
+            [
+                RequiredString("inspectorId"),
+                NullableString("requestId"),
+                RequiredText("url"),
+                RequiredText("method"),
+                RequiredText("resourceType"),
+                RequiredObject("initiator"),
+                RequiredBoolean("internal"),
+                RequiredString("destination"),
+                RequiredString("mode"),
+                RequiredString("credentialsMode"),
+                RequiredString("redirectMode"),
+                RequiredString("cacheMode"),
+                RequiredString("priority"),
+                RequiredString("initialPriority"),
+                RequiredString("fetchPriorityHint"),
+                RequiredString("renderBlocking"),
+                NullableString("referrer"),
+                RequiredString("referrerPolicy"),
+                RequiredBoolean("keepalive"),
+                RequiredBoolean("userGesture"),
+                RequiredBoolean("adResource"),
+                RequiredBoolean("formSubmission"),
+                RequiredInteger("headerCount", nonnegative: true),
+                RequiredObjectArray("headers"),
+                RequiredBoolean("headersTruncated")
+            ],
+            issues,
+            line,
+            path);
+        ValidateInspectorId(value, issues, line, path);
+        ValidateOptionalObject(
+            value,
+            "initiator",
+            (initiator, list, number, initiatorPath) => ValidateShape(
+                initiator,
+                [
+                    NullableString("type"),
+                    NullableString("url"),
+                    NullableInteger("line", nonnegative: true),
+                    NullableInteger("column", nonnegative: true),
+                    RequiredBoolean("linkPreload")
+                ],
+                list,
+                number,
+                initiatorPath),
+            issues,
+            line,
+            path);
+        ValidateNetworkHeaders(
+            value, "headers", "headerCount", "headersTruncated", issues, line, path);
+    }
+
+    private static void ValidateNetworkResponse(
+        JsonElement value,
+        ICollection<ArchiveValidationIssue> issues,
+        long line,
+        string path)
+    {
+        ValidateShape(
+            value,
+            [
+                RequiredText("url"),
+                NullableString("responseUrl"),
+                RequiredInteger("status", nonnegative: true),
+                RequiredText("statusText"),
+                RequiredText("mimeType"),
+                NullableString("charset"),
+                NullableString("alpnProtocol"),
+                NullableString("connectionInfo"),
+                NullableObject("remoteAddress"),
+                RequiredNumber("connectionId", nonnegative: true),
+                RequiredBoolean("connectionReused"),
+                RequiredBoolean("wasCached"),
+                RequiredBoolean("fetchedViaServiceWorker"),
+                RequiredString("serviceWorkerResponseSource"),
+                RequiredBoolean("inPrefetchCache"),
+                RequiredBoolean("networkAccessed"),
+                RequiredBoolean("fromArchive"),
+                RequiredBoolean("cookieInRequest"),
+                RequiredString("responseType"),
+                RequiredNumber("encodedDataLength", nonnegative: true),
+                RequiredNumber("expectedContentLength"),
+                RequiredInteger("headerCount", nonnegative: true),
+                RequiredObjectArray("headers"),
+                RequiredBoolean("headersTruncated"),
+                NullableObject("timing")
+            ],
+            issues,
+            line,
+            path);
+        ValidateOptionalObject(
+            value, "remoteAddress", ValidateNetworkRemoteAddress, issues, line, path);
+        ValidateNetworkHeaders(
+            value, "headers", "headerCount", "headersTruncated", issues, line, path);
+        ValidateOptionalObject(
+            value,
+            "timing",
+            (timing, list, number, timingPath) => ValidateNetworkTiming(
+                timing,
+                "requestStartBeforeRecordMilliseconds",
+                [
+                    "proxyStart", "proxyEnd", "domainLookupStart", "domainLookupEnd",
+                    "connectStart", "connectEnd", "sslStart", "sslEnd",
+                    "workerStart", "workerReady", "workerFetchStart",
+                    "workerRespondWithSettled", "workerRouterEvaluationStart",
+                    "workerCacheLookupStart", "sendStart", "sendEnd",
+                    "receiveHeadersStart", "receiveHeadersEnd",
+                    "receiveNonInformationalHeadersStart", "receiveEarlyHintsStart",
+                    "pushStart", "pushEnd", "responseEnd"
+                ],
+                list,
+                number,
+                timingPath),
+            issues,
+            line,
+            path);
+    }
+
+    private static void ValidateNetworkRemoteAddress(
+        JsonElement value,
+        ICollection<ArchiveValidationIssue> issues,
+        long line,
+        string path) =>
+        ValidateShape(
+            value,
+            [
+                RequiredString("ip"),
+                new PropertyRule(
+                    "port",
+                    true,
+                    false,
+                    port => IsInteger(port) &&
+                        port.GetInt64() is >= 0 and <= 65535,
+                    "must be an integer from 0 to 65535")
+            ],
+            issues,
+            line,
+            path);
+
+    private static void ValidateNetworkTiming(
+        JsonElement value,
+        string startProperty,
+        IReadOnlyList<string> phases,
+        ICollection<ArchiveValidationIssue> issues,
+        long line,
+        string path)
+    {
+        List<PropertyRule> rules = [RequiredNullableNumber(startProperty)];
+        rules.AddRange(phases.Select(phase => RequiredNullableNumber(phase)));
+        ValidateShape(value, rules, issues, line, path);
+    }
+
+    // Checks one header list against its count and truncation flag, and checks
+    // that every withheld value is null with a reason and that no credential
+    // header value was written.
+    private static void ValidateNetworkHeaders(
+        JsonElement parent,
+        string listProperty,
+        string countProperty,
+        string truncatedProperty,
+        ICollection<ArchiveValidationIssue> issues,
+        long line,
+        string path)
+    {
+        if (!parent.TryGetProperty(listProperty, out var list) ||
+            list.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var index = 0;
+        foreach (var header in list.EnumerateArray())
+        {
+            var headerPath = $"{path}/{listProperty}/{index}";
+            index++;
+            if (header.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            ValidateShape(
+                header,
+                [
+                    RequiredString("name"),
+                    NullableText("value"),
+                    RequiredBoolean("valueRedacted"),
+                    NullableEnum("redactionReason", NetworkRedactionReasons)
+                ],
+                issues,
+                line,
+                headerPath);
+            var redacted = header.TryGetProperty("valueRedacted", out var redactedValue) &&
+                redactedValue.ValueKind == JsonValueKind.True;
+            var hasValue = HasNonnullProperty(header, "value");
+            var hasReason = HasNonnullProperty(header, "redactionReason");
+            if (redacted == hasValue || redacted != hasReason)
+            {
+                AddError(
+                    issues,
+                    "browser-network-header-redaction",
+                    headerPath,
+                    "A withheld header value is null with a reason, and a recorded one has no reason.",
+                    line);
+            }
+
+            var name = ReadString(header, "name");
+            if (name is not null && NetworkCredentialHeaders.Contains(name) && hasValue)
+            {
+                AddError(
+                    issues,
+                    "browser-network-credential-header-value",
+                    $"{headerPath}/value",
+                    $"The value of a '{name}' header must not be recorded.",
+                    line);
+            }
+        }
+
+        if (!parent.TryGetProperty(countProperty, out var countValue) ||
+            !countValue.TryGetInt64(out var count) ||
+            !parent.TryGetProperty(truncatedProperty, out var truncatedValue) ||
+            truncatedValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return;
+        }
+
+        var length = list.GetArrayLength();
+        if (truncatedValue.ValueKind == JsonValueKind.True ? length >= count : length != count)
+        {
+            AddError(
+                issues,
+                "browser-network-header-count",
+                $"{path}/{listProperty}",
+                $"{countProperty} must equal the listed headers unless the list is marked truncated, in which case it must exceed them.",
+                line);
+        }
     }
 
     private static void ValidateBrowserLayoutCheckpointStarted(

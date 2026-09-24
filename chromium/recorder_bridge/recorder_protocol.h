@@ -13,7 +13,7 @@
 
 namespace a11y_recorder {
 
-inline constexpr char kProtocolVersion[] = "0.25";
+inline constexpr char kProtocolVersion[] = "0.26";
 inline constexpr uint32_t kDefaultMaximumMessageBytes = 4 * 1024 * 1024;
 // How long a process waits for a free recorder pipe instance before it reports
 // that it could not connect, and how long it backs off between attempts while

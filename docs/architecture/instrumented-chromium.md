@@ -92,6 +92,13 @@ Cookie values are never recorded. Authorization values, saved credentials, reque
 
 Network evidence includes request and response metadata, initiator, resource type, redirect chain, status, cache behavior, timing, and cookie names associated with the transaction.
 
+Protocol 0.26 implements network metadata on the `browser.network` channel.
+Header names are recorded with their values, except that the values of cookie
+and authorization headers, and of headers whose name or value marks them as a
+credential, are withheld at source. The record types and their limits are
+described under protocol version 0.26 below and in
+[the network metadata evidence model](network-metadata-evidence-model.md).
+
 ## Process architecture
 
 ```text
@@ -657,7 +664,59 @@ complete, linked checkpoints for the fixture document whose recorded values
 agree with what the page reported. The fixture shows that the logger emits
 records; it does not evaluate the page's layout or styling.
 
-Live 0.25 connections require an exact protocol-version match.
+Protocol version 0.26 records network metadata on the `browser.network`
+channel. Hooks in Blink's frame and worker resource load observers and in its
+resource fetcher record renderer loads; hooks in the browser's network service
+DevTools observer record the headers the network service reports sending and
+receiving; and a hook after the navigation-completed record records each
+finished navigation's request and response. Eight record types are emitted:
+
+- `request-will-be-sent`: a request or a redirect of it, with its URL, method,
+  resource type, initiator, fetch mode and cache mode, priority, referrer, the
+  headers Blink holds, the redirect response for a redirect, and the script
+  that was current.
+- `response-received`: the response metadata, headers, and load timing.
+- `request-finished`: the encoded and decoded lengths and the finish time.
+- `request-failed`: the network error and the kind of failure.
+- `memory-cache-hit`: one use of a resource Blink already held in memory.
+- `request-headers-sent`: the headers the network service sent, and the
+  cookies it attached or excluded, by name.
+- `response-headers-received`: the status and headers the network service
+  received, and the cookies the response set or tried to set, by name.
+- `navigation-response`: a finished navigation's redirect chain, request
+  headers, response head, and navigation timing.
+
+The recorded facts are bounded as follows:
+
+- No request or response body is recorded.
+- `Cookie`, `Set-Cookie`, `Set-Cookie2`, `Authorization`, and
+  `Proxy-Authorization` values are withheld, as are the values of headers whose
+  name holds a credential word or whose value begins with an HTTP
+  authentication scheme or contains a JSON Web Token. The name and the reason
+  are recorded.
+- A header list holds at most 256 headers.
+- URLs are recorded in full, including query strings.
+- Requests the browser makes for itself are not recorded.
+- Wire headers are not recorded for worker loads made through a factory that
+  has no DevTools observer.
+
+While the recorder is connected, Blink and the navigation loader assign a
+DevTools request identifier to each request that has none, so that the network
+service reports wire headers for it. This is the one network hook that changes
+Chromium's behaviour rather than only reading it; without a recorder
+connection the browser behaves as stock.
+
+The validation run serves a fifth fixture page from the loopback HTTP listener
+the cookie fixture uses, reached through a redirect in a background tab after
+the layout fixture. The page sends a fetch with credential-bearing and plain
+headers, follows a redirected fetch, fetches from a closed port, loads one
+cacheable script twice, and fetches from a dedicated worker. The verifier
+requires records for each of those loads, linked by identifier, with every
+credential value absent from the session and a fixture cookie listed by name.
+The fixture shows that the logger emits records; it does not evaluate the
+page's network use.
+
+Live 0.26 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
@@ -744,7 +803,7 @@ Successful connections are persisted on the `browser.lifecycle` channel:
    Rendered-frame checkpoints remain outstanding.
 6. Add cookie operations and network metadata with prohibited values removed at
    source. Cookie operations are implemented in protocol 0.23. Network metadata
-   remains outstanding.
+   is implemented in protocol 0.26.
 7. Add browser-chrome and compositor correlation needed by test scenarios.
 8. Package the browser and recorder as one installable application.
 

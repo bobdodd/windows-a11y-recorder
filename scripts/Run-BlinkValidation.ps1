@@ -619,6 +619,86 @@ document.title = "Cookie logging fixture ready";
 </html>
 '@
 
+# The page the network logging fixture serves, reached through a redirect so
+# the navigation response records a redirect chain. Its function sends a fetch
+# with credential-bearing and plain request headers, follows a redirected
+# fetch, sends a fetch to a closed loopback port so the request fails, loads the
+# same cacheable script twice so the second load is served from the memory
+# cache, and starts a dedicated worker that sends a fetch of its own. The
+# credential values are generated per run and passed in by the run script so
+# the verifier can require that no record contains them.
+$networkFixturePage = @'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Network logging fixture loading</title>
+</head>
+<body>
+<p>Network logging fixture</p>
+<script>
+function networkFixtureScript() {
+  return new Promise(function (resolve, reject) {
+    const script = document.createElement("script");
+    script.src = "/network/cached.js";
+    script.onload = function () { resolve(); };
+    script.onerror = function () { reject(new Error("script load failed")); };
+    document.head.appendChild(script);
+  });
+}
+async function runNetworkFixture(values) {
+  const data = await fetch("/network/data", {
+    cache: "no-store",
+    headers: {
+      "Authorization": "Bearer " + values.authorization,
+      "X-Api-Key": values.apiKey,
+      "X-Fixture-Scheme": "Bearer " + values.scheme,
+      "X-Fixture-Plain": "network-fixture-plain"
+    }
+  });
+  const dataText = await data.text();
+  const hop = await fetch("/network/hop", { cache: "no-store" });
+  const hopText = await hop.text();
+  let refused = "resolved";
+  try {
+    await fetch(values.refusedUrl, { cache: "no-store", mode: "no-cors" });
+  } catch (error) {
+    refused = "rejected";
+  }
+  await networkFixtureScript();
+  await networkFixtureScript();
+  const worker = new Worker("/network/worker.js");
+  const workerText = await new Promise(function (resolve, reject) {
+    worker.onmessage = function (event) { resolve(event.data); };
+    worker.onerror = function () { reject(new Error("worker failed")); };
+  });
+  worker.terminate();
+  return JSON.stringify({
+    outcome: "completed",
+    dataStatus: data.status,
+    dataText: dataText,
+    hopRedirected: hop.redirected,
+    hopUrl: hop.url,
+    hopText: hopText,
+    refused: refused,
+    cachedRuns: window.networkFixtureCachedRuns,
+    workerText: workerText
+  });
+}
+document.title = "Network logging fixture ready";
+</script>
+</body>
+</html>
+'@
+
+# The dedicated worker the network logging fixture starts. It sends one fetch
+# and posts the response text back to the page.
+$networkFixtureWorker = @'
+fetch("/network/worker-data", { cache: "no-store" })
+  .then(function (response) { return response.text(); })
+  .then(function (text) { postMessage(text); });
+'@
+
 # Serves the cookie logging fixture over HTTP on the loopback interface. Cookie
 # APIs refuse a file URL and a response header is the only way to set a cookie
 # from outside script, so the fixture needs an origin the listener fixture's
@@ -642,7 +722,20 @@ function Start-CookieFixtureServer {
         # The layout logging fixture, served at /layout. It shares the cookie
         # fixture's origin and sets no cookie of its own.
         [Parameter(Mandatory = $true)]
-        [string] $LayoutPage
+        [string] $LayoutPage,
+
+        # The network logging fixture, served at /network behind a redirect
+        # from /network-start, with its worker, script, and data responses.
+        [Parameter(Mandatory = $true)]
+        [string] $NetworkPage,
+
+        [Parameter(Mandatory = $true)]
+        [string] $NetworkWorker,
+
+        # The value of the credential-named response header the network
+        # fixture's data response carries, which no record may contain.
+        [Parameter(Mandatory = $true)]
+        [string] $NetworkSessionValue
     )
 
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
@@ -650,7 +743,16 @@ function Start-CookieFixtureServer {
     $port = ([Net.IPEndPoint] $listener.LocalEndpoint).Port
     $server = [PowerShell]::Create()
     $null = $server.AddScript({
-            param($Listener, $Page, $CookieValue, $InteractionPage, $LayoutPage)
+            param(
+                $Listener,
+                $Page,
+                $CookieValue,
+                $InteractionPage,
+                $LayoutPage,
+                $NetworkPage,
+                $NetworkWorker,
+                $NetworkSessionValue
+            )
             $ascii = [Text.Encoding]::ASCII
             while ($true) {
                 try {
@@ -681,6 +783,8 @@ function Start-CookieFixtureServer {
                     $contentType = "text/plain; charset=utf-8"
                     $body = "not found"
                     $setCookie = $null
+                    $cacheControl = "no-store"
+                    $extraHeaders = @()
                     if ($path -eq "/") {
                         $status = "200 OK"
                         $contentType = "text/html; charset=utf-8"
@@ -712,16 +816,63 @@ function Start-CookieFixtureServer {
                         $contentType = "text/html; charset=utf-8"
                         $body = $LayoutPage
                     }
+                    elseif ($path -eq "/network-start") {
+                        $status = "302 Found"
+                        $body = "redirect"
+                        $extraHeaders += "Location: /network"
+                    }
+                    elseif ($path -eq "/network") {
+                        $status = "200 OK"
+                        $contentType = "text/html; charset=utf-8"
+                        $body = $NetworkPage
+                    }
+                    elseif ($path -eq "/network/data" -or
+                            $path -eq "/network/data?hop=1") {
+                        $status = "200 OK"
+                        $body = "network data"
+                        $extraHeaders += (
+                            "X-Fixture-Response: network-fixture-response"
+                        )
+                        $extraHeaders += "X-Session-Id: $NetworkSessionValue"
+                    }
+                    elseif ($path -eq "/network/hop") {
+                        $status = "302 Found"
+                        $body = "redirect"
+                        $extraHeaders += "Location: /network/data?hop=1"
+                    }
+                    elseif ($path -eq "/network/cached.js") {
+                        # Cacheable, so the page's second load of the same
+                        # script is served from Blink's memory cache.
+                        $status = "200 OK"
+                        $contentType = "text/javascript; charset=utf-8"
+                        $cacheControl = "max-age=600"
+                        $body = (
+                            "window.networkFixtureCachedRuns = " +
+                            "(window.networkFixtureCachedRuns || 0) + 1;"
+                        )
+                    }
+                    elseif ($path -eq "/network/worker.js") {
+                        $status = "200 OK"
+                        $contentType = "text/javascript; charset=utf-8"
+                        $body = $NetworkWorker
+                    }
+                    elseif ($path -eq "/network/worker-data") {
+                        $status = "200 OK"
+                        $body = "worker data"
+                    }
                     $bodyBytes = [Text.Encoding]::UTF8.GetBytes($body)
                     $head = (
                         "HTTP/1.1 $status`r`n" +
                         "Content-Type: $contentType`r`n" +
                         "Content-Length: $($bodyBytes.Length)`r`n" +
-                        "Cache-Control: no-store`r`n" +
+                        "Cache-Control: $cacheControl`r`n" +
                         "Connection: close`r`n"
                     )
                     if ($setCookie) {
                         $head += "Set-Cookie: $setCookie`r`n"
+                    }
+                    foreach ($extraHeader in $extraHeaders) {
+                        $head += "$extraHeader`r`n"
                     }
                     $head += "`r`n"
                     $headBytes = $ascii.GetBytes($head)
@@ -740,7 +891,9 @@ function Start-CookieFixtureServer {
             }
         }).AddArgument($listener).AddArgument($Page).AddArgument(
             $CookieValue
-        ).AddArgument($InteractionPage).AddArgument($LayoutPage)
+        ).AddArgument($InteractionPage).AddArgument($LayoutPage).AddArgument(
+            $NetworkPage
+        ).AddArgument($NetworkWorker).AddArgument($NetworkSessionValue)
     $handle = $server.BeginInvoke()
 
     [pscustomobject]@{
@@ -1483,6 +1636,129 @@ function Invoke-LayoutFixture {
     }
 }
 
+# Runs the network logging fixture in a background tab. The tab opens
+# /network-start, which redirects to the fixture page, and the fixture function
+# is then called with the per-run credential values and the URL of a closed
+# loopback port. The page does not need to be painted, so the tab stays in the
+# background.
+function Invoke-NetworkFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase,
+
+        [Parameter(Mandatory = $true)]
+        [string] $StartUri,
+
+        [Parameter(Mandatory = $true)]
+        [string] $FixtureUri,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable] $Values
+    )
+
+    $version = ConvertFrom-Json (
+        Invoke-WebRequest `
+            -Uri "$DevToolsBase/json/version" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+    ).Content
+    $browserSocket = Get-CdpProperty $version "webSocketDebuggerUrl"
+    if ($browserSocket -isnot [string] -or $browserSocket.Length -eq 0) {
+        throw "The DevTools version reply reported no browser endpoint."
+    }
+
+    $browserSession = $null
+    $pageSession = $null
+    $targetId = $null
+    try {
+        $browserSession = New-CdpSession $browserSocket
+        $created = Invoke-CdpCommand $browserSession "Target.createTarget" @{
+            url = $StartUri
+            background = $true
+        }
+        $targetId = [string](Get-CdpProperty $created "targetId")
+        if ([string]::IsNullOrWhiteSpace($targetId)) {
+            throw "Opening the network logging fixture returned no target."
+        }
+
+        $target = $null
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $candidates = @()
+            try {
+                $candidates = @(
+                    Select-CdpFixtureTarget `
+                        (Get-CdpTargetList $DevToolsBase) `
+                        $FixtureUri `
+                        "Network logging fixture ready" |
+                        Where-Object { (Get-CdpProperty $_ "id") -eq $targetId }
+                )
+            }
+            catch {
+                $candidates = @()
+            }
+            if ($candidates.Count -eq 1) {
+                $target = $candidates[0]
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $target) {
+            throw (
+                "The network logging fixture did not report readiness in " +
+                "the DevTools target list."
+            )
+        }
+
+        $pageSession = New-CdpSession $target.webSocketDebuggerUrl
+        $argument = ConvertTo-Json -Compress -InputObject (
+            [pscustomobject] $Values
+        )
+        $run = Invoke-CdpCommand $pageSession "Runtime.evaluate" @{
+            expression = "runNetworkFixture($argument)"
+            awaitPromise = $true
+            returnByValue = $true
+        }
+        $failure = Get-CdpProperty $run "exceptionDetails"
+        if ($failure) {
+            $description = Get-CdpProperty (
+                Get-CdpProperty $failure "exception"
+            ) "description"
+            throw (
+                "The network logging fixture failed: $($failure.text) " +
+                "$description"
+            )
+        }
+        $reportText = [string](Get-CdpProperty $run.result "value")
+        $report = ConvertFrom-Json $reportText
+        if ((Get-CdpProperty $report "outcome") -ne "completed") {
+            throw "The network logging fixture did not report completion."
+        }
+
+        [pscustomobject]@{
+            TargetId = $targetId
+            Report = $reportText
+        }
+    }
+    finally {
+        Close-CdpSession $pageSession
+        if ($browserSession -and $targetId) {
+            try {
+                $null = Invoke-CdpCommand $browserSession "Target.closeTarget" @{
+                    targetId = $targetId
+                }
+            }
+            catch {
+                Write-Host (
+                    "Closing the network logging fixture tab failed: " +
+                    "$($_.Exception.Message)"
+                )
+            }
+        }
+        Close-CdpSession $browserSession
+    }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if ($principal.IsInRole(
@@ -1749,6 +2025,31 @@ $cookieFixtureUri = $null
 $interactionFixtureUri = $null
 $layoutFixtureUri = $null
 $layoutFixtureSteps = $null
+# The credential values the network logging fixture sends in request headers
+# and receives in a response header. They are generated per run so the verifier
+# can require that no record in the session contains them.
+$networkValues = @{
+    authorization = "a11y-recorder-authorization-" +
+        [Guid]::NewGuid().ToString("N")
+    apiKey = "a11y-recorder-api-key-" + [Guid]::NewGuid().ToString("N")
+    scheme = "a11y-recorder-scheme-" + [Guid]::NewGuid().ToString("N")
+    refusedUrl = $null
+}
+$networkSessionValue = "a11y-recorder-session-" +
+    [Guid]::NewGuid().ToString("N")
+# A loopback port that was bound and then released, so a fetch to it is
+# refused and the network logging fixture records a failed request.
+$closedPortListener = [Net.Sockets.TcpListener]::new(
+    [Net.IPAddress]::Loopback,
+    0
+)
+$closedPortListener.Start()
+$closedPort = ([Net.IPEndPoint] $closedPortListener.LocalEndpoint).Port
+$closedPortListener.Stop()
+$networkValues.refusedUrl = "http://127.0.0.1:$closedPort/network-refused"
+$networkStartUri = $null
+$networkFixtureUri = $null
+$networkFixtureReport = $null
 $env:A11Y_RECORDER_BRIDGE_LOG_FILE = $bridgeLog
 $env:A11Y_RECORDER_CHROMIUM_LOG_FILE = $chromiumLog
 try {
@@ -1756,13 +2057,22 @@ try {
         $cookieFixturePage `
         $cookieValue `
         $interactionFixturePage `
-        $layoutFixturePage
+        $layoutFixturePage `
+        $networkFixturePage `
+        $networkFixtureWorker `
+        $networkSessionValue
     $cookieFixtureUri = $cookieServer.BaseUri
     $interactionFixtureUri = "$($cookieServer.BaseUri)interaction"
     Write-Host "Serving the cookie logging fixture at $cookieFixtureUri"
     $layoutFixtureUri = "$($cookieServer.BaseUri)layout"
     Write-Host "Serving the interaction logging fixture at $interactionFixtureUri"
     Write-Host "Serving the layout logging fixture at $layoutFixtureUri"
+    $networkStartUri = "$($cookieServer.BaseUri)network-start"
+    $networkFixtureUri = "$($cookieServer.BaseUri)network"
+    Write-Host (
+        "Serving the network logging fixture at $networkFixtureUri behind " +
+        "$networkStartUri"
+    )
     Write-Host "`n== Capturing the deterministic Blink fixture =="
     $captureJob = Start-Job -ScriptBlock {
         param(
@@ -1970,6 +2280,27 @@ try {
         throw
     }
 
+    # The network logging fixture makes a fifth page send fetches with
+    # credential-bearing headers, follow a redirect, fail a request, reuse a
+    # cached script, and fetch from a dedicated worker, so the capture holds
+    # network metadata records for the logger to emit.
+    try {
+        $networkRun = Invoke-NetworkFixture `
+            $devToolsBase `
+            $networkStartUri `
+            $networkFixtureUri `
+            $networkValues
+        $networkFixtureReport = $networkRun.Report
+        Write-Host (
+            "Ran the network logging fixture in background target " +
+            "$($networkRun.TargetId). The page reported: $networkFixtureReport"
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
+
     Wait-Job $captureJob | Out-Null
     $captureErrors = @()
     $captureOutput = @(
@@ -2087,7 +2418,17 @@ try {
         -CookieValue $cookieValue `
         -InteractionFixtureUri $interactionFixtureUri `
         -LayoutFixtureUri $layoutFixtureUri `
-        -LayoutFixtureSteps $layoutFixtureSteps
+        -LayoutFixtureSteps $layoutFixtureSteps `
+        -NetworkFixtureUri $networkFixtureUri `
+        -NetworkStartUri $networkStartUri `
+        -NetworkRefusedUri $networkValues.refusedUrl `
+        -NetworkFixtureReport $networkFixtureReport `
+        -NetworkSecretValues @(
+            $networkValues.authorization,
+            $networkValues.apiKey,
+            $networkValues.scheme,
+            $networkSessionValue
+        )
 }
 catch {
     if (Test-Path -LiteralPath $bridgeLog -PathType Leaf) {
