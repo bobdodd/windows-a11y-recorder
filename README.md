@@ -145,8 +145,8 @@ short-lived documents that are mutated and discarded before any delivery pass
 produces a checkpoint. Under 0.16 the archive states that absence rather than
 naming evidence it does not contain.
 
-Protocol 0.17 is implemented as a proof of concept and awaits reference-platform
-build and capture validation. It records the AX update batches Chromium
+Protocol 0.17 has been validated on the reference Windows platform, at
+revision `eebbc7f` and in every reference run since. It records the AX update batches Chromium
 renderers serialize for the browser process and correlates them to committed
 navigations by browser instance, document token, and renderer process. Each
 batch reports its update count, event count, node count, 100,000-node limit, and
@@ -313,15 +313,35 @@ Completed:
 13. Record and validate observed page lifecycle state at scheduling,
     callback-entry, and explicit-cancellation boundaries, including a
     visible-to-hidden DOM timer transition.
+14. Record and validate scheduler deferral decisions (protocol 0.9), frame
+    and page navigation identity, parser-complete and post-mutation DOM
+    checkpoints with attribute and character-data transitions, browser to
+    renderer document correlation, and renderer accessibility serialization
+    checkpoints (protocols 0.10 to 0.17).
+15. Record and validate listener and dispatch evidence for the window event
+    target, each listener's registration form, registration location, and
+    JavaScript world (protocols 0.18 to 0.21).
+16. State lost browser evidence in the archive (protocol 0.22).
+17. Record and validate cookie operations, interaction-state changes, layout
+    geometry and computed styles, and network metadata (protocols 0.23 to
+    0.26).
+18. Launch instrumented Chromium from the recorder application and record its
+    evidence alongside the desktop, input, and UI Automation channels.
 
 Remaining:
 
-1. Extend Blink and browser-process evidence to shadow-adjusted and non-Node
-   dispatch paths, scheduler throttling decisions, cookies, DOM,
-   accessibility, network, and rendering.
-2. Record representative NVDA, JAWS, and Narrator sessions.
-3. Add evidence correlation and screen-reader behavior analysis.
-4. Investigate touch and gesture coverage on representative hardware.
+1. Extend network logging to traffic that does not pass through Blink's
+   resource fetcher: WebSocket, EventSource, and WebTransport.
+2. Extend DOM and layout capture to shadow-root content and pseudo-elements.
+3. Record interaction state at each checkpoint, not only its changes.
+4. Extend listener and dispatch evidence to shadow-adjusted dispatch paths,
+   worker global scopes, and dispatches whose original target is never a Node.
+5. Record rendered frame or compositor correlation identifiers.
+6. Record an application-launched session with the cookie, interaction,
+   layout, and network channels.
+7. Record representative NVDA, JAWS, and Narrator sessions.
+8. Add evidence correlation and screen-reader behavior analysis.
+9. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 
