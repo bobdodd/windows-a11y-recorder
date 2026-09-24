@@ -3244,6 +3244,16 @@ base::Value NetworkQuantity(int64_t value) {
   return base::Value(static_cast<double>(value));
 }
 
+// A transferred byte count, or null when Chromium reports none. The network
+// service reports -1 when no data crossed the network, as for a chrome:// or
+// otherwise locally served response.
+base::Value NetworkTransferredLength(int64_t value) {
+  if (value < 0) {
+    return base::Value();
+  }
+  return NetworkQuantity(value);
+}
+
 // A microsecond offset as milliseconds, or null for an unobserved time.
 base::Value NetworkMilliseconds(int64_t microseconds) {
   if (microseconds == kNetworkTimeUnobserved) {
@@ -3447,7 +3457,8 @@ base::DictValue CreateNetworkResponse(NetworkResponseFacts response) {
   value.Set("fromArchive", response.from_archive);
   value.Set("cookieInRequest", response.cookie_in_request);
   value.Set("responseType", std::move(response.response_type));
-  value.Set("encodedDataLength", NetworkQuantity(response.encoded_data_length));
+  value.Set("encodedDataLength",
+            NetworkTransferredLength(response.encoded_data_length));
   value.Set("expectedContentLength",
             NetworkQuantity(response.expected_content_length));
   SetNetworkHeaders(value, "headers", "headerCount", "headersTruncated",
@@ -3573,7 +3584,8 @@ void RecordBlinkNetworkFinished(NetworkScope scope,
   payload.Set("context", CreateNetworkRendererContext(*client, scope, nullptr));
   payload.Set("scope", CreateNetworkScope(std::move(scope)));
   payload.Set("inspectorId", InspectorId(inspector_id));
-  payload.Set("encodedDataLength", NetworkQuantity(encoded_data_length));
+  payload.Set("encodedDataLength",
+              NetworkTransferredLength(encoded_data_length));
   payload.Set("decodedBodyLength", NetworkQuantity(decoded_body_length));
   payload.Set("finishBeforeRecordMilliseconds",
               NetworkMilliseconds(finish_before_record));

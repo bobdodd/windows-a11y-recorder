@@ -120,6 +120,11 @@ is null.
 `request-finished` records the encoded data length, the decoded body length,
 and the finish time as milliseconds before the record was written.
 
+Chromium reports an encoded data length of -1 when no data crossed the
+network, as for a `chrome://` or other locally served response. The logger
+records that value as null, in both the response and the finish record, rather
+than as a byte count.
+
 `request-failed` records the URL, the network error code and its short name,
 and whether the failure was a cancellation, a timeout, an access check, a
 response block, an opaque-response block, a cancellation after an HTTP error,
