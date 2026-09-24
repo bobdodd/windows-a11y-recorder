@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include <limits>
+
 #include <string>
 #include <string_view>
 #include <vector>
@@ -882,6 +884,279 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
                                    int node_count,
                                    bool truncated,
                                    int maximum_nodes);
+
+// Network metadata. Every record on the browser.network channel carries
+// request and response metadata only: no request body, no response body, no
+// cookie value, and no value of a header that carries a credential. Header
+// names are always recorded; header values pass through network_text.h, which
+// withholds a value by header, by name, or by shape. Enumerated Chromium values
+// arrive as the names the hooks give them, so this bridge records them as
+// given.
+
+// One HTTP header as Chromium holds it at the hooked point.
+struct NetworkHeader {
+  std::string name;
+  std::string value;
+};
+
+// The most headers one list in a record carries. A longer list is cut and
+// marked, with its full length recorded.
+inline constexpr size_t kMaximumNetworkHeadersPerRecord = 256;
+
+// Marks a time Chromium did not record.
+inline constexpr int64_t kNetworkTimeUnobserved =
+    std::numeric_limits<int64_t>::min();
+
+// Blink's resource load timing for one response. The request start is given as
+// microseconds before the record was made; every phase is microseconds after
+// the request start, or kNetworkTimeUnobserved.
+struct NetworkLoadTiming {
+  bool present = false;
+  int64_t request_start_before_record = kNetworkTimeUnobserved;
+  int64_t proxy_start = kNetworkTimeUnobserved;
+  int64_t proxy_end = kNetworkTimeUnobserved;
+  int64_t domain_lookup_start = kNetworkTimeUnobserved;
+  int64_t domain_lookup_end = kNetworkTimeUnobserved;
+  int64_t connect_start = kNetworkTimeUnobserved;
+  int64_t connect_end = kNetworkTimeUnobserved;
+  int64_t ssl_start = kNetworkTimeUnobserved;
+  int64_t ssl_end = kNetworkTimeUnobserved;
+  int64_t worker_start = kNetworkTimeUnobserved;
+  int64_t worker_ready = kNetworkTimeUnobserved;
+  int64_t worker_fetch_start = kNetworkTimeUnobserved;
+  int64_t worker_respond_with_settled = kNetworkTimeUnobserved;
+  int64_t worker_router_evaluation_start = kNetworkTimeUnobserved;
+  int64_t worker_cache_lookup_start = kNetworkTimeUnobserved;
+  int64_t send_start = kNetworkTimeUnobserved;
+  int64_t send_end = kNetworkTimeUnobserved;
+  int64_t receive_headers_start = kNetworkTimeUnobserved;
+  int64_t receive_headers_end = kNetworkTimeUnobserved;
+  int64_t receive_non_informational_headers_start = kNetworkTimeUnobserved;
+  int64_t receive_early_hints_start = kNetworkTimeUnobserved;
+  int64_t push_start = kNetworkTimeUnobserved;
+  int64_t push_end = kNetworkTimeUnobserved;
+  int64_t response_end = kNetworkTimeUnobserved;
+};
+
+// The script context a renderer network record came from. A frame's loads
+// carry its document; a worker's loads carry the worker's DevTools token and
+// global object URL and no document.
+struct NetworkScope {
+  std::string context_kind;
+  int document_node_id = 0;
+  std::string document_token;
+  std::string worker_token;
+  std::string global_object_url;
+};
+
+// One request as Blink holds it when it is about to be sent.
+struct NetworkRequestFacts {
+  uint64_t inspector_id = 0;
+  std::string request_id;
+  std::string url;
+  std::string method;
+  std::string resource_type;
+  std::string initiator_type;
+  std::string initiator_url;
+  int initiator_line = 0;
+  int initiator_column = 0;
+  bool link_preload = false;
+  bool internal = false;
+  std::string destination;
+  std::string mode;
+  std::string credentials_mode;
+  std::string redirect_mode;
+  std::string cache_mode;
+  std::string priority;
+  std::string initial_priority;
+  std::string fetch_priority_hint;
+  std::string render_blocking;
+  std::string referrer;
+  std::string referrer_policy;
+  bool keepalive = false;
+  bool user_gesture = false;
+  bool ad_resource = false;
+  bool form_submission = false;
+  std::vector<NetworkHeader> headers;
+};
+
+// One response as Blink holds it.
+struct NetworkResponseFacts {
+  std::string url;
+  std::string response_url;
+  int status_code = 0;
+  std::string status_text;
+  std::string mime_type;
+  std::string charset;
+  std::string alpn_protocol;
+  std::string connection_info;
+  std::string remote_ip;
+  int remote_port = 0;
+  uint32_t connection_id = 0;
+  bool connection_reused = false;
+  bool was_cached = false;
+  bool fetched_via_service_worker = false;
+  std::string service_worker_response_source;
+  bool in_prefetch_cache = false;
+  bool network_accessed = false;
+  bool from_archive = false;
+  bool cookie_in_request = false;
+  std::string response_type;
+  int64_t encoded_data_length = 0;
+  int64_t expected_content_length = -1;
+  std::vector<NetworkHeader> headers;
+  NetworkLoadTiming timing;
+};
+
+// One load failure as Blink reports it.
+struct NetworkFailureFacts {
+  std::string url;
+  int net_error = 0;
+  std::string net_error_name;
+  bool cancellation = false;
+  bool timeout = false;
+  bool access_check = false;
+  bool blocked_by_response = false;
+  bool blocked_by_orb = false;
+  bool has_copy_in_cache = false;
+  bool cancelled_from_http_error = false;
+  bool internal = false;
+  std::string blocked_reason;
+  std::string cors_error;
+  std::string cors_failed_parameter;
+};
+
+// Browser navigation timing, as microseconds after the navigation start. The
+// navigation start is given as microseconds before the record was made.
+struct NavigationResponseTiming {
+  bool present = false;
+  int64_t navigation_start_before_record = kNetworkTimeUnobserved;
+  int64_t loader_start = kNetworkTimeUnobserved;
+  int64_t first_request_start = kNetworkTimeUnobserved;
+  int64_t first_response_start = kNetworkTimeUnobserved;
+  int64_t first_loader_callback = kNetworkTimeUnobserved;
+  int64_t final_request_start = kNetworkTimeUnobserved;
+  int64_t final_response_start = kNetworkTimeUnobserved;
+  int64_t final_non_informational_response_start = kNetworkTimeUnobserved;
+  int64_t final_loader_callback = kNetworkTimeUnobserved;
+  int64_t request_failed = kNetworkTimeUnobserved;
+  int64_t commit_sent = kNetworkTimeUnobserved;
+  int64_t commit_received = kNetworkTimeUnobserved;
+  int64_t commit_reply_sent = kNetworkTimeUnobserved;
+  int64_t did_commit = kNetworkTimeUnobserved;
+  int64_t final_request_domain_lookup_start = kNetworkTimeUnobserved;
+  int64_t final_request_domain_lookup_end = kNetworkTimeUnobserved;
+  int64_t final_request_connect_start = kNetworkTimeUnobserved;
+  int64_t final_request_connect_end = kNetworkTimeUnobserved;
+  int64_t final_request_ssl_start = kNetworkTimeUnobserved;
+};
+
+// One finished navigation's request and response metadata as the browser
+// holds it when WebContentsImpl reports the navigation finished.
+struct NavigationResponseFacts {
+  std::string request_id;
+  std::string url;
+  std::string method;
+  bool committed = false;
+  bool error_page = false;
+  bool same_document = false;
+  bool download = false;
+  bool back_forward_cache = false;
+  int net_error = 0;
+  std::string net_error_name;
+  bool response_present = false;
+  int status_code = 0;
+  std::string status_text;
+  std::string mime_type;
+  bool was_cached = false;
+  std::string remote_ip;
+  int remote_port = 0;
+  std::string connection_info;
+  std::vector<std::string> redirect_chain;
+  std::vector<NetworkHeader> request_headers;
+  std::vector<NetworkHeader> response_headers;
+  NavigationResponseTiming timing;
+};
+
+// Reports whether this process has a recorder connection. Hooks that change
+// Chromium behaviour for the recorder, rather than only reading it, test this
+// first so that a browser started without the recorder behaves as stock.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool IsRecorderActive();
+
+// Records a request Blink is about to send: the initial request, or the next
+// request of a redirect, which carries the redirect response.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkNetworkRequest(NetworkScope scope,
+                               NetworkRequestFacts request,
+                               bool redirect,
+                               NetworkResponseFacts redirect_response,
+                               CookieCallOrigin origin);
+
+// Records a response Blink received for a request, including one Blink served
+// from its memory cache while DevTools callbacks were enabled.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkNetworkResponse(NetworkScope scope,
+                                uint64_t inspector_id,
+                                std::string request_id,
+                                bool from_memory_cache,
+                                NetworkResponseFacts response);
+
+// Records that Blink finished a load. The finish time is microseconds before
+// the record was made, or kNetworkTimeUnobserved.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkNetworkFinished(NetworkScope scope,
+                                uint64_t inspector_id,
+                                int64_t encoded_data_length,
+                                int64_t decoded_body_length,
+                                int64_t finish_before_record);
+
+// Records that Blink failed or cancelled a load.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkNetworkFailed(NetworkScope scope,
+                              uint64_t inspector_id,
+                              NetworkFailureFacts failure);
+
+// Records one use of a resource Blink already held in its memory cache. No
+// request leaves the renderer for such a use.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkMemoryCacheUse(NetworkScope scope,
+                               bool static_data,
+                               NetworkRequestFacts request,
+                               NetworkResponseFacts response);
+
+// Records the request headers the network service reported sending, with the
+// cookies it attached or excluded. A frame record has frame tree node
+// identifiers; a worker record has negative ones and the DevTools agent id.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserNetworkRequestHeaders(int page_frame_tree_node_id,
+                                        int frame_tree_node_id,
+                                        std::string devtools_agent_id,
+                                        std::string request_id,
+                                        int64_t sent_before_record,
+                                        std::vector<NetworkHeader> headers,
+                                        std::vector<CookieAccessEntry> cookies);
+
+// Records the response headers the network service reported receiving, with
+// the cookies the response set or tried to set.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserNetworkResponseHeaders(
+    int page_frame_tree_node_id,
+    int frame_tree_node_id,
+    std::string devtools_agent_id,
+    std::string request_id,
+    int status_code,
+    std::vector<NetworkHeader> headers,
+    std::vector<CookieAccessEntry> cookies);
+
+// Records the request and response metadata of a finished navigation.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserNavigationResponse(int64_t navigation_id,
+                                     int page_frame_tree_node_id,
+                                     int frame_tree_node_id,
+                                     int64_t document_navigation_id,
+                                     std::string document_token,
+                                     NavigationResponseFacts facts);
 
 }  // namespace a11y_recorder
 

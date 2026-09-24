@@ -1736,8 +1736,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.25"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.25"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.26"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.26"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -3712,6 +3712,265 @@ class CookieIntegrationTests(unittest.TestCase):
                 check=True,
             )
             subprocess.run([str(binary)], check=True)
+
+    def test_network_header_classifier_passes_its_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "network_text_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "network_text.cc"),
+                    str(bridge / "network_text_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+
+class NetworkIntegrationTests(unittest.TestCase):
+    """Proves the network hooks are written once and match the bridge."""
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def assert_bridge_calls_match(self, text):
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", text, signatures),
+        )
+
+    def observer_source(self, include, observer, hooks):
+        return (
+            f"{include}\n\nnamespace blink {{\n\n"
+            f"{observer}::{observer}(\n    int) {{}}\n\n"
+            + "".join(f"void F(\n{anchor}}}\n\n" for anchor, _ in hooks)
+            + f"bool {observer}::InterestedInAllRequests() {{\n"
+            "  return false;\n}\n\n}  // namespace blink\n"
+        )
+
+    def test_names_enumerators_in_kebab_case(self):
+        cases = {
+            "kCorsWithForcedPreflight": "cors-with-forced-preflight",
+            "kSRIMessageSignatureMismatch": "sri-message-signature-mismatch",
+            "kCSP": "csp",
+            "kHttpCache": "http-cache",
+            "kOmitBug_775438_Workaround": "omit-bug-775438-workaround",
+            "kCoepFrameResourceNeedsCoepHeader":
+                "coep-frame-resource-needs-coep-header",
+        }
+        for enumerator, name in cases.items():
+            with self.subTest(enumerator=enumerator):
+                self.assertEqual(
+                    name, INTEGRATE.recorder_enum_value_name(enumerator)
+                )
+
+    def test_every_network_enumerator_has_a_distinct_name(self):
+        for function, _, enumerators in INTEGRATE.BLINK_NETWORK_ENUMS:
+            with self.subTest(function=function):
+                names = [
+                    INTEGRATE.recorder_enum_value_name(enumerator)
+                    for enumerator in enumerators
+                ]
+                self.assertEqual(len(names), len(set(names)))
+                self.assertNotIn("unknown", names)
+
+    def test_patches_the_resource_load_observers_idempotently(self):
+        cases = (
+            (
+                "resource_load_observer_for_frame.cc",
+                '#include "third_party/blink/renderer/core/loader/'
+                'resource_load_observer_for_frame.h"',
+                "ResourceLoadObserverForFrame",
+                INTEGRATE.BLINK_FRAME_NETWORK_HOOKS,
+                INTEGRATE.BLINK_FRAME_NETWORK_SCOPE_HELPER_MARKER,
+                INTEGRATE.BLINK_FRAME_MEMORY_CACHE_DEFINITION,
+                INTEGRATE.patch_blink_frame_network_observer,
+            ),
+            (
+                "resource_load_observer_for_worker.cc",
+                '#include "third_party/blink/renderer/core/loader/'
+                'resource_load_observer_for_worker.h"',
+                "ResourceLoadObserverForWorker",
+                INTEGRATE.BLINK_WORKER_NETWORK_HOOKS,
+                INTEGRATE.BLINK_WORKER_NETWORK_SCOPE_HELPER_MARKER,
+                INTEGRATE.BLINK_WORKER_MEMORY_CACHE_DEFINITION,
+                INTEGRATE.patch_blink_worker_network_observer,
+            ),
+        )
+        for name, include, observer, hooks, scope, definition, patch in cases:
+            with self.subTest(source=name):
+                patched = self.patch_twice(
+                    name, self.observer_source(include, observer, hooks), patch
+                )
+                for _, replacement in hooks:
+                    self.assertEqual(1, patched.count(replacement))
+                self.assertEqual(1, patched.count(definition))
+                for marker in (
+                    INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+                    INTEGRATE.BLINK_NETWORK_HELPER_MARKER,
+                    scope,
+                ):
+                    self.assertEqual(1, patched.count(marker))
+                    self.assertLess(
+                        patched.index(marker), patched.index(hooks[0][1])
+                    )
+                self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE))
+                self.assert_bridge_calls_match(patched)
+
+    def test_patches_the_memory_cache_notification_idempotently(self):
+        fetcher = self.patch_twice(
+            "resource_fetcher.cc",
+            "void F() {\n" + INTEGRATE.BLINK_MEMORY_CACHE_FETCHER_ANCHOR + "}\n",
+            INTEGRATE.patch_blink_resource_fetcher_memory_cache,
+        )
+        self.assertEqual(
+            1, fetcher.count(INTEGRATE.BLINK_MEMORY_CACHE_FETCHER_HOOK)
+        )
+        observer = self.patch_twice(
+            "resource_load_observer.h",
+            "class ResourceLoadObserver {\n"
+            "  virtual bool InterestedInAllRequests() = 0;\n};\n",
+            INTEGRATE.patch_blink_resource_load_observer,
+        )
+        self.assertEqual(
+            1, observer.count(INTEGRATE.BLINK_MEMORY_CACHE_OBSERVER_DECLARATION)
+        )
+        override = self.patch_twice(
+            "resource_load_observer_for_frame.h",
+            "class ResourceLoadObserverForFrame {\n"
+            "  bool InterestedInAllRequests() override;\n};\n",
+            INTEGRATE.patch_blink_network_observer_header,
+        )
+        self.assertEqual(
+            1, override.count(INTEGRATE.BLINK_MEMORY_CACHE_OVERRIDE_DECLARATION)
+        )
+
+    def test_patches_the_request_identifiers_idempotently(self):
+        cases = (
+            (
+                "frame_fetch_context.cc",
+                '#include "third_party/blink/renderer/core/loader/'
+                'frame_fetch_context.h"',
+                INTEGRATE.BLINK_FRAME_REQUEST_ID_ANCHOR,
+                INTEGRATE.BLINK_FRAME_REQUEST_ID_HOOK,
+            ),
+            (
+                "worker_fetch_context.cc",
+                '#include "third_party/blink/renderer/core/loader/'
+                'worker_fetch_context.h"',
+                INTEGRATE.BLINK_WORKER_REQUEST_ID_ANCHOR,
+                INTEGRATE.BLINK_WORKER_REQUEST_ID_HOOK,
+            ),
+        )
+        for name, include, anchor, hook in cases:
+            with self.subTest(source=name):
+                patched = self.patch_twice(
+                    name,
+                    f"{include}\n\nvoid F() {{\n{anchor}}}\n",
+                    lambda path, include=include, anchor=anchor, hook=hook: (
+                        INTEGRATE.patch_blink_fetch_context_request_ids(
+                            path, include, anchor, hook
+                        )
+                    ),
+                )
+                self.assertEqual(1, patched.count(hook))
+                self.assertIn("fetch_initiator_type_names::kInternal", hook)
+                self.assert_bridge_calls_match(patched)
+        navigation = self.patch_twice(
+            "navigation_url_loader_impl.cc",
+            '#include "content/browser/loader/navigation_url_loader_impl.h"\n'
+            "\nvoid F() {\n"
+            + INTEGRATE.CONTENT_NAVIGATION_REQUEST_ID_ANCHOR
+            + "}\n",
+            INTEGRATE.patch_content_navigation_request_id,
+        )
+        self.assertEqual(
+            1, navigation.count(INTEGRATE.CONTENT_NAVIGATION_REQUEST_ID_HOOK)
+        )
+        self.assert_bridge_calls_match(navigation)
+
+    def test_patches_the_wire_headers_idempotently(self):
+        patched = self.patch_twice(
+            "network_service_devtools_observer.cc",
+            '#include "content/browser/devtools/'
+            'network_service_devtools_observer.h"\n\nnamespace content {\n\n'
+            + INTEGRATE.CONTENT_NETWORK_HEADERS_HELPER_ANCHOR
+            + "    int) {}\n\nvoid F(\n"
+            + INTEGRATE.CONTENT_RAW_REQUEST_ANCHOR
+            + "}\n\nvoid G(\n"
+            + INTEGRATE.CONTENT_RAW_RESPONSE_ANCHOR
+            + "}\n\n}  // namespace content\n",
+            INTEGRATE.patch_content_network_headers,
+        )
+        for hook in (
+            INTEGRATE.CONTENT_RAW_REQUEST_HOOK,
+            INTEGRATE.CONTENT_RAW_RESPONSE_HOOK,
+        ):
+            self.assertEqual(1, patched.count(hook))
+            self.assertLess(
+                patched.index(INTEGRATE.CONTENT_NETWORK_HEADERS_HELPER_MARKER),
+                patched.index(hook),
+            )
+        self.assert_bridge_calls_match(patched)
+
+    def test_patches_the_navigation_response_idempotently(self):
+        patched = self.patch_twice(
+            "web_contents_impl.cc",
+            f"{INTEGRATE.CONTENT_NAVIGATION_INCLUDE}\n\nvoid F() {{\n"
+            + INTEGRATE.CONTENT_NAVIGATION_COMPLETED_HOOK
+            + "}\n",
+            INTEGRATE.patch_web_contents_navigation_response,
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.CONTENT_NAVIGATION_RESPONSE_HOOK)
+        )
+        self.assertLess(
+            patched.index(INTEGRATE.CONTENT_NAVIGATION_COMPLETED_HOOK),
+            patched.index(INTEGRATE.CONTENT_NAVIGATION_RESPONSE_HOOK),
+        )
+        self.assert_bridge_calls_match(patched)
+
+    def test_no_network_template_reads_a_body_or_cookie_value(self):
+        names = [
+            name
+            for name in dir(INTEGRATE)
+            if name.isupper()
+            and "NETWORK" in name
+            and isinstance(getattr(INTEGRATE, name), str)
+        ]
+        self.assertTrue(names)
+        for name in names:
+            with self.subTest(template=name):
+                text = getattr(INTEGRATE, name)
+                self.assertNotIn(".Value()", text)
+                self.assertNotIn("DidReceiveData", text)
+                self.assertNotIn("GetBody", text)
+                self.assertNotIn("cookie_line", text)
 
 
 class InteractionIntegrationTests(unittest.TestCase):

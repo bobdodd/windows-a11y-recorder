@@ -27,7 +27,8 @@ public partial class MainWindow : Window
         "browser.dom",
         "browser.cookie",
         "browser.interaction",
-        "browser.layout"
+        "browser.layout",
+        "browser.network"
     ];
     private static readonly HashSet<string> FilteredChannels =
     [

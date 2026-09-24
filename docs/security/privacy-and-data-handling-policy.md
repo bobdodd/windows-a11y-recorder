@@ -35,9 +35,9 @@ No record carries a cookie value, on any channel.
 - A nameless cookie whose value contains `=` is the one case where value text
   can be reported as a name, because Chromium stores it with an empty name and
   the text before the first `=` cannot be told apart from a name.
-- `Cookie` and `Set-Cookie` header values are cookie values. Network records,
-  when implemented, must report the cookie names a transaction carried and drop
-  the header values.
+- `Cookie` and `Set-Cookie` header values are cookie values. Network records
+  report the cookie names a transaction carried and withhold the header
+  values.
 
 ## API keys and similar secrets
 
@@ -75,9 +75,15 @@ reach the archive through:
 - URLs and titles in navigation, document, and script location records.
 - Raw keyboard records and screen video.
 
-Network metadata is not yet recorded, so no request or response header reaches
-the archive today. The network slice must drop authorization and API-key header
-values at source when it is added.
+Network metadata withholds, at source, the values of `Cookie`, `Set-Cookie`,
+`Set-Cookie2`, `Authorization`, and `Proxy-Authorization` headers, of headers
+whose name contains a credential word such as `key`, `token`, `secret`, or
+`auth`, and of header values that begin with an HTTP authentication scheme or
+contain a JSON Web Token. Each withheld header is recorded by name with the
+reason. A credential can still reach the archive through network records in:
+
+- Request, response, redirect, and referrer URLs, which are recorded in full.
+- A header whose name and value match none of those rules.
 
 ## Diagnostic logs
 

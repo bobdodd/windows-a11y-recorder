@@ -223,6 +223,29 @@ public sealed class BrowserEvidenceReceiverTests
             "120px",
             layout.Payload.GetProperty("computedStyle").GetProperty("width").GetString());
 
+        await WriteFrameAsync(
+            client,
+            new
+            {
+                kind = "evidence",
+                protocolVersion = BrowserEvidenceProtocol.CurrentVersion,
+                browserTimestampTicks = "10500",
+                channel = BrowserEvidenceChannels.Network,
+                eventType = BrowserEvidenceEventTypes.NetworkRequestWillBeSent,
+                payload = JsonDocument.Parse(
+                    BrowserNetworkPayloads.RequestWillBeSent).RootElement,
+                qualityFlags = Array.Empty<string>()
+            });
+
+        var network = await sink.WaitForRecordAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(BrowserEvidenceChannels.Network, network.Channel);
+        Assert.Equal(BrowserEvidenceEventTypes.NetworkRequestWillBeSent, network.EventType);
+        Assert.Equal(
+            "17",
+            network.Payload.GetProperty("request").GetProperty("inspectorId").GetString());
+
         client.Close();
         var stopped = await receiver.StopAsync(
             new SessionBoundary(

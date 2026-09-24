@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.25";
+    public const string CurrentVersion = "0.26";
 }
 
 public static class BrowserEvidenceChannels
@@ -18,6 +18,7 @@ public static class BrowserEvidenceChannels
     public const string Cookie = "browser.cookie";
     public const string Interaction = "browser.interaction";
     public const string Layout = "browser.layout";
+    public const string Network = "browser.network";
 }
 
 public static class BrowserEvidenceEventTypes
@@ -63,6 +64,14 @@ public static class BrowserEvidenceEventTypes
     public const string LayoutCheckpointStarted = "layout-checkpoint-started";
     public const string LayoutCheckpointNode = "layout-checkpoint-node";
     public const string LayoutCheckpointCompleted = "layout-checkpoint-completed";
+    public const string NetworkRequestWillBeSent = "request-will-be-sent";
+    public const string NetworkResponseReceived = "response-received";
+    public const string NetworkRequestFinished = "request-finished";
+    public const string NetworkRequestFailed = "request-failed";
+    public const string NetworkMemoryCacheHit = "memory-cache-hit";
+    public const string NetworkRequestHeadersSent = "request-headers-sent";
+    public const string NetworkResponseHeadersReceived = "response-headers-received";
+    public const string NetworkNavigationResponse = "navigation-response";
     public const string Omission = "collector-omission";
 }
 
@@ -600,3 +609,258 @@ public sealed record BrowserLayoutCheckpointCompletedPayload(
     int NodeCount,
     bool Truncated,
     int MaximumNodes);
+
+// Network records report request and response metadata as the Blink loader and
+// the browser's network service observer already hold it. No record carries a
+// request or response body. A header value the recorder classifies as a
+// credential, including every Cookie and Set-Cookie value, is withheld: its
+// entry keeps the name, reports a null value, and names the reason. Cookies a
+// request sent or a response set are reported by name and attributes only.
+// InspectorId is Blink's per-renderer-process request counter as a decimal
+// string. Byte counts and connection ids are JSON numbers, exact up to 2^53.
+// Times are milliseconds relative to the record's own request or navigation
+// start, and are null when the phase was not observed.
+
+public sealed record BrowserNetworkHeader(
+    string Name,
+    string? Value,
+    bool ValueRedacted,
+    string? RedactionReason);
+
+// Names the execution context that issued a renderer request. WorkerToken is
+// null for a window. GlobalObjectUrl is the worker script URL for a worker.
+public sealed record BrowserNetworkScope(
+    string ContextKind,
+    string? WorkerToken,
+    string? GlobalObjectUrl);
+
+public sealed record BrowserNetworkInitiator(
+    string? Type,
+    string? Url,
+    int? Line,
+    int? Column,
+    bool LinkPreload);
+
+public sealed record BrowserNetworkRequest(
+    string InspectorId,
+    string? RequestId,
+    string Url,
+    string Method,
+    string ResourceType,
+    BrowserNetworkInitiator Initiator,
+    bool Internal,
+    string Destination,
+    string Mode,
+    string CredentialsMode,
+    string RedirectMode,
+    string CacheMode,
+    string Priority,
+    string InitialPriority,
+    string FetchPriorityHint,
+    string RenderBlocking,
+    string? Referrer,
+    string ReferrerPolicy,
+    bool Keepalive,
+    bool UserGesture,
+    bool AdResource,
+    bool FormSubmission,
+    int HeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> Headers,
+    bool HeadersTruncated);
+
+public sealed record BrowserNetworkRemoteAddress(string Ip, int Port);
+
+// Load timing phases are milliseconds after the request start, which itself is
+// reported as milliseconds before the record was written.
+public sealed record BrowserNetworkLoadTiming(
+    double? RequestStartBeforeRecordMilliseconds,
+    double? ProxyStart,
+    double? ProxyEnd,
+    double? DomainLookupStart,
+    double? DomainLookupEnd,
+    double? ConnectStart,
+    double? ConnectEnd,
+    double? SslStart,
+    double? SslEnd,
+    double? WorkerStart,
+    double? WorkerReady,
+    double? WorkerFetchStart,
+    double? WorkerRespondWithSettled,
+    double? WorkerRouterEvaluationStart,
+    double? WorkerCacheLookupStart,
+    double? SendStart,
+    double? SendEnd,
+    double? ReceiveHeadersStart,
+    double? ReceiveHeadersEnd,
+    double? ReceiveNonInformationalHeadersStart,
+    double? ReceiveEarlyHintsStart,
+    double? PushStart,
+    double? PushEnd,
+    double? ResponseEnd);
+
+public sealed record BrowserNetworkResponse(
+    string Url,
+    string? ResponseUrl,
+    int Status,
+    string StatusText,
+    string MimeType,
+    string? Charset,
+    string? AlpnProtocol,
+    string? ConnectionInfo,
+    BrowserNetworkRemoteAddress? RemoteAddress,
+    double ConnectionId,
+    bool ConnectionReused,
+    bool WasCached,
+    bool FetchedViaServiceWorker,
+    string ServiceWorkerResponseSource,
+    bool InPrefetchCache,
+    bool NetworkAccessed,
+    bool FromArchive,
+    bool CookieInRequest,
+    string ResponseType,
+    double EncodedDataLength,
+    double ExpectedContentLength,
+    int HeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> Headers,
+    bool HeadersTruncated,
+    BrowserNetworkLoadTiming? Timing);
+
+// Records a renderer request about to be sent, or a redirect of it, in which
+// case RedirectResponse is the redirect response. Location and World report the
+// script current when Blink issued the request, and are null for none.
+public sealed record BrowserNetworkRequestWillBeSentPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    BrowserNetworkRequest Request,
+    bool Redirect,
+    BrowserNetworkResponse? RedirectResponse,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
+public sealed record BrowserNetworkResponseReceivedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string? RequestId,
+    string ResponseSource,
+    BrowserNetworkResponse Response);
+
+public sealed record BrowserNetworkRequestFinishedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    double EncodedDataLength,
+    double DecodedBodyLength,
+    double? FinishBeforeRecordMilliseconds);
+
+public sealed record BrowserNetworkCorsError(string Error, string? FailedParameter);
+
+public sealed record BrowserNetworkRequestFailedPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    string InspectorId,
+    string Url,
+    int NetError,
+    string? NetErrorName,
+    bool Cancellation,
+    bool Timeout,
+    bool AccessCheck,
+    bool BlockedByResponse,
+    bool BlockedByOrb,
+    bool HasCopyInCache,
+    bool CancelledFromHttpError,
+    bool Internal,
+    string? BlockedReason,
+    BrowserNetworkCorsError? CorsError);
+
+// Records a resource Blink served from its in-memory cache without a loader.
+public sealed record BrowserNetworkMemoryCacheHitPayload(
+    BrowserContext Context,
+    BrowserNetworkScope Scope,
+    bool StaticData,
+    BrowserNetworkRequest Request,
+    BrowserNetworkResponse Response);
+
+// Records the headers the network service put on the wire for a request, as
+// the browser's network service observer received them. DevtoolsAgentId names
+// the worker the observer was made for, and is null for a frame.
+public sealed record BrowserNetworkRequestHeadersSentPayload(
+    BrowserContext Context,
+    string? DevtoolsAgentId,
+    string RequestId,
+    double? SentBeforeRecordMilliseconds,
+    int HeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> Headers,
+    bool HeadersTruncated,
+    int CookieCount,
+    IReadOnlyList<BrowserCookieAccessEntry> Cookies,
+    bool CookiesTruncated);
+
+public sealed record BrowserNetworkResponseHeadersReceivedPayload(
+    BrowserContext Context,
+    string? DevtoolsAgentId,
+    string RequestId,
+    int Status,
+    int HeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> Headers,
+    bool HeadersTruncated,
+    int CookieCount,
+    IReadOnlyList<BrowserCookieAccessEntry> Cookies,
+    bool CookiesTruncated);
+
+public sealed record BrowserNavigationResponseHead(
+    int Status,
+    string StatusText,
+    string? MimeType,
+    bool WasCached,
+    BrowserNetworkRemoteAddress? RemoteAddress,
+    string? ConnectionInfo,
+    int HeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> Headers,
+    bool HeadersTruncated);
+
+// Navigation timing phases are milliseconds after the navigation start, which
+// itself is reported as milliseconds before the record was written.
+public sealed record BrowserNavigationResponseTiming(
+    double? NavigationStartBeforeRecordMilliseconds,
+    double? LoaderStart,
+    double? FirstRequestStart,
+    double? FirstResponseStart,
+    double? FirstLoaderCallback,
+    double? FinalRequestStart,
+    double? FinalResponseStart,
+    double? FinalNonInformationalResponseStart,
+    double? FinalLoaderCallback,
+    double? RequestFailed,
+    double? CommitSent,
+    double? CommitReceived,
+    double? CommitReplySent,
+    double? DidCommit,
+    double? FinalRequestDomainLookupStart,
+    double? FinalRequestDomainLookupEnd,
+    double? FinalRequestConnectStart,
+    double? FinalRequestConnectEnd,
+    double? FinalRequestSslStart);
+
+// Records the request and response of a finished navigation, written with the
+// navigation-completed record. Response is null when the navigation received
+// none. NavigationId matches the navigation channel records.
+public sealed record BrowserNetworkNavigationResponsePayload(
+    BrowserContext Context,
+    string NavigationId,
+    string? RequestId,
+    string Url,
+    string Method,
+    bool Committed,
+    bool ErrorPage,
+    bool SameDocument,
+    bool Download,
+    bool BackForwardCache,
+    int NetError,
+    string? NetErrorName,
+    IReadOnlyList<string> RedirectChain,
+    int RequestHeaderCount,
+    IReadOnlyList<BrowserNetworkHeader> RequestHeaders,
+    bool RequestHeadersTruncated,
+    BrowserNavigationResponseHead? Response,
+    BrowserNavigationResponseTiming? Timing);

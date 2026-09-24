@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.25` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.26` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -304,3 +304,22 @@ checkpoint is only recorded after style or layout work. It rejects
 non-finite geometry, negative sizes, and a text node reported with a style.
 The record types and their limits are described in
 `docs/architecture/layout-and-style-checkpoint-evidence-model.md`.
+
+Protocol 0.26 records network metadata on the `browser.network` channel. The
+Blink hooks in `resource_load_observer_for_frame.cc` and
+`resource_load_observer_for_worker.cc` call `RecordBlinkNetworkRequest`,
+`RecordBlinkNetworkResponse`, `RecordBlinkNetworkFinished`, and
+`RecordBlinkNetworkFailed`, and a hook in `resource_fetcher.cc` calls
+`RecordBlinkMemoryCacheUse` through the observer for every memory cache use.
+The browser hooks in `network_service_devtools_observer.cc` call
+`RecordBrowserNetworkRequestHeaders` and `RecordBrowserNetworkResponseHeaders`,
+and the hook after the navigation-completed record calls
+`RecordBrowserNavigationResponse`. Hooks in `frame_fetch_context.cc`,
+`worker_fetch_context.cc`, and `navigation_url_loader_impl.cc` test
+`IsRecorderActive` and give a request without a DevTools request identifier the
+one DevTools would assign, so that the network service reports its wire
+headers. Every header value passes through `network_text.h`, which withholds
+cookie and authorization header values and values whose header name or shape
+marks them as a credential; `network_text_test.cc` covers the classifier. The
+record types and their limits are described in
+`docs/architecture/network-metadata-evidence-model.md`.

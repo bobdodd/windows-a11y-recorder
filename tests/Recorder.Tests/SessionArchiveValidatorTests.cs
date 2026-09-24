@@ -3018,6 +3018,166 @@ public sealed class SessionArchiveValidatorTests
             issues, issue => issue.Code == "browser-layout-node-count-over-maximum");
     }
 
+    public static TheoryData<string, string> NetworkRecords()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (eventType, json) in BrowserNetworkPayloads.All())
+        {
+            data.Add(eventType, json);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(NetworkRecords))]
+    public async Task AcceptsEveryNetworkRecordShape(string eventType, string json)
+    {
+        var issues = await ValidateNetworkRecordAsync(eventType, JsonNode.Parse(json)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [MemberData(nameof(NetworkRecords))]
+    public async Task RejectsAnUndeclaredNetworkProperty(string eventType, string json)
+    {
+        var payload = JsonNode.Parse(json)!;
+        payload["undeclared"] = 1;
+
+        var issues = await ValidateNetworkRecordAsync(eventType, payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/undeclared", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsARecordedCredentialHeaderValue()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.RequestHeadersSent)!;
+        var cookie = payload["headers"]![1]!;
+        cookie["value"] = "session=abc";
+        cookie["valueRedacted"] = false;
+        cookie["redactionReason"] = null;
+
+        var issues = await ValidateNetworkRecordAsync("request-headers-sent", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-network-credential-header-value");
+    }
+
+    [Fact]
+    public async Task RejectsAWithheldHeaderThatCarriesAValue()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.RequestWillBeSent)!;
+        payload["request"]!["headers"]![2]!["value"] = "secret";
+
+        var issues = await ValidateNetworkRecordAsync("request-will-be-sent", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-header-redaction");
+    }
+
+    [Fact]
+    public async Task RejectsAHeaderCountThatDisagreesWithTheList()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.NavigationResponse)!;
+        payload["requestHeaderCount"] = 4;
+
+        var issues = await ValidateNetworkRecordAsync("navigation-response", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-header-count");
+    }
+
+    [Fact]
+    public async Task RejectsARedirectWithoutARedirectResponse()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.RedirectRequestWillBeSent)!;
+        payload["redirectResponse"] = null;
+
+        var issues = await ValidateNetworkRecordAsync("request-will-be-sent", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-redirect-response");
+    }
+
+    [Fact]
+    public async Task RejectsANonDecimalInspectorId()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.RequestFinished)!;
+        payload["inspectorId"] = "request-17";
+
+        var issues = await ValidateNetworkRecordAsync("request-finished", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-network-inspector-id-invalid");
+    }
+
+    [Fact]
+    public async Task RejectsAnUndeclaredTimingPhase()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.ResponseReceived)!;
+        payload["response"]!["timing"]!["bodyStart"] = 1.0;
+
+        var issues = await ValidateNetworkRecordAsync("response-received", payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/timing/bodyStart", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsAnUnparsedWireCookieWithAttributes()
+    {
+        var payload = JsonNode.Parse(BrowserNetworkPayloads.ResponseHeadersReceived)!;
+        payload["cookies"]![0]!["domain"] = "example.test";
+
+        var issues = await ValidateNetworkRecordAsync("response-headers-received", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-cookie-access-entry-shape");
+    }
+
+    [Fact]
+    public async Task AcceptsANetworkOmission()
+    {
+        var payload = JsonNode.Parse(
+            """
+            { "reason": "browser-evidence-write-failed", "count": 3 }
+            """)!;
+
+        var issues = await ValidateNetworkRecordAsync("collector-omission", payload);
+
+        Assert.Empty(issues);
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidateNetworkRecordAsync(string eventType, JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Network,
+            eventType,
+            document.RootElement.Clone());
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            return result.Issues.ToList();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static async Task<IReadOnlyList<ArchiveValidationIssue>>
         ValidateLayoutRecordAsync(string eventType, JsonNode payload)
     {

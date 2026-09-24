@@ -246,6 +246,16 @@ forces style or layout. Shadow-root content, pseudo-elements, and per-line
 geometry are not recorded; the property list and full limits are in
 [the layout and computed-style checkpoint evidence model](docs/architecture/layout-and-style-checkpoint-evidence-model.md).
 
+Protocol 0.26 records network metadata on the `browser.network` channel: each
+request a document or worker makes, its redirects, response, timing, finish or
+failure, and memory cache uses; the headers the network service sends and
+receives, with the cookies involved listed by name; and each finished
+navigation's redirect chain, headers, and response. No body is recorded.
+Header values are kept, except that the values of cookie and authorization
+headers, and of headers whose name or value marks them as a credential, are
+withheld at source. URLs are kept in full. The record types and limits are in
+[the network metadata evidence model](docs/architecture/network-metadata-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.
