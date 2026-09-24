@@ -197,6 +197,9 @@ headers carries a value.
 - A credential carried in a header whose name and value match none of the rules
   above, such as an unprefixed key under an unrelated header name, is recorded.
 - A worker's memory cache hits carry no request identifier.
+- A document that requests a resource it has already requested reuses it
+  without consulting the memory cache, so that reuse produces no record. Only
+  the first use of a cached resource by each document is recorded.
 - When the resource load observer reports interest in all requests, as it
   does while DevTools inspects the page's network activity, or when Blink's
   `SkipCallbacksWhenDevToolsNotOpen` feature is turned off, Blink replays a

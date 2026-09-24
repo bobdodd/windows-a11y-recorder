@@ -2264,7 +2264,9 @@ if ($isolatedWorldListener.context.documentId -ne $listener.context.documentId) 
 # cookie call observe a world in this protocol: the document.cookie read and
 # write records and the Cookie Store request record, which report the world
 # current at the call. The interaction records report the world of the script
-# that made a change, when one did. A world identity on any other record would
+# that made a change, when one did. The network request records report the
+# world of the script current when Blink issued the request, when one was. A
+# world identity on any other record would
 # be a claim the recorder cannot support.
 # Not every channel carries a context, and strict mode treats reading an absent
 # property as an error, so each step of the path is checked before it is read.
@@ -2298,13 +2300,18 @@ $nonListenerWorldRecords = @(
                 )
             ) -and
             $_.channel -ne "browser.interaction" -and
+            -not (
+                $_.channel -eq "browser.network" -and
+                $_.eventType -eq "request-will-be-sent"
+            ) -and
             (& $hasExecutionWorldIdentity $_)
         }
 )
 if ($nonListenerWorldRecords.Count -gt 0) {
     throw (
         "$($nonListenerWorldRecords.Count) records outside the listener " +
-        "channel, the cookie call records, and the interaction records " +
+        "channel, the cookie call records, the interaction records, and " +
+        "the network request records " +
         "reported an execution world identity."
     )
 }
@@ -3981,7 +3988,8 @@ if ($refusedRecord.payload.netError -ge 0) {
     )
 }
 
-# The second load of the cacheable script.
+# The second load of the cacheable script, from a new frame whose document
+# finds it only in the memory cache.
 $cachedScriptUri = "$NetworkFixtureUri/cached.js"
 $cacheHit = Select-NetworkRecord "memory-cache-hit" {
     $_.payload.request.url -eq $cachedScriptUri

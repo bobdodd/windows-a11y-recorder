@@ -710,7 +710,7 @@ The validation run serves a fifth fixture page from the loopback HTTP listener
 the cookie fixture uses, reached through a redirect in a background tab after
 the layout fixture. The page sends a fetch with credential-bearing and plain
 headers, follows a redirected fetch, fetches from a closed port, loads one
-cacheable script twice, and fetches from a dedicated worker. The verifier
+cacheable script into the page and again into a new frame, and fetches from a dedicated worker. The verifier
 requires records for each of those loads, linked by identifier, with every
 credential value absent from the session and a fixture cookie listed by name.
 The fixture shows that the logger emits records; it does not evaluate the
