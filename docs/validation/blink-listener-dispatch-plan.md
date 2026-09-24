@@ -1614,14 +1614,15 @@ connection to it is refused. The harness then calls one page function, which:
 2. fetches `/network/hop`, which redirects to `/network/data?hop=1`;
 3. fetches the closed port in `no-cors` mode and catches the rejection;
 4. adds a script element for `/network/cached.js`, served with
-   `Cache-Control: max-age=600`, waits for it to load, and does so again, so
-   the second load is served from Blink's memory cache; and
+   `Cache-Control: max-age=600`, waits for it to load, and then adds the same
+   script to a new same-origin frame, so the second load is served from
+   Blink's memory cache; and
 5. starts a dedicated worker from `/network/worker.js`, which fetches
    `/network/worker-data` and posts the text back.
 
 The page reports the data status, whether the second fetch was redirected, the
-refused fetch's outcome, how many times the cached script ran, and the worker's
-text. The verifier stops if any of those differs from what the steps should
+refused fetch's outcome, how many times the cached script ran in the page and
+the frame together, and the worker's text. The verifier stops if any of those differs from what the steps should
 produce, so a missing record is not confused with a step that never happened.
 
 The verifier requires that no line of the session's event log contains any of
@@ -1647,6 +1648,11 @@ record for `/network/cached.js` with status 200; a dedicated-worker
 script and a worker token, and its finish; and a committed
 `navigation-response` record for `/network` whose redirect chain is
 `/network-start` then `/network`, with a status 200 response and timing.
+
+The world check that rejects a world identity outside the listener channel,
+the cookie call records, and the interaction records now also admits the
+`request-will-be-sent` records, which report the world of the script current
+when Blink issued the request.
 
 These checks show that the logger emitted linked network records and withheld
 credential values. They do not evaluate the page's network use. No measured

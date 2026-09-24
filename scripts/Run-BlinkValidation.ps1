@@ -637,13 +637,17 @@ $networkFixturePage = @'
 <body>
 <p>Network logging fixture</p>
 <script>
-function networkFixtureScript() {
+// Loads the cacheable script into the given document. A document reuses a
+// resource it has already requested without consulting the memory cache, so
+// the second load goes into a new frame's document, whose resource fetcher
+// finds the script only in the renderer's memory cache.
+function networkFixtureScript(targetDocument) {
   return new Promise(function (resolve, reject) {
-    const script = document.createElement("script");
-    script.src = "/network/cached.js";
+    const script = targetDocument.createElement("script");
+    script.src = new URL("/network/cached.js", location.href).href;
     script.onload = function () { resolve(); };
     script.onerror = function () { reject(new Error("script load failed")); };
-    document.head.appendChild(script);
+    targetDocument.head.appendChild(script);
   });
 }
 async function runNetworkFixture(values) {
@@ -665,8 +669,10 @@ async function runNetworkFixture(values) {
   } catch (error) {
     refused = "rejected";
   }
-  await networkFixtureScript();
-  await networkFixtureScript();
+  await networkFixtureScript(document);
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  await networkFixtureScript(frame.contentDocument);
   const worker = new Worker("/network/worker.js");
   const workerText = await new Promise(function (resolve, reject) {
     worker.onmessage = function (event) { resolve(event.data); };
@@ -681,7 +687,8 @@ async function runNetworkFixture(values) {
     hopUrl: hop.url,
     hopText: hopText,
     refused: refused,
-    cachedRuns: window.networkFixtureCachedRuns,
+    cachedRuns: (window.networkFixtureCachedRuns || 0) +
+      (frame.contentWindow.networkFixtureCachedRuns || 0),
     workerText: workerText
   });
 }
@@ -841,8 +848,9 @@ function Start-CookieFixtureServer {
                         $extraHeaders += "Location: /network/data?hop=1"
                     }
                     elseif ($path -eq "/network/cached.js") {
-                        # Cacheable, so the page's second load of the same
-                        # script is served from Blink's memory cache.
+                        # Cacheable, so the second load of the same script,
+                        # from a new frame, is served from Blink's memory
+                        # cache.
                         $status = "200 OK"
                         $contentType = "text/javascript; charset=utf-8"
                         $cacheControl = "max-age=600"
