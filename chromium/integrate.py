@@ -1181,6 +1181,10 @@ BLINK_DOM_WRAPPER_WORLD_INCLUDE = (
     '#include "third_party/blink/renderer/platform/bindings/'
     'dom_wrapper_world.h"'
 )
+# The world name maps are main-thread only, so every hook that reads a world
+# name also tests the thread.
+BLINK_WTF_INCLUDE = '#include "third_party/blink/renderer/platform/wtf/wtf.h"'
+
 BLINK_LISTENER_KIND_HELPER = """\
 namespace {
 
@@ -1301,10 +1305,10 @@ BLINK_LISTENER_HOOK = """\
           recorder_world ? RecorderExecutionWorldKind(*recorder_world) : "",
           recorder_world ? recorder_world->GetWorldId()
                          : a11y_recorder::kExecutionWorldIdUnobserved,
-          recorder_world && !recorder_world->IsMainWorld()
+          recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
               ? recorder_world->NonMainWorldHumanReadableName().Utf8().c_str()
               : "",
-          recorder_world && !recorder_world->IsMainWorld()
+          recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
               ? recorder_world->NonMainWorldStableId().Utf8().c_str()
               : "");
     }
@@ -1359,10 +1363,10 @@ BLINK_LISTENER_REMOVED_HOOK = """\
         recorder_world ? RecorderExecutionWorldKind(*recorder_world) : "",
         recorder_world ? recorder_world->GetWorldId()
                        : a11y_recorder::kExecutionWorldIdUnobserved,
-        recorder_world && !recorder_world->IsMainWorld()
+        recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
             ? recorder_world->NonMainWorldHumanReadableName().Utf8().c_str()
             : "",
-        recorder_world && !recorder_world->IsMainWorld()
+        recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
             ? recorder_world->NonMainWorldStableId().Utf8().c_str()
             : "");
   }
@@ -1431,10 +1435,10 @@ BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION = """\
           recorder_world ? RecorderExecutionWorldKind(*recorder_world) : "",
           recorder_world ? recorder_world->GetWorldId()
                          : a11y_recorder::kExecutionWorldIdUnobserved,
-          recorder_world && !recorder_world->IsMainWorld()
+          recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
               ? recorder_world->NonMainWorldHumanReadableName().Utf8().c_str()
               : "",
-          recorder_world && !recorder_world->IsMainWorld()
+          recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
               ? recorder_world->NonMainWorldStableId().Utf8().c_str()
               : "");
     }
@@ -2873,6 +2877,7 @@ def patch_blink_event_target(path: Path) -> None:
         BLINK_SOURCE_LOCATION_INCLUDE,
         BLINK_JS_BASED_EVENT_LISTENER_INCLUDE,
         BLINK_DOM_WRAPPER_WORLD_INCLUDE,
+        BLINK_WTF_INCLUDE,
     ):
         if include in text:
             continue
@@ -3848,6 +3853,7 @@ BLINK_COOKIE_ORIGIN_INCLUDES = (
     BLINK_CAPTURE_SOURCE_LOCATION_INCLUDE,
     BLINK_SOURCE_LOCATION_INCLUDE,
     BLINK_DOM_WRAPPER_WORLD_INCLUDE,
+    BLINK_WTF_INCLUDE,
     '#include "v8/include/v8-isolate.h"',
 )
 BLINK_COOKIE_ORIGIN_HELPER = """\
@@ -3898,7 +3904,9 @@ a11y_recorder::CookieCallOrigin RecorderCookieCallOrigin(
   const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
   origin.world_kind = RecorderCookieWorldKind(world);
   origin.world_id = world.GetWorldId();
-  if (!world.IsMainWorld()) {
+  // Blink keeps isolated world names and stable identifiers in main-thread
+  // maps, so a worker world reports neither.
+  if (!world.IsMainWorld() && IsMainThread()) {
     origin.world_name = world.NonMainWorldHumanReadableName().Utf8();
     origin.world_stable_id = world.NonMainWorldStableId().Utf8();
   }
