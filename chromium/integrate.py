@@ -5908,6 +5908,11 @@ BLINK_NETWORK_INCLUDES = (
     '#include "services/network/public/cpp/request_destination.h"',
     '#include "services/network/public/mojom/cors.mojom-shared.h"',
     '#include "services/network/public/mojom/fetch_api.mojom-shared.h"',
+    # The cache mode and priority hint names are compared by enumerator, which
+    # needs the complete enum types rather than the forward declarations the
+    # worker observer otherwise sees.
+    '#include "third_party/blink/public/mojom/fetch/'
+    'fetch_api_request.mojom-blink.h"',
     '#include "third_party/blink/public/platform/'
     'resource_request_blocked_reason.h"',
     '#include "third_party/blink/renderer/platform/loader/fetch/'
