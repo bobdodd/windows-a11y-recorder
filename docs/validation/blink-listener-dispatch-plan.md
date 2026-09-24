@@ -1482,7 +1482,8 @@ They do not evaluate the page's layout or styling.
 ### Measured result
 
 Reference platform, September 23, 2026, at repository revision `841eff1`.
-Protocol 0.25. Recorded on the same Windows 10.0.19045 host and instrumented
+The branch was rebased when it was merged, so the same tree is commit `1d1eaf1`
+on `main`. Protocol 0.25. Recorded on the same Windows 10.0.19045 host and instrumented
 Chromium build as the earlier results in this document, rebuilt with the
 layout hook, with a 25-second capture that validated 57,355 events and 137
 artifacts and reported no network-service crashes. The recorder accepted
@@ -1554,8 +1555,8 @@ during the capture. The volume of the `841eff1` session was not counted.
 
 ### Measured result with 283 properties
 
-The `841eff1` run recorded the first 75 properties. Revision `eef1313` extends
-the list to 283, and the complete script was run again on the same host,
+The `841eff1` run recorded the first 75 properties. Revision `eef1313`, commit
+`c901b60` on `main` after the rebase, extends the list to 283, and the complete script was run again on the same host,
 September 23, 2026, rebuilt with the extended list. The 25-second capture
 validated 56,653 events and 136 artifacts and reported no network-service
 crashes. The recorder accepted 56,653 records and dropped none. The complete
