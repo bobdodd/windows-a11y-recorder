@@ -97,9 +97,12 @@ Comments, processing instructions, and the document node are not recorded.
   `getComputedStyle()` would report. The object has one member for each
   listed property; its member order is not significant, and the checkpoint
   start's `styleProperties` list gives the recorded order. A property Blink
-  produced no value for is present with a null value. Null for a text node, for an
-  element with no computed style, and for an element whose style was computed
-  only on demand inside a `display: none` subtree.
+  produced no value for is present with a null value. Null for a text node,
+  for an element with no computed style, and for an element whose style was computed
+  only on demand inside a `display: none` subtree. After a rendering update
+  Blink keeps no computed style for an element whose own `display` is `none`,
+  so such an element, including `head` and `script`, is recorded with a null
+  style and no layout object.
 
 ### Checkpoint completion
 
@@ -249,8 +252,10 @@ value, as `getComputedStyle()` does.
   rectangle for it.
 - A node under a display lock can report a rectangle from its last layout
   before the lock, because locked content is not laid out again.
-- Styles computed on demand for elements inside a `display: none` subtree are
-  not recorded, because they exist only when a script or tool asks for them.
+- The styles of an element whose own `display` is `none`, and of elements
+  inside it, are not recorded, because Blink keeps them only when a script or
+  tool asks for them. The record shows only that the element has no layout
+  object; it does not show that the reason is `display: none`.
 - A script's own `getComputedStyle()` or geometry calls can resolve style or
   perform layout, which changes the counters. The next paint-clean update then
   produces a checkpoint even if nothing visible changed. A forced layout is

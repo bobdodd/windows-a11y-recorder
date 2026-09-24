@@ -1551,3 +1551,41 @@ limit have not been observed in a real run. The hook logs every rendered
 document: the `5de598b` session held 2,420 layout records, of which 42 belonged
 to the fixture document and the rest to the other documents Chromium rendered
 during the capture. The volume of the `841eff1` session was not counted.
+
+### Measured result with 283 properties
+
+The `841eff1` run recorded the first 75 properties. Revision `eef1313` extends
+the list to 283, and the complete script was run again on the same host,
+September 23, 2026, rebuilt with the extended list. The 25-second capture
+validated 56,653 events and 136 artifacts and reported no network-service
+crashes. The recorder accepted 56,653 records and dropped none. The complete
+script exited with code 0, with every value in the earlier table reproduced
+except `LayoutBoxNodeId`, which was 96, and no omission records of any kind.
+
+The validated session is:
+
+`C:\Users\Public\Downloads\A11yRecorderLayoutLogging\sessions\20260923-231346-d199fb1628534347b38d1968bfb2206e`
+
+The verifier required every element's computed style to hold exactly the 283
+names. The table compares that session with the `5de598b` session, which
+recorded 75 properties; both event files were read in full.
+
+| Value | 75 properties (`5de598b`) | 283 properties (`eef1313`) |
+| --- | --- | --- |
+| Layout records | 2,420 | 2,372 |
+| Layout channel bytes | 3,640,072 | 4,790,667 |
+| Elements with a recorded computed style | 229 | 209 |
+| Mean serialized computed style per element, bytes | 1,742 | 7,166 |
+| Largest node record, bytes | 3,128 | 8,555 |
+| Property values reported as null | 0 | 0 |
+| Event file bytes | 75,182,900 | 75,518,188 |
+
+In these sessions the layout channel is about 5 and 6 percent of the event
+file; the DOM and UI Automation channels are the largest. Most element records
+carry no computed style: of 2,158 element records in the `eef1313` session,
+1,949 had none. They include every element whose own `display` is `none`, such
+as `HEAD`, `SCRIPT`, and the fixture's hidden `SPAN`, and the SVG `g` and
+`path` elements inside the icon sets of Chromium's own pages. Blink keeps no
+computed style for those elements after a rendering update, and the hook does
+not request one. The sessions are short and their pages small, so these
+figures do not predict the volume of a styled application page.
