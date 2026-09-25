@@ -47,6 +47,15 @@ and from the Windows documentation:
 - `components/viz/common/quads/compositor_frame_metadata.h`: frame tokens are
   32-bit, increase per compositor frame sink, and wrap back to 1, so they must
   be compared with `FrameTokenGT`.
+- `third_party/blink/renderer/core/frame/web_frame_widget_impl.h`:
+  `GetFrameSinkId()`, public on the widget, identifies the compositor frame
+  sink whose frames the tokens number. The browser process holds the same
+  value as `RenderWidgetHostImpl::GetFrameSinkId()`
+  (`content/browser/renderer_host/render_widget_host_impl.h`).
+- `third_party/blink/renderer/core/frame/local_frame.h` and
+  `content/public/browser/render_frame_host.h`: a local frame's
+  `LocalFrameToken` is the value the browser resolves to a `FrameTreeNodeId`
+  with `RenderFrameHost::GetFrameTreeNodeIdForFrameToken`.
 - `components/viz/common/frame_timing_details.h`, `ui/gfx/swap_result.h`, and
   `ui/gfx/presentation_feedback.h`: the presentation timestamp, refresh
   interval, and flags (`kVSync`, `kHWClock`, `kHWCompletion`, `kZeroCopy`,
@@ -140,6 +149,17 @@ and document token, plus the request identity `presentation-request-N`,
 unique within one renderer process, and the `layoutCheckpointId` it belongs
 to. `executionWorldId` is always null.
 
+Every record also carries the identity of the local-root widget the promise
+was queued on:
+
+- `frameSinkId`: the widget's `viz::FrameSinkId`, as client and sink
+  identifiers. Frame tokens are meaningful only within one frame sink.
+- `localRootFrameToken`: the `LocalFrameToken` of the widget's local root.
+
+Both are null only on a request with `notQueuedReason` of `no-widget`. They
+are recorded so a later browser-process slice can join renderer widgets to
+browser frame and widget identities without changing these records.
+
 ### Presentation requested
 
 - `sourceFrameNumber`: `LayerTreeHost::SourceFrameNumber()` when queued.
@@ -186,7 +206,7 @@ browser clock mapping and carries its uncertainty.
   and `layoutCheckpointId`. Checkpoint identities are per renderer process.
 - Swap and feedback records join their request by browser instance, renderer
   process, and request identity. Frame tokens are compared only within one
-  widget, using wrap-aware ordering.
+  `frameSinkId`, using wrap-aware ordering.
 - A checkpoint's presentation time joins desktop frames by session time. On
   the monitor that holds the browser window, the candidate frame is the first
   captured frame whose `compositedAtNanoseconds` is at or after the
@@ -254,7 +274,7 @@ animation frames. The verifier requires, for that step's layout checkpoint:
 For every request in the archive, the verifier requires that swapped,
 not-swapped, and feedback records join an existing request; that each request
 has at most one terminal outcome; and that frame tokens increase, wrap-aware,
-within each widget. It reports the number of unresolved requests rather than
+within each `frameSinkId`. It reports the number of unresolved requests rather than
 failing on them.
 
 The application-launched session run records desktop frames alongside the
@@ -269,8 +289,14 @@ Passing these checks shows that the logger emits the records with the stated
 shape and joins. It does not show that any captured frame displays a
 checkpoint's content.
 
-## Open decisions
+## Decisions
 
-- Whether browser-process frame-token evidence, such as the tokens the
-  browser receives for each renderer frame, is needed for out-of-process
-  iframe correlation.
+- The WGC dequeue policy is unchanged in this slice; see the recorder-side
+  capture boundary.
+- Browser-process frame-token evidence is deferred. An out-of-process iframe's
+  own widget reports presentation for its frames, so the time-based join
+  applies to it, but tying its frames to a browser frame, tab, or window
+  requires that later slice. The current Blink fixture's only iframe is
+  same-origin and shares the page's widget, so that slice also needs a
+  cross-site iframe fixture. The widget identity fields above are what it
+  would join on.
