@@ -44,6 +44,10 @@ from the product version.
   reports the measured delays between them.
   The run passed on Windows on September 25, 2026, at commit `afaf0c9`, with
   31,010 validated events, no refused events, and no omitted browser records.
+  It passed again at commit `0d55eee` with a protocol 0.29 browser build, with
+  31,693 validated events, no refused events, and no omitted browser records.
+  The session held 56 interaction snapshots, one for each of its 41 DOM
+  checkpoints and 15 layout checkpoints.
 - Record shadow DOM and pseudo-element content. Protocol 0.28 extends DOM
   checkpoints to the composed tree: every open, closed, and user-agent shadow
   root is recorded as a node under its host, with its mode, focus delegation,
