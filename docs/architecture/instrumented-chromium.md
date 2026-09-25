@@ -66,7 +66,8 @@ Snapshots must carry document, frame, navigation, and checkpoint identifiers so 
 Protocol 0.24 implements the change records for focus, selection, active
 descendant, and text-editing state on the `browser.interaction` channel. The
 record types and their limits are described under protocol version 0.24 below.
-Checkpoint-time snapshots of that state are not yet recorded.
+Protocol 0.29 adds checkpoint-time snapshots of that state, described under
+protocol version 0.29 below.
 
 Protocol 0.25 implements layout geometry and a defined list of computed styles
 on the `browser.layout` channel, recorded after every rendering update in which
@@ -110,6 +111,11 @@ Protocol 0.28 extends DOM checkpoints, layout checkpoints, and dispatch paths to
 shadow trees and pseudo-elements. The record types and their limits are
 described under protocol version 0.28 below and in
 [the shadow DOM and pseudo-element evidence model](shadow-dom-evidence-model.md).
+
+Protocol 0.29 records the interaction state a document holds after each DOM
+checkpoint and each layout checkpoint. The record types and their limits are
+described under protocol version 0.29 below and in
+[the interaction-state checkpoint evidence model](interaction-state-checkpoint-evidence-model.md).
 
 ## Process architecture
 
@@ -621,9 +627,11 @@ The recorded facts are bounded as follows:
   not trigger a DOM checkpoint.
 - A focus change in a document whose DOM node identity is not yet assigned
   produces no record.
-- Checkpoint-time snapshots of focus, selection, and text-editing state are not
-  recorded. The state at a given moment is reconstructed from the change
-  records.
+- Before protocol 0.29, checkpoint-time snapshots of focus, selection, and
+  text-editing state were not recorded, and the state at a given moment had to
+  be reconstructed from the change records. From protocol 0.29 a snapshot
+  follows each DOM and layout checkpoint; the state between two checkpoints is
+  still covered only by the change records.
 
 The validation run serves a third fixture page from the loopback HTTP listener
 the cookie fixture uses, opened in a foreground tab after the listener fixture
@@ -812,7 +820,41 @@ and path scopes that give each listener the visible path length the page
 reported. The fixture shows that the logger emits records; it does not
 evaluate the page's use of shadow DOM.
 
-Live 0.28 connections require an exact protocol-version match.
+Protocol version 0.29 follows each DOM checkpoint and each layout checkpoint
+with a snapshot of the document's interaction state on the
+`browser.interaction` channel, in the same synchronous call:
+
+- `interaction-checkpoint-started` names the source checkpoint, its channel
+  and reason, and records whether the document has focus, the element Blink
+  holds as focused, whether it matches `:focus-visible`, the element its
+  active descendant resolves to, how focus last moved, and the frame
+  selection's type, positions, and directionality.
+- `interaction-checkpoint-text-control` records each text control in
+  composed-tree order, including controls in shadow trees of any mode, with
+  its type, its value up to 4096 UTF-16 code units, and its selection.
+- `interaction-checkpoint-completed` records the number of text controls and
+  whether the traversal stopped at its limit of 512.
+
+Every record carries the renderer document context with no execution world.
+Accessibility checkpoints carry no snapshot. The snapshot reads only state
+Blink already holds and never requests style, layout, or a selection update.
+Values are recorded verbatim, including password fields, as the change records
+are. No deduplication is performed.
+
+The interaction fixture page's final step focuses its listbox, whose active
+descendant is already set, changes an inline style so the next rendering
+update resolves style, and waits two animation frames with the listbox still
+focused. The verifier requires a snapshot of the fixture document's
+`finished-parsing` DOM checkpoint with no focused element and empty text
+controls, and a snapshot of a later layout checkpoint with the listbox focused,
+its active descendant resolved, and the values the fixture set and typed. For
+every snapshot in the capture it requires a recorded source checkpoint of the
+same document and reason, one completion, and a text-control count equal to
+the records. The fixture shows that the logger emits snapshots; it does not
+evaluate the page's focus handling. The full model is in
+[the interaction-state checkpoint evidence model](interaction-state-checkpoint-evidence-model.md).
+
+Live 0.29 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
@@ -894,8 +936,9 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 5. Add document, DOM, style, layout, accessibility, and rendered-frame
    checkpoints. The bounded parser-complete DOM structure checkpoint is the
    first implemented part of this stage. Focus, selection, active descendant,
-   and text-editing change records are implemented in protocol 0.24. Layout
-   geometry and computed-style checkpoints are implemented in protocol 0.25.
+   and text-editing change records are implemented in protocol 0.24, and
+   checkpoint-time snapshots of that state in protocol 0.29. Layout geometry
+   and computed-style checkpoints are implemented in protocol 0.25.
    Rendered-frame checkpoints remain outstanding.
 6. Add cookie operations and network metadata with prohibited values removed at
    source. Cookie operations are implemented in protocol 0.23. Network metadata

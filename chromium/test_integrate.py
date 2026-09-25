@@ -1736,8 +1736,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.28"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.28"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.29"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.29"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -2648,6 +2648,86 @@ class IntegrateTests(unittest.TestCase):
                     patched,
                 )
 
+
+    def document_source(self, helper=""):
+        return (
+            '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+            "\n"
+            f"{helper}"
+            "void Document::FinishedParsing() {\n"
+            "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+            "\n"
+            "}\n"
+            "\n"
+            "void Document::NotifyChangeChildren(\n"
+            "    const ContainerNode& container,\n"
+            "    const ContainerNode::ChildrenChange& change) {\n"
+            "}\n"
+        )
+
+    def test_dom_checkpoints_are_followed_by_an_interaction_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(self.document_source(), encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER)
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER))
+        for include in INTEGRATE.BLINK_INTERACTION_CHECKPOINT_INCLUDES:
+            with self.subTest(include=include):
+                self.assertEqual(1, first.count(include))
+        complete = first.index("a11y_recorder::CompleteBlinkDomCheckpoint(")
+        call = first.index(
+            '"browser.dom", recorder_reason);', complete
+        )
+        self.assertLess(complete, call)
+        # The helper is defined at blink scope, after the DOM helper that
+        # declares it and before the function it is inserted ahead of.
+        self.assertLess(
+            first.index(INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER),
+            first.index("void Document::FinishedParsing() {"),
+        )
+
+    def test_upgrades_a_dom_helper_without_the_interaction_checkpoint(self):
+        legacy = INTEGRATE.LEGACY_SHADOW_TREE_BLINK_DOM_CHECKPOINT_HELPER
+        self.assertNotIn("RecorderRecordInteractionCheckpoint", legacy)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(self.document_source(legacy), encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER))
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER)
+        )
+
+    def test_the_interaction_checkpoint_never_forces_work(self):
+        helper = INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER
+        for forcing_call in (
+            "UpdateStyleAndLayout",
+            "EnsureComputedStyle",
+            "UpdateLifecycle",
+            "UpdateLayout",
+            "ComputeVisibleSelection",
+            "UpdateIfNeeded",
+            "RecalcAssignment",
+            "AssignedNodes()",
+            "GetBoundingClientRect",
+            "FlatTreeTraversal",
+        ):
+            with self.subTest(call=forcing_call):
+                self.assertNotIn(forcing_call, helper)
+        # Only the helper-owned constants bound the snapshot.
+        self.assertIn("kRecorderMaximumInteractionTextControls = 512", helper)
+        self.assertIn("kRecorderMaximumInteractionValueLength = 4096", helper)
 
     def test_migrates_light_tree_dom_checkpoint_hooks(self):
         """A checkpoint that recorded the light tree only must be replaced."""
@@ -4475,6 +4555,60 @@ class LayoutIntegrationTests(unittest.TestCase):
             )
             with self.assertRaises(RuntimeError):
                 INTEGRATE.patch_blink_local_frame_view(path)
+
+    def test_the_layout_checkpoint_is_followed_by_an_interaction_checkpoint(
+        self,
+    ):
+        patched = self.patch_twice(
+            cookie_source(
+                self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+                INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+                INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+            )
+        )
+        declaration = INTEGRATE.BLINK_LAYOUT_INTERACTION_CHECKPOINT_DECLARATION
+        self.assertEqual(1, patched.count(declaration))
+        # The declaration must name the blink scope helper, not a function of
+        # the unnamed namespace the layout helper opens.
+        self.assertLess(
+            patched.index(declaration),
+            patched.index("namespace {\n", patched.index(declaration)),
+        )
+        complete = patched.index("a11y_recorder::CompleteBlinkLayoutCheckpoint(")
+        interaction = patched.index(
+            'RecorderRecordInteractionCheckpoint(*recorder_document,'
+        )
+        self.assertLess(complete, interaction)
+        self.assertIn('"browser.layout", "rendering-update");', patched)
+
+    def test_upgrades_a_layout_helper_without_the_interaction_checkpoint(self):
+        """A 0.28 helper region, with no declaration ahead of it, is rewritten."""
+        current_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        call = """\
+  RecorderRecordInteractionCheckpoint(*recorder_document,
+                                      recorder_checkpoint_sequence,
+                                      "browser.layout", "rendering-update");
+"""
+        earlier_helper = current_helper.replace(
+            INTEGRATE.BLINK_LAYOUT_INTERACTION_CHECKPOINT_DECLARATION, "", 1
+        ).replace(call, "", 1)
+        self.assertNotIn("RecorderRecordInteractionCheckpoint", earlier_helper)
+        source = cookie_source(
+            self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "local_frame_view.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_local_frame_view(path)
+            current = path.read_text(encoding="utf-8")
+            path.write_text(
+                current.replace(current_helper, earlier_helper, 1),
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_local_frame_view(path)
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
 
     def test_the_layout_helper_never_indexes_a_raw_array(self):
         # Blink compiles with unsafe buffer usage as an error.

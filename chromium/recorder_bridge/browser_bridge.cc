@@ -114,6 +114,7 @@ struct EvidenceIdentityStorage {
   uint64_t next_dom_checkpoint_id = 1;
   uint64_t next_dom_transition_id = 1;
   uint64_t next_accessibility_checkpoint_id = 1;
+  uint64_t next_interaction_checkpoint_id = 1;
   uint64_t next_event_target_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
 
@@ -220,6 +221,12 @@ uint64_t AssignDomCheckpointIdentity() {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
   return identities.next_dom_checkpoint_id++;
+}
+
+uint64_t AssignInteractionCheckpointIdentity() {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  return identities.next_interaction_checkpoint_id++;
 }
 
 uint64_t AssignAccessibilityCheckpointIdentity() {
@@ -3443,6 +3450,155 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
   payload.Set("pseudoElementCount", pseudo_element_count);
   payload.Set("shadowRootCount", shadow_root_count);
   SendBlinkEvidence("browser.layout", "layout-checkpoint-completed",
+                    std::move(payload));
+}
+
+
+namespace {
+
+std::string InteractionCheckpointId(uint64_t checkpoint_sequence) {
+  return "interaction-checkpoint-" + base::NumberToString(checkpoint_sequence);
+}
+
+base::DictValue CreateInteractionCheckpointBasePayload(
+    const RecorderPipeClient& client,
+    uint64_t checkpoint_sequence,
+    int document_node_id,
+    std::string document_token) {
+  base::DictValue payload;
+  payload.Set("context", CreateContext(client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("checkpointId", InteractionCheckpointId(checkpoint_sequence));
+  return payload;
+}
+
+}  // namespace
+
+uint64_t BeginBlinkInteractionCheckpoint(int document_node_id,
+                                         std::string document_token,
+                                         std::string source_channel,
+                                         uint64_t source_checkpoint_sequence,
+                                         std::string reason,
+                                         InteractionCheckpointState state,
+                                         int maximum_text_controls,
+                                         int maximum_value_length) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      source_checkpoint_sequence == 0 || maximum_text_controls <= 0 ||
+      maximum_value_length <= 0) {
+    return 0;
+  }
+  // The reason must be one the source checkpoint's channel uses, so the
+  // snapshot cannot name a reason its source did not record.
+  std::string source_checkpoint_id;
+  if (source_channel == "browser.dom" &&
+      IsOneOf(reason, {"finished-parsing", "post-mutation"})) {
+    source_checkpoint_id = DomCheckpointId(source_checkpoint_sequence);
+  } else if (source_channel == "browser.layout" &&
+             reason == "rendering-update") {
+    source_checkpoint_id = LayoutCheckpointId(source_checkpoint_sequence);
+  } else {
+    return 0;
+  }
+  if (!IsOneOf(state.last_focus_type,
+               {"none", "script", "forward", "backward", "spatial-navigation",
+                "mouse", "access-key", "page"}) ||
+      !IsOneOf(state.selection_type, {"none", "caret", "range"})) {
+    return 0;
+  }
+  const bool has_positions = state.selection_type != "none";
+  if (has_positions &&
+      (state.anchor_node_id <= 0 || state.focus_node_id <= 0 ||
+       state.anchor_offset < 0 || state.focus_offset < 0)) {
+    return 0;
+  }
+  const bool has_focus = state.focused_node_id > 0;
+  const uint64_t checkpoint_sequence = AssignInteractionCheckpointIdentity();
+  base::DictValue payload = CreateInteractionCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("sourceCheckpointId", std::move(source_checkpoint_id));
+  payload.Set("sourceChannel", std::move(source_channel));
+  payload.Set("reason", std::move(reason));
+  payload.Set("documentHasFocus", state.document_has_focus);
+  payload.Set("focusedNodeId", OptionalNodeId(state.focused_node_id));
+  payload.Set("focusVisible", has_focus && state.focus_visible);
+  payload.Set("activeDescendantNodeId",
+              OptionalNodeId(has_focus ? state.active_descendant_node_id : 0));
+  payload.Set("lastFocusType", std::move(state.last_focus_type));
+  payload.Set("selectionType", state.selection_type);
+  payload.Set("anchorNodeId", has_positions ? base::Value(state.anchor_node_id)
+                                            : base::Value());
+  payload.Set("anchorOffset", has_positions ? base::Value(state.anchor_offset)
+                                            : base::Value());
+  payload.Set("focusNodeId", has_positions ? base::Value(state.focus_node_id)
+                                           : base::Value());
+  payload.Set("focusOffset", has_positions ? base::Value(state.focus_offset)
+                                           : base::Value());
+  payload.Set("directional", state.directional);
+  payload.Set("maximumTextControls", maximum_text_controls);
+  payload.Set("maximumValueLength", maximum_value_length);
+  SendBlinkEvidence("browser.interaction", "interaction-checkpoint-started",
+                    std::move(payload));
+  return checkpoint_sequence;
+}
+
+void RecordBlinkInteractionCheckpointTextControl(
+    uint64_t checkpoint_sequence,
+    int document_node_id,
+    std::string document_token,
+    int text_control_index,
+    int node_id,
+    std::string control_type,
+    std::string value,
+    int value_length,
+    bool value_truncated,
+    int selection_start,
+    int selection_end,
+    std::string selection_direction) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || text_control_index < 0 || node_id <= 0 ||
+      control_type.empty() || value_length < 0 || selection_start < 0 ||
+      selection_end < selection_start ||
+      !IsOneOf(selection_direction, {"none", "forward", "backward"})) {
+    return;
+  }
+  base::DictValue payload = CreateInteractionCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("textControlIndex", text_control_index);
+  payload.Set("nodeId", node_id);
+  payload.Set("controlType", std::move(control_type));
+  SetTruncatedTextProperties(payload, "value", "valueLength", "valueTruncated",
+                             std::move(value), value_length, value_truncated);
+  payload.Set("selectionStart", selection_start);
+  payload.Set("selectionEnd", selection_end);
+  payload.Set("selectionDirection", std::move(selection_direction));
+  SendBlinkEvidence("browser.interaction",
+                    "interaction-checkpoint-text-control", std::move(payload));
+}
+
+void CompleteBlinkInteractionCheckpoint(uint64_t checkpoint_sequence,
+                                        int document_node_id,
+                                        std::string document_token,
+                                        int text_control_count,
+                                        bool truncated,
+                                        int maximum_text_controls) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || text_control_count < 0 ||
+      maximum_text_controls <= 0 ||
+      text_control_count > maximum_text_controls) {
+    return;
+  }
+  base::DictValue payload = CreateInteractionCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("textControlCount", text_control_count);
+  payload.Set("truncated", truncated);
+  payload.Set("maximumTextControls", maximum_text_controls);
+  SendBlinkEvidence("browser.interaction", "interaction-checkpoint-completed",
                     std::move(payload));
 }
 

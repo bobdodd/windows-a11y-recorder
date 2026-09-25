@@ -221,6 +221,18 @@ internal static class EventPayloadValidator
                 ValidateBrowserActiveDescendantReferenceSet(
                     payload, issues, lineNumber);
                 break;
+            case ("browser.interaction", "interaction-checkpoint-started"):
+                ValidateBrowserInteractionCheckpointStarted(
+                    payload, issues, lineNumber);
+                break;
+            case ("browser.interaction", "interaction-checkpoint-text-control"):
+                ValidateBrowserInteractionCheckpointTextControl(
+                    payload, issues, lineNumber);
+                break;
+            case ("browser.interaction", "interaction-checkpoint-completed"):
+                ValidateBrowserInteractionCheckpointCompleted(
+                    payload, issues, lineNumber);
+                break;
             case ("browser.layout", "layout-checkpoint-started"):
                 ValidateBrowserLayoutCheckpointStarted(payload, issues, lineNumber);
                 break;
@@ -1132,6 +1144,204 @@ internal static class EventPayloadValidator
             issues,
             line);
         ValidateInteractionCommon(payload, issues, line);
+    }
+
+    // Checkpoint identities are "<prefix><sequence>" with a positive decimal
+    // sequence, as the bridge formats them.
+    private static bool IsCheckpointIdentity(string? value, string prefix) =>
+        value is not null &&
+        value.StartsWith(prefix, StringComparison.Ordinal) &&
+        value.Length > prefix.Length &&
+        value[prefix.Length] != '0' &&
+        value.AsSpan(prefix.Length).IndexOfAnyExceptInRange('0', '9') < 0;
+
+    private static void ValidateInteractionCheckpointIdentity(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        var checkpointId = ReadString(payload, "checkpointId");
+        if (checkpointId is not null &&
+            !IsCheckpointIdentity(checkpointId, "interaction-checkpoint-"))
+        {
+            AddError(
+                issues,
+                "browser-interaction-checkpoint-id-invalid",
+                "events.ndjson#/payload/checkpointId",
+                $"'{checkpointId}' is not an interaction checkpoint identity.",
+                line);
+        }
+    }
+
+    private static void ValidateBrowserInteractionCheckpointStarted(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredString("sourceCheckpointId"),
+                RequiredEnum("sourceChannel", "browser.dom", "browser.layout"),
+                RequiredEnum(
+                    "reason", "finished-parsing", "post-mutation",
+                    "rendering-update"),
+                RequiredBoolean("documentHasFocus"),
+                NullableInteger("focusedNodeId", positive: true),
+                RequiredBoolean("focusVisible"),
+                NullableInteger("activeDescendantNodeId", positive: true),
+                RequiredEnum("lastFocusType", FocusTypes),
+                RequiredEnum("selectionType", "none", "caret", "range"),
+                NullableInteger("anchorNodeId", positive: true),
+                NullableInteger("anchorOffset", nonnegative: true),
+                NullableInteger("focusNodeId", positive: true),
+                NullableInteger("focusOffset", nonnegative: true),
+                RequiredBoolean("directional"),
+                RequiredInteger("maximumTextControls", positive: true),
+                RequiredInteger("maximumValueLength", positive: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        ValidateInteractionCheckpointIdentity(payload, issues, line);
+
+        var sourceChannel = ReadString(payload, "sourceChannel");
+        var reason = ReadString(payload, "reason");
+        var sourceCheckpointId = ReadString(payload, "sourceCheckpointId");
+        var (sourcePrefix, sourceReasons) = sourceChannel switch
+        {
+            "browser.dom" =>
+                ("dom-checkpoint-", new[] { "finished-parsing", "post-mutation" }),
+            "browser.layout" =>
+                ("layout-checkpoint-", new[] { "rendering-update" }),
+            _ => ((string?)null, Array.Empty<string>())
+        };
+        if (sourcePrefix is not null && sourceCheckpointId is not null &&
+            !IsCheckpointIdentity(sourceCheckpointId, sourcePrefix))
+        {
+            AddError(
+                issues,
+                "browser-interaction-checkpoint-source-invalid",
+                "events.ndjson#/payload/sourceCheckpointId",
+                $"'{sourceCheckpointId}' is not a checkpoint identity of the " +
+                    $"'{sourceChannel}' channel.",
+                line);
+        }
+        if (sourcePrefix is not null && reason is not null &&
+            !sourceReasons.Contains(reason))
+        {
+            AddError(
+                issues,
+                "browser-interaction-checkpoint-reason-inconsistent",
+                "events.ndjson#/payload/reason",
+                $"Reason '{reason}' is not one the '{sourceChannel}' channel " +
+                    "records.",
+                line);
+        }
+
+        var focused = ReadNullableInteger(payload, "focusedNodeId");
+        if (focused is null &&
+            ReadNullableInteger(payload, "activeDescendantNodeId") is not null)
+        {
+            AddError(
+                issues,
+                "browser-interaction-checkpoint-active-descendant-without-focus",
+                "events.ndjson#/payload/activeDescendantNodeId",
+                "An active descendant is reported while no element is focused.",
+                line);
+        }
+        if (focused is null &&
+            payload.TryGetProperty("focusVisible", out var focusVisible) &&
+            focusVisible.ValueKind == JsonValueKind.True)
+        {
+            AddError(
+                issues,
+                "browser-interaction-checkpoint-focus-visible-without-focus",
+                "events.ndjson#/payload/focusVisible",
+                "Focus is reported visible while no element is focused.",
+                line);
+        }
+
+        var selectionType = ReadString(payload, "selectionType");
+        if (selectionType is not null)
+        {
+            ValidateAllOrNone(
+                payload,
+                ["anchorNodeId", "anchorOffset", "focusNodeId", "focusOffset"],
+                selectionType != "none",
+                "browser-interaction-checkpoint-selection-inconsistent",
+                $"Selection positions must be present exactly when the " +
+                    $"selection type is not 'none'; it is '{selectionType}'.",
+                issues,
+                line);
+        }
+    }
+
+    private static void ValidateBrowserInteractionCheckpointTextControl(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("textControlIndex", nonnegative: true),
+                RequiredInteger("nodeId", positive: true),
+                RequiredString("controlType"),
+                RequiredText("value"),
+                RequiredInteger("valueLength", nonnegative: true),
+                RequiredBoolean("valueTruncated"),
+                RequiredInteger("selectionStart", nonnegative: true),
+                RequiredInteger("selectionEnd", nonnegative: true),
+                RequiredEnum("selectionDirection", SelectionDirections)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        ValidateInteractionCheckpointIdentity(payload, issues, line);
+        ValidateTruncatedText(
+            payload, "value", "valueLength", "valueTruncated", issues, line);
+        ValidateOrderedRange(
+            payload, "selectionStart", "selectionEnd", issues, line);
+    }
+
+    private static void ValidateBrowserInteractionCheckpointCompleted(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("textControlCount", nonnegative: true),
+                RequiredBoolean("truncated"),
+                RequiredInteger("maximumTextControls", positive: true)
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        ValidateInteractionCheckpointIdentity(payload, issues, line);
+        var count = ReadNullableInteger(payload, "textControlCount");
+        var maximum = ReadNullableInteger(payload, "maximumTextControls");
+        if (count is not null && maximum is not null && count > maximum)
+        {
+            AddError(
+                issues,
+                "browser-interaction-checkpoint-count-over-maximum",
+                "events.ndjson#/payload/textControlCount",
+                $"The checkpoint reports {count} text controls, more than " +
+                    $"the stated maximum of {maximum}.",
+                line);
+        }
     }
 
     private static readonly string[] NetworkContextKinds =

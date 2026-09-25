@@ -1319,9 +1319,10 @@ function Invoke-CookieFixture {
 }
 
 # The page the interaction logging fixture serves. Its functions move focus,
-# set text-control values and a selection, and set an active descendant by
-# element reflection, so the capture holds each kind of interaction-state
-# record. Key presses and typed text are sent through DevTools input commands,
+# set text-control values and a selection, set an active descendant by
+# element reflection, and finally leave focus on the listbox across a
+# rendering update, so the capture holds each kind of interaction-state record
+# and an interaction checkpoint taken while an element holds focus. Key presses and typed text are sent through DevTools input commands,
 # which Blink handles as user input rather than as script. The page schedules
 # no timers and registers no listeners.
 $interactionFixturePage = @'
@@ -1379,6 +1380,17 @@ window.interactionFixture = {
       focused: focused,
       afterBlur: document.activeElement === document.body ? "body" : "other"
     });
+  },
+  holdListboxFocus: function () {
+    const choices = document.getElementById("choices");
+    choices.focus();
+    choices.style.outlineOffset = "2px";
+    return JSON.stringify({
+      focused: document.activeElement.id,
+      activeDescendant: choices.ariaActiveDescendantElement
+          ? choices.ariaActiveDescendantElement.id
+          : ""
+    });
   }
 };
 document.title = "Interaction logging fixture ready";
@@ -1417,7 +1429,8 @@ function Invoke-InteractionFixtureCall {
 # Opens the interaction logging fixture in a foreground tab, moves focus by
 # script and by the Tab key, types into a text field and a textarea, sets values
 # and a selection by script, sets an active descendant by element reflection,
-# and closes the tab. DevTools key and text input reaches a page only once its
+# leaves focus on the listbox across a rendering update, and closes the tab.
+# DevTools key and text input reaches a page only once its
 # widget has painted, and a tab opened in the background never paints, so the
 # tab must be in the foreground. The caller runs this step after the listener
 # fixture page has been hidden behind the background target, so bringing this
@@ -1589,6 +1602,26 @@ function Invoke-InteractionFixture {
         if ($descendant.focused -ne "choices" -or
             $descendant.afterBlur -ne "body") {
             throw "The fixture's active descendant step reported $($steps.ActiveDescendant)."
+        }
+
+        # Focus is left on the listbox and a style change is made, so the
+        # next rendering update produces a layout checkpoint, and with it an
+        # interaction checkpoint, while the listbox holds focus and names its
+        # active descendant. Two animation frames let that update complete.
+        $steps.HeldFocus = Invoke-InteractionFixtureCall $pageSession `
+            "interactionFixture.holdListboxFocus()"
+        $held = ConvertFrom-Json ([string] $steps.HeldFocus)
+        if ($held.focused -ne "choices" -or
+            $held.activeDescendant -ne "choice-two") {
+            throw "The fixture's held focus step reported $($steps.HeldFocus)."
+        }
+        $null = Invoke-CdpCommand $pageSession "Runtime.evaluate" @{
+            expression = (
+                "new Promise(r => requestAnimationFrame(() => " +
+                "requestAnimationFrame(() => r(true))))"
+            )
+            awaitPromise = $true
+            returnByValue = $true
         }
 
         [pscustomobject]@{

@@ -25,6 +25,12 @@ is recorded with its assigned nodes. The
 [shadow DOM and pseudo-element evidence model](shadow-dom-evidence-model.md)
 specifies those records.
 
+Protocol 0.29 follows each DOM checkpoint with a snapshot of the document's
+focus, selection, active descendant, and text-control state, named by the
+checkpoint's identity and recorded in the same synchronous call. The
+[interaction-state checkpoint evidence model](interaction-state-checkpoint-evidence-model.md)
+specifies those records.
+
 Together, these boundaries provide deterministic document-tree observations
 that can be correlated with renderer process and Blink document identity. They
 do not claim that a tree was painted, exposed through an accessibility API, or

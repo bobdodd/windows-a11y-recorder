@@ -277,6 +277,15 @@ scope, its retargeted target, and the part of the path a listener there sees.
 The record types and limits are in
 [the shadow DOM and pseudo-element evidence model](docs/architecture/shadow-dom-evidence-model.md).
 
+Protocol 0.29 records the interaction state a document holds after each DOM
+checkpoint and each layout checkpoint: whether the document has focus, the
+focused element, whether it matches `:focus-visible`, its active descendant,
+how focus last moved, the frame selection, and the value and selection of each
+text control, up to 512 controls and 4096 UTF-16 code units per value. The
+snapshot reads only state Blink already holds and never forces style or
+layout. The record types and limits are in
+[the interaction-state checkpoint evidence model](docs/architecture/interaction-state-checkpoint-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.
@@ -353,16 +362,17 @@ Completed:
 20. Validate an application-launched session with the cookie, interaction,
     layout, network, shadow-tree, and Windows input channels on Windows. See
     [the application-launched session plan](docs/validation/app-launched-session-plan.md).
+21. Record interaction state at each DOM and layout checkpoint, not only its
+    changes (protocol 0.29).
 
 Remaining:
 
-1. Record interaction state at each checkpoint, not only its changes.
-2. Extend listener and dispatch evidence to worker global scopes and
+1. Extend listener and dispatch evidence to worker global scopes and
    dispatches whose original target is never a Node.
-3. Record rendered frame or compositor correlation identifiers.
-4. Record representative NVDA, JAWS, and Narrator sessions.
-5. Add evidence correlation and screen-reader behavior analysis.
-6. Investigate touch and gesture coverage on representative hardware.
+2. Record rendered frame or compositor correlation identifiers.
+3. Record representative NVDA, JAWS, and Narrator sessions.
+4. Add evidence correlation and screen-reader behavior analysis.
+5. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 

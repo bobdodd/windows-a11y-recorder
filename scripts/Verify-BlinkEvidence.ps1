@@ -2285,8 +2285,9 @@ if ($isolatedWorldListener.context.documentId -ne $listener.context.documentId) 
 # Outside the listener channel, only the cookie records written at a script's
 # cookie call observe a world in this protocol: the document.cookie read and
 # write records and the Cookie Store request record, which report the world
-# current at the call. The interaction records report the world of the script
-# that made a change, when one did. The network request records report the
+# current at the call. The interaction change records report the world of the
+# script that made a change, when one did; the interaction checkpoint records
+# are taken after a checkpoint rather than at a script's call, and report none. The network request records report the
 # world of the script current when Blink issued the request, when one was, and
 # the realtime records written at a script's call, which are the WebSocket
 # creation, sent message, and close request records and the WebTransport
@@ -2324,7 +2325,15 @@ $nonListenerWorldRecords = @(
                     "cookie-store-request"
                 )
             ) -and
-            $_.channel -ne "browser.interaction" -and
+            -not (
+                $_.channel -eq "browser.interaction" -and
+                $_.eventType -in @(
+                    "focus-changed",
+                    "selection-changed",
+                    "text-control-value-changed",
+                    "active-descendant-reference-set"
+                )
+            ) -and
             -not (
                 $_.channel -eq "browser.network" -and
                 $_.eventType -in @(
@@ -2342,7 +2351,7 @@ $nonListenerWorldRecords = @(
 if ($nonListenerWorldRecords.Count -gt 0) {
     throw (
         "$($nonListenerWorldRecords.Count) records outside the listener " +
-        "channel, the cookie call records, the interaction records, and " +
+        "channel, the cookie call records, the interaction change records, and " +
         "the network request records, and the realtime call records " +
         "reported an execution world identity."
     )
@@ -3090,6 +3099,194 @@ Test-InteractionScriptOrigin $clearedFocus "blur"
     ActiveDescendantNodeId = $activeDescendant.payload.referencedNodeId
     ListboxFocusOutcome = $listboxFocus.payload.outcome
     BlurOutcome = $clearedFocus.payload.outcome
+} | Format-List
+
+# Protocol 0.29 follows each recorded DOM and layout checkpoint with a snapshot
+# of the document's interaction state. These checks establish that every
+# snapshot in the capture is complete and names a recorded source checkpoint
+# of the same document, and that the fixture document's snapshots hold the
+# state the fixture set: nothing focused and empty text controls when parsing
+# finished, and, after the fixture's final step, the listbox focused with its
+# active descendant and both text controls holding their last values. They say
+# nothing about whether that state is appropriate for the page.
+$interactionCheckpointEventTypes = @(
+    "interaction-checkpoint-started",
+    "interaction-checkpoint-text-control",
+    "interaction-checkpoint-completed"
+)
+$interactionCheckpointRecords = @(
+    $records | Where-Object {
+        $_.channel -eq "browser.interaction" -and
+        $_.eventType -in $interactionCheckpointEventTypes
+    }
+)
+$interactionCheckpointStarts = @(
+    $interactionCheckpointRecords |
+        Where-Object { $_.eventType -eq "interaction-checkpoint-started" }
+)
+if ($interactionCheckpointStarts.Count -eq 0) {
+    throw "No interaction-checkpoint-started record was emitted."
+}
+$interactionCheckpointParts = @{}
+foreach ($record in $interactionCheckpointRecords) {
+    $id = [string] $record.payload.checkpointId
+    if (-not $interactionCheckpointParts.ContainsKey($id)) {
+        $interactionCheckpointParts[$id] = [System.Collections.Generic.List[object]]::new()
+    }
+    $interactionCheckpointParts[$id].Add($record)
+}
+$sourceCheckpointStarts = @{}
+foreach ($record in @(
+        $records | Where-Object {
+            ($_.channel -eq "browser.dom" -and
+                $_.eventType -eq "dom-checkpoint-started") -or
+            ($_.channel -eq "browser.layout" -and
+                $_.eventType -eq "layout-checkpoint-started")
+        })) {
+    $key = (
+        "$($record.channel)|$($record.payload.context.processId)|" +
+        "$($record.payload.checkpointId)"
+    )
+    $sourceCheckpointStarts[$key] = $record
+}
+
+function Test-SameCheckpointDocument {
+    param($Left, $Right)
+
+    $Left.browserInstanceId -eq $Right.browserInstanceId -and
+    $Left.processId -eq $Right.processId -and
+    $Left.documentId -eq $Right.documentId -and
+    $Left.documentToken -eq $Right.documentToken
+}
+
+foreach ($start in $interactionCheckpointStarts) {
+    $id = [string] $start.payload.checkpointId
+    $context = $start.payload.context
+    if ($null -ne $context.executionWorldId) {
+        throw "Interaction checkpoint $id reported an execution world."
+    }
+    $sourceKey = (
+        "$($start.payload.sourceChannel)|$($context.processId)|" +
+        "$($start.payload.sourceCheckpointId)"
+    )
+    if (-not $sourceCheckpointStarts.ContainsKey($sourceKey)) {
+        throw (
+            "Interaction checkpoint $id names source checkpoint " +
+            "$($start.payload.sourceCheckpointId), which was not recorded."
+        )
+    }
+    $source = $sourceCheckpointStarts[$sourceKey]
+    if (-not (Test-SameCheckpointDocument $context $source.payload.context) -or
+        $start.payload.reason -ne $source.payload.reason) {
+        throw (
+            "Interaction checkpoint $id does not match the document or reason " +
+            "of its source checkpoint $($start.payload.sourceCheckpointId)."
+        )
+    }
+    $parts = @($interactionCheckpointParts[$id])
+    $starts = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-started" })
+    $completions = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-completed" })
+    $controls = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-text-control" })
+    if ($starts.Count -ne 1 -or $completions.Count -ne 1) {
+        throw (
+            "Interaction checkpoint $id has $($starts.Count) start and " +
+            "$($completions.Count) completion records."
+        )
+    }
+    $completion = $completions[0]
+    if ($completion.payload.maximumTextControls -ne
+            $start.payload.maximumTextControls -or
+        $completion.payload.textControlCount -ne $controls.Count -or
+        $completion.payload.truncated) {
+        throw (
+            "Interaction checkpoint $id completed with " +
+            "$($completion.payload.textControlCount) text controls against " +
+            "$($controls.Count) records, truncated $($completion.payload.truncated)."
+        )
+    }
+    for ($index = 0; $index -lt $controls.Count; $index++) {
+        if ($controls[$index].payload.textControlIndex -ne $index) {
+            throw "Interaction checkpoint $id has non-contiguous text-control indexes."
+        }
+    }
+    foreach ($part in $parts) {
+        if (-not (Test-SameCheckpointDocument $context $part.payload.context) -or
+            $null -ne $part.payload.context.executionWorldId) {
+            throw "Interaction checkpoint $id changes document between records."
+        }
+    }
+}
+
+function Get-InteractionCheckpointControls {
+    param([Parameter(Mandatory = $true)] $Start)
+
+    @(
+        $interactionCheckpointParts[[string] $Start.payload.checkpointId] |
+            Where-Object { $_.eventType -eq "interaction-checkpoint-text-control" }
+    )
+}
+
+function Test-InteractionCheckpointValues {
+    param($Start, [string] $FieldValue, [string] $NotesValue)
+
+    $controls = Get-InteractionCheckpointControls $Start
+    $field = @($controls | Where-Object { $_.payload.nodeId -eq $fieldNodeId })
+    $notes = @($controls | Where-Object { $_.payload.nodeId -eq $notesNodeId })
+    $controls.Count -eq 2 -and
+    $field.Count -eq 1 -and $field[0].payload.value -eq $FieldValue -and
+    $field[0].payload.controlType -eq "text" -and
+    $notes.Count -eq 1 -and $notes[0].payload.value -eq $NotesValue -and
+    $notes[0].payload.controlType -eq "textarea"
+}
+
+$fixtureCheckpointStarts = @(
+    $interactionCheckpointStarts |
+        Where-Object { $_.payload.context.documentId -eq $interactionDocumentId }
+)
+$parsedCheckpoint = @(
+    $fixtureCheckpointStarts | Where-Object {
+        $_.payload.sourceChannel -eq "browser.dom" -and
+        $_.payload.reason -eq "finished-parsing" -and
+        $null -eq $_.payload.focusedNodeId -and
+        $null -eq $_.payload.activeDescendantNodeId -and
+        (Test-InteractionCheckpointValues $_ "" "")
+    }
+)
+if ($parsedCheckpoint.Count -eq 0) {
+    throw (
+        "No interaction checkpoint after the fixture document's " +
+        "finished-parsing DOM checkpoint reported no focus and empty text " +
+        "controls."
+    )
+}
+$heldCheckpoint = @(
+    $fixtureCheckpointStarts | Where-Object {
+        $_.payload.sourceChannel -eq "browser.layout" -and
+        $_.payload.reason -eq "rendering-update" -and
+        $_.payload.focusedNodeId -eq $listboxNodeId -and
+        $_.payload.activeDescendantNodeId -eq
+            $activeDescendant.payload.referencedNodeId -and
+        (Test-InteractionCheckpointValues $_ "set by script" "nXs set by script")
+    }
+)
+if ($heldCheckpoint.Count -eq 0) {
+    throw (
+        "No interaction checkpoint after a layout checkpoint of the fixture " +
+        "document reported the listbox focused with its active descendant " +
+        "and the text controls' last values."
+    )
+}
+
+[pscustomobject]@{
+    InteractionCheckpoints = $interactionCheckpointStarts.Count
+    FixtureInteractionCheckpoints = $fixtureCheckpointStarts.Count
+    ParsedCheckpointId = $parsedCheckpoint[0].payload.checkpointId
+    ParsedSourceCheckpointId = $parsedCheckpoint[0].payload.sourceCheckpointId
+    HeldFocusCheckpointId = $heldCheckpoint[0].payload.checkpointId
+    HeldFocusSourceCheckpointId = $heldCheckpoint[0].payload.sourceCheckpointId
+    HeldFocusDocumentHasFocus = $heldCheckpoint[0].payload.documentHasFocus
+    HeldFocusVisible = $heldCheckpoint[0].payload.focusVisible
+    HeldFocusLastFocusType = $heldCheckpoint[0].payload.lastFocusType
 } | Format-List
 
 # The run script serves a fourth page, on the cookie fixture's origin, in a
@@ -5003,7 +5200,8 @@ Write-Host (
     "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +
     "accessibility serialization checkpoint, cookie operation, and " +
-    "interaction-state, layout and computed-style checkpoint, shadow root, " +
+    "interaction-state change and checkpoint, layout and computed-style " +
+    "checkpoint, shadow root, " +
     "slot assignment, pseudo-element, and shadow-scoped dispatch path, and " +
     "network " +
     "metadata and realtime channel evidence verified."

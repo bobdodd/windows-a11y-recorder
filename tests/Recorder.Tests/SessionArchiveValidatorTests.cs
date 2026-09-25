@@ -2882,6 +2882,131 @@ public sealed class SessionArchiveValidatorTests
             issues, issue => issue.Code == "browser-text-control-value-over-maximum");
     }
 
+    [Theory]
+    [InlineData("browser.dom", "rendering-update", "dom-checkpoint-3")]
+    [InlineData("browser.layout", "post-mutation", "layout-checkpoint-12")]
+    public async Task RejectsAnInteractionCheckpointReasonItsSourceDoesNotRecord(
+        string sourceChannel,
+        string reason,
+        string sourceCheckpointId)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
+        payload["sourceChannel"] = sourceChannel;
+        payload["reason"] = reason;
+        payload["sourceCheckpointId"] = sourceCheckpointId;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "interaction-checkpoint-started", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-interaction-checkpoint-reason-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("dom-checkpoint-12")]
+    [InlineData("layout-checkpoint-")]
+    [InlineData("layout-checkpoint-012")]
+    [InlineData("layout-checkpoint-1x")]
+    public async Task RejectsAnInteractionCheckpointSourceOfAnotherChannel(
+        string sourceCheckpointId)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
+        payload["sourceCheckpointId"] = sourceCheckpointId;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "interaction-checkpoint-started", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-interaction-checkpoint-source-invalid");
+    }
+
+    [Fact]
+    public async Task RejectsAMalformedInteractionCheckpointIdentity()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.CheckpointCompleted)!;
+        payload["checkpointId"] = "layout-checkpoint-7";
+
+        var issues = await ValidateInteractionRecordAsync(
+            "interaction-checkpoint-completed", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-interaction-checkpoint-id-invalid");
+    }
+
+    [Fact]
+    public async Task RejectsAnInteractionCheckpointActiveDescendantWithoutFocus()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
+        payload["focusedNodeId"] = null;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "interaction-checkpoint-started", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code ==
+                "browser-interaction-checkpoint-active-descendant-without-focus");
+    }
+
+    [Fact]
+    public async Task RejectsVisibleFocusWithoutAFocusedElement()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.DomCheckpointStarted)!;
+        payload["focusVisible"] = true;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "interaction-checkpoint-started", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code ==
+                "browser-interaction-checkpoint-focus-visible-without-focus");
+    }
+
+    [Fact]
+    public async Task RejectsAnInteractionCheckpointSelectionWithoutPositions()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.DomCheckpointStarted)!;
+        payload["focusOffset"] = null;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "interaction-checkpoint-started", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code ==
+                "browser-interaction-checkpoint-selection-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAnInteractionCheckpointTextControlLengthMismatch()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.CheckpointTextControl)!;
+        payload["valueLength"] = 12;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "interaction-checkpoint-text-control", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-dom-text-truncation-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsMoreInteractionCheckpointTextControlsThanTheMaximum()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.CheckpointCompleted)!;
+        payload["textControlCount"] = 513;
+
+        var issues = await ValidateInteractionRecordAsync(
+            "interaction-checkpoint-completed", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-interaction-checkpoint-count-over-maximum");
+    }
+
     [Fact]
     public async Task AcceptsAnInteractionOmissionRecord()
     {

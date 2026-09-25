@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.28` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.29` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -359,3 +359,13 @@ retargeted target and related target, and visible path indexes to
 `RecordBlinkDispatchPathNode` and `RecordBlinkDispatchPathWindow`. The record
 types and their limits are described in
 `docs/architecture/shadow-dom-evidence-model.md`.
+
+Protocol 0.29 adds interaction-state snapshots. `RecorderRecordInteractionCheckpoint`
+in `document.cc` is called by the DOM checkpoint helper after
+`CompleteBlinkDomCheckpoint` and by the layout checkpoint helper in
+`local_frame_view.cc` after `CompleteBlinkLayoutCheckpoint`. It calls
+`BeginBlinkInteractionCheckpoint` with the document's focus and frame
+selection state, `RecordBlinkInteractionCheckpointTextControl` for each text
+control in composed-tree order, and `CompleteBlinkInteractionCheckpoint`. The
+record types and their limits are described in
+`docs/architecture/interaction-state-checkpoint-evidence-model.md`.

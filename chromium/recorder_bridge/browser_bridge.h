@@ -853,6 +853,68 @@ void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
                                              int referenced_node_id,
                                              CookieCallOrigin origin);
 
+// The document-level interaction state read for one interaction checkpoint.
+// Node identifiers are Blink DOM node ids, and zero means no node. The focus
+// type is Blink's record of how focus last moved in the document, named as in
+// RecordBlinkFocusChanged. The selection is the frame selection in the DOM
+// tree, named as in RecordBlinkSelectionChanged, and its positions are
+// reported only when the selection type is not "none".
+struct InteractionCheckpointState {
+  bool document_has_focus = false;
+  int focused_node_id = 0;
+  bool focus_visible = false;
+  int active_descendant_node_id = 0;
+  std::string last_focus_type;
+  std::string selection_type;
+  int anchor_node_id = 0;
+  int anchor_offset = 0;
+  int focus_node_id = 0;
+  int focus_offset = 0;
+  bool directional = false;
+};
+
+// Starts one snapshot of a document's interaction state, taken immediately
+// after the named DOM or layout checkpoint completed. The source channel is
+// "browser.dom" or "browser.layout", and the reason is the source checkpoint's
+// reason. Returns zero when the snapshot is not recorded, in which case no
+// text-control or completion record may follow.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t BeginBlinkInteractionCheckpoint(int document_node_id,
+                                         std::string document_token,
+                                         std::string source_channel,
+                                         uint64_t source_checkpoint_sequence,
+                                         std::string reason,
+                                         InteractionCheckpointState state,
+                                         int maximum_text_controls,
+                                         int maximum_value_length);
+
+// Records one text control of a started interaction checkpoint in
+// composed-tree order. The value is bounded by the caller, which reports the
+// full length in UTF-16 code units and whether the recorded value was cut.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkInteractionCheckpointTextControl(
+    uint64_t checkpoint_sequence,
+    int document_node_id,
+    std::string document_token,
+    int text_control_index,
+    int node_id,
+    std::string control_type,
+    std::string value,
+    int value_length,
+    bool value_truncated,
+    int selection_start,
+    int selection_end,
+    std::string selection_direction);
+
+// Completes a started interaction checkpoint.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void CompleteBlinkInteractionCheckpoint(uint64_t checkpoint_sequence,
+                                        int document_node_id,
+                                        std::string document_token,
+                                        int text_control_count,
+                                        bool truncated,
+                                        int maximum_text_controls);
+
 // Frame geometry read at a layout checkpoint. Viewport and scroll values are
 // in CSS pixels, the units of getBoundingClientRect, innerWidth, and scrollX.
 // The device pixel ratio is the value window.devicePixelRatio reports, and

@@ -76,4 +76,27 @@ public sealed class BrowserInteractionPayloadIngestTests
         Assert.Equal("value-set", valuePayload.Source);
         Assert.Equal("world-0", valuePayload.Context.ExecutionWorldId);
     }
+
+    [Fact]
+    public void ReadsInteractionCheckpointStateAsWritten()
+    {
+        using var started = JsonDocument.Parse(
+            BrowserInteractionPayloads.LayoutCheckpointStarted);
+        var startedPayload =
+            BrowserProtocol.Deserialize<BrowserInteractionCheckpointStartedPayload>(
+                started.RootElement);
+        Assert.Equal("layout-checkpoint-12", startedPayload.SourceCheckpointId);
+        Assert.Equal(44, startedPayload.FocusedNodeId);
+        Assert.Equal(52, startedPayload.ActiveDescendantNodeId);
+        Assert.Null(startedPayload.AnchorNodeId);
+        Assert.Null(startedPayload.Context.ExecutionWorldId);
+
+        using var control = JsonDocument.Parse(
+            BrowserInteractionPayloads.CheckpointTextControl);
+        var controlPayload =
+            BrowserProtocol.Deserialize<BrowserInteractionCheckpointTextControlPayload>(
+                control.RootElement);
+        Assert.Equal("set by script", controlPayload.Value);
+        Assert.Equal(0, controlPayload.TextControlIndex);
+    }
 }

@@ -20,6 +20,17 @@ from the product version.
 
 ### Added
 
+- Record interaction state at each checkpoint. Protocol 0.29 follows every DOM
+  checkpoint and every layout checkpoint with a snapshot on the
+  `browser.interaction` channel of whether the document has focus, the element
+  Blink holds as focused, whether it matches `:focus-visible`, its active
+  descendant, how focus last moved, the frame selection, and the value and
+  selection of each text control, including controls in shadow trees. Values
+  are bounded to 4096 UTF-16 code units and the traversal to 512 controls. The
+  snapshot never forces style or layout. The Blink validation fixture holds
+  focus on a listbox across a rendering update, and the verifier checks the
+  snapshots of its parsed and final states and the completeness and source
+  correlation of every snapshot in the capture. Not yet validated on Windows.
 - Validate a session started from the recorder application.
   `scripts/Run-AppSessionValidation.ps1` starts the application, records a
   fixture page with the application's own Chromium launch, injects marked

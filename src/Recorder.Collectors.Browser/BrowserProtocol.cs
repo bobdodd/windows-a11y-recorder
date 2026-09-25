@@ -154,6 +154,18 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.ActiveDescendantReferenceSet) =>
                 payload.Deserialize<BrowserActiveDescendantReferenceSetPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.InteractionCheckpointStarted) =>
+                payload.Deserialize<BrowserInteractionCheckpointStartedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.InteractionCheckpointTextControl) =>
+                payload.Deserialize<BrowserInteractionCheckpointTextControlPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.InteractionCheckpointCompleted) =>
+                payload.Deserialize<BrowserInteractionCheckpointCompletedPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Layout,
                 BrowserEvidenceEventTypes.LayoutCheckpointStarted) =>
                 payload.Deserialize<BrowserLayoutCheckpointStartedPayload>(

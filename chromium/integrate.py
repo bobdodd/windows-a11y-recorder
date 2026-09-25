@@ -652,7 +652,7 @@ LEGACY_LIGHT_TREE_BLINK_DOM_CHECKPOINT_HOOK = """\
 BLINK_DOM_CHECKPOINT_HELPER_MARKER = (
     "void RecorderRecordDomCheckpoint(Document& recorder_document,"
 )
-BLINK_DOM_CHECKPOINT_HELPER = """\
+LEGACY_SHADOW_TREE_BLINK_DOM_CHECKPOINT_HELPER = """\
 // Declared before its definition so the definition has a prior declaration.
 // The mutation observer declares it as well, so the finished-parsing and
 // post-mutation checkpoints share one traversal.
@@ -802,6 +802,351 @@ void RecorderRecordDomCheckpoint(Document& recorder_document,
       kRecorderMaximumDomAttributesPerNode, kRecorderMaximumDomValueLength,
       recorder_shadow_root_count, recorder_slot_count);
 }
+
+"""
+BLINK_DOM_CHECKPOINT_HELPER = """\
+// Declared before its definition so the definition has a prior declaration.
+// The mutation observer declares it as well, so the finished-parsing and
+// post-mutation checkpoints share one traversal.
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason);
+
+// Defined further down this file; records the interaction state immediately
+// after the DOM checkpoint it follows.
+void RecorderRecordInteractionCheckpoint(Document& recorder_document,
+                                         uint64_t recorder_source_sequence,
+                                         const char* recorder_source_channel,
+                                         const char* recorder_reason);
+
+// Records one bounded structural checkpoint of the composed tree. Each node is
+// followed by the shadow root it hosts, of any mode, and that shadow tree, and
+// then by its own children, so a shadow root is recorded with its host as its
+// parent. Slot assignments are read as Blink currently holds them; the
+// traversal never requests an assignment recalculation, so recording does not
+// change the state it records.
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason) {
+  constexpr int kRecorderMaximumDomCheckpointNodes = 512;
+  constexpr int kRecorderMaximumDomAttributesPerNode = 64;
+  constexpr int kRecorderMaximumDomValueLength = 4096;
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  const std::string recorder_document_token =
+      recorder_document.Token().ToString();
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_reason, kRecorderMaximumDomCheckpointNodes);
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+  int recorder_node_count = 0;
+  bool recorder_truncated = false;
+  int recorder_attribute_count = 0;
+  bool recorder_attributes_truncated = false;
+  int recorder_shadow_root_count = 0;
+  int recorder_slot_count = 0;
+  HeapVector<Member<Node>> recorder_pending;
+  recorder_pending.push_back(&recorder_document);
+  while (!recorder_pending.empty()) {
+    Node& recorder_node = *recorder_pending.back();
+    recorder_pending.pop_back();
+    if (recorder_node_count >= kRecorderMaximumDomCheckpointNodes) {
+      recorder_truncated = true;
+      break;
+    }
+    ContainerNode* recorder_parent = recorder_node.ParentOrShadowHostNode();
+    a11y_recorder::RecordBlinkDomCheckpointNode(
+        recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token,
+        recorder_node_count, recorder_node.GetDomNodeId(),
+        recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+        static_cast<int>(recorder_node.getNodeType()),
+        recorder_node.nodeName().Utf8().c_str());
+    ++recorder_node_count;
+    for (Node* recorder_child = recorder_node.lastChild(); recorder_child;
+         recorder_child = recorder_child->previousSibling()) {
+      recorder_pending.push_back(recorder_child);
+    }
+    if (auto* recorder_shadow_root = DynamicTo<ShadowRoot>(recorder_node)) {
+      ++recorder_shadow_root_count;
+      const ShadowRootMode recorder_mode = recorder_shadow_root->GetMode();
+      const AtomicString& recorder_reference_target =
+          recorder_shadow_root->referenceTarget();
+      a11y_recorder::RecordBlinkDomCheckpointShadowRoot(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_shadow_root->GetDomNodeId(),
+          recorder_shadow_root->host().GetDomNodeId(),
+          recorder_mode == ShadowRootMode::kOpen     ? "open"
+          : recorder_mode == ShadowRootMode::kClosed ? "closed"
+                                                     : "user-agent",
+          recorder_shadow_root->delegatesFocus(),
+          recorder_shadow_root->IsManualSlotting() ? "manual" : "named",
+          recorder_shadow_root->clonable(),
+          recorder_shadow_root->serializable(),
+          recorder_shadow_root->IsDeclarativeShadowRoot(),
+          recorder_shadow_root->IsAvailableToElementInternals(),
+          !recorder_reference_target.IsNull(),
+          recorder_reference_target.IsNull()
+              ? std::string()
+              : recorder_reference_target.Utf8());
+    }
+    Element* recorder_element = DynamicTo<Element>(recorder_node);
+    if (!recorder_element) {
+      continue;
+    }
+    if (ShadowRoot* recorder_hosted_root = recorder_element->GetShadowRoot()) {
+      recorder_pending.push_back(recorder_hosted_root);
+    }
+    int recorder_node_attribute_index = 0;
+    for (const Attribute& recorder_attribute :
+         recorder_element->Attributes()) {
+      if (recorder_node_attribute_index >=
+          kRecorderMaximumDomAttributesPerNode) {
+        recorder_attributes_truncated = true;
+        break;
+      }
+      const String recorder_attribute_value = recorder_attribute.Value();
+      const int recorder_attribute_value_length =
+          static_cast<int>(recorder_attribute_value.length());
+      const bool recorder_attribute_value_truncated =
+          recorder_attribute_value_length > kRecorderMaximumDomValueLength;
+      const String recorder_recorded_attribute_value =
+          recorder_attribute_value_truncated
+              ? recorder_attribute_value.substr(
+                    0, kRecorderMaximumDomValueLength)
+              : recorder_attribute_value;
+      a11y_recorder::RecordBlinkDomCheckpointNodeAttribute(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_node.GetDomNodeId(),
+          recorder_node_attribute_index,
+          recorder_attribute.NamespaceURI().Utf8().c_str(),
+          recorder_attribute.LocalName().Utf8().c_str(),
+          recorder_recorded_attribute_value.Utf8().c_str(),
+          recorder_attribute_value_length,
+          recorder_attribute_value_truncated,
+          kRecorderMaximumDomValueLength);
+      ++recorder_node_attribute_index;
+      ++recorder_attribute_count;
+    }
+    auto* recorder_slot = DynamicTo<HTMLSlotElement>(recorder_element);
+    ShadowRoot* recorder_slot_root =
+        recorder_slot ? recorder_slot->ContainingShadowRoot() : nullptr;
+    if (recorder_slot_root && recorder_slot->SupportsAssignment()) {
+      ++recorder_slot_count;
+      const HeapVector<Member<Node>>& recorder_assigned =
+          recorder_slot->AssignedNodesNoRecalc();
+      std::vector<int> recorder_assigned_ids;
+      for (const Member<Node>& recorder_assigned_node : recorder_assigned) {
+        if (static_cast<int>(recorder_assigned_ids.size()) >=
+            kRecorderMaximumDomCheckpointNodes) {
+          break;
+        }
+        recorder_assigned_ids.push_back(
+            recorder_assigned_node->GetDomNodeId());
+      }
+      a11y_recorder::RecordBlinkDomCheckpointSlotAssignment(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_slot->GetDomNodeId(),
+          std::move(recorder_assigned_ids),
+          static_cast<int>(recorder_assigned.size()),
+          kRecorderMaximumDomCheckpointNodes,
+          !recorder_slot_root->GetSlotAssignment().NeedsAssignmentRecalc());
+    }
+  }
+  a11y_recorder::CompleteBlinkDomCheckpoint(
+      recorder_checkpoint_sequence, recorder_document_node_id,
+      recorder_document_token, recorder_reason, recorder_node_count,
+      recorder_truncated, kRecorderMaximumDomCheckpointNodes,
+      recorder_attribute_count, recorder_attributes_truncated,
+      kRecorderMaximumDomAttributesPerNode, kRecorderMaximumDomValueLength,
+      recorder_shadow_root_count, recorder_slot_count);
+  RecorderRecordInteractionCheckpoint(recorder_document,
+                                      recorder_checkpoint_sequence,
+                                      "browser.dom", recorder_reason);
+}
+
+"""
+BLINK_INTERACTION_CHECKPOINT_HELPER_MARKER = (
+    "void RecorderRecordInteractionCheckpoint(Document& recorder_document,\n"
+    "                                         uint64_t recorder_source_sequence,"
+    "\n"
+    "                                         const char* recorder_source_channel,"
+    "\n"
+    "                                         const char* recorder_reason) {\n"
+)
+BLINK_INTERACTION_CHECKPOINT_HELPER = """\
+// Declared before its definition so the definition has a prior declaration.
+// The layout checkpoint in local_frame_view.cc declares it as well.
+void RecorderRecordInteractionCheckpoint(Document& recorder_document,
+                                         uint64_t recorder_source_sequence,
+                                         const char* recorder_source_channel,
+                                         const char* recorder_reason);
+
+// Records the interaction state the document holds immediately after a DOM or
+// layout checkpoint completed: focus, the frame selection, and every text
+// control's value and selection. Everything is read from state Blink already
+// holds; nothing here requests a style recalculation, a layout, or a
+// selection update, so recording does not change the state it records. Text
+// controls are visited in composed-tree order, including every shadow tree,
+// and their values are recorded verbatim up to the value bound, as the value
+// change records are.
+void RecorderRecordInteractionCheckpoint(Document& recorder_document,
+                                         uint64_t recorder_source_sequence,
+                                         const char* recorder_source_channel,
+                                         const char* recorder_reason) {
+  constexpr int kRecorderMaximumInteractionTextControls = 512;
+  constexpr int kRecorderMaximumInteractionValueLength = 4096;
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  if (recorder_document_node_id <= 0 || !recorder_document.IsActive()) {
+    return;
+  }
+  const std::string recorder_document_token =
+      recorder_document.Token().ToString();
+  a11y_recorder::InteractionCheckpointState recorder_state;
+  recorder_state.document_has_focus = recorder_document.hasFocus();
+  Element* recorder_focused = recorder_document.FocusedElement();
+  if (recorder_focused) {
+    recorder_state.focused_node_id = recorder_focused->GetDomNodeId();
+    recorder_state.focus_visible =
+        SelectorChecker::MatchesFocusVisiblePseudoClass(*recorder_focused);
+    Element* recorder_active_descendant =
+        recorder_focused->GetElementAttribute(
+            html_names::kAriaActivedescendantAttr);
+    recorder_state.active_descendant_node_id =
+        recorder_active_descendant ? recorder_active_descendant->GetDomNodeId()
+                                   : 0;
+  }
+  switch (recorder_document.LastFocusType()) {
+    case mojom::blink::FocusType::kNone:
+      recorder_state.last_focus_type = "none";
+      break;
+    case mojom::blink::FocusType::kScript:
+      recorder_state.last_focus_type = "script";
+      break;
+    case mojom::blink::FocusType::kForward:
+      recorder_state.last_focus_type = "forward";
+      break;
+    case mojom::blink::FocusType::kBackward:
+      recorder_state.last_focus_type = "backward";
+      break;
+    case mojom::blink::FocusType::kSpatialNavigation:
+      recorder_state.last_focus_type = "spatial-navigation";
+      break;
+    case mojom::blink::FocusType::kMouse:
+      recorder_state.last_focus_type = "mouse";
+      break;
+    case mojom::blink::FocusType::kAccessKey:
+      recorder_state.last_focus_type = "access-key";
+      break;
+    case mojom::blink::FocusType::kPage:
+      recorder_state.last_focus_type = "page";
+      break;
+  }
+  recorder_state.selection_type = "none";
+  LocalFrame* recorder_frame = recorder_document.GetFrame();
+  if (recorder_frame && recorder_frame->Selection().IsAvailable()) {
+    const FrameSelection& recorder_frame_selection =
+        recorder_frame->Selection();
+    const SelectionInDomTree& recorder_selection =
+        recorder_frame_selection.GetSelectionInDomTree();
+    Node* recorder_anchor_node =
+        recorder_selection.Anchor().ComputeContainerNode();
+    Node* recorder_focus_node =
+        recorder_selection.Focus().ComputeContainerNode();
+    if (!recorder_selection.IsNone() && recorder_anchor_node &&
+        recorder_focus_node) {
+      recorder_state.selection_type =
+          recorder_selection.IsCaret() ? "caret" : "range";
+      recorder_state.anchor_node_id = recorder_anchor_node->GetDomNodeId();
+      recorder_state.anchor_offset = static_cast<int>(
+          recorder_selection.Anchor().ComputeOffsetInContainerNode());
+      recorder_state.focus_node_id = recorder_focus_node->GetDomNodeId();
+      recorder_state.focus_offset = static_cast<int>(
+          recorder_selection.Focus().ComputeOffsetInContainerNode());
+    }
+    recorder_state.directional = recorder_frame_selection.IsDirectional();
+  }
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkInteractionCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_source_channel, recorder_source_sequence, recorder_reason,
+          std::move(recorder_state), kRecorderMaximumInteractionTextControls,
+          kRecorderMaximumInteractionValueLength);
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+  int recorder_text_control_count = 0;
+  bool recorder_truncated = false;
+  HeapVector<Member<Node>> recorder_pending;
+  recorder_pending.push_back(&recorder_document);
+  while (!recorder_pending.empty()) {
+    Node& recorder_node = *recorder_pending.back();
+    recorder_pending.pop_back();
+    for (Node* recorder_child = recorder_node.lastChild(); recorder_child;
+         recorder_child = recorder_child->previousSibling()) {
+      recorder_pending.push_back(recorder_child);
+    }
+    Element* recorder_element = DynamicTo<Element>(recorder_node);
+    if (!recorder_element) {
+      continue;
+    }
+    if (ShadowRoot* recorder_hosted_root = recorder_element->GetShadowRoot()) {
+      recorder_pending.push_back(recorder_hosted_root);
+    }
+    if (!recorder_element->IsTextControl()) {
+      continue;
+    }
+    if (recorder_text_control_count >=
+        kRecorderMaximumInteractionTextControls) {
+      recorder_truncated = true;
+      break;
+    }
+    auto& recorder_control = To<TextControlElement>(*recorder_element);
+    const String recorder_value = recorder_control.Value();
+    const int recorder_value_length =
+        static_cast<int>(recorder_value.length());
+    const bool recorder_value_truncated =
+        recorder_value_length > kRecorderMaximumInteractionValueLength;
+    const String recorder_recorded_value =
+        recorder_value_truncated
+            ? recorder_value.substr(0, kRecorderMaximumInteractionValueLength)
+            : recorder_value;
+    a11y_recorder::RecordBlinkInteractionCheckpointTextControl(
+        recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token, recorder_text_control_count,
+        recorder_control.GetDomNodeId(),
+        recorder_control.FormControlTypeAsString().Utf8(),
+        recorder_recorded_value.Utf8(), recorder_value_length,
+        recorder_value_truncated,
+        static_cast<int>(recorder_control.selectionStart()),
+        static_cast<int>(recorder_control.selectionEnd()),
+        recorder_control.selectionDirection().Utf8());
+    ++recorder_text_control_count;
+  }
+  a11y_recorder::CompleteBlinkInteractionCheckpoint(
+      recorder_checkpoint_sequence, recorder_document_node_id,
+      recorder_document_token, recorder_text_control_count,
+      recorder_truncated, kRecorderMaximumInteractionTextControls);
+}
+
+"""
+BLINK_INTERACTION_CHECKPOINT_INCLUDES = (
+    '#include "third_party/blink/renderer/core/css/selector_checker.h"',
+    '#include "third_party/blink/renderer/core/editing/frame_selection.h"',
+    '#include "third_party/blink/renderer/core/editing/position.h"',
+    '#include "third_party/blink/renderer/core/html/forms/'
+    'text_control_element.h"',
+)
+# The interaction checkpoint follows each layout checkpoint as well. The
+# layout helper opens an unnamed namespace, so the declaration of the blink
+# scope helper is placed ahead of it.
+BLINK_LAYOUT_INTERACTION_CHECKPOINT_DECLARATION = """\
+// Defined in document.cc; records the interaction state immediately after the
+// layout checkpoint it follows.
+void RecorderRecordInteractionCheckpoint(Document& recorder_document,
+                                         uint64_t recorder_source_sequence,
+                                         const char* recorder_source_channel,
+                                         const char* recorder_reason);
 
 """
 BLINK_DOM_CHECKPOINT_DECLARATION = """\
@@ -3384,11 +3729,30 @@ def patch_blink_document(path: Path) -> None:
     text = add_includes_after(
         text, BLINK_BRIDGE_INCLUDE, BLINK_DOM_CHECKPOINT_INCLUDES, path
     )
+    text = add_includes_after(
+        text, BLINK_BRIDGE_INCLUDE, BLINK_INTERACTION_CHECKPOINT_INCLUDES, path
+    )
+    # A tree patched for protocol 0.28 holds a DOM helper that does not
+    # follow its checkpoint with an interaction checkpoint.
+    if LEGACY_SHADOW_TREE_BLINK_DOM_CHECKPOINT_HELPER in text:
+        text = replace_once(
+            text,
+            LEGACY_SHADOW_TREE_BLINK_DOM_CHECKPOINT_HELPER,
+            BLINK_DOM_CHECKPOINT_HELPER,
+            path,
+        )
     text = insert_before_once(
         text,
         "void Document::FinishedParsing() {\n",
         BLINK_DOM_CHECKPOINT_HELPER,
         BLINK_DOM_CHECKPOINT_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        "void Document::FinishedParsing() {\n",
+        BLINK_INTERACTION_CHECKPOINT_HELPER,
+        BLINK_INTERACTION_CHECKPOINT_HELPER_MARKER,
         path,
     )
     if BLINK_DOM_CHECKPOINT_HOOK not in text:
@@ -6165,6 +6529,9 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_document_token, recorder_node_count, recorder_truncated,
       kRecorderMaximumLayoutCheckpointNodes, recorder_pseudo_element_count,
       recorder_shadow_root_count);
+  RecorderRecordInteractionCheckpoint(*recorder_document,
+                                      recorder_checkpoint_sequence,
+                                      "browser.layout", "rendering-update");
 }
 
 }  // namespace
@@ -6186,9 +6553,12 @@ BLINK_LAYOUT_STYLE_PROPERTY_ARRAY = (
     )
     + "};\n"
 )
-BLINK_LAYOUT_CHECKPOINT_HELPER = BLINK_LAYOUT_CHECKPOINT_HELPER.replace(
-    "@@RECORDER_LAYOUT_STYLE_PROPERTY_ARRAY@@\n",
-    BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
+BLINK_LAYOUT_CHECKPOINT_HELPER = (
+    BLINK_LAYOUT_INTERACTION_CHECKPOINT_DECLARATION
+    + BLINK_LAYOUT_CHECKPOINT_HELPER.replace(
+        "@@RECORDER_LAYOUT_STYLE_PROPERTY_ARRAY@@\n",
+        BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
+    )
 )
 BLINK_LAYOUT_STYLE_PROPERTY_ARRAY_PATTERN = re.compile(
     r"constexpr CSSPropertyID kRecorderLayoutStyleProperties\[\] = \{\n"
@@ -6266,6 +6636,12 @@ def replace_layout_checkpoint_helper(text: str, path: Path) -> str:
             f"{path}: expected exactly one layout checkpoint helper anchor"
         )
     start = text.rfind("namespace {\n", 0, end)
+    # A helper written for protocol 0.29 or later is preceded by the
+    # declaration of the interaction checkpoint, which belongs to the region.
+    if start >= 0 and text[:start].endswith(
+        BLINK_LAYOUT_INTERACTION_CHECKPOINT_DECLARATION
+    ):
+        start -= len(BLINK_LAYOUT_INTERACTION_CHECKPOINT_DECLARATION)
     if (
         start < 0
         or BLINK_LAYOUT_CHECKPOINT_HELPER_MARKER not in text[start:end]

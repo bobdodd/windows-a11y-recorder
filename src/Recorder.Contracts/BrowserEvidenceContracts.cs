@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.28";
+    public const string CurrentVersion = "0.29";
 }
 
 public static class BrowserEvidenceChannels
@@ -63,6 +63,12 @@ public static class BrowserEvidenceEventTypes
     public const string TextControlValueChanged = "text-control-value-changed";
     public const string ActiveDescendantReferenceSet =
         "active-descendant-reference-set";
+    public const string InteractionCheckpointStarted =
+        "interaction-checkpoint-started";
+    public const string InteractionCheckpointTextControl =
+        "interaction-checkpoint-text-control";
+    public const string InteractionCheckpointCompleted =
+        "interaction-checkpoint-completed";
     public const string LayoutCheckpointStarted = "layout-checkpoint-started";
     public const string LayoutCheckpointNode = "layout-checkpoint-node";
     public const string LayoutCheckpointCompleted = "layout-checkpoint-completed";
@@ -619,6 +625,56 @@ public sealed record BrowserActiveDescendantReferenceSetPayload(
     int ReferencedNodeId,
     BrowserScriptLocation? Location,
     BrowserExecutionWorld? World);
+
+// Interaction checkpoint records report the interaction state Blink held for a
+// document immediately after a DOM or layout checkpoint completed, read
+// without requesting any lifecycle update. SourceCheckpointId names that
+// checkpoint and SourceChannel its channel. Node identities are Blink DOM node
+// ids. FocusedNodeId is the element Blink holds as focused, which may be inside
+// a shadow tree, and is not retargeted. The selection positions are null when
+// SelectionType is "none".
+public sealed record BrowserInteractionCheckpointStartedPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    string SourceCheckpointId,
+    string SourceChannel,
+    string Reason,
+    bool DocumentHasFocus,
+    int? FocusedNodeId,
+    bool FocusVisible,
+    int? ActiveDescendantNodeId,
+    string LastFocusType,
+    string SelectionType,
+    int? AnchorNodeId,
+    int? AnchorOffset,
+    int? FocusNodeId,
+    int? FocusOffset,
+    bool Directional,
+    int MaximumTextControls,
+    int MaximumValueLength);
+
+// Records one text control of an interaction checkpoint in composed-tree
+// order. The value is bounded to the start record's MaximumValueLength UTF-16
+// code units; ValueLength reports the full length.
+public sealed record BrowserInteractionCheckpointTextControlPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    int TextControlIndex,
+    int NodeId,
+    string ControlType,
+    string Value,
+    int ValueLength,
+    bool ValueTruncated,
+    int SelectionStart,
+    int SelectionEnd,
+    string SelectionDirection);
+
+public sealed record BrowserInteractionCheckpointCompletedPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    int TextControlCount,
+    bool Truncated,
+    int MaximumTextControls);
 
 // Layout checkpoint records report the geometry and a defined list of computed
 // styles Blink already held for a document once a rendering update reached the

@@ -1,7 +1,7 @@
 namespace Recorder.Tests;
 
-// The JSON the bridge writes for each browser.interaction record in protocol
-// 0.24, shared by the ingest and archive tests so both check the same shapes.
+// The JSON the bridge writes for each browser.interaction record in protocols
+// 0.24 and 0.29, shared by the ingest and archive tests so both check the same shapes.
 internal static class BrowserInteractionPayloads
 {
     private const string ScriptContextJson = """
@@ -190,8 +190,87 @@ internal static class BrowserInteractionPayloads
         }
         """;
 
+    // A snapshot taken after a layout checkpoint while a listbox holds focus
+    // and names an active descendant.
+    public static readonly string LayoutCheckpointStarted = $$"""
+        {
+          "context": {{UserContextJson}},
+          "checkpointId": "interaction-checkpoint-7",
+          "sourceCheckpointId": "layout-checkpoint-12",
+          "sourceChannel": "browser.layout",
+          "reason": "rendering-update",
+          "documentHasFocus": true,
+          "focusedNodeId": 44,
+          "focusVisible": false,
+          "activeDescendantNodeId": 52,
+          "lastFocusType": "script",
+          "selectionType": "none",
+          "anchorNodeId": null,
+          "anchorOffset": null,
+          "focusNodeId": null,
+          "focusOffset": null,
+          "directional": false,
+          "maximumTextControls": 512,
+          "maximumValueLength": 4096
+        }
+        """;
+
+    // A snapshot taken when parsing finished, before anything was focused.
+    public static readonly string DomCheckpointStarted = $$"""
+        {
+          "context": {{UserContextJson}},
+          "checkpointId": "interaction-checkpoint-1",
+          "sourceCheckpointId": "dom-checkpoint-3",
+          "sourceChannel": "browser.dom",
+          "reason": "finished-parsing",
+          "documentHasFocus": false,
+          "focusedNodeId": null,
+          "focusVisible": false,
+          "activeDescendantNodeId": null,
+          "lastFocusType": "none",
+          "selectionType": "caret",
+          "anchorNodeId": 21,
+          "anchorOffset": 0,
+          "focusNodeId": 21,
+          "focusOffset": 0,
+          "directional": false,
+          "maximumTextControls": 512,
+          "maximumValueLength": 4096
+        }
+        """;
+
+    public static readonly string CheckpointTextControl = $$"""
+        {
+          "context": {{UserContextJson}},
+          "checkpointId": "interaction-checkpoint-7",
+          "textControlIndex": 0,
+          "nodeId": 47,
+          "controlType": "text",
+          "value": "set by script",
+          "valueLength": 13,
+          "valueTruncated": false,
+          "selectionStart": 13,
+          "selectionEnd": 13,
+          "selectionDirection": "none"
+        }
+        """;
+
+    public static readonly string CheckpointCompleted = $$"""
+        {
+          "context": {{UserContextJson}},
+          "checkpointId": "interaction-checkpoint-7",
+          "textControlCount": 1,
+          "truncated": false,
+          "maximumTextControls": 512
+        }
+        """;
+
     public static IEnumerable<(string EventType, string Json)> All()
     {
+        yield return ("interaction-checkpoint-started", LayoutCheckpointStarted);
+        yield return ("interaction-checkpoint-started", DomCheckpointStarted);
+        yield return ("interaction-checkpoint-text-control", CheckpointTextControl);
+        yield return ("interaction-checkpoint-completed", CheckpointCompleted);
         yield return ("focus-changed", ScriptFocusChanged);
         yield return ("focus-changed", KeyboardFocusChanged);
         yield return ("focus-changed", FocusCleared);

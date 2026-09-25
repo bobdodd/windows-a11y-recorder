@@ -12,6 +12,12 @@ Protocol 0.28 extends the traversal to shadow trees and pseudo-elements. The
 [shadow DOM and pseudo-element evidence model](shadow-dom-evidence-model.md)
 specifies the added members and records.
 
+Protocol 0.29 follows each layout checkpoint with a snapshot of the document's
+focus, selection, active descendant, and text-control state, named by the
+checkpoint's identity and recorded in the same synchronous call. The
+[interaction-state checkpoint evidence model](interaction-state-checkpoint-evidence-model.md)
+specifies those records.
+
 The records are evidence. The recorder does not interpret them, compare them
 with any expectation, or flag any value.
 
