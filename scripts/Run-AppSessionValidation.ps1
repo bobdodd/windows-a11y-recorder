@@ -127,6 +127,21 @@ public static class AppSessionInput
     public static extern bool SetForegroundWindow(IntPtr window);
 
     [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attach, uint attachTo, bool doAttach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
@@ -149,6 +164,35 @@ public static class AppSessionInput
     public static void EnablePerMonitorDpiAwareness()
     {
         SetProcessDpiAwarenessContext(new IntPtr(-4));
+    }
+
+    // Windows only lets the process that owns the foreground move it, so this
+    // attaches to that window's input queue for the call. It sends no input,
+    // so nothing extra reaches the recorder's input channel.
+    public static bool BringToForeground(IntPtr window)
+    {
+        if (IsIconic(window))
+        {
+            ShowWindow(window, 9);
+        }
+        uint unused;
+        uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out unused);
+        uint currentThread = GetCurrentThreadId();
+        bool attached = foregroundThread != 0 && foregroundThread != currentThread &&
+            AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            BringWindowToTop(window);
+            SetForegroundWindow(window);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+        return GetForegroundWindow() == window;
     }
 
     public static uint GetRootWindowProcessAt(int x, int y)
@@ -682,19 +726,24 @@ try {
         throw "The app launched Chromium with a DevTools debugging port."
     }
 
+    # The Chromium top-level window is not keyboard focusable through UI
+    # Automation, so SetFocus on it throws. The window is brought to the
+    # foreground through Win32 instead, retried while Windows settles.
     $chromiumHandle = [IntPtr] $chromiumWindow.Current.NativeWindowHandle
-    $null = [AppSessionInput]::SetForegroundWindow($chromiumHandle)
-    $chromiumWindow.SetFocus()
-    Start-Sleep -Milliseconds 500
-    $foregroundProcessId = [uint32] 0
-    $null = [AppSessionInput]::GetWindowThreadProcessId(
-        [AppSessionInput]::GetForegroundWindow(),
-        [ref] $foregroundProcessId
-    )
-    if (@($chromiumProcesses | ForEach-Object { [int] $_.ProcessId }) -notcontains
-        [int] $foregroundProcessId) {
-        throw "The instrumented Chromium window could not be brought to the foreground."
+    $chromiumIdsForForeground = @($chromiumProcesses | ForEach-Object { [int] $_.ProcessId })
+    Wait-Until -TimeoutSeconds 10 -Failure (
+        "The instrumented Chromium window could not be brought to the foreground."
+    ) -Condition {
+        $null = [AppSessionInput]::BringToForeground($chromiumHandle)
+        Start-Sleep -Milliseconds 300
+        $foregroundProcessId = [uint32] 0
+        $null = [AppSessionInput]::GetWindowThreadProcessId(
+            [AppSessionInput]::GetForegroundWindow(),
+            [ref] $foregroundProcessId
+        )
+        $chromiumIdsForForeground -contains [int] $foregroundProcessId
     }
+    Start-Sleep -Milliseconds 500
 
     $buttonElement = Find-ByNameAndType $chromiumWindow "Record app session click" (
         [System.Windows.Automation.ControlType]::Button

@@ -33,7 +33,10 @@ interaction consistently.
    Chromium with the recorder bootstrap switch and without a debugging port.
 6. Brings Chromium to the foreground, reads the screen rectangles of the three
    controls from UI Automation, and confirms that no other window covers
-   them.
+   them. The foreground change uses Win32 calls, attaching to the input
+   queue of the current foreground window for the call, because the
+   Chromium top-level window is not keyboard focusable through UI Automation
+   and `SetFocus` on it fails. No input is sent to make the change.
 7. Injects Windows input with `SendInput`: a click on the button, a click on
    the text field, the keys `a`, `1`, `1`, `y`, and Tab. Every injected input
    carries the extra-information value `0x41313159`, which the raw input
