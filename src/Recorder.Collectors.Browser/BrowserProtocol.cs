@@ -166,6 +166,22 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.InteractionCheckpointCompleted) =>
                 payload.Deserialize<BrowserInteractionCheckpointCompletedPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Presentation,
+                BrowserEvidenceEventTypes.PresentationRequested) =>
+                payload.Deserialize<BrowserPresentationRequestedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Presentation,
+                BrowserEvidenceEventTypes.PresentationNotSwapped) =>
+                payload.Deserialize<BrowserPresentationNotSwappedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Presentation,
+                BrowserEvidenceEventTypes.PresentationSwapped) =>
+                payload.Deserialize<BrowserPresentationSwappedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Presentation,
+                BrowserEvidenceEventTypes.PresentationFeedback) =>
+                payload.Deserialize<BrowserPresentationFeedbackPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Layout,
                 BrowserEvidenceEventTypes.LayoutCheckpointStarted) =>
                 payload.Deserialize<BrowserLayoutCheckpointStartedPayload>(
@@ -273,6 +289,7 @@ internal static class BrowserProtocol
                 BrowserEvidenceChannels.Cookie or
                 BrowserEvidenceChannels.Interaction or
                 BrowserEvidenceChannels.Layout or
+                BrowserEvidenceChannels.Presentation or
                 BrowserEvidenceChannels.Network,
                 BrowserEvidenceEventTypes.Omission) =>
                 payload.Deserialize<BrowserOmissionPayload>(JsonOptions)

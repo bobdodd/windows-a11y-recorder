@@ -20,6 +20,22 @@ from the product version.
 
 ### Added
 
+- Record rendered-frame correlation evidence. Protocol 0.30 follows every
+  layout checkpoint with a presentation request on the compositor of the
+  frame's local-root widget, and records on the `browser.presentation`
+  channel whether a compositor frame carried the following commit, its frame
+  sink and frame token, and the presentation time and flags viz reported for
+  it, or that no frame was produced and why. Queuing the request never asks
+  for a commit or a frame. WGC desktop frames now record, per monitor, the
+  time the Windows compositor rendered the copied image and the time the
+  recorder dequeued it, on the session clock. The Blink verifier checks the
+  joins, outcomes, and frame-token order, and requires the interaction
+  fixture's held-focus layout checkpoint to be presented; the app-session
+  verifier checks composition times against dequeue times, requires a
+  candidate captured frame for at least one presented checkpoint, and reports
+  the measured distributions. See
+  [the rendered-frame correlation evidence model](docs/architecture/rendered-frame-correlation-evidence-model.md).
+  Windows validation runs have not yet been made.
 - Record interaction state at each checkpoint. Protocol 0.29 follows every DOM
   checkpoint and every layout checkpoint with a snapshot on the
   `browser.interaction` channel of whether the document has focus, the element

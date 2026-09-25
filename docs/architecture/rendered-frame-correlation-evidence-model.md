@@ -1,6 +1,6 @@
 # Rendered-Frame Correlation Evidence Model
 
-Status: design, not yet implemented. Proposed as protocol 0.30.
+Status: implemented as protocol 0.30. Windows validation runs pending.
 
 ## Purpose
 
@@ -113,20 +113,32 @@ does not record an outcome it did not observe.
 ### Recorder side
 
 `WindowsGraphicsCaptureBackend.CopyLatestFrame` calls
-`Direct3D11CaptureFramePool.TryGetNextFrame()` on a pool of two buffers and
-does not read the frame's timestamp. It is extended to return, per monitor,
-the frame's `SystemRelativeTime` and the number of attempts before a frame was
-available. The desktop frame record gains a `monitorFrames` array with, for
-each monitor:
+`Direct3D11CaptureFramePool.TryGetNextFrame()` on a pool of two buffers,
+retrying up to 25 times at 10 ms intervals, and previously did not read the
+frame's timestamp. It now returns, per monitor, the frame's
+`SystemRelativeTime`, the session time at which the pool handed the frame
+over, and the number of attempts. The desktop frame record gains a
+`monitorFrames` array with, for each monitor:
 
-- the monitor handle and bounds;
+- `monitorHandle` and the monitor bounds `x`, `y`, `width`, and `height`;
 - `systemRelativeTimeTicks`, the raw `TimeSpan` ticks (100 ns units);
-- `compositedAtNanoseconds`, the session time derived from it; and
+- `compositedAtNanoseconds`, the session time derived from it as
+  `systemRelativeTimeTicks` times 100 minus the session origin counter value
+  scaled to nanoseconds (`CompositionClock` in `Recorder.Contracts`);
+- `dequeuedAtNanoseconds`, the session time just after `TryGetNextFrame`
+  returned the frame; and
 - `tryGetNextFrameAttempts`.
 
-The existing `capturedAt` poll time is unchanged. A frame captured by the GDI
-fallback has no composition time; its `monitorFrames` entries carry null
-composition fields and the existing quality flags.
+The existing record time (`capturedAt`) is unchanged. It is read before the
+pixel buffer is allocated and before the dequeue loop, which can wait up to
+250 ms, so a frame composed after `capturedAt` is possible and legitimate. The
+dequeue time is recorded because it, not `capturedAt`, is an upper bound on
+the composition time.
+
+A frame captured by the GDI fallback has no composition time. Its
+`monitorFrames` entries state each monitor and leave the timing fields null.
+Archives written before this slice omit `monitorFrames`; the archive validator
+accepts that.
 
 Recording the timestamp does not change which WGC frame is copied. The pool
 returns the oldest queued frame, so a captured image can be older than the
@@ -162,11 +174,17 @@ browser frame and widget identities without changing these records.
 
 ### Presentation requested
 
-- `sourceFrameNumber`: `LayerTreeHost::SourceFrameNumber()` when queued.
-- `isMainFrameWidget`: whether the local root is the outermost main frame.
+- `sourceFrameNumber`: `LayerTreeHost::SourceFrameNumber()` when queued, and
+  null otherwise.
+- `isMainFrameWidget`: `WebFrameWidgetImpl::ForMainFrame()`, null only with
+  `no-widget`.
 - `queued`: true, or false with `notQueuedReason` of `no-widget` or
   `not-compositing`.
-- `ticks`: bridge QPC ticks at queue time.
+- `highResolutionTicks`: `TimeTicks::IsHighResolution()`.
+- `maximumNotSwappedRecords`: the per-request cap on `kept-active` records,
+  16.
+
+The queue time is the record's envelope timestamp.
 
 ### Presentation not swapped
 
@@ -174,7 +192,14 @@ browser frame and widget identities without changing these records.
   `activation-fails`.
 - `action`: `broken` for `swap-fails` and `commit-no-update`, `kept-active`
   otherwise, matching the promise's return value.
-- `ticks`: the timestamp Chromium passed to `DidNotSwap`, converted to QPC.
+- `notSwappedIndex` and `notSwappedCount`: the zero-based index of this
+  record among the request's not-swapped records, and that index plus one.
+- `timestampTicks`: the timestamp Chromium passed to `DidNotSwap`, converted
+  to QPC ticks, and `timestampTimeTicksMicroseconds`, the raw value. Both are
+  null when Chromium passed a null time.
+
+`kept-active` records beyond the cap are not emitted; a `broken` record is
+always emitted.
 
 A `kept-active` record means the promise moved to a later frame, which can
 contain changes made after the checkpoint.
@@ -182,7 +207,9 @@ contain changes made after the checkpoint.
 ### Presentation swapped
 
 - `frameToken`: the compositor frame token from `WillSwap`.
-- `swapTicks`: bridge QPC ticks at `DidSwap`.
+- `notSwappedCount`: the number of not-swapped records before the swap.
+
+The `DidSwap` time is the record's envelope timestamp.
 
 ### Presentation feedback
 
@@ -196,9 +223,26 @@ contain changes made after the checkpoint.
   `swapEndTicks`: the corresponding `FrameTimingDetails` timestamps converted
   to QPC ticks, each null when Chromium reported a null value.
 - `highResolutionTicks`: `TimeTicks::IsHighResolution()`.
+- `notSwappedCount`: the number of not-swapped records before the feedback.
 
-The receiver maps every tick field to session nanoseconds with the existing
-browser clock mapping and carries its uncertainty.
+### Encoding
+
+- Frame tokens, tick values, microsecond values, and the interval are decimal
+  strings, because QPC values and 32-bit unsigned tokens do not all fit the
+  JSON integer range the other bridge fields use. The validator requires frame
+  tokens in 1 to 4294967295 with no leading zeros.
+- `frameSinkId` is the string `client:sink`, each part a 32-bit unsigned
+  decimal.
+- Every tick field is null unless `highResolutionTicks` is true and Chromium
+  reported a nonzero time. A tick field without its raw microsecond value is
+  rejected.
+
+A tick field maps to session time through the envelope of the record that
+carries it: session nanoseconds equal the record's `monotonicNanoseconds`
+plus the difference between the tick value and the record's
+`nativeTimestamp.value`, scaled by the frequency in the process's
+`browser-clock-synchronized` record. The record's
+`timestampUncertaintyNanoseconds` applies.
 
 ## Correlation rules
 
@@ -206,7 +250,8 @@ browser clock mapping and carries its uncertainty.
   and `layoutCheckpointId`. Checkpoint identities are per renderer process.
 - Swap and feedback records join their request by browser instance, renderer
   process, and request identity. Frame tokens are compared only within one
-  `frameSinkId`, using wrap-aware ordering.
+  `frameSinkId`, using wrap-aware ordering. Checkpoints from one rendering
+  update can share a commit and therefore a token.
 - A checkpoint's presentation time joins desktop frames by session time. On
   the monitor that holds the browser window, the candidate frame is the first
   captured frame whose `compositedAtNanoseconds` is at or after the
@@ -269,20 +314,22 @@ animation frames. The verifier requires, for that step's layout checkpoint:
 - one queued `presentation-requested` record joined to it;
 - a `presentation-swapped` record with a nonzero frame token; and
 - a `presentation-feedback` record without the `failure` flag, whose
-  presentation time is after the swap time.
+  presentation time is not before the swap time.
 
 For every request in the archive, the verifier requires that swapped,
 not-swapped, and feedback records join an existing request; that each request
-has at most one terminal outcome; and that frame tokens increase, wrap-aware,
-within each `frameSinkId`. It reports the number of unresolved requests rather than
-failing on them.
+has at most one terminal outcome; and that frame tokens never go backwards,
+wrap-aware, within each `frameSinkId`. It reports the number of unresolved
+requests rather than failing on them.
 
 The application-launched session run records desktop frames alongside the
-browser. Its verifier requires that every WGC frame reports a composition time
-no later than its `capturedAt`, and that at least one presented checkpoint has
-a candidate captured frame under the correlation rule. It reports the
-distribution of `capturedAt` minus composition time, and of candidate
-composition time minus presentation time. Those distributions are
+browser. Its verifier requires that every WGC frame reports, for every
+monitor, a composition time no later than its dequeue time, and that at least
+one presented checkpoint has a candidate captured frame under the correlation
+rule. It reports the distributions of `capturedAt` minus composition time, of
+dequeue time minus composition time, and of candidate composition time minus
+presentation time, and the number of images that needed more than one dequeue
+attempt. Those distributions are
 measurements for review, not pass criteria.
 
 Passing these checks shows that the logger emits the records with the stated

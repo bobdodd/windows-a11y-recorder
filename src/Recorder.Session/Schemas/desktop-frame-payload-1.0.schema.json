@@ -39,6 +39,36 @@
     "backend": { "enum": ["windows-graphics-capture", "gdi-bitblt"] },
     "monitorCount": { "type": ["integer", "null"], "minimum": 0 },
     "fallbackReason": { "type": ["string", "null"] },
-    "gdiFallbackFrameCount": { "type": "integer", "minimum": 0 }
+    "gdiFallbackFrameCount": { "type": "integer", "minimum": 0 },
+    "monitorFrames": {
+      "description": "Per-monitor composition timing. Absent in archives written before it was recorded; timing fields are null for GDI fallback frames.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "monitorHandle",
+          "x",
+          "y",
+          "width",
+          "height",
+          "systemRelativeTimeTicks",
+          "compositedAtNanoseconds",
+          "dequeuedAtNanoseconds",
+          "tryGetNextFrameAttempts"
+        ],
+        "properties": {
+          "monitorHandle": { "type": "integer" },
+          "x": { "type": "integer" },
+          "y": { "type": "integer" },
+          "width": { "type": "integer", "minimum": 1 },
+          "height": { "type": "integer", "minimum": 1 },
+          "systemRelativeTimeTicks": { "type": ["integer", "null"], "minimum": 1 },
+          "compositedAtNanoseconds": { "type": ["integer", "null"] },
+          "dequeuedAtNanoseconds": { "type": ["integer", "null"] },
+          "tryGetNextFrameAttempts": { "type": ["integer", "null"], "minimum": 1 }
+        }
+      }
+    }
   }
 }

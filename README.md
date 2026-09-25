@@ -286,6 +286,15 @@ snapshot reads only state Blink already holds and never forces style or
 layout. The record types and limits are in
 [the interaction-state checkpoint evidence model](docs/architecture/interaction-state-checkpoint-evidence-model.md).
 
+Protocol 0.30 records which compositor frame carried the commit after each
+layout checkpoint, by frame sink and frame token, and when Chromium reported
+that frame presented, or that no frame was produced and why. Desktop frames
+captured through Windows Graphics Capture record, per monitor, when the Windows
+compositor rendered the copied image. The records let a later analysis find
+the captured frames that could show a checkpoint's state; they do not show
+that any captured frame does. The record types and limits are in
+[the rendered-frame correlation evidence model](docs/architecture/rendered-frame-correlation-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.
@@ -364,6 +373,9 @@ Completed:
     [the application-launched session plan](docs/validation/app-launched-session-plan.md).
 21. Record interaction state at each DOM and layout checkpoint, not only its
     changes (protocol 0.29).
+22. Record the compositor frame and presentation time of each layout
+    checkpoint and the composition time of each captured desktop frame
+    (protocol 0.30, pending Windows validation).
 
 Remaining:
 

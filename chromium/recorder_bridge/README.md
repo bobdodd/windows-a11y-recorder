@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.29` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.30` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -369,3 +369,16 @@ selection state, `RecordBlinkInteractionCheckpointTextControl` for each text
 control in composed-tree order, and `CompleteBlinkInteractionCheckpoint`. The
 record types and their limits are described in
 `docs/architecture/interaction-state-checkpoint-evidence-model.md`.
+
+Protocol 0.30 adds rendered-frame correlation. The layout checkpoint helper in
+`local_frame_view.cc` calls `RecorderRequestLayoutPresentation` after
+`CompleteBlinkLayoutCheckpoint` and before the interaction snapshot. It
+resolves the frame's local-root `WebFrameWidgetImpl` and calls the
+`RecorderRequestPresentationEvidence` entry point the integration adds to that
+class, which calls `BeginBlinkPresentationRequest` and, when the request is
+queued, queues a `RecorderPresentationSwapPromise` on the widget's
+`LayerTreeHost`. The promise calls `RecordBlinkPresentationNotSwapped`,
+`RecordBlinkPresentationSwapped`, and, from a presentation callback registered
+on the main thread, `RecordBlinkPresentationFeedback`. The record types are
+described in
+`docs/architecture/rendered-frame-correlation-evidence-model.md`.

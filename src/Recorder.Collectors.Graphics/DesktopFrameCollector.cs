@@ -283,16 +283,18 @@ public sealed class DesktopFrameCollector : ICaptureCollector
 
         var backend = "windows-graphics-capture";
         string[] qualityFlags = ["hardware-composed-wgc"];
+        IReadOnlyList<WindowsGraphicsCaptureBackend.MonitorFrameTiming>? monitorTimings = null;
         if (_windowsGraphicsCapture is not null)
         {
             try
             {
-                _windowsGraphicsCapture.CapturePixels(
+                monitorTimings = _windowsGraphicsCapture.CapturePixels(
                     x,
                     y,
                     width,
                     height,
-                    pixels);
+                    pixels,
+                    _context.Clock.GetElapsedNanoseconds);
             }
             catch (Exception exception) when (!IsFatal(exception))
             {
@@ -300,6 +302,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
                     $"{exception.GetType().Name}: {exception.Message}";
                 _windowsGraphicsCapture.Dispose();
                 _windowsGraphicsCapture = null;
+                monitorTimings = null;
                 CapturePixels(x, y, width, height, pixels);
                 Interlocked.Increment(ref _gdiFallbackFrames);
                 backend = "gdi-bitblt";
@@ -328,6 +331,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
         File.Move(temporaryPath, finalPath);
 
         var completedAt = _context.Clock.GetElapsedNanoseconds();
+        var monitorFrames = DescribeMonitorFrames(monitorTimings);
         EmitFrameEvent(
             "desktop-frame",
             new
@@ -348,11 +352,52 @@ public sealed class DesktopFrameCollector : ICaptureCollector
                 fallbackReason = backend == "gdi-bitblt"
                     ? _windowsGraphicsCaptureFailure
                     : null,
-                gdiFallbackFrameCount = Interlocked.Read(ref _gdiFallbackFrames)
+                gdiFallbackFrameCount = Interlocked.Read(ref _gdiFallbackFrames),
+                monitorFrames
             },
             capturedAt,
             sequence,
             qualityFlags);
+    }
+
+    // One entry per monitor. A WGC frame carries the compositor's render time
+    // for that monitor's copied image; a GDI fallback frame has none, so its
+    // entries state the monitor and leave the timing fields null.
+    private object[] DescribeMonitorFrames(
+        IReadOnlyList<WindowsGraphicsCaptureBackend.MonitorFrameTiming>? timings)
+    {
+        if (timings is null)
+        {
+            try
+            {
+                timings = WindowsGraphicsCaptureBackend.DescribeMonitorsWithoutTiming();
+            }
+            catch (Win32Exception)
+            {
+                return [];
+            }
+        }
+
+        var clock = _context!.Clock;
+        return timings
+            .Select(timing => (object)new
+            {
+                monitorHandle = (long)timing.Handle,
+                x = timing.X,
+                y = timing.Y,
+                width = timing.Width,
+                height = timing.Height,
+                systemRelativeTimeTicks = timing.SystemRelativeTimeTicks,
+                compositedAtNanoseconds = timing.SystemRelativeTimeTicks is { } ticks
+                    ? CompositionClock.SystemRelativeTimeToSessionNanoseconds(
+                        ticks,
+                        clock.OriginTimestamp,
+                        clock.Frequency)
+                    : (long?)null,
+                dequeuedAtNanoseconds = timing.DequeuedAtNanoseconds,
+                tryGetNextFrameAttempts = timing.TryGetNextFrameAttempts
+            })
+            .ToArray();
     }
 
     private static void CapturePixels(

@@ -117,6 +117,11 @@ checkpoint and each layout checkpoint. The record types and their limits are
 described under protocol version 0.29 below and in
 [the interaction-state checkpoint evidence model](interaction-state-checkpoint-evidence-model.md).
 
+Protocol 0.30 records the compositor frame and presentation time of each
+layout checkpoint. The record types are described under protocol version 0.30
+below and in
+[the rendered-frame correlation evidence model](rendered-frame-correlation-evidence-model.md).
+
 ## Process architecture
 
 ```text
@@ -854,7 +859,36 @@ the records. The fixture shows that the logger emits snapshots; it does not
 evaluate the page's focus handling. The full model is in
 [the interaction-state checkpoint evidence model](interaction-state-checkpoint-evidence-model.md).
 
-Live 0.29 connections require an exact protocol-version match.
+Protocol version 0.30 follows each layout checkpoint, after its completion
+record and before its interaction snapshot, with a `presentation-requested`
+record on the `browser.presentation` channel. The layout checkpoint helper
+asks the frame's local-root `WebFrameWidgetImpl` to queue a recorder
+`cc::SwapPromise` on its `LayerTreeHost`; queuing never requests a commit, a
+frame, or a lifecycle update. When the frame has no local-root widget, or the
+widget does not composite, the request states that and nothing is queued.
+The promise then reports:
+
+- `presentation-not-swapped` for each `DidNotSwap`, with the reason and
+  whether the promise was broken (`swap-fails`, `commit-no-update`) or kept
+  for a later frame, capped at 16 kept records per request;
+- `presentation-swapped` at `DidSwap`, with the compositor frame token read
+  in `WillSwap`; and
+- `presentation-feedback` when viz reports presentation of that token, with
+  the presentation time, refresh interval, feedback flags, and the viz
+  receive, draw, and swap times.
+
+Every record carries the document context, the request identity, the layout
+checkpoint identity on the request, and the widget's frame sink identity and
+local-root frame token. Frame tokens, tick values, and microsecond values are
+decimal strings. The Blink validation requires the interaction fixture's
+held-focus layout checkpoint to be queued, swapped with a nonzero token, and
+presented without the `failure` flag no earlier than its swap, and checks the
+joins, single outcome, and frame-token order of every request. The fixture
+shows that the logger emits the records; it does not show what any frame
+displayed. The full model is in
+[the rendered-frame correlation evidence model](rendered-frame-correlation-evidence-model.md).
+
+Live 0.30 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

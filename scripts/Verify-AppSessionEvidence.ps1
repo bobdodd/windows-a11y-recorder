@@ -540,6 +540,150 @@ if ($inputFrames.Count -eq 0) {
     throw "No desktop frame was recorded while the injected input ran."
 }
 
+# Each WGC desktop frame states, per monitor, the time the Windows compositor
+# rendered the copied image and the session time the recorder dequeued it.
+# Each presented browser frame states when viz reported it presented. These
+# checks establish that the composition times are ordered with the dequeue
+# and that at least one presented layout checkpoint has a candidate captured
+# frame: the first image, per monitor, composed at or after the presentation
+# time less the browser clock uncertainty. The reported distributions are
+# measurements for review. They do not show that any captured image displays
+# a checkpoint's content.
+$monitorImages = [System.Collections.Generic.List[object]]::new()
+foreach ($frameRecord in @(
+        $records | Where-Object {
+            $_.channel -eq "graphics.desktop.frames" -and
+            $_.eventType -eq "desktop-frame" -and
+            $_.payload.backend -eq "windows-graphics-capture"
+        })) {
+    if ($null -eq $frameRecord.payload.PSObject.Properties["monitorFrames"] -or
+        @($frameRecord.payload.monitorFrames).Count -eq 0) {
+        throw "WGC desktop frame $($frameRecord.sequence) has no monitor composition times."
+    }
+    foreach ($monitorFrame in @($frameRecord.payload.monitorFrames)) {
+        if ($null -eq $monitorFrame.compositedAtNanoseconds -or
+            $null -eq $monitorFrame.dequeuedAtNanoseconds) {
+            throw "WGC desktop frame $($frameRecord.sequence) has a monitor image without timing."
+        }
+        if ([long] $monitorFrame.compositedAtNanoseconds -gt
+            [long] $monitorFrame.dequeuedAtNanoseconds) {
+            throw (
+                "WGC desktop frame $($frameRecord.sequence) records monitor " +
+                "$($monitorFrame.monitorHandle) as composed after it was dequeued."
+            )
+        }
+        $monitorImages.Add([pscustomobject]@{
+                Monitor = [long] $monitorFrame.monitorHandle
+                CapturedAt = [long] $frameRecord.monotonicNanoseconds
+                ComposedAt = [long] $monitorFrame.compositedAtNanoseconds
+                DequeuedAt = [long] $monitorFrame.dequeuedAtNanoseconds
+                Attempts = [int] $monitorFrame.tryGetNextFrameAttempts
+            })
+    }
+}
+if ($monitorImages.Count -eq 0) {
+    throw "No WGC desktop frame recorded monitor composition times."
+}
+
+$clockFrequencies = @{}
+foreach ($clockRecord in @(
+        $records | Where-Object { $_.eventType -eq "browser-clock-synchronized" })) {
+    $clockFrequencies[[string] $clockRecord.payload.clockMappingId] =
+        [long] $clockRecord.payload.monotonicFrequency
+}
+
+# A presentation time is mapped to the session clock through the feedback
+# record's own envelope, which carries both the bridge ticks and the session
+# time the receiver assigned to them.
+$presentations = [System.Collections.Generic.List[object]]::new()
+foreach ($feedbackRecord in @(
+        $records | Where-Object {
+            $_.channel -eq "browser.presentation" -and
+            $_.eventType -eq "presentation-feedback" -and
+            $null -ne $_.payload.presentedTicks -and
+            $_.payload.flags -notcontains "failure"
+        })) {
+    $mappingId = [string] $feedbackRecord.clockMappingId
+    if (-not $clockFrequencies.ContainsKey($mappingId)) {
+        throw "Presentation feedback uses clock mapping $mappingId, which was never synchronized."
+    }
+    $presentedAt = [long] $feedbackRecord.monotonicNanoseconds + [long] [Math]::Round(
+        ([long] $feedbackRecord.payload.presentedTicks -
+            [long] $feedbackRecord.nativeTimestamp.value) * 1000000000.0 /
+            $clockFrequencies[$mappingId])
+    $uncertainty = 0
+    if ($null -ne $feedbackRecord.timestampUncertaintyNanoseconds) {
+        $uncertainty = [long] $feedbackRecord.timestampUncertaintyNanoseconds
+    }
+    $presentations.Add([pscustomobject]@{
+            RequestId = $feedbackRecord.payload.requestId
+            PresentedAt = $presentedAt
+            Uncertainty = $uncertainty
+        })
+}
+if ($presentations.Count -eq 0) {
+    throw "No layout checkpoint reported presentation feedback without the failure flag."
+}
+
+$imagesByMonitor = @(
+    $monitorImages | Group-Object Monitor | ForEach-Object {
+        [pscustomobject]@{
+            Monitor = $_.Name
+            Images = @($_.Group | Sort-Object ComposedAt)
+        }
+    }
+)
+$candidateLags = [System.Collections.Generic.List[double]]::new()
+$presentationsWithCandidate = 0
+foreach ($presentation in $presentations) {
+    $hasCandidate = $false
+    foreach ($monitorGroup in $imagesByMonitor) {
+        $candidate = @(
+            $monitorGroup.Images | Where-Object {
+                $_.ComposedAt -ge ($presentation.PresentedAt - $presentation.Uncertainty)
+            } | Select-Object -First 1
+        )
+        if ($candidate.Count -eq 1) {
+            $hasCandidate = $true
+            $candidateLags.Add(($candidate[0].ComposedAt - $presentation.PresentedAt) / 1000000.0)
+        }
+    }
+    if ($hasCandidate) {
+        $presentationsWithCandidate++
+    }
+}
+if ($presentationsWithCandidate -eq 0) {
+    throw "No presented layout checkpoint has a candidate captured desktop frame."
+}
+
+function Get-Distribution {
+    param([double[]] $Values)
+
+    if ($Values.Count -eq 0) {
+        return "none"
+    }
+    $sorted = @($Values | Sort-Object)
+    $median = $sorted[[int][Math]::Floor(($sorted.Count - 1) / 2)]
+    (
+        "min $([Math]::Round($sorted[0], 2)) ms, median " +
+        "$([Math]::Round($median, 2)) ms, max " +
+        "$([Math]::Round($sorted[$sorted.Count - 1], 2)) ms, n $($sorted.Count)"
+    )
+}
+
+[pscustomobject]@{
+    WgcMonitorImages = $monitorImages.Count
+    Monitors = $imagesByMonitor.Count
+    CapturedAtMinusComposition = Get-Distribution @(
+        $monitorImages | ForEach-Object { ($_.CapturedAt - $_.ComposedAt) / 1000000.0 })
+    DequeueMinusComposition = Get-Distribution @(
+        $monitorImages | ForEach-Object { ($_.DequeuedAt - $_.ComposedAt) / 1000000.0 })
+    ImagesNeedingMoreThanOneAttempt = @($monitorImages | Where-Object { $_.Attempts -gt 1 }).Count
+    PresentedCheckpoints = $presentations.Count
+    PresentedCheckpointsWithCandidate = $presentationsWithCandidate
+    CandidateCompositionMinusPresentation = Get-Distribution $candidateLags.ToArray()
+} | Format-List
+
 function Get-Milliseconds {
     param([long] $From, [long] $To)
 
@@ -581,5 +725,5 @@ Write-Host (
     "App session collectors, fixture navigation, renderer cookie, network, " +
     "DOM, layout, accessibility, and listener evidence, injected input, " +
     "trusted dispatch, focus, text edits, UI Automation focus, foreground " +
-    "window, and desktop frame evidence verified."
+    "window, desktop frame, and rendered-frame timing evidence verified."
 )

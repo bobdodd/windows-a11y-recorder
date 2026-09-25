@@ -26,6 +26,7 @@ internal static class EventPayloadValidator
         "browser.cookie",
         "browser.interaction",
         "browser.layout",
+        "browser.presentation",
         "browser.network"
     ];
 
@@ -242,6 +243,18 @@ internal static class EventPayloadValidator
             case ("browser.layout", "layout-checkpoint-completed"):
                 ValidateBrowserLayoutCheckpointCompleted(payload, issues, lineNumber);
                 break;
+            case ("browser.presentation", "presentation-requested"):
+                ValidateBrowserPresentationRequested(payload, issues, lineNumber);
+                break;
+            case ("browser.presentation", "presentation-not-swapped"):
+                ValidateBrowserPresentationNotSwapped(payload, issues, lineNumber);
+                break;
+            case ("browser.presentation", "presentation-swapped"):
+                ValidateBrowserPresentationSwapped(payload, issues, lineNumber);
+                break;
+            case ("browser.presentation", "presentation-feedback"):
+                ValidateBrowserPresentationFeedback(payload, issues, lineNumber);
+                break;
             case ("browser.network", "request-will-be-sent"):
                 ValidateBrowserNetworkRequestWillBeSent(payload, issues, lineNumber);
                 break;
@@ -301,6 +314,7 @@ internal static class EventPayloadValidator
             case ("browser.cookie", "collector-omission"):
             case ("browser.interaction", "collector-omission"):
             case ("browser.layout", "collector-omission"):
+            case ("browser.presentation", "collector-omission"):
             case ("browser.network", "collector-omission"):
                 ValidateBrowserOmission(payload, issues, lineNumber);
                 break;
@@ -469,7 +483,8 @@ internal static class EventPayloadValidator
     private static void ValidateDesktopFrame(
         JsonElement payload,
         ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        long line)
+    {
         ValidateShape(
             payload,
             [
@@ -487,10 +502,116 @@ internal static class EventPayloadValidator
                 RequiredEnum("backend", "windows-graphics-capture", "gdi-bitblt"),
                 NullableInteger("monitorCount", nonnegative: true),
                 NullableString("fallbackReason"),
-                RequiredInteger("gdiFallbackFrameCount", nonnegative: true)
+                RequiredInteger("gdiFallbackFrameCount", nonnegative: true),
+                OptionalObjectArray("monitorFrames")
             ],
             issues,
             line);
+        ValidateDesktopMonitorFrames(payload, issues, line);
+    }
+
+    // Archives written before per-monitor composition timing omit
+    // monitorFrames. When it is present, a WGC frame states the compositor
+    // time of every monitor's copied image and a GDI fallback frame states
+    // none, because GDI has no composition time.
+    private static void ValidateDesktopMonitorFrames(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty("monitorFrames", out var monitorFrames) ||
+            monitorFrames.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var isWindowsGraphicsCapture =
+            payload.TryGetProperty("backend", out var backend) &&
+            backend.ValueKind == JsonValueKind.String &&
+            backend.GetString() == "windows-graphics-capture";
+        var index = 0;
+        foreach (var monitorFrame in monitorFrames.EnumerateArray())
+        {
+            var pointer = $"events.ndjson#/payload/monitorFrames/{index}";
+            index++;
+            if (monitorFrame.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            ValidateShape(
+                monitorFrame,
+                [
+                    RequiredInteger("monitorHandle"),
+                    RequiredInteger("x"),
+                    RequiredInteger("y"),
+                    RequiredInteger("width", positive: true),
+                    RequiredInteger("height", positive: true),
+                    NullableInteger("systemRelativeTimeTicks", positive: true),
+                    NullableInteger("compositedAtNanoseconds"),
+                    NullableInteger("dequeuedAtNanoseconds"),
+                    NullableInteger("tryGetNextFrameAttempts", positive: true)
+                ],
+                issues,
+                line,
+                pointer);
+
+            var timed = new[]
+            {
+                "systemRelativeTimeTicks",
+                "compositedAtNanoseconds",
+                "dequeuedAtNanoseconds",
+                "tryGetNextFrameAttempts"
+            }.Select(name =>
+                monitorFrame.TryGetProperty(name, out var value) &&
+                value.ValueKind != JsonValueKind.Null)
+            .ToArray();
+            var expected = isWindowsGraphicsCapture;
+            if (timed.Any(present => present != expected))
+            {
+                AddError(
+                    issues,
+                    "desktop-monitor-frame-timing-inconsistent",
+                    pointer,
+                    expected
+                        ? "A Windows Graphics Capture frame must state the " +
+                            "composition time and dequeue attempts of every monitor image."
+                        : "A GDI fallback frame has no composition time, so its " +
+                            "monitor entries must leave the timing fields null.",
+                    line);
+            }
+
+            if (monitorFrame.TryGetProperty("compositedAtNanoseconds", out var composedAt) &&
+                monitorFrame.TryGetProperty("dequeuedAtNanoseconds", out var dequeuedAt) &&
+                IsInteger(composedAt) &&
+                IsInteger(dequeuedAt) &&
+                composedAt.GetInt64() > dequeuedAt.GetInt64())
+            {
+                AddError(
+                    issues,
+                    "desktop-monitor-frame-composed-after-dequeue",
+                    pointer,
+                    "The monitor image is recorded as composed after the " +
+                        "recorder dequeued it.",
+                    line);
+            }
+        }
+
+        if (isWindowsGraphicsCapture &&
+            payload.TryGetProperty("monitorCount", out var monitorCount) &&
+            monitorCount.ValueKind == JsonValueKind.Number &&
+            monitorCount.TryGetInt64(out var count) &&
+            count != monitorFrames.GetArrayLength())
+        {
+            AddError(
+                issues,
+                "desktop-monitor-frame-count-inconsistent",
+                "events.ndjson#/payload/monitorFrames",
+                $"The frame records {monitorFrames.GetArrayLength()} monitor " +
+                    $"images for {count} captured monitors.",
+                line);
+        }
+    }
 
     private static void ValidateAudioStream(
         JsonElement payload,
@@ -2531,6 +2652,356 @@ internal static class EventPayloadValidator
         }
     }
 
+    // Presentation records. Frame tokens are unsigned 32-bit values, tick and
+    // microsecond fields are decimal strings because they exceed the range a
+    // JSON number carries exactly, and the frame sink is "clientId:sinkId".
+    private static readonly string[] PresentationFeedbackFlagNames =
+        ["vsync", "hw-clock", "hw-completion", "zero-copy", "failure"];
+
+    private static readonly string[] PresentationTickProperties =
+    [
+        "presentedTicks",
+        "receivedCompositorFrameTicks",
+        "drawStartTicks",
+        "swapStartTicks",
+        "swapEndTicks"
+    ];
+
+    private static bool IsPositiveDecimal(string? value, ulong maximum) =>
+        value is not null &&
+        value.Length > 0 &&
+        value[0] != '0' &&
+        value.AsSpan().IndexOfAnyExceptInRange('0', '9') < 0 &&
+        ulong.TryParse(value, out var number) &&
+        number <= maximum;
+
+    private static bool IsNonnegativeDecimal(string? value) =>
+        value is not null &&
+        value.Length > 0 &&
+        (value == "0" || value[0] != '0') &&
+        value.AsSpan().IndexOfAnyExceptInRange('0', '9') < 0 &&
+        long.TryParse(value, out _);
+
+    private static bool IsFrameSinkIdentity(string? value)
+    {
+        if (value is null)
+        {
+            return false;
+        }
+        var separator = value.IndexOf(':');
+        return separator > 0 &&
+            IsNonnegativeDecimal(value[..separator]) &&
+            uint.TryParse(value[..separator], out _) &&
+            IsNonnegativeDecimal(value[(separator + 1)..]) &&
+            uint.TryParse(value[(separator + 1)..], out _);
+    }
+
+    private static PropertyRule RequiredFrameSinkId(string name) =>
+        new(
+            name,
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsFrameSinkIdentity(value.GetString()),
+            "must be a frame sink identity written clientId:sinkId");
+
+    private static PropertyRule NullableFrameSinkId(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsFrameSinkIdentity(value.GetString()),
+            "must be a frame sink identity written clientId:sinkId, or null");
+
+    private static PropertyRule RequiredFrameToken(string name) =>
+        new(
+            name,
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsPositiveDecimal(value.GetString(), uint.MaxValue),
+            "must be a positive unsigned 32-bit decimal string");
+
+    private static PropertyRule RequiredDecimalText(string name) =>
+        new(
+            name,
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsNonnegativeDecimal(value.GetString()),
+            "must be a nonnegative decimal integer string");
+
+    private static PropertyRule NullablePositiveDecimalText(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsPositiveDecimal(value.GetString(), long.MaxValue),
+            "must be a positive decimal integer string or null");
+
+    private static PropertyRule[] PresentationBaseRules(bool widgetRequired) =>
+    [
+        RequiredObject("context"),
+        RequiredString("requestId"),
+        widgetRequired
+            ? RequiredFrameSinkId("frameSinkId")
+            : NullableFrameSinkId("frameSinkId"),
+        widgetRequired
+            ? RequiredString("localRootFrameToken")
+            : NullableString("localRootFrameToken")
+    ];
+
+    private static void ValidatePresentationBase(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        var requestId = ReadString(payload, "requestId");
+        if (requestId is not null &&
+            !IsCheckpointIdentity(requestId, "presentation-request-"))
+        {
+            AddError(
+                issues,
+                "browser-presentation-request-id-invalid",
+                "events.ndjson#/payload/requestId",
+                $"'{requestId}' is not a presentation request identity.",
+                line);
+        }
+        if (payload.TryGetProperty("localRootFrameToken", out var token) &&
+            token.ValueKind == JsonValueKind.String &&
+            string.IsNullOrWhiteSpace(token.GetString()))
+        {
+            AddError(
+                issues,
+                "browser-presentation-frame-token-empty",
+                "events.ndjson#/payload/localRootFrameToken",
+                "A named local root must carry a nonempty frame token.",
+                line);
+        }
+    }
+
+    private static void ValidateBrowserPresentationRequested(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                .. PresentationBaseRules(widgetRequired: false),
+                RequiredString("layoutCheckpointId"),
+                RequiredBoolean("queued"),
+                NullableEnum("notQueuedReason", "no-widget", "not-compositing"),
+                NullableInteger("sourceFrameNumber", nonnegative: true),
+                NullableBoolean("isMainFrameWidget"),
+                RequiredBoolean("highResolutionTicks"),
+                RequiredInteger("maximumNotSwappedRecords", positive: true)
+            ],
+            issues,
+            line);
+        ValidatePresentationBase(payload, issues, line);
+        var checkpointId = ReadString(payload, "layoutCheckpointId");
+        if (checkpointId is not null &&
+            !IsCheckpointIdentity(checkpointId, "layout-checkpoint-"))
+        {
+            AddError(
+                issues,
+                "browser-presentation-checkpoint-id-invalid",
+                "events.ndjson#/payload/layoutCheckpointId",
+                $"'{checkpointId}' is not a layout checkpoint identity.",
+                line);
+        }
+        if (!payload.TryGetProperty("queued", out var queuedValue) ||
+            !IsBoolean(queuedValue))
+        {
+            return;
+        }
+        var queued = queuedValue.GetBoolean();
+        var reason = ReadString(payload, "notQueuedReason");
+        var hasWidget = HasNonnullProperty(payload, "frameSinkId");
+        var hasToken = HasNonnullProperty(payload, "localRootFrameToken");
+        var hasFrameNumber = HasNonnullProperty(payload, "sourceFrameNumber");
+        var hasMainFrame = HasNonnullProperty(payload, "isMainFrameWidget");
+        var consistent = queued
+            ? reason is null && hasWidget && hasToken && hasFrameNumber &&
+                hasMainFrame
+            : reason switch
+            {
+                "no-widget" => !hasWidget && !hasToken && !hasFrameNumber &&
+                    !hasMainFrame,
+                "not-compositing" => hasWidget && hasToken && !hasFrameNumber &&
+                    hasMainFrame,
+                _ => false
+            };
+        if (!consistent)
+        {
+            AddError(
+                issues,
+                "browser-presentation-request-inconsistent",
+                "events.ndjson#/payload",
+                "A queued request names its widget and source frame number " +
+                    "with no reason; a request without a widget names none; " +
+                    "a request on a widget that does not composite names the " +
+                    "widget but no frame number.",
+                line);
+        }
+    }
+
+    private static void ValidateBrowserPresentationNotSwapped(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                .. PresentationBaseRules(widgetRequired: true),
+                RequiredEnum(
+                    "reason",
+                    "swap-fails",
+                    "commit-fails",
+                    "commit-no-update",
+                    "activation-fails"),
+                RequiredEnum("action", "kept-active", "broken"),
+                RequiredInteger("notSwappedIndex", nonnegative: true),
+                RequiredInteger("notSwappedCount", positive: true),
+                NullablePositiveDecimalText("timestampTicks"),
+                NullablePositiveDecimalText("timestampTimeTicksMicroseconds")
+            ],
+            issues,
+            line);
+        ValidatePresentationBase(payload, issues, line);
+        var reason = ReadString(payload, "reason");
+        var action = ReadString(payload, "action");
+        // The promise breaks on the reasons Chromium's own presentation-time
+        // promise treats as failures and stays active on the others.
+        var breaks = reason is "swap-fails" or "commit-no-update";
+        if (reason is not null && action is not null &&
+            (action == "broken") != breaks)
+        {
+            AddError(
+                issues,
+                "browser-presentation-not-swapped-action-inconsistent",
+                "events.ndjson#/payload/action",
+                $"A '{reason}' outcome cannot be '{action}'.",
+                line);
+        }
+        var index = ReadNullableInteger(payload, "notSwappedIndex");
+        var count = ReadNullableInteger(payload, "notSwappedCount");
+        if (index is not null && count is not null && count != index + 1)
+        {
+            AddError(
+                issues,
+                "browser-presentation-not-swapped-count-inconsistent",
+                "events.ndjson#/payload/notSwappedCount",
+                "The count of not-swapped calls must be one more than the index.",
+                line);
+        }
+        if (HasNonnullProperty(payload, "timestampTicks") &&
+            !HasNonnullProperty(payload, "timestampTimeTicksMicroseconds"))
+        {
+            AddError(
+                issues,
+                "browser-presentation-ticks-without-time",
+                "events.ndjson#/payload/timestampTicks",
+                "A counter value is derived from Chromium's time, so it cannot " +
+                    "appear without it.",
+                line);
+        }
+    }
+
+    private static void ValidateBrowserPresentationSwapped(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                .. PresentationBaseRules(widgetRequired: true),
+                RequiredFrameToken("frameToken"),
+                RequiredInteger("notSwappedCount", nonnegative: true)
+            ],
+            issues,
+            line);
+        ValidatePresentationBase(payload, issues, line);
+    }
+
+    private static void ValidateBrowserPresentationFeedback(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                .. PresentationBaseRules(widgetRequired: true),
+                RequiredFrameToken("frameToken"),
+                NullablePositiveDecimalText("presentedTicks"),
+                NullablePositiveDecimalText("presentedTimeTicksMicroseconds"),
+                RequiredDecimalText("intervalMicroseconds"),
+                RequiredStringArray("flags"),
+                NullablePositiveDecimalText("receivedCompositorFrameTicks"),
+                NullablePositiveDecimalText("drawStartTicks"),
+                NullablePositiveDecimalText("swapStartTicks"),
+                NullablePositiveDecimalText("swapEndTicks"),
+                RequiredBoolean("highResolutionTicks"),
+                RequiredInteger("notSwappedCount", nonnegative: true)
+            ],
+            issues,
+            line);
+        ValidatePresentationBase(payload, issues, line);
+        if (payload.TryGetProperty("flags", out var flags) &&
+            flags.ValueKind == JsonValueKind.Array)
+        {
+            var names = flags.EnumerateArray()
+                .Select(item => item.ValueKind == JsonValueKind.String
+                    ? item.GetString()
+                    : null)
+                .ToList();
+            if (names.Any(name =>
+                    name is null ||
+                    !PresentationFeedbackFlagNames.Contains(
+                        name, StringComparer.Ordinal)) ||
+                names.Distinct(StringComparer.Ordinal).Count() != names.Count)
+            {
+                AddError(
+                    issues,
+                    "browser-presentation-feedback-flags-invalid",
+                    "events.ndjson#/payload/flags",
+                    "Feedback flags must be distinct names of " +
+                        "gfx::PresentationFeedback flags.",
+                    line);
+            }
+        }
+        if (payload.TryGetProperty("highResolutionTicks", out var highResolution) &&
+            highResolution.ValueKind == JsonValueKind.False &&
+            PresentationTickProperties.Any(name => HasNonnullProperty(payload, name)))
+        {
+            AddError(
+                issues,
+                "browser-presentation-ticks-without-high-resolution",
+                "events.ndjson#/payload",
+                "Counter values are derived only from a high-resolution clock.",
+                line);
+        }
+        if (HasNonnullProperty(payload, "presentedTicks") &&
+            !HasNonnullProperty(payload, "presentedTimeTicksMicroseconds"))
+        {
+            AddError(
+                issues,
+                "browser-presentation-ticks-without-time",
+                "events.ndjson#/payload/presentedTicks",
+                "A counter value is derived from Chromium's time, so it cannot " +
+                    "appear without it.",
+                line);
+        }
+    }
+
     private static long? ReadNullableInteger(JsonElement payload, string property) =>
         payload.TryGetProperty(property, out var value) &&
         value.ValueKind == JsonValueKind.Number &&
@@ -4131,6 +4602,16 @@ internal static class EventPayloadValidator
         new(
             name,
             true,
+            false,
+            value => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(
+                    item => item.ValueKind == JsonValueKind.Object),
+            "must be an array of objects");
+
+    private static PropertyRule OptionalObjectArray(string name) =>
+        new(
+            name,
+            false,
             false,
             value => value.ValueKind == JsonValueKind.Array &&
                 value.EnumerateArray().All(

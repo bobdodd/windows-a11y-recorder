@@ -28,6 +28,7 @@ public partial class MainWindow : Window
         "browser.cookie",
         "browser.interaction",
         "browser.layout",
+        "browser.presentation",
         "browser.network",
         "browser.accessibility"
     ];

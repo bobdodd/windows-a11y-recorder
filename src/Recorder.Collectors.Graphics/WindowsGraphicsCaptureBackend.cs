@@ -173,26 +173,46 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
             exception);
     }
 
-    public void CapturePixels(
+    internal IReadOnlyList<MonitorFrameTiming> CapturePixels(
         int virtualX,
         int virtualY,
         int virtualWidth,
         int virtualHeight,
-        byte[] destination)
+        byte[] destination,
+        Func<long> sessionNanoseconds)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         Array.Clear(destination);
 
-        foreach (var monitor in _monitors)
+        var timings = new MonitorFrameTiming[_monitors.Count];
+        for (var index = 0; index < _monitors.Count; index++)
         {
-            monitor.CopyLatestFrame(
+            timings[index] = _monitors[index].CopyLatestFrame(
                 virtualX,
                 virtualY,
                 virtualWidth,
                 virtualHeight,
-                destination);
+                destination,
+                sessionNanoseconds);
         }
+
+        return timings;
     }
+
+    // The monitors a GDI fallback frame covers, with no composition timing,
+    // so a fallback record lists the same monitors a WGC record would.
+    internal static IReadOnlyList<MonitorFrameTiming> DescribeMonitorsWithoutTiming() =>
+        EnumerateMonitors()
+            .Select(monitor => new MonitorFrameTiming(
+                monitor.Handle,
+                monitor.X,
+                monitor.Y,
+                monitor.Width,
+                monitor.Height,
+                null,
+                null,
+                null))
+            .ToArray();
 
     public void Dispose()
     {
@@ -363,16 +383,19 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
             _session.StartCapture();
         }
 
-        public void CopyLatestFrame(
+        public MonitorFrameTiming CopyLatestFrame(
             int virtualX,
             int virtualY,
             int virtualWidth,
             int virtualHeight,
-            byte[] destination)
+            byte[] destination,
+            Func<long> sessionNanoseconds)
         {
             Direct3D11CaptureFrame? frame = null;
-            for (var attempt = 0; attempt < 25 && frame is null; attempt++)
+            var attempts = 0;
+            while (attempts < 25 && frame is null)
             {
+                attempts++;
                 frame = _framePool.TryGetNextFrame();
                 if (frame is null)
                 {
@@ -386,8 +409,18 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
                     $"No WGC frame was available for monitor {_monitor.Handle}.");
             }
 
+            // Session time just after the pool handed over the frame. The
+            // compositor rendered the frame before this, so it bounds the
+            // composition time from above.
+            var dequeuedAt = sessionNanoseconds();
+
             using (frame)
             {
+                // The QPC time, in 100 ns TimeSpan ticks, at which the
+                // compositor rendered this frame. The pool returns its oldest
+                // queued frame, so this can precede the poll by more than one
+                // frame interval.
+                var systemRelativeTimeTicks = frame.SystemRelativeTime.Ticks;
                 var size = frame.ContentSize;
                 using var sourceTexture = GetTexture(frame.Surface);
                 EnsureStagingTexture(size.Width, size.Height);
@@ -415,6 +448,16 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
                 {
                     _context.Unmap(_stagingTexture!, 0);
                 }
+
+                return new MonitorFrameTiming(
+                    _monitor.Handle,
+                    _monitor.X,
+                    _monitor.Y,
+                    _monitor.Width,
+                    _monitor.Height,
+                    systemRelativeTimeTicks,
+                    dequeuedAt,
+                    attempts);
             }
         }
 
@@ -528,6 +571,16 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
     {
         void GetInterface(in Guid iid, out nint graphicsInterface);
     }
+
+    internal sealed record MonitorFrameTiming(
+        nint Handle,
+        int X,
+        int Y,
+        int Width,
+        int Height,
+        long? SystemRelativeTimeTicks,
+        long? DequeuedAtNanoseconds,
+        int? TryGetNextFrameAttempts);
 
     private sealed record MonitorDefinition(
         nint Handle,

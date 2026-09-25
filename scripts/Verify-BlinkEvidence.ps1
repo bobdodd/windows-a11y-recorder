@@ -3301,6 +3301,252 @@ if ($heldCheckpoint.Count -eq 0) {
     HeldFocusLastFocusType = $heldCheckpoint[0].payload.lastFocusType
 } | Format-List
 
+# Protocol 0.30 follows each layout checkpoint with a presentation request on
+# the compositor of the frame's local-root widget, and records whether a
+# compositor frame carried the following commit, its frame token, and the
+# presentation time viz reported for it. These checks establish that every
+# presentation record joins a recorded request and layout checkpoint, that no
+# request has more than one outcome, that frame tokens do not go backwards
+# within one frame sink, and that the fixture's held-focus layout checkpoint
+# was carried by a presented frame. They say nothing about what the frame
+# showed or whether any captured image displays it.
+$prEventTypes = @(
+    "presentation-requested",
+    "presentation-not-swapped",
+    "presentation-swapped",
+    "presentation-feedback"
+)
+$prRecords = @(
+    $records | Where-Object {
+        $_.channel -eq "browser.presentation" -and
+        $_.eventType -in $prEventTypes
+    }
+)
+$prRequests = @($prRecords | Where-Object { $_.eventType -eq "presentation-requested" })
+if ($prRequests.Count -eq 0) {
+    throw "No presentation-requested record was emitted."
+}
+
+# Request identities are unique only within one renderer process.
+function Get-PresentationRequestKey {
+    param([Parameter(Mandatory = $true)] $PresentationRecord)
+
+    $prRecordContext = $PresentationRecord.payload.context
+    (
+        "$($prRecordContext.browserInstanceId)|$($prRecordContext.processId)|" +
+        "$($PresentationRecord.payload.requestId)"
+    )
+}
+
+# viz frame tokens are 32-bit and wrap back to 1, so ordering is the sign of
+# the 32-bit difference, as FrameTokenGT computes it.
+function Test-FrameTokenBefore {
+    param([uint64] $Earlier, [uint64] $Later)
+
+    $prDifference = ($Later + 4294967296 - $Earlier) % 4294967296
+    $prDifference -ne 0 -and $prDifference -lt 2147483648
+}
+
+$prRequestsByKey = @{}
+foreach ($prRequest in $prRequests) {
+    $prKey = Get-PresentationRequestKey $prRequest
+    if ($prRequestsByKey.ContainsKey($prKey)) {
+        throw "Presentation request $prKey was recorded more than once."
+    }
+    $prRequestsByKey[$prKey] = $prRequest
+    $prLayoutKey = (
+        "browser.layout|$($prRequest.payload.context.browserInstanceId)|" +
+        "$($prRequest.payload.context.processId)|" +
+        "$($prRequest.payload.layoutCheckpointId)"
+    )
+    if (-not $sourceCheckpointStarts.ContainsKey($prLayoutKey)) {
+        throw (
+            "Presentation request $prKey names layout checkpoint " +
+            "$($prRequest.payload.layoutCheckpointId), which was not recorded."
+        )
+    }
+    if (-not (Test-SameCheckpointDocument $prRequest.payload.context `
+            $sourceCheckpointStarts[$prLayoutKey].payload.context)) {
+        throw "Presentation request $prKey does not match its layout checkpoint's document."
+    }
+}
+
+$prOutcomes = @{}
+foreach ($prRecord in @($prRecords | Where-Object { $_.eventType -ne "presentation-requested" })) {
+    $prKey = Get-PresentationRequestKey $prRecord
+    if (-not $prRequestsByKey.ContainsKey($prKey)) {
+        throw "A $($prRecord.eventType) record names request $prKey, which was not recorded."
+    }
+    $prRequest = $prRequestsByKey[$prKey]
+    if (-not $prRequest.payload.queued) {
+        throw "Request $prKey was not queued but has a $($prRecord.eventType) record."
+    }
+    if (-not (Test-SameCheckpointDocument $prRequest.payload.context $prRecord.payload.context) -or
+        $prRecord.payload.frameSinkId -ne $prRequest.payload.frameSinkId -or
+        $prRecord.payload.localRootFrameToken -ne $prRequest.payload.localRootFrameToken) {
+        throw "The $($prRecord.eventType) record of request $prKey changes document or widget."
+    }
+    if (-not $prOutcomes.ContainsKey($prKey)) {
+        $prOutcomes[$prKey] = [System.Collections.Generic.List[object]]::new()
+    }
+    $prOutcomes[$prKey].Add($prRecord)
+}
+
+$prUnresolved = 0
+$prBroken = 0
+$prPresented = 0
+$prFailed = 0
+foreach ($prKey in $prRequestsByKey.Keys) {
+    $prRequest = $prRequestsByKey[$prKey]
+    if (-not $prRequest.payload.queued) {
+        continue
+    }
+    $prParts = @()
+    if ($prOutcomes.ContainsKey($prKey)) {
+        $prParts = @($prOutcomes[$prKey])
+    }
+    $prBreaks = @($prParts | Where-Object {
+            $_.eventType -eq "presentation-not-swapped" -and
+            $_.payload.action -eq "broken"
+        })
+    $prSwaps = @($prParts | Where-Object { $_.eventType -eq "presentation-swapped" })
+    $prFeedback = @($prParts | Where-Object { $_.eventType -eq "presentation-feedback" })
+    if (($prBreaks.Count + $prFeedback.Count) -gt 1 -or $prSwaps.Count -gt 1) {
+        throw (
+            "Request $prKey has $($prBreaks.Count) broken, $($prSwaps.Count) " +
+            "swapped, and $($prFeedback.Count) feedback records."
+        )
+    }
+    if ($prFeedback.Count -eq 1 -and
+        ($prSwaps.Count -ne 1 -or
+            $prFeedback[0].payload.frameToken -ne $prSwaps[0].payload.frameToken)) {
+        throw "Request $prKey has feedback that does not follow its swapped frame."
+    }
+    if ($prBreaks.Count -eq 1) {
+        $prBroken++
+    }
+    elseif ($prFeedback.Count -eq 1) {
+        $prPresented++
+        if ($prFeedback[0].payload.flags -contains "failure") {
+            $prFailed++
+        }
+    }
+    else {
+        $prUnresolved++
+    }
+}
+
+# Tokens can repeat, because checkpoints from one rendering update share a
+# commit, but a later swap on one frame sink never carries an earlier token.
+$prTokenSequences = 0
+$prSwapGroups = @(
+    $prRecords |
+        Where-Object { $_.eventType -eq "presentation-swapped" } |
+        Group-Object { "$($_.payload.context.browserInstanceId)|$($_.payload.frameSinkId)" }
+)
+foreach ($prGroup in $prSwapGroups) {
+    $prOrdered = @(
+        $prGroup.Group |
+            Sort-Object { [long] $_.nativeTimestamp.value }, { [long] $_.sequence }
+    )
+    for ($prIndex = 1; $prIndex -lt $prOrdered.Count; $prIndex++) {
+        $prPrevious = [uint64] $prOrdered[$prIndex - 1].payload.frameToken
+        $prCurrent = [uint64] $prOrdered[$prIndex].payload.frameToken
+        if ($prPrevious -ne $prCurrent -and
+            -not (Test-FrameTokenBefore $prPrevious $prCurrent)) {
+            throw (
+                "Frame sink $($prGroup.Name) swapped token $prCurrent after " +
+                "token $prPrevious."
+            )
+        }
+    }
+    $prTokenSequences++
+}
+
+# The fixture's held-focus step changes the listbox outline offset and waits
+# two animation frames, so its layout checkpoint must reach the display.
+$prFixtureEvidence = $null
+foreach ($prHeld in $heldCheckpoint) {
+    $prContext = $prHeld.payload.context
+    $prMatches = @(
+        $prRequests | Where-Object {
+            $_.payload.context.browserInstanceId -eq $prContext.browserInstanceId -and
+            $_.payload.context.processId -eq $prContext.processId -and
+            $_.payload.layoutCheckpointId -eq $prHeld.payload.sourceCheckpointId -and
+            $_.payload.queued
+        }
+    )
+    foreach ($prRequest in $prMatches) {
+        $prKey = Get-PresentationRequestKey $prRequest
+        if (-not $prOutcomes.ContainsKey($prKey)) {
+            continue
+        }
+        $prSwap = @($prOutcomes[$prKey] | Where-Object { $_.eventType -eq "presentation-swapped" })
+        $prFeedback = @($prOutcomes[$prKey] | Where-Object { $_.eventType -eq "presentation-feedback" })
+        if ($prSwap.Count -eq 1 -and $prFeedback.Count -eq 1 -and
+            [uint64] $prSwap[0].payload.frameToken -ne 0 -and
+            $prFeedback[0].payload.flags -notcontains "failure" -and
+            $null -ne $prFeedback[0].payload.presentedTicks -and
+            [long] $prFeedback[0].payload.presentedTicks -ge
+                [long] $prSwap[0].nativeTimestamp.value) {
+            $prFixtureEvidence = [pscustomobject]@{
+                Request = $prRequest
+                Swap = $prSwap[0]
+                Feedback = $prFeedback[0]
+            }
+            break
+        }
+    }
+    if ($null -ne $prFixtureEvidence) {
+        break
+    }
+}
+if ($null -eq $prFixtureEvidence) {
+    throw (
+        "No held-focus layout checkpoint of the interaction fixture was " +
+        "carried by a swapped frame with presentation feedback, without the " +
+        "failure flag, presented no earlier than its swap."
+    )
+}
+
+$prFrequencyRecord = @(
+    $records | Where-Object {
+        $_.eventType -eq "browser-clock-synchronized" -and
+        $_.payload.clockMappingId -eq $prFixtureEvidence.Feedback.clockMappingId
+    }
+)
+$prSwapToPresentMs = $null
+if ($prFrequencyRecord.Count -ge 1) {
+    $prSwapToPresentMs = [Math]::Round(
+        ([long] $prFixtureEvidence.Feedback.payload.presentedTicks -
+            [long] $prFixtureEvidence.Swap.nativeTimestamp.value) * 1000.0 /
+            [long] $prFrequencyRecord[0].payload.monotonicFrequency,
+        3)
+}
+
+[pscustomobject]@{
+    PresentationRequests = $prRequests.Count
+    QueuedRequests = @($prRequests | Where-Object { $_.payload.queued }).Count
+    NotQueuedReasons = (
+        @($prRequests | Where-Object { -not $_.payload.queued } |
+            ForEach-Object { $_.payload.notQueuedReason } | Sort-Object -Unique) -join ", "
+    )
+    PresentedRequests = $prPresented
+    PresentedWithFailureFlag = $prFailed
+    BrokenRequests = $prBroken
+    UnresolvedRequests = $prUnresolved
+    KeptActiveRecords = @($prRecords | Where-Object {
+            $_.eventType -eq "presentation-not-swapped" -and
+            $_.payload.action -eq "kept-active"
+        }).Count
+    FrameSinks = $prTokenSequences
+    FixtureLayoutCheckpointId = $prFixtureEvidence.Request.payload.layoutCheckpointId
+    FixtureFrameSinkId = $prFixtureEvidence.Request.payload.frameSinkId
+    FixtureFrameToken = $prFixtureEvidence.Swap.payload.frameToken
+    FixtureFeedbackFlags = ($prFixtureEvidence.Feedback.payload.flags -join ", ")
+    FixtureSwapToPresentationMs = $prSwapToPresentMs
+} | Format-List
+
 # The run script serves a fourth page, on the cookie fixture's origin, in a
 # foreground tab. The page paints, widens a box from 200 to 320 CSS pixels, and
 # then changes only the box's color, waiting two animation frames after each
@@ -5213,7 +5459,7 @@ Write-Host (
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +
     "accessibility serialization checkpoint, cookie operation, and " +
     "interaction-state change and checkpoint, layout and computed-style " +
-    "checkpoint, shadow root, " +
+    "checkpoint and its compositor presentation, shadow root, " +
     "slot assignment, pseudo-element, and shadow-scoped dispatch path, and " +
     "network " +
     "metadata and realtime channel evidence verified."

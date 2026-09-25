@@ -1006,6 +1006,83 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
                                    int pseudo_element_count,
                                    int shadow_root_count);
 
+// The local-root widget a presentation request was queued on. The frame sink
+// is the viz::FrameSinkId whose compositor frames the frame tokens number, and
+// the frame token is the LocalFrameToken of the widget's local root. A request
+// made without a widget carries no identity.
+struct PresentationWidgetIdentity {
+  bool present = false;
+  uint32_t frame_sink_client_id = 0;
+  uint32_t frame_sink_id = 0;
+  std::string local_root_frame_token;
+};
+
+// Chromium's timing for one presented compositor frame, as microseconds from
+// the base::TimeTicks origin. Zero means Chromium reported a null time. The
+// flags are gfx::PresentationFeedback::Flags.
+struct PresentationFeedbackTiming {
+  int64_t presented_microseconds = 0;
+  int64_t interval_microseconds = 0;
+  uint32_t flags = 0;
+  int64_t received_compositor_frame_microseconds = 0;
+  int64_t draw_start_microseconds = 0;
+  int64_t swap_start_microseconds = 0;
+  int64_t swap_end_microseconds = 0;
+};
+
+// Records a request for the presentation of the compositor frame that carries
+// the named layout checkpoint's rendering update. An empty not-queued reason
+// means the caller queues a swap promise when a nonzero sequence is returned;
+// otherwise it is "no-widget" or "not-compositing" and nothing is queued.
+// The source frame number is LayerTreeHost::SourceFrameNumber(), or -1 when
+// there is no layer tree host. Returns zero when the request is not recorded.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t BeginBlinkPresentationRequest(int document_node_id,
+                                       std::string document_token,
+                                       uint64_t layout_checkpoint_sequence,
+                                       PresentationWidgetIdentity widget,
+                                       std::string not_queued_reason,
+                                       int source_frame_number,
+                                       bool is_main_frame_widget,
+                                       bool high_resolution_ticks);
+
+// Records one cc::SwapPromise::DidNotSwap call for a queued request. The
+// reason is "swap-fails", "commit-fails", "commit-no-update", or
+// "activation-fails"; a kept-active promise waits for a later frame, and a
+// broken one ends the request. The index counts calls from zero, and the
+// timestamp is Chromium's, in TimeTicks microseconds, or zero when null.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPresentationNotSwapped(uint64_t request_sequence,
+                                       int document_node_id,
+                                       std::string document_token,
+                                       PresentationWidgetIdentity widget,
+                                       std::string reason,
+                                       bool kept_active,
+                                       int not_swapped_index,
+                                       int64_t timestamp_microseconds,
+                                       bool high_resolution_ticks);
+
+// Records that the compositor frame carrying a queued request was submitted,
+// from cc::SwapPromise::DidSwap, so the record's own timestamp is the swap.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPresentationSwapped(uint64_t request_sequence,
+                                    int document_node_id,
+                                    std::string document_token,
+                                    PresentationWidgetIdentity widget,
+                                    uint32_t frame_token,
+                                    int not_swapped_count);
+
+// Records viz's presentation feedback for the frame carrying a request.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPresentationFeedback(uint64_t request_sequence,
+                                     int document_node_id,
+                                     std::string document_token,
+                                     PresentationWidgetIdentity widget,
+                                     uint32_t frame_token,
+                                     PresentationFeedbackTiming timing,
+                                     int not_swapped_count,
+                                     bool high_resolution_ticks);
+
 // Network metadata. Every record on the browser.network channel carries
 // request and response metadata only: no request body, no response body, no
 // cookie value, and no value of a header that carries a credential. Header

@@ -3672,6 +3672,377 @@ public sealed class SessionArchiveValidatorTests
         }
     }
 
+    public static TheoryData<string, string> PresentationRecords()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (eventType, json) in BrowserPresentationPayloads.All())
+        {
+            data.Add(eventType, json);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(PresentationRecords))]
+    public async Task AcceptsEveryPresentationRecordShape(string eventType, string json)
+    {
+        var issues = await ValidatePresentationRecordAsync(
+            eventType, JsonNode.Parse(json)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [MemberData(nameof(PresentationRecords))]
+    public async Task RejectsAnUndeclaredPresentationProperty(
+        string eventType,
+        string json)
+    {
+        var payload = JsonNode.Parse(json)!;
+        payload["undeclared"] = 1;
+
+        var issues = await ValidatePresentationRecordAsync(eventType, payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/undeclared", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("requestId", "presentation-7", "browser-presentation-request-id-invalid")]
+    [InlineData("requestId", "presentation-request-07", "browser-presentation-request-id-invalid")]
+    [InlineData("layoutCheckpointId", "interaction-checkpoint-12", "browser-presentation-checkpoint-id-invalid")]
+    [InlineData("notQueuedReason", "no-widget", "browser-presentation-request-inconsistent")]
+    public async Task RejectsAnInconsistentPresentationRequest(
+        string property,
+        string value,
+        string code)
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.QueuedRequest)!;
+        payload[property] = value;
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-requested", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public async Task RejectsARequestWithoutAWidgetThatNamesAFrameNumber()
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.RequestWithoutWidget)!;
+        payload["sourceFrameNumber"] = 4;
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-requested", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-presentation-request-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("frameSinkId", "3-2")]
+    [InlineData("frameSinkId", "3:")]
+    [InlineData("frameSinkId", "4294967296:2")]
+    public async Task RejectsAMalformedFrameSinkIdentity(string property, string value)
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.Swapped)!;
+        payload[property] = value;
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-swapped", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "payload-property-invalid");
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("4294967296")]
+    [InlineData("017")]
+    [InlineData("-3")]
+    public async Task RejectsAFrameTokenOutsideTheUnsignedRange(string token)
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.Swapped)!;
+        payload["frameToken"] = token;
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-swapped", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "payload-property-invalid");
+    }
+
+    [Theory]
+    [InlineData("commit-fails", "broken")]
+    [InlineData("activation-fails", "broken")]
+    [InlineData("swap-fails", "kept-active")]
+    [InlineData("commit-no-update", "kept-active")]
+    public async Task RejectsANotSwappedActionChromiumWouldNotTake(
+        string reason,
+        string action)
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.KeptActive)!;
+        payload["reason"] = reason;
+        payload["action"] = action;
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-not-swapped", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-presentation-not-swapped-action-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsANotSwappedCountThatDoesNotFollowTheIndex()
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.KeptActive)!;
+        payload["notSwappedCount"] = 3;
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-not-swapped", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-presentation-not-swapped-count-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("vsync", "vsync")]
+    [InlineData("vsync", "tearing")]
+    public async Task RejectsFeedbackFlagsChromiumDoesNotDefine(string first, string second)
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.Feedback)!;
+        payload["flags"] = new JsonArray(first, second);
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-feedback", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-presentation-feedback-flags-invalid");
+    }
+
+    [Fact]
+    public async Task RejectsCounterTicksFromALowResolutionClock()
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.Feedback)!;
+        payload["highResolutionTicks"] = false;
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-feedback", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-presentation-ticks-without-high-resolution");
+    }
+
+    [Fact]
+    public async Task RejectsCounterTicksWithoutChromiumTime()
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.Feedback)!;
+        payload["presentedTimeTicksMicroseconds"] = null;
+
+        var issues = await ValidatePresentationRecordAsync(
+            "presentation-feedback", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-presentation-ticks-without-time");
+    }
+
+    [Fact]
+    public async Task AcceptsAPresentationOmission()
+    {
+        var payload = JsonNode.Parse(
+            """{"reason":"browser-evidence-write-failed","count":2}""")!;
+
+        var issues = await ValidatePresentationRecordAsync("collector-omission", payload);
+
+        Assert.Empty(issues);
+    }
+
+    private const string WindowsGraphicsCaptureFrame = """
+        {
+          "path": "frames/desktop/0000000000.png",
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "stride": 7680,
+          "pixelFormat": "B8G8R8A8",
+          "encodedFormat": "png",
+          "byteLength": 1024,
+          "captureDurationNanoseconds": 20000000,
+          "framesPerSecond": 2,
+          "backend": "windows-graphics-capture",
+          "monitorCount": 1,
+          "fallbackReason": null,
+          "gdiFallbackFrameCount": 0,
+          "monitorFrames": [
+            {
+              "monitorHandle": 65537,
+              "x": 0,
+              "y": 0,
+              "width": 1920,
+              "height": 1080,
+              "systemRelativeTimeTicks": 1000167000,
+              "compositedAtNanoseconds": 16700000,
+              "dequeuedAtNanoseconds": 31200000,
+              "tryGetNextFrameAttempts": 1
+            }
+          ]
+        }
+        """;
+
+    [Fact]
+    public async Task AcceptsADesktopFrameWithMonitorCompositionTimes()
+    {
+        var issues = await ValidateDesktopFrameAsync(
+            JsonNode.Parse(WindowsGraphicsCaptureFrame)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public async Task AcceptsADesktopFrameWrittenBeforeMonitorCompositionTimes()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!.AsObject();
+        payload.Remove("monitorFrames");
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public async Task AcceptsAGdiFallbackFrameWithoutCompositionTimes()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["backend"] = "gdi-bitblt";
+        payload["monitorCount"] = null;
+        var monitor = payload["monitorFrames"]![0]!;
+        monitor["systemRelativeTimeTicks"] = null;
+        monitor["compositedAtNanoseconds"] = null;
+        monitor["dequeuedAtNanoseconds"] = null;
+        monitor["tryGetNextFrameAttempts"] = null;
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [InlineData("windows-graphics-capture", "compositedAtNanoseconds")]
+    [InlineData("windows-graphics-capture", "dequeuedAtNanoseconds")]
+    [InlineData("windows-graphics-capture", "tryGetNextFrameAttempts")]
+    [InlineData("gdi-bitblt", null)]
+    public async Task RejectsMonitorTimingThatDoesNotMatchTheBackend(
+        string backend,
+        string? nulledProperty)
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["backend"] = backend;
+        if (nulledProperty is not null)
+        {
+            payload["monitorFrames"]![0]![nulledProperty] = null;
+        }
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "desktop-monitor-frame-timing-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAMonitorImageComposedAfterItWasDequeued()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["monitorFrames"]![0]!["dequeuedAtNanoseconds"] = 16699999;
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "desktop-monitor-frame-composed-after-dequeue");
+    }
+
+    [Fact]
+    public async Task RejectsMonitorFramesThatDoNotMatchTheMonitorCount()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["monitorCount"] = 2;
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "desktop-monitor-frame-count-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAnUndeclaredMonitorFrameProperty()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["monitorFrames"]![0]!["undeclared"] = 1;
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/monitorFrames/0/undeclared", StringComparison.Ordinal));
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidateDesktopFrameAsync(JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(
+            0,
+            100,
+            "graphics.desktop.frames",
+            "desktop-frame",
+            document.RootElement.Clone());
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            return result.Issues.ToList();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidatePresentationRecordAsync(string eventType, JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Presentation,
+            eventType,
+            document.RootElement.Clone());
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            return result.Issues.ToList();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static async Task<IReadOnlyList<ArchiveValidationIssue>>
         ValidateInteractionRecordAsync(string eventType, JsonNode payload)
     {

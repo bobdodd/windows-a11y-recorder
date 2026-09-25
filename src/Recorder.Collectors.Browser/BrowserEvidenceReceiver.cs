@@ -44,6 +44,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                 BrowserEvidenceChannels.Cookie,
                 BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceChannels.Layout,
+                BrowserEvidenceChannels.Presentation,
                 BrowserEvidenceChannels.Network
             ],
             "instrumented-chromium-local-ipc");

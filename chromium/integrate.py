@@ -6225,6 +6225,9 @@ BLINK_LAYOUT_CHECKPOINT_INCLUDES = (
     '#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"',
     '#include "ui/gfx/geometry/quad_f.h"',
     '#include "ui/gfx/geometry/rect_f.h"',
+    '#include "base/time/time.h"',
+    '#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"',
+    '#include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"',
 )
 BLINK_LAYOUT_CHECKPOINT_HELPER_MARKER = "RecorderRecordLayoutCheckpoint("
 BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR = """\
@@ -6336,6 +6339,32 @@ void RecorderReadGeneratedText(
           ? recorder_full_text.substr(0, kRecorderMaximumGeneratedTextLength)
                 .Utf8()
           : recorder_full_text.Utf8();
+}
+
+// Asks the local-root widget of a frame to report what happens to the
+// compositor frame that carries a layout checkpoint's rendering update. A
+// frame with no widget is recorded as such, so every completed layout
+// checkpoint has exactly one presentation request.
+void RecorderRequestLayoutPresentation(
+    LocalFrame& recorder_frame,
+    uint64_t recorder_checkpoint_sequence,
+    int recorder_document_node_id,
+    const std::string& recorder_document_token) {
+  WebLocalFrameImpl* recorder_local_root =
+      WebLocalFrameImpl::FromFrame(recorder_frame.LocalFrameRoot());
+  WebFrameWidgetImpl* recorder_widget =
+      recorder_local_root ? recorder_local_root->FrameWidgetImpl() : nullptr;
+  if (!recorder_widget) {
+    a11y_recorder::BeginBlinkPresentationRequest(
+        recorder_document_node_id, recorder_document_token,
+        recorder_checkpoint_sequence,
+        a11y_recorder::PresentationWidgetIdentity{}, "no-widget", -1, false,
+        base::TimeTicks::IsHighResolution());
+    return;
+  }
+  recorder_widget->RecorderRequestPresentationEvidence(
+      recorder_checkpoint_sequence, recorder_document_node_id,
+      recorder_document_token);
 }
 
 // Records the layout geometry and computed styles of one frame view's document
@@ -6529,6 +6558,10 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_document_token, recorder_node_count, recorder_truncated,
       kRecorderMaximumLayoutCheckpointNodes, recorder_pseudo_element_count,
       recorder_shadow_root_count);
+  RecorderRequestLayoutPresentation(recorder_frame,
+                                    recorder_checkpoint_sequence,
+                                    recorder_document_node_id,
+                                    recorder_document_token);
   RecorderRecordInteractionCheckpoint(*recorder_document,
                                       recorder_checkpoint_sequence,
                                       "browser.layout", "rendering-update");
@@ -6691,6 +6724,293 @@ def patch_blink_local_frame_view(path: Path) -> None:
     )
     write_patched(path, text)
 
+
+
+# Rendered-frame correlation. Each layout checkpoint asks its local-root
+# widget to queue a swap promise on the widget's layer tree. The promise
+# records the compositor frame token when the frame carrying the update is
+# submitted, or each reason it was not, and then registers for viz's
+# presentation feedback for that token. Nothing here changes what Chromium
+# draws or when: the promise only observes the commit it rides.
+BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION_ANCHOR = """\
+  void NotifyPresentationTime(
+      base::OnceCallback<void(const viz::FrameTimingDetails&)>
+          presentation_callback) override;
+"""
+BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION = """\
+  // Recorder evidence: records a presentation request for the compositor
+  // frame that carries the named layout checkpoint's rendering update, and
+  // queues a swap promise that follows that frame when this widget composites.
+  void RecorderRequestPresentationEvidence(uint64_t layout_checkpoint_sequence,
+                                           int document_node_id,
+                                           std::string document_token);
+"""
+BLINK_PRESENTATION_WIDGET_HEADER_FRIEND_ANCHOR = (
+    "  friend class ReportTimeSwapPromise;\n"
+)
+BLINK_PRESENTATION_WIDGET_HEADER_FRIEND = (
+    "  friend class RecorderPresentationSwapPromise;\n"
+)
+BLINK_PRESENTATION_WIDGET_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    "#include <atomic>",
+    "#include <string>",
+    '#include "base/memory/ref_counted.h"',
+    '#include "cc/trees/swap_promise.h"',
+    '#include "components/viz/common/frame_timing_details.h"',
+    '#include "components/viz/common/quads/compositor_frame_metadata.h"',
+)
+BLINK_PRESENTATION_WIDGET_MARKER = "class RecorderPresentationSwapPromise"
+BLINK_PRESENTATION_WIDGET_ANCHOR = """\
+void WebFrameWidgetImpl::WaitForDebuggerWhenShown() {
+"""
+BLINK_PRESENTATION_WIDGET_BLOCK = """\
+// Recorder evidence: the facts every record of one presentation request
+// repeats. The swap promise and the presentation callback share them across
+// the main and compositor threads, so they never change once made.
+class RecorderPresentationRequestFacts
+    : public base::RefCountedThreadSafe<RecorderPresentationRequestFacts> {
+ public:
+  RecorderPresentationRequestFacts(
+      uint64_t request_sequence,
+      int document_node_id,
+      std::string document_token,
+      a11y_recorder::PresentationWidgetIdentity widget,
+      bool high_resolution_ticks)
+      : request_sequence(request_sequence),
+        document_node_id(document_node_id),
+        document_token(std::move(document_token)),
+        widget(std::move(widget)),
+        high_resolution_ticks(high_resolution_ticks) {}
+
+  const uint64_t request_sequence;
+  const int document_node_id;
+  const std::string document_token;
+  const a11y_recorder::PresentationWidgetIdentity widget;
+  const bool high_resolution_ticks;
+
+ private:
+  friend class base::RefCountedThreadSafe<RecorderPresentationRequestFacts>;
+  ~RecorderPresentationRequestFacts() = default;
+};
+
+static int64_t RecorderTimeTicksMicroseconds(base::TimeTicks recorder_time) {
+  return recorder_time.is_null()
+             ? 0
+             : (recorder_time - base::TimeTicks()).InMicroseconds();
+}
+
+static const char* RecorderDidNotSwapReasonName(
+    cc::SwapPromise::DidNotSwapReason recorder_reason) {
+  switch (recorder_reason) {
+    case cc::SwapPromise::SWAP_FAILS:
+      return "swap-fails";
+    case cc::SwapPromise::COMMIT_FAILS:
+      return "commit-fails";
+    case cc::SwapPromise::COMMIT_NO_UPDATE:
+      return "commit-no-update";
+    case cc::SwapPromise::ACTIVATION_FAILS:
+      return "activation-fails";
+  }
+  return "unknown";
+}
+
+// Follows the compositor frame that carries one layout checkpoint's rendering
+// update. The promise breaks on the reasons ReportTimeSwapPromise treats as
+// failures, a swap that fails or a commit with no update, and otherwise stays
+// active for a later frame. DidNotSwap may run on either thread, so the count
+// of calls is atomic.
+class RecorderPresentationSwapPromise : public cc::SwapPromise {
+ public:
+  RecorderPresentationSwapPromise(
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      WebFrameWidgetImpl* widget)
+      : facts_(std::move(facts)),
+        task_runner_(std::move(task_runner)),
+        widget_(MakeCrossThreadWeakHandle(widget)) {}
+
+  RecorderPresentationSwapPromise(const RecorderPresentationSwapPromise&) =
+      delete;
+  RecorderPresentationSwapPromise& operator=(
+      const RecorderPresentationSwapPromise&) = delete;
+
+  ~RecorderPresentationSwapPromise() override = default;
+
+  void DidActivate() override {}
+
+  void WillSwap(viz::CompositorFrameMetadata* metadata) override {
+    frame_token_ = metadata->frame_token;
+  }
+
+  void DidSwap() override {
+    const int recorder_not_swapped_count = not_swapped_count_.load();
+    a11y_recorder::RecordBlinkPresentationSwapped(
+        facts_->request_sequence, facts_->document_node_id,
+        facts_->document_token, facts_->widget, frame_token_,
+        recorder_not_swapped_count);
+    PostCrossThreadTask(
+        *task_runner_, FROM_HERE,
+        CrossThreadBindOnce(&AddFeedbackCallback,
+                            MakeUnwrappingCrossThreadWeakHandle(widget_),
+                            facts_, frame_token_, recorder_not_swapped_count));
+  }
+
+  DidNotSwapAction DidNotSwap(DidNotSwapReason reason,
+                              base::TimeTicks timestamp) override {
+    const bool recorder_kept_active =
+        reason != DidNotSwapReason::SWAP_FAILS &&
+        reason != DidNotSwapReason::COMMIT_NO_UPDATE;
+    const int recorder_index = not_swapped_count_.fetch_add(1);
+    a11y_recorder::RecordBlinkPresentationNotSwapped(
+        facts_->request_sequence, facts_->document_node_id,
+        facts_->document_token, facts_->widget,
+        RecorderDidNotSwapReasonName(reason), recorder_kept_active,
+        recorder_index, RecorderTimeTicksMicroseconds(timestamp),
+        facts_->high_resolution_ticks);
+    return recorder_kept_active ? DidNotSwapAction::KEEP_ACTIVE
+                                : DidNotSwapAction::BREAK_PROMISE;
+  }
+
+  int64_t GetTraceId() const override { return 0; }
+
+ private:
+  // Runs on the main thread. A widget that was collected or closed before the
+  // task ran registers nothing, so the request ends without feedback.
+  static void AddFeedbackCallback(
+      WebFrameWidgetImpl* widget,
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      uint32_t frame_token,
+      int not_swapped_count) {
+    if (!widget || !widget->widget_base_) {
+      return;
+    }
+    widget->widget_base_->AddPresentationCallback(
+        frame_token, blink::BindOnce(&RecordFeedback, std::move(facts),
+                                     frame_token, not_swapped_count));
+  }
+
+  static void RecordFeedback(
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      uint32_t frame_token,
+      int not_swapped_count,
+      const viz::FrameTimingDetails& details) {
+    a11y_recorder::PresentationFeedbackTiming recorder_timing;
+    recorder_timing.presented_microseconds = RecorderTimeTicksMicroseconds(
+        details.presentation_feedback.timestamp);
+    recorder_timing.interval_microseconds =
+        details.presentation_feedback.interval.InMicroseconds();
+    recorder_timing.flags = details.presentation_feedback.flags;
+    recorder_timing.received_compositor_frame_microseconds =
+        RecorderTimeTicksMicroseconds(
+            details.received_compositor_frame_timestamp);
+    recorder_timing.draw_start_microseconds =
+        RecorderTimeTicksMicroseconds(details.draw_start_timestamp);
+    recorder_timing.swap_start_microseconds =
+        RecorderTimeTicksMicroseconds(details.swap_timings.swap_start);
+    recorder_timing.swap_end_microseconds =
+        RecorderTimeTicksMicroseconds(details.swap_timings.swap_end);
+    a11y_recorder::RecordBlinkPresentationFeedback(
+        facts->request_sequence, facts->document_node_id,
+        facts->document_token, facts->widget, frame_token, recorder_timing,
+        not_swapped_count, facts->high_resolution_ticks);
+  }
+
+  const scoped_refptr<RecorderPresentationRequestFacts> facts_;
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  CrossThreadWeakHandle<WebFrameWidgetImpl> widget_;
+  uint32_t frame_token_ = 0;
+  std::atomic<int> not_swapped_count_{0};
+};
+
+void WebFrameWidgetImpl::RecorderRequestPresentationEvidence(
+    uint64_t layout_checkpoint_sequence,
+    int document_node_id,
+    std::string document_token) {
+  const bool recorder_high_resolution = base::TimeTicks::IsHighResolution();
+  WebLocalFrameImpl* recorder_local_root = LocalRootImpl();
+  if (!recorder_local_root || !recorder_local_root->GetFrame()) {
+    a11y_recorder::BeginBlinkPresentationRequest(
+        document_node_id, std::move(document_token),
+        layout_checkpoint_sequence,
+        a11y_recorder::PresentationWidgetIdentity{}, "no-widget", -1, false,
+        recorder_high_resolution);
+    return;
+  }
+  a11y_recorder::PresentationWidgetIdentity recorder_widget;
+  recorder_widget.present = true;
+  recorder_widget.frame_sink_client_id = frame_sink_id_.client_id();
+  recorder_widget.frame_sink_id = frame_sink_id_.sink_id();
+  recorder_widget.local_root_frame_token =
+      recorder_local_root->GetFrame()->GetLocalFrameToken().ToString();
+  cc::LayerTreeHost* recorder_host =
+      widget_base_ ? widget_base_->LayerTreeHost() : nullptr;
+  const bool recorder_composites = View()->does_composite() && recorder_host;
+  const uint64_t recorder_request_sequence =
+      a11y_recorder::BeginBlinkPresentationRequest(
+          document_node_id, document_token, layout_checkpoint_sequence,
+          recorder_widget, recorder_composites ? "" : "not-compositing",
+          recorder_composites ? recorder_host->SourceFrameNumber() : -1,
+          ForMainFrame(), recorder_high_resolution);
+  if (recorder_request_sequence == 0) {
+    return;
+  }
+  recorder_host->QueueSwapPromise(
+      std::make_unique<RecorderPresentationSwapPromise>(
+          base::MakeRefCounted<RecorderPresentationRequestFacts>(
+              recorder_request_sequence, document_node_id,
+              std::move(document_token), std::move(recorder_widget),
+              recorder_high_resolution),
+          recorder_host->GetTaskRunnerProvider()->MainThreadTaskRunner(),
+          this));
+}
+
+"""
+
+
+def patch_blink_web_frame_widget_header(path: Path) -> None:
+    """Declares the presentation request and befriends its swap promise."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, '#include "base/time/time.h"', ("#include <string>",), path
+    )
+    if BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION not in text:
+        text = replace_once(
+            text,
+            BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION_ANCHOR,
+            BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION_ANCHOR
+            + BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION,
+            path,
+        )
+    if BLINK_PRESENTATION_WIDGET_HEADER_FRIEND not in text:
+        text = replace_once(
+            text,
+            BLINK_PRESENTATION_WIDGET_HEADER_FRIEND_ANCHOR,
+            BLINK_PRESENTATION_WIDGET_HEADER_FRIEND_ANCHOR
+            + BLINK_PRESENTATION_WIDGET_HEADER_FRIEND,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_blink_web_frame_widget(path: Path) -> None:
+    """Adds the presentation swap promise and the request that queues it."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/frame/'
+        'web_frame_widget_impl.h"',
+        BLINK_PRESENTATION_WIDGET_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PRESENTATION_WIDGET_ANCHOR,
+        BLINK_PRESENTATION_WIDGET_BLOCK,
+        BLINK_PRESENTATION_WIDGET_MARKER,
+        path,
+    )
+    write_patched(path, text)
 
 # Network metadata. The Blink hooks record request and response metadata at
 # the resource load observers, which see every load a frame or worker makes
@@ -8650,6 +8970,12 @@ def main() -> int:
     patch_blink_text_field_input_type(forms / "text_field_input_type.cc")
     patch_blink_text_area_element(forms / "html_text_area_element.cc")
     patch_blink_local_frame_view(blink_core / "frame" / "local_frame_view.cc")
+    patch_blink_web_frame_widget_header(
+        blink_core / "frame" / "web_frame_widget_impl.h"
+    )
+    patch_blink_web_frame_widget(
+        blink_core / "frame" / "web_frame_widget_impl.cc"
+    )
     patch_blink_cookie_jar(
         source
         / "third_party"

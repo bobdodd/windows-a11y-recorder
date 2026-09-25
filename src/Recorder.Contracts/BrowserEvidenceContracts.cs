@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.29";
+    public const string CurrentVersion = "0.30";
 }
 
 public static class BrowserEvidenceChannels
@@ -18,6 +18,7 @@ public static class BrowserEvidenceChannels
     public const string Cookie = "browser.cookie";
     public const string Interaction = "browser.interaction";
     public const string Layout = "browser.layout";
+    public const string Presentation = "browser.presentation";
     public const string Network = "browser.network";
 }
 
@@ -72,6 +73,10 @@ public static class BrowserEvidenceEventTypes
     public const string LayoutCheckpointStarted = "layout-checkpoint-started";
     public const string LayoutCheckpointNode = "layout-checkpoint-node";
     public const string LayoutCheckpointCompleted = "layout-checkpoint-completed";
+    public const string PresentationRequested = "presentation-requested";
+    public const string PresentationNotSwapped = "presentation-not-swapped";
+    public const string PresentationSwapped = "presentation-swapped";
+    public const string PresentationFeedback = "presentation-feedback";
     public const string NetworkRequestWillBeSent = "request-will-be-sent";
     public const string NetworkResponseReceived = "response-received";
     public const string NetworkRequestFinished = "request-finished";
@@ -747,6 +752,66 @@ public sealed record BrowserLayoutCheckpointCompletedPayload(
     int MaximumNodes,
     int PseudoElementCount = 0,
     int ShadowRootCount = 0);
+
+// Presentation records follow the compositor frame that carries one layout
+// checkpoint's rendering update. A request names the checkpoint and the
+// local-root widget whose layer tree it rides. At most one terminal record
+// follows: a not-swapped record whose action is "broken", or a swapped record
+// and then, when viz reports it, feedback for the same frame token. Frame
+// tokens are unsigned 32-bit decimal strings numbered per frame sink, and the
+// frame sink is written "clientId:sinkId". Every tick field is a decimal
+// QueryPerformanceCounter value, the clock the record envelope's native
+// timestamp uses, or null when Chromium reported no time or its clock was not
+// high resolution.
+public sealed record BrowserPresentationRequestedPayload(
+    BrowserContext Context,
+    string RequestId,
+    string? FrameSinkId,
+    string? LocalRootFrameToken,
+    string LayoutCheckpointId,
+    bool Queued,
+    string? NotQueuedReason,
+    int? SourceFrameNumber,
+    bool? IsMainFrameWidget,
+    bool HighResolutionTicks,
+    int MaximumNotSwappedRecords);
+
+public sealed record BrowserPresentationNotSwappedPayload(
+    BrowserContext Context,
+    string RequestId,
+    string FrameSinkId,
+    string LocalRootFrameToken,
+    string Reason,
+    string Action,
+    int NotSwappedIndex,
+    int NotSwappedCount,
+    string? TimestampTicks,
+    string? TimestampTimeTicksMicroseconds);
+
+public sealed record BrowserPresentationSwappedPayload(
+    BrowserContext Context,
+    string RequestId,
+    string FrameSinkId,
+    string LocalRootFrameToken,
+    string FrameToken,
+    int NotSwappedCount);
+
+public sealed record BrowserPresentationFeedbackPayload(
+    BrowserContext Context,
+    string RequestId,
+    string FrameSinkId,
+    string LocalRootFrameToken,
+    string FrameToken,
+    string? PresentedTicks,
+    string? PresentedTimeTicksMicroseconds,
+    string IntervalMicroseconds,
+    IReadOnlyList<string> Flags,
+    string? ReceivedCompositorFrameTicks,
+    string? DrawStartTicks,
+    string? SwapStartTicks,
+    string? SwapEndTicks,
+    bool HighResolutionTicks,
+    int NotSwappedCount);
 
 // Network records report request and response metadata as the Blink loader and
 // the browser's network service observer already hold it. No record carries a

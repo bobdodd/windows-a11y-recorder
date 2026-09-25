@@ -115,6 +115,7 @@ struct EvidenceIdentityStorage {
   uint64_t next_dom_transition_id = 1;
   uint64_t next_accessibility_checkpoint_id = 1;
   uint64_t next_interaction_checkpoint_id = 1;
+  uint64_t next_presentation_request_id = 1;
   uint64_t next_event_target_id = 1;
   std::unordered_map<uintptr_t, std::string> listener_ids;
 
@@ -200,6 +201,15 @@ int64_t QueryEvidenceTicks() {
   return value.QuadPart;
 }
 
+int64_t QueryEvidenceFrequency() {
+  static const int64_t frequency = [] {
+    LARGE_INTEGER value = {};
+    CHECK(::QueryPerformanceFrequency(&value));
+    return value.QuadPart;
+  }();
+  return frequency;
+}
+
 std::string DocumentId(int document_node_id) {
   return "dom-document-" + base::NumberToString(document_node_id);
 }
@@ -227,6 +237,12 @@ uint64_t AssignInteractionCheckpointIdentity() {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
   return identities.next_interaction_checkpoint_id++;
+}
+
+uint64_t AssignPresentationRequestIdentity() {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  return identities.next_presentation_request_id++;
 }
 
 uint64_t AssignAccessibilityCheckpointIdentity() {
@@ -3450,6 +3466,235 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
   payload.Set("pseudoElementCount", pseudo_element_count);
   payload.Set("shadowRootCount", shadow_root_count);
   SendBlinkEvidence("browser.layout", "layout-checkpoint-completed",
+                    std::move(payload));
+}
+
+
+namespace {
+
+// Each presentation request may record at most this many kept-active
+// DidNotSwap calls. The terminal records state the full count, so a reader
+// sees how many were not recorded.
+constexpr int kMaximumPresentationNotSwappedRecords = 16;
+
+std::string PresentationRequestId(uint64_t request_sequence) {
+  return "presentation-request-" + base::NumberToString(request_sequence);
+}
+
+// Converts a Chromium TimeTicks value to QueryPerformanceCounter ticks. On
+// Windows a high-resolution TimeTicks is the counter value scaled to
+// microseconds with no offset (base/time/time_win.cc), so the inverse is exact
+// to within one microsecond. Any other TimeTicks source, or a null time, has
+// no counter value.
+base::Value PresentationCounterTicks(int64_t microseconds,
+                                     bool high_resolution_ticks) {
+  if (!high_resolution_ticks || microseconds <= 0) {
+    return base::Value();
+  }
+  const int64_t frequency = QueryEvidenceFrequency();
+  const int64_t whole_seconds = microseconds / 1000000;
+  const int64_t remainder = microseconds % 1000000;
+  return base::Value(base::NumberToString(whole_seconds * frequency +
+                                          remainder * frequency / 1000000));
+}
+
+base::Value OptionalMicroseconds(int64_t microseconds) {
+  return microseconds > 0 ? base::Value(base::NumberToString(microseconds))
+                          : base::Value();
+}
+
+bool IsValidPresentationWidget(const PresentationWidgetIdentity& widget) {
+  return !widget.present || !widget.local_root_frame_token.empty();
+}
+
+base::DictValue CreatePresentationBasePayload(
+    const RecorderPipeClient& client,
+    uint64_t request_sequence,
+    int document_node_id,
+    std::string document_token,
+    const PresentationWidgetIdentity& widget) {
+  base::DictValue payload;
+  payload.Set("context", CreateContext(client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("requestId", PresentationRequestId(request_sequence));
+  if (widget.present) {
+    payload.Set("frameSinkId",
+                base::NumberToString(widget.frame_sink_client_id) + ":" +
+                    base::NumberToString(widget.frame_sink_id));
+    payload.Set("localRootFrameToken", widget.local_root_frame_token);
+  } else {
+    payload.Set("frameSinkId", base::Value());
+    payload.Set("localRootFrameToken", base::Value());
+  }
+  return payload;
+}
+
+base::ListValue PresentationFeedbackFlagNames(uint32_t flags) {
+  // gfx::PresentationFeedback::Flags, in bit order.
+  constexpr std::array<const char*, 5> kNames = {
+      "vsync", "hw-clock", "hw-completion", "zero-copy", "failure"};
+  base::ListValue names;
+  for (size_t bit = 0; bit < kNames.size(); ++bit) {
+    if (flags & (1u << bit)) {
+      names.Append(kNames[bit]);
+    }
+  }
+  return names;
+}
+
+}  // namespace
+
+uint64_t BeginBlinkPresentationRequest(int document_node_id,
+                                       std::string document_token,
+                                       uint64_t layout_checkpoint_sequence,
+                                       PresentationWidgetIdentity widget,
+                                       std::string not_queued_reason,
+                                       int source_frame_number,
+                                       bool is_main_frame_widget,
+                                       bool high_resolution_ticks) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      layout_checkpoint_sequence == 0 || !IsValidPresentationWidget(widget) ||
+      source_frame_number < -1) {
+    return 0;
+  }
+  // A request is queued only on a widget with a layer tree host; a request
+  // without a widget names no widget and no frame number.
+  const bool queued = not_queued_reason.empty();
+  if ((queued && (!widget.present || source_frame_number < 0)) ||
+      (!queued &&
+       !IsOneOf(not_queued_reason, {"no-widget", "not-compositing"})) ||
+      (not_queued_reason == "no-widget" &&
+       (widget.present || source_frame_number != -1))) {
+    return 0;
+  }
+  const uint64_t request_sequence = AssignPresentationRequestIdentity();
+  base::DictValue payload = CreatePresentationBasePayload(
+      *client, request_sequence, document_node_id, std::move(document_token),
+      widget);
+  payload.Set("layoutCheckpointId",
+              LayoutCheckpointId(layout_checkpoint_sequence));
+  payload.Set("queued", queued);
+  payload.Set("notQueuedReason",
+              queued ? base::Value() : base::Value(not_queued_reason));
+  payload.Set("sourceFrameNumber", source_frame_number >= 0
+                                       ? base::Value(source_frame_number)
+                                       : base::Value());
+  payload.Set("isMainFrameWidget",
+              widget.present ? base::Value(is_main_frame_widget)
+                             : base::Value());
+  payload.Set("highResolutionTicks", high_resolution_ticks);
+  payload.Set("maximumNotSwappedRecords",
+              kMaximumPresentationNotSwappedRecords);
+  SendBlinkEvidence("browser.presentation", "presentation-requested",
+                    std::move(payload));
+  return queued ? request_sequence : 0;
+}
+
+void RecordBlinkPresentationNotSwapped(uint64_t request_sequence,
+                                       int document_node_id,
+                                       std::string document_token,
+                                       PresentationWidgetIdentity widget,
+                                       std::string reason,
+                                       bool kept_active,
+                                       int not_swapped_index,
+                                       int64_t timestamp_microseconds,
+                                       bool high_resolution_ticks) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || request_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || !widget.present ||
+      !IsValidPresentationWidget(widget) || not_swapped_index < 0 ||
+      !IsOneOf(reason, {"swap-fails", "commit-fails", "commit-no-update",
+                        "activation-fails"})) {
+    return;
+  }
+  // A broken promise ends the request, so its record is always sent; a
+  // kept-active one is sent only within the per-request limit.
+  if (kept_active &&
+      not_swapped_index >= kMaximumPresentationNotSwappedRecords) {
+    return;
+  }
+  base::DictValue payload = CreatePresentationBasePayload(
+      *client, request_sequence, document_node_id, std::move(document_token),
+      widget);
+  payload.Set("reason", std::move(reason));
+  payload.Set("action", kept_active ? "kept-active" : "broken");
+  payload.Set("notSwappedIndex", not_swapped_index);
+  payload.Set("notSwappedCount", not_swapped_index + 1);
+  payload.Set("timestampTicks", PresentationCounterTicks(
+                                    timestamp_microseconds,
+                                    high_resolution_ticks));
+  payload.Set("timestampTimeTicksMicroseconds",
+              OptionalMicroseconds(timestamp_microseconds));
+  SendBlinkEvidence("browser.presentation", "presentation-not-swapped",
+                    std::move(payload));
+}
+
+void RecordBlinkPresentationSwapped(uint64_t request_sequence,
+                                    int document_node_id,
+                                    std::string document_token,
+                                    PresentationWidgetIdentity widget,
+                                    uint32_t frame_token,
+                                    int not_swapped_count) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || request_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || !widget.present ||
+      !IsValidPresentationWidget(widget) || frame_token == 0 ||
+      not_swapped_count < 0) {
+    return;
+  }
+  base::DictValue payload = CreatePresentationBasePayload(
+      *client, request_sequence, document_node_id, std::move(document_token),
+      widget);
+  payload.Set("frameToken", base::NumberToString(frame_token));
+  payload.Set("notSwappedCount", not_swapped_count);
+  SendBlinkEvidence("browser.presentation", "presentation-swapped",
+                    std::move(payload));
+}
+
+void RecordBlinkPresentationFeedback(uint64_t request_sequence,
+                                     int document_node_id,
+                                     std::string document_token,
+                                     PresentationWidgetIdentity widget,
+                                     uint32_t frame_token,
+                                     PresentationFeedbackTiming timing,
+                                     int not_swapped_count,
+                                     bool high_resolution_ticks) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || request_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || !widget.present ||
+      !IsValidPresentationWidget(widget) || frame_token == 0 ||
+      not_swapped_count < 0 || timing.interval_microseconds < 0) {
+    return;
+  }
+  base::DictValue payload = CreatePresentationBasePayload(
+      *client, request_sequence, document_node_id, std::move(document_token),
+      widget);
+  payload.Set("frameToken", base::NumberToString(frame_token));
+  payload.Set("presentedTicks",
+              PresentationCounterTicks(timing.presented_microseconds,
+                                       high_resolution_ticks));
+  payload.Set("presentedTimeTicksMicroseconds",
+              OptionalMicroseconds(timing.presented_microseconds));
+  payload.Set("intervalMicroseconds",
+              base::NumberToString(timing.interval_microseconds));
+  payload.Set("flags", PresentationFeedbackFlagNames(timing.flags));
+  payload.Set("receivedCompositorFrameTicks",
+              PresentationCounterTicks(
+                  timing.received_compositor_frame_microseconds,
+                  high_resolution_ticks));
+  payload.Set("drawStartTicks",
+              PresentationCounterTicks(timing.draw_start_microseconds,
+                                       high_resolution_ticks));
+  payload.Set("swapStartTicks",
+              PresentationCounterTicks(timing.swap_start_microseconds,
+                                       high_resolution_ticks));
+  payload.Set("swapEndTicks",
+              PresentationCounterTicks(timing.swap_end_microseconds,
+                                       high_resolution_ticks));
+  payload.Set("highResolutionTicks", high_resolution_ticks);
+  payload.Set("notSwappedCount", not_swapped_count);
+  SendBlinkEvidence("browser.presentation", "presentation-feedback",
                     std::move(payload));
 }
 

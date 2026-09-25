@@ -1736,8 +1736,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.29"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.29"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.30"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.30"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -4665,6 +4665,154 @@ class LayoutIntegrationTests(unittest.TestCase):
             with self.subTest(property=name):
                 self.assertIn(f"`{name}`", document)
                 self.assertIn(f"'{name}'", verifier)
+
+
+class PresentationIntegrationTests(unittest.TestCase):
+    """Proves the presentation swap promise is written once and only observes."""
+
+    WIDGET_INCLUDE = (
+        '#include "third_party/blink/renderer/core/frame/'
+        'web_frame_widget_impl.h"'
+    )
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def header_source(self):
+        return cookie_source(
+            '#include "base/time/time.h"\n',
+            INTEGRATE.BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION_ANCHOR,
+            INTEGRATE.BLINK_PRESENTATION_WIDGET_HEADER_FRIEND_ANCHOR,
+        )
+
+    def test_patches_the_widget_header_idempotently(self):
+        patched = self.patch_twice(
+            "web_frame_widget_impl.h",
+            self.header_source(),
+            INTEGRATE.patch_blink_web_frame_widget_header,
+        )
+        self.assertEqual(
+            1,
+            patched.count(
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION
+            ),
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_PRESENTATION_WIDGET_HEADER_FRIEND)
+        )
+        # The declaration follows NotifyPresentationTime, in the public section,
+        # and the friend follows ReportTimeSwapPromise's.
+        self.assertLess(
+            patched.index("void NotifyPresentationTime("),
+            patched.index("void RecorderRequestPresentationEvidence("),
+        )
+        self.assertLess(
+            patched.index("friend class ReportTimeSwapPromise;"),
+            patched.index("friend class RecorderPresentationSwapPromise;"),
+        )
+
+    def test_patches_the_widget_idempotently(self):
+        patched = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK)
+        )
+        self.assertLess(
+            patched.index(INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK),
+            patched.index(INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR),
+        )
+        for include_line in INTEGRATE.BLINK_PRESENTATION_WIDGET_INCLUDES:
+            with self.subTest(include=include_line):
+                self.assertEqual(1, patched.count(include_line + "\n"))
+
+    def test_the_widget_patches_fail_when_an_anchor_is_absent(self):
+        cases = (
+            (
+                "web_frame_widget_impl.h",
+                self.header_source().replace(
+                    "friend class ReportTimeSwapPromise;", ""
+                ),
+                INTEGRATE.patch_blink_web_frame_widget_header,
+            ),
+            (
+                "web_frame_widget_impl.cc",
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.patch_blink_web_frame_widget,
+            ),
+        )
+        for name, source, patch in cases:
+            with self.subTest(file=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / name
+                    path.write_text(source, encoding="utf-8")
+                    with self.assertRaises(RuntimeError):
+                        patch(path)
+
+    def test_the_swap_promise_breaks_only_where_chromium_does(self):
+        """The promise keeps the same break rule as ReportTimeSwapPromise."""
+        block = INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK
+        self.assertIn(
+            "reason != DidNotSwapReason::SWAP_FAILS &&\n"
+            "        reason != DidNotSwapReason::COMMIT_NO_UPDATE;",
+            block,
+        )
+        self.assertIn("fetch_add(1)", block)
+        # The feedback callback is registered on the main thread only.
+        self.assertIn("PostCrossThreadTask(", block)
+        self.assertIn("MainThreadTaskRunner()", block)
+
+    def test_the_swap_promise_never_requests_a_frame(self):
+        block = INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK
+        for forbidden in (
+            "SetNeedsCommit",
+            "SetNeedsAnimate",
+            "SetNeedsUpdateLayers",
+            "RequestPresentationTimeForNextFrame",
+            "ScheduleAnimation",
+        ):
+            with self.subTest(call=forbidden):
+                self.assertNotIn(forbidden, block)
+
+    def test_every_layout_checkpoint_requests_its_presentation(self):
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        complete = helper.index("a11y_recorder::CompleteBlinkLayoutCheckpoint(")
+        request = helper.index("  RecorderRequestLayoutPresentation(recorder_frame,")
+        interaction = helper.index(
+            "RecorderRecordInteractionCheckpoint(*recorder_document,"
+        )
+        self.assertLess(complete, request)
+        self.assertLess(request, interaction)
+        self.assertIn('"no-widget", -1, false', helper)
+
+    def test_the_presentation_templates_match_the_bridge_header(self):
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        for label in (
+            "BLINK_PRESENTATION_WIDGET_BLOCK",
+            "BLINK_LAYOUT_CHECKPOINT_HELPER",
+        ):
+            with self.subTest(template=label):
+                self.assertEqual(
+                    [],
+                    INTEGRATE.describe_signature_mismatches(
+                        label, getattr(INTEGRATE, label), signatures
+                    ),
+                )
 
 
 class RealtimeIntegrationTests(unittest.TestCase):
