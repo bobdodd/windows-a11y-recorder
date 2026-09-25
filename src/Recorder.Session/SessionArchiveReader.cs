@@ -54,19 +54,10 @@ public static class SessionArchiveReader
                 "The selected folder does not contain manifest.json and events.ndjson.");
         }
 
-        await using var manifestStream = File.OpenRead(manifestPath);
-        var manifest = await JsonSerializer.DeserializeAsync<SessionManifest>(
-            manifestStream,
-            JsonOptions,
-            cancellationToken).ConfigureAwait(false) ??
-            throw new InvalidDataException("The session manifest is empty.");
+        var manifest = await ReadManifestAsync(manifestPath, cancellationToken)
+            .ConfigureAwait(false);
 
-        var events = new List<SessionTimelineEvent>();
-        var frames = new List<SessionVideoFrame>();
-        var audioTracks = new Dictionary<string, SessionAudioTrack>(
-            StringComparer.OrdinalIgnoreCase);
-        var browserProjections = new List<BrowserEventProjection>();
-        long maximumTimestamp = 0;
+        var builder = new SessionPlaybackArchiveBuilder(root);
         long lineNumber = 0;
 
         using var reader = new StreamReader(eventPath);
@@ -80,71 +71,49 @@ public static class SessionArchiveReader
             }
 
             using var document = JsonDocument.Parse(line);
-            var record = document.RootElement;
-            var channel = ReadString(record, "channel") ?? "unknown";
-            var eventType = ReadString(record, "eventType") ?? "unknown";
-            var timestamp = ReadInt64(record, "monotonicNanoseconds") ?? 0;
-            maximumTimestamp = Math.Max(maximumTimestamp, timestamp);
-
-            var payload = record.TryGetProperty("payload", out var payloadValue)
-                ? payloadValue
-                : default;
-            var eventId = ReadString(record, "eventId") ??
-                CreateLegacyEventId(record, channel, lineNumber);
-            var timelineEvent = new SessionTimelineEvent(
-                lineNumber,
-                eventId,
-                ReadString(record, "evidenceClass") ?? "observed",
-                channel,
-                eventType,
-                timestamp,
-                CreateSummary(channel, eventType, payload),
-                record.GetRawText());
-            events.Add(timelineEvent);
-            var browserProjection = BrowserNavigationCorrelator.Project(
-                timelineEvent,
-                payload);
-            if (browserProjection is not null)
-            {
-                browserProjections.Add(browserProjection);
-            }
-
-            if (channel == "graphics.desktop.frames" &&
-                eventType == "desktop-frame" &&
-                payload.ValueKind == JsonValueKind.Object)
-            {
-                AddFrame(root, timestamp, payload, frames);
-            }
-
-            if (channel.StartsWith("audio.", StringComparison.Ordinal) &&
-                eventType == "audio-stream-started" &&
-                payload.ValueKind == JsonValueKind.Object)
-            {
-                AddAudioTrack(root, timestamp, payload, audioTracks);
-            }
+            builder.Add(lineNumber, document.RootElement);
         }
 
-        events.Sort(static (left, right) =>
-            left.MonotonicNanoseconds.CompareTo(right.MonotonicNanoseconds));
-        frames.Sort(static (left, right) =>
-            left.MonotonicNanoseconds.CompareTo(right.MonotonicNanoseconds));
-        var duration = Math.Max(manifest.DurationNanoseconds ?? 0, maximumTimestamp);
-        var browserNavigations = BrowserNavigationCorrelator.Build(
-            browserProjections,
-            duration);
-        return new SessionPlaybackArchive(
-            root,
-            manifest,
-            duration,
-            events,
-            frames,
-            audioTracks.Values
-                .OrderBy(track => track.Stream, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            browserNavigations);
+        return builder.Build(manifest);
     }
 
-    private static void AddFrame(
+    internal static async Task<SessionManifest> ReadManifestAsync(
+        string manifestPath,
+        CancellationToken cancellationToken)
+    {
+        await using var manifestStream = File.OpenRead(manifestPath);
+        return await JsonSerializer.DeserializeAsync<SessionManifest>(
+            manifestStream,
+            JsonOptions,
+            cancellationToken).ConfigureAwait(false) ??
+            throw new InvalidDataException("The session manifest is empty.");
+    }
+
+    internal static SessionTimelineEvent CreateTimelineEvent(
+        long lineNumber,
+        JsonElement record,
+        out JsonElement payload)
+    {
+        var channel = ReadString(record, "channel") ?? "unknown";
+        var eventType = ReadString(record, "eventType") ?? "unknown";
+        var timestamp = ReadInt64(record, "monotonicNanoseconds") ?? 0;
+        payload = record.TryGetProperty("payload", out var payloadValue)
+            ? payloadValue
+            : default;
+        var eventId = ReadString(record, "eventId") ??
+            CreateLegacyEventId(record, channel, lineNumber);
+        return new SessionTimelineEvent(
+            lineNumber,
+            eventId,
+            ReadString(record, "evidenceClass") ?? "observed",
+            channel,
+            eventType,
+            timestamp,
+            CreateSummary(channel, eventType, payload),
+            record.GetRawText());
+    }
+
+    internal static void AddFrame(
         string root,
         long timestamp,
         JsonElement payload,
@@ -165,7 +134,7 @@ public static class SessionArchiveReader
             ReadInt32(payload, "height") ?? 0));
     }
 
-    private static void AddAudioTrack(
+    internal static void AddAudioTrack(
         string root,
         long timestamp,
         JsonElement payload,

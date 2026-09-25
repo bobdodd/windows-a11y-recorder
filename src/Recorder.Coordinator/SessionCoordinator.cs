@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Recorder.Contracts;
 using Recorder.Session;
 
@@ -173,12 +174,25 @@ public sealed class SessionCoordinator : IAsyncDisposable
             new { note = string.IsNullOrWhiteSpace(note) ? null : note.Trim() }));
     }
 
+    /// <summary>
+    /// The playback archive prepared during the last stop that requested it,
+    /// built from the same read of the event log that finalization validation
+    /// made. Null when the stop did not request playback.
+    /// </summary>
+    public SessionPlaybackArchive? FinalizedPlaybackArchive { get; private set; }
+
+    public Task<RecordingSessionStatus> StopAsync(
+        CancellationToken cancellationToken = default) =>
+        StopAsync(preparePlayback: false, cancellationToken);
+
     public async Task<RecordingSessionStatus> StopAsync(
+        bool preparePlayback,
         CancellationToken cancellationToken = default)
     {
         await _transitionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            FinalizedPlaybackArchive = null;
             ThrowIfDisposed();
             if (State != RecordingSessionState.Recording)
             {
@@ -234,9 +248,13 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 cancellationToken,
                 artifacts).ConfigureAwait(false);
             DeleteRecordingMarker();
+            var playback = preparePlayback
+                ? new SessionPlaybackArchiveBuilder(_sessionDirectory!)
+                : null;
             var validation = await SessionArchiveValidator.ValidateAsync(
                 _sessionDirectory!,
                 FinalizationValidation,
+                playback,
                 cancellationToken).ConfigureAwait(false);
             if (!validation.IsValid)
             {
@@ -255,15 +273,22 @@ public sealed class SessionCoordinator : IAsyncDisposable
                     _message,
                     cancellationToken,
                     artifacts).ConfigureAwait(false);
+                playback = preparePlayback
+                    ? new SessionPlaybackArchiveBuilder(_sessionDirectory!)
+                    : null;
                 validation = await SessionArchiveValidator.ValidateAsync(
                     _sessionDirectory!,
                     FinalizationValidation,
+                    playback,
                     cancellationToken).ConfigureAwait(false);
             }
 
             await SessionArchiveValidator.WriteReportAsync(
                 _sessionDirectory!,
                 validation,
+                cancellationToken).ConfigureAwait(false);
+            FinalizedPlaybackArchive = await BuildPlaybackAsync(
+                playback,
                 cancellationToken).ConfigureAwait(false);
             return GetStatus();
         }
@@ -295,6 +320,30 @@ public sealed class SessionCoordinator : IAsyncDisposable
 
         _transitionLock.Dispose();
         _disposed = true;
+    }
+
+    // A playback archive that cannot be built leaves the property null, so
+    // the caller falls back to loading the archive itself and reports the
+    // failure there. Finalization has already written the manifest and
+    // validation report, and playback must not change the stop outcome.
+    private static async Task<SessionPlaybackArchive?> BuildPlaybackAsync(
+        SessionPlaybackArchiveBuilder? playback,
+        CancellationToken cancellationToken)
+    {
+        if (playback is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await playback.BuildAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException or JsonException or IOException)
+        {
+            return null;
+        }
     }
 
     private SessionBoundary Boundary() =>

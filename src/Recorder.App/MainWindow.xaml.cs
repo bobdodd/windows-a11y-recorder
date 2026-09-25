@@ -448,11 +448,13 @@ public partial class MainWindow : Window
         MarkerButton.IsEnabled = false;
         StatusTextBlock.Text = "Stopping and verifying session files.";
         string? completedSession = null;
+        SessionPlaybackArchive? preparedArchive = null;
 
         try
         {
-            var status = await _coordinator.StopAsync();
+            var status = await _coordinator.StopAsync(preparePlayback: true);
             completedSession = status.SessionDirectory;
+            preparedArchive = _coordinator.FinalizedPlaybackArchive;
             RefreshStatus(status);
             StatusTextBlock.Text = status.State == RecordingSessionState.Completed
                 ? "Recording completed and session files verified."
@@ -482,11 +484,22 @@ public partial class MainWindow : Window
 
         if (Directory.Exists(completedSession))
         {
-            await LoadSessionAsync(completedSession, validate: false);
+            await LoadSessionAsync(
+                completedSession,
+                validate: false,
+                preparedArchive);
         }
     }
 
-    private async Task LoadSessionAsync(string sessionDirectory, bool validate)
+    // A prepared archive was built from the read finalization validation
+    // made, so it is used as is. Otherwise, opening with validation builds
+    // the archive from the validator's read, and opening without validation
+    // reads the archive once to load it. The event log is read once in each
+    // case.
+    private async Task LoadSessionAsync(
+        string sessionDirectory,
+        bool validate,
+        SessionPlaybackArchive? preparedArchive = null)
     {
         PausePlayback();
         SetPlaybackEnabled(false);
@@ -497,10 +510,18 @@ public partial class MainWindow : Window
 
         try
         {
-            if (validate)
+            SessionPlaybackArchive archive;
+            if (preparedArchive is not null)
             {
+                archive = preparedArchive;
+            }
+            else if (validate)
+            {
+                var playback = new SessionPlaybackArchiveBuilder(sessionDirectory);
                 var validation = await SessionArchiveValidator.ValidateAsync(
-                    sessionDirectory);
+                    sessionDirectory,
+                    ArchiveValidationOptions.Default,
+                    playback);
                 if (!validation.IsValid)
                 {
                     var problems = string.Join(
@@ -516,10 +537,16 @@ public partial class MainWindow : Window
                         Environment.NewLine +
                         problems);
                 }
+
+                archive = await playback.BuildAsync();
+            }
+            else
+            {
+                archive = await SessionArchiveReader.LoadAsync(sessionDirectory);
             }
 
             CloseAudio();
-            _playbackArchive = await SessionArchiveReader.LoadAsync(sessionDirectory);
+            _playbackArchive = archive;
             _playbackPositionNanoseconds = 0;
             _displayedFrameIndex = -1;
             TimelineControl.SetSession(

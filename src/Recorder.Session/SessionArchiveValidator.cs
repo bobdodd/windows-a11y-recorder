@@ -104,9 +104,21 @@ public static class SessionArchiveValidator
             ArchiveValidationOptions.Default,
             cancellationToken);
 
+    public static Task<ArchiveValidationResult> ValidateAsync(
+        string sessionDirectory,
+        ArchiveValidationOptions options,
+        CancellationToken cancellationToken = default) =>
+        ValidateAsync(sessionDirectory, options, null, cancellationToken);
+
+    /// <summary>
+    /// Validates an archive and, when <paramref name="playback"/> is given,
+    /// passes every event record the validator parses to it, so the same
+    /// read of the event log also prepares playback.
+    /// </summary>
     public static async Task<ArchiveValidationResult> ValidateAsync(
         string sessionDirectory,
         ArchiveValidationOptions options,
+        SessionPlaybackArchiveBuilder? playback,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionDirectory);
@@ -198,6 +210,7 @@ public static class SessionArchiveValidator
             var eventCount = await ValidateEventsAsync(
                 rootPath,
                 sessionId,
+                playback,
                 issues,
                 cancellationToken).ConfigureAwait(false);
             if (acceptedEventCount is not null && acceptedEventCount != eventCount)
@@ -467,6 +480,7 @@ public static class SessionArchiveValidator
     private static async Task<long> ValidateEventsAsync(
         string rootPath,
         string? expectedSessionId,
+        SessionPlaybackArchiveBuilder? playback,
         ICollection<ArchiveValidationIssue> issues,
         CancellationToken cancellationToken)
     {
@@ -511,6 +525,7 @@ public static class SessionArchiveValidator
                     "events.ndjson",
                     $"Event is not valid JSON: {exception.Message}",
                     lineNumber);
+                playback?.AddUnreadable(lineNumber, exception.Message);
                 continue;
             }
 
@@ -518,6 +533,7 @@ public static class SessionArchiveValidator
             {
                 eventCount++;
                 var record = eventDocument.RootElement;
+                playback?.Add(lineNumber, record);
                 if (record.ValueKind != JsonValueKind.Object)
                 {
                     AddError(

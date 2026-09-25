@@ -190,6 +190,19 @@ from the product version.
 
 ### Changed
 
+- Read the event log once when a recording stops and once when a recording is
+  opened. Stopping previously parsed every record to validate the archive and
+  then parsed every record again to load the player, and opening a recording
+  with validation did the same. A `SessionPlaybackArchiveBuilder` now receives
+  each record the validator parses, and the player uses the archive it builds.
+  The app asks the coordinator to prepare playback when it stops a recording;
+  the capture host does not, so headless runs do not hold the playback
+  archive in memory. A record the validator cannot parse makes the prepared
+  archive fail to build, as the reader fails on that record, and the app then
+  loads the archive itself and reports the failure. Validation outcomes,
+  reports, and the loaded archive are unchanged. On the 46 MB protocol 0.31
+  validation event log, the two reads took 1.65 s and the single read 1.07 s
+  on a warm Linux run.
 - Hash each session artifact once at finalization. The recorder previously
   hashed every artifact when writing the terminal manifest, then reread and
   hashed every artifact again when validating it, and hashed every artifact

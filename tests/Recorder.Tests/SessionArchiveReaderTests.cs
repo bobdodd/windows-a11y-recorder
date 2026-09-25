@@ -50,9 +50,7 @@ public sealed class SessionArchiveReaderTests
                         })
                 ]);
 
-            var archive = await SessionArchiveReader.LoadAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+            var archive = await LoadBothWaysAsync(directory);
 
             Assert.Equal(2_000_000_000, archive.DurationNanoseconds);
             var frame = Assert.Single(archive.Frames);
@@ -97,9 +95,7 @@ public sealed class SessionArchiveReaderTests
                         })
                 ]);
 
-            var archive = await SessionArchiveReader.LoadAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+            var archive = await LoadBothWaysAsync(directory);
 
             Assert.Empty(archive.Frames);
             Assert.Single(archive.Events);
@@ -247,9 +243,7 @@ public sealed class SessionArchiveReaderTests
                         })
                 ]);
 
-            var archive = await SessionArchiveReader.LoadAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+            var archive = await LoadBothWaysAsync(directory);
 
             var navigation = Assert.Single(archive.BrowserNavigations);
             Assert.Equal("https://example.test/", navigation.Url);
@@ -360,9 +354,7 @@ public sealed class SessionArchiveReaderTests
                         })
                 ]);
 
-            var archive = await SessionArchiveReader.LoadAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+            var archive = await LoadBothWaysAsync(directory);
 
             var navigation = Assert.Single(
                 archive.BrowserNavigations,
@@ -374,6 +366,68 @@ public sealed class SessionArchiveReaderTests
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task ValidatorReadReportsUnreadableEventLine()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            await WriteManifestAsync(directory, 1_000_000_000);
+            await File.WriteAllTextAsync(
+                Path.Combine(directory, "events.ndjson"),
+                "{\"channel\":\n",
+                TestContext.Current.CancellationToken);
+            var playback = new SessionPlaybackArchiveBuilder(directory);
+
+            var validation = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                ArchiveValidationOptions.Default,
+                playback,
+                TestContext.Current.CancellationToken);
+
+            Assert.Contains(
+                validation.Issues,
+                issue => issue.Code == "event-json-invalid");
+            await Assert.ThrowsAsync<InvalidDataException>(
+                () => playback.BuildAsync(TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    // Loads the archive with the reader's own read and with the validator's
+    // read, asserts the two playback archives are the same, and returns the
+    // reader's archive.
+    private static async Task<SessionPlaybackArchive> LoadBothWaysAsync(
+        string directory)
+    {
+        var loaded = await SessionArchiveReader.LoadAsync(
+            directory,
+            TestContext.Current.CancellationToken);
+        var playback = new SessionPlaybackArchiveBuilder(directory);
+        await SessionArchiveValidator.ValidateAsync(
+            directory,
+            ArchiveValidationOptions.Default,
+            playback,
+            TestContext.Current.CancellationToken);
+        var built = await playback.BuildAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(loaded.SessionDirectory, built.SessionDirectory);
+        Assert.Equal(loaded.DurationNanoseconds, built.DurationNanoseconds);
+        Assert.Equal(loaded.Events, built.Events);
+        Assert.Equal(loaded.Frames, built.Frames);
+        Assert.Equal(loaded.AudioTracks, built.AudioTracks);
+        Assert.Equal(
+            JsonSerializer.Serialize(loaded.BrowserNavigations, JsonOptions),
+            JsonSerializer.Serialize(built.BrowserNavigations, JsonOptions));
+        Assert.Equal(
+            JsonSerializer.Serialize(loaded.Manifest, JsonOptions),
+            JsonSerializer.Serialize(built.Manifest, JsonOptions));
+        return loaded;
     }
 
     private static string CreateDirectory()

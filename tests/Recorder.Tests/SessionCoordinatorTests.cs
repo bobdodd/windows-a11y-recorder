@@ -8,6 +8,35 @@ namespace Recorder.Tests;
 public sealed class SessionCoordinatorTests
 {
     [Fact]
+    public async Task StopPreparesPlaybackOnlyWhenRequested()
+    {
+        var outputRoot = Path.Combine(
+            Path.GetTempPath(),
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var coordinator = new SessionCoordinator(
+                _ => [new FakeCollector()]);
+            await coordinator.StartAsync(
+                new RecordingOptions { OutputRoot = outputRoot },
+                TestContext.Current.CancellationToken);
+
+            var stopped = await coordinator.StopAsync(
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(RecordingSessionState.Completed, stopped.State);
+            Assert.Null(coordinator.FinalizedPlaybackArchive);
+        }
+        finally
+        {
+            if (Directory.Exists(outputRoot))
+            {
+                Directory.Delete(outputRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task FinalizesManifestAndRemovesRecordingMarker()
     {
         var outputRoot = Path.Combine(
@@ -27,8 +56,16 @@ public sealed class SessionCoordinatorTests
             Assert.True(coordinator.AddMarker("Reached search results"));
 
             var stopped = await coordinator.StopAsync(
+                preparePlayback: true,
                 TestContext.Current.CancellationToken);
             Assert.Equal(RecordingSessionState.Completed, stopped.State);
+            var prepared = coordinator.FinalizedPlaybackArchive;
+            Assert.NotNull(prepared);
+            var loaded = await SessionArchiveReader.LoadAsync(
+                stopped.SessionDirectory!,
+                TestContext.Current.CancellationToken);
+            Assert.Equal(loaded.Events, prepared.Events);
+            Assert.Equal(3, prepared.Events.Count);
             Assert.False(File.Exists(Path.Combine(
                 stopped.SessionDirectory!,
                 ".recording")));
