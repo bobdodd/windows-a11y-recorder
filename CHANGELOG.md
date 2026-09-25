@@ -20,6 +20,14 @@ from the product version.
 
 ### Added
 
+- Validate a session started from the recorder application.
+  `scripts/Run-AppSessionValidation.ps1` starts the application, records a
+  fixture page with the application's own Chromium launch, injects marked
+  Windows mouse and keyboard input, and stops and reloads the session through
+  the application. `scripts/Verify-AppSessionEvidence.ps1` checks that the
+  raw input, browser dispatch, focus, text edit, UI Automation,
+  foreground-window, and desktop-frame records of that input agree, and
+  reports the measured delays between them.
 - Record shadow DOM and pseudo-element content. Protocol 0.28 extends DOM
   checkpoints to the composed tree: every open, closed, and user-agent shadow
   root is recorded as a node under its host, with its mode, focus delegation,
@@ -181,6 +189,9 @@ from the product version.
   activating a target that does not exist.
 
 ### Fixed
+
+- Include `browser.accessibility` records in the playback Browser filter.
+  They were shown only under Other.
 
 - Wait for a free recorder pipe instance instead of failing a process that found
   the pipe busy. The recorder keeps one pending pipe instance at a time, so a

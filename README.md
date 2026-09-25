@@ -357,8 +357,10 @@ Remaining:
 2. Extend listener and dispatch evidence to worker global scopes and
    dispatches whose original target is never a Node.
 3. Record rendered frame or compositor correlation identifiers.
-4. Record an application-launched session with the cookie, interaction,
-   layout, and network channels.
+4. Validate an application-launched session with the cookie, interaction,
+   layout, network, and Windows input channels on Windows. The run is
+   described in
+   [the application-launched session plan](docs/validation/app-launched-session-plan.md).
 5. Record representative NVDA, JAWS, and Narrator sessions.
 6. Add evidence correlation and screen-reader behavior analysis.
 7. Investigate touch and gesture coverage on representative hardware.
@@ -387,6 +389,15 @@ PowerShell window after the Chromium checkout has been prepared:
 .\scripts\Run-BlinkValidation.ps1 `
   -ChromiumSource C:\Users\User\chromium-dev\chromium\src
 ```
+
+A session started from the recorder application itself, with injected
+Windows input, is validated after that build with:
+
+```powershell
+.\scripts\Run-AppSessionValidation.ps1
+```
+
+Leave the mouse and keyboard alone until it reports its result.
 
 The Chromium build requires substantial disk space and the Visual Studio C++
 toolchain. Run its setup from Windows PowerShell:

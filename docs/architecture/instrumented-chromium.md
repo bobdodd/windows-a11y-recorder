@@ -657,7 +657,9 @@ The recorded facts are bounded as follows:
 
 - Only the 283 listed properties are recorded. The list and the reason for
   each property are in the evidence model.
-- Shadow-root content and pseudo-elements are not recorded.
+- Shadow-tree content and pseudo-elements are recorded from protocol 0.28,
+  within the limits given in
+  [the shadow DOM and pseudo-element evidence model](shadow-dom-evidence-model.md).
 - The rectangle is the bounding box only; line boxes and fragments are not
   recorded separately.
 - Documents that are not painted, such as those in background tabs, and frames
