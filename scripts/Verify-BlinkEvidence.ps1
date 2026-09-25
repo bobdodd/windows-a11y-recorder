@@ -1047,7 +1047,9 @@ if ($fixturePostMutationStarts.Count -lt 1) {
 }
 # Attribute and character-data mutations queue checkpoints of their own, so the
 # structural checkpoint is identified by the node it added rather than by being
-# the only one.
+# the only one. Checkpoint identifiers are only unique within one renderer
+# process, so the candidate's nodes are narrowed to the fixture document as
+# well as to the checkpoint.
 $parserDivNodeIds = @(
     $fixtureDomNodes |
         Where-Object {
@@ -1063,6 +1065,10 @@ $postMutationCheckpointStart = $fixturePostMutationStarts |
             $domCheckpointNodes |
                 Where-Object {
                     $_.payload.checkpointId -eq $candidateId -and
+                    $_.payload.context.browserInstanceId -eq
+                        $listener.context.browserInstanceId -and
+                    $_.payload.context.processId -eq $listener.context.processId -and
+                    $_.payload.context.documentId -eq $listener.context.documentId -and
                     $_.payload.nodeType -eq "element" -and
                     $_.payload.nodeName -eq "DIV" -and
                     $_.payload.nodeId -notin $parserDivNodeIds
@@ -3753,12 +3759,37 @@ if ($shadowCommits.Count -ne 1) {
 $shadowDocumentToken = $shadowCommits[0].payload.context.documentToken
 $shadowProcessId = $shadowCommits[0].payload.rendererProcessId
 # Only the DOM, layout, and dispatch channels are read here, and each of their
-# records carries a browser context.
-$shadowDocumentRecords = @(
+# records carries a browser context. DOM and layout records carry the
+# committed document's token, but dispatch records carry only the renderer's
+# document identifier, so the token selects the DOM and layout records and the
+# single renderer document identifier they share selects the dispatch records.
+$shadowTokenRecords = @(
     $records |
         Where-Object {
-            $_.channel -in @("browser.dom", "browser.layout", "browser.dispatch") -and
+            $_.channel -in @("browser.dom", "browser.layout") -and
             $_.payload.context.documentToken -eq $shadowDocumentToken -and
+            $_.payload.context.processId -eq $shadowProcessId
+        }
+)
+$shadowRendererDocumentIds = @(
+    $shadowTokenRecords |
+        ForEach-Object { [string] $_.payload.context.documentId } |
+        Sort-Object -Unique
+)
+if ($shadowRendererDocumentIds.Count -ne 1) {
+    throw (
+        "The shadow DOM logging fixture's DOM and layout records carried " +
+        "$($shadowRendererDocumentIds.Count) renderer document identifiers " +
+        "rather than one."
+    )
+}
+$shadowRendererDocumentId = $shadowRendererDocumentIds[0]
+$shadowDocumentRecords = @(
+    $shadowTokenRecords
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.payload.context.documentId -eq $shadowRendererDocumentId -and
             $_.payload.context.processId -eq $shadowProcessId
         }
 )
@@ -3785,23 +3816,23 @@ foreach ($start in @(
     $nodes = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-node" })
     $roots = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-shadow-root" })
     $slots = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-slot-assignment" })
-    $completions = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-completed" })
-    if ($completions.Count -ne 1) {
+    $shadowCompletions = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-completed" })
+    if ($shadowCompletions.Count -ne 1) {
         throw (
             "Shadow fixture DOM checkpoint $checkpointId had " +
-            "$($completions.Count) completion records rather than one."
+            "$($shadowCompletions.Count) completion records rather than one."
         )
     }
-    $completion = $completions[0].payload
-    if ($completion.truncated -or
-        $completion.nodeCount -ne $nodes.Count -or
-        $completion.shadowRootCount -ne $roots.Count -or
-        $completion.slotCount -ne $slots.Count) {
+    $shadowCompletion = $shadowCompletions[0].payload
+    if ($shadowCompletion.truncated -or
+        $shadowCompletion.nodeCount -ne $nodes.Count -or
+        $shadowCompletion.shadowRootCount -ne $roots.Count -or
+        $shadowCompletion.slotCount -ne $slots.Count) {
         throw (
             "Shadow fixture DOM checkpoint $checkpointId completed with " +
-            "$($completion.nodeCount) nodes, $($completion.shadowRootCount) " +
-            "shadow roots, $($completion.slotCount) slots, truncated " +
-            "$($completion.truncated), but emitted $($nodes.Count) node, " +
+            "$($shadowCompletion.nodeCount) nodes, $($shadowCompletion.shadowRootCount) " +
+            "shadow roots, $($shadowCompletion.slotCount) slots, truncated " +
+            "$($shadowCompletion.truncated), but emitted $($nodes.Count) node, " +
             "$($roots.Count) shadow root, and $($slots.Count) slot records."
         )
     }
@@ -3999,19 +4030,19 @@ foreach ($start in $shadowLayoutStarts) {
             } |
             ForEach-Object { $_.payload }
     )
-    $completion = @(
+    $shadowCompletion = @(
         $shadowDocumentRecords |
             Where-Object {
                 $_.eventType -eq "layout-checkpoint-completed" -and
                 $_.payload.checkpointId -eq $checkpointId
             }
     )
-    if ($completion.Count -eq 1 -and
+    if ($shadowCompletion.Count -eq 1 -and
         @($nodes | Where-Object { $_.nodeId -eq $shadowIds["closed-button"] }).Count -eq 1) {
         $shadowLayout = [pscustomobject]@{
             Id = $checkpointId
             Nodes = $nodes
-            Completion = $completion[0].payload
+            Completion = $shadowCompletion[0].payload
         }
     }
 }
