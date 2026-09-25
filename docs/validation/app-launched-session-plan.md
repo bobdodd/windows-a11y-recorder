@@ -116,4 +116,74 @@ one run on one machine. They are not a latency contract.
 
 ## Result
 
-Not yet run on Windows.
+The application-launched session completed the reference Windows procedure on
+September 25, 2026, using repository commit `afaf0c9`. The run script exited
+with code 0 after:
+
+- Passing the managed recorder test suite and building the recorder
+  application.
+- Starting the application, which launched instrumented Chromium with the
+  recorder bootstrap switch and without a debugging port.
+- Recording the fixture page with keyboard and mouse, UI Automation,
+  foreground window, desktop frame, and browser evidence.
+- Injecting the marked clicks, typing, and Tab, and stopping the recording
+  through the application.
+- Loading the finished session into the application's playback.
+- Passing archive validation, the browser evidence-loss rule, and every
+  requirement of `Verify-AppSessionEvidence.ps1`.
+
+The validated session is:
+
+`C:\Users\Public\Downloads\A11yRecorderAppSession\sessions\20260925-123720-1874f18beabe4890a2e3e6108cab7056`
+
+The run reported:
+
+- `APP_STOP_STATUS=Recording completed and session files verified.`
+- `APP_PLAYBACK_STATUS=20260925-123720-1874f18beabe4890a2e3e6108cab7056 | 44 frames | 31,010 events | 0 audio tracks`
+- `APP_PLAYBACK_NAVIGATIONS=5`
+- `DISPLAYS=\\.\DISPLAY1 1920x1080 at (0, 0)`
+- `SYSTEM_DPI=96`
+- `ARCHIVE_VALID=True`
+- `EVENTS_VALIDATED=31010`
+- `ARTIFACTS_VALIDATED=46`
+- `SINK_REFUSED_EVENTS=0`
+- `BROWSER_OMITTED_RECORDS=0`
+- `OTHER_OMISSIONS=` (none)
+
+The verifier found 12 instrumented Chromium processes, the fixture renderer
+as process 31324, 6 marked mouse records, and 10 marked key records. It
+reported 7 shadow roots, 10 layout checkpoints, 10 accessibility checkpoints,
+15 desktop frames during the input, and no omission kinds. Focus reached
+nodes 5, 7, and 18, and the text field's last user-edit value was `a11y`
+after 4 user edits.
+
+Measured delays from the raw input record:
+
+| Measurement | Delay (ms) |
+| --- | --- |
+| Button press to trusted `mousedown` | 2.16 |
+| Button release to trusted `click` | 2.36 |
+| Text field press to trusted `mousedown` | 2.73 |
+| First key to trusted `keydown` | 1.29 |
+| Button press to UI Automation focus | 24.88 |
+| Text field press to UI Automation focus | 30.56 |
+| Tab press to UI Automation focus | 34.44 |
+
+These delays are single measurements from one run on one machine, a single
+1920x1080 display at 96 DPI, with injected rather than physical input. They
+show that the channels agree on this machine; they are not a latency
+characterisation.
+
+Three earlier attempts on the same day failed before this result, none of
+them because of a recorder defect:
+
+1. The application did not start, because the per-user .NET installation was
+   not found without `DOTNET_ROOT`. The runner now sets it for the process it
+   launches.
+2. UI Automation `SetFocus` on the Chromium top-level window threw, since
+   that window is not keyboard focusable. The runner now moves the
+   foreground with Win32 calls and sends no input to do so.
+3. The verifier required the `user-gesture` focus trigger on the two mouse
+   focus changes. Blink records `script` for them, as described under what
+   the verifier requires. The recording was re-verified with the corrected
+   expectation before this run.

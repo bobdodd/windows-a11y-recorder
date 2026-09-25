@@ -350,6 +350,9 @@ Completed:
     pseudo-element layout, and shadow-adjusted dispatch paths (protocol 0.28).
 19. Launch instrumented Chromium from the recorder application and record its
     evidence alongside the desktop, input, and UI Automation channels.
+20. Validate an application-launched session with the cookie, interaction,
+    layout, network, shadow-tree, and Windows input channels on Windows. See
+    [the application-launched session plan](docs/validation/app-launched-session-plan.md).
 
 Remaining:
 
@@ -357,13 +360,9 @@ Remaining:
 2. Extend listener and dispatch evidence to worker global scopes and
    dispatches whose original target is never a Node.
 3. Record rendered frame or compositor correlation identifiers.
-4. Validate an application-launched session with the cookie, interaction,
-   layout, network, and Windows input channels on Windows. The run is
-   described in
-   [the application-launched session plan](docs/validation/app-launched-session-plan.md).
-5. Record representative NVDA, JAWS, and Narrator sessions.
-6. Add evidence correlation and screen-reader behavior analysis.
-7. Investigate touch and gesture coverage on representative hardware.
+4. Record representative NVDA, JAWS, and Narrator sessions.
+5. Add evidence correlation and screen-reader behavior analysis.
+6. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 

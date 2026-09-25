@@ -28,6 +28,8 @@ from the product version.
   raw input, browser dispatch, focus, text edit, UI Automation,
   foreground-window, and desktop-frame records of that input agree, and
   reports the measured delays between them.
+  The run passed on Windows on September 25, 2026, at commit `afaf0c9`, with
+  31,010 validated events, no refused events, and no omitted browser records.
 - Record shadow DOM and pseudo-element content. Protocol 0.28 extends DOM
   checkpoints to the composed tree: every open, closed, and user-agent shadow
   root is recorded as a node under its host, with its mode, focus delegation,
