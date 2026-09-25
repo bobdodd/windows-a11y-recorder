@@ -190,6 +190,19 @@ from the product version.
 
 ### Changed
 
+- Hash each session artifact once at finalization. The recorder previously
+  hashed every artifact when writing the terminal manifest, then reread and
+  hashed every artifact again when validating it, and hashed every artifact
+  twice more when validation failed and the manifest was rewritten and
+  validated again. Finalization now builds the artifact inventory once, reuses
+  it for any rewrite, and validates with hash verification skipped, because
+  the manifest hashes were computed from the same files moments earlier.
+  Skipped verification still checks each artifact's path, presence, size, and
+  hash format. Opening a recording in the player still rereads every artifact
+  and verifies its hash. Validator 1.3 reports `artifactHashesVerified` in
+  `diagnostics/archive-validation.json`, and a report written at finalization
+  states `false`. A recording with a 920 MB event log and 273 MB of frames
+  previously read about 1.2 GB twice for hashing when stopped.
 - State UI Automation queue loss per episode, protect focus changes and
   automation events from floods, and read element properties with each
   event. A protocol 0.30 run with Microsoft Solitaire open received up to

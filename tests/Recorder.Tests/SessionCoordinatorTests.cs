@@ -46,6 +46,13 @@ public sealed class SessionCoordinatorTests
             Assert.Equal(
                 3,
                 validation.RootElement.GetProperty("eventsValidated").GetInt64());
+            Assert.False(
+                validation.RootElement.GetProperty("artifactHashesVerified").GetBoolean());
+            var verified = await SessionArchiveValidator.ValidateAsync(
+                stopped.SessionDirectory!,
+                TestContext.Current.CancellationToken);
+            Assert.True(verified.IsValid);
+            Assert.True(verified.ArtifactHashesVerified);
 
             using var manifest = JsonDocument.Parse(
                 await File.ReadAllTextAsync(

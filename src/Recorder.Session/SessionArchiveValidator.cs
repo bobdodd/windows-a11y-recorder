@@ -24,11 +24,27 @@ public sealed record ArchiveValidationResult(
     string? SessionId,
     long EventsValidated,
     long ArtifactsValidated,
-    IReadOnlyList<ArchiveValidationIssue> Issues);
+    IReadOnlyList<ArchiveValidationIssue> Issues,
+    bool ArtifactHashesVerified = true);
+
+/// <summary>
+/// Controls how much of an archive the validator rereads.
+/// </summary>
+/// <param name="VerifyArtifactHashes">
+/// When true, every declared artifact is reread and its SHA-256 compared with
+/// the manifest. When false, the validator still checks each artifact's path,
+/// presence, size, and hash format, but does not reread the file to recompute
+/// its hash. The recorder uses false only at finalization, where it computed
+/// the manifest hashes from the same files moments earlier.
+/// </param>
+public sealed record ArchiveValidationOptions(bool VerifyArtifactHashes = true)
+{
+    public static ArchiveValidationOptions Default { get; } = new();
+}
 
 public static class SessionArchiveValidator
 {
-    public const string ValidatorVersion = "1.2";
+    public const string ValidatorVersion = "1.3";
     public const string ReportRelativePath = "diagnostics/archive-validation.json";
 
     private static readonly string[] ManifestProperties =
@@ -80,11 +96,21 @@ public static class SessionArchiveValidator
         "analysis"
     ];
 
+    public static Task<ArchiveValidationResult> ValidateAsync(
+        string sessionDirectory,
+        CancellationToken cancellationToken = default) =>
+        ValidateAsync(
+            sessionDirectory,
+            ArchiveValidationOptions.Default,
+            cancellationToken);
+
     public static async Task<ArchiveValidationResult> ValidateAsync(
         string sessionDirectory,
+        ArchiveValidationOptions options,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionDirectory);
+        ArgumentNullException.ThrowIfNull(options);
 
         var issues = new List<ArchiveValidationIssue>();
         var rootPath = Path.GetFullPath(sessionDirectory);
@@ -166,6 +192,7 @@ public static class SessionArchiveValidator
             var artifactResult = await ValidateArtifactsAsync(
                 manifest,
                 rootPath,
+                options.VerifyArtifactHashes,
                 issues,
                 cancellationToken).ConfigureAwait(false);
             var eventCount = await ValidateEventsAsync(
@@ -187,7 +214,8 @@ public static class SessionArchiveValidator
                 sessionId,
                 eventCount,
                 artifactResult,
-                issues);
+                issues,
+                options.VerifyArtifactHashes);
         }
     }
 
@@ -297,6 +325,7 @@ public static class SessionArchiveValidator
     private static async Task<long> ValidateArtifactsAsync(
         JsonElement manifest,
         string rootPath,
+        bool verifyHashes,
         ICollection<ArchiveValidationIssue> issues,
         CancellationToken cancellationToken)
     {
@@ -371,6 +400,21 @@ public static class SessionArchiveValidator
             }
 
             var expectedHash = ReadString(artifact, "sha256");
+            if (!verifyHashes)
+            {
+                if (!IsSha256Hex(expectedHash))
+                {
+                    AddError(
+                        issues,
+                        "artifact-hash-invalid",
+                        relativePath!,
+                        "Artifact SHA-256 must be 64 lowercase hexadecimal characters.");
+                }
+
+                validatedCount++;
+                continue;
+            }
+
             await using var stream = new FileStream(
                 absolutePath,
                 FileMode.Open,
@@ -1123,7 +1167,8 @@ public static class SessionArchiveValidator
         string? sessionId,
         long eventsValidated,
         long artifactsValidated,
-        IReadOnlyList<ArchiveValidationIssue> issues) =>
+        IReadOnlyList<ArchiveValidationIssue> issues,
+        bool artifactHashesVerified = true) =>
         new(
             ValidatorVersion,
             DateTimeOffset.UtcNow,
@@ -1131,7 +1176,13 @@ public static class SessionArchiveValidator
             sessionId,
             eventsValidated,
             artifactsValidated,
-            issues);
+            issues,
+            artifactHashesVerified);
+
+    private static bool IsSha256Hex(string? value) =>
+        value is { Length: 64 } &&
+        value.All(character =>
+            character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static void AddError(
         ICollection<ArchiveValidationIssue> issues,

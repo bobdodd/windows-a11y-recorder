@@ -7,6 +7,12 @@ namespace Recorder.Coordinator;
 
 public sealed class SessionCoordinator : IAsyncDisposable
 {
+    // Finalization validation checks the manifest the coordinator has just
+    // written from hashes it has just computed, so it does not reread every
+    // artifact to recompute them. Opening a recording later verifies hashes.
+    private static readonly ArchiveValidationOptions FinalizationValidation =
+        new(VerifyArtifactHashes: false);
+
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
     private readonly Func<RecordingOptions, IReadOnlyList<ICaptureCollector>> _collectorFactory;
     private readonly List<CollectorRuntime> _collectors = [];
@@ -216,14 +222,21 @@ public sealed class SessionCoordinator : IAsyncDisposable
             _message = failures.Count == 0
                 ? "Recording completed."
                 : string.Join(Environment.NewLine, failures);
+            // Hash every artifact exactly once. The failure rewrite below
+            // reuses this inventory, and finalization validation skips the
+            // reread because these hashes were computed from the same files.
+            var artifacts = await BuildArtifactInventoryAsync(cancellationToken)
+                .ConfigureAwait(false);
             await WriteManifestAsync(
                 completion,
                 endedUtc,
                 failures.Count == 0 ? null : _message,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                artifacts).ConfigureAwait(false);
             DeleteRecordingMarker();
             var validation = await SessionArchiveValidator.ValidateAsync(
                 _sessionDirectory!,
+                FinalizationValidation,
                 cancellationToken).ConfigureAwait(false);
             if (!validation.IsValid)
             {
@@ -240,9 +253,11 @@ public sealed class SessionCoordinator : IAsyncDisposable
                     "failed",
                     endedUtc,
                     _message,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    artifacts).ConfigureAwait(false);
                 validation = await SessionArchiveValidator.ValidateAsync(
                     _sessionDirectory!,
+                    FinalizationValidation,
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -320,6 +335,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
             DeleteRecordingMarker();
             var validation = await SessionArchiveValidator.ValidateAsync(
                 _sessionDirectory,
+                FinalizationValidation,
                 CancellationToken.None).ConfigureAwait(false);
             await SessionArchiveValidator.WriteReportAsync(
                 _sessionDirectory,
@@ -346,7 +362,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
         string status,
         DateTimeOffset? endedUtc,
         string? failure,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<SessionArtifact>? artifactInventory = null)
     {
         if (_sessionDirectory is null ||
             _sessionId is null ||
@@ -358,7 +375,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
         }
 
         var artifacts = status is "completed" or "failed"
-            ? await BuildArtifactInventoryAsync(cancellationToken).ConfigureAwait(false)
+            ? artifactInventory ??
+                await BuildArtifactInventoryAsync(cancellationToken).ConfigureAwait(false)
             : [];
         var manifest = new SessionManifest(
             SessionSchemaVersions.Manifest,

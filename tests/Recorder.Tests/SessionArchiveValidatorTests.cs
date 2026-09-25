@@ -64,6 +64,94 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task SkippingHashVerificationKeepsStructuralArtifactChecks()
+    {
+        var directory = await CreateArchiveAsync([CreateEvent(0, 100)]);
+        try
+        {
+            var eventPath = Path.Combine(directory, "events.ndjson");
+            var bytes = await File.ReadAllBytesAsync(
+                eventPath,
+                TestContext.Current.CancellationToken);
+            var index = Array.IndexOf(bytes, (byte)'{');
+            bytes[index + 1] = bytes[index + 1] == (byte)' '
+                ? (byte)'\t'
+                : (byte)' ';
+            await File.WriteAllBytesAsync(
+                eventPath,
+                bytes,
+                TestContext.Current.CancellationToken);
+            var options = new ArchiveValidationOptions(VerifyArtifactHashes: false);
+
+            var skipped = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                options,
+                TestContext.Current.CancellationToken);
+            var verified = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(skipped.ArtifactHashesVerified);
+            Assert.Equal(1, skipped.ArtifactsValidated);
+            Assert.DoesNotContain(
+                skipped.Issues,
+                issue => issue.Code == "artifact-hash-mismatch");
+            Assert.True(verified.ArtifactHashesVerified);
+            Assert.Contains(
+                verified.Issues,
+                issue => issue.Code == "artifact-hash-mismatch");
+
+            await File.AppendAllTextAsync(
+                eventPath,
+                "{}\n",
+                TestContext.Current.CancellationToken);
+            var resized = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                options,
+                TestContext.Current.CancellationToken);
+            Assert.Contains(
+                resized.Issues,
+                issue => issue.Code == "artifact-size-mismatch");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SkippingHashVerificationRejectsMalformedHash()
+    {
+        var directory = await CreateArchiveAsync([CreateEvent(0, 100)]);
+        try
+        {
+            var manifestPath = Path.Combine(directory, "manifest.json");
+            var manifest = JsonNode.Parse(await File.ReadAllTextAsync(
+                manifestPath,
+                TestContext.Current.CancellationToken))!;
+            manifest["artifacts"]![0]!["sha256"] = "not-a-hash";
+            await File.WriteAllTextAsync(
+                manifestPath,
+                manifest.ToJsonString(),
+                TestContext.Current.CancellationToken);
+
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                new ArchiveValidationOptions(VerifyArtifactHashes: false),
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsValid);
+            Assert.Contains(
+                result.Issues,
+                issue => issue.Code == "artifact-hash-invalid");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DetectsSequenceAndTimestampRegression()
     {
         var directory = await CreateArchiveAsync(
