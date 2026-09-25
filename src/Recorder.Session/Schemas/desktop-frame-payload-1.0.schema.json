@@ -40,6 +40,10 @@
     "monitorCount": { "type": ["integer", "null"], "minimum": 0 },
     "fallbackReason": { "type": ["string", "null"] },
     "gdiFallbackFrameCount": { "type": "integer", "minimum": 0 },
+    "frameSelection": {
+      "description": "Which arrived WGC frame each monitor image comes from. newest-arrived: the recorder releases every arrived frame except the newest and copies that one at the poll. Absent in archives written before it was recorded, whose images are the oldest queued frame; null for GDI fallback frames.",
+      "enum": ["newest-arrived", null]
+    },
     "monitorFrames": {
       "description": "Per-monitor composition timing. Absent in archives written before it was recorded; timing fields are null for GDI fallback frames.",
       "type": "array",
@@ -66,7 +70,16 @@
           "systemRelativeTimeTicks": { "type": ["integer", "null"], "minimum": 1 },
           "compositedAtNanoseconds": { "type": ["integer", "null"] },
           "dequeuedAtNanoseconds": { "type": ["integer", "null"] },
-          "tryGetNextFrameAttempts": { "type": ["integer", "null"], "minimum": 1 }
+          "tryGetNextFrameAttempts": { "type": ["integer", "null"], "minimum": 1 },
+          "supersededFrameCount": {
+            "description": "Arrived frames released without being copied since the previous capture of this monitor. Present when frameSelection is newest-arrived.",
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "reusedPreviousImage": {
+            "description": "True when no frame arrived since the previous capture, so the previous image was copied again with its original timing. Present when frameSelection is newest-arrived.",
+            "type": ["boolean", "null"]
+          }
         }
       }
     }

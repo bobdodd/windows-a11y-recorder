@@ -3879,6 +3879,7 @@ public sealed class SessionArchiveValidatorTests
           "monitorCount": 1,
           "fallbackReason": null,
           "gdiFallbackFrameCount": 0,
+          "frameSelection": "newest-arrived",
           "monitorFrames": [
             {
               "monitorHandle": 65537,
@@ -3889,7 +3890,9 @@ public sealed class SessionArchiveValidatorTests
               "systemRelativeTimeTicks": 1000167000,
               "compositedAtNanoseconds": 16700000,
               "dequeuedAtNanoseconds": 31200000,
-              "tryGetNextFrameAttempts": 1
+              "tryGetNextFrameAttempts": 1,
+              "supersededFrameCount": 3,
+              "reusedPreviousImage": false
             }
           ]
         }
@@ -3908,6 +3911,7 @@ public sealed class SessionArchiveValidatorTests
     public async Task AcceptsADesktopFrameWrittenBeforeMonitorCompositionTimes()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!.AsObject();
+        payload.Remove("frameSelection");
         payload.Remove("monitorFrames");
 
         var issues = await ValidateDesktopFrameAsync(payload);
@@ -3916,16 +3920,126 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task AcceptsAGdiFallbackFrameWithoutCompositionTimes()
+    public async Task AcceptsADesktopFrameWrittenBeforeNewestArrivedSelection()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!.AsObject();
+        payload.Remove("frameSelection");
+        var monitor = payload["monitorFrames"]![0]!.AsObject();
+        monitor.Remove("supersededFrameCount");
+        monitor.Remove("reusedPreviousImage");
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public async Task AcceptsAReusedPreviousImage()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        var monitor = payload["monitorFrames"]![0]!;
+        monitor["supersededFrameCount"] = 0;
+        monitor["reusedPreviousImage"] = true;
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [InlineData("supersededFrameCount")]
+    [InlineData("reusedPreviousImage")]
+    public async Task RejectsANewestArrivedFrameWithoutMonitorSelectionFields(
+        string nulledProperty)
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["monitorFrames"]![0]![nulledProperty] = null;
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "desktop-monitor-frame-selection-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsMonitorSelectionFieldsWithoutAFrameSelection()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!.AsObject();
+        payload.Remove("frameSelection");
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "desktop-monitor-frame-selection-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAReusedImageThatReleasedArrivedFrames()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["monitorFrames"]![0]!["reusedPreviousImage"] = true;
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "desktop-monitor-frame-selection-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAFrameSelectionOnAGdiFallbackFrame()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         payload["backend"] = "gdi-bitblt";
         payload["monitorCount"] = null;
         var monitor = payload["monitorFrames"]![0]!;
+        foreach (var property in new[]
+        {
+            "systemRelativeTimeTicks",
+            "compositedAtNanoseconds",
+            "dequeuedAtNanoseconds",
+            "tryGetNextFrameAttempts",
+            "supersededFrameCount",
+            "reusedPreviousImage"
+        })
+        {
+            monitor[property] = null;
+        }
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "desktop-frame-selection-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAnUndeclaredFrameSelection()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["frameSelection"] = "oldest-queued";
+
+        var issues = await ValidateDesktopFrameAsync(payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/frameSelection", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AcceptsAGdiFallbackFrameWithoutCompositionTimes()
+    {
+        var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
+        payload["backend"] = "gdi-bitblt";
+        payload["monitorCount"] = null;
+        payload["frameSelection"] = null;
+        var monitor = payload["monitorFrames"]![0]!;
         monitor["systemRelativeTimeTicks"] = null;
         monitor["compositedAtNanoseconds"] = null;
         monitor["dequeuedAtNanoseconds"] = null;
         monitor["tryGetNextFrameAttempts"] = null;
+        monitor["supersededFrameCount"] = null;
+        monitor["reusedPreviousImage"] = null;
 
         var issues = await ValidateDesktopFrameAsync(payload);
 

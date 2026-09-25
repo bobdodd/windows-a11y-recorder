@@ -7,6 +7,8 @@ using Vortice.DXGI;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
+using Windows.Foundation;
+using Recorder.Contracts;
 using WinRT;
 using WinRT.Interop;
 using static Vortice.Direct3D11.D3D11;
@@ -47,8 +49,11 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
 
     public int MonitorCount => _monitors.Count;
 
-    public static WindowsGraphicsCaptureBackend Create()
+    // sessionNanoseconds is read on the capture pool's worker threads when a
+    // frame arrives, so it must be safe to call from any thread.
+    public static WindowsGraphicsCaptureBackend Create(Func<long> sessionNanoseconds)
     {
+        ArgumentNullException.ThrowIfNull(sessionNanoseconds);
         bool isSupported;
         try
         {
@@ -119,7 +124,8 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
                         nativeDevice,
                         deviceContext,
                         winRtDevice,
-                        monitor));
+                        monitor,
+                        sessionNanoseconds));
                 }
                 catch (Exception exception)
                 {
@@ -178,8 +184,7 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
         int virtualY,
         int virtualWidth,
         int virtualHeight,
-        byte[] destination,
-        Func<long> sessionNanoseconds)
+        byte[] destination)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         Array.Clear(destination);
@@ -192,8 +197,7 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
                 virtualY,
                 virtualWidth,
                 virtualHeight,
-                destination,
-                sessionNanoseconds);
+                destination);
         }
 
         return timings;
@@ -209,6 +213,8 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
                 monitor.Y,
                 monitor.Width,
                 monitor.Height,
+                null,
+                null,
                 null,
                 null,
                 null))
@@ -322,18 +328,40 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
         private readonly GraphicsCaptureItem _item;
         private readonly Direct3D11CaptureFramePool _framePool;
         private readonly GraphicsCaptureSession _session;
-        private ID3D11Texture2D? _stagingTexture;
+        private readonly Func<long> _sessionNanoseconds;
+        private readonly TypedEventHandler<Direct3D11CaptureFramePool, object> _frameArrived;
+
+        // The newest arrived frame, written by the pool's worker threads and
+        // taken by the capture thread.
+        private readonly NewestArrivalSlot<Direct3D11CaptureFrame> _arrivals = new();
+
+        // Guards pool access from the arrival handler against disposal, and
+        // the arrival failure the capture thread reports.
+        private readonly object _gate = new();
+        private Exception? _arrivalFailure;
         private bool _disposed;
+
+        // The last image copied into the staging texture, re-read when no
+        // newer frame has arrived. Only the capture thread touches these.
+        private ID3D11Texture2D? _stagingTexture;
+        private bool _hasPreviousImage;
+        private int _previousWidth;
+        private int _previousHeight;
+        private long _previousSystemRelativeTimeTicks;
+        private long _previousDequeuedAt;
 
         public MonitorCapture(
             ID3D11Device device,
             ID3D11DeviceContext context,
             IDirect3DDevice winRtDevice,
-            MonitorDefinition monitor)
+            MonitorDefinition monitor,
+            Func<long> sessionNanoseconds)
         {
             _device = device;
             _context = context;
             _monitor = monitor;
+            _sessionNanoseconds = sessionNanoseconds;
+            _frameArrived = OnFrameArrived;
             try
             {
                 _item = CreateCaptureItem(monitor.Handle);
@@ -358,7 +386,7 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
                 _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
                     winRtDevice,
                     DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                    2,
+                    FramePoolBufferCount,
                     _item.Size);
             }
             catch (Exception exception)
@@ -378,9 +406,51 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
             }
         }
 
+        // Three buffers: one for the frame the arrival handler holds, one for
+        // the frame the capture thread may be copying, and one free for the
+        // next composition.
+        private const int FramePoolBufferCount = 3;
+
         public void Start()
         {
+            _framePool.FrameArrived += _frameArrived;
             _session.StartCapture();
+        }
+
+        // Runs on a pool worker thread for each arrival. Takes every queued
+        // frame and keeps only the newest, so the pool does not stay full and
+        // the frame held at a poll is the latest one that reached the pool.
+        // Frames replaced here are released without being copied.
+        private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
+        {
+            lock (_gate)
+            {
+                if (_disposed || _arrivalFailure is not null)
+                {
+                    return;
+                }
+
+                while (true)
+                {
+                    Direct3D11CaptureFrame? next;
+                    try
+                    {
+                        next = _framePool.TryGetNextFrame();
+                    }
+                    catch (Exception exception)
+                    {
+                        _arrivalFailure = exception;
+                        return;
+                    }
+
+                    if (next is null)
+                    {
+                        return;
+                    }
+
+                    _arrivals.Offer(next, _sessionNanoseconds());
+                }
+            }
         }
 
         public MonitorFrameTiming CopyLatestFrame(
@@ -388,66 +458,98 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
             int virtualY,
             int virtualWidth,
             int virtualHeight,
-            byte[] destination,
-            Func<long> sessionNanoseconds)
+            byte[] destination)
         {
             Direct3D11CaptureFrame? frame = null;
+            long dequeuedAt = 0;
+            long superseded = 0;
             var attempts = 0;
-            while (attempts < 25 && frame is null)
+            while (true)
             {
                 attempts++;
-                frame = _framePool.TryGetNextFrame();
-                if (frame is null)
+                lock (_gate)
                 {
-                    Thread.Sleep(10);
+                    if (_arrivalFailure is not null)
+                    {
+                        throw new InvalidOperationException(
+                            $"WGC frame arrival failed for monitor {_monitor.Handle}: " +
+                                _arrivalFailure.Message,
+                            _arrivalFailure);
+                    }
                 }
+
+                if (_arrivals.Take() is { } arrival)
+                {
+                    frame = arrival.Item;
+                    dequeuedAt = arrival.ArrivedAt;
+                    superseded = arrival.ReleasedBeforeTake;
+                }
+
+                // Only the first capture waits. Later, no arrival since the
+                // previous poll means no newer frame reached the pool, so the
+                // previous image is the latest one the recorder received.
+                if (frame is not null || _hasPreviousImage || attempts >= 25)
+                {
+                    break;
+                }
+
+                Thread.Sleep(10);
             }
 
             if (frame is null)
             {
-                throw new InvalidOperationException(
-                    $"No WGC frame was available for monitor {_monitor.Handle}.");
-            }
+                if (!_hasPreviousImage)
+                {
+                    throw new InvalidOperationException(
+                        $"No WGC frame was available for monitor {_monitor.Handle}.");
+                }
 
-            // Session time just after the pool handed over the frame. The
-            // compositor rendered the frame before this, so it bounds the
-            // composition time from above.
-            var dequeuedAt = sessionNanoseconds();
+                CopyStagingTexture(
+                    _previousWidth,
+                    _previousHeight,
+                    virtualX,
+                    virtualY,
+                    virtualWidth,
+                    virtualHeight,
+                    destination);
+                return new MonitorFrameTiming(
+                    _monitor.Handle,
+                    _monitor.X,
+                    _monitor.Y,
+                    _monitor.Width,
+                    _monitor.Height,
+                    _previousSystemRelativeTimeTicks,
+                    _previousDequeuedAt,
+                    attempts,
+                    0,
+                    true);
+            }
 
             using (frame)
             {
                 // The QPC time, in 100 ns TimeSpan ticks, at which the
-                // compositor rendered this frame. The pool returns its oldest
-                // queued frame, so this can precede the poll by more than one
-                // frame interval.
+                // compositor rendered this frame.
                 var systemRelativeTimeTicks = frame.SystemRelativeTime.Ticks;
                 var size = frame.ContentSize;
-                using var sourceTexture = GetTexture(frame.Surface);
-                EnsureStagingTexture(size.Width, size.Height);
-                _context.CopyResource(_stagingTexture!, sourceTexture);
+                using (var sourceTexture = GetTexture(frame.Surface))
+                {
+                    EnsureStagingTexture(size.Width, size.Height);
+                    _context.CopyResource(_stagingTexture!, sourceTexture);
+                }
 
-                var mapped = _context.Map(
-                    _stagingTexture!,
-                    0,
-                    MapMode.Read,
-                    Vortice.Direct3D11.MapFlags.None);
-                try
-                {
-                    CopyRows(
-                        mapped.DataPointer,
-                        checked((int)mapped.RowPitch),
-                        size.Width,
-                        size.Height,
-                        virtualX,
-                        virtualY,
-                        virtualWidth,
-                        virtualHeight,
-                        destination);
-                }
-                finally
-                {
-                    _context.Unmap(_stagingTexture!, 0);
-                }
+                _hasPreviousImage = true;
+                _previousWidth = size.Width;
+                _previousHeight = size.Height;
+                _previousSystemRelativeTimeTicks = systemRelativeTimeTicks;
+                _previousDequeuedAt = dequeuedAt;
+                CopyStagingTexture(
+                    size.Width,
+                    size.Height,
+                    virtualX,
+                    virtualY,
+                    virtualWidth,
+                    virtualHeight,
+                    destination);
 
                 return new MonitorFrameTiming(
                     _monitor.Handle,
@@ -457,7 +559,42 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
                     _monitor.Height,
                     systemRelativeTimeTicks,
                     dequeuedAt,
-                    attempts);
+                    attempts,
+                    superseded,
+                    false);
+            }
+        }
+
+        private void CopyStagingTexture(
+            int width,
+            int height,
+            int virtualX,
+            int virtualY,
+            int virtualWidth,
+            int virtualHeight,
+            byte[] destination)
+        {
+            var mapped = _context.Map(
+                _stagingTexture!,
+                0,
+                MapMode.Read,
+                Vortice.Direct3D11.MapFlags.None);
+            try
+            {
+                CopyRows(
+                    mapped.DataPointer,
+                    checked((int)mapped.RowPitch),
+                    width,
+                    height,
+                    virtualX,
+                    virtualY,
+                    virtualWidth,
+                    virtualHeight,
+                    destination);
+            }
+            finally
+            {
+                _context.Unmap(_stagingTexture!, 0);
             }
         }
 
@@ -468,10 +605,17 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
                 return;
             }
 
+            lock (_gate)
+            {
+                _disposed = true;
+            }
+
+            _arrivals.Dispose();
+
+            _framePool.FrameArrived -= _frameArrived;
             _session.Dispose();
             _framePool.Dispose();
             _stagingTexture?.Dispose();
-            _disposed = true;
         }
 
         private static ID3D11Texture2D GetTexture(IDirect3DSurface surface)
@@ -580,7 +724,9 @@ internal sealed class WindowsGraphicsCaptureBackend : IDisposable
         int Height,
         long? SystemRelativeTimeTicks,
         long? DequeuedAtNanoseconds,
-        int? TryGetNextFrameAttempts);
+        int? TryGetNextFrameAttempts,
+        long? SupersededFrameCount,
+        bool? ReusedPreviousImage);
 
     private sealed record MonitorDefinition(
         nint Handle,

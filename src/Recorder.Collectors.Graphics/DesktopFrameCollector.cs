@@ -105,7 +105,8 @@ public sealed class DesktopFrameCollector : ICaptureCollector
             Directory.CreateDirectory(_framesDirectory);
             try
             {
-                _windowsGraphicsCapture = WindowsGraphicsCaptureBackend.Create();
+                _windowsGraphicsCapture = WindowsGraphicsCaptureBackend.Create(
+                    context.Clock.GetElapsedNanoseconds);
             }
             catch (Exception exception) when (!IsFatal(exception))
             {
@@ -293,8 +294,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
                     y,
                     width,
                     height,
-                    pixels,
-                    _context.Clock.GetElapsedNanoseconds);
+                    pixels);
             }
             catch (Exception exception) when (!IsFatal(exception))
             {
@@ -353,6 +353,9 @@ public sealed class DesktopFrameCollector : ICaptureCollector
                     ? _windowsGraphicsCaptureFailure
                     : null,
                 gdiFallbackFrameCount = Interlocked.Read(ref _gdiFallbackFrames),
+                frameSelection = backend == "windows-graphics-capture"
+                    ? "newest-arrived"
+                    : null,
                 monitorFrames
             },
             capturedAt,
@@ -395,7 +398,9 @@ public sealed class DesktopFrameCollector : ICaptureCollector
                         clock.Frequency)
                     : (long?)null,
                 dequeuedAtNanoseconds = timing.DequeuedAtNanoseconds,
-                tryGetNextFrameAttempts = timing.TryGetNextFrameAttempts
+                tryGetNextFrameAttempts = timing.TryGetNextFrameAttempts,
+                supersededFrameCount = timing.SupersededFrameCount,
+                reusedPreviousImage = timing.ReusedPreviousImage
             })
             .ToArray();
     }

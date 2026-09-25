@@ -168,6 +168,21 @@ from the product version.
 
 ### Changed
 
+- Copy the newest arrived Windows Graphics Capture frame instead of the
+  oldest queued one. The protocol 0.30 application-launched session run
+  measured every copied image as 350 to 768 ms old at the poll (median
+  370 ms, at 5 frames per second), consistent with a two-buffer pool that
+  stays full between polls. The recorder now takes each frame as it arrives,
+  keeps only the newest, and releases the rest, on a pool of three buffers.
+  When no frame arrived since the previous poll it copies the previous image
+  again with its original timing. Desktop frame records state
+  `frameSelection` as `newest-arrived`, and each monitor image states how
+  many arrived frames were released before it and whether it was reused. The
+  archive validator accepts earlier archives without these fields. The
+  application-launched session verifier checks per-monitor image order and
+  reuse, and reports image age separately for new and reused images. See
+  [the WGC newest-frame selection note](docs/architecture/wgc-newest-frame-selection.md).
+  The Windows validation run has not yet been made.
 - Schedule the validation fixture's page-lifecycle timers from the harness
   instead of at page load. A page's visibility while it loads depends on when
   Chromium shows its window, so the fixture used to record its lifecycle

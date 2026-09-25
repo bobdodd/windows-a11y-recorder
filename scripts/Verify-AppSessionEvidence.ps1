@@ -549,13 +549,24 @@ if ($inputFrames.Count -eq 0) {
 # time less the browser clock uncertainty. The reported distributions are
 # measurements for review. They do not show that any captured image displays
 # a checkpoint's content.
+#
+# The recorder keeps only the newest arrived frame per monitor. Each image
+# states how many arrived frames were released before it and whether it is
+# the previous image copied again because no frame arrived. Per monitor, in
+# capture order, a new image must be composed after the previous one, and a
+# reused image must carry the previous image's composition and dequeue times.
 $monitorImages = [System.Collections.Generic.List[object]]::new()
+$lastImageByMonitor = @{}
 foreach ($frameRecord in @(
         $records | Where-Object {
             $_.channel -eq "graphics.desktop.frames" -and
             $_.eventType -eq "desktop-frame" -and
             $_.payload.backend -eq "windows-graphics-capture"
-        })) {
+        } | Sort-Object { [long] $_.sequence })) {
+    if ($null -eq $frameRecord.payload.PSObject.Properties["frameSelection"] -or
+        $frameRecord.payload.frameSelection -ne "newest-arrived") {
+        throw "WGC desktop frame $($frameRecord.sequence) does not state newest-arrived frame selection."
+    }
     if ($null -eq $frameRecord.payload.PSObject.Properties["monitorFrames"] -or
         @($frameRecord.payload.monitorFrames).Count -eq 0) {
         throw "WGC desktop frame $($frameRecord.sequence) has no monitor composition times."
@@ -572,13 +583,50 @@ foreach ($frameRecord in @(
                 "$($monitorFrame.monitorHandle) as composed after it was dequeued."
             )
         }
-        $monitorImages.Add([pscustomobject]@{
-                Monitor = [long] $monitorFrame.monitorHandle
-                CapturedAt = [long] $frameRecord.monotonicNanoseconds
-                ComposedAt = [long] $monitorFrame.compositedAtNanoseconds
-                DequeuedAt = [long] $monitorFrame.dequeuedAtNanoseconds
-                Attempts = [int] $monitorFrame.tryGetNextFrameAttempts
-            })
+        if ($null -eq $monitorFrame.PSObject.Properties["supersededFrameCount"] -or
+            $null -eq $monitorFrame.supersededFrameCount -or
+            $null -eq $monitorFrame.PSObject.Properties["reusedPreviousImage"] -or
+            $null -eq $monitorFrame.reusedPreviousImage) {
+            throw (
+                "WGC desktop frame $($frameRecord.sequence) has a monitor image " +
+                "without released-frame or reuse evidence."
+            )
+        }
+        $image = [pscustomobject]@{
+            Monitor = [long] $monitorFrame.monitorHandle
+            Sequence = [long] $frameRecord.sequence
+            CapturedAt = [long] $frameRecord.monotonicNanoseconds
+            ComposedAt = [long] $monitorFrame.compositedAtNanoseconds
+            DequeuedAt = [long] $monitorFrame.dequeuedAtNanoseconds
+            Attempts = [int] $monitorFrame.tryGetNextFrameAttempts
+            Superseded = [long] $monitorFrame.supersededFrameCount
+            Reused = [bool] $monitorFrame.reusedPreviousImage
+        }
+        $previous = $lastImageByMonitor[$image.Monitor]
+        if ($image.Reused) {
+            if ($null -eq $previous) {
+                throw (
+                    "WGC desktop frame $($image.Sequence) reuses a previous image " +
+                    "of monitor $($image.Monitor), but none was captured."
+                )
+            }
+            if ($image.ComposedAt -ne $previous.ComposedAt -or
+                $image.DequeuedAt -ne $previous.DequeuedAt -or
+                $image.Superseded -ne 0) {
+                throw (
+                    "WGC desktop frame $($image.Sequence) reuses the image of monitor " +
+                    "$($image.Monitor) without its timing, or with released frames."
+                )
+            }
+        }
+        elseif ($null -ne $previous -and $image.ComposedAt -le $previous.ComposedAt) {
+            throw (
+                "WGC desktop frame $($image.Sequence) copies a new image of monitor " +
+                "$($image.Monitor) composed no later than the previous image."
+            )
+        }
+        $lastImageByMonitor[$image.Monitor] = $image
+        $monitorImages.Add($image)
     }
 }
 if ($monitorImages.Count -eq 0) {
@@ -657,7 +705,7 @@ if ($presentationsWithCandidate -eq 0) {
 }
 
 function Get-Distribution {
-    param([double[]] $Values)
+    param([double[]] $Values, [string] $Unit = " ms")
 
     if ($Values.Count -eq 0) {
         return "none"
@@ -665,19 +713,30 @@ function Get-Distribution {
     $sorted = @($Values | Sort-Object)
     $median = $sorted[[int][Math]::Floor(($sorted.Count - 1) / 2)]
     (
-        "min $([Math]::Round($sorted[0], 2)) ms, median " +
-        "$([Math]::Round($median, 2)) ms, max " +
-        "$([Math]::Round($sorted[$sorted.Count - 1], 2)) ms, n $($sorted.Count)"
+        "min $([Math]::Round($sorted[0], 2))$Unit, median " +
+        "$([Math]::Round($median, 2))$Unit, max " +
+        "$([Math]::Round($sorted[$sorted.Count - 1], 2))$Unit, n $($sorted.Count)"
     )
 }
 
 [pscustomobject]@{
     WgcMonitorImages = $monitorImages.Count
     Monitors = $imagesByMonitor.Count
-    CapturedAtMinusComposition = Get-Distribution @(
-        $monitorImages | ForEach-Object { ($_.CapturedAt - $_.ComposedAt) / 1000000.0 })
+    NewImages = @($monitorImages | Where-Object { -not $_.Reused }).Count
+    ReusedImages = @($monitorImages | Where-Object { $_.Reused }).Count
+    ReleasedArrivedFrames = [long] ($monitorImages | Measure-Object Superseded -Sum).Sum
+    ReleasedFramesPerNewImage = Get-Distribution @(
+        $monitorImages | Where-Object { -not $_.Reused } |
+            ForEach-Object { [double] $_.Superseded }) -Unit ""
+    NewImageCapturedAtMinusComposition = Get-Distribution @(
+        $monitorImages | Where-Object { -not $_.Reused } |
+            ForEach-Object { ($_.CapturedAt - $_.ComposedAt) / 1000000.0 })
+    ReusedImageCapturedAtMinusComposition = Get-Distribution @(
+        $monitorImages | Where-Object { $_.Reused } |
+            ForEach-Object { ($_.CapturedAt - $_.ComposedAt) / 1000000.0 })
     DequeueMinusComposition = Get-Distribution @(
-        $monitorImages | ForEach-Object { ($_.DequeuedAt - $_.ComposedAt) / 1000000.0 })
+        $monitorImages | Where-Object { -not $_.Reused } |
+            ForEach-Object { ($_.DequeuedAt - $_.ComposedAt) / 1000000.0 })
     ImagesNeedingMoreThanOneAttempt = @($monitorImages | Where-Object { $_.Attempts -gt 1 }).Count
     PresentedCheckpoints = $presentations.Count
     PresentedCheckpointsWithCandidate = $presentationsWithCandidate

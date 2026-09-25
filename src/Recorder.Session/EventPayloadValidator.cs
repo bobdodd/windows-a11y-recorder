@@ -503,6 +503,7 @@ internal static class EventPayloadValidator
                 NullableInteger("monitorCount", nonnegative: true),
                 NullableString("fallbackReason"),
                 RequiredInteger("gdiFallbackFrameCount", nonnegative: true),
+                OptionalNullableEnum("frameSelection", "newest-arrived"),
                 OptionalObjectArray("monitorFrames")
             ],
             issues,
@@ -529,6 +530,22 @@ internal static class EventPayloadValidator
             payload.TryGetProperty("backend", out var backend) &&
             backend.ValueKind == JsonValueKind.String &&
             backend.GetString() == "windows-graphics-capture";
+        // Archives written before the recorder kept only the newest arrived
+        // frame have no frameSelection and no per-monitor selection fields.
+        var selectsNewestArrived =
+            payload.TryGetProperty("frameSelection", out var frameSelection) &&
+            frameSelection.ValueKind == JsonValueKind.String;
+        if (selectsNewestArrived && !isWindowsGraphicsCapture)
+        {
+            AddError(
+                issues,
+                "desktop-frame-selection-inconsistent",
+                "events.ndjson#/payload/frameSelection",
+                "Only a Windows Graphics Capture frame has a frame selection; " +
+                    "a GDI fallback frame must leave it null.",
+                line);
+        }
+
         var index = 0;
         foreach (var monitorFrame in monitorFrames.EnumerateArray())
         {
@@ -550,7 +567,9 @@ internal static class EventPayloadValidator
                     NullableInteger("systemRelativeTimeTicks", positive: true),
                     NullableInteger("compositedAtNanoseconds"),
                     NullableInteger("dequeuedAtNanoseconds"),
-                    NullableInteger("tryGetNextFrameAttempts", positive: true)
+                    NullableInteger("tryGetNextFrameAttempts", positive: true),
+                    OptionalNullableInteger("supersededFrameCount", nonnegative: true),
+                    OptionalNullableBoolean("reusedPreviousImage")
                 ],
                 issues,
                 line,
@@ -578,6 +597,42 @@ internal static class EventPayloadValidator
                             "composition time and dequeue attempts of every monitor image."
                         : "A GDI fallback frame has no composition time, so its " +
                             "monitor entries must leave the timing fields null.",
+                    line);
+            }
+
+            var selectionStated = new[] { "supersededFrameCount", "reusedPreviousImage" }
+                .Select(name =>
+                    monitorFrame.TryGetProperty(name, out var value) &&
+                    value.ValueKind != JsonValueKind.Null)
+                .ToArray();
+            var selectionExpected = selectsNewestArrived && isWindowsGraphicsCapture;
+            if (selectionStated.Any(present => present != selectionExpected))
+            {
+                AddError(
+                    issues,
+                    "desktop-monitor-frame-selection-inconsistent",
+                    pointer,
+                    selectionExpected
+                        ? "A frame that keeps the newest arrived image must state, " +
+                            "for every monitor, how many arrived frames it released " +
+                            "and whether it reused the previous image."
+                        : "Only a frame that keeps the newest arrived image states " +
+                            "released frames and image reuse.",
+                    line);
+            }
+
+            if (monitorFrame.TryGetProperty("reusedPreviousImage", out var reused) &&
+                reused.ValueKind == JsonValueKind.True &&
+                monitorFrame.TryGetProperty("supersededFrameCount", out var superseded) &&
+                IsInteger(superseded) &&
+                superseded.GetInt64() != 0)
+            {
+                AddError(
+                    issues,
+                    "desktop-monitor-frame-selection-inconsistent",
+                    pointer,
+                    "A reused image means no frame arrived since the previous " +
+                        "capture, so no arrived frame can have been released.",
                     line);
             }
 
@@ -4520,6 +4575,18 @@ internal static class EventPayloadValidator
                     ? "must be a nonnegative integer or null"
                     : "must be an integer or null");
 
+    private static PropertyRule OptionalNullableInteger(
+        string name,
+        bool nonnegative = false) =>
+        new(
+            name,
+            false,
+            true,
+            value => IsInteger(value) && (!nonnegative || value.GetInt64() >= 0),
+            nonnegative
+                ? "must be a nonnegative integer or null"
+                : "must be an integer or null");
+
     private static PropertyRule OptionalInteger(
         string name,
         bool nonnegative = false) =>
@@ -4699,6 +4766,15 @@ internal static class EventPayloadValidator
             value => value.ValueKind == JsonValueKind.String &&
                 values.Contains(value.GetString(), StringComparer.Ordinal),
             $"must be one of: {string.Join(", ", values)}");
+
+    private static PropertyRule OptionalNullableEnum(string name, params string[] values) =>
+        new(
+            name,
+            false,
+            true,
+            value => value.ValueKind == JsonValueKind.String &&
+                values.Contains(value.GetString(), StringComparer.Ordinal),
+            $"must be null or one of: {string.Join(", ", values)}");
 
     private static PropertyRule OptionalEnum(string name, params string[] values) =>
         new(

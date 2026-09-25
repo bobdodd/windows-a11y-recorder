@@ -154,6 +154,12 @@ minus composition time, and that measurement decides whether a later change
 should drain the pool to the newest frame. Draining would change what
 existing capture records, so it needs its own versioned change and tests.
 
+Follow-up: after the measurement below, the recorder copies the newest
+arrived frame instead, as described in
+[the WGC newest-frame selection note](wgc-newest-frame-selection.md). Records
+written since then state `frameSelection`; the fields described in this
+section keep their meaning, except as that note states.
+
 ## Recorded fields
 
 Every `browser.presentation` record carries the layout checkpoint's document
@@ -372,7 +378,9 @@ made.
 ## Decisions
 
 - The WGC dequeue policy is unchanged in this slice; see the recorder-side
-  capture boundary.
+  capture boundary. It was changed afterwards on the evidence of the
+  validation results; see
+  [the WGC newest-frame selection note](wgc-newest-frame-selection.md).
 - Browser-process frame-token evidence is deferred. An out-of-process iframe's
   own widget reports presentation for its frames, so the time-based join
   applies to it, but tying its frames to a browser frame, tab, or window

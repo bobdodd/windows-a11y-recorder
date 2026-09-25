@@ -295,6 +295,12 @@ the captured frames that could show a checkpoint's state; they do not show
 that any captured frame does. The record types and limits are in
 [the rendered-frame correlation evidence model](docs/architecture/rendered-frame-correlation-evidence-model.md).
 
+Each captured monitor image is the newest frame that reached the Windows
+Graphics Capture pool before the poll. The recorder releases older arrivals
+as they come, states how many it released, and marks an image copied again
+because no newer frame arrived. The mechanism and its limits are in
+[the WGC newest-frame selection note](docs/architecture/wgc-newest-frame-selection.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.
@@ -381,11 +387,9 @@ Remaining:
 
 1. Extend listener and dispatch evidence to worker global scopes and
    dispatches whose original target is never a Node.
-2. Record rendered frame or compositor correlation identifiers (design in
-   `docs/architecture/rendered-frame-correlation-evidence-model.md`).
-3. Record representative NVDA, JAWS, and Narrator sessions.
-4. Add evidence correlation and screen-reader behavior analysis.
-5. Investigate touch and gesture coverage on representative hardware.
+2. Record representative NVDA, JAWS, and Narrator sessions.
+3. Add evidence correlation and screen-reader behavior analysis.
+4. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 
