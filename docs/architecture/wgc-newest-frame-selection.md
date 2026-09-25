@@ -1,7 +1,7 @@
 # WGC Newest-Frame Selection
 
-Status: implemented. The first Windows run failed on a composition-order
-rule that this note now retires; the rerun is pending.
+Status: implemented and validated on Windows. The first Windows run failed on
+a composition-order rule that this note retires; the rerun passed.
 
 ## Purpose
 
@@ -153,6 +153,34 @@ composition time for new and for reused images, and of arrival minus
 composition time. The distributions are measurements for review, not pass
 criteria. A reused image's age reflects how long the screen produced no
 arrivals, not capture delay.
+
+## Windows validation results
+
+The application-launched session run at commit `9ab8c5f` passed on
+September 25, 2026: one monitor at 1920 by 1080, 24,719 events and 45
+artifacts validated, capture rate 5 frames per second. An earlier run at the
+same commit failed because another application's UI Automation events
+filled the UI Automation collector's queue and the scripted focus change was
+among the dropped observations; that failure is independent of frame
+selection and the run was repeated with that application closed.
+
+All 43 monitor images were new images; none was reused. The arrival handler
+released 497 arrived frames, 10 to 35 per image (median 11), consistent with
+arrivals at about 60 per second between polls 200 ms apart. No image needed
+more than one attempt.
+
+| Measurement | Protocol 0.30 (oldest queued) | Newest arrived |
+| --- | --- | --- |
+| `capturedAt` minus composition time | min 350.13, median 370.06, max 768.42 ms | min -17.66, median -7.03, max 4.20 ms |
+| Arrival or dequeue minus composition time | min 351.84, median 370.80, max 770.89 ms | min -16.02, median -13.57, max -8.12 ms |
+| Presented checkpoints with a candidate image | 11 of 12 | 14 of 14 |
+| Candidate composition minus presentation time | min 83.28, median 166.58, max 183.27 ms | min 16.62, median 116.61, max 166.60 ms |
+
+Every arrival again preceded its reported composition time, by 8.1 to
+16.0 ms here. The remaining gap between a checkpoint's presentation and its
+first candidate image is bounded by the poll interval (200 ms at the default
+capture rate), not by the frame pool. The numbers come from one run on one
+machine and one display.
 
 ## Limits
 

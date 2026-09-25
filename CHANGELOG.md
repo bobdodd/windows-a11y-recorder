@@ -187,7 +187,11 @@ from the product version.
   image's `SystemRelativeTime` was 12.2 to 15.5 ms after the recorder took the
   frame, on a 60 Hz grid, with an exact clock conversion. The
   `desktop-monitor-frame-composed-after-dequeue` error code is retired; both
-  times are still recorded. The Windows rerun has not yet been made.
+  times are still recorded. Validated on Windows at `9ab8c5f`: all 43 images
+  were new, `capturedAt` minus composition time fell from a median of 370 ms
+  to -7 ms (range -17.7 to 4.2 ms), 14 of 14 presented checkpoints had a
+  candidate image, and the median candidate lag after presentation fell from
+  167 ms to 117 ms.
 - Schedule the validation fixture's page-lifecycle timers from the harness
   instead of at page load. A page's visibility while it loads depends on when
   Chromium shows its window, so the fixture used to record its lifecycle

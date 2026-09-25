@@ -162,7 +162,8 @@ Follow-up: after the measurement below, the recorder copies the newest
 arrived frame instead, as described in
 [the WGC newest-frame selection note](wgc-newest-frame-selection.md). Records
 written since then state `frameSelection`; the fields described in this
-section keep their meaning, except as that note states.
+section keep their meaning, except as that note states. The note records the
+Windows results with the new selection.
 
 ## Recorded fields
 
