@@ -345,4 +345,5 @@ page's layout or styling.
 
 - Per-fragment and per-line geometry.
 - Rendered-frame and compositor correlation identifiers, so a checkpoint can be
-  joined to the frame that displayed it.
+  joined to the frame that displayed it. The design is in
+  `rendered-frame-correlation-evidence-model.md`.

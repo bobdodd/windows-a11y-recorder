@@ -369,7 +369,8 @@ Remaining:
 
 1. Extend listener and dispatch evidence to worker global scopes and
    dispatches whose original target is never a Node.
-2. Record rendered frame or compositor correlation identifiers.
+2. Record rendered frame or compositor correlation identifiers (design in
+   `docs/architecture/rendered-frame-correlation-evidence-model.md`).
 3. Record representative NVDA, JAWS, and Narrator sessions.
 4. Add evidence correlation and screen-reader behavior analysis.
 5. Investigate touch and gesture coverage on representative hardware.

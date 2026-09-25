@@ -939,7 +939,8 @@ Successful connections are persisted on the `browser.lifecycle` channel:
    and text-editing change records are implemented in protocol 0.24, and
    checkpoint-time snapshots of that state in protocol 0.29. Layout geometry
    and computed-style checkpoints are implemented in protocol 0.25.
-   Rendered-frame checkpoints remain outstanding.
+   Rendered-frame checkpoints remain outstanding; their design is in
+   `rendered-frame-correlation-evidence-model.md`.
 6. Add cookie operations and network metadata with prohibited values removed at
    source. Cookie operations are implemented in protocol 0.23. Network metadata
    is implemented in protocol 0.26, and WebSocket, EventSource, and
