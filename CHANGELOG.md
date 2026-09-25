@@ -30,7 +30,10 @@ from the product version.
   snapshot never forces style or layout. The Blink validation fixture holds
   focus on a listbox across a rendering update, and the verifier checks the
   snapshots of its parsed and final states and the completeness and source
-  correlation of every snapshot in the capture. Not yet validated on Windows.
+  correlation of every snapshot in the capture. The Blink validation passed on
+  Windows on September 25, 2026, at commit `1ca3cd0`, with 67,720 validated
+  events, 186 validated artifacts, no omitted browser records, and 134
+  interaction snapshots, 15 of them for the interaction fixture document.
 - Validate a session started from the recorder application.
   `scripts/Run-AppSessionValidation.ps1` starts the application, records a
   fixture page with the application's own Chromium launch, injects marked
