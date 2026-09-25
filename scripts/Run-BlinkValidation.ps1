@@ -2050,7 +2050,12 @@ function Invoke-ShadowFixture {
             @{ Name = "Dispatch"; Call = "shadowFixture.dispatch()" }
         )
     $settled = ConvertFrom-Json $run.Steps.Settle
-    $observed = @(ConvertFrom-Json $run.Steps.Dispatch)
+    # Windows PowerShell 5.1 writes a parsed JSON array to the pipeline as a
+    # single object, so wrapping ConvertFrom-Json directly in @() yields a
+    # one-element array holding the whole list. Assigning first and then
+    # wrapping the variable gives the entries themselves.
+    $parsedDispatch = ConvertFrom-Json $run.Steps.Dispatch
+    $observed = @($parsedDispatch)
     if ($settled.namedAssigned -ne 1 -or $settled.defaultAssigned -ne 1 -or
         $settled.manualAssigned -ne 1 -or $observed.Count -ne 3) {
         throw (

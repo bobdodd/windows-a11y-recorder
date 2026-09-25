@@ -3729,7 +3729,10 @@ if ($layoutTextNodes.Count -lt 1) {
 # records, and the per-scope view of the dispatch path. They say nothing about
 # whether the page's use of shadow DOM or generated content is appropriate.
 $shadowSteps = ConvertFrom-Json $ShadowFixtureSteps
-$shadowObserved = @(ConvertFrom-Json ([string] $shadowSteps.Dispatch))
+# Assigned before wrapping, because Windows PowerShell 5.1 writes a parsed
+# JSON array to the pipeline as one object rather than as its entries.
+$parsedShadowDispatch = ConvertFrom-Json ([string] $shadowSteps.Dispatch)
+$shadowObserved = @($parsedShadowDispatch)
 $shadowCommits = @(
     $records |
         Where-Object {
