@@ -120,9 +120,17 @@ fallback has no composition time; its `monitorFrames` entries carry null
 composition fields and the existing quality flags.
 
 Recording the timestamp does not change which WGC frame is copied. The pool
-returns the oldest queued frame, so a captured image can be up to one queued
-frame older than the poll suggests. Recording its composition time makes that
-visible; changing the dequeue policy is a separate decision.
+returns the oldest queued frame, so a captured image can be older than the
+poll suggests. How much older has not been measured; it depends in part on
+whether the capture stops producing frames while both pool buffers are
+queued, which has not been verified. Recording the composition time makes the
+age of every image visible.
+
+Decision: the dequeue policy stays unchanged in this slice. The
+application-launched session run reports the distribution of `capturedAt`
+minus composition time, and that measurement decides whether a later change
+should drain the pool to the newest frame. Draining would change what
+existing capture records, so it needs its own versioned change and tests.
 
 ## Recorded fields
 
@@ -263,8 +271,6 @@ checkpoint's content.
 
 ## Open decisions
 
-- Whether the WGC capture should drain the pool to the newest frame, which
-  would change existing capture behavior.
 - Whether browser-process frame-token evidence, such as the tokens the
   browser receives for each renderer frame, is needed for out-of-process
   iframe correlation.
