@@ -34,7 +34,14 @@ from the product version.
   token. Web Serial's dispatch path is not recorded, and worklet records are
   not validated. See
   [the worker and non-Node dispatch evidence model](docs/architecture/worker-and-non-node-dispatch-evidence-model.md).
-  Windows validation is pending.
+  The Blink validation passed on Windows on September 25, 2026, at commit
+  `5f1d72f`, with 29,083 validated events, 235 validated artifacts, and no
+  omitted browser records. The worker fixture page recorded 38 listener
+  registrations, and the verifier checked 20 of them from registration through
+  invocation to dispatch completion. The load dispatch's original target was
+  the document, the IndexedDB put travelled `IDBRequest`, `IDBTransaction`,
+  `IDBDatabase` in one dispatch, the three workers carried distinct tokens,
+  and the dedicated worker's fetch carried its listener records' token.
 - Record rendered-frame correlation evidence. Protocol 0.30 follows every
   layout checkpoint with a presentation request on the compositor of the
   frame's local-root widget, and records on the `browser.presentation`

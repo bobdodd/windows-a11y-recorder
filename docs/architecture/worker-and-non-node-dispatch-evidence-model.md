@@ -1,6 +1,7 @@
 # Worker and Non-Node Dispatch Evidence Model
 
-Status: implemented as protocol 0.31; Windows validation pending.
+Status: implemented as protocol 0.31 and validated on Windows on September 25,
+2026, at commit `5f1d72f`.
 
 ## Purpose
 

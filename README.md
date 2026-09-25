@@ -393,14 +393,13 @@ Completed:
     (protocol 0.30).
 23. Record listener and dispatch evidence in dedicated, shared, and service
     worker global scopes and for dispatches that do not pass through Blink's
-    Node event dispatcher (protocol 0.31, pending Windows validation).
+    Node event dispatcher (protocol 0.31).
 
 Remaining:
 
-1. Validate protocol 0.31 worker and non-Node dispatch evidence on Windows.
-2. Record representative NVDA, JAWS, and Narrator sessions.
-3. Add evidence correlation and screen-reader behavior analysis.
-4. Investigate touch and gesture coverage on representative hardware.
+1. Record representative NVDA, JAWS, and Narrator sessions.
+2. Add evidence correlation and screen-reader behavior analysis.
+3. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 
