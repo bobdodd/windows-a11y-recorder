@@ -375,7 +375,7 @@ Completed:
     changes (protocol 0.29).
 22. Record the compositor frame and presentation time of each layout
     checkpoint and the composition time of each captured desktop frame
-    (protocol 0.30, pending Windows validation).
+    (protocol 0.30).
 
 Remaining:
 

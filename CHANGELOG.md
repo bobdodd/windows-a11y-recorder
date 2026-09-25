@@ -35,7 +35,17 @@ from the product version.
   candidate captured frame for at least one presented checkpoint, and reports
   the measured distributions. See
   [the rendered-frame correlation evidence model](docs/architecture/rendered-frame-correlation-evidence-model.md).
-  Windows validation runs have not yet been made.
+  The Blink validation passed on Windows on September 25, 2026, at commit
+  `712f4c4`, with 67,527 validated events, 186 validated artifacts, no omitted
+  browser records, and 37 presentation requests, all queued: 35 presented,
+  none with the failure flag, 2 broken, none unresolved, across 6 frame sinks.
+  The fixture's held-focus checkpoint was presented 17.8 ms after its swap,
+  flagged `vsync`. The application-launched session run passed the same day
+  at the same commit, with 30,544 validated events and 46 validated
+  artifacts. Of its 12 presented checkpoints, 11 had a candidate captured
+  frame, 83 to 183 ms after presentation (median 167 ms). The 44 captured
+  images, on one monitor, were composed 350 to 768 ms before the capture
+  poll (median 370 ms), and none needed more than one dequeue attempt.
 - Record interaction state at each checkpoint. Protocol 0.29 follows every DOM
   checkpoint and every layout checkpoint with a snapshot on the
   `browser.interaction` channel of whether the document has focus, the element

@@ -1,6 +1,6 @@
 # Rendered-Frame Correlation Evidence Model
 
-Status: implemented as protocol 0.30. Windows validation runs pending.
+Status: implemented as protocol 0.30 and validated on Windows.
 
 ## Purpose
 
@@ -335,6 +335,36 @@ measurements for review, not pass criteria.
 Passing these checks shows that the logger emits the records with the stated
 shape and joins. It does not show that any captured frame displays a
 checkpoint's content.
+
+## Windows validation results
+
+Both runs passed on September 25, 2026, at commit `712f4c4`.
+
+Blink validation: 37 presentation requests, all queued. 35 were presented,
+none with the `failure` flag; 2 were broken; none were unresolved; no
+`kept-active` records were emitted. Swaps covered 6 frame sinks. The
+fixture's held-focus layout checkpoint (`layout-checkpoint-8`, frame sink
+`7:10`, token 9) was presented 17.8 ms after its swap, with only the `vsync`
+flag.
+
+Application-launched session run, one monitor, 44 captured images:
+
+| Measurement | Minimum | Median | Maximum |
+| --- | --- | --- | --- |
+| `capturedAt` minus composition time | 350.13 ms | 370.06 ms | 768.42 ms |
+| Dequeue time minus composition time | 351.84 ms | 370.80 ms | 770.89 ms |
+| Candidate composition minus presentation (11 of 12 presented checkpoints) | 83.28 ms | 166.58 ms | 183.27 ms |
+
+No image needed more than one dequeue attempt.
+
+Reading of the measurement: every copied image was already at least 350 ms
+old when the recorder took it, and the first attempt always found a queued
+frame. That is consistent with the pool returning its oldest queued frame
+while newer compositions wait behind it. It does not establish whether WGC
+stops producing frames while both buffers are queued. The candidate lag of 83
+to 183 ms is bounded below by that dequeue behavior and the capture rate, not
+by the Windows compositor alone. These are measurements from one run on one
+machine and are the input the dequeue-policy decision below was waiting for.
 
 ## Decisions
 
