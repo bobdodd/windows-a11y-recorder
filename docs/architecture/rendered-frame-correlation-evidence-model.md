@@ -132,8 +132,12 @@ over, and the number of attempts. The desktop frame record gains a
 The existing record time (`capturedAt`) is unchanged. It is read before the
 pixel buffer is allocated and before the dequeue loop, which can wait up to
 250 ms, so a frame composed after `capturedAt` is possible and legitimate. The
-dequeue time is recorded because it, not `capturedAt`, is an upper bound on
-the composition time.
+dequeue time was recorded as an upper bound on the composition time. Windows
+validation after the change to newest-frame selection disproved that: the
+composition time was 12.2 to 15.5 ms after the dequeue for every image. The
+dequeue time is still recorded, as a measurement, and the archive validator no
+longer orders the two; see
+[the WGC newest-frame selection note](wgc-newest-frame-selection.md).
 
 A frame captured by the GDI fallback has no composition time. Its
 `monitorFrames` entries state each monitor and leave the timing fields null.
@@ -331,11 +335,11 @@ requests rather than failing on them.
 
 The application-launched session run records desktop frames alongside the
 browser. Its verifier requires that every WGC frame reports, for every
-monitor, a composition time no later than its dequeue time, and that at least
+monitor, a composition time and a dequeue time, and that at least
 one presented checkpoint has a candidate captured frame under the correlation
 rule. It reports the distributions of `capturedAt` minus composition time, of
-dequeue time minus composition time, and of candidate composition time minus
-presentation time, and the number of images that needed more than one dequeue
+dequeue time minus composition time (which can be negative), and of
+candidate composition time minus presentation time, and the number of images that needed more than one dequeue
 attempt. Those distributions are
 measurements for review, not pass criteria.
 

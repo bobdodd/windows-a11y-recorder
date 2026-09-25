@@ -542,9 +542,11 @@ if ($inputFrames.Count -eq 0) {
 
 # Each WGC desktop frame states, per monitor, the time the Windows compositor
 # rendered the copied image and the session time the recorder dequeued it.
-# Each presented browser frame states when viz reported it presented. These
-# checks establish that the composition times are ordered with the dequeue
-# and that at least one presented layout checkpoint has a candidate captured
+# The two are not ordered: Windows validation found the composition time up
+# to one display refresh after the dequeue. Each presented browser frame
+# states when viz reported it presented. These checks establish that every
+# image has both times and that at least one presented layout checkpoint has
+# a candidate captured
 # frame: the first image, per monitor, composed at or after the presentation
 # time less the browser clock uncertainty. The reported distributions are
 # measurements for review. They do not show that any captured image displays
@@ -575,13 +577,6 @@ foreach ($frameRecord in @(
         if ($null -eq $monitorFrame.compositedAtNanoseconds -or
             $null -eq $monitorFrame.dequeuedAtNanoseconds) {
             throw "WGC desktop frame $($frameRecord.sequence) has a monitor image without timing."
-        }
-        if ([long] $monitorFrame.compositedAtNanoseconds -gt
-            [long] $monitorFrame.dequeuedAtNanoseconds) {
-            throw (
-                "WGC desktop frame $($frameRecord.sequence) records monitor " +
-                "$($monitorFrame.monitorHandle) as composed after it was dequeued."
-            )
         }
         if ($null -eq $monitorFrame.PSObject.Properties["supersededFrameCount"] -or
             $null -eq $monitorFrame.supersededFrameCount -or

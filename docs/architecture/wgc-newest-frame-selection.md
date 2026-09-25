@@ -1,6 +1,7 @@
 # WGC Newest-Frame Selection
 
-Status: implemented. Windows validation run pending.
+Status: implemented. The first Windows run failed on a composition-order
+rule that this note now retires; the rerun is pending.
 
 ## Purpose
 
@@ -73,18 +74,53 @@ A reused image repeats the previous image's `systemRelativeTimeTicks`,
 `compositedAtNanoseconds`, and `dequeuedAtNanoseconds`, and has a
 `supersededFrameCount` of 0.
 
+## Composition time and dequeue time
+
+Protocol 0.30 made the archive validator reject an image whose composition
+time was later than its dequeue time, on the assumption that the compositor
+renders a frame before the pool delivers it. That assumption was never
+measured: at 0.30 every copied image was about 370 ms old, so the order
+could not be violated.
+
+The first Windows run of this change (September 25, 2026, commit `47f6ab0`,
+one monitor, 44 images) failed on that rule. For every image the composition
+time was 12.2 to 15.5 ms after the session time at which the arrival handler
+took the frame. The conversion is not the cause: the session clock frequency
+on that machine is 10,000,000 counts per second, so `SystemRelativeTime`
+ticks are the raw counter value and the conversion is exact. Every
+`systemRelativeTimeTicks` value was a whole number of 1/60 s intervals from
+the first, to within 0.01 of an interval.
+
+The measurements are consistent with `SystemRelativeTime` being the display
+refresh at which the frame is shown, with WGC delivering the frame about one
+refresh earlier. Microsoft documents the property only as "the QPC (Query
+Performance Counter) time at which the compositor rendered the frame"
+([Direct3D11CaptureFrame.SystemRelativeTime](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.direct3d11captureframe.systemrelativetime)),
+so that reading is an inference, not a documented fact.
+
+Decision: the recorder records both times as measured, and the archive
+validator and the application-launched session verifier no longer order
+them. The verifier reports arrival minus composition time, which can be
+negative. The `desktop-monitor-frame-composed-after-dequeue` error code is
+retired. A recorder cannot know the compositor's schedule, so an order the
+platform does not document is not a validity rule for a logger.
+
 ## Claims the evidence supports
 
 - Which arrived frame each image came from, as the newest one that reached
   the pool before the poll, with its composition and arrival times.
 - How many arrived frames the recorder released unseen between two captures.
 - That an image is a repeat of the previous one.
+- The reported composition time of each image, as Windows reports it.
 
 ## Claims the evidence does not support
 
 - That the screen did not change between two captures when an image is
   reused. It shows only that no newer frame reached the pool. Whether WGC
   delivers a frame for every composed change has not been verified.
+- That an image's composition time is when its pixels were composed, rather
+  than when they were due to be shown. The documented meaning and the
+  measured order disagree; see above.
 - What a released frame showed. Released frames are not copied, as frames
   were not copied between polls before this change.
 - That fresher images show a layout checkpoint's state; see the rendered-frame
@@ -101,15 +137,17 @@ Required test levels:
 - Unit tests for the archive validator: `frameSelection` values; the selection
   fields required on every monitor of a `newest-arrived` frame and rejected
   without one; `frameSelection` rejected on a GDI fallback frame; a reused
-  image with released frames rejected; and earlier archives without the
-  fields accepted.
+  image with released frames rejected; earlier archives without the fields
+  accepted; and an image whose composition time follows its dequeue time
+  accepted.
 - A Windows application-launched session run.
 
 The application-launched session verifier requires every WGC frame to state
 `newest-arrived` and every monitor image to state both selection fields. Per
 monitor, in capture order, it requires a new image to be composed after the
 previous image, and a reused image to repeat the previous image's composition
-and arrival times with no released frames. It reports counts of new and
+and arrival times with no released frames. It does not order an image's
+composition and arrival times. It reports counts of new and
 reused images, released frames, and the distributions of `capturedAt` minus
 composition time for new and for reused images, and of arrival minus
 composition time. The distributions are measurements for review, not pass

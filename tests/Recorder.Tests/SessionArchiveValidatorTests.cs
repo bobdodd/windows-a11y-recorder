@@ -4069,15 +4069,17 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAMonitorImageComposedAfterItWasDequeued()
+    public async Task AcceptsAMonitorImageWhoseCompositionTimeFollowsItsDequeue()
     {
+        // Windows reported SystemRelativeTime up to one display refresh after
+        // the pool delivered the frame.
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
-        payload["monitorFrames"]![0]!["dequeuedAtNanoseconds"] = 16699999;
+        var composedAt = payload["monitorFrames"]![0]!["compositedAtNanoseconds"]!.GetValue<long>();
+        payload["monitorFrames"]![0]!["dequeuedAtNanoseconds"] = composedAt - 15_000_000;
 
         var issues = await ValidateDesktopFrameAsync(payload);
 
-        Assert.Contains(
-            issues, issue => issue.Code == "desktop-monitor-frame-composed-after-dequeue");
+        Assert.Empty(issues);
     }
 
     [Fact]

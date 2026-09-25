@@ -636,20 +636,10 @@ internal static class EventPayloadValidator
                     line);
             }
 
-            if (monitorFrame.TryGetProperty("compositedAtNanoseconds", out var composedAt) &&
-                monitorFrame.TryGetProperty("dequeuedAtNanoseconds", out var dequeuedAt) &&
-                IsInteger(composedAt) &&
-                IsInteger(dequeuedAt) &&
-                composedAt.GetInt64() > dequeuedAt.GetInt64())
-            {
-                AddError(
-                    issues,
-                    "desktop-monitor-frame-composed-after-dequeue",
-                    pointer,
-                    "The monitor image is recorded as composed after the " +
-                        "recorder dequeued it.",
-                    line);
-            }
+            // The composition time is not ordered with the dequeue time.
+            // Windows validation found SystemRelativeTime up to one display
+            // refresh after the pool delivered the frame; see
+            // docs/architecture/wgc-newest-frame-selection.md.
         }
 
         if (isWindowsGraphicsCapture &&

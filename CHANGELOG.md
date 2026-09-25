@@ -182,7 +182,12 @@ from the product version.
   application-launched session verifier checks per-monitor image order and
   reuse, and reports image age separately for new and reused images. See
   [the WGC newest-frame selection note](docs/architecture/wgc-newest-frame-selection.md).
-  The Windows validation run has not yet been made.
+  Stop rejecting a monitor image whose composition time is later than its
+  dequeue time. The first Windows run failed on that protocol 0.30 rule: every
+  image's `SystemRelativeTime` was 12.2 to 15.5 ms after the recorder took the
+  frame, on a 60 Hz grid, with an exact clock conversion. The
+  `desktop-monitor-frame-composed-after-dequeue` error code is retired; both
+  times are still recorded. The Windows rerun has not yet been made.
 - Schedule the validation fixture's page-lifecycle timers from the harness
   instead of at page load. A page's visibility while it loads depends on when
   Chromium shows its window, so the fixture used to record its lifecycle
