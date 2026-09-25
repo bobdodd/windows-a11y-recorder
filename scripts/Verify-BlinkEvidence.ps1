@@ -3130,36 +3130,36 @@ if ($interactionCheckpointStarts.Count -eq 0) {
 # Checkpoint identities are unique only within one renderer process, so records
 # are grouped by browser instance, renderer process, and checkpoint identity.
 function Get-InteractionCheckpointKey {
-    param([Parameter(Mandatory = $true)] $Record)
+    param([Parameter(Mandatory = $true)] $CheckpointRecord)
 
-    $context = $Record.payload.context
+    $checkpointContext = $CheckpointRecord.payload.context
     (
-        "$($context.browserInstanceId)|$($context.processId)|" +
-        "$($Record.payload.checkpointId)"
+        "$($checkpointContext.browserInstanceId)|$($checkpointContext.processId)|" +
+        "$($CheckpointRecord.payload.checkpointId)"
     )
 }
 
 $interactionCheckpointParts = @{}
-foreach ($record in $interactionCheckpointRecords) {
-    $id = Get-InteractionCheckpointKey $record
-    if (-not $interactionCheckpointParts.ContainsKey($id)) {
-        $interactionCheckpointParts[$id] = [System.Collections.Generic.List[object]]::new()
+foreach ($icRecord in $interactionCheckpointRecords) {
+    $icId = Get-InteractionCheckpointKey $icRecord
+    if (-not $interactionCheckpointParts.ContainsKey($icId)) {
+        $interactionCheckpointParts[$icId] = [System.Collections.Generic.List[object]]::new()
     }
-    $interactionCheckpointParts[$id].Add($record)
+    $interactionCheckpointParts[$icId].Add($icRecord)
 }
 $sourceCheckpointStarts = @{}
-foreach ($record in @(
+foreach ($icRecord in @(
         $records | Where-Object {
             ($_.channel -eq "browser.dom" -and
                 $_.eventType -eq "dom-checkpoint-started") -or
             ($_.channel -eq "browser.layout" -and
                 $_.eventType -eq "layout-checkpoint-started")
         })) {
-    $key = (
-        "$($record.channel)|$($record.payload.context.browserInstanceId)|" +
-        "$($record.payload.context.processId)|$($record.payload.checkpointId)"
+    $icKey = (
+        "$($icRecord.channel)|$($icRecord.payload.context.browserInstanceId)|" +
+        "$($icRecord.payload.context.processId)|$($icRecord.payload.checkpointId)"
     )
-    $sourceCheckpointStarts[$key] = $record
+    $sourceCheckpointStarts[$icKey] = $icRecord
 }
 
 function Test-SameCheckpointDocument {
@@ -3171,60 +3171,60 @@ function Test-SameCheckpointDocument {
     $Left.documentToken -eq $Right.documentToken
 }
 
-foreach ($start in $interactionCheckpointStarts) {
-    $id = "$($start.payload.checkpointId) in renderer process $($start.payload.context.processId)"
-    $context = $start.payload.context
-    if ($null -ne $context.executionWorldId) {
-        throw "Interaction checkpoint $id reported an execution world."
+foreach ($icStart in $interactionCheckpointStarts) {
+    $icId = "$($icStart.payload.checkpointId) in renderer process $($icStart.payload.context.processId)"
+    $icContext = $icStart.payload.context
+    if ($null -ne $icContext.executionWorldId) {
+        throw "Interaction checkpoint $icId reported an execution world."
     }
-    $sourceKey = (
-        "$($start.payload.sourceChannel)|$($context.browserInstanceId)|" +
-        "$($context.processId)|$($start.payload.sourceCheckpointId)"
+    $icSourceKey = (
+        "$($icStart.payload.sourceChannel)|$($icContext.browserInstanceId)|" +
+        "$($icContext.processId)|$($icStart.payload.sourceCheckpointId)"
     )
-    if (-not $sourceCheckpointStarts.ContainsKey($sourceKey)) {
+    if (-not $sourceCheckpointStarts.ContainsKey($icSourceKey)) {
         throw (
-            "Interaction checkpoint $id names source checkpoint " +
-            "$($start.payload.sourceCheckpointId), which was not recorded."
+            "Interaction checkpoint $icId names source checkpoint " +
+            "$($icStart.payload.sourceCheckpointId), which was not recorded."
         )
     }
-    $source = $sourceCheckpointStarts[$sourceKey]
-    if (-not (Test-SameCheckpointDocument $context $source.payload.context) -or
-        $start.payload.reason -ne $source.payload.reason) {
+    $icSource = $sourceCheckpointStarts[$icSourceKey]
+    if (-not (Test-SameCheckpointDocument $icContext $icSource.payload.context) -or
+        $icStart.payload.reason -ne $icSource.payload.reason) {
         throw (
-            "Interaction checkpoint $id does not match the document or reason " +
-            "of its source checkpoint $($start.payload.sourceCheckpointId)."
+            "Interaction checkpoint $icId does not match the document or reason " +
+            "of its source checkpoint $($icStart.payload.sourceCheckpointId)."
         )
     }
-    $parts = @($interactionCheckpointParts[(Get-InteractionCheckpointKey $start)])
-    $starts = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-started" })
-    $completions = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-completed" })
-    $controls = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-text-control" })
-    if ($starts.Count -ne 1 -or $completions.Count -ne 1) {
+    $icParts = @($interactionCheckpointParts[(Get-InteractionCheckpointKey $icStart)])
+    $icStarts = @($icParts | Where-Object { $_.eventType -eq "interaction-checkpoint-started" })
+    $icCompletions = @($icParts | Where-Object { $_.eventType -eq "interaction-checkpoint-completed" })
+    $icControls = @($icParts | Where-Object { $_.eventType -eq "interaction-checkpoint-text-control" })
+    if ($icStarts.Count -ne 1 -or $icCompletions.Count -ne 1) {
         throw (
-            "Interaction checkpoint $id has $($starts.Count) start and " +
-            "$($completions.Count) completion records."
+            "Interaction checkpoint $icId has $($icStarts.Count) start and " +
+            "$($icCompletions.Count) completion records."
         )
     }
-    $completion = $completions[0]
-    if ($completion.payload.maximumTextControls -ne
-            $start.payload.maximumTextControls -or
-        $completion.payload.textControlCount -ne $controls.Count -or
-        $completion.payload.truncated) {
+    $icCompletion = $icCompletions[0]
+    if ($icCompletion.payload.maximumTextControls -ne
+            $icStart.payload.maximumTextControls -or
+        $icCompletion.payload.textControlCount -ne $icControls.Count -or
+        $icCompletion.payload.truncated) {
         throw (
-            "Interaction checkpoint $id completed with " +
-            "$($completion.payload.textControlCount) text controls against " +
-            "$($controls.Count) records, truncated $($completion.payload.truncated)."
+            "Interaction checkpoint $icId completed with " +
+            "$($icCompletion.payload.textControlCount) text controls against " +
+            "$($icControls.Count) records, truncated $($icCompletion.payload.truncated)."
         )
     }
-    for ($index = 0; $index -lt $controls.Count; $index++) {
-        if ($controls[$index].payload.textControlIndex -ne $index) {
-            throw "Interaction checkpoint $id has non-contiguous text-control indexes."
+    for ($icIndex = 0; $icIndex -lt $icControls.Count; $icIndex++) {
+        if ($icControls[$icIndex].payload.textControlIndex -ne $icIndex) {
+            throw "Interaction checkpoint $icId has non-contiguous text-control indexes."
         }
     }
-    foreach ($part in $parts) {
-        if (-not (Test-SameCheckpointDocument $context $part.payload.context) -or
-            $null -ne $part.payload.context.executionWorldId) {
-            throw "Interaction checkpoint $id changes document between records."
+    foreach ($icPart in $icParts) {
+        if (-not (Test-SameCheckpointDocument $icContext $icPart.payload.context) -or
+            $null -ne $icPart.payload.context.executionWorldId) {
+            throw "Interaction checkpoint $icId changes document between records."
         }
     }
 }
