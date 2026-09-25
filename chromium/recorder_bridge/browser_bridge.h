@@ -216,7 +216,12 @@ void RecordBlinkDispatchPathNode(uintptr_t event_identity,
                                  int document_node_id,
                                  int node_id,
                                  std::string tag_name,
-                                 std::string element_id);
+                                 std::string element_id,
+                                 int tree_scope_root_node_id,
+                                 std::string shadow_root_mode,
+                                 int target_node_id,
+                                 int related_target_node_id,
+                                 std::vector<int> visible_path_indexes);
 
 // Adds the Window entry that terminates a Node dispatch path. Blink keeps the
 // Window outside its NodeEventContexts, so it is appended separately rather
@@ -225,7 +230,10 @@ COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDispatchPathWindow(uintptr_t event_identity,
                                    int document_node_id,
                                    uintptr_t target_identity,
-                                   std::string interface_name);
+                                   std::string interface_name,
+                                   int target_node_id,
+                                   int related_target_node_id,
+                                   std::vector<int> visible_path_indexes);
 
 // Emits dispatch-started after the complete Node path has been accumulated.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
@@ -370,6 +378,39 @@ void RecordBlinkDomCheckpointNodeAttribute(uint64_t checkpoint_sequence,
                                            bool attribute_value_truncated,
                                            int maximum_value_length);
 
+// Records the properties of a shadow root already emitted as a node of the
+// same checkpoint. The shadow root's parent in the checkpoint is its host.
+// reference_target is meaningful only when reference_target_present is true.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomCheckpointShadowRoot(uint64_t checkpoint_sequence,
+                                        int document_node_id,
+                                        std::string document_token,
+                                        int node_id,
+                                        int host_node_id,
+                                        std::string mode,
+                                        bool delegates_focus,
+                                        std::string slot_assignment,
+                                        bool clonable,
+                                        bool serializable,
+                                        bool declarative,
+                                        bool available_to_element_internals,
+                                        bool reference_target_present,
+                                        std::string reference_target);
+
+// Records the nodes currently assigned to a slot element already emitted in
+// the same checkpoint, as Blink holds them without recalculating the
+// assignment. assignment_current is false when Blink has marked the
+// assignment for recalculation, so the recorded list may be stale.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomCheckpointSlotAssignment(uint64_t checkpoint_sequence,
+                                            int document_node_id,
+                                            std::string document_token,
+                                            int node_id,
+                                            std::vector<int> assigned_node_ids,
+                                            int assigned_node_count,
+                                            int maximum_assigned_nodes,
+                                            bool assignment_current);
+
 // Completes the checkpoint and explicitly reports whether its node limit or
 // its per-node attribute limit was reached before the complete document tree
 // and attribute set were emitted.
@@ -384,7 +425,9 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int attribute_count,
                                 bool attributes_truncated,
                                 int maximum_attributes_per_node,
-                                int maximum_value_length);
+                                int maximum_value_length,
+                                int shadow_root_count,
+                                int slot_count);
 
 // Starts one checkpoint for the accessibility updates Chromium is about to
 // send from the renderer to the browser process. The shared document token
@@ -850,6 +893,20 @@ struct LayoutCheckpointNode {
   double height = 0;
   bool computed_style_present = false;
   std::vector<LayoutCheckpointStyleValue> computed_style;
+  // Set for a pseudo-element. The originating node is the element or
+  // pseudo-element that holds it. The generated text is the text laid out in
+  // the pseudo-element's layout subtree, truncated by the caller, with its
+  // full length in UTF-16 code units.
+  bool pseudo_element_present = false;
+  int originating_node_id = 0;
+  std::string pseudo_type;
+  std::string generated_text;
+  int generated_text_length = 0;
+  bool generated_text_truncated = false;
+  // Set for a node inside a shadow tree: the host of the containing shadow
+  // root and that root's mode.
+  int shadow_host_node_id = 0;
+  std::string shadow_root_mode;
 };
 
 // Starts one layout and computed-style checkpoint for a document whose
@@ -883,7 +940,9 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
                                    std::string document_token,
                                    int node_count,
                                    bool truncated,
-                                   int maximum_nodes);
+                                   int maximum_nodes,
+                                   int pseudo_element_count,
+                                   int shadow_root_count);
 
 // Network metadata. Every record on the browser.network channel carries
 // request and response metadata only: no request body, no response body, no

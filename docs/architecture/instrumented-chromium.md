@@ -106,6 +106,11 @@ not recorded. The record types and their limits are described under protocol
 version 0.27 below and in
 [the realtime network evidence model](realtime-network-evidence-model.md).
 
+Protocol 0.28 extends DOM checkpoints, layout checkpoints, and dispatch paths to
+shadow trees and pseudo-elements. The record types and their limits are
+described under protocol version 0.28 below and in
+[the shadow DOM and pseudo-element evidence model](shadow-dom-evidence-model.md).
+
 ## Process architecture
 
 ```text
@@ -765,7 +770,40 @@ generated credential values it sends and receives must be absent from the
 session. The fixture has no HTTP/3 server, so WebTransport establishment is not
 covered by the validation run.
 
-Live 0.27 connections require an exact protocol-version match.
+Protocol version 0.28 extends three record families to the composed tree:
+
+- DOM checkpoints visit open, closed, and user-agent shadow roots after their
+  hosts. Each shadow root is a `dom-checkpoint-node` of type `shadow-root`
+  parented by its host, followed by a `dom-checkpoint-shadow-root` record with
+  its mode and options. Each slot is followed by a
+  `dom-checkpoint-slot-assignment` record with its assigned nodes and whether
+  Blink held that assignment as current. The completion adds shadow root and
+  slot counts.
+- Layout checkpoints record elements and laid-out text inside shadow trees,
+  with the host and mode of their tree, and every pseudo-element Blink has
+  created, as a `pseudo-element` node with its originating node, type, and
+  generated text up to 4096 characters. The completion adds pseudo-element and
+  shadow root counts.
+- `dispatch-started` adds `pathScopes`, one per composed path entry, with the
+  entry's tree scope root and mode, its retargeted target and related target,
+  and the path indexes `composedPath()` returns to a listener there.
+
+The hooks read what Blink holds. They never request a slot assignment
+recalculation, create a pseudo-element, or force style or layout. The visible
+path indexes come from the per-scope cache Blink fills for `composedPath()`, so
+the values match what a page listener receives.
+
+A shadow DOM logging fixture page attaches an open shadow root with named and
+default slots, a closed shadow root with manual slot assignment, and holds an
+input, `::before` and `::after` content, and a list marker. It then clicks a
+button inside the closed shadow root. The verifier requires the three shadow
+roots with their modes and options, current assignments of the expected nodes,
+the four pseudo-elements with their text, nodes in each kind of shadow tree,
+and path scopes that give each listener the visible path length the page
+reported. The fixture shows that the logger emits records; it does not
+evaluate the page's use of shadow DOM.
+
+Live 0.28 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
@@ -853,7 +891,9 @@ Successful connections are persisted on the `browser.lifecycle` channel:
 6. Add cookie operations and network metadata with prohibited values removed at
    source. Cookie operations are implemented in protocol 0.23. Network metadata
    is implemented in protocol 0.26, and WebSocket, EventSource, and
-   WebTransport records in protocol 0.27.
+   WebTransport records in protocol 0.27. Shadow-tree and pseudo-element
+   content in DOM and layout checkpoints, and shadow-adjusted dispatch paths,
+   are implemented in protocol 0.28.
 7. Add browser-chrome and compositor correlation needed by test scenarios.
 8. Package the browser and recorder as one installable application.
 

@@ -268,6 +268,15 @@ replaced, so no cookie value leaves the network service. The record types and
 limits are in
 [the realtime network evidence model](docs/architecture/realtime-network-evidence-model.md).
 
+Protocol 0.28 extends DOM checkpoints, layout checkpoints, and dispatch paths to
+the composed tree. DOM checkpoints record every open, closed, and user-agent
+shadow root with its host and options, and every slot's assigned nodes. Layout
+checkpoints record nodes inside shadow trees and every pseudo-element Blink has
+created, with its generated text. Each dispatch path entry records its tree
+scope, its retargeted target, and the part of the path a listener there sees.
+The record types and limits are in
+[the shadow DOM and pseudo-element evidence model](docs/architecture/shadow-dom-evidence-model.md).
+
 ## Project goals
 
 - Capture raw keyboard and mouse evidence.
@@ -337,21 +346,22 @@ Completed:
 17. Record and validate cookie operations, interaction-state changes, layout
     geometry and computed styles, network metadata, and WebSocket,
     EventSource, and WebTransport channels (protocols 0.23 to 0.27).
-18. Launch instrumented Chromium from the recorder application and record its
+18. Record and validate shadow roots, slot assignments, shadow-tree and
+    pseudo-element layout, and shadow-adjusted dispatch paths (protocol 0.28).
+19. Launch instrumented Chromium from the recorder application and record its
     evidence alongside the desktop, input, and UI Automation channels.
 
 Remaining:
 
-1. Extend DOM and layout capture to shadow-root content and pseudo-elements.
-2. Record interaction state at each checkpoint, not only its changes.
-3. Extend listener and dispatch evidence to shadow-adjusted dispatch paths,
-   worker global scopes, and dispatches whose original target is never a Node.
-4. Record rendered frame or compositor correlation identifiers.
-5. Record an application-launched session with the cookie, interaction,
+1. Record interaction state at each checkpoint, not only its changes.
+2. Extend listener and dispatch evidence to worker global scopes and
+   dispatches whose original target is never a Node.
+3. Record rendered frame or compositor correlation identifiers.
+4. Record an application-launched session with the cookie, interaction,
    layout, and network channels.
-6. Record representative NVDA, JAWS, and Narrator sessions.
-7. Add evidence correlation and screen-reader behavior analysis.
-8. Investigate touch and gesture coverage on representative hardware.
+5. Record representative NVDA, JAWS, and Narrator sessions.
+6. Add evidence correlation and screen-reader behavior analysis.
+7. Investigate touch and gesture coverage on representative hardware.
 
 ## Build and test
 

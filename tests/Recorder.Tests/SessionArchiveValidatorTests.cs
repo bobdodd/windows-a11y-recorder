@@ -336,6 +336,7 @@ public sealed class SessionArchiveValidatorTests
                 trusted = false,
                 originalTarget = target,
                 composedPath = Array.Empty<object>(),
+                pathScopes = Array.Empty<object>(),
                 phase = "none",
                 listenerId = (string?)null,
                 defaultPrevented = false,
@@ -605,6 +606,18 @@ public sealed class SessionArchiveValidatorTests
                 trusted = false,
                 originalTarget = target,
                 composedPath = new object[] { target },
+                pathScopes = new object[]
+                {
+                    new
+                    {
+                        treeScopeRootNodeId = (long?)null,
+                        shadowRootMode = (string?)null,
+                        targetNodeId = (long?)null,
+                        relatedTargetNodeId = (long?)null,
+                        visiblePathIndexes = new[] { 0 },
+                        unmatchedVisibleTargetCount = 0
+                    }
+                },
                 phase = "none",
                 listenerId = (string?)null,
                 defaultPrevented = false,
@@ -1542,7 +1555,9 @@ public sealed class SessionArchiveValidatorTests
                     maximumValueLength = 4096,
                     coveredTransitionCount = 0,
                     coveredTransitionFirstId = (string?)null,
-                    coveredTransitionLastId = (string?)null
+                    coveredTransitionLastId = (string?)null,
+                    shadowRootCount = 0,
+                    slotCount = 0
                 }),
             CreateEvent(
                 5,
@@ -1590,7 +1605,9 @@ public sealed class SessionArchiveValidatorTests
                     maximumValueLength = 4096,
                     coveredTransitionCount = 2,
                     coveredTransitionFirstId = "dom-transition-1",
-                    coveredTransitionLastId = "dom-transition-2"
+                    coveredTransitionLastId = "dom-transition-2",
+                    shadowRootCount = 0,
+                    slotCount = 0
                 })
         };
         var directory = await CreateArchiveAsync(records);
@@ -1817,7 +1834,9 @@ public sealed class SessionArchiveValidatorTests
                 maximumValueLength = 4096,
                 coveredTransitionCount,
                 coveredTransitionFirstId,
-                coveredTransitionLastId
+                coveredTransitionLastId,
+                shadowRootCount = 0,
+                slotCount = 0
             });
         var directory = await CreateArchiveAsync([record]);
 
@@ -2498,6 +2517,18 @@ public sealed class SessionArchiveValidatorTests
                 trusted = false,
                 originalTarget = target,
                 composedPath = new object[] { target },
+                pathScopes = new object[]
+                {
+                    new
+                    {
+                        treeScopeRootNodeId = (long?)null,
+                        shadowRootMode = (string?)null,
+                        targetNodeId = (long?)null,
+                        relatedTargetNodeId = (long?)null,
+                        visiblePathIndexes = new[] { 0 },
+                        unmatchedVisibleTargetCount = 0
+                    }
+                },
                 phase,
                 listenerId,
                 defaultPrevented,
@@ -3267,6 +3298,215 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Network,
             eventType,
             document.RootElement.Clone());
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            return result.Issues.ToList();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    public static TheoryData<string, string, string> ShadowDomRecords() =>
+        new()
+        {
+            { BrowserEvidenceChannels.Dom, "dom-checkpoint-node", BrowserShadowDomPayloads.ShadowRootNode },
+            { BrowserEvidenceChannels.Dom, "dom-checkpoint-shadow-root", BrowserShadowDomPayloads.ShadowRoot },
+            { BrowserEvidenceChannels.Dom, "dom-checkpoint-slot-assignment", BrowserShadowDomPayloads.SlotAssignment },
+            { BrowserEvidenceChannels.Dispatch, "dispatch-started", BrowserShadowDomPayloads.DispatchStarted }
+        };
+
+    [Theory]
+    [MemberData(nameof(ShadowDomRecords))]
+    public async Task AcceptsEveryShadowDomRecordShape(
+        string channel,
+        string eventType,
+        string json)
+    {
+        var issues = await ValidateRecordAsync(channel, eventType, JsonNode.Parse(json)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [MemberData(nameof(ShadowDomRecords))]
+    public async Task RejectsAnUndeclaredShadowDomProperty(
+        string channel,
+        string eventType,
+        string json)
+    {
+        var payload = JsonNode.Parse(json)!;
+        payload["undeclared"] = 1;
+
+        var issues = await ValidateRecordAsync(channel, eventType, payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/undeclared", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsAnUnknownShadowRootMode()
+    {
+        var payload = JsonNode.Parse(BrowserShadowDomPayloads.ShadowRoot)!;
+        payload["mode"] = "hidden";
+
+        var issues = await ValidateRecordAsync(
+            BrowserEvidenceChannels.Dom,
+            "dom-checkpoint-shadow-root",
+            payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/mode", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsASlotAssignmentWhoseTruncationDisagreesWithItsCount()
+    {
+        var payload = JsonNode.Parse(BrowserShadowDomPayloads.SlotAssignment)!;
+        payload["assignedNodeCount"] = 3;
+
+        var issues = await ValidateRecordAsync(
+            BrowserEvidenceChannels.Dom,
+            "dom-checkpoint-slot-assignment",
+            payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-dom-slot-assignment-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsPathScopesThatDoNotMatchTheComposedPath()
+    {
+        var payload = JsonNode.Parse(BrowserShadowDomPayloads.DispatchStarted)!;
+        payload["pathScopes"]!.AsArray().RemoveAt(4);
+
+        var issues = await ValidateRecordAsync(
+            BrowserEvidenceChannels.Dispatch,
+            "dispatch-started",
+            payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-dispatch-path-scopes-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAVisiblePathIndexOutsideTheComposedPath()
+    {
+        var payload = JsonNode.Parse(BrowserShadowDomPayloads.DispatchStarted)!;
+        payload["pathScopes"]![2]!["visiblePathIndexes"]!.AsArray().Add(5);
+
+        var issues = await ValidateRecordAsync(
+            BrowserEvidenceChannels.Dispatch,
+            "dispatch-started",
+            payload);
+
+        Assert.Contains(
+            issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith(
+                    "/pathScopes/2/visiblePathIndexes",
+                    StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsAShadowRootModeWithoutItsScopeRoot()
+    {
+        var payload = JsonNode.Parse(BrowserShadowDomPayloads.DispatchStarted)!;
+        payload["pathScopes"]![0]!["treeScopeRootNodeId"] = null;
+
+        var issues = await ValidateRecordAsync(
+            BrowserEvidenceChannels.Dispatch,
+            "dispatch-started",
+            payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-dispatch-path-scopes-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAnElementRecordCarryingAPseudoElementDescription()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.PseudoElementNode)!;
+        payload["nodeType"] = "element";
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-layout-pseudo-element-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAPseudoElementWithoutItsDescription()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.PseudoElementNode)!;
+        payload["pseudoElement"] = null;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-layout-pseudo-element-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsGeneratedTextLongerThanItsReportedLength()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.PseudoElementNode)!;
+        payload["pseudoElement"]!["generatedTextLength"] = 2;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public async Task RejectsAShadowHostWithoutAShadowRootMode()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ShadowTreeElementNode)!;
+        payload["shadowRootMode"] = null;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-layout-shadow-scope-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsMorePseudoElementsThanNodes()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.CheckpointCompleted)!;
+        payload["pseudoElementCount"] = 10;
+
+        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-completed", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-layout-pseudo-element-count-over-node-count");
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidateRecordAsync(string channel, string eventType, JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(0, 100, channel, eventType, document.RootElement.Clone());
         var directory = await CreateArchiveAsync([record]);
 
         try

@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.27` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.28` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -346,3 +346,16 @@ which holds `cookie_text.cc` and `recorder_switches.h` and depends only on the
 C++ standard library. `cookie_text_test.cc` covers reading names back from the
 replaced headers. The record types and their limits are described in
 `docs/architecture/realtime-network-evidence-model.md`.
+
+Protocol 0.28 extends DOM checkpoints, layout checkpoints, and dispatch paths to
+the composed tree. The DOM checkpoint helper in `document.cc` visits each
+shadow root after its host and calls `RecordBlinkDomCheckpointShadowRoot` and,
+for each slot, `RecordBlinkDomCheckpointSlotAssignment`. The layout checkpoint
+helper in `local_frame_view.cc` visits shadow trees and the pseudo-elements
+Blink has created, and passes the pseudo-element, shadow host, and shadow mode
+fields on each `LayoutCheckpointNode`. The dispatch hook in
+`event_dispatcher.cc` passes each path entry's tree scope root and mode,
+retargeted target and related target, and visible path indexes to
+`RecordBlinkDispatchPathNode` and `RecordBlinkDispatchPathWindow`. The record
+types and their limits are described in
+`docs/architecture/shadow-dom-evidence-model.md`.

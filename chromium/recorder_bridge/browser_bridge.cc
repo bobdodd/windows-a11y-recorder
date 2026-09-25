@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <initializer_list>
@@ -144,6 +145,18 @@ struct EvidenceIdentityStorage {
     std::string target_id;
   };
 
+  // The tree scope a composed path entry is dispatched in, with the target
+  // and related target retargeted for that scope and the path entries that
+  // scope's composedPath() exposes.
+  struct PathScope {
+    int tree_scope_root_node_id = 0;
+    std::string shadow_root_mode;
+    int target_node_id = 0;
+    int related_target_node_id = 0;
+    std::vector<int> visible_path_indexes;
+    int unmatched_visible_target_count = 0;
+  };
+
   struct DispatchState {
     std::string dispatch_id;
     int document_node_id;
@@ -153,6 +166,7 @@ struct EvidenceIdentityStorage {
     std::string target_element_id;
     bool trusted;
     std::vector<NodeState> composed_path;
+    std::vector<PathScope> path_scopes;
     bool observed_default_prevented = false;
     bool observed_propagation_stopped = false;
     bool observed_immediate_propagation_stopped = false;
@@ -412,6 +426,8 @@ std::string DomNodeTypeName(int node_type) {
       return "comment";
     case 9:
       return "document";
+    case 11:
+      return "shadow-root";
     default:
       return "other";
   }
@@ -976,6 +992,33 @@ base::DictValue CreateDispatchPayload(
     composed_path.Append(CreateEventTarget(entry));
   }
   payload.Set("composedPath", std::move(composed_path));
+  base::ListValue path_scopes;
+  for (const auto& scope : state.path_scopes) {
+    base::DictValue entry;
+    entry.Set("treeScopeRootNodeId",
+              scope.tree_scope_root_node_id > 0
+                  ? base::Value(scope.tree_scope_root_node_id)
+                  : base::Value());
+    entry.Set("shadowRootMode", scope.shadow_root_mode.empty()
+                                    ? base::Value()
+                                    : base::Value(scope.shadow_root_mode));
+    entry.Set("targetNodeId", scope.target_node_id > 0
+                                  ? base::Value(scope.target_node_id)
+                                  : base::Value());
+    entry.Set("relatedTargetNodeId",
+              scope.related_target_node_id > 0
+                  ? base::Value(scope.related_target_node_id)
+                  : base::Value());
+    base::ListValue visible;
+    for (int index : scope.visible_path_indexes) {
+      visible.Append(index);
+    }
+    entry.Set("visiblePathIndexes", std::move(visible));
+    entry.Set("unmatchedVisibleTargetCount",
+              scope.unmatched_visible_target_count);
+    path_scopes.Append(std::move(entry));
+  }
+  payload.Set("pathScopes", std::move(path_scopes));
   if (current_target) {
     payload.Set("currentTarget", CreateEventTarget(*current_target));
   } else {
@@ -1778,11 +1821,44 @@ void RecordBlinkDispatchStarted(uintptr_t event_identity,
                            trusted);
 }
 
+namespace {
+
+EvidenceIdentityStorage::PathScope CreatePathScope(
+    int tree_scope_root_node_id,
+    std::string shadow_root_mode,
+    int target_node_id,
+    int related_target_node_id,
+    const std::vector<int>& visible_path_indexes) {
+  EvidenceIdentityStorage::PathScope scope;
+  scope.tree_scope_root_node_id = std::max(tree_scope_root_node_id, 0);
+  if (shadow_root_mode == "open" || shadow_root_mode == "closed" ||
+      shadow_root_mode == "user-agent") {
+    scope.shadow_root_mode = std::move(shadow_root_mode);
+  }
+  scope.target_node_id = std::max(target_node_id, 0);
+  scope.related_target_node_id = std::max(related_target_node_id, 0);
+  for (int index : visible_path_indexes) {
+    if (index < 0) {
+      ++scope.unmatched_visible_target_count;
+    } else {
+      scope.visible_path_indexes.push_back(index);
+    }
+  }
+  return scope;
+}
+
+}  // namespace
+
 void RecordBlinkDispatchPathNode(uintptr_t event_identity,
                                  int document_node_id,
                                  int node_id,
                                  std::string tag_name,
-                                 std::string element_id) {
+                                 std::string element_id,
+                                 int tree_scope_root_node_id,
+                                 std::string shadow_root_mode,
+                                 int target_node_id,
+                                 int related_target_node_id,
+                                 std::vector<int> visible_path_indexes) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
   auto found = identities.dispatches.find(event_identity);
@@ -1796,12 +1872,18 @@ void RecordBlinkDispatchPathNode(uintptr_t event_identity,
        .tag_name = std::move(tag_name),
        .element_id = std::move(element_id),
        .kind = kEventTargetKindNode});
+  found->second.path_scopes.push_back(CreatePathScope(
+      tree_scope_root_node_id, std::move(shadow_root_mode), target_node_id,
+      related_target_node_id, visible_path_indexes));
 }
 
 void RecordBlinkDispatchPathWindow(uintptr_t event_identity,
                                    int document_node_id,
                                    uintptr_t target_identity,
-                                   std::string interface_name) {
+                                   std::string interface_name,
+                                   int target_node_id,
+                                   int related_target_node_id,
+                                   std::vector<int> visible_path_indexes) {
   if (document_node_id <= 0) {
     return;
   }
@@ -1818,6 +1900,9 @@ void RecordBlinkDispatchPathWindow(uintptr_t event_identity,
        .kind = kEventTargetKindWindow,
        .interface_name = std::move(interface_name),
        .target_id = std::move(target_id)});
+  found->second.path_scopes.push_back(CreatePathScope(
+      0, std::string(), target_node_id, related_target_node_id,
+      visible_path_indexes));
 }
 
 void CompleteBlinkDispatchStart(uintptr_t event_identity) {
@@ -2187,6 +2272,85 @@ void RecordBlinkDomCheckpointNodeAttribute(uint64_t checkpoint_sequence,
                     std::move(payload));
 }
 
+void RecordBlinkDomCheckpointShadowRoot(uint64_t checkpoint_sequence,
+                                        int document_node_id,
+                                        std::string document_token,
+                                        int node_id,
+                                        int host_node_id,
+                                        std::string mode,
+                                        bool delegates_focus,
+                                        std::string slot_assignment,
+                                        bool clonable,
+                                        bool serializable,
+                                        bool declarative,
+                                        bool available_to_element_internals,
+                                        bool reference_target_present,
+                                        std::string reference_target) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_id <= 0 || host_node_id <= 0 ||
+      (mode != "open" && mode != "closed" && mode != "user-agent") ||
+      (slot_assignment != "named" && slot_assignment != "manual")) {
+    return;
+  }
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("nodeId", node_id);
+  payload.Set("hostNodeId", host_node_id);
+  payload.Set("mode", std::move(mode));
+  payload.Set("delegatesFocus", delegates_focus);
+  payload.Set("slotAssignment", std::move(slot_assignment));
+  payload.Set("clonable", clonable);
+  payload.Set("serializable", serializable);
+  payload.Set("declarative", declarative);
+  payload.Set("availableToElementInternals", available_to_element_internals);
+  payload.Set("referenceTarget", reference_target_present
+                                     ? base::Value(std::move(reference_target))
+                                     : base::Value());
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-shadow-root",
+                    std::move(payload));
+}
+
+void RecordBlinkDomCheckpointSlotAssignment(uint64_t checkpoint_sequence,
+                                            int document_node_id,
+                                            std::string document_token,
+                                            int node_id,
+                                            std::vector<int> assigned_node_ids,
+                                            int assigned_node_count,
+                                            int maximum_assigned_nodes,
+                                            bool assignment_current) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_id <= 0 || assigned_node_count < 0 ||
+      maximum_assigned_nodes <= 0 ||
+      static_cast<int>(assigned_node_ids.size()) > assigned_node_count ||
+      static_cast<int>(assigned_node_ids.size()) > maximum_assigned_nodes) {
+    return;
+  }
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("nodeId", node_id);
+  base::ListValue assigned;
+  for (int assigned_node_id : assigned_node_ids) {
+    if (assigned_node_id > 0) {
+      assigned.Append(assigned_node_id);
+    } else {
+      assigned.Append(base::Value());
+    }
+  }
+  payload.Set("assignedNodeIds", std::move(assigned));
+  payload.Set("assignedNodeCount", assigned_node_count);
+  payload.Set("assignedNodesTruncated",
+              static_cast<int>(assigned_node_ids.size()) <
+                  assigned_node_count);
+  payload.Set("maximumAssignedNodes", maximum_assigned_nodes);
+  payload.Set("assignmentCurrent", assignment_current);
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-slot-assignment",
+                    std::move(payload));
+}
+
 void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int document_node_id,
                                 std::string document_token,
@@ -2197,13 +2361,16 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int attribute_count,
                                 bool attributes_truncated,
                                 int maximum_attributes_per_node,
-                                int maximum_value_length) {
+                                int maximum_value_length,
+                                int shadow_root_count,
+                                int slot_count) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() ||
       reason.empty() || node_count < 0 || maximum_nodes <= 0 ||
       attribute_count < 0 || maximum_attributes_per_node <= 0 ||
-      maximum_value_length <= 0) {
+      maximum_value_length <= 0 || shadow_root_count < 0 ||
+      slot_count < 0) {
     return;
   }
   base::DictValue payload = CreateDomCheckpointBasePayload(
@@ -2217,6 +2384,8 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
   payload.Set("attributesTruncated", attributes_truncated);
   payload.Set("maximumAttributesPerNode", maximum_attributes_per_node);
   payload.Set("maximumValueLength", maximum_value_length);
+  payload.Set("shadowRootCount", shadow_root_count);
+  payload.Set("slotCount", slot_count);
   const EvidenceIdentityStorage::DomTransitionCoverage coverage =
       TakeDomTransitionCoverage(document_node_id);
   payload.Set("coveredTransitionCount", coverage.transition_count);
@@ -3169,6 +3338,11 @@ void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
       node.node_name.empty() || (node.node_type != 1 && node.node_type != 3)) {
     return;
   }
+  if (node.pseudo_element_present &&
+      (node.node_type != 1 || node.pseudo_type.empty() ||
+       node.generated_text_length < 0)) {
+    return;
+  }
   // Text nodes carry no style of their own, and a text node is only recorded
   // when it has a layout object.
   if (node.node_type == 3 &&
@@ -3186,8 +3360,34 @@ void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
       std::move(document_token));
   payload.Set("nodeIndex", node.node_index);
   payload.Set("nodeId", node.node_id);
-  payload.Set("nodeType", DomNodeTypeName(node.node_type));
+  payload.Set("nodeType", node.pseudo_element_present
+                              ? std::string("pseudo-element")
+                              : DomNodeTypeName(node.node_type));
   payload.Set("nodeName", std::move(node.node_name));
+  if (node.pseudo_element_present) {
+    base::DictValue pseudo;
+    pseudo.Set("originatingNodeId", node.originating_node_id > 0
+                                        ? base::Value(node.originating_node_id)
+                                        : base::Value());
+    pseudo.Set("pseudoType", std::move(node.pseudo_type));
+    SetTruncatedTextProperties(pseudo, "generatedText", "generatedTextLength",
+                               "generatedTextTruncated",
+                               std::move(node.generated_text),
+                               node.generated_text_length,
+                               node.generated_text_truncated);
+    payload.Set("pseudoElement", std::move(pseudo));
+  } else {
+    payload.Set("pseudoElement", base::Value());
+  }
+  if (node.shadow_host_node_id > 0 &&
+      (node.shadow_root_mode == "open" || node.shadow_root_mode == "closed" ||
+       node.shadow_root_mode == "user-agent")) {
+    payload.Set("shadowHostNodeId", node.shadow_host_node_id);
+    payload.Set("shadowRootMode", std::move(node.shadow_root_mode));
+  } else {
+    payload.Set("shadowHostNodeId", base::Value());
+    payload.Set("shadowRootMode", base::Value());
+  }
   payload.Set("layoutObjectPresent", node.layout_object_present);
   payload.Set("displayLocked", node.display_locked);
   if (node.layout_object_present) {
@@ -3223,10 +3423,14 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
                                    std::string document_token,
                                    int node_count,
                                    bool truncated,
-                                   int maximum_nodes) {
+                                   int maximum_nodes,
+                                   int pseudo_element_count,
+                                   int shadow_root_count) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
-      document_token.empty() || node_count < 0 || maximum_nodes <= 0) {
+      document_token.empty() || node_count < 0 || maximum_nodes <= 0 ||
+      pseudo_element_count < 0 || pseudo_element_count > node_count ||
+      shadow_root_count < 0) {
     return;
   }
   base::DictValue payload = CreateLayoutCheckpointBasePayload(
@@ -3236,6 +3440,8 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
   payload.Set("nodeCount", node_count);
   payload.Set("truncated", truncated);
   payload.Set("maximumNodes", maximum_nodes);
+  payload.Set("pseudoElementCount", pseudo_element_count);
+  payload.Set("shadowRootCount", shadow_root_count);
   SendBlinkEvidence("browser.layout", "layout-checkpoint-completed",
                     std::move(payload));
 }

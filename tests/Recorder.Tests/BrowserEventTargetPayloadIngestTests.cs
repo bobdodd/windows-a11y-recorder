@@ -150,6 +150,24 @@ public sealed class BrowserEventTargetPayloadIngestTests
               "trusted": true,
               "originalTarget": {{NodeTargetJson}},
               "composedPath": [{{NodeTargetJson}}, {{WindowTargetJson}}],
+              "pathScopes": [
+                {
+                  "treeScopeRootNodeId": 8,
+                  "shadowRootMode": null,
+                  "targetNodeId": 91,
+                  "relatedTargetNodeId": null,
+                  "visiblePathIndexes": [0, 1],
+                  "unmatchedVisibleTargetCount": 0
+                },
+                {
+                  "treeScopeRootNodeId": null,
+                  "shadowRootMode": null,
+                  "targetNodeId": 91,
+                  "relatedTargetNodeId": null,
+                  "visiblePathIndexes": [0, 1],
+                  "unmatchedVisibleTargetCount": 0
+                }
+              ],
               "currentTarget": null,
               "phase": "none",
               "listenerId": null,
@@ -185,6 +203,24 @@ public sealed class BrowserEventTargetPayloadIngestTests
               "trusted": true,
               "originalTarget": {{NodeTargetJson}},
               "composedPath": [{{NodeTargetJson}}, {{WindowTargetJson}}],
+              "pathScopes": [
+                {
+                  "treeScopeRootNodeId": 8,
+                  "shadowRootMode": null,
+                  "targetNodeId": 91,
+                  "relatedTargetNodeId": null,
+                  "visiblePathIndexes": [0, 1],
+                  "unmatchedVisibleTargetCount": 0
+                },
+                {
+                  "treeScopeRootNodeId": null,
+                  "shadowRootMode": null,
+                  "targetNodeId": 91,
+                  "relatedTargetNodeId": null,
+                  "visiblePathIndexes": [0, 1],
+                  "unmatchedVisibleTargetCount": 0
+                }
+              ],
               "currentTarget": {{WindowTargetJson}},
               "phase": "bubbling",
               "listenerId": "listener-8",

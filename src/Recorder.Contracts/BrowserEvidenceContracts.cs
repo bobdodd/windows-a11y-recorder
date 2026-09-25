@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.27";
+    public const string CurrentVersion = "0.28";
 }
 
 public static class BrowserEvidenceChannels
@@ -41,6 +41,8 @@ public static class BrowserEvidenceEventTypes
     public const string DomCheckpointStarted = "dom-checkpoint-started";
     public const string DomCheckpointNode = "dom-checkpoint-node";
     public const string DomCheckpointNodeAttribute = "dom-checkpoint-node-attribute";
+    public const string DomCheckpointShadowRoot = "dom-checkpoint-shadow-root";
+    public const string DomCheckpointSlotAssignment = "dom-checkpoint-slot-assignment";
     public const string DomCheckpointCompleted = "dom-checkpoint-completed";
     public const string DomAttributeChanged = "dom-attribute-changed";
     public const string DomCharacterDataChanged = "dom-character-data-changed";
@@ -185,6 +187,23 @@ public sealed record BrowserListenerPayload(
     BrowserScriptLocation? Location,
     BrowserExecutionWorld? World);
 
+// Describes the tree scope one composed path entry is dispatched in, at the
+// same index as that entry. TreeScopeRootNodeId is the document or shadow root
+// that roots the scope, and is null for the window entry. ShadowRootMode is
+// null unless the root is a shadow root. TargetNodeId and RelatedTargetNodeId
+// are the target and related target Blink retargeted for the scope, and are
+// null when absent or not a node. VisiblePathIndexes lists, in order, the
+// composed path indexes that composedPath() returns to a listener in this
+// scope; UnmatchedVisibleTargetCount counts entries Blink returned that are not
+// in the recorded path.
+public sealed record BrowserDispatchPathScope(
+    long? TreeScopeRootNodeId,
+    string? ShadowRootMode,
+    long? TargetNodeId,
+    long? RelatedTargetNodeId,
+    IReadOnlyList<int> VisiblePathIndexes,
+    int UnmatchedVisibleTargetCount);
+
 public sealed record BrowserDispatchPayload(
     BrowserContext Context,
     string DispatchId,
@@ -199,7 +218,8 @@ public sealed record BrowserDispatchPayload(
     bool ImmediatePropagationStopped,
     string? DefaultAction,
     string? Outcome,
-    BrowserEventTargetReference? CurrentTarget = null);
+    BrowserEventTargetReference? CurrentTarget = null,
+    IReadOnlyList<BrowserDispatchPathScope>? PathScopes = null);
 
 public sealed record BrowserTimerPayload(
     BrowserContext Context,
@@ -270,6 +290,36 @@ public sealed record BrowserDomCheckpointNodeAttributePayload(
     bool AttributeValueTruncated,
     int MaximumValueLength);
 
+// Records the shadow root that follows its host in a DOM checkpoint. Mode is
+// "open", "closed", or "user-agent"; SlotAssignment is "named" or "manual".
+// ReferenceTarget is null when the root has none.
+public sealed record BrowserDomCheckpointShadowRootPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    long NodeId,
+    long HostNodeId,
+    string Mode,
+    bool DelegatesFocus,
+    string SlotAssignment,
+    bool Clonable,
+    bool Serializable,
+    bool Declarative,
+    bool AvailableToElementInternals,
+    string? ReferenceTarget);
+
+// Records the nodes one slot is assigned, in order, as Blink held them when the
+// checkpoint read them. AssignmentCurrent is false when Blink had marked the
+// assignment for recalculation, which the recorder never requests.
+public sealed record BrowserDomCheckpointSlotAssignmentPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    long NodeId,
+    IReadOnlyList<long?> AssignedNodeIds,
+    int AssignedNodeCount,
+    bool AssignedNodesTruncated,
+    int MaximumAssignedNodes,
+    bool AssignmentCurrent);
+
 public sealed record BrowserDomCheckpointCompletedPayload(
     BrowserContext Context,
     string CheckpointId,
@@ -283,7 +333,9 @@ public sealed record BrowserDomCheckpointCompletedPayload(
     int MaximumValueLength,
     int CoveredTransitionCount,
     string? CoveredTransitionFirstId,
-    string? CoveredTransitionLastId);
+    string? CoveredTransitionLastId,
+    int ShadowRootCount = 0,
+    int SlotCount = 0);
 
 public sealed record BrowserDomAttributeChangedPayload(
     BrowserContext Context,
@@ -599,10 +651,22 @@ public sealed record BrowserLayoutCheckpointStartedPayload(
     int MaximumNodes,
     IReadOnlyList<string> StyleProperties);
 
-// Records one element or laid-out text node. BoundingClientRect is null when
-// the node has no layout object. ComputedStyle maps each listed property to its
-// resolved value, or to null when Blink produced none, and is null for a text
-// node or an element without a current computed style.
+// Describes a pseudo-element record. PseudoType is the name Blink uses for it
+// in events, such as "::before". GeneratedText is the text of the layout text
+// objects the pseudo-element generated, including nested pseudo-elements.
+public sealed record BrowserLayoutPseudoElement(
+    long? OriginatingNodeId,
+    string PseudoType,
+    string GeneratedText,
+    int GeneratedTextLength,
+    bool GeneratedTextTruncated);
+
+// Records one element, laid-out text node, or pseudo-element.
+// BoundingClientRect is null when the node has no layout object. ComputedStyle
+// maps each listed property to its resolved value, or to null when Blink
+// produced none, and is null for a text node or an element without a current
+// computed style. ShadowHostNodeId and ShadowRootMode name the host and mode of
+// the shadow tree that contains the node, and are null in a document tree.
 public sealed record BrowserLayoutCheckpointNodePayload(
     BrowserContext Context,
     string CheckpointId,
@@ -613,7 +677,10 @@ public sealed record BrowserLayoutCheckpointNodePayload(
     bool LayoutObjectPresent,
     bool DisplayLocked,
     BrowserLayoutRect? BoundingClientRect,
-    IReadOnlyDictionary<string, string?>? ComputedStyle);
+    IReadOnlyDictionary<string, string?>? ComputedStyle,
+    BrowserLayoutPseudoElement? PseudoElement = null,
+    long? ShadowHostNodeId = null,
+    string? ShadowRootMode = null);
 
 public sealed record BrowserLayoutCheckpointCompletedPayload(
     BrowserContext Context,
@@ -621,7 +688,9 @@ public sealed record BrowserLayoutCheckpointCompletedPayload(
     string Reason,
     int NodeCount,
     bool Truncated,
-    int MaximumNodes);
+    int MaximumNodes,
+    int PseudoElementCount = 0,
+    int ShadowRootCount = 0);
 
 // Network records report request and response metadata as the Blink loader and
 // the browser's network service observer already hold it. No record carries a

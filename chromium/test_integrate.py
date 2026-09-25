@@ -1736,8 +1736,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.27"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.27"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.28"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.28"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -2073,12 +2073,26 @@ class IntegrateTests(unittest.TestCase):
             self.assertEqual(1, first.count("RecordBlinkDomCheckpointNode("))
             self.assertEqual(1, first.count("CompleteBlinkDomCheckpoint"))
             self.assertIn("kRecorderMaximumDomCheckpointNodes = 512", first)
-            self.assertIn(
-                "NodeTraversal::InclusiveDescendantsOf(*this)",
-                first,
+            self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HOOK))
+            self.assertEqual(
+                1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER)
             )
-            self.assertIn("recorder_node.parentNode()", first)
+            self.assertLess(
+                first.index(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER),
+                first.index("void Document::FinishedParsing() {"),
+            )
+            # The traversal is composed: a hosted shadow root of any mode is
+            # recorded with its host as its parent, and slot assignments are
+            # read without a recalculation.
+            self.assertIn("recorder_element->GetShadowRoot()", first)
+            self.assertIn("recorder_node.ParentOrShadowHostNode()", first)
+            self.assertIn("RecordBlinkDomCheckpointShadowRoot(", first)
+            self.assertIn("AssignedNodesNoRecalc()", first)
+            self.assertNotIn("->AssignedNodes()", first)
+            self.assertNotIn("RecalcAssignment()", first)
             self.assertIn("Token().ToString()", first)
+            for include in INTEGRATE.BLINK_DOM_CHECKPOINT_INCLUDES:
+                self.assertIn(include, first)
             self.assertIn(
                 "if (HasFinishedParsing())\n"
                 "    MutationObserver::EnqueueRecorderDomCheckpoint(*this)",
@@ -2164,10 +2178,15 @@ class IntegrateTests(unittest.TestCase):
                 first.count("recorder_mutated_documents"),
                 4,
             )
-            self.assertEqual(2, first.count('"post-mutation"'))
-            self.assertEqual(1, first.count("BeginBlinkDomCheckpoint"))
-            self.assertEqual(1, first.count("RecordBlinkDomCheckpointNode("))
-            self.assertEqual(1, first.count("CompleteBlinkDomCheckpoint"))
+            self.assertEqual(1, first.count('"post-mutation"'))
+            self.assertEqual(0, first.count("BeginBlinkDomCheckpoint"))
+            self.assertEqual(
+                1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_DECLARATION)
+            )
+            self.assertLess(
+                first.index(INTEGRATE.BLINK_DOM_CHECKPOINT_DECLARATION),
+                first.index("class MutationObserverAgentData"),
+            )
             self.assertIn(
                 "MutationObserver::EnqueueRecorderDomCheckpoint",
                 first,
@@ -2179,11 +2198,6 @@ class IntegrateTests(unittest.TestCase):
             )
             self.assertIn("recorder_document->HasFinishedParsing()", first)
             self.assertIn("recorder_document->IsActive()", first)
-            self.assertIn("recorder_document->Token().ToString()", first)
-            self.assertIn(
-                "NodeTraversal::InclusiveDescendantsOf(*recorder_document)",
-                first,
-            )
             self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, first)
 
     def test_migrates_protocol_010_navigation_hooks_idempotently(self):
@@ -2461,18 +2475,18 @@ class IntegrateTests(unittest.TestCase):
                 INTEGRATE.BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
                 mutation_first,
             )
-            self.assertEqual(1, mutation_first.count("BeginBlinkDomCheckpoint"))
+            # The post-mutation checkpoint is recorded by the helper that
+            # document.cc defines, so the delivery hook only calls it.
+            self.assertEqual(0, mutation_first.count("BeginBlinkDomCheckpoint"))
             self.assertEqual(
                 1,
-                mutation_first.count("RecordBlinkDomCheckpointNode("),
-            )
-            self.assertEqual(
-                1,
-                mutation_first.count("CompleteBlinkDomCheckpoint"),
+                mutation_first.count(
+                    'RecorderRecordDomCheckpoint(*recorder_document, '
+                    '"post-mutation")'
+                ),
             )
             self.assertIn(
-                "recorder_document->Token().ToString()",
-                mutation_first,
+                INTEGRATE.BLINK_DOM_CHECKPOINT_DECLARATION, mutation_first
             )
 
 
@@ -2599,30 +2613,32 @@ class IntegrateTests(unittest.TestCase):
                 INTEGRATE.BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
                 mutation_first,
             )
-            self.assertEqual(1, mutation_first.count("BeginBlinkDomCheckpoint"))
+            # The post-mutation checkpoint is recorded by the helper that
+            # document.cc defines, so the delivery hook only calls it.
+            self.assertEqual(0, mutation_first.count("BeginBlinkDomCheckpoint"))
             self.assertEqual(
                 1,
-                mutation_first.count("RecordBlinkDomCheckpointNode("),
-            )
-            self.assertEqual(
-                1,
-                mutation_first.count("CompleteBlinkDomCheckpoint"),
+                mutation_first.count(
+                    'RecorderRecordDomCheckpoint(*recorder_document, '
+                    '"post-mutation")'
+                ),
             )
             self.assertIn(
-                "recorder_document->Token().ToString()",
-                mutation_first,
+                INTEGRATE.BLINK_DOM_CHECKPOINT_DECLARATION, mutation_first
             )
 
+            self.assertEqual(
+                1,
+                document_first.count("RecordBlinkDomCheckpointNodeAttribute("),
+            )
+            self.assertIn(
+                "kRecorderMaximumDomAttributesPerNode = 64", document_first
+            )
+            self.assertIn(
+                "kRecorderMaximumDomValueLength = 4096", document_first
+            )
+            self.assertIn("recorder_attributes_truncated", document_first)
             for patched in (document_first, mutation_first):
-                self.assertEqual(
-                    1,
-                    patched.count("RecordBlinkDomCheckpointNodeAttribute("),
-                )
-                self.assertIn(
-                    "kRecorderMaximumDomAttributesPerNode = 64", patched
-                )
-                self.assertIn("kRecorderMaximumDomValueLength = 4096", patched)
-                self.assertIn("recorder_attributes_truncated", patched)
                 self.assertIn(
                     '#include "third_party/blink/renderer/core/dom/attribute.h"',
                     patched,
@@ -2632,6 +2648,78 @@ class IntegrateTests(unittest.TestCase):
                     patched,
                 )
 
+
+    def test_migrates_light_tree_dom_checkpoint_hooks(self):
+        """A checkpoint that recorded the light tree only must be replaced."""
+        with tempfile.TemporaryDirectory() as directory:
+            document_path = Path(directory) / "document.cc"
+            document_path.write_text(
+                '#include "third_party/blink/renderer/core/dom/document.h"\n'
+                f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                '#include "third_party/blink/renderer/core/dom/node_traversal.h"\n'
+                "\n"
+                "void Document::FinishedParsing() {\n"
+                "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+                "\n"
+                f"{INTEGRATE.LEGACY_LIGHT_TREE_BLINK_DOM_CHECKPOINT_HOOK}"
+                "\n"
+                "}\n"
+                "\n"
+                "void Document::NotifyChangeChildren(\n"
+                "    const ContainerNode& container,\n"
+                "    const ContainerNode::ChildrenChange& change) {\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_document(document_path)
+            document_first = document_path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document(document_path)
+            self.assertEqual(
+                document_first, document_path.read_text(encoding="utf-8")
+            )
+            self.assertNotIn(
+                INTEGRATE.LEGACY_LIGHT_TREE_BLINK_DOM_CHECKPOINT_HOOK,
+                document_first,
+            )
+            self.assertEqual(
+                1, document_first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HOOK)
+            )
+            self.assertEqual(
+                1, document_first.count("a11y_recorder::BeginBlinkDomCheckpoint(")
+            )
+
+            mutation_path = Path(directory) / "mutation_observer.cc"
+            mutation_path.write_text(
+                '#include "third_party/blink/renderer/core/dom/mutation_observer.h"\n'
+                f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                '#include "third_party/blink/renderer/core/dom/node.h"\n'
+                '#include "third_party/blink/renderer/core/dom/node_traversal.h"\n'
+                "\n"
+                "class MutationObserverAgentData {\n"
+                "  void DeliverMutations() {\n"
+                "    HeapHashSet<Member<Document>> recorder_mutated_documents;\n"
+                "    for (const auto& slot : slots)\n"
+                "      slot->DispatchSlotChangeEvent();\n"
+                f"{INTEGRATE.LEGACY_LIGHT_TREE_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK}"
+                "  }\n"
+                "};\n",
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_mutation_observer(mutation_path)
+            mutation_first = mutation_path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_mutation_observer(mutation_path)
+            self.assertEqual(
+                mutation_first, mutation_path.read_text(encoding="utf-8")
+            )
+            self.assertNotIn(
+                INTEGRATE.LEGACY_LIGHT_TREE_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+                mutation_first,
+            )
+            self.assertIn(
+                INTEGRATE.BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+                mutation_first,
+            )
+            self.assertNotIn("BeginBlinkDomCheckpoint", mutation_first)
 
     def test_patches_element_attribute_mutations_idempotently(self):
         """Attribute transitions must be recorded once per mutation path."""
@@ -3111,6 +3199,43 @@ class IntegrateTests(unittest.TestCase):
 
             self.assertEqual(current, path.read_text(encoding="utf-8"))
 
+    def test_migrates_a_dispatch_path_that_omitted_the_tree_scopes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_dispatcher.cc"
+            self._write_event_dispatcher(path)
+            INTEGRATE.patch_blink_event_dispatcher(path)
+            current = path.read_text(encoding="utf-8")
+
+            without_scopes = current.replace(
+                INTEGRATE.BLINK_DISPATCH_HOOK,
+                INTEGRATE.LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_SCOPES,
+                1,
+            )
+            self.assertNotIn("EnsureEventPath", without_scopes)
+            path.write_text(without_scopes, encoding="utf-8")
+
+            INTEGRATE.patch_blink_event_dispatcher(path)
+
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_dispatch_path_records_each_entry_tree_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_dispatcher.cc"
+            self._write_event_dispatcher(path)
+            INTEGRATE.patch_blink_event_dispatcher(path)
+            patched = path.read_text(encoding="utf-8")
+        for include in INTEGRATE.BLINK_DISPATCH_SCOPE_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        hook = INTEGRATE.BLINK_DISPATCH_HOOK
+        # The retargeted targets and the visible path are read from Blink's
+        # per-scope context, the same data composedPath() returns.
+        self.assertIn("recorder_context.Target()", hook)
+        self.assertIn("recorder_context.RelatedTarget()", hook)
+        self.assertIn("EnsureEventPath(recorder_event_path)", hook)
+        self.assertIn("recorder_window_context.RelatedTarget()", hook)
+        self.assertIn("TopNodeEventContext()", hook)
+        self.assertIn("recorder_event_path.IsEmpty()", hook)
+
     def test_exported_data_declarations_do_not_hide_a_signature(self):
         header = (
             "namespace a11y_recorder {\n"
@@ -3362,6 +3487,7 @@ class IntegrateTests(unittest.TestCase):
                 '#include "third_party/blink/renderer/core/dom/'
                 'node_traversal.h"\n'
                 "\n"
+                "class MutationObserverAgentData;\n"
                 "void MutationObserver::DeliverMutations() {\n"
                 "  for (auto& document : recorder_mutated_documents) {\n"
                 "    a11y_recorder::BeginBlinkDomCheckpoint(\n"
@@ -3384,7 +3510,8 @@ class IntegrateTests(unittest.TestCase):
             finally:
                 INTEGRATE._INTEGRATED_PATHS.clear()
         message = str(failure.exception)
-        self.assertIn("mutation_observer.cc:10", message)
+        # The helper declaration adds four lines ahead of the stale call.
+        self.assertIn("mutation_observer.cc:15", message)
         self.assertIn("BeginBlinkDomCheckpoint", message)
         self.assertIn("called with 3 arguments", message)
 
@@ -4229,6 +4356,42 @@ class LayoutIntegrationTests(unittest.TestCase):
                 "patched", patched, signatures
             ),
         )
+
+    def test_upgrades_a_light_tree_helper_in_place(self):
+        """A helper written before the composed traversal is rewritten."""
+        source = cookie_source(
+            self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+        )
+        current = self.patch_twice(source)
+        earlier_helper = (
+            "namespace {\n\n"
+            + INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY
+            + "void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {\n"
+            "  for (Node& recorder_node :\n"
+            "       NodeTraversal::InclusiveDescendantsOf(*recorder_document)) {\n"
+            "  }\n"
+            "}\n\n"
+            "}  // namespace\n\n"
+        )
+        earlier = current.replace(
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER, earlier_helper, 1
+        )
+        self.assertNotEqual(current, earlier)
+        self.assertEqual(current, self.patch_twice(earlier))
+
+    def test_the_helper_records_the_composed_tree_and_pseudo_elements(self):
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertNotIn("NodeTraversal::InclusiveDescendantsOf", helper)
+        self.assertIn("recorder_element->GetShadowRoot()", helper)
+        self.assertIn("RecorderAppendPseudoElements(", helper)
+        self.assertIn("ForEachTransitionPseudo(", helper)
+        self.assertIn("GetColumnPseudoElements()", helper)
+        self.assertIn("TransformedText()", helper)
+        # Reading a pseudo-element never creates one.
+        self.assertNotIn("EnsurePseudoElement", helper)
+        self.assertNotIn("CreatePseudoElementIfNeeded", helper)
 
     def test_upgrades_a_helper_that_indexes_the_property_array(self):
         legacy_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
