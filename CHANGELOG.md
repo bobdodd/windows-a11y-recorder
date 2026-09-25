@@ -299,6 +299,13 @@ from the product version.
 
 ### Fixed
 
+- Keep the UI Automation collector running when an event's element is gone
+  before its cached properties are read. The cached read did not catch
+  `ElementNotAvailableException`, so one such event ended the record stream
+  and failed the session; a Blink validation run on September 25, 2026 at
+  commit `dabe8ff` recorded no UI Automation events after 5.75 seconds of a
+  48.8 second session. The element is now read again, and the record states
+  `element-not-available` when that read also fails.
 - Include `browser.accessibility` records in the playback Browser filter.
   They were shown only under Other.
 

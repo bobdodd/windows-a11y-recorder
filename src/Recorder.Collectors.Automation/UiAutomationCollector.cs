@@ -534,6 +534,11 @@ public sealed class UiAutomationCollector : ICaptureCollector
                 "event-cache",
                 []);
         }
+        // ElementNotAvailableException is neither of the other two types; the
+        // current read below records that the element had gone.
+        catch (ElementNotAvailableException)
+        {
+        }
         catch (InvalidOperationException)
         {
         }
