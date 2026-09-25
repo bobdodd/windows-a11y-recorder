@@ -26,6 +26,17 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $LayoutFixtureSteps,
 
+    # The URL the run script served the shadow DOM logging fixture from.
+    [Parameter(Mandatory = $true)]
+    [string] $ShadowFixtureUri,
+
+    # What the shadow DOM fixture page reported, as a JSON object whose Settle
+    # member holds the page's count of nodes assigned to each slot and whose
+    # Dispatch member holds the composedPath() length each of its click
+    # listeners saw.
+    [Parameter(Mandatory = $true)]
+    [string] $ShadowFixtureSteps,
+
     # The URL the run script served the network logging fixture page from.
     # The page's data, script, and worker URLs all begin with it.
     [Parameter(Mandatory = $true)]
@@ -3707,6 +3718,500 @@ if ($layoutTextNodes.Count -lt 1) {
     LayoutZoomFactor = $layoutStateCheckpoints["Settle"].Checkpoint.Start.layoutZoomFactor
 } | Format-List
 
+# The run script serves a page that builds an open shadow root with a named and
+# a default slot, a closed shadow root with manual slot assignment that
+# delegates focus, and an input, whose shadow root Blink creates as a
+# user-agent root. The page has ::before, ::after, and ::marker content in the
+# document tree and ::before content inside the open shadow tree, and it
+# dispatches a click from a button inside the closed shadow root. These checks
+# establish that the logger recorded each shadow root with its host and mode,
+# each slot's assigned nodes, the shadow-tree and pseudo-element layout
+# records, and the per-scope view of the dispatch path. They say nothing about
+# whether the page's use of shadow DOM or generated content is appropriate.
+$shadowSteps = ConvertFrom-Json $ShadowFixtureSteps
+$shadowObserved = @(ConvertFrom-Json ([string] $shadowSteps.Dispatch))
+$shadowCommits = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "browser.navigation" -and
+            $_.eventType -eq "navigation-completed" -and
+            ([string] $_.payload.url).StartsWith($ShadowFixtureUri) -and
+            $_.payload.frameType -eq "primary-main-frame" -and
+            $_.payload.committed -eq $true -and
+            $_.payload.sameDocument -eq $false
+        }
+)
+if ($shadowCommits.Count -ne 1) {
+    throw (
+        "$($shadowCommits.Count) committed navigations to the shadow DOM " +
+        "logging fixture were recorded rather than one."
+    )
+}
+$shadowDocumentToken = $shadowCommits[0].payload.context.documentToken
+$shadowProcessId = $shadowCommits[0].payload.rendererProcessId
+# Only the DOM, layout, and dispatch channels are read here, and each of their
+# records carries a browser context.
+$shadowDocumentRecords = @(
+    $records |
+        Where-Object {
+            $_.channel -in @("browser.dom", "browser.layout", "browser.dispatch") -and
+            $_.payload.context.documentToken -eq $shadowDocumentToken -and
+            $_.payload.context.processId -eq $shadowProcessId
+        }
+)
+
+# Groups the fixture document's DOM checkpoint records by checkpoint, checks
+# that each checkpoint's counts match the records it emitted, and maps each id
+# attribute value to the node that carried it.
+$shadowDomCheckpoints = New-Object System.Collections.ArrayList
+foreach ($start in @(
+        $shadowDocumentRecords |
+            Where-Object {
+                $_.channel -eq "browser.dom" -and
+                $_.eventType -eq "dom-checkpoint-started"
+            }
+    )) {
+    $checkpointId = $start.payload.checkpointId
+    $inCheckpoint = @(
+        $shadowDocumentRecords |
+            Where-Object {
+                $_.channel -eq "browser.dom" -and
+                $_.payload.checkpointId -eq $checkpointId
+            }
+    )
+    $nodes = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-node" })
+    $roots = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-shadow-root" })
+    $slots = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-slot-assignment" })
+    $completions = @($inCheckpoint | Where-Object { $_.eventType -eq "dom-checkpoint-completed" })
+    if ($completions.Count -ne 1) {
+        throw (
+            "Shadow fixture DOM checkpoint $checkpointId had " +
+            "$($completions.Count) completion records rather than one."
+        )
+    }
+    $completion = $completions[0].payload
+    if ($completion.truncated -or
+        $completion.nodeCount -ne $nodes.Count -or
+        $completion.shadowRootCount -ne $roots.Count -or
+        $completion.slotCount -ne $slots.Count) {
+        throw (
+            "Shadow fixture DOM checkpoint $checkpointId completed with " +
+            "$($completion.nodeCount) nodes, $($completion.shadowRootCount) " +
+            "shadow roots, $($completion.slotCount) slots, truncated " +
+            "$($completion.truncated), but emitted $($nodes.Count) node, " +
+            "$($roots.Count) shadow root, and $($slots.Count) slot records."
+        )
+    }
+    $ids = @{}
+    foreach ($attribute in @(
+            $inCheckpoint |
+                Where-Object {
+                    $_.eventType -eq "dom-checkpoint-node-attribute" -and
+                    $_.payload.attributeName -eq "id" -and
+                    $null -eq $_.payload.attributeNamespace
+                }
+        )) {
+        $ids[[string] $attribute.payload.attributeValue] = [long] $attribute.payload.nodeId
+    }
+    $nodesById = @{}
+    foreach ($node in $nodes) {
+        $nodesById[[long] $node.payload.nodeId] = $node.payload
+    }
+    [void] $shadowDomCheckpoints.Add([pscustomobject]@{
+            Id = $checkpointId
+            Reason = $start.payload.reason
+            Nodes = $nodesById
+            Roots = $roots
+            Slots = $slots
+            Ids = $ids
+        })
+}
+
+$shadowParsed = @(
+    $shadowDomCheckpoints | Where-Object { $_.Reason -eq "finished-parsing" }
+)
+if ($shadowParsed.Count -ne 1) {
+    throw (
+        "$($shadowParsed.Count) finished-parsing DOM checkpoints were " +
+        "recorded for the shadow DOM logging fixture rather than one."
+    )
+}
+$shadowParsed = $shadowParsed[0]
+$shadowIds = $shadowParsed.Ids
+foreach ($name in @(
+        "open-host", "open-label", "open-default", "open-bold",
+        "open-named-slot", "open-default-slot", "closed-host",
+        "closed-assigned", "closed-manual-slot", "closed-button",
+        "shadow-input", "shadow-note", "shadow-item"
+    )) {
+    if (-not $shadowIds.ContainsKey($name)) {
+        throw (
+            "The shadow fixture's finished-parsing DOM checkpoint recorded no " +
+            "node with id '$name'."
+        )
+    }
+}
+
+# Checks that the checkpoint recorded one shadow root on the host with the
+# expected mode, focus delegation, and slot assignment, that the root has its
+# own node record whose parent is the host, and that the named element inside
+# the shadow tree has the root as its parent.
+function Test-ShadowRootRecord {
+    param(
+        [Parameter(Mandatory = $true)] $Checkpoint,
+        [Parameter(Mandatory = $true)] [string] $HostId,
+        [Parameter(Mandatory = $true)] [string] $Mode,
+        [Parameter(Mandatory = $true)] [bool] $DelegatesFocus,
+        [Parameter(Mandatory = $true)] [string] $SlotAssignment,
+        [string] $ChildId
+    )
+
+    $hostNodeId = $Checkpoint.Ids[$HostId]
+    $found = @(
+        $Checkpoint.Roots |
+            Where-Object { $_.payload.hostNodeId -eq $hostNodeId }
+    )
+    if ($found.Count -ne 1) {
+        throw (
+            "DOM checkpoint $($Checkpoint.Id) recorded $($found.Count) shadow " +
+            "roots on #$HostId rather than one."
+        )
+    }
+    $root = $found[0].payload
+    if ($root.mode -ne $Mode -or
+        $root.delegatesFocus -ne $DelegatesFocus -or
+        $root.slotAssignment -ne $SlotAssignment) {
+        throw (
+            "DOM checkpoint $($Checkpoint.Id) recorded the shadow root on " +
+            "#$HostId as mode '$($root.mode)', delegatesFocus " +
+            "$($root.delegatesFocus), slotAssignment '$($root.slotAssignment)'."
+        )
+    }
+    $rootNode = $Checkpoint.Nodes[[long] $root.nodeId]
+    if ($null -eq $rootNode -or
+        $rootNode.nodeType -ne "shadow-root" -or
+        $rootNode.parentNodeId -ne $hostNodeId) {
+        throw (
+            "DOM checkpoint $($Checkpoint.Id) has no shadow-root node record " +
+            "under #$HostId for its shadow root."
+        )
+    }
+    if ($ChildId) {
+        $child = $Checkpoint.Nodes[$Checkpoint.Ids[$ChildId]]
+        if ($null -eq $child -or $child.parentNodeId -ne $root.nodeId) {
+            throw (
+                "DOM checkpoint $($Checkpoint.Id) did not record #$ChildId as " +
+                "a child of the shadow root on #$HostId."
+            )
+        }
+    }
+    $root
+}
+
+$openRoot = Test-ShadowRootRecord $shadowParsed "open-host" "open" $false "named" "open-bold"
+$closedRoot = Test-ShadowRootRecord $shadowParsed "closed-host" "closed" $true "manual" "closed-button"
+$userAgentRoot = Test-ShadowRootRecord $shadowParsed "shadow-input" "user-agent" $false "named"
+
+# The slots are compared in a checkpoint that read every fixture slot while
+# Blink held its assignment as current. Slot assignment is recalculated lazily,
+# so the finished-parsing checkpoint may read the slots before Blink assigned
+# them, and the recorder never requests the recalculation itself. The settle
+# step makes a post-mutation checkpoint after two animation frames for this.
+$slotExpectations = [ordered]@{
+    "open-named-slot" = @("open-label")
+    "open-default-slot" = @("open-default")
+    "closed-manual-slot" = @("closed-assigned")
+}
+$staleSlotRecords = 0
+$slotCheckpoint = $null
+foreach ($checkpoint in $shadowDomCheckpoints) {
+    $staleSlotRecords += @(
+        $checkpoint.Slots | Where-Object { -not $_.payload.assignmentCurrent }
+    ).Count
+    foreach ($slot in $checkpoint.Slots) {
+        foreach ($assigned in @($slot.payload.assignedNodeIds)) {
+            if ($null -ne $assigned -and -not $checkpoint.Nodes.ContainsKey([long] $assigned)) {
+                throw (
+                    "DOM checkpoint $($checkpoint.Id) assigned node $assigned " +
+                    "to a slot but emitted no node record for it."
+                )
+            }
+        }
+    }
+    $allCurrent = $true
+    foreach ($slotId in $slotExpectations.Keys) {
+        $slot = @(
+            $checkpoint.Slots |
+                Where-Object { $_.payload.nodeId -eq $checkpoint.Ids[$slotId] }
+        )
+        if ($slot.Count -ne 1 -or -not $slot[0].payload.assignmentCurrent) {
+            $allCurrent = $false
+        }
+    }
+    if ($allCurrent) {
+        $slotCheckpoint = $checkpoint
+    }
+}
+if ($null -eq $slotCheckpoint) {
+    throw (
+        "No DOM checkpoint of the shadow fixture read all three fixture slots " +
+        "with a current assignment."
+    )
+}
+foreach ($slotId in $slotExpectations.Keys) {
+    $slot = @(
+        $slotCheckpoint.Slots |
+            Where-Object { $_.payload.nodeId -eq $slotCheckpoint.Ids[$slotId] }
+    )[0].payload
+    $expected = @($slotExpectations[$slotId] | ForEach-Object { $slotCheckpoint.Ids[$_] })
+    $actual = @($slot.assignedNodeIds)
+    if ($slot.assignedNodeCount -ne $expected.Count -or
+        $slot.assignedNodesTruncated -or
+        ($actual -join ",") -ne ($expected -join ",")) {
+        throw (
+            "DOM checkpoint $($slotCheckpoint.Id) recorded #$slotId as " +
+            "assigned [$($actual -join ', ')] rather than " +
+            "[$($expected -join ', ')]."
+        )
+    }
+}
+
+# The layout checks use the latest completed layout checkpoint of the fixture
+# document that recorded the closed shadow tree's button.
+$shadowLayoutStarts = @(
+    $shadowDocumentRecords |
+        Where-Object {
+            $_.channel -eq "browser.layout" -and
+            $_.eventType -eq "layout-checkpoint-started"
+        }
+)
+$shadowLayout = $null
+foreach ($start in $shadowLayoutStarts) {
+    $checkpointId = $start.payload.checkpointId
+    $nodes = @(
+        $shadowDocumentRecords |
+            Where-Object {
+                $_.eventType -eq "layout-checkpoint-node" -and
+                $_.payload.checkpointId -eq $checkpointId
+            } |
+            ForEach-Object { $_.payload }
+    )
+    $completion = @(
+        $shadowDocumentRecords |
+            Where-Object {
+                $_.eventType -eq "layout-checkpoint-completed" -and
+                $_.payload.checkpointId -eq $checkpointId
+            }
+    )
+    if ($completion.Count -eq 1 -and
+        @($nodes | Where-Object { $_.nodeId -eq $shadowIds["closed-button"] }).Count -eq 1) {
+        $shadowLayout = [pscustomobject]@{
+            Id = $checkpointId
+            Nodes = $nodes
+            Completion = $completion[0].payload
+        }
+    }
+}
+if ($null -eq $shadowLayout) {
+    throw (
+        "No completed layout checkpoint of the shadow fixture recorded the " +
+        "button inside the closed shadow root."
+    )
+}
+$layoutPseudoNodes = @(
+    $shadowLayout.Nodes | Where-Object { $_.nodeType -eq "pseudo-element" }
+)
+if ($shadowLayout.Completion.truncated -or
+    $shadowLayout.Completion.nodeCount -ne $shadowLayout.Nodes.Count -or
+    $shadowLayout.Completion.pseudoElementCount -ne $layoutPseudoNodes.Count -or
+    $shadowLayout.Completion.shadowRootCount -lt 3) {
+    throw (
+        "Shadow fixture layout checkpoint $($shadowLayout.Id) completed with " +
+        "$($shadowLayout.Completion.nodeCount) nodes, " +
+        "$($shadowLayout.Completion.pseudoElementCount) pseudo-elements, and " +
+        "$($shadowLayout.Completion.shadowRootCount) shadow roots, but " +
+        "emitted $($shadowLayout.Nodes.Count) node and " +
+        "$($layoutPseudoNodes.Count) pseudo-element records."
+    )
+}
+$pseudoExpectations = @(
+    @{ Origin = "shadow-note"; Type = "::before"; Text = "Note:" },
+    @{ Origin = "shadow-note"; Type = "::after"; Text = "End" },
+    @{ Origin = "shadow-item"; Type = "::marker"; Text = $null },
+    @{ Origin = "open-bold"; Type = "::before"; Text = "Open" }
+)
+$openPseudoMode = $null
+foreach ($expectation in $pseudoExpectations) {
+    $origin = $shadowIds[$expectation.Origin]
+    $found = @(
+        $layoutPseudoNodes |
+            Where-Object {
+                $_.pseudoElement.originatingNodeId -eq $origin -and
+                $_.pseudoElement.pseudoType -eq $expectation.Type
+            }
+    )
+    if ($found.Count -ne 1) {
+        throw (
+            "Layout checkpoint $($shadowLayout.Id) recorded $($found.Count) " +
+            "$($expectation.Type) records for #$($expectation.Origin) rather " +
+            "than one."
+        )
+    }
+    # Surrounding whitespace in generated text is not asserted.
+    if ($null -ne $expectation.Text -and
+        ([string] $found[0].pseudoElement.generatedText).Trim() -ne $expectation.Text) {
+        throw (
+            "Layout checkpoint $($shadowLayout.Id) recorded the " +
+            "$($expectation.Type) text of #$($expectation.Origin) as " +
+            "'$($found[0].pseudoElement.generatedText)'."
+        )
+    }
+    if ($expectation.Origin -eq "open-bold") {
+        $openPseudoMode = $found[0].shadowRootMode
+    }
+}
+
+# Checks the shadow scope a layout node record reports.
+function Test-LayoutShadowScope {
+    param(
+        [Parameter(Mandatory = $true)] [long] $NodeId,
+        [Parameter(Mandatory = $true)] [string] $Label,
+        [Parameter(Mandatory = $true)] [long] $HostNodeId,
+        [Parameter(Mandatory = $true)] [string] $Mode
+    )
+
+    $found = @($shadowLayout.Nodes | Where-Object { $_.nodeId -eq $NodeId })
+    if ($found.Count -ne 1 -or
+        $found[0].shadowHostNodeId -ne $HostNodeId -or
+        $found[0].shadowRootMode -ne $Mode) {
+        throw (
+            "Layout checkpoint $($shadowLayout.Id) did not record $Label once " +
+            "in the $Mode shadow tree of node $HostNodeId."
+        )
+    }
+}
+Test-LayoutShadowScope $shadowIds["closed-button"] "#closed-button" $shadowIds["closed-host"] "closed"
+Test-LayoutShadowScope $shadowIds["open-bold"] "#open-bold" $shadowIds["open-host"] "open"
+$userAgentLayoutNodes = @(
+    $shadowLayout.Nodes |
+        Where-Object {
+            $_.shadowRootMode -eq "user-agent" -and
+            $_.shadowHostNodeId -eq $shadowIds["shadow-input"]
+        }
+)
+if ($userAgentLayoutNodes.Count -lt 1) {
+    throw (
+        "Layout checkpoint $($shadowLayout.Id) recorded no node inside the " +
+        "input's user-agent shadow tree."
+    )
+}
+foreach ($node in $shadowLayout.Nodes) {
+    if ($node.nodeId -eq $shadowIds["shadow-note"] -and $null -ne $node.shadowRootMode) {
+        throw "Layout checkpoint $($shadowLayout.Id) placed #shadow-note in a shadow tree."
+    }
+}
+
+# The dispatch from inside the closed shadow root. Blink's composed path runs
+# from the button through its shadow root and host to the window, and each
+# path scope reports the part of that path a listener in that scope sees,
+# which the page's listeners reported as composedPath() lengths.
+$shadowDispatches = @(
+    $shadowDocumentRecords |
+        Where-Object {
+            $_.channel -eq "browser.dispatch" -and
+            $_.eventType -eq "dispatch-started" -and
+            $_.payload.eventName -eq "click" -and
+            $_.payload.originalTarget.elementId -eq "closed-button"
+        }
+)
+if ($shadowDispatches.Count -ne 1) {
+    throw (
+        "$($shadowDispatches.Count) click dispatches from #closed-button " +
+        "were recorded rather than one."
+    )
+}
+$shadowDispatch = $shadowDispatches[0].payload
+$shadowPath = @($shadowDispatch.composedPath)
+$shadowScopes = @($shadowDispatch.pathScopes)
+$observedLength = @{}
+foreach ($entry in $shadowObserved) {
+    $observedLength[[string] $entry.where] = [int] $entry.composedPathLength
+}
+if ($shadowDispatch.trusted -ne $false -or
+    $shadowPath.Count -ne $observedLength["button"] -or
+    $shadowScopes.Count -ne $shadowPath.Count -or
+    $shadowPath[0].nodeId -ne $shadowIds["closed-button"] -or
+    $shadowPath[2].nodeId -ne $shadowIds["closed-host"] -or
+    $shadowPath[$shadowPath.Count - 1].kind -ne "window") {
+    throw (
+        "The #closed-button dispatch recorded trusted $($shadowDispatch.trusted), " +
+        "$($shadowPath.Count) path entries, and $($shadowScopes.Count) path " +
+        "scopes; the button's listener saw $($observedLength['button']) " +
+        "composed path entries."
+    )
+}
+$shadowDocumentNodes = @(
+    $shadowParsed.Nodes.Values | Where-Object { $_.nodeType -eq "document" }
+)
+if ($shadowDocumentNodes.Count -ne 1) {
+    throw "The shadow fixture's finished-parsing DOM checkpoint has no document node."
+}
+$documentIndex = -1
+for ($index = 0; $index -lt $shadowPath.Count; $index++) {
+    if ($shadowPath[$index].nodeId -eq $shadowDocumentNodes[0].nodeId) {
+        $documentIndex = $index
+    }
+}
+if ($documentIndex -lt 0) {
+    throw "The #closed-button dispatch path recorded no document entry."
+}
+$scopeChecks = @(
+    @{ Index = 0; Where = "button"; Root = $closedRoot.nodeId; Mode = "closed"; Target = $shadowIds["closed-button"] },
+    @{ Index = 2; Where = "host"; Root = $null; Mode = $null; Target = $shadowIds["closed-host"] },
+    @{ Index = $documentIndex; Where = "document"; Root = $null; Mode = $null; Target = $shadowIds["closed-host"] }
+)
+foreach ($check in $scopeChecks) {
+    $scope = $shadowScopes[$check.Index]
+    $visible = @($scope.visiblePathIndexes)
+    # The closed tree's scopes see the whole path. The document tree's scopes
+    # see it from the host onward, since retargeting hides the shadow tree.
+    $expectedVisible = @(2..($shadowPath.Count - 1))
+    if ($check.Where -eq "button") {
+        $expectedVisible = @(0..($shadowPath.Count - 1))
+    }
+    if ($scope.shadowRootMode -ne $check.Mode -or
+        $scope.targetNodeId -ne $check.Target -or
+        ($null -ne $check.Root -and $scope.treeScopeRootNodeId -ne $check.Root) -or
+        $visible.Count -ne $observedLength[$check.Where] -or
+        ($visible -join ",") -ne ($expectedVisible -join ",")) {
+        throw (
+            "Path scope $($check.Index) of the #closed-button dispatch " +
+            "recorded mode '$($scope.shadowRootMode)', target " +
+            "$($scope.targetNodeId), and visible indexes " +
+            "[$($visible -join ', ')]; the $($check.Where) listener saw " +
+            "$($observedLength[$check.Where]) composed path entries."
+        )
+    }
+}
+
+[pscustomobject]@{
+    ShadowRecords = $shadowDocumentRecords.Count
+    ShadowDomCheckpoints = $shadowDomCheckpoints.Count
+    OpenShadowRootNodeId = $openRoot.nodeId
+    ClosedShadowRootNodeId = $closedRoot.nodeId
+    UserAgentShadowRootNodeId = $userAgentRoot.nodeId
+    SlotCheckpointId = $slotCheckpoint.Id
+    SlotCheckpointReason = $slotCheckpoint.Reason
+    StaleSlotRecords = $staleSlotRecords
+    ShadowLayoutCheckpointId = $shadowLayout.Id
+    ShadowLayoutPseudoElements = $layoutPseudoNodes.Count
+    ShadowLayoutShadowRoots = $shadowLayout.Completion.shadowRootCount
+    UserAgentLayoutNodes = $userAgentLayoutNodes.Count
+    OpenTreePseudoShadowRootMode = $openPseudoMode
+    ShadowDispatchPathEntries = $shadowPath.Count
+    ShadowDispatchDocumentIndex = $documentIndex
+} | Format-List
+
 # The run script serves a fifth page that sends a fetch with credential-bearing
 # and plain request headers, follows a redirected fetch, fails a fetch to a
 # closed port, loads one cacheable script twice, and fetches from a dedicated
@@ -4464,6 +4969,8 @@ Write-Host (
     "frame/page navigation-identity, parser-complete DOM checkpoint, and " +
     "coalesced post-mutation DOM checkpoint, and correlated renderer " +
     "accessibility serialization checkpoint, cookie operation, and " +
-    "interaction-state, layout and computed-style checkpoint, and network " +
+    "interaction-state, layout and computed-style checkpoint, shadow root, " +
+    "slot assignment, pseudo-element, and shadow-scoped dispatch path, and " +
+    "network " +
     "metadata and realtime channel evidence verified."
 )

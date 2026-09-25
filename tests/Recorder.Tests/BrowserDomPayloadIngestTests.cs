@@ -103,7 +103,9 @@ public sealed class BrowserDomPayloadIngestTests
               "maximumValueLength": 4096,
               "coveredTransitionCount": {{coveredTransitionCount}},
               "coveredTransitionFirstId": {{coveredTransitionFirstId}},
-              "coveredTransitionLastId": {{coveredTransitionLastId}}
+              "coveredTransitionLastId": {{coveredTransitionLastId}},
+              "shadowRootCount": 1,
+              "slotCount": 1
             }
             """);
     }
@@ -184,6 +186,40 @@ public sealed class BrowserDomPayloadIngestTests
             BrowserEvidenceChannels.Dom,
             BrowserEvidenceEventTypes.DomAttributeChanged,
             document.RootElement));
+    }
+
+    [Fact]
+    public void AcceptsShadowRootCheckpointNodeAsWritten()
+    {
+        Accept(
+            BrowserEvidenceEventTypes.DomCheckpointNode,
+            BrowserShadowDomPayloads.ShadowRootNode);
+    }
+
+    [Fact]
+    public void AcceptsShadowRootAsWritten()
+    {
+        Accept(
+            BrowserEvidenceEventTypes.DomCheckpointShadowRoot,
+            BrowserShadowDomPayloads.ShadowRoot);
+    }
+
+    [Fact]
+    public void AcceptsSlotAssignmentAsWritten()
+    {
+        Accept(
+            BrowserEvidenceEventTypes.DomCheckpointSlotAssignment,
+            BrowserShadowDomPayloads.SlotAssignment);
+    }
+
+    [Fact]
+    public void AcceptsShadowScopedDispatchAsWritten()
+    {
+        using var document = JsonDocument.Parse(BrowserShadowDomPayloads.DispatchStarted);
+        BrowserProtocol.ValidateEvidencePayload(
+            BrowserEvidenceChannels.Dispatch,
+            BrowserEvidenceEventTypes.DispatchStarted,
+            document.RootElement);
     }
 
     private static void Accept(string eventType, string payload)

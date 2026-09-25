@@ -20,6 +20,22 @@ from the product version.
 
 ### Added
 
+- Record shadow DOM and pseudo-element content. Protocol 0.28 extends DOM
+  checkpoints to the composed tree: every open, closed, and user-agent shadow
+  root is recorded as a node under its host, with its mode, focus delegation,
+  slot assignment mode, and other options, and every slot is recorded with its
+  assigned nodes as Blink currently holds them and whether that assignment is
+  current. Layout checkpoints record elements and laid-out text inside shadow
+  trees with the host and mode of their tree, and every pseudo-element Blink
+  has created, such as `::before`, `::after`, and `::marker`, with its
+  geometry, computed styles, and generated text up to 4096 characters. Each
+  dispatch path entry records its tree scope, retargeted target and related
+  target, and the path indexes `composedPath()` returns to a listener there.
+  Nothing is recalculated or created for recording. The validation run adds a
+  shadow DOM fixture page, and the verifier requires the shadow roots, slot
+  assignments, pseudo-elements, shadow-tree layout nodes, and per-scope path
+  views it holds. The default capture duration is 35 seconds, up from 25, to
+  cover the added page.
 - Record WebSocket, EventSource, and WebTransport channels on the
   `browser.network` channel. Protocol 0.27 records each WebSocket's creation,
   handshake request and response, messages sent and received, close request,

@@ -19,6 +19,12 @@ between renderer `dom-document-N` identity and browser
 `document-navigation-N` identity without treating either namespace as globally
 stable.
 
+Protocol 0.28 extends the traversal to the composed tree. Every shadow root, of
+any mode, is recorded after its host, followed by its shadow tree, and each slot
+is recorded with its assigned nodes. The
+[shadow DOM and pseudo-element evidence model](shadow-dom-evidence-model.md)
+specifies those records.
+
 Together, these boundaries provide deterministic document-tree observations
 that can be correlated with renderer process and Blink document identity. They
 do not claim that a tree was painted, exposed through an accessibility API, or
@@ -45,10 +51,12 @@ All records use the `browser.dom` channel and renderer-process
 
 - `context`: the same renderer document context as the checkpoint start;
 - `checkpointId`: the checkpoint being streamed;
-- `nodeIndex`: a zero-based position in preorder traversal;
+- `nodeIndex`: a zero-based position in composed-tree preorder traversal;
 - `nodeId`: Blink's stable DOM node identity;
-- `parentNodeId`: the parent node identity, or null for the document root;
-- `nodeType`: `document`, `element`, `text`, `comment`, or `other`; and
+- `parentNodeId`: the parent node identity, or null for the document root. A
+  shadow root's parent is its host;
+- `nodeType`: `document`, `element`, `text`, `comment`, `shadow-root`, or
+  `other`; and
 - `nodeName`: Blink's node name, such as `#document`, `HTML`, or `BODY`.
 
 The node record does not contain text content, element IDs, classes, attribute
@@ -69,9 +77,12 @@ pixels.
 - from protocol 0.16, `coveredTransitionCount`, `coveredTransitionFirstId`, and
   `coveredTransitionLastId`, which state the attribute and character-data
   transitions recorded for this document since its previous completed
-  checkpoint. The attribute and text evidence model specifies them.
+  checkpoint. The attribute and text evidence model specifies them; and
+- from protocol 0.28, `shadowRootCount` and `slotCount`, the numbers of shadow
+  root and slot assignment records the checkpoint emitted.
 
-The current implementation uses a 512-node limit. A truncated checkpoint is
+The current implementation uses a 512-node limit, which from protocol 0.28
+covers shadow-tree nodes as well. A truncated checkpoint is
 valid evidence of a partial preorder prefix. It must not be interpreted as the
 complete document tree.
 
@@ -121,8 +132,8 @@ The evidence does not establish:
 - an exact mutation count within a coalesced delivery pass;
 - attribute or character-data changes that do not change a child list;
 - element attributes, DOM text, form values, style, layout, or geometry;
-- shadow-tree, pseudo-element, or isolated-world structure beyond what the
-  chosen traversal exposes;
+- pseudo-element or isolated-world structure, and slot assignment at a moment
+  Blink had not yet recalculated it;
 - accessibility-tree state or platform accessibility exposure;
 - paint, compositing, presentation, visibility, focus, or user perception;
 - load completion or network completion;
@@ -151,8 +162,12 @@ matches the existing listener and dispatch evidence. It requires:
 
 Passing this fixture validates bounded parser-complete and coalesced
 post-mutation structural checkpoints. It does not validate large-document
-truncation, attribute or character-data mutation triggers, shadow DOM,
-cross-origin frame traversal, or sustained high-volume operation.
+truncation, attribute or character-data mutation triggers, cross-origin frame
+traversal, or sustained high-volume operation.
+Shadow roots and slot assignments are validated by the separate shadow DOM
+fixture that the
+[shadow DOM and pseudo-element evidence model](shadow-dom-evidence-model.md)
+describes.
 
 The parser-complete portion was validated on September 19, 2026 at source
 checkpoint `79caba1`. The archive contained 2,236 events and 81 artifacts, with

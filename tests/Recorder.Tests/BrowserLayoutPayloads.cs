@@ -1,6 +1,6 @@
 namespace Recorder.Tests;
 
-// The JSON the bridge writes for each browser.layout record in protocol 0.25,
+// The JSON the bridge writes for each browser.layout record in protocol 0.28,
 // shared by the ingest and archive tests so both check the same shapes.
 internal static class BrowserLayoutPayloads
 {
@@ -68,7 +68,10 @@ internal static class BrowserLayoutPayloads
             "display": "inline-block",
             "width": "120px",
             "color": "rgb(0, 0, 0)"
-          }
+          },
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null
         }
         """;
 
@@ -85,7 +88,10 @@ internal static class BrowserLayoutPayloads
           "layoutObjectPresent": false,
           "displayLocked": false,
           "boundingClientRect": null,
-          "computedStyle": null
+          "computedStyle": null,
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null
         }
         """;
 
@@ -100,7 +106,10 @@ internal static class BrowserLayoutPayloads
           "layoutObjectPresent": false,
           "displayLocked": true,
           "boundingClientRect": null,
-          "computedStyle": { "display": "block", "width": null, "color": "rgb(0, 0, 0)" }
+          "computedStyle": { "display": "block", "width": null, "color": "rgb(0, 0, 0)" },
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null
         }
         """;
 
@@ -115,7 +124,55 @@ internal static class BrowserLayoutPayloads
           "layoutObjectPresent": true,
           "displayLocked": false,
           "boundingClientRect": { "x": 14, "y": 34, "width": 42.25, "height": 16 },
-          "computedStyle": null
+          "computedStyle": null,
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null
+        }
+        """;
+
+    // An element inside a closed shadow root records its host and the mode.
+    public static readonly string ShadowTreeElementNode = $$"""
+        {
+          "context": {{ContextJson}},
+          "checkpointId": "layout-checkpoint-1",
+          "nodeIndex": 7,
+          "nodeId": 49,
+          "nodeType": "element",
+          "nodeName": "SPAN",
+          "layoutObjectPresent": true,
+          "displayLocked": false,
+          "boundingClientRect": { "x": 8, "y": 60, "width": 30, "height": 16 },
+          "computedStyle": { "display": "inline", "width": "auto", "color": "rgb(0, 0, 0)" },
+          "pseudoElement": null,
+          "shadowHostNodeId": 48,
+          "shadowRootMode": "closed"
+        }
+        """;
+
+    // A ::before pseudo-element carries its originating element, its type,
+    // and the text it generated.
+    public static readonly string PseudoElementNode = $$"""
+        {
+          "context": {{ContextJson}},
+          "checkpointId": "layout-checkpoint-1",
+          "nodeIndex": 8,
+          "nodeId": 50,
+          "nodeType": "pseudo-element",
+          "nodeName": "::before",
+          "layoutObjectPresent": true,
+          "displayLocked": false,
+          "boundingClientRect": { "x": 8, "y": 30.5, "width": 12, "height": 24 },
+          "computedStyle": { "display": "inline", "width": "auto", "color": "rgb(0, 0, 0)" },
+          "pseudoElement": {
+            "originatingNodeId": 44,
+            "pseudoType": "::before",
+            "generatedText": "Note: ",
+            "generatedTextLength": 6,
+            "generatedTextTruncated": false
+          },
+          "shadowHostNodeId": null,
+          "shadowRootMode": null
         }
         """;
 
@@ -124,9 +181,11 @@ internal static class BrowserLayoutPayloads
           "context": {{ContextJson}},
           "checkpointId": "layout-checkpoint-1",
           "reason": "rendering-update",
-          "nodeCount": 7,
+          "nodeCount": 9,
           "truncated": false,
-          "maximumNodes": 100000
+          "maximumNodes": 100000,
+          "pseudoElementCount": 1,
+          "shadowRootCount": 1
         }
         """;
 
@@ -138,6 +197,8 @@ internal static class BrowserLayoutPayloads
         yield return ("layout-checkpoint-node", UnrenderedElementNode);
         yield return ("layout-checkpoint-node", StyleValueMissingNode);
         yield return ("layout-checkpoint-node", TextNode);
+        yield return ("layout-checkpoint-node", ShadowTreeElementNode);
+        yield return ("layout-checkpoint-node", PseudoElementNode);
         yield return ("layout-checkpoint-completed", CheckpointCompleted);
     }
 }

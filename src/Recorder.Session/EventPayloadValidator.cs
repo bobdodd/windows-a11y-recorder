@@ -175,6 +175,12 @@ internal static class EventPayloadValidator
             case ("browser.dom", "dom-checkpoint-node-attribute"):
                 ValidateBrowserDomCheckpointNodeAttribute(payload, issues, lineNumber);
                 break;
+            case ("browser.dom", "dom-checkpoint-shadow-root"):
+                ValidateBrowserDomCheckpointShadowRoot(payload, issues, lineNumber);
+                break;
+            case ("browser.dom", "dom-checkpoint-slot-assignment"):
+                ValidateBrowserDomCheckpointSlotAssignment(payload, issues, lineNumber);
+                break;
             case ("browser.dom", "dom-checkpoint-completed"):
                 ValidateBrowserDomCheckpointCompleted(payload, issues, lineNumber);
                 break;
@@ -735,7 +741,8 @@ internal static class EventPayloadValidator
                     : NullableString("outcome"),
                 requireDefaultAction
                     ? RequiredObject("currentTarget")
-                    : OptionalNullableObject("currentTarget")
+                    : OptionalNullableObject("currentTarget"),
+                RequiredObjectArray("pathScopes")
             ],
             issues,
             line);
@@ -743,6 +750,77 @@ internal static class EventPayloadValidator
         ValidateBrowserEventTargetProperty(payload, "originalTarget", issues, line);
         ValidateBrowserEventTargetProperty(payload, "currentTarget", issues, line);
         ValidateBrowserEventTargetArrayProperty(payload, "composedPath", issues, line);
+        ValidateBrowserDispatchPathScopes(payload, issues, line);
+    }
+
+    // Each composed path entry has one scope record at the same index, and
+    // every visible path index names an entry of the recorded path.
+    private static void ValidateBrowserDispatchPathScopes(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        if (!payload.TryGetProperty("pathScopes", out var scopes) ||
+            scopes.ValueKind != JsonValueKind.Array ||
+            !payload.TryGetProperty("composedPath", out var path) ||
+            path.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var pathLength = path.GetArrayLength();
+        if (scopes.GetArrayLength() != pathLength)
+        {
+            AddError(
+                issues,
+                "browser-dispatch-path-scopes-inconsistent",
+                "events.ndjson#/payload/pathScopes",
+                $"The dispatch records {scopes.GetArrayLength()} path scopes " +
+                    $"for a composed path of {pathLength} entries.",
+                line);
+            return;
+        }
+
+        var index = 0;
+        foreach (var scope in scopes.EnumerateArray())
+        {
+            var pointer = $"events.ndjson#/payload/pathScopes/{index}";
+            ValidateShape(
+                scope,
+                [
+                    NullableInteger("treeScopeRootNodeId", positive: true),
+                    NullableEnum("shadowRootMode", "open", "closed", "user-agent"),
+                    NullableInteger("targetNodeId", positive: true),
+                    NullableInteger("relatedTargetNodeId", positive: true),
+                    new PropertyRule(
+                        "visiblePathIndexes",
+                        true,
+                        false,
+                        value => value.ValueKind == JsonValueKind.Array &&
+                            value.EnumerateArray().All(item =>
+                                item.ValueKind == JsonValueKind.Number &&
+                                item.TryGetInt32(out var visible) &&
+                                visible >= 0 &&
+                                visible < pathLength),
+                        "must be an array of indexes into the composed path"),
+                    RequiredInteger("unmatchedVisibleTargetCount", nonnegative: true)
+                ],
+                issues,
+                line,
+                pointer);
+            if (HasNonnullProperty(scope, "shadowRootMode") &&
+                !HasNonnullProperty(scope, "treeScopeRootNodeId"))
+            {
+                AddError(
+                    issues,
+                    "browser-dispatch-path-scopes-inconsistent",
+                    pointer,
+                    "A shadow root mode was recorded without the shadow root " +
+                        "that roots the scope.",
+                    line);
+            }
+            index++;
+        }
     }
 
     private static void ValidateBrowserTimer(
@@ -2070,7 +2148,7 @@ internal static class EventPayloadValidator
                 RequiredString("checkpointId"),
                 RequiredInteger("nodeIndex", nonnegative: true),
                 RequiredInteger("nodeId", positive: true),
-                RequiredEnum("nodeType", "element", "text"),
+                RequiredEnum("nodeType", "element", "text", "pseudo-element"),
                 RequiredString("nodeName"),
                 RequiredBoolean("layoutObjectPresent"),
                 RequiredBoolean("displayLocked"),
@@ -2084,12 +2162,26 @@ internal static class EventPayloadValidator
                             entry.Name.Length > 0 &&
                             entry.Value.ValueKind is
                                 JsonValueKind.String or JsonValueKind.Null),
-                    "must be an object of string or null values, or null")
+                    "must be an object of string or null values, or null"),
+                NullableObject("pseudoElement"),
+                NullableInteger("shadowHostNodeId", positive: true),
+                NullableEnum("shadowRootMode", "open", "closed", "user-agent")
             ],
             issues,
             line);
         ValidateBrowserContextProperty(payload, issues, line);
         ValidateRendererDocumentContext(payload, issues, line);
+        ValidateBrowserLayoutPseudoElement(payload, issues, line);
+        if (HasNonnullProperty(payload, "shadowHostNodeId") !=
+            HasNonnullProperty(payload, "shadowRootMode"))
+        {
+            AddError(
+                issues,
+                "browser-layout-shadow-scope-inconsistent",
+                "events.ndjson#/payload/shadowHostNodeId",
+                "A shadow host and a shadow root mode must be recorded together.",
+                line);
+        }
 
         var hasRect = payload.TryGetProperty("boundingClientRect", out var rect) &&
             rect.ValueKind == JsonValueKind.Object;
@@ -2136,6 +2228,53 @@ internal static class EventPayloadValidator
         }
     }
 
+    // A pseudo-element record carries its pseudo-element description, and no
+    // other record does.
+    private static void ValidateBrowserLayoutPseudoElement(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        var isPseudo = ReadString(payload, "nodeType") == "pseudo-element";
+        var hasPseudo = payload.TryGetProperty("pseudoElement", out var pseudo) &&
+            pseudo.ValueKind == JsonValueKind.Object;
+        if (isPseudo != hasPseudo)
+        {
+            AddError(
+                issues,
+                "browser-layout-pseudo-element-inconsistent",
+                "events.ndjson#/payload/pseudoElement",
+                "A pseudo-element description must be present exactly when the " +
+                    "record is a pseudo-element.",
+                line);
+        }
+        if (!hasPseudo)
+        {
+            return;
+        }
+
+        const string pointer = "events.ndjson#/payload/pseudoElement";
+        ValidateShape(
+            pseudo,
+            [
+                NullableInteger("originatingNodeId", positive: true),
+                RequiredString("pseudoType"),
+                RequiredText("generatedText"),
+                RequiredInteger("generatedTextLength", nonnegative: true),
+                RequiredBoolean("generatedTextTruncated")
+            ],
+            issues,
+            line,
+            pointer);
+        ValidateTruncatedText(
+            pseudo,
+            "generatedText",
+            "generatedTextLength",
+            "generatedTextTruncated",
+            issues,
+            line);
+    }
+
     private static void ValidateBrowserLayoutCheckpointCompleted(
         JsonElement payload,
         ICollection<ArchiveValidationIssue> issues,
@@ -2149,7 +2288,9 @@ internal static class EventPayloadValidator
                 RequiredEnum("reason", "rendering-update"),
                 RequiredInteger("nodeCount", nonnegative: true),
                 RequiredBoolean("truncated"),
-                RequiredInteger("maximumNodes", positive: true)
+                RequiredInteger("maximumNodes", positive: true),
+                RequiredInteger("pseudoElementCount", nonnegative: true),
+                RequiredInteger("shadowRootCount", nonnegative: true)
             ],
             issues,
             line);
@@ -2165,6 +2306,17 @@ internal static class EventPayloadValidator
                 "events.ndjson#/payload/nodeCount",
                 $"The checkpoint reports {count} nodes, more than the stated " +
                     $"maximum of {maximum}.",
+                line);
+        }
+        var pseudoCount = ReadNullableInteger(payload, "pseudoElementCount");
+        if (count is not null && pseudoCount is not null && pseudoCount > count)
+        {
+            AddError(
+                issues,
+                "browser-layout-pseudo-element-count-over-node-count",
+                "events.ndjson#/payload/pseudoElementCount",
+                $"The checkpoint reports {pseudoCount} pseudo-elements among " +
+                    $"{count} nodes.",
                 line);
         }
     }
@@ -2848,6 +3000,7 @@ internal static class EventPayloadValidator
                     "element",
                     "text",
                     "comment",
+                    "shadow-root",
                     "other"),
                 RequiredString("nodeName")
             ],
@@ -2887,6 +3040,91 @@ internal static class EventPayloadValidator
             "attributeValueTruncated",
             issues,
             line);
+    }
+
+    private static void ValidateBrowserDomCheckpointShadowRoot(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("nodeId", positive: true),
+                RequiredInteger("hostNodeId", positive: true),
+                RequiredEnum("mode", "open", "closed", "user-agent"),
+                RequiredBoolean("delegatesFocus"),
+                RequiredEnum("slotAssignment", "named", "manual"),
+                RequiredBoolean("clonable"),
+                RequiredBoolean("serializable"),
+                RequiredBoolean("declarative"),
+                RequiredBoolean("availableToElementInternals"),
+                NullableText("referenceTarget")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+    }
+
+    private static void ValidateBrowserDomCheckpointSlotAssignment(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("nodeId", positive: true),
+                new PropertyRule(
+                    "assignedNodeIds",
+                    true,
+                    false,
+                    value => value.ValueKind == JsonValueKind.Array &&
+                        value.EnumerateArray().All(item =>
+                            item.ValueKind == JsonValueKind.Null ||
+                            (item.ValueKind == JsonValueKind.Number &&
+                                item.TryGetInt64(out var id) &&
+                                id > 0)),
+                    "must be an array of positive node ids or nulls"),
+                RequiredInteger("assignedNodeCount", nonnegative: true),
+                RequiredBoolean("assignedNodesTruncated"),
+                RequiredInteger("maximumAssignedNodes", positive: true),
+                RequiredBoolean("assignmentCurrent")
+            ],
+            issues,
+            line);
+        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateRendererDocumentContext(payload, issues, line);
+        var count = ReadNullableInteger(payload, "assignedNodeCount");
+        var maximum = ReadNullableInteger(payload, "maximumAssignedNodes");
+        if (count is null || maximum is null ||
+            !payload.TryGetProperty("assignedNodeIds", out var ids) ||
+            ids.ValueKind != JsonValueKind.Array ||
+            !payload.TryGetProperty("assignedNodesTruncated", out var truncated) ||
+            !IsBoolean(truncated))
+        {
+            return;
+        }
+
+        var recorded = ids.GetArrayLength();
+        var consistent = recorded <= count &&
+            recorded <= maximum &&
+            truncated.GetBoolean() == (recorded < count);
+        if (!consistent)
+        {
+            AddError(
+                issues,
+                "browser-dom-slot-assignment-inconsistent",
+                "events.ndjson#/payload/assignedNodeIds",
+                $"The slot records {recorded} assigned nodes of {count}, which " +
+                    "does not agree with its truncation flag and maximum.",
+                line);
+        }
     }
 
     // A checkpoint either covers no transition and names neither bound, or
@@ -2949,7 +3187,9 @@ internal static class EventPayloadValidator
                 RequiredInteger("maximumValueLength", positive: true),
                 RequiredInteger("coveredTransitionCount", nonnegative: true),
                 NullableString("coveredTransitionFirstId"),
-                NullableString("coveredTransitionLastId")
+                NullableString("coveredTransitionLastId"),
+                RequiredInteger("shadowRootCount", nonnegative: true),
+                RequiredInteger("slotCount", nonnegative: true)
             ],
             issues,
             line);
@@ -3584,15 +3824,20 @@ internal static class EventPayloadValidator
 
     private static PropertyRule NullableInteger(
         string name,
-        bool nonnegative = false) =>
+        bool nonnegative = false,
+        bool positive = false) =>
         new(
             name,
             true,
             true,
-            value => IsInteger(value) && (!nonnegative || value.GetInt64() >= 0),
-            nonnegative
-                ? "must be a nonnegative integer or null"
-                : "must be an integer or null");
+            value => IsInteger(value) &&
+                (!nonnegative || value.GetInt64() >= 0) &&
+                (!positive || value.GetInt64() > 0),
+            positive
+                ? "must be a positive integer or null"
+                : nonnegative
+                    ? "must be a nonnegative integer or null"
+                    : "must be an integer or null");
 
     private static PropertyRule OptionalInteger(
         string name,

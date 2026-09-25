@@ -1813,3 +1813,52 @@ Of the 306 network records, 15 were realtime records: 3
 fixture expects. The 15 records held 23,627 bytes of the 82,534,822-byte event
 file. All of them describe the fixture's own channels, so these figures do not
 predict the volume of an application that keeps a socket open.
+
+## Shadow DOM logging
+
+Protocol 0.28 extends DOM checkpoints, layout checkpoints, and dispatch paths to
+shadow trees and pseudo-elements. The run script serves a shadow DOM fixture
+page at `/shadow` and opens it in the foreground after the layout fixture. The
+page:
+
+1. attaches an open shadow root to `#open-host` with a slot named `label` and a
+   default slot, and gives `#open-bold` a `::before` rule with the content
+   `Open`;
+2. attaches a closed shadow root with focus delegation and manual slot
+   assignment to `#closed-host`, assigns `#closed-assigned` to its slot, and
+   places `#closed-button` inside it;
+3. holds an input, `#shadow-input`, whose user-agent shadow root Blink creates;
+4. gives `#shadow-note` `::before` content `Note:` and `::after` content `End`,
+   and renders `#shadow-item` as a list item with a marker;
+5. waits two frames, appends text to `#shadow-log` so that a post-mutation
+   checkpoint follows, and reports the number of nodes assigned to each slot;
+   and
+6. calls `click()` on `#closed-button`, with click listeners on the button,
+   the closed host, and the document that report the length of
+   `composedPath()` each sees.
+
+The run stops if a slot does not report one assigned node or if the three
+listeners did not all run. The path lengths the listeners report are passed to
+the verifier.
+
+The verifier requires, in one DOM checkpoint, `shadow-root` nodes parented by
+each host and `dom-checkpoint-shadow-root` records for the open root, the
+closed root with `delegatesFocus` true and `slotAssignment` `manual`, and a
+user-agent root on the input. It requires slot assignment records whose
+assignment is current and whose assigned node identifiers are those of the
+nodes the page placed or assigned. In a layout checkpoint it requires
+`pseudo-element` nodes for `#open-bold::before` with generated text `Open`,
+`#shadow-note::before` with `Note:`, `#shadow-note::after` with `End`, and a
+marker for `#shadow-item`, and nodes whose `shadowRootMode` is `open`,
+`closed`, and `user-agent`. For the untrusted click dispatch it requires as many
+path entries as the button's listener saw and one path scope per entry. The
+scope of the button lists every path index and targets the button. The scopes
+of the host and the document list the indexes from the host onward, target the
+host, and hold as many indexes as the listener there saw.
+
+These checks show that the logger emitted shadow roots, slot assignments,
+pseudo-elements, shadow-tree layout nodes, and per-scope path views matching
+what the page observed. They do not evaluate the page's use of shadow DOM.
+
+The default capture duration is 35 seconds, up from 25, to cover the added
+page.

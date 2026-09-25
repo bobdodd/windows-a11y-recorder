@@ -571,7 +571,7 @@ INTERMEDIATE_BLINK_DOM_CHECKPOINT_HOOK = """\
   }
 """
 
-BLINK_DOM_CHECKPOINT_HOOK = """\
+LEGACY_LIGHT_TREE_BLINK_DOM_CHECKPOINT_HOOK = """\
   constexpr int kRecorderMaximumDomCheckpointNodes = 512;
   constexpr int kRecorderMaximumDomAttributesPerNode = 64;
   constexpr int kRecorderMaximumDomValueLength = 4096;
@@ -649,6 +649,183 @@ BLINK_DOM_CHECKPOINT_HOOK = """\
         kRecorderMaximumDomValueLength);
   }
 """
+BLINK_DOM_CHECKPOINT_HELPER_MARKER = (
+    "void RecorderRecordDomCheckpoint(Document& recorder_document,"
+)
+BLINK_DOM_CHECKPOINT_HELPER = """\
+// Declared before its definition so the definition has a prior declaration.
+// The mutation observer declares it as well, so the finished-parsing and
+// post-mutation checkpoints share one traversal.
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason);
+
+// Records one bounded structural checkpoint of the composed tree. Each node is
+// followed by the shadow root it hosts, of any mode, and that shadow tree, and
+// then by its own children, so a shadow root is recorded with its host as its
+// parent. Slot assignments are read as Blink currently holds them; the
+// traversal never requests an assignment recalculation, so recording does not
+// change the state it records.
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason) {
+  constexpr int kRecorderMaximumDomCheckpointNodes = 512;
+  constexpr int kRecorderMaximumDomAttributesPerNode = 64;
+  constexpr int kRecorderMaximumDomValueLength = 4096;
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  const std::string recorder_document_token =
+      recorder_document.Token().ToString();
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_reason, kRecorderMaximumDomCheckpointNodes);
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+  int recorder_node_count = 0;
+  bool recorder_truncated = false;
+  int recorder_attribute_count = 0;
+  bool recorder_attributes_truncated = false;
+  int recorder_shadow_root_count = 0;
+  int recorder_slot_count = 0;
+  HeapVector<Member<Node>> recorder_pending;
+  recorder_pending.push_back(&recorder_document);
+  while (!recorder_pending.empty()) {
+    Node& recorder_node = *recorder_pending.back();
+    recorder_pending.pop_back();
+    if (recorder_node_count >= kRecorderMaximumDomCheckpointNodes) {
+      recorder_truncated = true;
+      break;
+    }
+    ContainerNode* recorder_parent = recorder_node.ParentOrShadowHostNode();
+    a11y_recorder::RecordBlinkDomCheckpointNode(
+        recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token,
+        recorder_node_count, recorder_node.GetDomNodeId(),
+        recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+        static_cast<int>(recorder_node.getNodeType()),
+        recorder_node.nodeName().Utf8().c_str());
+    ++recorder_node_count;
+    for (Node* recorder_child = recorder_node.lastChild(); recorder_child;
+         recorder_child = recorder_child->previousSibling()) {
+      recorder_pending.push_back(recorder_child);
+    }
+    if (auto* recorder_shadow_root = DynamicTo<ShadowRoot>(recorder_node)) {
+      ++recorder_shadow_root_count;
+      const ShadowRootMode recorder_mode = recorder_shadow_root->GetMode();
+      const AtomicString& recorder_reference_target =
+          recorder_shadow_root->referenceTarget();
+      a11y_recorder::RecordBlinkDomCheckpointShadowRoot(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_shadow_root->GetDomNodeId(),
+          recorder_shadow_root->host().GetDomNodeId(),
+          recorder_mode == ShadowRootMode::kOpen     ? "open"
+          : recorder_mode == ShadowRootMode::kClosed ? "closed"
+                                                     : "user-agent",
+          recorder_shadow_root->delegatesFocus(),
+          recorder_shadow_root->IsManualSlotting() ? "manual" : "named",
+          recorder_shadow_root->clonable(),
+          recorder_shadow_root->serializable(),
+          recorder_shadow_root->IsDeclarativeShadowRoot(),
+          recorder_shadow_root->IsAvailableToElementInternals(),
+          !recorder_reference_target.IsNull(),
+          recorder_reference_target.IsNull()
+              ? std::string()
+              : recorder_reference_target.Utf8());
+    }
+    Element* recorder_element = DynamicTo<Element>(recorder_node);
+    if (!recorder_element) {
+      continue;
+    }
+    if (ShadowRoot* recorder_hosted_root = recorder_element->GetShadowRoot()) {
+      recorder_pending.push_back(recorder_hosted_root);
+    }
+    int recorder_node_attribute_index = 0;
+    for (const Attribute& recorder_attribute :
+         recorder_element->Attributes()) {
+      if (recorder_node_attribute_index >=
+          kRecorderMaximumDomAttributesPerNode) {
+        recorder_attributes_truncated = true;
+        break;
+      }
+      const String recorder_attribute_value = recorder_attribute.Value();
+      const int recorder_attribute_value_length =
+          static_cast<int>(recorder_attribute_value.length());
+      const bool recorder_attribute_value_truncated =
+          recorder_attribute_value_length > kRecorderMaximumDomValueLength;
+      const String recorder_recorded_attribute_value =
+          recorder_attribute_value_truncated
+              ? recorder_attribute_value.substr(
+                    0, kRecorderMaximumDomValueLength)
+              : recorder_attribute_value;
+      a11y_recorder::RecordBlinkDomCheckpointNodeAttribute(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_node.GetDomNodeId(),
+          recorder_node_attribute_index,
+          recorder_attribute.NamespaceURI().Utf8().c_str(),
+          recorder_attribute.LocalName().Utf8().c_str(),
+          recorder_recorded_attribute_value.Utf8().c_str(),
+          recorder_attribute_value_length,
+          recorder_attribute_value_truncated,
+          kRecorderMaximumDomValueLength);
+      ++recorder_node_attribute_index;
+      ++recorder_attribute_count;
+    }
+    auto* recorder_slot = DynamicTo<HTMLSlotElement>(recorder_element);
+    ShadowRoot* recorder_slot_root =
+        recorder_slot ? recorder_slot->ContainingShadowRoot() : nullptr;
+    if (recorder_slot_root && recorder_slot->SupportsAssignment()) {
+      ++recorder_slot_count;
+      const HeapVector<Member<Node>>& recorder_assigned =
+          recorder_slot->AssignedNodesNoRecalc();
+      std::vector<int> recorder_assigned_ids;
+      for (const Member<Node>& recorder_assigned_node : recorder_assigned) {
+        if (static_cast<int>(recorder_assigned_ids.size()) >=
+            kRecorderMaximumDomCheckpointNodes) {
+          break;
+        }
+        recorder_assigned_ids.push_back(
+            recorder_assigned_node->GetDomNodeId());
+      }
+      a11y_recorder::RecordBlinkDomCheckpointSlotAssignment(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_slot->GetDomNodeId(),
+          std::move(recorder_assigned_ids),
+          static_cast<int>(recorder_assigned.size()),
+          kRecorderMaximumDomCheckpointNodes,
+          !recorder_slot_root->GetSlotAssignment().NeedsAssignmentRecalc());
+    }
+  }
+  a11y_recorder::CompleteBlinkDomCheckpoint(
+      recorder_checkpoint_sequence, recorder_document_node_id,
+      recorder_document_token, recorder_reason, recorder_node_count,
+      recorder_truncated, kRecorderMaximumDomCheckpointNodes,
+      recorder_attribute_count, recorder_attributes_truncated,
+      kRecorderMaximumDomAttributesPerNode, kRecorderMaximumDomValueLength,
+      recorder_shadow_root_count, recorder_slot_count);
+}
+
+"""
+BLINK_DOM_CHECKPOINT_DECLARATION = """\
+// Defined in document.cc, which records every DOM checkpoint.
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason);
+
+"""
+BLINK_DOM_CHECKPOINT_HOOK = """\
+  RecorderRecordDomCheckpoint(*this, "finished-parsing");
+"""
+BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+    for (const auto& recorder_document : recorder_mutated_documents) {
+      if (!recorder_document->HasFinishedParsing() ||
+          !recorder_document->IsActive())
+        continue;
+      RecorderRecordDomCheckpoint(*recorder_document, "post-mutation");
+    }
+"""
+BLINK_DOM_CHECKPOINT_INCLUDES = (
+    '#include "third_party/blink/renderer/core/dom/shadow_root.h"',
+    '#include "third_party/blink/renderer/core/dom/slot_assignment.h"',
+    '#include "third_party/blink/renderer/core/html/html_slot_element.h"',
+)
 BLINK_POST_MUTATION_DOM_CHECKPOINT_HOOK = """\
     HeapHashSet<Member<Document>> recorder_mutated_documents;
     recorder_mutated_documents.swap(recorder_mutated_documents_);
@@ -818,7 +995,7 @@ INTERMEDIATE_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
     }
 """
 
-BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+LEGACY_LIGHT_TREE_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
     constexpr int kRecorderMaximumDomCheckpointNodes = 512;
     constexpr int kRecorderMaximumDomAttributesPerNode = 64;
     constexpr int kRecorderMaximumDomValueLength = 4096;
@@ -1568,7 +1745,7 @@ LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_WINDOW = """\
   a11y_recorder::CompleteBlinkDispatchStart(
       reinterpret_cast<uintptr_t>(event_));
 """
-BLINK_DISPATCH_HOOK = (
+LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_SCOPES = (
     LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_WINDOW.replace(
         """\
   a11y_recorder::CompleteBlinkDispatchStart(""",
@@ -1585,6 +1762,113 @@ BLINK_DISPATCH_HOOK = (
   }
   a11y_recorder::CompleteBlinkDispatchStart(""",
     )
+)
+# Each path entry is recorded with the tree scope Blink dispatches it in, the
+# target and related target as retargeted for that scope, and the entries of
+# the path that scope can see. The visible entries are the ones composedPath()
+# returns to a listener in that scope; they are read from the same per-scope
+# list Blink builds for composedPath(), which Blink computes once per dispatch
+# and caches, so reading it here returns what a listener would receive.
+BLINK_DISPATCH_HOOK = """\
+  Element* recorder_element = DynamicTo<Element>(*node_);
+  a11y_recorder::RecordBlinkDispatchStarted(
+      reinterpret_cast<uintptr_t>(event_),
+      node_->GetDocument().GetDomNodeId(),
+      node_->GetDomNodeId(),
+      event_->type().Utf8().c_str(),
+      node_->nodeName().Utf8().c_str(),
+      recorder_element
+          ? recorder_element->GetIdAttribute().Utf8().c_str()
+          : "",
+      event_->isTrusted());
+  EventPath& recorder_event_path = event_->GetEventPath();
+  LocalDOMWindow* recorder_path_window =
+      recorder_event_path.GetWindowEventContext().Window();
+  auto recorder_visible_indexes =
+      [&recorder_event_path, recorder_path_window](
+          TreeScopeEventContext& recorder_scope_context) {
+        std::vector<int> recorder_indexes;
+        for (const Member<EventTarget>& recorder_visible :
+             recorder_scope_context.EnsureEventPath(recorder_event_path)) {
+          int recorder_index = -1;
+          int recorder_position = 0;
+          for (const NodeEventContext& recorder_candidate :
+               recorder_event_path.NodeEventContexts()) {
+            if (&recorder_candidate.GetNode() == recorder_visible.Get()) {
+              recorder_index = recorder_position;
+              break;
+            }
+            ++recorder_position;
+          }
+          if (recorder_index < 0 && recorder_path_window &&
+              recorder_visible.Get() == recorder_path_window) {
+            recorder_index = recorder_position;
+          }
+          recorder_indexes.push_back(recorder_index);
+        }
+        return recorder_indexes;
+      };
+  auto recorder_target_node_id = [](EventTarget* recorder_target) {
+    Node* recorder_target_node =
+        recorder_target ? recorder_target->ToNode() : nullptr;
+    return recorder_target_node ? recorder_target_node->GetDomNodeId() : 0;
+  };
+  for (NodeEventContext& recorder_context :
+       recorder_event_path.NodeEventContexts()) {
+    Node& recorder_path_node = recorder_context.GetNode();
+    Element* recorder_path_element =
+        DynamicTo<Element>(recorder_path_node);
+    TreeScopeEventContext& recorder_scope_context =
+        recorder_context.GetTreeScopeEventContext();
+    ShadowRoot* recorder_scope_root =
+        DynamicTo<ShadowRoot>(recorder_scope_context.RootNode());
+    const char* recorder_scope_mode = "";
+    if (recorder_scope_root) {
+      const ShadowRootMode recorder_mode = recorder_scope_root->GetMode();
+      recorder_scope_mode =
+          recorder_mode == ShadowRootMode::kOpen     ? "open"
+          : recorder_mode == ShadowRootMode::kClosed ? "closed"
+                                                     : "user-agent";
+    }
+    a11y_recorder::RecordBlinkDispatchPathNode(
+        reinterpret_cast<uintptr_t>(event_),
+        recorder_path_node.GetDocument().GetDomNodeId(),
+        recorder_path_node.GetDomNodeId(),
+        recorder_path_node.nodeName().Utf8().c_str(),
+        recorder_path_element
+            ? recorder_path_element->GetIdAttribute().Utf8().c_str()
+            : "",
+        recorder_scope_context.RootNode().GetDomNodeId(),
+        recorder_scope_mode,
+        recorder_target_node_id(recorder_context.Target()),
+        recorder_target_node_id(recorder_context.RelatedTarget()),
+        recorder_visible_indexes(recorder_scope_context));
+  }
+  if (recorder_path_window) {
+    WindowEventContext& recorder_window_context =
+        recorder_event_path.GetWindowEventContext();
+    a11y_recorder::RecordBlinkDispatchPathWindow(
+        reinterpret_cast<uintptr_t>(event_),
+        recorder_path_window->document()
+            ? recorder_path_window->document()->GetDomNodeId()
+            : 0,
+        reinterpret_cast<uintptr_t>(recorder_path_window),
+        recorder_path_window->InterfaceName().Utf8().c_str(),
+        recorder_target_node_id(recorder_window_context.Target()),
+        recorder_target_node_id(recorder_window_context.RelatedTarget()),
+        recorder_event_path.IsEmpty()
+            ? std::vector<int>()
+            : recorder_visible_indexes(
+                  recorder_event_path.TopNodeEventContext()
+                      .GetTreeScopeEventContext()));
+  }
+  a11y_recorder::CompleteBlinkDispatchStart(
+      reinterpret_cast<uintptr_t>(event_));
+"""
+BLINK_DISPATCH_SCOPE_INCLUDES = (
+    '#include "third_party/blink/renderer/core/dom/events/node_event_context.h"',
+    '#include "third_party/blink/renderer/core/dom/events/tree_scope_event_context.h"',
+    '#include "third_party/blink/renderer/core/dom/shadow_root.h"',
 )
 LEGACY_BLINK_DISPATCH_CALL = """\
   a11y_recorder::RecordBlinkDispatchStarted(
@@ -3090,7 +3374,24 @@ def patch_blink_document(path: Path) -> None:
             BLINK_DOM_CHECKPOINT_HOOK,
             path,
         )
-    if "BeginBlinkDomCheckpoint" not in text:
+    if LEGACY_LIGHT_TREE_BLINK_DOM_CHECKPOINT_HOOK in text:
+        text = replace_once(
+            text,
+            LEGACY_LIGHT_TREE_BLINK_DOM_CHECKPOINT_HOOK,
+            BLINK_DOM_CHECKPOINT_HOOK,
+            path,
+        )
+    text = add_includes_after(
+        text, BLINK_BRIDGE_INCLUDE, BLINK_DOM_CHECKPOINT_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        "void Document::FinishedParsing() {\n",
+        BLINK_DOM_CHECKPOINT_HELPER,
+        BLINK_DOM_CHECKPOINT_HELPER_MARKER,
+        path,
+    )
+    if BLINK_DOM_CHECKPOINT_HOOK not in text:
         anchor = "  DocumentParserTiming::From(*this).MarkParserStop();\n\n"
         text = replace_once(
             text,
@@ -3172,6 +3473,20 @@ def patch_blink_mutation_observer(path: Path) -> None:
             BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
             path,
         )
+    if LEGACY_LIGHT_TREE_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK in text:
+        text = replace_once(
+            text,
+            LEGACY_LIGHT_TREE_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+            BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+            path,
+        )
+    text = insert_before_once(
+        text,
+        "class MutationObserverAgentData",
+        BLINK_DOM_CHECKPOINT_DECLARATION,
+        "void RecorderRecordDomCheckpoint(",
+        path,
+    )
     if "recorder_mutated_documents" not in text:
         enqueue_condition = (
             "    if (active_mutation_observers_.empty() &&\n"
@@ -3285,6 +3600,14 @@ def patch_blink_event_dispatcher(path: Path) -> None:
             BLINK_DISPATCH_HOOK,
             path,
         )
+    text = upgrade_legacy_hooks(
+        text,
+        ((LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_SCOPES, BLINK_DISPATCH_HOOK),),
+        path,
+    )
+    text = add_includes_after(
+        text, BLINK_BRIDGE_INCLUDE, BLINK_DISPATCH_SCOPE_INCLUDES, path
+    )
     if "RecordBlinkDispatchStarted" not in text:
         anchor = (
             "  event_->SetTarget("
@@ -5527,8 +5850,15 @@ BLINK_LAYOUT_CHECKPOINT_INCLUDES = (
     'display_lock_utilities.h"',
     BLINK_DOCUMENT_INCLUDE,
     '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/dom/column_pseudo_element.h"',
     '#include "third_party/blink/renderer/core/dom/node_traversal.h"',
+    '#include "third_party/blink/renderer/core/dom/pseudo_element.h"',
+    '#include "third_party/blink/renderer/core/dom/shadow_root.h"',
     '#include "third_party/blink/renderer/core/layout/layout_object.h"',
+    '#include "third_party/blink/renderer/core/layout/layout_text.h"',
+    '#include "third_party/blink/renderer/core/view_transition/'
+    'view_transition_utils.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"',
     '#include "ui/gfx/geometry/quad_f.h"',
     '#include "ui/gfx/geometry/rect_f.h"',
 )
@@ -5551,6 +5881,97 @@ const std::vector<std::string>& RecorderLayoutStylePropertyNames() {
     return result;
   }());
   return *names;
+}
+
+const char* RecorderShadowRootModeName(ShadowRootMode recorder_mode) {
+  switch (recorder_mode) {
+    case ShadowRootMode::kOpen:
+      return "open";
+    case ShadowRootMode::kClosed:
+      return "closed";
+    case ShadowRootMode::kUserAgent:
+      return "user-agent";
+  }
+  return "user-agent";
+}
+
+// Appends every pseudo-element Blink currently holds for the element, and
+// recursively the pseudo-elements those hold, in the order Blink attaches
+// them. Nothing is created: an absent pseudo-element is not recorded.
+void RecorderAppendPseudoElements(
+    const Element& recorder_element,
+    HeapVector<Member<PseudoElement>>& recorder_result) {
+  constexpr PseudoId kRecorderPseudoIds[] = {
+      kPseudoIdCheckMark,
+      kPseudoIdBefore,
+      kPseudoIdAfter,
+      kPseudoIdExpandIcon,
+      kPseudoIdPickerIcon,
+      kPseudoIdInterestButton,
+      kPseudoIdMarker,
+      kPseudoIdFirstLetter,
+      kPseudoIdBackdrop,
+      kPseudoIdOverscrollBackdrop,
+      kPseudoIdOverscrollAreaParent,
+      kPseudoIdSkeleton,
+      kPseudoIdScrollMarkerGroupBefore,
+      kPseudoIdScrollMarkerGroupAfter,
+      kPseudoIdScrollMarker,
+      kPseudoIdScrollButtonBlockStart,
+      kPseudoIdScrollButtonInlineStart,
+      kPseudoIdScrollButtonInlineEnd,
+      kPseudoIdScrollButtonBlockEnd,
+  };
+  for (PseudoId recorder_pseudo_id : kRecorderPseudoIds) {
+    if (PseudoElement* recorder_pseudo =
+            recorder_element.GetPseudoElement(recorder_pseudo_id)) {
+      recorder_result.push_back(recorder_pseudo);
+      RecorderAppendPseudoElements(*recorder_pseudo, recorder_result);
+    }
+  }
+  ViewTransitionUtils::ForEachTransitionPseudo(
+      recorder_element,
+      [&recorder_result](PseudoElement* recorder_pseudo) {
+        recorder_result.push_back(recorder_pseudo);
+        RecorderAppendPseudoElements(*recorder_pseudo, recorder_result);
+      },
+      ViewTransitionUtils::Filter::kDirectChildren);
+  if (const ColumnPseudoElementsVector* recorder_columns =
+          recorder_element.GetColumnPseudoElements()) {
+    for (const Member<ColumnPseudoElement>& recorder_column :
+         *recorder_columns) {
+      recorder_result.push_back(recorder_column.Get());
+      RecorderAppendPseudoElements(*recorder_column, recorder_result);
+    }
+  }
+}
+
+// Reads the text laid out inside a pseudo-element's layout subtree, as
+// rendered after text-transform, up to a fixed length.
+void RecorderReadGeneratedText(
+    const LayoutObject* recorder_layout_object,
+    a11y_recorder::LayoutCheckpointNode& recorder_record) {
+  constexpr unsigned kRecorderMaximumGeneratedTextLength = 4096;
+  StringBuilder recorder_text;
+  for (const LayoutObject* recorder_descendant = recorder_layout_object;
+       recorder_descendant;
+       recorder_descendant =
+           recorder_descendant->NextInPreOrder(recorder_layout_object)) {
+    if (const auto* recorder_layout_text =
+            DynamicTo<LayoutText>(recorder_descendant)) {
+      recorder_text.Append(recorder_layout_text->TransformedText());
+    }
+  }
+  const String recorder_full_text = recorder_text.ToString();
+  recorder_record.generated_text_length =
+      static_cast<int>(recorder_full_text.length());
+  recorder_record.generated_text_truncated =
+      recorder_full_text.length() > kRecorderMaximumGeneratedTextLength;
+  recorder_record.generated_text =
+      recorder_record.generated_text_truncated
+          ? recorder_full_text.substr(0, kRecorderMaximumGeneratedTextLength)
+                .Utf8()
+          : recorder_full_text.Utf8();
 }
 
 // Records the layout geometry and computed styles of one frame view's document
@@ -5601,20 +6022,20 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       RecorderLayoutStylePropertyNames();
   int recorder_node_count = 0;
   bool recorder_truncated = false;
-  for (Node& recorder_node :
-       NodeTraversal::InclusiveDescendantsOf(*recorder_document)) {
+  int recorder_pseudo_element_count = 0;
+  int recorder_shadow_root_count = 0;
+  // Records one element, laid-out text node, or pseudo-element. Returns false
+  // once the node limit is reached.
+  auto recorder_record_node = [&](Node& recorder_node,
+                                  PseudoElement* recorder_pseudo) {
     Element* recorder_element = DynamicTo<Element>(recorder_node);
-    const bool recorder_is_text = recorder_node.IsTextNode();
-    if (!recorder_element && !recorder_is_text) {
-      continue;
-    }
     LayoutObject* recorder_layout_object = recorder_node.GetLayoutObject();
-    if (recorder_is_text && !recorder_layout_object) {
-      continue;
+    if (recorder_node.IsTextNode() && !recorder_layout_object) {
+      return true;
     }
     if (recorder_node_count >= kRecorderMaximumLayoutCheckpointNodes) {
       recorder_truncated = true;
-      break;
+      return false;
     }
     a11y_recorder::LayoutCheckpointNode recorder_record;
     recorder_record.node_index = recorder_node_count;
@@ -5671,15 +6092,79 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
         ++recorder_index;
       }
     }
+    if (recorder_pseudo) {
+      recorder_record.pseudo_element_present = true;
+      Element* recorder_originating =
+          recorder_pseudo->ParentOrShadowHostElement();
+      recorder_record.originating_node_id =
+          recorder_originating ? recorder_originating->GetDomNodeId() : 0;
+      recorder_record.pseudo_type =
+          PseudoElement::PseudoElementNameForEvents(recorder_pseudo).Utf8();
+      RecorderReadGeneratedText(recorder_layout_object, recorder_record);
+    }
+    if (ShadowRoot* recorder_containing_root =
+            recorder_node.ContainingShadowRoot()) {
+      recorder_record.shadow_host_node_id =
+          recorder_containing_root->host().GetDomNodeId();
+      recorder_record.shadow_root_mode =
+          RecorderShadowRootModeName(recorder_containing_root->GetMode());
+    }
     a11y_recorder::RecordBlinkLayoutCheckpointNode(
         recorder_checkpoint_sequence, recorder_document_node_id,
         recorder_document_token, std::move(recorder_record));
     ++recorder_node_count;
+    return true;
+  };
+  // Composed-tree preorder: each node, then its pseudo-elements, then the
+  // shadow tree it hosts, then its own children.
+  HeapVector<Member<Node>> recorder_pending;
+  recorder_pending.push_back(recorder_document);
+  while (!recorder_pending.empty()) {
+    Node& recorder_node = *recorder_pending.back();
+    recorder_pending.pop_back();
+    for (Node* recorder_child = recorder_node.lastChild(); recorder_child;
+         recorder_child = recorder_child->previousSibling()) {
+      recorder_pending.push_back(recorder_child);
+    }
+    if (IsA<ShadowRoot>(recorder_node)) {
+      ++recorder_shadow_root_count;
+      continue;
+    }
+    Element* recorder_element = DynamicTo<Element>(recorder_node);
+    if (recorder_element) {
+      if (ShadowRoot* recorder_hosted_root =
+              recorder_element->GetShadowRoot()) {
+        recorder_pending.push_back(recorder_hosted_root);
+      }
+    } else if (!recorder_node.IsTextNode()) {
+      continue;
+    }
+    if (!recorder_record_node(recorder_node, nullptr)) {
+      break;
+    }
+    if (!recorder_element) {
+      continue;
+    }
+    HeapVector<Member<PseudoElement>> recorder_pseudo_elements;
+    RecorderAppendPseudoElements(*recorder_element, recorder_pseudo_elements);
+    bool recorder_limit_reached = false;
+    for (const Member<PseudoElement>& recorder_pseudo :
+         recorder_pseudo_elements) {
+      if (!recorder_record_node(*recorder_pseudo, recorder_pseudo.Get())) {
+        recorder_limit_reached = true;
+        break;
+      }
+      ++recorder_pseudo_element_count;
+    }
+    if (recorder_limit_reached) {
+      break;
+    }
   }
   a11y_recorder::CompleteBlinkLayoutCheckpoint(
       recorder_checkpoint_sequence, recorder_document_node_id,
       recorder_document_token, recorder_node_count, recorder_truncated,
-      kRecorderMaximumLayoutCheckpointNodes);
+      kRecorderMaximumLayoutCheckpointNodes, recorder_pseudo_element_count,
+      recorder_shadow_root_count);
 }
 
 }  // namespace
@@ -5762,6 +6247,36 @@ BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS = (
 )
 
 
+def replace_layout_checkpoint_helper(text: str, path: Path) -> str:
+    """Replaces a layout helper written by an earlier revision.
+
+    The helper is inserted once, directly before its anchor, and opens with
+    the only anonymous namespace in that region. A tree patched before the
+    composed-tree traversal holds a helper that records the light tree only,
+    so the whole region is rewritten rather than matched against any
+    particular earlier text.
+    """
+    if BLINK_LAYOUT_CHECKPOINT_HELPER in text:
+        return text
+    if BLINK_LAYOUT_CHECKPOINT_HELPER_MARKER not in text:
+        return text
+    end = text.find(BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR)
+    if end < 0 or text.find(BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR, end + 1) >= 0:
+        raise RuntimeError(
+            f"{path}: expected exactly one layout checkpoint helper anchor"
+        )
+    start = text.rfind("namespace {\n", 0, end)
+    if (
+        start < 0
+        or BLINK_LAYOUT_CHECKPOINT_HELPER_MARKER not in text[start:end]
+        or not text[start:end].endswith("}  // namespace\n\n")
+    ):
+        raise RuntimeError(
+            f"{path}: the layout checkpoint helper region is not recognised"
+        )
+    return text[:start] + BLINK_LAYOUT_CHECKPOINT_HELPER + text[end:]
+
+
 def patch_blink_local_frame_view(path: Path) -> None:
     """Adds the layout checkpoint helper and its paint-clean hook."""
     text = read_source(path)
@@ -5787,6 +6302,7 @@ def patch_blink_local_frame_view(path: Path) -> None:
                 f"found {len(arrays)}"
             )
         text = text.replace(arrays[0], BLINK_LAYOUT_STYLE_PROPERTY_ARRAY)
+    text = replace_layout_checkpoint_helper(text, path)
     text = insert_before_once(
         text,
         BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,

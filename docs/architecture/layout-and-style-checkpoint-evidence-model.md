@@ -8,6 +8,10 @@ geometry and style to the existing browser, renderer, document, and DOM
 correlation spine, so a later analysis can say where an element was drawn and
 how it was styled at a known point in the session.
 
+Protocol 0.28 extends the traversal to shadow trees and pseudo-elements. The
+[shadow DOM and pseudo-element evidence model](shadow-dom-evidence-model.md)
+specifies the added members and records.
+
 The records are evidence. The recorder does not interpret them, compare them
 with any expectation, or flag any value.
 
@@ -73,14 +77,16 @@ within one renderer process.
 
 ### Checkpoint node
 
-Nodes are visited in light-DOM tree order from the document. An element is
-always recorded. A text node is recorded only when it has a layout object.
-Comments, processing instructions, and the document node are not recorded.
+Nodes are visited in composed-tree order from the document: each node, then
+its pseudo-elements, then the shadow tree it hosts, then its own children. An
+element and a pseudo-element are always recorded. A text node is recorded only
+when it has a layout object. Comments, processing instructions, shadow roots,
+and the document node are not recorded.
 
 - `nodeIndex`: the node's position in the checkpoint, from zero.
 - `nodeId`: the Blink DOM node identity, the same identity the DOM checkpoint,
   mutation, and interaction records carry.
-- `nodeType`: `element` or `text`.
+- `nodeType`: `element`, `text`, or, from protocol 0.28, `pseudo-element`.
 - `nodeName`: the DOM node name.
 - `layoutObjectPresent`: whether the node has a layout object, which is to say
   whether Blink generated a box for it.
@@ -103,12 +109,18 @@ Comments, processing instructions, and the document node are not recorded.
   Blink keeps no computed style for an element whose own `display` is `none`,
   so such an element, including `head` and `script`, is recorded with a null
   style and no layout object.
+- `pseudoElement`, `shadowHostNodeId`, and `shadowRootMode`: from protocol
+  0.28, the pseudo-element's originating node, type, and generated text, and
+  the host and mode of the shadow tree containing the node. Each is null when
+  it does not apply.
 
 ### Checkpoint completion
 
 - `nodeCount`: the number of node records emitted.
 - `truncated`: whether the traversal stopped at `maximumNodes`.
 - `maximumNodes`: 100000.
+- `pseudoElementCount` and `shadowRootCount`: from protocol 0.28, the numbers of
+  pseudo-element records emitted and shadow roots traversed.
 
 ## Recorded computed-style properties
 
@@ -234,10 +246,11 @@ value, as `getComputedStyle()` does.
   number of changed updates. Whether an animation Chromium runs on the
   compositor resolves style on the main thread on every frame has not been
   measured.
-- Only the light DOM is traversed. Nodes inside shadow roots, including
-  user-agent shadow roots such as those inside form controls, are not
-  recorded. Pseudo-elements such as `::before`, `::after`, and `::marker` are
-  not recorded.
+- Before protocol 0.28 only the light DOM was traversed, and pseudo-elements
+  were not recorded. From protocol 0.28, nodes inside open, closed, and
+  user-agent shadow roots, and every pseudo-element Blink has created, are
+  recorded. A pseudo-element Blink has not created, because its style gives it
+  no content, is absent.
 - Documents in frames whose rendering is throttled, such as offscreen frames,
   and documents that are not painted, such as those in background tabs, produce
   no checkpoints until they are rendered.
@@ -286,9 +299,8 @@ The records support these statements about a recorded session:
 - The viewport size, scroll offset, device pixel ratio, and layout zoom factor
   in effect for the checkpoint.
 
-They do not support statements about properties outside the list, shadow or
-pseudo-element content, per-line geometry, or the exact moment within a frame
-at which a script changed a value.
+They do not support statements about properties outside the list, per-line
+geometry, or the exact moment within a frame at which a script changed a value.
 
 ## Deterministic validation
 
@@ -325,7 +337,6 @@ page's layout or styling.
 
 ## Next dependent slices
 
-- Shadow-root and pseudo-element traversal, if later analysis needs them.
 - Per-fragment and per-line geometry.
 - Rendered-frame and compositor correlation identifiers, so a checkpoint can be
   joined to the frame that displayed it.

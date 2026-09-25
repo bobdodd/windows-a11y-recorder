@@ -17,9 +17,10 @@ param(
 
     # The capture has to outlast the fixture's page-lifecycle phase, which is
     # scheduled by this script after the page reports visible and completes
-    # 3.5 seconds later. The default leaves room for a slow launch.
+    # 3.5 seconds later, and every fixture page that runs after it. The default
+    # leaves room for a slow launch.
     [ValidateRange(5, 300)]
-    [int] $DurationSeconds = 25
+    [int] $DurationSeconds = 35
 )
 
 $ErrorActionPreference = "Stop"
@@ -832,6 +833,11 @@ function Start-CookieFixtureServer {
         [Parameter(Mandatory = $true)]
         [string] $LayoutPage,
 
+        # The shadow DOM logging fixture, served at /shadow. It shares the
+        # cookie fixture's origin and sets no cookie of its own.
+        [Parameter(Mandatory = $true)]
+        [string] $ShadowPage,
+
         # The network logging fixture, served at /network behind a redirect
         # from /network-start, with its worker, script, and data responses.
         [Parameter(Mandatory = $true)]
@@ -862,6 +868,7 @@ function Start-CookieFixtureServer {
                 $CookieValue,
                 $InteractionPage,
                 $LayoutPage,
+                $ShadowPage,
                 $NetworkPage,
                 $NetworkWorker,
                 $NetworkSessionValue,
@@ -1033,6 +1040,11 @@ function Start-CookieFixtureServer {
                         $contentType = "text/html; charset=utf-8"
                         $body = $LayoutPage
                     }
+                    elseif ($path -eq "/shadow") {
+                        $status = "200 OK"
+                        $contentType = "text/html; charset=utf-8"
+                        $body = $ShadowPage
+                    }
                     elseif ($path -eq "/network-start") {
                         $status = "302 Found"
                         $body = "redirect"
@@ -1124,6 +1136,8 @@ function Start-CookieFixtureServer {
         }).AddArgument($listener).AddArgument($Page).AddArgument(
             $CookieValue
         ).AddArgument($InteractionPage).AddArgument($LayoutPage).AddArgument(
+            $ShadowPage
+        ).AddArgument(
             $NetworkPage
         ).AddArgument($NetworkWorker).AddArgument(
             $NetworkSessionValue
@@ -1675,9 +1689,9 @@ document.title = "Layout logging fixture ready";
 </html>
 '@
 
-# Runs one of the layout fixture page's functions, each of which returns a
-# promise, and returns the value the promise resolves to.
-function Invoke-LayoutFixtureCall {
+# Runs one of a fixture page's functions, each of which returns a promise, and
+# returns the value the promise resolves to.
+function Invoke-FixtureCall {
     param(
         [Parameter(Mandatory = $true)]
         $Session,
@@ -1697,11 +1711,173 @@ function Invoke-LayoutFixtureCall {
             Get-CdpProperty $failure "exception"
         ) "description"
         throw (
-            "The layout logging fixture failed at ${Expression}: " +
+            "The fixture failed at ${Expression}: " +
             "$($failure.text) $description"
         )
     }
     Get-CdpProperty $run.result "value"
+}
+
+# Opens a fixture page in a foreground tab, waits until it reports readiness and
+# is visible, runs its page functions in order, and closes the tab. The recorder
+# emits layout checkpoints only for a document whose rendering update reaches
+# the paint-clean state, and a tab opened in the background never paints, so
+# the tab must be in the foreground. The tab named by ReturnTargetId is
+# activated again before the fixture tab closes.
+function Invoke-ForegroundFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase,
+
+        [Parameter(Mandatory = $true)]
+        [string] $FixtureUri,
+
+        # The tab to activate before the fixture tab closes.
+        [Parameter(Mandatory = $true)]
+        [string] $ReturnTargetId,
+
+        # The fixture's name as messages use it, such as "layout logging
+        # fixture".
+        [Parameter(Mandatory = $true)]
+        [string] $Name,
+
+        # The document title the page sets once its script has run.
+        [Parameter(Mandatory = $true)]
+        [string] $ReadyTitle,
+
+        # The page functions to run in order, each a hashtable with a Name and
+        # a Call expression that returns a promise.
+        [Parameter(Mandatory = $true)]
+        [object[]] $Steps
+    )
+
+    $version = ConvertFrom-Json (
+        Invoke-WebRequest `
+            -Uri "$DevToolsBase/json/version" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+    ).Content
+    $browserSocket = Get-CdpProperty $version "webSocketDebuggerUrl"
+    if ($browserSocket -isnot [string] -or $browserSocket.Length -eq 0) {
+        throw "The DevTools version reply reported no browser endpoint."
+    }
+
+    $browserSession = $null
+    $pageSession = $null
+    $targetId = $null
+    try {
+        $browserSession = New-CdpSession $browserSocket
+        $created = Invoke-CdpCommand $browserSession "Target.createTarget" @{
+            url = $FixtureUri
+            background = $false
+        }
+        $targetId = [string](Get-CdpProperty $created "targetId")
+        if ([string]::IsNullOrWhiteSpace($targetId)) {
+            throw "Opening the $Name returned no target."
+        }
+
+        $target = $null
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $candidates = @()
+            try {
+                $candidates = @(
+                    Select-CdpFixtureTarget `
+                        (Get-CdpTargetList $DevToolsBase) `
+                        $FixtureUri `
+                        $ReadyTitle |
+                        Where-Object { (Get-CdpProperty $_ "id") -eq $targetId }
+                )
+            }
+            catch {
+                $candidates = @()
+            }
+            if ($candidates.Count -eq 1) {
+                $target = $candidates[0]
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $target) {
+            throw (
+                "The $Name did not report readiness in " +
+                "the DevTools target list."
+            )
+        }
+
+        $pageSession = New-CdpSession $target.webSocketDebuggerUrl
+        $activated = Invoke-WebRequest `
+            -Method Put `
+            -Uri "$DevToolsBase/json/activate/$targetId" `
+            -UseBasicParsing `
+            -TimeoutSec 5
+        if ($activated.StatusCode -ne 200) {
+            throw (
+                "Activating the $Name reported status " +
+                "$($activated.StatusCode)."
+            )
+        }
+        $null = Invoke-CdpCommand $pageSession "Page.bringToFront" $null
+        $visibility = ""
+        $deadline = (Get-Date).AddSeconds(20)
+        while ((Get-Date) -lt $deadline) {
+            $visibility = [string](Invoke-FixtureCall $pageSession `
+                "String(document.visibilityState)")
+            if ($visibility -eq "visible") {
+                break
+            }
+            Start-Sleep -Milliseconds 250
+        }
+        if ($visibility -ne "visible") {
+            throw (
+                "The $Name reported visibility " +
+                "'$visibility' after being activated, so it cannot paint. " +
+                "A window that is minimized, occluded, or " +
+                "on an inactive desktop produces this."
+            )
+        }
+        $results = [ordered]@{}
+        foreach ($step in $Steps) {
+            $results[$step.Name] = [string](
+                Invoke-FixtureCall $pageSession $step.Call
+            )
+        }
+
+        [pscustomobject]@{
+            TargetId = $targetId
+            Steps = $results
+        }
+    }
+    finally {
+        Close-CdpSession $pageSession
+        try {
+            $null = Invoke-WebRequest `
+                -Method Put `
+                -Uri "$DevToolsBase/json/activate/$ReturnTargetId" `
+                -UseBasicParsing `
+                -TimeoutSec 5
+        }
+        catch {
+            Write-Host (
+                "Activating the background target again failed: " +
+                "$($_.Exception.Message)"
+            )
+        }
+        if ($browserSession -and $targetId) {
+            try {
+                $null = Invoke-CdpCommand $browserSession "Target.closeTarget" @{
+                    targetId = $targetId
+                }
+            }
+            catch {
+                Write-Host (
+                    "Closing the $Name tab failed: " +
+                    "$($_.Exception.Message)"
+                )
+            }
+        }
+        Close-CdpSession $browserSession
+    }
 }
 
 # Opens the layout logging fixture in a foreground tab, lets it paint, widens
@@ -1729,145 +1905,160 @@ function Invoke-LayoutFixture {
         [string] $ReturnTargetId
     )
 
-    $version = ConvertFrom-Json (
-        Invoke-WebRequest `
-            -Uri "$DevToolsBase/json/version" `
-            -UseBasicParsing `
-            -TimeoutSec 5
-    ).Content
-    $browserSocket = Get-CdpProperty $version "webSocketDebuggerUrl"
-    if ($browserSocket -isnot [string] -or $browserSocket.Length -eq 0) {
-        throw "The DevTools version reply reported no browser endpoint."
+    $run = Invoke-ForegroundFixture `
+        -DevToolsBase $DevToolsBase `
+        -FixtureUri $FixtureUri `
+        -ReturnTargetId $ReturnTargetId `
+        -Name "layout logging fixture" `
+        -ReadyTitle "Layout logging fixture ready" `
+        -Steps @(
+            @{ Name = "Settle"; Call = "layoutFixture.settle()" },
+            @{ Name = "Widen"; Call = "layoutFixture.widen()" },
+            @{ Name = "Recolor"; Call = "layoutFixture.recolor()" }
+        )
+    $widened = ConvertFrom-Json $run.Steps.Widen
+    $recolored = ConvertFrom-Json $run.Steps.Recolor
+    if ($widened.width -ne 320 -or $recolored.color -ne "rgb(128, 0, 0)") {
+        throw (
+            "The layout logging fixture reported $($run.Steps.Widen) after " +
+            "widening and $($run.Steps.Recolor) after recoloring."
+        )
     }
+    $run
+}
 
-    $browserSession = $null
-    $pageSession = $null
-    $targetId = $null
-    try {
-        $browserSession = New-CdpSession $browserSocket
-        $created = Invoke-CdpCommand $browserSession "Target.createTarget" @{
-            url = $FixtureUri
-            background = $false
-        }
-        $targetId = [string](Get-CdpProperty $created "targetId")
-        if ([string]::IsNullOrWhiteSpace($targetId)) {
-            throw "Opening the layout logging fixture returned no target."
-        }
+# The page the shadow DOM logging fixture serves. It hosts an open shadow root
+# with a named and a default slot and generated content inside it, a closed
+# shadow root with manual slot assignment that delegates focus, and an input,
+# whose shadow root Blink creates as a user-agent root. A paragraph has
+# ::before and ::after content and a list item has a marker. The page script
+# attaches both author shadow roots while the document is still parsing, so the
+# finished-parsing DOM checkpoint already holds them. Its settle function waits
+# two animation frames, by which time Blink has assigned the slots, and then
+# appends a text node to a log paragraph, which is a child-list mutation that
+# makes the recorder take a post-mutation DOM checkpoint with the slots
+# assigned. Its dispatch function calls click() on a button inside the closed
+# shadow root. Listeners on that button, on its host, and on the document
+# report what composedPath() returned to each of them, which is what the
+# dispatch record's per-scope visible path is compared against.
+$shadowFixturePage = @'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shadow DOM logging fixture loading</title>
+<style>
+#shadow-note::before { content: "Note:"; }
+#shadow-note::after { content: "End"; }
+#shadow-item { display: list-item; list-style: disc inside; }
+</style>
+</head>
+<body>
+<p id="shadow-note">Shadow DOM logging fixture.</p>
+<ul><li id="shadow-item">Item</li></ul>
+<div id="open-host"><span slot="label" id="open-label">Label</span><span id="open-default">Default</span></div>
+<div id="closed-host"><span id="closed-assigned">Assigned</span><span id="closed-unassigned">Unassigned</span></div>
+<input id="shadow-input" value="Text" aria-label="Fixture text">
+<p id="shadow-log"></p>
+<script>
+const openRoot = document.getElementById("open-host").attachShadow({ mode: "open" });
+openRoot.innerHTML =
+  '<style>#open-bold::before { content: "Open"; }</style>' +
+  '<b id="open-bold"><slot name="label" id="open-named-slot"></slot></b>' +
+  '<slot id="open-default-slot"></slot>';
+const closedRoot = document.getElementById("closed-host").attachShadow({
+  mode: "closed",
+  delegatesFocus: true,
+  slotAssignment: "manual"
+});
+closedRoot.innerHTML =
+  '<slot id="closed-manual-slot"></slot>' +
+  '<button id="closed-button" type="button">Inside</button>';
+closedRoot.getElementById("closed-manual-slot").assign(
+  document.getElementById("closed-assigned"));
+const shadowObserved = [];
+function shadowNote(where) {
+  return function (event) {
+    shadowObserved.push({ where: where, composedPathLength: event.composedPath().length });
+  };
+}
+closedRoot.getElementById("closed-button").addEventListener("click", shadowNote("button"));
+document.getElementById("closed-host").addEventListener("click", shadowNote("host"));
+document.addEventListener("click", shadowNote("document"));
+function shadowFixtureFrames() {
+  return new Promise(function (resolve) {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { resolve(); });
+    });
+  });
+}
+window.shadowFixture = {
+  settle: function () {
+    return shadowFixtureFrames().then(function () {
+      document.getElementById("shadow-log").appendChild(
+        document.createTextNode("Settled"));
+      return shadowFixtureFrames();
+    }).then(function () {
+      return JSON.stringify({
+        namedAssigned: openRoot.getElementById("open-named-slot").assignedNodes().length,
+        defaultAssigned: openRoot.getElementById("open-default-slot").assignedNodes().length,
+        manualAssigned: closedRoot.getElementById("closed-manual-slot").assignedNodes().length
+      });
+    });
+  },
+  dispatch: function () {
+    shadowObserved.length = 0;
+    closedRoot.getElementById("closed-button").click();
+    return shadowFixtureFrames().then(function () {
+      return JSON.stringify(shadowObserved);
+    });
+  }
+};
+document.title = "Shadow DOM logging fixture ready";
+</script>
+</body>
+</html>
+'@
 
-        $target = $null
-        $deadline = (Get-Date).AddSeconds(20)
-        while ((Get-Date) -lt $deadline) {
-            $candidates = @()
-            try {
-                $candidates = @(
-                    Select-CdpFixtureTarget `
-                        (Get-CdpTargetList $DevToolsBase) `
-                        $FixtureUri `
-                        "Layout logging fixture ready" |
-                        Where-Object { (Get-CdpProperty $_ "id") -eq $targetId }
-                )
-            }
-            catch {
-                $candidates = @()
-            }
-            if ($candidates.Count -eq 1) {
-                $target = $candidates[0]
-                break
-            }
-            Start-Sleep -Milliseconds 100
-        }
-        if (-not $target) {
-            throw (
-                "The layout logging fixture did not report readiness in " +
-                "the DevTools target list."
-            )
-        }
+# Opens the shadow DOM logging fixture in a foreground tab, lets it paint and
+# assign its slots, clicks the button inside its closed shadow root, and closes
+# the tab. It runs in the foreground so the document produces layout
+# checkpoints, which is where its shadow-tree and pseudo-element layout records
+# come from. This step only makes the page build shadow trees and dispatch an
+# event so the logger has records to emit; the verifier is what checks them.
+function Invoke-ShadowFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase,
 
-        $pageSession = New-CdpSession $target.webSocketDebuggerUrl
-        $activated = Invoke-WebRequest `
-            -Method Put `
-            -Uri "$DevToolsBase/json/activate/$targetId" `
-            -UseBasicParsing `
-            -TimeoutSec 5
-        if ($activated.StatusCode -ne 200) {
-            throw (
-                "Activating the layout logging fixture reported status " +
-                "$($activated.StatusCode)."
-            )
-        }
-        $null = Invoke-CdpCommand $pageSession "Page.bringToFront" $null
-        $visibility = ""
-        $deadline = (Get-Date).AddSeconds(20)
-        while ((Get-Date) -lt $deadline) {
-            $visibility = [string](Invoke-LayoutFixtureCall $pageSession `
-                "String(document.visibilityState)")
-            if ($visibility -eq "visible") {
-                break
-            }
-            Start-Sleep -Milliseconds 250
-        }
-        if ($visibility -ne "visible") {
-            throw (
-                "The layout logging fixture reported visibility " +
-                "'$visibility' after being activated, so it cannot paint. " +
-                "A window that is minimized, occluded, or " +
-                "on an inactive desktop produces this."
-            )
-        }
-        $steps = [ordered]@{}
-        foreach ($step in @(
-                @{ Name = "Settle"; Call = "layoutFixture.settle()" },
-                @{ Name = "Widen"; Call = "layoutFixture.widen()" },
-                @{ Name = "Recolor"; Call = "layoutFixture.recolor()" }
-            )) {
-            $steps[$step.Name] = [string](
-                Invoke-LayoutFixtureCall $pageSession $step.Call
-            )
-        }
-        $widened = ConvertFrom-Json $steps.Widen
-        $recolored = ConvertFrom-Json $steps.Recolor
-        if ($widened.width -ne 320 -or $recolored.color -ne "rgb(128, 0, 0)") {
-            throw (
-                "The layout logging fixture reported $($steps.Widen) after " +
-                "widening and $($steps.Recolor) after recoloring."
-            )
-        }
+        [Parameter(Mandatory = $true)]
+        [string] $FixtureUri,
 
-        [pscustomobject]@{
-            TargetId = $targetId
-            Steps = $steps
-        }
+        # The tab to activate before the fixture tab closes.
+        [Parameter(Mandatory = $true)]
+        [string] $ReturnTargetId
+    )
+
+    $run = Invoke-ForegroundFixture `
+        -DevToolsBase $DevToolsBase `
+        -FixtureUri $FixtureUri `
+        -ReturnTargetId $ReturnTargetId `
+        -Name "shadow DOM logging fixture" `
+        -ReadyTitle "Shadow DOM logging fixture ready" `
+        -Steps @(
+            @{ Name = "Settle"; Call = "shadowFixture.settle()" },
+            @{ Name = "Dispatch"; Call = "shadowFixture.dispatch()" }
+        )
+    $settled = ConvertFrom-Json $run.Steps.Settle
+    $observed = @(ConvertFrom-Json $run.Steps.Dispatch)
+    if ($settled.namedAssigned -ne 1 -or $settled.defaultAssigned -ne 1 -or
+        $settled.manualAssigned -ne 1 -or $observed.Count -ne 3) {
+        throw (
+            "The shadow DOM logging fixture reported $($run.Steps.Settle) " +
+            "after settling and $($run.Steps.Dispatch) after dispatching."
+        )
     }
-    finally {
-        Close-CdpSession $pageSession
-        try {
-            $null = Invoke-WebRequest `
-                -Method Put `
-                -Uri "$DevToolsBase/json/activate/$ReturnTargetId" `
-                -UseBasicParsing `
-                -TimeoutSec 5
-        }
-        catch {
-            Write-Host (
-                "Activating the background target again failed: " +
-                "$($_.Exception.Message)"
-            )
-        }
-        if ($browserSession -and $targetId) {
-            try {
-                $null = Invoke-CdpCommand $browserSession "Target.closeTarget" @{
-                    targetId = $targetId
-                }
-            }
-            catch {
-                Write-Host (
-                    "Closing the layout logging fixture tab failed: " +
-                    "$($_.Exception.Message)"
-                )
-            }
-        }
-        Close-CdpSession $browserSession
-    }
+    $run
 }
 
 # Runs the network logging fixture in a background tab. The tab opens
@@ -2259,6 +2450,8 @@ $cookieFixtureUri = $null
 $interactionFixtureUri = $null
 $layoutFixtureUri = $null
 $layoutFixtureSteps = $null
+$shadowFixtureUri = $null
+$shadowFixtureSteps = $null
 # The credential values the network logging fixture sends in request headers
 # and receives in a response header. They are generated per run so the verifier
 # can require that no record in the session contains them.
@@ -2301,6 +2494,7 @@ try {
         $cookieValue `
         $interactionFixturePage `
         $layoutFixturePage `
+        $shadowFixturePage `
         $networkFixturePage `
         $networkFixtureWorker `
         $networkSessionValue `
@@ -2311,6 +2505,8 @@ try {
     $layoutFixtureUri = "$($cookieServer.BaseUri)layout"
     Write-Host "Serving the interaction logging fixture at $interactionFixtureUri"
     Write-Host "Serving the layout logging fixture at $layoutFixtureUri"
+    $shadowFixtureUri = "$($cookieServer.BaseUri)shadow"
+    Write-Host "Serving the shadow DOM logging fixture at $shadowFixtureUri"
     $networkStartUri = "$($cookieServer.BaseUri)network-start"
     $networkFixtureUri = "$($cookieServer.BaseUri)network"
     Write-Host (
@@ -2524,6 +2720,28 @@ try {
         throw
     }
 
+    # The shadow DOM logging fixture makes another page build open, closed,
+    # and user-agent shadow trees with slots and generated content, and
+    # dispatch a click from inside a closed shadow root. It runs in the
+    # foreground so the document produces layout checkpoints.
+    try {
+        $shadowRun = Invoke-ShadowFixture `
+            $devToolsBase `
+            $shadowFixtureUri `
+            $backgroundTargetId
+        $shadowFixtureSteps = ConvertTo-Json -Compress -InputObject (
+            [pscustomobject] $shadowRun.Steps
+        )
+        Write-Host (
+            "Ran the shadow DOM logging fixture in foreground target " +
+            "$($shadowRun.TargetId). The page reported: $shadowFixtureSteps"
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
+
     # The network logging fixture makes a fifth page send fetches with
     # credential-bearing headers, follow a redirect, fail a request, reuse a
     # cached script, and fetch from a dedicated worker, so the capture holds
@@ -2663,6 +2881,8 @@ try {
         -InteractionFixtureUri $interactionFixtureUri `
         -LayoutFixtureUri $layoutFixtureUri `
         -LayoutFixtureSteps $layoutFixtureSteps `
+        -ShadowFixtureUri $shadowFixtureUri `
+        -ShadowFixtureSteps $shadowFixtureSteps `
         -NetworkFixtureUri $networkFixtureUri `
         -NetworkStartUri $networkStartUri `
         -NetworkRefusedUri $networkValues.refusedUrl `
