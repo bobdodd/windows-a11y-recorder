@@ -3127,9 +3127,21 @@ $interactionCheckpointStarts = @(
 if ($interactionCheckpointStarts.Count -eq 0) {
     throw "No interaction-checkpoint-started record was emitted."
 }
+# Checkpoint identities are unique only within one renderer process, so records
+# are grouped by browser instance, renderer process, and checkpoint identity.
+function Get-InteractionCheckpointKey {
+    param([Parameter(Mandatory = $true)] $Record)
+
+    $context = $Record.payload.context
+    (
+        "$($context.browserInstanceId)|$($context.processId)|" +
+        "$($Record.payload.checkpointId)"
+    )
+}
+
 $interactionCheckpointParts = @{}
 foreach ($record in $interactionCheckpointRecords) {
-    $id = [string] $record.payload.checkpointId
+    $id = Get-InteractionCheckpointKey $record
     if (-not $interactionCheckpointParts.ContainsKey($id)) {
         $interactionCheckpointParts[$id] = [System.Collections.Generic.List[object]]::new()
     }
@@ -3144,8 +3156,8 @@ foreach ($record in @(
                 $_.eventType -eq "layout-checkpoint-started")
         })) {
     $key = (
-        "$($record.channel)|$($record.payload.context.processId)|" +
-        "$($record.payload.checkpointId)"
+        "$($record.channel)|$($record.payload.context.browserInstanceId)|" +
+        "$($record.payload.context.processId)|$($record.payload.checkpointId)"
     )
     $sourceCheckpointStarts[$key] = $record
 }
@@ -3160,14 +3172,14 @@ function Test-SameCheckpointDocument {
 }
 
 foreach ($start in $interactionCheckpointStarts) {
-    $id = [string] $start.payload.checkpointId
+    $id = "$($start.payload.checkpointId) in renderer process $($start.payload.context.processId)"
     $context = $start.payload.context
     if ($null -ne $context.executionWorldId) {
         throw "Interaction checkpoint $id reported an execution world."
     }
     $sourceKey = (
-        "$($start.payload.sourceChannel)|$($context.processId)|" +
-        "$($start.payload.sourceCheckpointId)"
+        "$($start.payload.sourceChannel)|$($context.browserInstanceId)|" +
+        "$($context.processId)|$($start.payload.sourceCheckpointId)"
     )
     if (-not $sourceCheckpointStarts.ContainsKey($sourceKey)) {
         throw (
@@ -3183,7 +3195,7 @@ foreach ($start in $interactionCheckpointStarts) {
             "of its source checkpoint $($start.payload.sourceCheckpointId)."
         )
     }
-    $parts = @($interactionCheckpointParts[$id])
+    $parts = @($interactionCheckpointParts[(Get-InteractionCheckpointKey $start)])
     $starts = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-started" })
     $completions = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-completed" })
     $controls = @($parts | Where-Object { $_.eventType -eq "interaction-checkpoint-text-control" })
@@ -3221,7 +3233,7 @@ function Get-InteractionCheckpointControls {
     param([Parameter(Mandatory = $true)] $Start)
 
     @(
-        $interactionCheckpointParts[[string] $Start.payload.checkpointId] |
+        $interactionCheckpointParts[(Get-InteractionCheckpointKey $Start)] |
             Where-Object { $_.eventType -eq "interaction-checkpoint-text-control" }
     )
 }
