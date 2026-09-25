@@ -5544,10 +5544,11 @@ $workerDispatchRecords = @(
 # on, in path order. Report is what the page's listener reported, where the
 # page could observe it; worker scopes report nothing back but their replies.
 $workerExpectations = @(
-    @{ Key = "load"; Event = "load"; Interface = "Window"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Window"); Trusted = $true; Report = $workerReport.load },
-    @{ Key = "pageshow"; Event = "pageshow"; Interface = "Window"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Window"); Trusted = $true; Report = $workerReport.pageshow },
-    @{ Key = "window-message"; Event = "message"; Interface = "Window"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Window"); Trusted = $null; Report = $workerReport.windowMessage },
-    @{ Key = "window-custom"; Event = "fixture-window"; Interface = "Window"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Window"); Trusted = $false; Report = $workerReport.windowCustom },
+    # Blink names the window interface by its implementation, DOMWindow.
+    @{ Key = "load"; Event = "load"; Interface = "DOMWindow"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("DOMWindow"); Trusted = $true; Report = $workerReport.load },
+    @{ Key = "pageshow"; Event = "pageshow"; Interface = "DOMWindow"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("DOMWindow"); Trusted = $true; Report = $workerReport.pageshow },
+    @{ Key = "window-message"; Event = "message"; Interface = "DOMWindow"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("DOMWindow"); Trusted = $null; Report = $workerReport.windowMessage },
+    @{ Key = "window-custom"; Event = "fixture-window"; Interface = "DOMWindow"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("DOMWindow"); Trusted = $false; Report = $workerReport.windowCustom },
     @{ Key = "abort"; Event = "abort"; Interface = "AbortSignal"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("AbortSignal"); Trusted = $true; Report = $workerReport.abort },
     # Blink's interface name for a script-constructed EventTarget.
     @{ Key = "custom"; Event = "fixture-custom"; Interface = "EventTargetImpl"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("EventTargetImpl"); Trusted = $false; Report = $workerReport.custom },
@@ -5591,7 +5592,7 @@ foreach ($expected in $workerExpectations) {
         $scope = $registration.scope
         $target = $registration.target
         $expectedKind = "other"
-        if ($expected.Interface -eq "Window") {
+        if ($expected.Interface -eq "DOMWindow") {
             $expectedKind = "window"
         }
         if ($target.kind -ne $expectedKind -or $null -ne $target.nodeId -or
