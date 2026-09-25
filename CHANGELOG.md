@@ -190,6 +190,16 @@ from the product version.
 
 ### Changed
 
+- Make moving to a new point in the playback timeline fast. The timeline used
+  to redraw one rectangle for every recorded event each time the playhead
+  moved, which took about 2 seconds for a recording with a few hundred
+  thousand events. Events are now drawn on a layer that is rebuilt only when
+  the recording, filters, zoom, pan, or control size change, as at most one
+  rectangle per pixel column per channel group. Moving the playhead redraws
+  only the playhead and the selection highlight. Clicking an event and
+  stepping with the arrow keys use binary searches instead of scanning every
+  event. Where session markers and other channels share a pixel column in
+  the last lane, the marker colour is drawn on top.
 - Record when the instrumented browser exits. A `browser-exited` lifecycle
   record states the exit code, the exit time Windows reports, and whether the
   recorder asked the browser to stop. An exit the recorder did not ask for

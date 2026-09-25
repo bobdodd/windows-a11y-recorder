@@ -20,19 +20,39 @@ public sealed class SessionTimelineControl : FrameworkElement
             ["session.annotations"] = Freeze("#E8AF34")
         };
 
+    private const int LaneCount = 8;
+    private const int OtherLane = 7;
+    private const int AnnotationSeries = 7;
+    private const int OtherSeries = 8;
+    private const int SeriesCount = 9;
+
+    // Series are drawn in this order, so markers stay visible over other
+    // channels that share their lane.
+    private static readonly int[] SeriesDrawOrder = [0, 1, 2, 3, 4, 5, 6, OtherSeries, AnnotationSeries];
+
+    private static readonly Brush BackgroundBrush = Freeze("#201F1D");
+    private static readonly Brush OtherChannelBrush = Freeze("#BAB9B4");
+    private static readonly Pen HighlightPen = FreezePen(Brushes.White, 2);
+
+    private readonly DrawingVisual _eventLayer = new();
+    private readonly DrawingVisual _overlayLayer = new();
+    private readonly VisualCollection _layers;
     private IReadOnlyList<SessionTimelineEvent> _events = [];
     private IReadOnlySet<string> _visibleChannels = new HashSet<string>();
     private bool _showOtherChannels = true;
+    private SessionTimelineIndex _index = CreateIndex([], _ => false);
     private long _durationNanoseconds;
     private long _positionNanoseconds;
     private long _viewportStartNanoseconds;
     private long _viewportDurationNanoseconds;
     private SessionTimelineEvent? _selectedEvent;
+    private int _selectedIndex = -1;
 
     public SessionTimelineControl()
     {
         Focusable = true;
         Cursor = Cursors.Hand;
+        _layers = new VisualCollection(this) { _eventLayer, _overlayLayer };
     }
 
     public event EventHandler<TimelineEventSelectedEventArgs>? SelectedEventChanged;
@@ -42,10 +62,20 @@ public sealed class SessionTimelineControl : FrameworkElement
         get => _positionNanoseconds;
         set
         {
-            _positionNanoseconds = Math.Clamp(value, 0, _durationNanoseconds);
-            InvalidateVisual();
+            var position = Math.Clamp(value, 0, _durationNanoseconds);
+            if (position == _positionNanoseconds)
+            {
+                return;
+            }
+
+            _positionNanoseconds = position;
+            RedrawOverlay();
         }
     }
+
+    protected override int VisualChildrenCount => _layers.Count;
+
+    protected override Visual GetVisualChild(int index) => _layers[index];
 
     public void SetSession(
         IReadOnlyList<SessionTimelineEvent> events,
@@ -56,8 +86,9 @@ public sealed class SessionTimelineControl : FrameworkElement
         _viewportStartNanoseconds = 0;
         _viewportDurationNanoseconds = _durationNanoseconds;
         _positionNanoseconds = 0;
+        RebuildIndex();
         SelectEvent(null);
-        InvalidateVisual();
+        RedrawAll();
     }
 
     public void SetVisibleChannels(
@@ -66,13 +97,13 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         _visibleChannels = visibleChannels;
         _showOtherChannels = showOtherChannels;
-        if (_selectedEvent is not null &&
-            !IsChannelVisible(_selectedEvent.Channel))
+        RebuildIndex();
+        if (_selectedEvent is not null && _selectedIndex < 0)
         {
             SelectEvent(null);
         }
 
-        InvalidateVisual();
+        RedrawAll();
     }
 
     public void SetViewport(long startNanoseconds, long durationNanoseconds)
@@ -81,12 +112,25 @@ public sealed class SessionTimelineControl : FrameworkElement
             durationNanoseconds,
             Math.Min(1, _durationNanoseconds),
             _durationNanoseconds);
-        _viewportDurationNanoseconds = duration;
-        _viewportStartNanoseconds = Math.Clamp(
+        var start = Math.Clamp(
             startNanoseconds,
             0,
             Math.Max(0, _durationNanoseconds - duration));
-        InvalidateVisual();
+        if (duration == _viewportDurationNanoseconds &&
+            start == _viewportStartNanoseconds)
+        {
+            return;
+        }
+
+        _viewportDurationNanoseconds = duration;
+        _viewportStartNanoseconds = start;
+        RedrawAll();
+    }
+
+    protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
+    {
+        base.OnRenderSizeChanged(sizeInfo);
+        RedrawAll();
     }
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
@@ -102,32 +146,25 @@ public sealed class SessionTimelineControl : FrameworkElement
         var timestamp = _viewportStartNanoseconds +
             (long)(Math.Clamp(point.X / ActualWidth, 0, 1) *
                 _viewportDurationNanoseconds);
-        var laneHeight = Math.Max(3, ActualHeight / 8);
-        var lane = Math.Clamp((int)(point.Y / laneHeight), 0, 7);
-        var visible = GetVisibleEvents(inViewportOnly: true);
-        var candidates = visible.Where(item => GetLane(item.Channel) == lane).ToArray();
-        if (candidates.Length == 0)
-        {
-            candidates = visible.ToArray();
-        }
-
-        SelectEvent(candidates
-            .MinBy(item => Math.Abs(item.MonotonicNanoseconds - timestamp)));
+        var laneHeight = Math.Max(3, ActualHeight / LaneCount);
+        var lane = Math.Clamp((int)(point.Y / laneHeight), 0, LaneCount - 1);
+        var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
+        SelectEvent(
+            _index.NearestInLane(lane, timestamp, _viewportStartNanoseconds, viewportEnd) ??
+            _index.Nearest(timestamp, _viewportStartNanoseconds, viewportEnd));
         e.Handled = true;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        var events = GetVisibleEvents(inViewportOnly: false);
+        var events = _index.VisibleEvents;
         if (events.Count == 0)
         {
             return;
         }
 
-        var index = _selectedEvent is null
-            ? -1
-            : events.IndexOf(_selectedEvent);
+        var index = _selectedIndex;
         SessionTimelineEvent? next = e.Key switch
         {
             Key.Left => events[Math.Max(0, index - 1)],
@@ -145,80 +182,109 @@ public sealed class SessionTimelineControl : FrameworkElement
         e.Handled = true;
     }
 
-    protected override void OnRender(DrawingContext drawingContext)
+    private void RedrawAll()
     {
-        base.OnRender(drawingContext);
-        var bounds = new Rect(0, 0, ActualWidth, ActualHeight);
-        drawingContext.DrawRectangle(Freeze("#201F1D"), null, bounds);
-        if (_durationNanoseconds <= 0 ||
-            _viewportDurationNanoseconds <= 0 ||
-            ActualWidth <= 0 ||
-            ActualHeight <= 0)
+        RedrawEvents();
+        RedrawOverlay();
+    }
+
+    // The event layer changes only with the session, filters, viewport, or
+    // size. Drawing is one rectangle per occupied pixel column per series,
+    // so it is bounded by the control width rather than the event count.
+    private void RedrawEvents()
+    {
+        using var drawingContext = _eventLayer.RenderOpen();
+        var width = ActualWidth;
+        var height = ActualHeight;
+        drawingContext.DrawRectangle(
+            BackgroundBrush,
+            null,
+            new Rect(0, 0, width, height));
+        if (!CanDraw())
         {
             return;
         }
 
-        var laneHeight = Math.Max(3, ActualHeight / 8);
-        var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
-        foreach (var item in _events)
+        var laneHeight = Math.Max(3, height / LaneCount);
+        var columns = (int)Math.Ceiling(width);
+        foreach (var series in SeriesDrawOrder)
         {
-            if (item.MonotonicNanoseconds < _viewportStartNanoseconds ||
-                item.MonotonicNanoseconds > viewportEnd ||
-                !IsChannelVisible(item.Channel))
-            {
-                continue;
-            }
-
-            var x = (item.MonotonicNanoseconds - _viewportStartNanoseconds) /
-                (double)_viewportDurationNanoseconds * ActualWidth;
-            var lane = GetLane(item.Channel);
-            var brush = ChannelBrushes.TryGetValue(item.Channel, out var known)
-                ? known
-                : Freeze("#BAB9B4");
-            drawingContext.DrawRectangle(
-                brush,
-                null,
-                new Rect(Math.Floor(x), lane * laneHeight, 1.5, laneHeight - 1));
-            if (ReferenceEquals(item, _selectedEvent))
+            var lane = LaneOfSeries(series);
+            var brush = BrushOfSeries(series);
+            foreach (var column in _index.OccupiedColumns(
+                         series,
+                         _viewportStartNanoseconds,
+                         _viewportDurationNanoseconds,
+                         columns))
             {
                 drawingContext.DrawRectangle(
+                    brush,
                     null,
-                    new Pen(Brushes.White, 2),
-                    new Rect(
-                        Math.Floor(x) - 3,
-                        lane * laneHeight,
-                        7,
-                        laneHeight - 1));
+                    new Rect(column, lane * laneHeight, 1.5, laneHeight - 1));
             }
+        }
+    }
+
+    // The overlay holds the playhead and the selection highlight, so moving
+    // the playhead redraws two shapes instead of the whole timeline.
+    private void RedrawOverlay()
+    {
+        using var drawingContext = _overlayLayer.RenderOpen();
+        if (!CanDraw())
+        {
+            return;
+        }
+
+        var laneHeight = Math.Max(3, ActualHeight / LaneCount);
+        var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
+        if (_selectedEvent is not null &&
+            _selectedIndex >= 0 &&
+            _selectedEvent.MonotonicNanoseconds >= _viewportStartNanoseconds &&
+            _selectedEvent.MonotonicNanoseconds <= viewportEnd)
+        {
+            var x = Math.Floor(ToX(_selectedEvent.MonotonicNanoseconds));
+            var lane = GetLane(_selectedEvent.Channel);
+            drawingContext.DrawRectangle(
+                null,
+                HighlightPen,
+                new Rect(x - 3, lane * laneHeight, 7, laneHeight - 1));
         }
 
         if (_positionNanoseconds >= _viewportStartNanoseconds &&
             _positionNanoseconds <= viewportEnd)
         {
-            var playheadX = (_positionNanoseconds - _viewportStartNanoseconds) /
-                (double)_viewportDurationNanoseconds * ActualWidth;
+            var playheadX = ToX(_positionNanoseconds);
             drawingContext.DrawLine(
-                new Pen(Brushes.White, 2),
+                HighlightPen,
                 new Point(playheadX, 0),
                 new Point(playheadX, ActualHeight));
         }
     }
 
+    private bool CanDraw() =>
+        _durationNanoseconds > 0 &&
+        _viewportDurationNanoseconds > 0 &&
+        ActualWidth > 0 &&
+        ActualHeight > 0;
+
+    private double ToX(long timestamp) =>
+        (timestamp - _viewportStartNanoseconds) /
+        (double)_viewportDurationNanoseconds * ActualWidth;
+
+    private void RebuildIndex()
+    {
+        _index = CreateIndex(_events, IsChannelVisible);
+        _selectedIndex = _index.IndexOf(_selectedEvent);
+    }
+
+    private static SessionTimelineIndex CreateIndex(
+        IReadOnlyList<SessionTimelineEvent> events,
+        Func<string, bool> isVisible) =>
+        new(events, isVisible, GetLane, GetSeries, LaneCount, SeriesCount);
+
     private bool IsChannelVisible(string channel) =>
         _visibleChannels.Contains(channel) ||
         (_showOtherChannels && !ChannelBrushes.ContainsKey(channel));
-
-    private List<SessionTimelineEvent> GetVisibleEvents(bool inViewportOnly)
-    {
-        var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
-        return _events
-            .Where(item =>
-                IsChannelVisible(item.Channel) &&
-                (!inViewportOnly ||
-                    (item.MonotonicNanoseconds >= _viewportStartNanoseconds &&
-                     item.MonotonicNanoseconds <= viewportEnd)))
-            .ToList();
-    }
 
     private void SelectEvent(SessionTimelineEvent? item)
     {
@@ -228,7 +294,8 @@ public sealed class SessionTimelineControl : FrameworkElement
         }
 
         _selectedEvent = item;
-        InvalidateVisual();
+        _selectedIndex = _index.IndexOf(item);
+        RedrawOverlay();
         SelectedEventChanged?.Invoke(
             this,
             new TimelineEventSelectedEventArgs(item));
@@ -243,7 +310,34 @@ public sealed class SessionTimelineControl : FrameworkElement
         "graphics.desktop.frames" => 4,
         "audio.microphone" => 5,
         "audio.system" => 6,
-        _ => 7
+        _ => OtherLane
+    };
+
+    private static int GetSeries(string channel)
+    {
+        var lane = GetLane(channel);
+        if (lane != OtherLane)
+        {
+            return lane;
+        }
+
+        return channel == "session.annotations" ? AnnotationSeries : OtherSeries;
+    }
+
+    private static int LaneOfSeries(int series) =>
+        series < OtherLane ? series : OtherLane;
+
+    private static Brush BrushOfSeries(int series) => series switch
+    {
+        0 => ChannelBrushes["input.keyboard"],
+        1 => ChannelBrushes["input.mouse"],
+        2 => ChannelBrushes["accessibility.uia.events"],
+        3 => ChannelBrushes["window.foreground"],
+        4 => ChannelBrushes["graphics.desktop.frames"],
+        5 => ChannelBrushes["audio.microphone"],
+        6 => ChannelBrushes["audio.system"],
+        AnnotationSeries => ChannelBrushes["session.annotations"],
+        _ => OtherChannelBrush
     };
 
     private static SolidColorBrush Freeze(string color)
@@ -251,6 +345,13 @@ public sealed class SessionTimelineControl : FrameworkElement
         var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
         brush.Freeze();
         return brush;
+    }
+
+    private static Pen FreezePen(Brush brush, double thickness)
+    {
+        var pen = new Pen(brush, thickness);
+        pen.Freeze();
+        return pen;
     }
 }
 
