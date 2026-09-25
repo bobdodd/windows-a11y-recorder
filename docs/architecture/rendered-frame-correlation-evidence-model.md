@@ -142,9 +142,10 @@ accepts that.
 
 Recording the timestamp does not change which WGC frame is copied. The pool
 returns the oldest queued frame, so a captured image can be older than the
-poll suggests. How much older has not been measured; it depends in part on
-whether the capture stops producing frames while both pool buffers are
-queued, which has not been verified. Recording the composition time makes the
+poll suggests. The first Windows run measured it (see the Windows validation
+results below); why it is that large depends in part on whether the capture
+stops producing frames while both pool buffers are queued, which has not been
+verified. Recording the composition time makes the
 age of every image visible.
 
 Decision: the dequeue policy stays unchanged in this slice. The
@@ -364,7 +365,9 @@ while newer compositions wait behind it. It does not establish whether WGC
 stops producing frames while both buffers are queued. The candidate lag of 83
 to 183 ms is bounded below by that dequeue behavior and the capture rate, not
 by the Windows compositor alone. These are measurements from one run on one
-machine and are the input the dequeue-policy decision below was waiting for.
+machine and are the measurement the dequeue-policy decision in the capture
+boundary section was waiting for. No change to the dequeue policy has been
+made.
 
 ## Decisions
 
