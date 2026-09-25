@@ -15,5 +15,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Recorder.Tests/Recorder.Tests.csproj" />
+    <Project Path="tests/UiaLoadSource/UiaLoadSource.csproj" />
   </Folder>
 </Solution>

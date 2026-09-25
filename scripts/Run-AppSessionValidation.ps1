@@ -13,7 +13,16 @@ param(
 
     [string] $DotnetPath = (
         Join-Path $env:USERPROFILE ".dotnet\dotnet.exe"
-    )
+    ),
+
+    # The rate at which the UI Automation load source raises name changes
+    # while the recording runs, and the lowest mean rate it must achieve for
+    # the run to count as recorded under load. A protocol 0.30 run received
+    # up to 1,588 UI Automation observations per second from an application
+    # on the desktop.
+    [int] $UiaLoadRatePerSecond = 2000,
+
+    [int] $UiaLoadMinimumPerSecond = 1500
 )
 
 $ErrorActionPreference = "Stop"
@@ -582,6 +591,8 @@ $repository = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $repository "windows-a11y-recorder.slnx"
 $appProject = Join-Path $repository "src\Recorder.App\Recorder.App.csproj"
 $appOutput = Join-Path $repository "artifacts\app-session-validation\app"
+$loadProject = Join-Path $repository "tests\UiaLoadSource\UiaLoadSource.csproj"
+$loadOutput = Join-Path $repository "artifacts\app-session-validation\uia-load"
 $verifier = Join-Path $PSScriptRoot "Verify-AppSessionEvidence.ps1"
 $dotnet = $DotnetPath
 $chromiumPath = [IO.Path]::GetFullPath($ChromiumPath)
@@ -592,7 +603,7 @@ $outputRoot = [IO.Path]::GetFullPath($OutputRoot)
 $inputMarker = 0x41313159
 $typedText = "a11y"
 
-foreach ($requiredPath in @($chromiumPath, $dotnet, $solution, $appProject)) {
+foreach ($requiredPath in @($chromiumPath, $dotnet, $solution, $appProject, $loadProject)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required path not found: $requiredPath"
     }
@@ -609,8 +620,17 @@ $appExecutable = Join-Path $appOutput "Recorder.App.exe"
 if (-not (Test-Path -LiteralPath $appExecutable -PathType Leaf)) {
     throw "The app build did not produce $appExecutable."
 }
+Invoke-Checked "Building the UI Automation load source" {
+    & $dotnet build $loadProject --configuration Release --output $loadOutput
+}
+$loadExecutable = Join-Path $loadOutput "UiaLoadSource.exe"
+if (-not (Test-Path -LiteralPath $loadExecutable -PathType Leaf)) {
+    throw "The load source build did not produce $loadExecutable."
+}
+$loadSummaryPath = Join-Path $outputRoot "uia-load-source.json"
+Remove-Item -LiteralPath $loadSummaryPath -Force -ErrorAction SilentlyContinue
 
-foreach ($stale in @(Get-Process -Name "Recorder.App" -ErrorAction SilentlyContinue)) {
+foreach ($stale in @(Get-Process -Name "Recorder.App", "UiaLoadSource" -ErrorAction SilentlyContinue)) {
     Write-Host "Stopping running recorder process $($stale.Id)"
     Stop-Process -Id $stale.Id -Force -ErrorAction SilentlyContinue
 }
@@ -626,6 +646,7 @@ $sessionsBefore = @(
 
 $server = $null
 $app = $null
+$loadSource = $null
 try {
     $server = Start-AppFixtureServer $fixturePage
     $fixtureUri = "$($server.BaseUri)app-session"
@@ -640,6 +661,21 @@ try {
     $previousDotnetRoot = $env:DOTNET_ROOT
     $env:DOTNET_ROOT = $dotnetRoot
     try {
+        # The load source raises name changes on its text elements for as
+        # long as a UI Automation client listens, so it loads the recorder
+        # from the moment its UI Automation collector subscribes. Its small
+        # window sits in the corner of the work area and does not take focus.
+        $loadSource = Start-Process -FilePath $loadExecutable -PassThru -ArgumentList @(
+            "--rate", $UiaLoadRatePerSecond,
+            "--summary", "`"$loadSummaryPath`""
+        )
+        Wait-Until -TimeoutSeconds 30 -Failure "The UI Automation load source window did not open." -Condition {
+            $loadSource.Refresh()
+            $loadSource.HasExited -or $loadSource.MainWindowHandle -ne [IntPtr]::Zero
+        }
+        if ($loadSource.HasExited) {
+            throw "The UI Automation load source exited with code $($loadSource.ExitCode)."
+        }
         $app = Start-Process -FilePath $appExecutable -PassThru
     }
     finally {
@@ -834,13 +870,31 @@ try {
         throw "The recorder app did not exit after its window was closed."
     }
     $app = $null
+
+    # Closing the load source window makes it write what it raised.
+    $loadSource.Refresh()
+    ($automation::FromHandle($loadSource.MainWindowHandle)).GetCurrentPattern(
+        [System.Windows.Automation.WindowPattern]::Pattern
+    ).Close()
+    if (-not $loadSource.WaitForExit(30000)) {
+        throw "The UI Automation load source did not exit after its window was closed."
+    }
+    $loadSource = $null
 }
 finally {
     Stop-AppFixtureServer $server
     if ($app -and -not $app.HasExited) {
         Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
     }
+    if ($loadSource -and -not $loadSource.HasExited) {
+        Stop-Process -Id $loadSource.Id -Force -ErrorAction SilentlyContinue
+    }
 }
+
+if (-not (Test-Path -LiteralPath $loadSummaryPath -PathType Leaf)) {
+    throw "The UI Automation load source wrote no summary."
+}
+$loadSummary = Get-Content -LiteralPath $loadSummaryPath -Raw | ConvertFrom-Json
 
 $session = Get-ChildItem -LiteralPath $outputRoot -Directory |
     Where-Object { $_.FullName -notin $sessionsBefore } |
@@ -871,6 +925,7 @@ $steps = [pscustomobject]@{
     NextRect = $nextRect
     ChromiumProcessIds = $chromiumIds
     TypedText = $typedText
+    UiaLoadSourceProcessId = [int] $loadSummary.processId
 } | ConvertTo-Json -Depth 4 -Compress
 # Kept beside the session, not in it, so that a failed verification can be
 # repeated against the same recording without recording again.
@@ -922,6 +977,15 @@ foreach ($omissionLine in @(
         $otherOmissions += "$($omission.channel) $($omission.payload.reason) $count"
     }
 }
+# The load is stated by the source, which counts what it raised; the archive
+# alone cannot show what UI Automation refused before the recorder saw it.
+if ([double] $loadSummary.meanRaisedPerSecond -lt $UiaLoadMinimumPerSecond) {
+    throw (
+        "The UI Automation load source raised $($loadSummary.raised) name " +
+        "changes at $($loadSummary.meanRaisedPerSecond) per second, below " +
+        "the $UiaLoadMinimumPerSecond per second this run requires."
+    )
+}
 if ($browserLost -gt 0 -or $sinkRefusedEvents -gt 0) {
     throw (
         "This run lost evidence: $browserLost browser record(s) reported as " +
@@ -942,3 +1006,9 @@ Write-Host "ARTIFACTS_VALIDATED=$($validation.artifactsValidated)"
 Write-Host "SINK_REFUSED_EVENTS=$sinkRefusedEvents"
 Write-Host "BROWSER_OMITTED_RECORDS=$browserLost"
 Write-Host "OTHER_OMISSIONS=$($otherOmissions -join '; ')"
+Write-Host (
+    "UIA_LOAD_SOURCE=raised $($loadSummary.raised) over " +
+    "$($loadSummary.raisingSpanSeconds) s, mean $($loadSummary.meanRaisedPerSecond) " +
+    "per second, peak $($loadSummary.peakRaisedPerSecond) in one second, " +
+    "target $($loadSummary.targetRatePerSecond)"
+)

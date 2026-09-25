@@ -183,7 +183,11 @@ from the product version.
   element properties with each event instead of the processor reading them
   one call at a time, and each element snapshot states `propertySource` as
   `event-cache` or `current-read`. The validator accepts the earlier total
-  form and checks the new fields for consistency. Whether caching prevents
+  form and checks the new fields for consistency. The application session
+  validation now starts a UI Automation load source that raises 2,000 name
+  changes per second on text elements while the recording runs, and fails if
+  its mean rate is below 1,500 per second, since an application on the
+  desktop floods UI Automation only in some states. Whether caching prevents
   overflow at these rates has not yet been measured. See
   `docs/architecture/uia-overload-evidence.md`.
 - Copy the newest arrived Windows Graphics Capture frame instead of the

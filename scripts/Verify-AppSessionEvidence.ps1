@@ -14,6 +14,8 @@ param(
     # they were clicked. ChromiumProcessIds lists the processes started from
     # the instrumented Chromium executable while the recording ran.
     # TypedText is the text the run script typed into the text field.
+    # UiaLoadSourceProcessId, when present, is the process that raised UI
+    # Automation name changes throughout the recording to load the collector.
     [Parameter(Mandatory = $true)]
     [string] $StepsJson
 )
@@ -799,6 +801,31 @@ $uiaDroppedByType = @(
             "$($_.Name)=$(($_.Group | ForEach-Object { [long] $_.Value } | Measure-Object -Sum).Sum)"
         }
 )
+# What the recorder received from the UI Automation load source, if the run
+# used one: the total and the busiest second of arrival.
+$uiaLoadReceived = "none"
+$uiaLoadReceivedPeak = "none"
+$loadProcessId = Get-OptionalProperty $steps "UiaLoadSourceProcessId"
+if ($null -ne $loadProcessId) {
+    $loadRecords = @(
+        $records |
+            Where-Object {
+                $_.channel -eq "accessibility.uia.events" -and
+                $_.eventType -ne "collector-omission" -and
+                $_.payload.PSObject.Properties.Name -contains "element" -and
+                $_.payload.element.processId -eq [int] $loadProcessId
+            }
+    )
+    $uiaLoadReceived = $loadRecords.Count
+    $uiaLoadReceivedPeak = 0
+    if ($loadRecords.Count -gt 0) {
+        $uiaLoadReceivedPeak = (
+            $loadRecords |
+                Group-Object { [math]::Floor([long] $_.monotonicNanoseconds / 1e9) } |
+                Measure-Object -Property Count -Maximum
+        ).Maximum
+    }
+}
 
 [pscustomobject]@{
     RendererProcessId = $rendererProcessId
@@ -821,6 +848,8 @@ $uiaDroppedByType = @(
     LayoutCheckpoints = $layoutCompletions.Count
     AccessibilityCheckpoints = $accessibilityCompletions.Count
     FramesDuringInput = $inputFrames.Count
+    UiaLoadSourceReceived = $uiaLoadReceived
+    UiaLoadSourceReceivedPeakPerSecond = $uiaLoadReceivedPeak
     UiaPropertySources = ($uiaPropertySources -join "; ")
     UiaDropEpisodes = $uiaDropEpisodes.Count
     UiaDroppedByType = ($uiaDroppedByType -join "; ")

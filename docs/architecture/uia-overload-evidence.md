@@ -53,8 +53,17 @@ Each element snapshot now states `propertySource`:
 
 Snapshots in archives written before this change state no `propertySource`. Their values were read after dequeuing.
 
+## Validation under load
+
+Two application-launched validation runs at this change passed with no drop episodes, and every one of their 1,193 and 1,194 UI Automation observations stated `event-cache`. Solitaire was running during both but raised no UI Automation events, so neither run measured the collector under load. Whether an application floods UI Automation depends on its state, which a validation run cannot control.
+
+The application session validation therefore starts its own load source, `tests/UiaLoadSource`, before the recorder app and closes it after the recording stops. It is a small window of 40 text elements that raises name changes on them at a set rate, 2,000 per second by default, only while a UI Automation client listens for property changes. The rate and element type imitate the application that overflowed the queue. When it closes, it writes how many changes it raised, over what span, and its busiest second.
+
+The run fails if the source's mean rate is below 1,500 per second, so a run that did not apply the load cannot pass as one that did. The verifier reports how many observations the recorder received from the source's process and the busiest second of arrival. The existing focus checks decide whether focus evidence survived the load. Drop episodes are reported, not failed, because recording loss under load and stating it is the designed behavior.
+
 ## Limits
 
-- Whether caching reduces the processing time per observation enough to prevent overflow at the observed rates has not been measured. The next validation run with Solitaire open is the first measurement.
+- Whether caching reduces the processing time per observation enough to prevent overflow at the observed rates has not been measured. The first validation run with the load source is the first measurement.
+- The load source raises events from one WPF process. A native or XAML provider, or several sources at once, may load UI Automation differently.
 - Loss inside UI Automation itself, before an event reaches the collector, is not visible to the collector and is not stated.
 - The collector still observes the whole desktop. Limiting it to the process under test would reduce load but would also stop recording evidence from other processes, which the recorder records by design.
