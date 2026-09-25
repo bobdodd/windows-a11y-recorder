@@ -137,5 +137,5 @@ public sealed class SessionTimelineIndexTests
             seriesCount: 3);
 
     private static SessionTimelineEvent Event(string channel, long time) =>
-        new(0, Guid.NewGuid().ToString("N"), "observed", channel, "test", time, "", "{}");
+        new(0, Guid.NewGuid().ToString("N"), "observed", channel, "test", time, "", 0, 0);
 }

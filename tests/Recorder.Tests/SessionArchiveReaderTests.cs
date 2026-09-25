@@ -65,7 +65,7 @@ public sealed class SessionArchiveReaderTests
                 item => Assert.StartsWith("test-session:", item.EventId));
             Assert.All(
                 archive.Events,
-                item => Assert.Contains("\"channel\":", item.RawJson));
+                item => Assert.Contains("\"channel\":", archive.ReadEventJson(item)));
         }
         finally
         {
@@ -398,6 +398,81 @@ public sealed class SessionArchiveReaderTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task ReadsEachRecordFromItsLocationInTheEventLog()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            await WriteManifestAsync(directory, 1_000_000_000);
+            var lines = new[]
+            {
+                RawEvent("first", 10, "plain"),
+                RawEvent("second", 20, "caf\u00e9 \u65e5\u672c \ud83d\ude00"),
+                RawEvent("third", 30, new string('x', 300_000)),
+                RawEvent("fourth", 40, "last line has no line ending")
+            };
+            var bytes = new List<byte>(System.Text.Encoding.UTF8.GetPreamble());
+            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(lines[0] + "\r\n"));
+            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(lines[1] + "\n"));
+            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(" \t\n"));
+            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(lines[2] + "\n"));
+            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(lines[3]));
+            await File.WriteAllBytesAsync(
+                Path.Combine(directory, "events.ndjson"),
+                bytes.ToArray(),
+                TestContext.Current.CancellationToken);
+
+            var archive = await LoadBothWaysAsync(directory);
+
+            Assert.Equal(
+                new long[] { 1, 2, 4, 5 },
+                archive.Events.Select(item => item.Line));
+            Assert.Equal(
+                lines,
+                archive.Events.Select(archive.ReadEventJson));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReportsARecordThatMovedAfterTheRecordingWasOpened()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            await WriteManifestAsync(directory, 1_000_000_000);
+            var eventPath = Path.Combine(directory, "events.ndjson");
+            await File.WriteAllTextAsync(
+                eventPath,
+                RawEvent("first", 10, "a") + "\n" + RawEvent("second", 20, "b") + "\n",
+                TestContext.Current.CancellationToken);
+            var archive = await SessionArchiveReader.LoadAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                eventPath,
+                RawEvent("second", 20, "b") + "\n" + RawEvent("first", 10, "a") + "\n",
+                TestContext.Current.CancellationToken);
+
+            var exception = Assert.Throws<InvalidDataException>(
+                () => archive.ReadEventJson(archive.Events[0]));
+            Assert.Contains("changed after the recording was opened", exception.Message);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static string RawEvent(string eventId, long timestamp, string note) =>
+        "{\"eventId\":\"" + eventId + "\",\"channel\":\"test.channel\"," +
+        "\"eventType\":\"test\",\"monotonicNanoseconds\":" + timestamp + "," +
+        "\"payload\":{\"note\":\"" + note + "\"}}";
 
     // Loads the archive with the reader's own read and with the validator's
     // read, asserts the two playback archives are the same, and returns the

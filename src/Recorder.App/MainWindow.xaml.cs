@@ -366,10 +366,23 @@ public partial class MainWindow : Window
 
         PausePlayback();
         SeekTo(e.TimelineEvent.MonotonicNanoseconds, synchronizeAudio: false);
-        using var document = JsonDocument.Parse(e.TimelineEvent.RawJson);
-        EventDetailsTextBox.Text = JsonSerializer.Serialize(
-            document.RootElement,
-            InspectorJsonOptions);
+        try
+        {
+            var rawJson = _playbackArchive?.ReadEventJson(e.TimelineEvent) ??
+                throw new InvalidOperationException("No recording is open.");
+            using var document = JsonDocument.Parse(rawJson);
+            EventDetailsTextBox.Text = JsonSerializer.Serialize(
+                document.RootElement,
+                InspectorJsonOptions);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                InvalidDataException or InvalidOperationException or JsonException)
+        {
+            EventDetailsTextBox.Text =
+                $"The complete record for event line {e.TimelineEvent.Line} " +
+                $"could not be read: {exception.Message}";
+        }
         EventDetailsTextBox.CaretIndex = 0;
         EventDetailsTextBox.ScrollToHome();
         AutomationProperties.SetHelpText(

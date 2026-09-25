@@ -33,7 +33,13 @@ public sealed class SessionPlaybackArchiveBuilder
 
     public string SessionDirectory => _root;
 
-    public void Add(long lineNumber, JsonElement record)
+    /// <param name="byteOffset">
+    /// Where the record's line starts in events.ndjson, in bytes.
+    /// </param>
+    /// <param name="byteLength">
+    /// The line's length in bytes, without its line ending.
+    /// </param>
+    public void Add(long lineNumber, long byteOffset, int byteLength, JsonElement record)
     {
         ThrowIfBuilt();
         if (record.ValueKind != JsonValueKind.Object)
@@ -44,6 +50,8 @@ public sealed class SessionPlaybackArchiveBuilder
 
         var timelineEvent = SessionArchiveReader.CreateTimelineEvent(
             lineNumber,
+            byteOffset,
+            byteLength,
             record,
             out var payload);
         var timestamp = timelineEvent.MonotonicNanoseconds;

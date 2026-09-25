@@ -190,6 +190,23 @@ from the product version.
 
 ### Changed
 
+- Stop holding every event record's text in memory during playback. Each
+  timeline event now keeps the byte offset and length of its line in
+  `events.ndjson`, and the event inspector reads the record from the file
+  when an event is selected. Previously the complete text of every record was
+  kept as a string for the whole playback session; for a recording with an
+  event log of 487.8 MB, that is roughly twice the log's size in memory.
+  Reading a record checks that the bytes at its location are still the same
+  event, and the inspector says so if the event log changed after the
+  recording was opened.
+- Read `events.ndjson` as UTF-8 bytes when validating or loading a
+  recording, instead of decoding each line to a string first. Two behaviours
+  change. A line that is not valid UTF-8 is now reported as
+  `event-json-invalid`; previously the invalid bytes were silently replaced
+  and the line could pass. Lines end only at a line feed, with an optional
+  carriage return before it; a carriage return on its own no longer ends a
+  line. The recorder writes each record as one UTF-8 line ending in a line
+  feed, so recordings it produced are not affected.
 - Make moving to a new point in the playback timeline fast. The timeline used
   to redraw one rectangle for every recorded event each time the playhead
   moved, which took about 2 seconds for a recording with a few hundred

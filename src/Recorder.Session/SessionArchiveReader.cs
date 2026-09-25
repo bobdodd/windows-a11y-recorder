@@ -9,8 +9,62 @@ public sealed record SessionPlaybackArchive(
     IReadOnlyList<SessionTimelineEvent> Events,
     IReadOnlyList<SessionVideoFrame> Frames,
     IReadOnlyList<SessionAudioTrack> AudioTracks,
-    IReadOnlyList<BrowserNavigationCorrelation> BrowserNavigations);
+    IReadOnlyList<BrowserNavigationCorrelation> BrowserNavigations)
+{
+    /// <summary>
+    /// Reads an event's complete record from the event log. Playback keeps
+    /// only where each record is, so its text is read when it is needed.
+    /// </summary>
+    /// <exception cref="InvalidDataException">
+    /// The bytes at the recorded location are no longer that event, which
+    /// means the event log changed after the recording was opened.
+    /// </exception>
+    public string ReadEventJson(SessionTimelineEvent item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var bytes = new byte[item.ByteLength];
+        using (var stream = new FileStream(
+                   Path.Combine(SessionDirectory, "events.ndjson"),
+                   FileMode.Open,
+                   FileAccess.Read,
+                   FileShare.ReadWrite,
+                   bufferSize: 1))
+        {
+            stream.Position = item.ByteOffset;
+            stream.ReadExactly(bytes);
+        }
 
+        try
+        {
+            using var document = JsonDocument.Parse(bytes);
+            var record = document.RootElement;
+            if (record.ValueKind == JsonValueKind.Object &&
+                record.GetProperty("channel").GetString() == item.Channel &&
+                record.GetProperty("monotonicNanoseconds").GetInt64() ==
+                    item.MonotonicNanoseconds &&
+                (!record.TryGetProperty("eventId", out var eventId) ||
+                    eventId.GetString() == item.EventId))
+            {
+                return System.Text.Encoding.UTF8.GetString(bytes);
+            }
+        }
+        catch (Exception exception) when (
+            exception is JsonException or InvalidOperationException or
+                KeyNotFoundException or FormatException)
+        {
+        }
+
+        throw new InvalidDataException(
+            $"Event line {item.Line} is no longer at its recorded location. " +
+            "The event log changed after the recording was opened.");
+    }
+}
+
+/// <summary>
+/// One event in the playback timeline. The complete record stays in the
+/// event log at <see cref="ByteOffset"/>; read it with
+/// <see cref="SessionPlaybackArchive.ReadEventJson"/>.
+/// </summary>
 public sealed record SessionTimelineEvent(
     long Line,
     string EventId,
@@ -19,7 +73,8 @@ public sealed record SessionTimelineEvent(
     string EventType,
     long MonotonicNanoseconds,
     string Summary,
-    string RawJson);
+    long ByteOffset,
+    int ByteLength);
 
 public sealed record SessionVideoFrame(
     long MonotonicNanoseconds,
@@ -58,20 +113,21 @@ public static class SessionArchiveReader
             .ConfigureAwait(false);
 
         var builder = new SessionPlaybackArchiveBuilder(root);
-        long lineNumber = 0;
-
-        using var reader = new StreamReader(eventPath);
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        using var reader = new NdjsonLineReader(eventPath);
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            lineNumber++;
-            if (string.IsNullOrWhiteSpace(line))
+            if (reader.IsBlankLine)
             {
                 continue;
             }
 
-            using var document = JsonDocument.Parse(line);
-            builder.Add(lineNumber, document.RootElement);
+            using var document = JsonDocument.Parse(reader.Line);
+            builder.Add(
+                reader.LineNumber,
+                reader.LineOffset,
+                reader.Line.Length,
+                document.RootElement);
         }
 
         return builder.Build(manifest);
@@ -91,6 +147,8 @@ public static class SessionArchiveReader
 
     internal static SessionTimelineEvent CreateTimelineEvent(
         long lineNumber,
+        long byteOffset,
+        int byteLength,
         JsonElement record,
         out JsonElement payload)
     {
@@ -110,7 +168,8 @@ public static class SessionArchiveReader
             eventType,
             timestamp,
             CreateSummary(channel, eventType, payload),
-            record.GetRawText());
+            byteOffset,
+            byteLength);
     }
 
     internal static void AddFrame(

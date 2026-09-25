@@ -495,13 +495,12 @@ public static class SessionArchiveValidator
         var timestampStates = new Dictionary<string, long>(StringComparer.Ordinal);
         var eventIds = new Dictionary<string, long>(StringComparer.Ordinal);
         var references = new List<EventReference>();
-        long lineNumber = 0;
         long eventCount = 0;
-        using var reader = new StreamReader(eventPath);
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        using var reader = new NdjsonLineReader(eventPath);
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false))
         {
-            lineNumber++;
-            if (string.IsNullOrWhiteSpace(line))
+            var lineNumber = reader.LineNumber;
+            if (reader.IsBlankLine)
             {
                 AddError(
                     issues,
@@ -515,7 +514,7 @@ public static class SessionArchiveValidator
             JsonDocument eventDocument;
             try
             {
-                eventDocument = JsonDocument.Parse(line);
+                eventDocument = JsonDocument.Parse(reader.Line);
             }
             catch (JsonException exception)
             {
@@ -533,7 +532,11 @@ public static class SessionArchiveValidator
             {
                 eventCount++;
                 var record = eventDocument.RootElement;
-                playback?.Add(lineNumber, record);
+                playback?.Add(
+                    lineNumber,
+                    reader.LineOffset,
+                    reader.Line.Length,
+                    record);
                 if (record.ValueKind != JsonValueKind.Object)
                 {
                     AddError(
