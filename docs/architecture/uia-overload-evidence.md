@@ -61,9 +61,20 @@ The application session validation therefore starts its own load source, `tests/
 
 The run fails if the source's mean rate is below 1,500 per second, so a run that did not apply the load cannot pass as one that did. The verifier reports how many observations the recorder received from the source's process and the busiest second of arrival. The existing focus checks decide whether focus evidence survived the load. Drop episodes are reported, not failed, because recording loss under load and stating it is the designed behavior.
 
+### First run under load
+
+The first application-launched run with the load source, at `80109fc`, passed:
+
+- The source raised 18,049 name changes over 9.008 s, a mean of 2,003.7 per second and at most 2,029 in one second.
+- The recorder received 18,025 observations from the source's process, at most 2,445 in one second of arrival. Of all 19,258 UI Automation observations, every one stated `event-cache`.
+- No drop episode was written. The required focus changes arrived 21.07 to 40.88 ms after their input.
+- The received name values cover every value from 0 to 18,016 without a gap. The source numbers its changes in order, so none raised before the last one received was lost. The 32 values above 18,016 were raised after the UI Automation collector stopped, at 10.121 s of session time, while the source kept raising until the recorder app closed. Six values arrived twice, which is consistent with WPF raising its own name change for the same update; this was not examined further.
+
+At about 2,000 observations per second, above the 1,588 per second that overflowed the queue before, the collector kept up without loss. Its highest rate without loss has not been measured.
+
 ## Limits
 
-- Whether caching reduces the processing time per observation enough to prevent overflow at the observed rates has not been measured. The first validation run with the load source is the first measurement.
+- One run at about 2,000 observations per second is one measurement. The rate at which the collector starts to drop, and how much of the improvement comes from caching rather than the reserve, have not been measured.
 - The load source raises events from one WPF process. A native or XAML provider, or several sources at once, may load UI Automation differently.
 - Loss inside UI Automation itself, before an event reaches the collector, is not visible to the collector and is not stated.
 - The collector still observes the whole desktop. Limiting it to the process under test would reduce load but would also stop recording evidence from other processes, which the recorder records by design.

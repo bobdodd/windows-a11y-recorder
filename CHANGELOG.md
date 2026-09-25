@@ -187,8 +187,10 @@ from the product version.
   validation now starts a UI Automation load source that raises 2,000 name
   changes per second on text elements while the recording runs, and fails if
   its mean rate is below 1,500 per second, since an application on the
-  desktop floods UI Automation only in some states. Whether caching prevents
-  overflow at these rates has not yet been measured. See
+  desktop floods UI Automation only in some states. The first run under that
+  load raised 18,049 name changes at a mean of 2,003.7 per second; the
+  recorder received every one raised while its collector ran, with no drop
+  episode and every observation read from the event cache. See
   `docs/architecture/uia-overload-evidence.md`.
 - Copy the newest arrived Windows Graphics Capture frame instead of the
   oldest queued one. The protocol 0.30 application-launched session run
