@@ -23,6 +23,10 @@ Two kinds of data are never recorded:
 - Cookie values.
 - Values that are, or look like, API keys and similar secrets.
 
+Browser crash reports are the one exception, described under
+[Diagnostic logs](#diagnostic-logs). They are raw process memory, which no rule
+can filter.
+
 ## Cookie values
 
 No record carries a cookie value, on any channel.
@@ -104,12 +108,15 @@ reach the archive through realtime records in:
 
 ## Diagnostic logs
 
-Diagnostic logs follow the same two rules. They are not session evidence and
-are kept local.
+Diagnostic logs follow the same two rules, except browser crash reports. They
+are not session evidence and are kept local.
 
-- Opt-in Chromium diagnostic logging is disabled by default. When enabled
-  through `A11Y_RECORDER_CHROMIUM_LOG_FILE`, the file can contain tested URLs
-  and browsing details.
+- The recorder writes Chromium's own log for every browser it launches, to
+  `diagnostics\chromium.log` inside the session directory, so a browser that
+  closes during a recording leaves a record of what it reported. The file can
+  contain tested URLs and browsing details. A path set through
+  `A11Y_RECORDER_CHROMIUM_LOG_FILE` is used instead of the session path when
+  present.
 - Early native bridge tracing through `A11Y_RECORDER_BRIDGE_LOG_FILE` records
   process identifiers, monotonic tick values, startup stages, child process
   types, and internal errors. It never includes bootstrap contents, pipe names,
@@ -118,6 +125,29 @@ are kept local.
   reduced to printable characters. The recorder sets this path for every
   browser it launches, writing to `diagnostics\browser-bridge.log` inside the
   session directory.
+
+### Browser crash reports
+
+When Chromium's crash handler writes a crash report for a browser the recorder
+launched, the recorder copies it into `diagnostics\browser-crash-reports`
+inside the session directory before it deletes the browser profile. The report
+is kept so a browser that closes during a recording can be diagnosed.
+
+A crash report can contain cookie values and API-key-like secrets. It is kept
+anyway, as a deliberate exception to the two rules. Crashpad, which writes the
+reports, captures a heuristic subset of the crashed process's state, including
+each thread's stack memory, memory referenced from registers and stacks, and
+the process command line and environment
+([Crashpad overview design](https://chromium.googlesource.com/crashpad/crashpad/+/refs/heads/main/doc/overview_design.md)).
+Any of that memory can hold a cookie value, a token, or page content, and a
+minidump cannot be filtered without losing what it is kept for. Two points
+apply:
+
+- The launched browser's environment already excludes variables whose names
+  contain credential words, and its command line carries no authentication
+  token, because the bootstrap is sent on standard input.
+- A session with a crash report must be handled as possibly containing cookie
+  values and secrets. A session without one is unaffected.
 
 ## Changes to this policy
 

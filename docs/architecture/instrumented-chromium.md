@@ -957,7 +957,8 @@ with no rejected connection, dropped record, or archive-validation issue.
 Details and reproducible commands are in the
 [validation record](../validation/chromium-connection-2026-09-18.md).
 
-Successful connections are persisted on the `browser.lifecycle` channel:
+Successful connections and browser exits are persisted on the
+`browser.lifecycle` channel:
 
 - `browser-connected` is emitted only after the hello message and
   authentication token are validated.
@@ -965,15 +966,45 @@ Successful connections are persisted on the `browser.lifecycle` channel:
   completes and the recorder sends `ready`.
 - Child-process hello messages are accepted only for renderer processes and
   must include positive browser parent and Chromium child process identifiers.
-- Neither record contains the authentication token.
+- `browser-exited` is emitted when a browser that completed startup exits,
+  observed from the operating system rather than reported by the browser. It
+  names the browser instance and process, the exit code as a signed integer
+  and in the unsigned hexadecimal form Windows status codes are written in,
+  the exit time Windows reports or null when it cannot, and
+  `requestedByRecorder`. That flag is true only when the exit followed the
+  recorder's own request to stop the browser. An exit the recorder did not
+  request leaves the rest of the session without browser evidence, so the
+  collector's health becomes `Degraded` with a stated reason, which the
+  application shows in its collector list and announces once through a UI
+  Automation notification. A browser that exits during startup is reported by
+  the launch failure instead.
+- Neither connection record contains the authentication token.
 - A failed authentication or handshake produces no lifecycle record. The
   rejection is stated as a `collector-omission` record with the reason
   `browser-connection-rejected` on the `browser.listener` channel.
-- Both lifecycle payloads are closed shapes the archive validator checks, as are
+- The three lifecycle payloads are closed shapes the archive validator checks, as are
   the three accessibility checkpoint payloads. An accessibility checkpoint must
   name a renderer process and the Chromium document token it serialized, and
   carries no DOM document node identity, because the serialization is not taken
   at a DOM checkpoint.
+
+Two diagnostic files support explaining a browser that closes during a
+recording. Chromium's own log is written to `diagnostics\chromium.log` for every
+launched browser. Chromium on Windows keeps crash reports in a `Crashpad`
+folder inside its user data directory
+([install_util.cc](https://source.chromium.org/chromium/chromium/src/+/main:chrome/install_static/install_util.cc)),
+and Crashpad's Windows database writes each report as a `.dmp` file in its
+`reports` folder
+([crash_report_database_win.cc](https://chromium.googlesource.com/crashpad/crashpad/+/refs/heads/main/client/crash_report_database_win.cc)).
+The recorder copies that folder's files into
+`diagnostics\browser-crash-reports` after the browser has exited and before
+the per-session profile is deleted. A failed copy is stated as a
+`collector-omission` record with the reason `browser-crash-report-copy-failed`.
+Crash reports are an exception to the privacy policy's rules on cookie values
+and secrets, as the [privacy and data-handling
+policy](../security/privacy-and-data-handling-policy.md) states. Whether this
+build's crash handler writes reports at all has not yet been confirmed on the
+reference platform.
 
 ## Instrumentation sequence
 

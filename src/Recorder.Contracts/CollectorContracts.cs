@@ -150,6 +150,10 @@ public interface ICaptureCollector : IAsyncDisposable
     CollectorLifecycleState LifecycleState { get; }
     CollectorHealthState HealthState { get; }
 
+    // Why the collector is not healthy, in words an operator can act on, when
+    // the collector can say. Null when healthy or when no reason is known.
+    string? HealthReason => null;
+
     ValueTask<CapabilityResult> InitializeAsync(
         CollectorInitializationContext context,
         CancellationToken cancellationToken);

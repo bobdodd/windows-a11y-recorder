@@ -21,6 +21,8 @@ namespace Recorder.App;
 internal sealed class BusyIndicator
 {
     private const string BusyActivityId = "Recorder.App.Busy";
+    private const string CollectorHealthActivityId =
+        "Recorder.App.CollectorHealth";
 
     private readonly UIElement _announcer;
     private readonly FrameworkElement _panel;
@@ -66,6 +68,16 @@ internal sealed class BusyIndicator
     /// </summary>
     public void AnnounceCompleted(string message) =>
         Announce(message, AutomationNotificationKind.ActionCompleted, BusyActivityId);
+
+    /// <summary>
+    /// Speaks a change the user did not ask for and may need to act on, such
+    /// as a collector that stopped supplying evidence during a recording.
+    /// </summary>
+    public void AnnounceAlert(string message) =>
+        Announce(
+            message,
+            AutomationNotificationKind.Other,
+            CollectorHealthActivityId);
 
     private void End()
     {

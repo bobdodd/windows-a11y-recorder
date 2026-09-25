@@ -9,6 +9,9 @@ namespace Recorder.Collectors.Browser;
 
 public sealed class BrowserEvidenceReceiver : ICaptureCollector
 {
+    public const string ChromiumLogFileName = "chromium.log";
+    public const string CrashReportsDirectoryName = "browser-crash-reports";
+
     private readonly BrowserEvidenceReceiverOptions _options;
     private readonly object _gate = new();
     private readonly object _eventWriteGate = new();
@@ -20,6 +23,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
     private CancellationTokenSource? _runCancellation;
     private Task? _acceptTask;
     private string? _ownedProfileDirectory;
+    private string? _profileDirectory;
     private long _sequence = -1;
 
     public BrowserEvidenceReceiver(
@@ -54,6 +58,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
             BrowserEvidenceProtocol.CurrentVersion,
             _options.BrowserInstanceId,
             _options.MaximumMessageBytes);
+        _launcher.Exited += OnBrowserExited;
     }
 
     public CollectorDescriptor Descriptor { get; }
@@ -62,6 +67,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
         CollectorLifecycleState.Created;
     public CollectorHealthState HealthState { get; private set; } =
         CollectorHealthState.Unknown;
+    public string? HealthReason { get; private set; }
 
     public ValueTask<CapabilityResult> InitializeAsync(
         CollectorInitializationContext context,
@@ -125,6 +131,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                     _context.SessionId);
                 _ownedProfileDirectory = profileDirectory;
             }
+            _profileDirectory = profileDirectory;
             // A bridge that fails before Chromium logging starts can only
             // report its reason through this file, so a path is always
             // supplied. An environment value set by a validation harness is
@@ -158,7 +165,11 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                     _options.StartUrl,
                     _options.RemoteDebuggingPort,
                     bridgeDiagnosticLogPath,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    Path.Combine(
+                        _context.SessionDirectory,
+                        "diagnostics",
+                        ChromiumLogFileName)).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -197,6 +208,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
 
         LifecycleState = CollectorLifecycleState.Stopping;
         await _launcher.StopAsync(cancellationToken).ConfigureAwait(false);
+        PreserveCrashReports();
         DeleteOwnedProfile();
         await _runCancellation!.CancelAsync().ConfigureAwait(false);
 
@@ -241,6 +253,7 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
         }
         _runCancellation?.Dispose();
         await _launcher.DisposeAsync().ConfigureAwait(false);
+        PreserveCrashReports();
         DeleteOwnedProfile();
         LifecycleState = CollectorLifecycleState.Disposed;
     }
@@ -677,6 +690,92 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
             CultureInfo.InvariantCulture,
             out result) &&
         result > 0;
+
+    // The exit is recorded whether or not the recorder asked for it, so the log
+    // states where browser evidence ends and why. An exit the recorder did not
+    // ask for leaves the rest of the session without browser evidence, which
+    // the health state and its reason make visible while recording continues.
+    internal void OnBrowserExited(ChromiumExit exit)
+    {
+        var exitCodeHex = ChromiumLauncher.FormatExitCode(exit.ExitCode);
+        EmitLifecycle(
+            BrowserEvidenceEventTypes.Exited,
+            new
+            {
+                browserInstanceId = _options.BrowserInstanceId,
+                processId = exit.ProcessId,
+                exitCode = exit.ExitCode,
+                exitCodeHex,
+                exitedUtc = exit.ExitedUtc,
+                requestedByRecorder = exit.RequestedByRecorder
+            });
+        if (!exit.RequestedByRecorder &&
+            LifecycleState == CollectorLifecycleState.Running)
+        {
+            HealthState = CollectorHealthState.Degraded;
+            HealthReason =
+                "The instrumented browser closed during the recording with " +
+                $"exit code {exitCodeHex}. No browser evidence was recorded " +
+                "after that point.";
+        }
+    }
+
+    // Chromium keeps crash reports in the Crashpad folder of its user data
+    // directory, which is deleted when the session ends. The reports are
+    // copied into the session first, after the browser has exited, so a
+    // browser crash leaves evidence.
+    private void PreserveCrashReports()
+    {
+        var profileDirectory = _profileDirectory;
+        _profileDirectory = null;
+        if (profileDirectory is null || _context is null)
+        {
+            return;
+        }
+
+        try
+        {
+            CopyCrashReports(profileDirectory, _context.SessionDirectory);
+        }
+        catch
+        {
+            HealthState = CollectorHealthState.Degraded;
+            EmitOmission(BrowserEvidenceOmissionReasons.CrashReportCopyFailed);
+        }
+    }
+
+    internal static int CopyCrashReports(
+        string profileDirectory,
+        string sessionDirectory)
+    {
+        var reportsDirectory = Path.Combine(
+            profileDirectory,
+            "Crashpad",
+            "reports");
+        if (!Directory.Exists(reportsDirectory))
+        {
+            return 0;
+        }
+
+        var destinationDirectory = Path.Combine(
+            sessionDirectory,
+            "diagnostics",
+            CrashReportsDirectoryName);
+        var count = 0;
+        foreach (var source in Directory.EnumerateFiles(
+                     reportsDirectory,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            var destination = Path.Combine(
+                destinationDirectory,
+                Path.GetRelativePath(reportsDirectory, source));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(source, destination, overwrite: false);
+            count++;
+        }
+        return count;
+    }
 
     private void DeleteOwnedProfile()
     {

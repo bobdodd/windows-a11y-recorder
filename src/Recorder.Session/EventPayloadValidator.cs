@@ -101,6 +101,9 @@ internal static class EventPayloadValidator
             case ("browser.lifecycle", "browser-connected"):
                 ValidateBrowserConnected(payload, issues, lineNumber);
                 break;
+            case ("browser.lifecycle", "browser-exited"):
+                ValidateBrowserExited(payload, issues, lineNumber);
+                break;
             case ("browser.lifecycle", "browser-clock-synchronized"):
                 ValidateBrowserClockSynchronized(payload, issues, lineNumber);
                 break;
@@ -756,6 +759,27 @@ internal static class EventPayloadValidator
                 RequiredText("chromiumVersion"),
                 NullableInteger("parentProcessId", nonnegative: true),
                 NullableInteger("childProcessId", nonnegative: true)
+            ],
+            issues,
+            line);
+
+    // The exit code is the process exit status Windows reports, which is signed
+    // here and also given as the unsigned hexadecimal form Windows status codes
+    // are usually written in. The exit time is null when Windows could not
+    // report it.
+    private static void ValidateBrowserExited(
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line) =>
+        ValidateShape(
+            payload,
+            [
+                RequiredString("browserInstanceId"),
+                RequiredInteger("processId", positive: true),
+                RequiredInteger("exitCode"),
+                RequiredString("exitCodeHex"),
+                NullableDateTime("exitedUtc"),
+                RequiredBoolean("requestedByRecorder")
             ],
             issues,
             line);
@@ -4917,6 +4941,15 @@ internal static class EventPayloadValidator
             value => value.ValueKind == JsonValueKind.String &&
                 value.TryGetDateTimeOffset(out _),
             "must be a date-time string");
+
+    private static PropertyRule NullableDateTime(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.String &&
+                value.TryGetDateTimeOffset(out _),
+            "must be a date-time string or null");
 
     private static PropertyRule RequiredStringArray(string name) =>
         new(

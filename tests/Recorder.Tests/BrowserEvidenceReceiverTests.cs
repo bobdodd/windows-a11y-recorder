@@ -31,6 +31,103 @@ public sealed class BrowserEvidenceReceiverTests
     }
 
     [Fact]
+    public async Task RecordsBrowserExitAndDegradesOnlyWhenNotRequested()
+    {
+        var clock = new TestSessionClock();
+        var sink = new TestEventSink();
+        await using var receiver = new BrowserEvidenceReceiver(
+            new BrowserEvidenceReceiverOptions
+            {
+                PipeName = $"recorder-browser-test-{Guid.NewGuid():N}",
+                BrowserInstanceId = "browser-1"
+            });
+        await receiver.InitializeAsync(
+            new CollectorInitializationContext(
+                "test-session",
+                Path.GetTempPath(),
+                clock,
+                sink),
+            TestContext.Current.CancellationToken);
+        await receiver.StartAsync(
+            new SessionBoundary(
+                clock.GetElapsedNanoseconds(),
+                DateTimeOffset.UtcNow),
+            TestContext.Current.CancellationToken);
+
+        receiver.OnBrowserExited(new ChromiumExit(
+            26860,
+            0,
+            DateTimeOffset.UtcNow,
+            RequestedByRecorder: true));
+        Assert.Equal(CollectorHealthState.Healthy, receiver.HealthState);
+        Assert.Null(receiver.HealthReason);
+
+        receiver.OnBrowserExited(new ChromiumExit(
+            26860,
+            unchecked((int)0x80000003),
+            null,
+            RequestedByRecorder: false));
+        Assert.Equal(CollectorHealthState.Degraded, receiver.HealthState);
+        Assert.Contains("0x80000003", receiver.HealthReason);
+
+        var requested = await sink.WaitForRecordAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        var unrequested = await sink.WaitForRecordAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(BrowserEvidenceChannels.Lifecycle, requested.Channel);
+        Assert.Equal(BrowserEvidenceEventTypes.Exited, requested.EventType);
+        Assert.True(
+            requested.Payload.GetProperty("requestedByRecorder").GetBoolean());
+        Assert.False(
+            unrequested.Payload.GetProperty("requestedByRecorder").GetBoolean());
+        Assert.Equal(
+            "0x80000003",
+            unrequested.Payload.GetProperty("exitCodeHex").GetString());
+        Assert.Equal(
+            JsonValueKind.Null,
+            unrequested.Payload.GetProperty("exitedUtc").ValueKind);
+    }
+
+    [Fact]
+    public void CopiesBrowserCrashReportsIntoSessionDiagnostics()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-tests",
+            Guid.NewGuid().ToString("N"));
+        var profile = Path.Combine(root, "profile");
+        var session = Path.Combine(root, "session");
+        var reports = Path.Combine(profile, "Crashpad", "reports");
+        Directory.CreateDirectory(reports);
+        File.WriteAllText(Path.Combine(reports, "report-1.dmp"), "dump");
+
+        try
+        {
+            Assert.Equal(
+                0,
+                BrowserEvidenceReceiver.CopyCrashReports(
+                    Path.Combine(root, "no-profile"),
+                    session));
+            Assert.Equal(
+                1,
+                BrowserEvidenceReceiver.CopyCrashReports(profile, session));
+            Assert.Equal(
+                "dump",
+                File.ReadAllText(Path.Combine(
+                    session,
+                    "diagnostics",
+                    BrowserEvidenceReceiver.CrashReportsDirectoryName,
+                    "report-1.dmp")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AuthenticatesSynchronizesAndAcceptsBrowserEvidence()
     {
         var options = new BrowserEvidenceReceiverOptions

@@ -190,6 +190,20 @@ from the product version.
 
 ### Changed
 
+- Record when the instrumented browser exits. A `browser-exited` lifecycle
+  record states the exit code, the exit time Windows reports, and whether the
+  recorder asked the browser to stop. An exit the recorder did not ask for
+  marks the browser collector `Degraded` with a reason, shown in the collector
+  list and announced to screen readers once, because the recording continues
+  without browser evidence. Previously such an exit left no record, and the
+  browser evidence simply stopped.
+- Keep evidence of a browser that closes during a recording. Chromium's log is
+  now written to `diagnostics\chromium.log` for every session, and crash
+  reports in the per-session browser profile are copied to
+  `diagnostics\browser-crash-reports` before the profile is deleted. The
+  privacy and data-handling policy is amended: the Chromium log is on by
+  default, and crash reports are an exception to the rules on cookie values and
+  secrets, because they are raw process memory.
 - Show when the app is busy. Starting a recording, stopping and verifying it,
   and loading or validating a recording for playback now set the wait cursor,
   show a working indicator with text in the player status bar, and raise UI

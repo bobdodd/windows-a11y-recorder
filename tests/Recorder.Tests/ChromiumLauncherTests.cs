@@ -38,6 +38,104 @@ public sealed class ChromiumLauncherTests
     }
 
     [Fact]
+    public async Task ReportsAnExitTheRecorderDidNotRequest()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        // The script outlives the startup stability window, then ends with
+        // its own exit code, as a browser that closes unasked would.
+        var script = Path.Combine(root, "exits-later.cmd");
+        File.WriteAllText(
+            script,
+            "@ping -n 3 127.0.0.1 >nul\r\n@exit /b 7\r\n");
+        var exited = new TaskCompletionSource<ChromiumExit>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var launcher = new ChromiumLauncher(() => false);
+        launcher.Exited += exit => exited.TrySetResult(exit);
+
+        try
+        {
+            var process = await launcher.LaunchAsync(
+                script,
+                Path.Combine(root, "profile"),
+                CreateConnection(),
+                startUrl: null,
+                remoteDebuggingPort: null,
+                bridgeDiagnosticLogPath: null,
+                TestContext.Current.CancellationToken);
+            var exit = await exited.Task.WaitAsync(
+                TimeSpan.FromSeconds(15),
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(process.Id, exit.ProcessId);
+            Assert.Equal(7, exit.ExitCode);
+            Assert.False(exit.RequestedByRecorder);
+            Assert.NotNull(exit.ExitedUtc);
+        }
+        finally
+        {
+            await launcher.StopAsync(CancellationToken.None);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReportsAnExitTheRecorderRequestedBeforeStopReturns()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "recorder-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var script = Path.Combine(root, "runs-until-stopped.cmd");
+        File.WriteAllText(script, "@ping -n 60 127.0.0.1 >nul\r\n");
+        ChromiumExit? reported = null;
+        await using var launcher = new ChromiumLauncher(() => false);
+        launcher.Exited += exit => reported = exit;
+
+        try
+        {
+            await launcher.LaunchAsync(
+                script,
+                Path.Combine(root, "profile"),
+                CreateConnection(),
+                startUrl: null,
+                remoteDebuggingPort: null,
+                bridgeDiagnosticLogPath: null,
+                TestContext.Current.CancellationToken);
+            await launcher.StopAsync(TestContext.Current.CancellationToken);
+
+            Assert.NotNull(reported);
+            Assert.True(reported.RequestedByRecorder);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FormatsExitCodesAsWindowsStatusValues()
+    {
+        Assert.Equal("0x00000000", ChromiumLauncher.FormatExitCode(0));
+        Assert.Equal(
+            "0x80000003",
+            ChromiumLauncher.FormatExitCode(unchecked((int)0x80000003)));
+        Assert.Equal("0x0000A11B", ChromiumLauncher.FormatExitCode(0xA11B));
+    }
+
+    private static BrowserEvidenceConnectionInfo CreateConnection() =>
+        new(
+            $"unused-{Guid.NewGuid():N}",
+            "test-authentication-token",
+            BrowserEvidenceProtocol.CurrentVersion,
+            Guid.NewGuid().ToString("N"),
+            1024);
+
+    [Fact]
     public async Task LaunchRejectsElevatedRecorderProcess()
     {
         var executable = Path.Combine(Environment.SystemDirectory, "cmd.exe");

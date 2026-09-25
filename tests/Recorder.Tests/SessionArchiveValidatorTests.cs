@@ -943,6 +943,64 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
+    public async Task AcceptsBrowserExitAndRejectsItWithoutItsRequester()
+    {
+        // The exit record states whether the recorder asked for the exit, so
+        // a record that omits it cannot be read as either.
+        var exited = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Lifecycle,
+            BrowserEvidenceEventTypes.Exited,
+            new
+            {
+                browserInstanceId = "browser-1",
+                processId = 26860,
+                exitCode = unchecked((int)0x80000003),
+                exitCodeHex = "0x80000003",
+                exitedUtc = (DateTimeOffset?)null,
+                requestedByRecorder = false
+            });
+        var incomplete = CreateEvent(
+            1,
+            200,
+            BrowserEvidenceChannels.Lifecycle,
+            BrowserEvidenceEventTypes.Exited,
+            new
+            {
+                browserInstanceId = "browser-1",
+                processId = 26860,
+                exitCode = 0,
+                exitCodeHex = "0x00000000",
+                exitedUtc = DateTimeOffset.UtcNow
+            });
+        var validDirectory = await CreateArchiveAsync([exited]);
+        var invalidDirectory = await CreateArchiveAsync([incomplete]);
+
+        try
+        {
+            var valid = await SessionArchiveValidator.ValidateAsync(
+                validDirectory,
+                TestContext.Current.CancellationToken);
+            var invalid = await SessionArchiveValidator.ValidateAsync(
+                invalidDirectory,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(valid.IsValid);
+            Assert.Empty(valid.Issues);
+            Assert.False(invalid.IsValid);
+            Assert.Contains(
+                invalid.Issues,
+                issue => issue.Code == "payload-property-missing");
+        }
+        finally
+        {
+            Directory.Delete(validDirectory, recursive: true);
+            Directory.Delete(invalidDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RejectsABrowserOmissionThatReportsAnUnknownFact()
     {
         // The omission shape is closed, so a fact no reporter is defined to

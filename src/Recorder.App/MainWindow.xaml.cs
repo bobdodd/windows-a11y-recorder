@@ -53,6 +53,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _playbackTimer;
     private readonly Stopwatch _playbackStopwatch = new();
     private readonly BusyIndicator _busy;
+    private readonly HashSet<string> _announcedHealthReasons =
+        new(StringComparer.Ordinal);
     private SessionCoordinator? _coordinator;
     private SessionAudioPlayer? _audioPlayer;
     private SessionPlaybackArchive? _playbackArchive;
@@ -123,6 +125,7 @@ public partial class MainWindow : Window
         SetConfigurationEnabled(false);
         OpenRecordingButton.IsEnabled = false;
         StatusTextBlock.Text = "Starting recording.";
+        _announcedHealthReasons.Clear();
         var busy = _busy.Begin("Starting recording.");
 
         try
@@ -1131,8 +1134,27 @@ public partial class MainWindow : Window
             $"Events: {status.AcceptedEvents:N0} accepted, " +
             $"{status.DroppedEvents:N0} dropped";
         CollectorStatusListBox.ItemsSource = status.Collectors.Select(collector =>
-            $"{collector.CollectorType}: {collector.Lifecycle}, {collector.Health}")
+            collector.HealthReason is null
+                ? $"{collector.CollectorType}: {collector.Lifecycle}, {collector.Health}"
+                : $"{collector.CollectorType}: {collector.Lifecycle}, " +
+                    $"{collector.Health}. {collector.HealthReason}")
             .ToArray();
+
+        // A collector that stops supplying evidence while recording is spoken
+        // once, because the recording continues and nothing else would tell a
+        // screen-reader user that part of the evidence has ended.
+        if (status.State == RecordingSessionState.Recording)
+        {
+            foreach (var collector in status.Collectors)
+            {
+                if (collector.HealthReason is { } reason &&
+                    _announcedHealthReasons.Add(
+                        $"{collector.CollectorType}\n{reason}"))
+                {
+                    _busy.AnnounceAlert(reason);
+                }
+            }
+        }
     }
 
     private void SetConfigurationEnabled(bool enabled)

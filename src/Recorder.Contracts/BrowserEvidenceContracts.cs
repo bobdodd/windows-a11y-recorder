@@ -25,6 +25,7 @@ public static class BrowserEvidenceChannels
 public static class BrowserEvidenceEventTypes
 {
     public const string Connected = "browser-connected";
+    public const string Exited = "browser-exited";
     public const string ClockSynchronized = "browser-clock-synchronized";
     public const string ListenerRegistered = "listener-registered";
     public const string ListenerRemoved = "listener-removed";
@@ -110,6 +111,8 @@ public static class BrowserEvidenceOmissionReasons
 {
     public const string EvidenceWriteFailed = "browser-evidence-write-failed";
     public const string SinkRefusedRecord = "browser-evidence-sink-refused";
+    public const string CrashReportCopyFailed =
+        "browser-crash-report-copy-failed";
 }
 
 public sealed record BrowserContext(

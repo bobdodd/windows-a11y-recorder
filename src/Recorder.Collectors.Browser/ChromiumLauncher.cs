@@ -54,6 +54,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
     private readonly Func<bool> _isCurrentProcessElevated;
     private Process? _process;
     private string? _bridgeDiagnosticLogPath;
+    private Task? _exitWatch;
+    private volatile bool _stopRequested;
 
     public ChromiumLauncher()
         : this(IsCurrentProcessElevated)
@@ -68,6 +70,11 @@ public sealed class ChromiumLauncher : IAsyncDisposable
 
     public Process? Process => _process;
 
+    // Raised once when a browser that completed startup exits, whether the
+    // recorder asked it to or not. Startup exits are reported by the launch
+    // failure instead, so a browser that never started is not reported twice.
+    public event Action<ChromiumExit>? Exited;
+
     public async Task<Process> LaunchAsync(
         string executablePath,
         string profileDirectory,
@@ -75,7 +82,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         string? startUrl,
         int? remoteDebuggingPort,
         string? bridgeDiagnosticLogPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? chromiumLogPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(profileDirectory);
@@ -104,7 +112,10 @@ public sealed class ChromiumLauncher : IAsyncDisposable
             executablePath,
             profileDirectory,
             startUrl,
-            Environment.GetEnvironmentVariable(LogFileEnvironmentVariable),
+            // A path set by a validation harness is preserved rather than
+            // replaced, as it is for the bridge log.
+            Environment.GetEnvironmentVariable(LogFileEnvironmentVariable) ??
+                chromiumLogPath,
             remoteDebuggingPort,
             bridgeDiagnosticLogPath);
         _bridgeDiagnosticLogPath =
@@ -115,6 +126,7 @@ public sealed class ChromiumLauncher : IAsyncDisposable
             throw new InvalidOperationException(
                 "Instrumented Chromium did not start.");
         _process = process;
+        _stopRequested = false;
 
         try
         {
@@ -139,6 +151,7 @@ public sealed class ChromiumLauncher : IAsyncDisposable
                         process.ExitCode,
                         _bridgeDiagnosticLogPath));
             }
+            _exitWatch = WatchForExitAsync(process);
             return process;
         }
         catch (Exception exception)
@@ -449,6 +462,67 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         return null;
     }
 
+    // The exit is observed from the operating system, so it is recorded even
+    // when the browser could not say anything before it ended. The exit time
+    // is the one Windows reports for the process, which can be unavailable.
+    private async Task WatchForExitAsync(Process process)
+    {
+        int processId;
+        try
+        {
+            processId = process.Id;
+            await process.WaitForExitAsync().ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        int exitCode;
+        try
+        {
+            exitCode = process.ExitCode;
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        DateTimeOffset? exitedUtc = null;
+        try
+        {
+            exitedUtc = new DateTimeOffset(process.ExitTime.ToUniversalTime());
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (NotSupportedException)
+        {
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+        }
+
+        try
+        {
+            Exited?.Invoke(new ChromiumExit(
+                processId,
+                exitCode,
+                exitedUtc,
+                _stopRequested));
+        }
+        catch
+        {
+            // A failing observer must not leave the exit watch faulted, because
+            // stopping the browser waits for it.
+        }
+    }
+
+    public static string FormatExitCode(int exitCode) =>
+        "0x" + unchecked((uint)exitCode).ToString(
+            "X8",
+            System.Globalization.CultureInfo.InvariantCulture);
+
     private static void TerminateProcessTree(Process process)
     {
         try
@@ -571,6 +645,9 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         {
             if (!process.HasExited)
             {
+                // Set only for a browser still running, so an exit that came
+                // first is not attributed to the recorder's request.
+                _stopRequested = true;
                 _ = process.CloseMainWindow();
                 try
                 {
@@ -588,6 +665,14 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         }
         finally
         {
+            // The exit is reported before the process is released, so the
+            // exit code is still readable and the record precedes the stop.
+            var exitWatch = _exitWatch;
+            _exitWatch = null;
+            if (exitWatch is not null && process.HasExited)
+            {
+                await exitWatch.ConfigureAwait(false);
+            }
             process.Dispose();
             _process = null;
         }
@@ -598,6 +683,14 @@ public sealed class ChromiumLauncher : IAsyncDisposable
         await StopAsync(CancellationToken.None).ConfigureAwait(false);
     }
 }
+
+// An exit of a browser that completed startup. RequestedByRecorder is true
+// only when the exit followed the recorder's own request to stop the browser.
+public sealed record ChromiumExit(
+    int ProcessId,
+    int ExitCode,
+    DateTimeOffset? ExitedUtc,
+    bool RequestedByRecorder);
 
 // Distinguishes an exit observed inside the startup stability window from any
 // other launch failure, so a described exit is never described again.
