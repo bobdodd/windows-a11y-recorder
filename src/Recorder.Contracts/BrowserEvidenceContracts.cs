@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.30";
+    public const string CurrentVersion = "0.31";
 }
 
 public static class BrowserEvidenceChannels
@@ -143,12 +143,13 @@ public static class BrowserEventTargetKinds
 // carries a DOM node identifier. A Window or other non-Node EventTarget has
 // none, so its NodeId is absent and it is identified by Kind, by the Blink
 // interface name, and by a target identifier that is stable for the lifetime of
-// the renderer process that reported it.
+// the renderer process that reported it. DocumentId is null only for a
+// non-Node target in a worker or worklet scope, which belongs to no document.
 public sealed record BrowserEventTargetReference(
     string Kind,
     string? InterfaceName,
     string? TargetId,
-    string DocumentId,
+    string? DocumentId,
     long? NodeId,
     string? BackendNodeId,
     string? TagName,
@@ -196,7 +197,8 @@ public sealed record BrowserListenerPayload(
     bool Passive,
     bool Once,
     BrowserScriptLocation? Location,
-    BrowserExecutionWorld? World);
+    BrowserExecutionWorld? World,
+    BrowserNetworkScope? Scope = null);
 
 // Describes the tree scope one composed path entry is dispatched in, at the
 // same index as that entry. TreeScopeRootNodeId is the document or shadow root
@@ -230,7 +232,8 @@ public sealed record BrowserDispatchPayload(
     string? DefaultAction,
     string? Outcome,
     BrowserEventTargetReference? CurrentTarget = null,
-    IReadOnlyList<BrowserDispatchPathScope>? PathScopes = null);
+    IReadOnlyList<BrowserDispatchPathScope>? PathScopes = null,
+    BrowserNetworkScope? Scope = null);
 
 public sealed record BrowserTimerPayload(
     BrowserContext Context,
@@ -830,8 +833,10 @@ public sealed record BrowserNetworkHeader(
     bool ValueRedacted,
     string? RedactionReason);
 
-// Names the execution context that issued a renderer request. WorkerToken is
-// null for a window. GlobalObjectUrl is the worker script URL for a worker.
+// Names the execution context that issued a renderer request, and from
+// protocol 0.31 the context a listener or dispatch record belongs to, so a
+// worker's records on both channels carry one WorkerToken. WorkerToken is null
+// for a window. GlobalObjectUrl is the worker script URL for a worker.
 public sealed record BrowserNetworkScope(
     string ContextKind,
     string? WorkerToken,

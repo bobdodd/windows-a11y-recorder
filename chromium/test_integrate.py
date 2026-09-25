@@ -172,6 +172,89 @@ HISTORICAL_LISTENER_HOOK_WITHOUT_REGISTRATION_KIND = """\
 """
 
 
+# The at-target dispatch Blink performs for an EventTarget that is not a Node.
+EVENT_TARGET_DISPATCH_SOURCE = (
+    "\n"
+    "DispatchEventResult EventTarget::DispatchEventInternal(Event& event) {\n"
+    "  event.SetTarget(this);\n"
+    "  event.SetCurrentTarget(this);\n"
+    "  event.SetEventPhase(Event::PhaseType::kAtTarget);\n"
+    "  DispatchEventResult dispatch_result = FireEventListeners(event);\n"
+    "  event.SetEventPhase(Event::PhaseType::kNone);\n"
+    "  return dispatch_result;\n"
+    "}\n"
+)
+# The entry point the Node event dispatcher's source opens with.
+EVENT_DISPATCHER_DISPATCH_EVENT_SOURCE = (
+    "DispatchEventResult EventDispatcher::DispatchEvent(Node& node, "
+    "Event& event) {\n"
+    "  return EventDispatcher(node, event).Dispatch();\n"
+    "}\n"
+    "\n"
+)
+# A window's dispatch of its own load and pageshow events.
+LOCAL_DOM_WINDOW_SOURCE = (
+    '#include "third_party/blink/renderer/core/frame/local_dom_window.h"\n'
+    "\n"
+    "#include <memory>\n"
+    "\n"
+    "DispatchEventResult LocalDOMWindow::DispatchEvent(Event& event,\n"
+    "                                                  EventTarget* target) {\n"
+    "  event.SetTrusted(true);\n"
+    "  event.SetTarget(target ? target : this);\n"
+    "  event.SetCurrentTarget(this);\n"
+    "  event.SetEventPhase(Event::PhaseType::kAtTarget);\n"
+    "\n"
+    '  DEVTOOLS_TIMELINE_TRACE_EVENT("EventDispatch",\n'
+    "                                inspector_event_dispatch_event::Data, "
+    "event,\n"
+    "                                GetIsolate());\n"
+    "  return FireEventListeners(event);\n"
+    "}\n"
+)
+# IndexedDB's own propagation from a request to its transaction and database.
+IDB_EVENT_DISPATCHER_SOURCE = (
+    '#include "third_party/blink/renderer/modules/indexeddb/'
+    'idb_event_dispatcher.h"\n'
+    "\n"
+    "namespace blink {\n"
+    "\n"
+    "DispatchEventResult IDBEventDispatcher::Dispatch(\n"
+    "    Event& event,\n"
+    "    HeapVector<Member<EventTarget>>& event_targets) {\n"
+    "  wtf_size_t size = event_targets.size();\n"
+    "  DCHECK(size);\n"
+    "\n"
+    "  event.SetEventPhase(Event::PhaseType::kCapturingPhase);\n"
+    "  for (wtf_size_t i = size - 1; i; --i) {  // Don't do the first element.\n"
+    "    event.SetCurrentTarget(event_targets[i].Get());\n"
+    "    event_targets[i]->FireEventListeners(event);\n"
+    "    if (event.PropagationStopped())\n"
+    "      goto doneDispatching;\n"
+    "  }\n"
+    "\n"
+    "doneDispatching:\n"
+    "  event.SetCurrentTarget(nullptr);\n"
+    "  event.SetEventPhase(Event::PhaseType::kNone);\n"
+    "  return EventTarget::GetDispatchEventResult(event);\n"
+    "}\n"
+    "\n"
+    "}  // namespace blink\n"
+)
+IDB_BUILD_SOURCE = (
+    'blink_modules_sources("indexeddb") {\n'
+    "  sources = [\n"
+    '    "shared_idb_database_connection.cc",\n'
+    '    "shared_idb_database_connection.h",\n'
+    "  ]\n"
+    "\n"
+    "  public_deps = [\n"
+    '    "//third_party/blink/renderer/modules/indexeddb:mojo",\n'
+    "  ]\n"
+    "}\n"
+)
+
+
 class IntegrateTests(unittest.TestCase):
     def test_bridge_accepts_generated_negative_ax_node_ids(self):
         bridge_source = (
@@ -610,6 +693,8 @@ class IntegrateTests(unittest.TestCase):
                 'event_target.h"\n'
                 '#include "base/time/time.h"\n'
                 "\n"
+                "namespace blink {\n"
+                "\n"
                 "bool EventTarget::AddEventListenerInternal() {\n"
                 "  bool added = true;\n"
                 "  if (added) {\n"
@@ -667,7 +752,8 @@ class IntegrateTests(unittest.TestCase):
                 "the DOM spec.\n"
                 "    listener->Invoke(context, &event);\n"
                 "    fired_listener = true;\n"
-                "}\n",
+                "}\n"
+                + EVENT_TARGET_DISPATCH_SOURCE,
                 encoding="utf-8",
             )
             event_dispatcher.write_text(
@@ -675,7 +761,8 @@ class IntegrateTests(unittest.TestCase):
                 'event_dispatcher.h"\n'
                 '#include "build/build_config.h"\n'
                 "\n"
-                "DispatchEventResult EventDispatcher::Dispatch() {\n"
+                + EVENT_DISPATCHER_DISPATCH_EVENT_SOURCE
+                + "DispatchEventResult EventDispatcher::Dispatch() {\n"
                 "  event_->SetTarget("
                 "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
                 "#if DCHECK_IS_ON()\n"
@@ -1736,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.30"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.30"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.31"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.31"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -3334,11 +3421,164 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.parse_bridge_signatures(header),
         )
 
+    def test_records_dispatches_outside_the_node_dispatcher(self):
+        """Non-Node, window, and IndexedDB dispatches open their own records.
+
+        Blink fires these listeners without its Node event dispatcher, so
+        each entry point opens a dispatch only when no hook has opened one for
+        the same event, and completes only a dispatch it opened. Every call
+        matches the bridge signature, and a second run changes nothing.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event_target = root / "event_target.cc"
+            self._write_event_target(event_target)
+            window = root / "local_dom_window.cc"
+            window.write_text(LOCAL_DOM_WINDOW_SOURCE, encoding="utf-8")
+            idb = root / "idb_event_dispatcher.cc"
+            idb.write_text(IDB_EVENT_DISPATCHER_SOURCE, encoding="utf-8")
+            idb_build = root / "BUILD.gn"
+            idb_build.write_text(IDB_BUILD_SOURCE, encoding="utf-8")
+            dispatcher = root / "event_dispatcher.cc"
+            self._write_event_dispatcher(dispatcher)
+            signatures = INTEGRATE.parse_bridge_signatures(
+                (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+                .read_text(encoding="utf-8")
+            )
+
+            def patch_all() -> dict[Path, str]:
+                INTEGRATE.patch_blink_event_target(event_target)
+                INTEGRATE.patch_blink_local_dom_window(window)
+                INTEGRATE.patch_blink_idb_event_dispatcher(idb)
+                INTEGRATE.patch_blink_idb_build(idb_build)
+                INTEGRATE.patch_blink_event_dispatcher(dispatcher)
+                return {
+                    path: path.read_text(encoding="utf-8")
+                    for path in (
+                        event_target, window, idb, idb_build, dispatcher
+                    )
+                }
+
+            INTEGRATE._INTEGRATED_PATHS.clear()
+            try:
+                first = patch_all()
+                INTEGRATE.verify_integrated_sources(signatures)
+                second = patch_all()
+            finally:
+                INTEGRATE._INTEGRATED_PATHS.clear()
+
+        self.assertEqual(first, second)
+        target_text = first[event_target]
+        self.assertEqual(
+            1, target_text.count(INTEGRATE.BLINK_EVENT_TARGET_DISPATCH_HOOK)
+        )
+        self.assertEqual(
+            1, target_text.count(INTEGRATE.BLINK_EVENT_SCOPE_HELPER_MARKER)
+        )
+        self.assertEqual(
+            1, target_text.count(INTEGRATE.BLINK_TARGET_DISPATCH_HELPER_MARKER)
+        )
+        # Every listener record names its execution context.
+        self.assertEqual(
+            3, target_text.count("RecorderEventScopeFor(recorder_context)")
+        )
+        # The helpers precede every hook that reads them.
+        self.assertLess(
+            target_text.index(INTEGRATE.BLINK_EVENT_SCOPE_HELPER_MARKER),
+            target_text.index("RecorderEventScopeFor(recorder_context)"),
+        )
+        window_text = first[window]
+        self.assertEqual(
+            1, window_text.count(INTEGRATE.BLINK_WINDOW_DISPATCH_HOOK)
+        )
+        self.assertNotIn("  return FireEventListeners(event);\n", window_text)
+        self.assertLess(
+            window_text.index(INTEGRATE.BLINK_TARGET_DISPATCH_HELPER_MARKER),
+            window_text.index("DispatchEventResult LocalDOMWindow::"),
+        )
+        idb_text = first[idb]
+        self.assertEqual(
+            1, idb_text.count(INTEGRATE.BLINK_IDB_DISPATCH_START_HOOK)
+        )
+        self.assertEqual(
+            1, idb_text.count(INTEGRATE.BLINK_IDB_DISPATCH_COMPLETED_HOOK)
+        )
+        # The dispatch flag is declared before the first jump past it.
+        self.assertLess(
+            idb_text.index("const bool recorder_dispatch_opened"),
+            idb_text.index("goto doneDispatching;"),
+        )
+        self.assertLess(
+            idb_text.index("namespace blink {"),
+            idb_text.index(INTEGRATE.BLINK_TARGET_DISPATCH_HELPER_MARKER),
+        )
+        self.assertIn(
+            '  deps = [ "//chromium/recorder_bridge" ]\n', first[idb_build]
+        )
+        self.assertIn(
+            "RecorderEventScopeFor(node_->GetExecutionContext())",
+            first[dispatcher],
+        )
+        self.assertLess(
+            first[dispatcher].index(INTEGRATE.BLINK_EVENT_SCOPE_HELPER_MARKER),
+            first[dispatcher].index("DispatchEventResult EventDispatcher::"),
+        )
+
+    def test_migrates_a_dispatch_hook_that_named_no_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_dispatcher.cc"
+            self._write_event_dispatcher(path)
+            INTEGRATE.patch_blink_event_dispatcher(path)
+            current = path.read_text(encoding="utf-8")
+
+            without_scope = current.replace(
+                INTEGRATE.BLINK_DISPATCH_HOOK,
+                INTEGRATE.LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_EVENT_SCOPE,
+                1,
+            ).replace(INTEGRATE.BLINK_EVENT_SCOPE_HELPER, "", 1)
+            self.assertNotIn("RecorderEventScopeFor(", without_scope)
+            path.write_text(without_scope, encoding="utf-8")
+
+            INTEGRATE.patch_blink_event_dispatcher(path)
+
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
+
+    def test_migrates_listener_hooks_that_named_no_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event_target.cc"
+            self._write_event_target(path)
+            INTEGRATE.patch_blink_event_target(path)
+            current = path.read_text(encoding="utf-8")
+
+            without_scope = (
+                current.replace(
+                    ",\n          RecorderEventScopeFor(recorder_context));", ");"
+                )
+                .replace(
+                    ",\n        RecorderEventScopeFor(recorder_context));", ");"
+                )
+                .replace(INTEGRATE.BLINK_TARGET_DISPATCH_HELPER, "", 1)
+                .replace(INTEGRATE.BLINK_EVENT_SCOPE_HELPER, "", 1)
+                .replace(
+                    INTEGRATE.BLINK_EVENT_TARGET_DISPATCH_HOOK,
+                    INTEGRATE.BLINK_EVENT_TARGET_DISPATCH_ANCHOR,
+                    1,
+                )
+            )
+            self.assertNotIn("RecorderEventScopeFor(", without_scope)
+            path.write_text(without_scope, encoding="utf-8")
+
+            INTEGRATE.patch_blink_event_target(path)
+
+            self.assertEqual(current, path.read_text(encoding="utf-8"))
+
     def _write_event_target(self, path: Path) -> None:
         path.write_text(
             '#include "third_party/blink/renderer/core/dom/events/'
             'event_target.h"\n'
             '#include "base/time/time.h"\n'
+            "\n"
+            "namespace blink {\n"
             "\n"
             "bool EventTarget::AddEventListenerInternal() {\n"
             "  bool added = true;\n"
@@ -3399,7 +3639,8 @@ class IntegrateTests(unittest.TestCase):
             "of the DOM spec.\n"
             "    listener->Invoke(context, &event);\n"
             "    fired_listener = true;\n"
-            "}\n",
+            "}\n"
+            + EVENT_TARGET_DISPATCH_SOURCE,
             encoding="utf-8",
         )
 
@@ -3409,7 +3650,8 @@ class IntegrateTests(unittest.TestCase):
             'event_dispatcher.h"\n'
             '#include "build/build_config.h"\n'
             "\n"
-            "DispatchEventResult EventDispatcher::Dispatch() {\n"
+            + EVENT_DISPATCHER_DISPATCH_EVENT_SOURCE
+            + "DispatchEventResult EventDispatcher::Dispatch() {\n"
             "  event_->SetTarget("
             "&EventPath::EventTargetRespectingTargetRules(*node_));\n"
             "#if DCHECK_IS_ON()\n"

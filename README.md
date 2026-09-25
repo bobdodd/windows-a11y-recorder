@@ -295,6 +295,15 @@ the captured frames that could show a checkpoint's state; they do not show
 that any captured frame does. The record types and limits are in
 [the rendered-frame correlation evidence model](docs/architecture/rendered-frame-correlation-evidence-model.md).
 
+Protocol 0.31 records listeners and dispatches in dedicated, shared, and
+service worker global scopes, on EventTargets that are not Nodes, for a
+window's load and pageshow events, and along IndexedDB's request, transaction,
+and database path. Every listener and dispatch record names the execution
+context it belongs to and, for a worker, the token that worker's network
+records carry. Web Serial's dispatch path is not recorded. The record types
+and limits are in
+[the worker and non-Node dispatch evidence model](docs/architecture/worker-and-non-node-dispatch-evidence-model.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again
@@ -382,11 +391,13 @@ Completed:
 22. Record the compositor frame and presentation time of each layout
     checkpoint and the composition time of each captured desktop frame
     (protocol 0.30).
+23. Record listener and dispatch evidence in dedicated, shared, and service
+    worker global scopes and for dispatches that do not pass through Blink's
+    Node event dispatcher (protocol 0.31, pending Windows validation).
 
 Remaining:
 
-1. Extend listener and dispatch evidence to worker global scopes and
-   dispatches whose original target is never a Node.
+1. Validate protocol 0.31 worker and non-Node dispatch evidence on Windows.
 2. Record representative NVDA, JAWS, and Narrator sessions.
 3. Add evidence correlation and screen-reader behavior analysis.
 4. Investigate touch and gesture coverage on representative hardware.

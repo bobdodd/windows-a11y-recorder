@@ -498,6 +498,159 @@ public sealed class SessionArchiveValidatorTests
         }
     }
 
+    // Protocol 0.31 names the execution context of every listener and
+    // dispatch record. A worker scope belongs to no document, so its records
+    // name none and can hold only a non-Node target, while a record that names
+    // no scope, as earlier archives do, must still name its document.
+    [Fact]
+    public async Task AcceptsAWorkerListenerThatNamesNoDocument()
+    {
+        var issues = await ValidateListenerScopeAsync(
+            contextDocumentId: null,
+            targetKind: "other",
+            targetDocumentId: null,
+            scopeKind: "dedicated-worker");
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public async Task RejectsANodeTargetInAWorkerScope()
+    {
+        var issues = await ValidateListenerScopeAsync(
+            contextDocumentId: null,
+            targetKind: "node",
+            targetDocumentId: null,
+            scopeKind: "service-worker");
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-event-scope-inconsistent" &&
+                issue.Message.Contains("has no node event target", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RejectsAWorkerRecordThatNamesADocument()
+    {
+        var issues = await ValidateListenerScopeAsync(
+            contextDocumentId: "dom-document-8",
+            targetKind: "other",
+            targetDocumentId: "dom-document-8",
+            scopeKind: "shared-worker");
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-event-scope-inconsistent" &&
+                issue.Path == "events.ndjson#/payload/context/documentId");
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "browser-event-scope-inconsistent" &&
+                issue.Path == "events.ndjson#/payload/target/documentId");
+    }
+
+    [Fact]
+    public async Task RejectsATargetWithoutADocumentOutsideAWorkerScope()
+    {
+        var unscoped = await ValidateListenerScopeAsync(
+            contextDocumentId: "dom-document-8",
+            targetKind: "other",
+            targetDocumentId: null,
+            scopeKind: null);
+        var window = await ValidateListenerScopeAsync(
+            contextDocumentId: "dom-document-8",
+            targetKind: "other",
+            targetDocumentId: null,
+            scopeKind: "window");
+
+        Assert.Contains(
+            unscoped,
+            issue => issue.Code == "browser-event-scope-inconsistent" &&
+                issue.Message.Contains("names no scope", StringComparison.Ordinal));
+        Assert.Contains(
+            window,
+            issue => issue.Code == "browser-event-scope-inconsistent" &&
+                issue.Message.Contains("window scope", StringComparison.Ordinal));
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidateListenerScopeAsync(
+            string? contextDocumentId,
+            string targetKind,
+            string? targetDocumentId,
+            string? scopeKind)
+    {
+        var context = new
+        {
+            browserInstanceId = "browser-1",
+            processId = 1200,
+            processType = "renderer",
+            profileId = (string?)null,
+            browserContextId = (string?)null,
+            pageId = (string?)null,
+            frameId = (string?)null,
+            documentId = contextDocumentId,
+            executionWorldId = (string?)null,
+            documentToken = (string?)null
+        };
+        var node = targetKind == "node";
+        var target = new
+        {
+            kind = targetKind,
+            interfaceName = node ? (string?)null : "DedicatedWorkerGlobalScope",
+            targetId = node ? (string?)null : "event-target-5",
+            documentId = targetDocumentId,
+            nodeId = node ? 12L : (long?)null,
+            backendNodeId = (string?)null,
+            tagName = node ? "DIV" : (string?)null,
+            elementId = (string?)null,
+            classes = Array.Empty<string>()
+        };
+        var payload = new Dictionary<string, object?>
+        {
+            ["context"] = context,
+            ["listenerId"] = "listener-1",
+            ["eventName"] = "message",
+            ["registrationKind"] = "add-event-listener",
+            ["target"] = target,
+            ["capture"] = false,
+            ["passive"] = false,
+            ["once"] = false,
+            ["location"] = null,
+            ["world"] = null
+        };
+        if (scopeKind is not null)
+        {
+            var window = scopeKind == "window";
+            payload["scope"] = new
+            {
+                contextKind = scopeKind,
+                workerToken = window ? null : "5B2A9F0E6C1D4A7B8E3F2C1D0A9B8C7D",
+                globalObjectUrl = window
+                    ? null
+                    : "http://127.0.0.1:8123/workers/worker.js"
+            };
+        }
+
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            payload);
+        var directory = await CreateArchiveAsync([record]);
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            return result.Issues.ToList();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task RejectsANodeEventTargetWithoutANodeIdentifier()
     {

@@ -383,7 +383,7 @@ taken from Blink's `WindowEventContext`, which exists exactly when Blink will
 run window listeners for that event, so the recorded path ends where Blink's
 path ends. A dispatch whose original target is not a Node does not pass through
 `EventDispatcher::Dispatch` and is not recorded by this increment, and worker
-global scopes remain outside it.
+global scopes remain outside it. Protocol 0.31 records both.
 
 Protocol version 0.19 reports how each listener entered Blink's listener map.
 Blink funnels an `addEventListener` call, an inline `on*` content attribute, and
@@ -888,7 +888,23 @@ shows that the logger emits the records; it does not show what any frame
 displayed. The full model is in
 [the rendered-frame correlation evidence model](rendered-frame-correlation-evidence-model.md).
 
-Live 0.30 connections require an exact protocol-version match.
+Protocol version 0.31 records the listener dispatches that do not pass
+through Blink's Node event dispatcher, and names the execution context of
+every listener and dispatch record. `EventTarget::DispatchEventInternal`,
+`LocalDOMWindow::DispatchEvent(Event&, EventTarget*)`, and
+`IDBEventDispatcher::Dispatch` each open a dispatch record when no hook has
+opened one for the same event, so a dispatch to a non-Node target, a window's
+load and pageshow dispatch with the document as target, and an IndexedDB
+request, transaction, and database dispatch are recorded with their path and
+listener invocations. Every listener and dispatch record carries a `scope` in
+the shape network records use, with the context kind, the worker's DevTools
+token, and the global object URL. A record in a dedicated, shared, or service
+worker, or in a worklet, names no document, and only a non-Node target can
+occur there. Web Serial's dispatch path is not recorded, and worklet records
+are produced but not validated. The full model is in
+[the worker and non-Node dispatch evidence model](worker-and-non-node-dispatch-evidence-model.md).
+
+Live 0.31 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

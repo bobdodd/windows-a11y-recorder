@@ -14,6 +14,9 @@ namespace Recorder.Tests;
 // callback Blink replaced in place, so those shapes are covered here too.
 // Protocol 0.21 adds the JavaScript world a listener callback belongs to, which
 // a listener record carries as a world object and repeats in its context.
+// Protocol 0.31 names the execution context of every listener and dispatch
+// record, and a record in a worker scope names no document, so a worker
+// target, a worker listener, and a worker dispatch are covered here too.
 public sealed class BrowserEventTargetPayloadIngestTests
 {
     private const string ContextJson = """
@@ -590,6 +593,157 @@ public sealed class BrowserEventTargetPayloadIngestTests
             BrowserEvidenceOmissionReasons.SinkRefusedRecord,
             payload.Reason);
         Assert.Equal(2, payload.Count);
+    }
+
+    private const string WorkerContextJson = """
+        {
+          "browserInstanceId": "browser-instance-1",
+          "processId": 3440,
+          "frameId": null,
+          "documentId": null,
+          "documentToken": null
+        }
+        """;
+
+    private const string WorkerTargetJson = """
+        {
+          "kind": "other",
+          "interfaceName": "DedicatedWorkerGlobalScope",
+          "targetId": "event-target-5",
+          "documentId": null,
+          "nodeId": null,
+          "backendNodeId": null,
+          "tagName": null,
+          "elementId": null,
+          "classes": []
+        }
+        """;
+
+    private const string WorkerScopeJson = """
+        {
+          "contextKind": "dedicated-worker",
+          "workerToken": "5B2A9F0E6C1D4A7B8E3F2C1D0A9B8C7D",
+          "globalObjectUrl": "http://127.0.0.1:8123/workers/dedicated.js"
+        }
+        """;
+
+    [Fact]
+    public void AcceptsAWorkerListenerRegistrationAsWritten()
+    {
+        var payload = Accept<BrowserListenerPayload>(
+            BrowserEvidenceChannels.Listener,
+            BrowserEvidenceEventTypes.ListenerRegistered,
+            $$"""
+            {
+              "context": {{WorkerContextJson}},
+              "listenerId": "listener-12",
+              "eventName": "message",
+              "registrationKind": "add-event-listener",
+              "target": {{WorkerTargetJson}},
+              "capture": false,
+              "passive": false,
+              "once": false,
+              "location": null,
+              "world": null,
+              "scope": {{WorkerScopeJson}}
+            }
+            """);
+
+        Assert.Null(payload.Target.DocumentId);
+        Assert.Null(payload.Context.DocumentId);
+        var scope = Assert.IsType<BrowserNetworkScope>(payload.Scope);
+        Assert.Equal("dedicated-worker", scope.ContextKind);
+        Assert.Equal("5B2A9F0E6C1D4A7B8E3F2C1D0A9B8C7D", scope.WorkerToken);
+        Assert.EndsWith("/workers/dedicated.js", scope.GlobalObjectUrl);
+    }
+
+    [Fact]
+    public void AcceptsAWorkerDispatchAsWritten()
+    {
+        var payload = Accept<BrowserDispatchPayload>(
+            BrowserEvidenceChannels.Dispatch,
+            BrowserEvidenceEventTypes.ListenerInvoked,
+            $$"""
+            {
+              "context": {{WorkerContextJson}},
+              "dispatchId": "dispatch-9",
+              "eventName": "message",
+              "trusted": true,
+              "originalTarget": {{WorkerTargetJson}},
+              "composedPath": [{{WorkerTargetJson}}],
+              "pathScopes": [
+                {
+                  "treeScopeRootNodeId": null,
+                  "shadowRootMode": null,
+                  "targetNodeId": null,
+                  "relatedTargetNodeId": null,
+                  "visiblePathIndexes": [0],
+                  "unmatchedVisibleTargetCount": 0
+                }
+              ],
+              "currentTarget": {{WorkerTargetJson}},
+              "phase": "at-target",
+              "listenerId": "listener-12",
+              "defaultPrevented": false,
+              "propagationStopped": false,
+              "immediatePropagationStopped": false,
+              "defaultAction": null,
+              "outcome": null,
+              "scope": {{WorkerScopeJson}}
+            }
+            """);
+
+        var scope = Assert.IsType<BrowserNetworkScope>(payload.Scope);
+        Assert.Equal("dedicated-worker", scope.ContextKind);
+        var original = Assert.IsType<BrowserEventTargetReference>(
+            payload.OriginalTarget);
+        Assert.Null(original.DocumentId);
+        Assert.Single(payload.ComposedPath);
+    }
+
+    [Fact]
+    public void AcceptsAWindowScopeOnADispatchAsWritten()
+    {
+        var payload = Accept<BrowserDispatchPayload>(
+            BrowserEvidenceChannels.Dispatch,
+            BrowserEvidenceEventTypes.DispatchStarted,
+            $$"""
+            {
+              "context": {{ContextJson}},
+              "dispatchId": "dispatch-10",
+              "eventName": "load",
+              "trusted": true,
+              "originalTarget": {{NodeTargetJson}},
+              "composedPath": [{{WindowTargetJson}}],
+              "pathScopes": [
+                {
+                  "treeScopeRootNodeId": null,
+                  "shadowRootMode": null,
+                  "targetNodeId": 91,
+                  "relatedTargetNodeId": null,
+                  "visiblePathIndexes": [0],
+                  "unmatchedVisibleTargetCount": 0
+                }
+              ],
+              "currentTarget": null,
+              "phase": "none",
+              "listenerId": null,
+              "defaultPrevented": false,
+              "propagationStopped": false,
+              "immediatePropagationStopped": false,
+              "defaultAction": null,
+              "outcome": null,
+              "scope": {
+                "contextKind": "window",
+                "workerToken": null,
+                "globalObjectUrl": null
+              }
+            }
+            """);
+
+        var scope = Assert.IsType<BrowserNetworkScope>(payload.Scope);
+        Assert.Equal("window", scope.ContextKind);
+        Assert.Null(scope.WorkerToken);
     }
 
     private static T Accept<T>(

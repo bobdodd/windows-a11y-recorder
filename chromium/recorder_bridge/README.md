@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.30` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.31` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -102,7 +102,7 @@ cross-version identity, so a consumer identifies a target by its kind. A Node ke
 there. Window listener registrations, removals, invocations, and the window
 entry at the end of a composed path are recorded from Blink's own
 `WindowEventContext`, so a recorded path ends where Blink's path ends. Worker
-global scopes are not covered. A target identifier is process-local and must
+global scopes are covered from protocol 0.31. A target identifier is process-local and must
 never be compared across processes.
 
 Protocol 0.19 reports how each listener entered Blink's listener map.
@@ -382,3 +382,18 @@ queued, queues a `RecorderPresentationSwapPromise` on the widget's
 on the main thread, `RecordBlinkPresentationFeedback`. The record types are
 described in
 `docs/architecture/rendered-frame-correlation-evidence-model.md`.
+
+Protocol 0.31 adds worker and non-Node dispatch evidence. The listener hooks
+and the Node dispatch hook pass an `EventScope` built by
+`RecorderEventScopeFor` from the target's execution context: its kind, and for
+a context other than a window, its global object URL and, for a worker or
+worklet, its DevTools token. `EventTarget::DispatchEventInternal`,
+`LocalDOMWindow::DispatchEvent(Event&, EventTarget*)`, and
+`IDBEventDispatcher::Dispatch` call `BeginBlinkTargetDispatch`, which opens a
+dispatch only when no hook has opened one for the event, then
+`RecordBlinkDispatchPathTarget` for each target listeners are fired on and
+`CompleteBlinkDispatchStart`, and `RecordBlinkDispatchCompleted` after the
+listeners run. A target in a worker or worklet scope reports no document.
+`SerialPort`'s dispatch is not hooked. The record shapes and limits are
+described in
+`docs/architecture/worker-and-non-node-dispatch-evidence-model.md`.

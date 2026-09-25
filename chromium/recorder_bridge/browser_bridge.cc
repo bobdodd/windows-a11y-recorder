@@ -36,16 +36,38 @@
 namespace a11y_recorder {
 namespace {
 
+// Records an execution context kind outside the recorded set as other, so an
+// unexpected global scope is named honestly instead of as one it is not.
+std::string NormalizeEventScopeKind(std::string context_kind) {
+  if (context_kind == "window" || context_kind == "dedicated-worker" ||
+      context_kind == "shared-worker" || context_kind == "service-worker" ||
+      context_kind == "worklet") {
+    return context_kind;
+  }
+  return "other";
+}
+
+// A worker or worklet global scope has no document, so records in it name the
+// scope rather than a document.
+bool IsDocumentFreeScopeKind(std::string_view context_kind) {
+  return context_kind == "dedicated-worker" ||
+         context_kind == "shared-worker" ||
+         context_kind == "service-worker" || context_kind == "worklet";
+}
+
 // Decides whether one reported EventTarget can be recorded without inventing
-// identity. Every recordable target belongs to a document, because the record
-// names that document. A Node must also report its own node identifier; a
-// Window or other non-Node EventTarget has none and is identified by its kind
-// and its process-local target identifier instead.
+// identity. A target in a window scope belongs to a document, because the
+// record names that document. A target in a worker or worklet scope has no
+// document and is recorded only when it is not a Node, since no DOM exists
+// there. A Node must also report its own node identifier; a Window or other
+// non-Node EventTarget has none and is identified by its kind and its
+// process-local target identifier instead.
 bool IsRecordableEventTarget(std::string_view kind,
                              int document_node_id,
-                             int target_node_id) {
+                             int target_node_id,
+                             bool document_free_scope = false) {
   if (document_node_id <= 0) {
-    return false;
+    return document_free_scope && kind == kEventTargetKindOther;
   }
   if (kind == kEventTargetKindWindow || kind == kEventTargetKindOther) {
     return true;
@@ -162,11 +184,10 @@ struct EvidenceIdentityStorage {
   struct DispatchState {
     std::string dispatch_id;
     int document_node_id;
-    int target_node_id;
+    NodeState original_target;
     std::string event_name;
-    std::string target_tag_name;
-    std::string target_element_id;
     bool trusted;
+    EventScope scope;
     std::vector<NodeState> composed_path;
     std::vector<PathScope> path_scopes;
     bool observed_default_prevented = false;
@@ -411,7 +432,12 @@ base::DictValue CreateEventTarget(std::string kind,
   } else {
     target.Set("targetId", std::move(target_id));
   }
-  target.Set("documentId", DocumentId(document_node_id));
+  // A target in a worker or worklet scope belongs to no document.
+  if (document_node_id > 0) {
+    target.Set("documentId", DocumentId(document_node_id));
+  } else {
+    target.Set("documentId", base::Value());
+  }
   if (target_node_id > 0) {
     target.Set("nodeId", target_node_id);
   } else {
@@ -437,6 +463,24 @@ base::DictValue CreateEventTarget(
   return CreateEventTarget(state.kind, state.interface_name, state.target_id,
                            state.document_node_id, state.node_id,
                            state.tag_name, state.element_id);
+}
+
+// Describes the execution context of a listener or dispatch record, in the
+// same shape network records use for the context that issued a request.
+base::DictValue CreateEventScope(const EventScope& scope) {
+  base::DictValue value;
+  value.Set("contextKind", NormalizeEventScopeKind(scope.context_kind));
+  if (scope.worker_token.empty()) {
+    value.Set("workerToken", base::Value());
+  } else {
+    value.Set("workerToken", scope.worker_token);
+  }
+  if (scope.global_object_url.empty()) {
+    value.Set("globalObjectUrl", base::Value());
+  } else {
+    value.Set("globalObjectUrl", scope.global_object_url);
+  }
+  return value;
 }
 
 std::string DomNodeTypeName(int node_type) {
@@ -635,27 +679,58 @@ std::optional<std::string> TakeListenerIdentity(uintptr_t listener_identity) {
   return listener_id;
 }
 
+EvidenceIdentityStorage::DispatchState CreateDispatchState(
+    EvidenceIdentityStorage& identities,
+    int document_node_id,
+    EvidenceIdentityStorage::NodeState original_target,
+    std::string event_name,
+    bool trusted,
+    EventScope scope) {
+  scope.context_kind = NormalizeEventScopeKind(std::move(scope.context_kind));
+  return EvidenceIdentityStorage::DispatchState{
+      .dispatch_id =
+          "dispatch-" + base::NumberToString(identities.next_dispatch_id++),
+      .document_node_id = document_node_id,
+      .original_target = std::move(original_target),
+      .event_name = std::move(event_name),
+      .trusted = trusted,
+      .scope = std::move(scope),
+  };
+}
+
 void RegisterDispatchIdentity(
     uintptr_t event_identity,
     int document_node_id,
     int target_node_id,
-    const std::string& event_name,
-    const std::string& target_tag_name,
-    const std::string& target_element_id,
-    bool trusted) {
+    std::string event_name,
+    std::string target_tag_name,
+    std::string target_element_id,
+    bool trusted,
+    EventScope scope) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
-  EvidenceIdentityStorage::DispatchState state{
-      .dispatch_id =
-          "dispatch-" + base::NumberToString(identities.next_dispatch_id++),
-      .document_node_id = document_node_id,
-      .target_node_id = target_node_id,
-      .event_name = event_name,
-      .target_tag_name = target_tag_name,
-      .target_element_id = target_element_id,
-      .trusted = trusted,
-  };
-  identities.dispatches.insert_or_assign(event_identity, state);
+  identities.dispatches.insert_or_assign(
+      event_identity,
+      CreateDispatchState(
+          identities, document_node_id,
+          EvidenceIdentityStorage::NodeState{
+              .document_node_id = document_node_id,
+              .node_id = target_node_id,
+              .tag_name = std::move(target_tag_name),
+              .element_id = std::move(target_element_id),
+              .kind = kEventTargetKindNode,
+          },
+          std::move(event_name), trusted, std::move(scope)));
+}
+
+// Whether the dispatch an invocation belongs to runs in a worker or worklet
+// scope, where a current target has no document.
+bool DispatchIsDocumentFree(uintptr_t event_identity) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.dispatches.find(event_identity);
+  return found != identities.dispatches.end() &&
+         IsDocumentFreeScopeKind(found->second.scope.context_kind);
 }
 
 std::optional<EvidenceIdentityStorage::DispatchState> FindDispatchIdentity(
@@ -956,7 +1031,8 @@ base::DictValue CreateListenerPayload(
     std::string world_kind,
     int world_id,
     std::string world_name,
-    std::string world_stable_id) {
+    std::string world_stable_id,
+    const EventScope& scope) {
   base::DictValue payload;
   base::DictValue context = CreateContext(client, document_node_id);
   // The context reports the world the record is about only when Blink reported
@@ -986,6 +1062,7 @@ base::DictValue CreateListenerPayload(
               CreateExecutionWorld(world_kind, world_id,
                                    std::move(world_name),
                                    std::move(world_stable_id)));
+  payload.Set("scope", CreateEventScope(scope));
   return payload;
 }
 
@@ -1005,11 +1082,8 @@ base::DictValue CreateDispatchPayload(
   payload.Set("dispatchId", state.dispatch_id);
   payload.Set("eventName", state.event_name);
   payload.Set("trusted", state.trusted);
-  payload.Set("originalTarget",
-              CreateEventTarget(kEventTargetKindNode, std::string(),
-                                std::string(), state.document_node_id,
-                                state.target_node_id, state.target_tag_name,
-                                state.target_element_id));
+  payload.Set("originalTarget", CreateEventTarget(state.original_target));
+  payload.Set("scope", CreateEventScope(state.scope));
   base::ListValue composed_path;
   for (const auto& entry : state.composed_path) {
     composed_path.Append(CreateEventTarget(entry));
@@ -1701,10 +1775,15 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string world_kind,
                                    int world_id,
                                    std::string world_name,
-                                   std::string world_stable_id) {
+                                   std::string world_stable_id,
+                                   EventScope scope) {
+  scope.context_kind = NormalizeEventScopeKind(std::move(scope.context_kind));
+  const bool document_free_scope =
+      IsDocumentFreeScopeKind(scope.context_kind);
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || !IsRecordableEventTarget(target_kind, document_node_id,
-                                          target_node_id)) {
+                                          target_node_id,
+                               document_free_scope)) {
     return;
   }
 
@@ -1720,7 +1799,7 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
       passive, once, std::move(script_url), std::move(function_name),
       script_id, line_number, column_number,
       NormalizeExecutionWorldKind(std::move(world_kind)), world_id,
-      std::move(world_name), std::move(world_stable_id));
+      std::move(world_name), std::move(world_stable_id), scope);
   SendBlinkEvidence("browser.listener", "listener-registered",
                     std::move(payload));
 }
@@ -1746,13 +1825,18 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                                 std::string world_kind,
                                 int world_id,
                                 std::string world_name,
-                                std::string world_stable_id) {
+                                std::string world_stable_id,
+                                EventScope scope) {
+  scope.context_kind = NormalizeEventScopeKind(std::move(scope.context_kind));
+  const bool document_free_scope =
+      IsDocumentFreeScopeKind(scope.context_kind);
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<std::string> listener_id =
       TakeListenerIdentity(listener_identity);
   if (!client || !listener_id ||
       !IsRecordableEventTarget(target_kind, document_node_id,
-                               target_node_id)) {
+                               target_node_id,
+                               document_free_scope)) {
     return;
   }
 
@@ -1768,7 +1852,7 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
       passive, once, std::move(script_url), std::move(function_name),
       script_id, line_number, column_number,
       NormalizeExecutionWorldKind(std::move(world_kind)), world_id,
-      std::move(world_name), std::move(world_stable_id));
+      std::move(world_name), std::move(world_stable_id), scope);
   SendBlinkEvidence("browser.listener", "listener-removed",
                     std::move(payload));
 }
@@ -1794,10 +1878,15 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
                                         std::string world_kind,
                                         int world_id,
                                         std::string world_name,
-                                        std::string world_stable_id) {
+                                        std::string world_stable_id,
+                                         EventScope scope) {
+  scope.context_kind = NormalizeEventScopeKind(std::move(scope.context_kind));
+  const bool document_free_scope =
+      IsDocumentFreeScopeKind(scope.context_kind);
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || !IsRecordableEventTarget(target_kind, document_node_id,
-                                          target_node_id)) {
+                                          target_node_id,
+                               document_free_scope)) {
     return;
   }
 
@@ -1822,7 +1911,7 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
       passive, once, std::move(script_url), std::move(function_name),
       script_id, line_number, column_number,
       NormalizeExecutionWorldKind(std::move(world_kind)), world_id,
-      std::move(world_name), std::move(world_stable_id));
+      std::move(world_name), std::move(world_stable_id), scope);
   SendBlinkEvidence("browser.listener", "listener-callback-replaced",
                     std::move(payload));
 }
@@ -1833,15 +1922,66 @@ void RecordBlinkDispatchStarted(uintptr_t event_identity,
                                 std::string event_name,
                                 std::string target_tag_name,
                                 std::string target_element_id,
-                                bool trusted) {
+                                bool trusted,
+                                EventScope scope) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || target_node_id <= 0) {
     return;
   }
 
   RegisterDispatchIdentity(event_identity, document_node_id, target_node_id,
-                           event_name, target_tag_name, target_element_id,
-                           trusted);
+                           std::move(event_name), std::move(target_tag_name),
+                           std::move(target_element_id), trusted,
+                           std::move(scope));
+}
+
+bool BeginBlinkTargetDispatch(uintptr_t event_identity,
+                              std::string target_kind,
+                              std::string target_interface_name,
+                              uintptr_t target_identity,
+                              int document_node_id,
+                              int target_node_id,
+                              std::string target_tag_name,
+                              std::string target_element_id,
+                              std::string event_name,
+                              bool trusted,
+                              EventScope scope) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return false;
+  }
+  scope.context_kind = NormalizeEventScopeKind(std::move(scope.context_kind));
+  if (!IsRecordableEventTarget(target_kind, document_node_id, target_node_id,
+                               IsDocumentFreeScopeKind(scope.context_kind))) {
+    return false;
+  }
+  const bool node_target = target_kind == kEventTargetKindNode;
+  // A Node original target is described as the Node dispatcher describes one,
+  // by its node identifier alone.
+  EvidenceIdentityStorage::NodeState original_target{
+      .document_node_id = std::max(document_node_id, 0),
+      .node_id = node_target ? target_node_id : 0,
+      .tag_name = node_target ? std::move(target_tag_name) : std::string(),
+      .element_id = node_target ? std::move(target_element_id) : std::string(),
+      .kind = std::move(target_kind),
+      .interface_name =
+          node_target ? std::string() : std::move(target_interface_name),
+      .target_id = node_target ? std::string()
+                               : RegisterEventTargetIdentity(target_identity),
+  };
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  // An event that is already being recorded belongs to the hook that opened
+  // it, so a nested or repeated entry for the same event opens nothing.
+  if (identities.dispatches.contains(event_identity)) {
+    return false;
+  }
+  identities.dispatches.insert_or_assign(
+      event_identity,
+      CreateDispatchState(identities, std::max(document_node_id, 0),
+                          std::move(original_target), std::move(event_name),
+                          trusted, std::move(scope)));
+  return true;
 }
 
 namespace {
@@ -1928,6 +2068,48 @@ void RecordBlinkDispatchPathWindow(uintptr_t event_identity,
       visible_path_indexes));
 }
 
+void RecordBlinkDispatchPathTarget(uintptr_t event_identity,
+                                   std::string target_kind,
+                                   std::string target_interface_name,
+                                   uintptr_t target_identity,
+                                   int document_node_id,
+                                   int target_node_id,
+                                   std::string target_tag_name,
+                                   std::string target_element_id,
+                                   int scope_target_node_id,
+                                   bool visible_to_listener) {
+  const bool node_target = target_kind == kEventTargetKindNode;
+  std::string target_id =
+      node_target ? std::string() : RegisterEventTargetIdentity(target_identity);
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.dispatches.find(event_identity);
+  if (found == identities.dispatches.end() ||
+      !IsRecordableEventTarget(
+          target_kind, document_node_id, target_node_id,
+          IsDocumentFreeScopeKind(found->second.scope.context_kind))) {
+    return;
+  }
+  EvidenceIdentityStorage::DispatchState& state = found->second;
+  std::vector<int> visible_path_indexes;
+  if (visible_to_listener) {
+    visible_path_indexes.push_back(
+        static_cast<int>(state.composed_path.size()));
+  }
+  state.composed_path.push_back(
+      {.document_node_id = std::max(document_node_id, 0),
+       .node_id = node_target ? target_node_id : 0,
+       .tag_name = node_target ? std::move(target_tag_name) : std::string(),
+       .element_id =
+           node_target ? std::move(target_element_id) : std::string(),
+       .kind = std::move(target_kind),
+       .interface_name =
+           node_target ? std::string() : std::move(target_interface_name),
+       .target_id = std::move(target_id)});
+  state.path_scopes.push_back(CreatePathScope(
+      0, std::string(), scope_target_node_id, 0, visible_path_indexes));
+}
+
 void CompleteBlinkDispatchStart(uintptr_t event_identity) {
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<EvidenceIdentityStorage::DispatchState> state =
@@ -1954,7 +2136,8 @@ void BeginBlinkListenerInvocation(uintptr_t event_identity,
       FindListenerIdentity(listener_identity);
   if (!listener_id ||
       !IsRecordableEventTarget(current_target_kind, current_document_node_id,
-                               current_target_node_id)) {
+                               current_target_node_id,
+                               DispatchIsDocumentFree(event_identity))) {
     return;
   }
   const bool node_target = current_target_kind == kEventTargetKindNode;

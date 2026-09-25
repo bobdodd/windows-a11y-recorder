@@ -20,6 +20,21 @@ from the product version.
 
 ### Added
 
+- Record worker and non-Node dispatch evidence. Protocol 0.31 records
+  listener and dispatch evidence in dedicated, shared, and service worker
+  global scopes, for dispatches to EventTargets that are not Nodes, for a
+  window's load and pageshow dispatches with the document as target, and for
+  IndexedDB's request, transaction, and database propagation. Every listener
+  and dispatch record carries a `scope` naming its execution context kind,
+  worker token, and global object URL, in the shape network records use, and
+  a record in a worker or worklet scope names no document. The session
+  validator rejects a record whose scope and document identities disagree,
+  and the Blink validation adds a fixture page that exercises each path and
+  joins a dedicated worker's listener records to its network records by
+  token. Web Serial's dispatch path is not recorded, and worklet records are
+  not validated. See
+  [the worker and non-Node dispatch evidence model](docs/architecture/worker-and-non-node-dispatch-evidence-model.md).
+  Windows validation is pending.
 - Record rendered-frame correlation evidence. Protocol 0.30 follows every
   layout checkpoint with a presentation request on the compositor of the
   frame's local-root widget, and records on the `browser.presentation`

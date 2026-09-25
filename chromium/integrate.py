@@ -1832,7 +1832,8 @@ BLINK_LISTENER_HOOK = """\
               : "",
           recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
               ? recorder_world->NonMainWorldStableId().Utf8().c_str()
-              : "");
+              : "",
+          RecorderEventScopeFor(recorder_context));
     }
 """
 BLINK_LISTENER_REMOVED_HOOK = """\
@@ -1890,7 +1891,8 @@ BLINK_LISTENER_REMOVED_HOOK = """\
             : "",
         recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
             ? recorder_world->NonMainWorldStableId().Utf8().c_str()
-            : "");
+            : "",
+        RecorderEventScopeFor(recorder_context));
   }
 """
 BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_ANCHOR = """\
@@ -1962,7 +1964,8 @@ BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK_REGION = """\
               : "",
           recorder_world && !recorder_world->IsMainWorld() && IsMainThread()
               ? recorder_world->NonMainWorldStableId().Utf8().c_str()
-              : "");
+              : "",
+          RecorderEventScopeFor(recorder_context));
     }
 """
 BLINK_LISTENER_ATTRIBUTE_REPLACEMENT_HOOK = (
@@ -2114,7 +2117,7 @@ LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_SCOPES = (
 # returns to a listener in that scope; they are read from the same per-scope
 # list Blink builds for composedPath(), which Blink computes once per dispatch
 # and caches, so reading it here returns what a listener would receive.
-BLINK_DISPATCH_HOOK = """\
+LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_EVENT_SCOPE = """\
   Element* recorder_element = DynamicTo<Element>(*node_);
   a11y_recorder::RecordBlinkDispatchStarted(
       reinterpret_cast<uintptr_t>(event_),
@@ -2210,6 +2213,13 @@ BLINK_DISPATCH_HOOK = """\
   a11y_recorder::CompleteBlinkDispatchStart(
       reinterpret_cast<uintptr_t>(event_));
 """
+# Protocol 0.31 names the execution context of every dispatch, so the start
+# record carries the scope of the context the Node belongs to.
+BLINK_DISPATCH_HOOK = LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_EVENT_SCOPE.replace(
+    "      event_->isTrusted());\n",
+    "      event_->isTrusted(),\n"
+    "      RecorderEventScopeFor(node_->GetExecutionContext()));\n",
+)
 BLINK_DISPATCH_SCOPE_INCLUDES = (
     '#include "third_party/blink/renderer/core/dom/events/node_event_context.h"',
     '#include "third_party/blink/renderer/core/dom/events/tree_scope_event_context.h"',
@@ -3523,6 +3533,359 @@ def patch_blink_character_data(path: Path) -> None:
     write_patched(path, text)
 
 
+# Protocol 0.31 names the execution context of each listener and dispatch
+# record. A worker or worklet global scope has no document, so without the
+# scope a record made there could name nothing. The helper reads the same
+# Blink facts the network hooks read for a request's scope, so a worker's
+# listener, dispatch, and network records carry one worker token.
+BLINK_EVENT_SCOPE_INCLUDES = (
+    '#include "third_party/blink/renderer/core/execution_context/'
+    'execution_context.h"',
+    '#include "third_party/blink/renderer/core/frame/local_dom_window.h"',
+    '#include "third_party/blink/renderer/core/workers/'
+    'worker_or_worklet_global_scope.h"',
+)
+BLINK_EVENT_SCOPE_HELPER_MARKER = (
+    "a11y_recorder::EventScope RecorderEventScopeFor("
+)
+BLINK_EVENT_SCOPE_HELPER = """\
+namespace {
+
+// Names the execution context a listener or dispatch record belongs to. A
+// window is identified by its document elsewhere in the record, so its scope
+// carries no worker token or URL. Any other context carries its global object
+// URL, and a worker or worklet scope also carries its DevTools token, the token
+// its network records carry. A context Blink classifies as none of these is
+// named other.
+[[maybe_unused]] a11y_recorder::EventScope RecorderEventScopeFor(
+    ExecutionContext* context) {
+  a11y_recorder::EventScope scope;
+  scope.context_kind = "other";
+  if (!context) {
+    return scope;
+  }
+  if (IsA<LocalDOMWindow>(context)) {
+    scope.context_kind = "window";
+    return scope;
+  }
+  if (context->IsDedicatedWorkerGlobalScope()) {
+    scope.context_kind = "dedicated-worker";
+  } else if (context->IsSharedWorkerGlobalScope()) {
+    scope.context_kind = "shared-worker";
+  } else if (context->IsServiceWorkerGlobalScope()) {
+    scope.context_kind = "service-worker";
+  } else if (context->IsWorkletGlobalScope()) {
+    scope.context_kind = "worklet";
+  }
+  if (auto* global = DynamicTo<WorkerOrWorkletGlobalScope>(context)) {
+    const base::UnguessableToken& token = global->GetDevToolsToken();
+    if (!token.is_empty()) {
+      scope.worker_token = token.ToString();
+    }
+  }
+  scope.global_object_url = context->Url().GetString().Utf8();
+  return scope;
+}
+
+}  // namespace
+
+"""
+BLINK_TARGET_DISPATCH_INCLUDES = BLINK_EVENT_SCOPE_INCLUDES + (
+    '#include "third_party/blink/renderer/core/dom/document.h"',
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/dom/events/event.h"',
+    '#include "third_party/blink/renderer/core/dom/events/event_target.h"',
+    '#include "third_party/blink/renderer/core/dom/node.h"',
+    '#include "third_party/blink/renderer/platform/runtime_enabled_features.h"',
+)
+BLINK_TARGET_DISPATCH_HELPER_MARKER = "bool RecorderBeginTargetDispatch("
+# The dispatches Blink performs outside its Node event dispatcher are recorded
+# through these helpers, which each patched source carries in its own
+# anonymous namespace rather than through a shared Blink header. Blink decides
+# per dispatch whether composedPath() returns anything on these paths: it
+# returns the current target when the feature that makes it do so is enabled,
+# and otherwise only a window. The helper reads the same condition.
+BLINK_TARGET_DISPATCH_HELPER = """\
+namespace {
+
+struct RecorderEventTargetFacts {
+  const char* kind = a11y_recorder::kEventTargetKindOther;
+  std::string interface_name;
+  int document_node_id = 0;
+  int node_id = 0;
+  std::string tag_name;
+  std::string element_id;
+};
+
+// Describes one EventTarget the way the listener hooks describe a target.
+[[maybe_unused]] RecorderEventTargetFacts RecorderDescribeEventTarget(
+    EventTarget& target) {
+  RecorderEventTargetFacts facts;
+  Node* node = target.ToNode();
+  LocalDOMWindow* window = target.ToLocalDOMWindow();
+  facts.kind = node ? a11y_recorder::kEventTargetKindNode
+                    : (window ? a11y_recorder::kEventTargetKindWindow
+                              : a11y_recorder::kEventTargetKindOther);
+  facts.interface_name = target.InterfaceName().Utf8();
+  LocalDOMWindow* document_window =
+      window ? window : DynamicTo<LocalDOMWindow>(target.GetExecutionContext());
+  Document* document =
+      node ? &node->GetDocument()
+           : (document_window ? document_window->document() : nullptr);
+  facts.document_node_id = document ? document->GetDomNodeId() : 0;
+  if (node) {
+    facts.node_id = node->GetDomNodeId();
+    facts.tag_name = node->nodeName().Utf8();
+    if (Element* element = DynamicTo<Element>(node)) {
+      facts.element_id = element->GetIdAttribute().Utf8();
+    }
+  }
+  return facts;
+}
+
+[[maybe_unused]] bool RecorderBeginTargetDispatch(Event& event,
+                                                  EventTarget& original_target,
+                                                  ExecutionContext* context) {
+  const RecorderEventTargetFacts facts =
+      RecorderDescribeEventTarget(original_target);
+  return a11y_recorder::BeginBlinkTargetDispatch(
+      reinterpret_cast<uintptr_t>(&event), facts.kind, facts.interface_name,
+      reinterpret_cast<uintptr_t>(&original_target), facts.document_node_id,
+      facts.node_id, facts.tag_name, facts.element_id, event.type().Utf8(),
+      event.isTrusted(), RecorderEventScopeFor(context));
+}
+
+[[maybe_unused]] void RecorderRecordTargetDispatchPathEntry(
+    Event& event,
+    EventTarget& entry) {
+  const RecorderEventTargetFacts facts = RecorderDescribeEventTarget(entry);
+  EventTarget* original_target = event.target();
+  Node* original_node = original_target ? original_target->ToNode() : nullptr;
+  a11y_recorder::RecordBlinkDispatchPathTarget(
+      reinterpret_cast<uintptr_t>(&event), facts.kind, facts.interface_name,
+      reinterpret_cast<uintptr_t>(&entry), facts.document_node_id,
+      facts.node_id, facts.tag_name, facts.element_id,
+      original_node ? original_node->GetDomNodeId() : 0,
+      RuntimeEnabledFeatures::ComposedPathReturnTargetBeingDispatchedEnabled() ||
+          entry.ToLocalDOMWindow());
+}
+
+[[maybe_unused]] void RecorderCompleteTargetDispatchStart(Event& event) {
+  a11y_recorder::CompleteBlinkDispatchStart(
+      reinterpret_cast<uintptr_t>(&event));
+}
+
+[[maybe_unused]] void RecorderCompleteTargetDispatch(
+    Event& event,
+    DispatchEventResult result) {
+  a11y_recorder::RecordBlinkDispatchCompleted(
+      reinterpret_cast<uintptr_t>(&event),
+      result == DispatchEventResult::kCanceledByEventHandler
+          ? 1
+          : result == DispatchEventResult::kCanceledByDefaultEventHandler
+                ? 2
+                : result == DispatchEventResult::kCanceledBeforeDispatch ? 3
+                                                                         : 0,
+      event.defaultPrevented(), event.PropagationStopped(),
+      event.ImmediatePropagationStopped());
+}
+
+}  // namespace
+
+"""
+# EventTarget's own at-target dispatch runs for every target that is not a
+# Node and does not override it: a window's dispatchEvent and postMessage
+# events, worker global scopes, message ports, abort signals, and script
+# constructed targets among them.
+BLINK_EVENT_TARGET_DISPATCH_ANCHOR = """\
+  event.SetEventPhase(Event::PhaseType::kAtTarget);
+  DispatchEventResult dispatch_result = FireEventListeners(event);
+"""
+BLINK_EVENT_TARGET_DISPATCH_HOOK = """\
+  event.SetEventPhase(Event::PhaseType::kAtTarget);
+  const bool recorder_dispatch_opened =
+      RecorderBeginTargetDispatch(event, *this, GetExecutionContext());
+  if (recorder_dispatch_opened) {
+    RecorderRecordTargetDispatchPathEntry(event, *this);
+    RecorderCompleteTargetDispatchStart(event);
+  }
+  DispatchEventResult dispatch_result = FireEventListeners(event);
+  if (recorder_dispatch_opened) {
+    RecorderCompleteTargetDispatch(event, dispatch_result);
+  }
+"""
+# A window dispatches its own load and pageshow events with the document as
+# target and fires only its own listeners, without Blink's Node dispatcher.
+BLINK_WINDOW_DISPATCH_ANCHOR = """\
+                                GetIsolate());
+  return FireEventListeners(event);
+}
+"""
+BLINK_WINDOW_DISPATCH_HOOK = """\
+                                GetIsolate());
+  EventTarget* recorder_original_target = event.target();
+  const bool recorder_dispatch_opened =
+      recorder_original_target &&
+      RecorderBeginTargetDispatch(event, *recorder_original_target, this);
+  if (recorder_dispatch_opened) {
+    RecorderRecordTargetDispatchPathEntry(event, *this);
+    RecorderCompleteTargetDispatchStart(event);
+  }
+  const DispatchEventResult recorder_result = FireEventListeners(event);
+  if (recorder_dispatch_opened) {
+    RecorderCompleteTargetDispatch(event, recorder_result);
+  }
+  return recorder_result;
+}
+"""
+# IndexedDB propagates request events to the transaction and the database, and
+# transaction events to the database, through its own dispatcher. The targets
+# arrive in path order, the original target first.
+BLINK_IDB_DISPATCH_START_ANCHOR = """\
+  wtf_size_t size = event_targets.size();
+  DCHECK(size);
+"""
+BLINK_IDB_DISPATCH_START_HOOK = """\
+  wtf_size_t size = event_targets.size();
+  DCHECK(size);
+  const bool recorder_dispatch_opened = RecorderBeginTargetDispatch(
+      event, *event_targets[0], event_targets[0]->GetExecutionContext());
+  if (recorder_dispatch_opened) {
+    for (const Member<EventTarget>& recorder_entry : event_targets) {
+      RecorderRecordTargetDispatchPathEntry(event, *recorder_entry);
+    }
+    RecorderCompleteTargetDispatchStart(event);
+  }
+"""
+BLINK_IDB_DISPATCH_COMPLETED_ANCHOR = """\
+doneDispatching:
+  event.SetCurrentTarget(nullptr);
+  event.SetEventPhase(Event::PhaseType::kNone);
+  return EventTarget::GetDispatchEventResult(event);
+}
+"""
+BLINK_IDB_DISPATCH_COMPLETED_HOOK = """\
+doneDispatching:
+  event.SetCurrentTarget(nullptr);
+  event.SetEventPhase(Event::PhaseType::kNone);
+  const DispatchEventResult recorder_result =
+      EventTarget::GetDispatchEventResult(event);
+  if (recorder_dispatch_opened) {
+    RecorderCompleteTargetDispatch(event, recorder_result);
+  }
+  return recorder_result;
+}
+"""
+BLINK_IDB_BUILD_ANCHOR = """\
+    "shared_idb_database_connection.h",
+  ]
+"""
+BLINK_IDB_BUILD_PATCHED = """\
+    "shared_idb_database_connection.h",
+  ]
+
+  deps = [ "//chromium/recorder_bridge" ]
+"""
+
+
+def ensure_event_scope_helper(
+    text: str, anchor: str, path: Path, after: bool = False
+) -> str:
+    """Writes the scope helper once, before an anchor or just after it."""
+    if BLINK_EVENT_SCOPE_HELPER_MARKER in text:
+        return text
+    replacement = (
+        f"{anchor}{BLINK_EVENT_SCOPE_HELPER}"
+        if after
+        else f"{BLINK_EVENT_SCOPE_HELPER}{anchor}"
+    )
+    return replace_once(text, anchor, replacement, path)
+
+
+def ensure_target_dispatch_helpers(
+    text: str, anchor: str, path: Path, after: bool = False
+) -> str:
+    """Writes the scope and target dispatch helpers once.
+
+    The dispatch helper always follows the scope helper it calls, so a
+    checkout that already holds the scope helper converges on the layout a
+    fresh checkout receives.
+    """
+    text = add_includes_after(
+        text, BLINK_BRIDGE_INCLUDE, BLINK_TARGET_DISPATCH_INCLUDES, path
+    )
+    text = ensure_event_scope_helper(text, anchor, path, after)
+    if BLINK_TARGET_DISPATCH_HELPER_MARKER not in text:
+        text = replace_once(
+            text,
+            BLINK_EVENT_SCOPE_HELPER,
+            f"{BLINK_EVENT_SCOPE_HELPER}{BLINK_TARGET_DISPATCH_HELPER}",
+            path,
+        )
+    return text
+
+
+def patch_blink_local_dom_window(path: Path) -> None:
+    text = read_source(path)
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "third_party/blink/renderer/core/frame/'
+            'local_dom_window.h"\n',
+            '#include "third_party/blink/renderer/core/frame/'
+            'local_dom_window.h"\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            path,
+        )
+    text = ensure_target_dispatch_helpers(
+        text,
+        "DispatchEventResult LocalDOMWindow::DispatchEvent(Event& event,\n",
+        path,
+    )
+    if "RecorderBeginTargetDispatch(event, *recorder_original_target" not in text:
+        text = replace_once(
+            text, BLINK_WINDOW_DISPATCH_ANCHOR, BLINK_WINDOW_DISPATCH_HOOK, path
+        )
+    write_patched(path, text)
+
+
+def patch_blink_idb_event_dispatcher(path: Path) -> None:
+    text = read_source(path)
+    if BLINK_BRIDGE_INCLUDE not in text:
+        text = replace_once(
+            text,
+            '#include "third_party/blink/renderer/modules/indexeddb/'
+            'idb_event_dispatcher.h"\n',
+            '#include "third_party/blink/renderer/modules/indexeddb/'
+            'idb_event_dispatcher.h"\n\n'
+            f"{BLINK_BRIDGE_INCLUDE}\n",
+            path,
+        )
+    text = ensure_target_dispatch_helpers(
+        text, "DispatchEventResult IDBEventDispatcher::Dispatch(\n", path
+    )
+    if "recorder_dispatch_opened" not in text:
+        text = replace_once(
+            text,
+            BLINK_IDB_DISPATCH_START_ANCHOR,
+            BLINK_IDB_DISPATCH_START_HOOK,
+            path,
+        )
+        text = replace_once(
+            text,
+            BLINK_IDB_DISPATCH_COMPLETED_ANCHOR,
+            BLINK_IDB_DISPATCH_COMPLETED_HOOK,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_blink_idb_build(path: Path) -> None:
+    patch_blink_module_build(
+        path, BLINK_IDB_BUILD_ANCHOR, BLINK_IDB_BUILD_PATCHED
+    )
+
+
 def patch_blink_event_target(path: Path) -> None:
     text = read_source(path)
     if BLINK_BRIDGE_INCLUDE not in text:
@@ -3565,6 +3928,12 @@ def patch_blink_event_target(path: Path) -> None:
             f"{BLINK_BRIDGE_INCLUDE}\n{include}",
             path,
         )
+    # The scope and target dispatch helpers open the Blink namespace, ahead
+    # of every listener helper and hook, so a checkout patched before they
+    # existed receives them where a fresh checkout holds them.
+    text = ensure_target_dispatch_helpers(
+        text, "namespace blink {\n", path, after=True
+    )
     if "RecorderListenerRegistrationKind(" not in text:
         anchor = "bool EventTarget::AddEventListenerInternal("
         text = replace_once(
@@ -3682,6 +4051,13 @@ def patch_blink_event_target(path: Path) -> None:
                 "    listener->Invoke(context, &event);\n"
                 f"{BLINK_LISTENER_INVOKED_HOOK}"
             ),
+            path,
+        )
+    if "RecorderBeginTargetDispatch(event, *this" not in text:
+        text = replace_once(
+            text,
+            BLINK_EVENT_TARGET_DISPATCH_ANCHOR,
+            BLINK_EVENT_TARGET_DISPATCH_HOOK,
             path,
         )
     write_patched(path, text)
@@ -3966,11 +4342,26 @@ def patch_blink_event_dispatcher(path: Path) -> None:
         )
     text = upgrade_legacy_hooks(
         text,
-        ((LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_SCOPES, BLINK_DISPATCH_HOOK),),
+        (
+            (LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_SCOPES, BLINK_DISPATCH_HOOK),
+            (
+                LEGACY_BLINK_DISPATCH_HOOK_WITHOUT_EVENT_SCOPE,
+                BLINK_DISPATCH_HOOK,
+            ),
+        ),
         path,
     )
     text = add_includes_after(
         text, BLINK_BRIDGE_INCLUDE, BLINK_DISPATCH_SCOPE_INCLUDES, path
+    )
+    text = add_includes_after(
+        text, BLINK_BRIDGE_INCLUDE, BLINK_EVENT_SCOPE_INCLUDES, path
+    )
+    text = ensure_event_scope_helper(
+        text,
+        "DispatchEventResult EventDispatcher::DispatchEvent(Node& node, "
+        "Event& event) {\n",
+        path,
     )
     if "RecordBlinkDispatchStarted" not in text:
         anchor = (
@@ -9016,6 +9407,15 @@ def main() -> int:
         / "dom"
         / "mutation_observer.cc"
     )
+    patch_blink_local_dom_window(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "frame"
+        / "local_dom_window.cc"
+    )
     patch_blink_event_dispatcher(
         source
         / "third_party"
@@ -9131,6 +9531,10 @@ def main() -> int:
     patch_blink_event_source(modules / "eventsource" / "event_source.cc")
     patch_blink_web_transport(modules / "webtransport" / "web_transport.cc")
     patch_blink_realtime_builds(modules)
+    patch_blink_idb_event_dispatcher(
+        modules / "indexeddb" / "idb_event_dispatcher.cc"
+    )
+    patch_blink_idb_build(modules / "indexeddb" / "BUILD.gn")
     network = source / "services" / "network"
     patch_network_websocket(network / "websocket.cc")
     patch_network_service_build(network / "BUILD.gn")

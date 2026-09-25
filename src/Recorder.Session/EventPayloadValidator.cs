@@ -877,7 +877,8 @@ internal static class EventPayloadValidator
                 RequiredBoolean("passive"),
                 RequiredBoolean("once"),
                 NullableObject("location"),
-                NullableObject("world")
+                NullableObject("world"),
+                OptionalObject("scope")
             ],
             issues,
             line);
@@ -885,6 +886,8 @@ internal static class EventPayloadValidator
         ValidateBrowserEventTargetProperty(payload, "target", issues, line);
         ValidateBrowserLocationProperty(payload, issues, line);
         ValidateBrowserExecutionWorldProperty(payload, issues, line);
+        ValidateNetworkScopeProperty(payload, issues, line);
+        ValidateBrowserEventScope(payload, ["target"], issues, line);
     }
 
     private static void ValidateBrowserDispatch(
@@ -923,7 +926,8 @@ internal static class EventPayloadValidator
                 requireDefaultAction
                     ? RequiredObject("currentTarget")
                     : OptionalNullableObject("currentTarget"),
-                RequiredObjectArray("pathScopes")
+                RequiredObjectArray("pathScopes"),
+                OptionalObject("scope")
             ],
             issues,
             line);
@@ -932,6 +936,113 @@ internal static class EventPayloadValidator
         ValidateBrowserEventTargetProperty(payload, "currentTarget", issues, line);
         ValidateBrowserEventTargetArrayProperty(payload, "composedPath", issues, line);
         ValidateBrowserDispatchPathScopes(payload, issues, line);
+        ValidateNetworkScopeProperty(payload, issues, line);
+        ValidateBrowserEventScope(
+            payload,
+            ["originalTarget", "currentTarget", "composedPath"],
+            issues,
+            line);
+    }
+
+    private static readonly string[] DocumentFreeScopeKinds =
+    [
+        "dedicated-worker", "shared-worker", "service-worker", "worklet"
+    ];
+
+    // From protocol 0.31 a listener or dispatch record names the execution
+    // context it belongs to. A worker or worklet scope has no document, so its
+    // record names none, and only a non-Node target can be recorded there. A
+    // record in a window scope, or an earlier record with no scope, belongs to
+    // a document and names it on every target.
+    private static void ValidateBrowserEventScope(
+        JsonElement payload,
+        IReadOnlyList<string> targetProperties,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        string? scopeKind = null;
+        if (payload.TryGetProperty("scope", out var scope) &&
+            scope.ValueKind == JsonValueKind.Object)
+        {
+            scopeKind = ReadString(scope, "contextKind");
+        }
+
+        var documentFree = scopeKind is not null &&
+            DocumentFreeScopeKinds.Contains(scopeKind, StringComparer.Ordinal);
+        if (documentFree &&
+            payload.TryGetProperty("context", out var context) &&
+            context.ValueKind == JsonValueKind.Object &&
+            HasNonnullProperty(context, "documentId"))
+        {
+            AddError(
+                issues,
+                "browser-event-scope-inconsistent",
+                "events.ndjson#/payload/context/documentId",
+                $"A record in a {scopeKind} scope belongs to no document.",
+                line);
+        }
+
+        foreach (var property in targetProperties)
+        {
+            if (!payload.TryGetProperty(property, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.Object)
+            {
+                CheckTarget(value, $"events.ndjson#/payload/{property}");
+            }
+            else if (value.ValueKind == JsonValueKind.Array)
+            {
+                var index = 0;
+                foreach (var entry in value.EnumerateArray())
+                {
+                    if (entry.ValueKind == JsonValueKind.Object)
+                    {
+                        CheckTarget(
+                            entry,
+                            $"events.ndjson#/payload/{property}/{index}");
+                    }
+                    index++;
+                }
+            }
+        }
+
+        void CheckTarget(JsonElement target, string path)
+        {
+            var hasDocument = HasNonnullProperty(target, "documentId");
+            var kind = ReadString(target, "kind");
+            if (documentFree && hasDocument)
+            {
+                AddError(
+                    issues,
+                    "browser-event-scope-inconsistent",
+                    $"{path}/documentId",
+                    $"A target in a {scopeKind} scope belongs to no document.",
+                    line);
+            }
+            else if (documentFree && kind != "other")
+            {
+                AddError(
+                    issues,
+                    "browser-event-scope-inconsistent",
+                    path,
+                    $"A {scopeKind} scope has no {kind} event target.",
+                    line);
+            }
+            else if (!documentFree && !hasDocument)
+            {
+                AddError(
+                    issues,
+                    "browser-event-scope-inconsistent",
+                    $"{path}/documentId",
+                    scopeKind is null
+                        ? "A record that names no scope must name its document."
+                        : $"A target in a {scopeKind} scope must name its document.",
+                    line);
+            }
+        }
     }
 
     // Each composed path entry has one scope record at the same index, and
@@ -4226,7 +4337,7 @@ internal static class EventPayloadValidator
                 RequiredEnum("kind", "node", "window", "other"),
                 NullableString("interfaceName"),
                 NullableString("targetId"),
-                RequiredString("documentId"),
+                NullableString("documentId"),
                 NullableInteger("nodeId", nonnegative: true),
                 NullableString("backendNodeId"),
                 NullableString("tagName"),

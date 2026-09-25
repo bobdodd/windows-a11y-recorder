@@ -64,6 +64,21 @@ inline constexpr char kEventTargetKindNode[] = "node";
 inline constexpr char kEventTargetKindWindow[] = "window";
 inline constexpr char kEventTargetKindOther[] = "other";
 
+// Names the execution context a listener or dispatch record belongs to. A
+// listener or dispatch in a dedicated, shared, or service worker, or in a
+// worklet, belongs to no document, so its records name the global scope
+// instead: the context kind, the worker's DevTools token, which is the same
+// token that worker's network records carry, and the global object URL. A
+// window scope carries no worker token or URL, because the document already
+// identifies it. The context kind is one of window, dedicated-worker,
+// shared-worker, service-worker, worklet, or other, and the bridge records any
+// other value as other.
+struct EventScope {
+  std::string context_kind;
+  std::string worker_token;
+  std::string global_object_url;
+};
+
 // Identifies how a listener entered Blink's listener map. Blink accepts the
 // three forms through one internal registration path, and the distinction is
 // read from the listener object Blink created rather than from the call site:
@@ -112,13 +127,16 @@ COMPONENT_EXPORT(RECORDER_BRIDGE)
 // location rather than an object of nulls. The location describes the call that
 // registered, removed, or replaced the listener, not where its callback
 // function was defined.
-// The final four parameters of each listener entry point describe the
+// The four parameters before the scope describe the
 // JavaScript world the callback belongs to, which is the world the registration
 // was made from rather than the world that happened to be current when the
 // record was written. An empty world kind means Blink reported no world, which
 // is the case for a listener Blink installed itself, and a record with no world
 // reports a null world rather than a world of nulls. An empty world name or
-// stable identifier means Blink holds none for that world.
+// stable identifier means Blink holds none for that world. The final parameter
+// names the execution context the target belongs to. A target in a worker or
+// worklet scope reports a zero document node identifier, and only a non-Node
+// target in such a scope is recorded without a document.
 void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string registration_kind,
                                    std::string target_kind,
@@ -140,7 +158,8 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string world_kind,
                                    int world_id,
                                    std::string world_name,
-                                   std::string world_stable_id);
+                                   std::string world_stable_id,
+                                   EventScope scope);
 
 // Records a listener only after Blink has accepted its removal. The listener
 // identifier is the same one allocated when the registration was accepted.
@@ -166,7 +185,8 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                                 std::string world_kind,
                                 int world_id,
                                 std::string world_name,
-                                std::string world_stable_id);
+                                std::string world_stable_id,
+                                EventScope scope);
 
 // Records that Blink replaced the callback of an existing attribute listener
 // registration in place. Assigning an on-event IDL attribute over a listener
@@ -197,7 +217,8 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
                                         std::string world_kind,
                                         int world_id,
                                         std::string world_name,
-                                        std::string world_stable_id);
+                                        std::string world_stable_id,
+                                         EventScope scope);
 
 // Records one dispatch-started event after Blink has established the event
 // path and original target, but before capture-phase listeners run.
@@ -208,7 +229,48 @@ void RecordBlinkDispatchStarted(uintptr_t event_identity,
                                 std::string event_name,
                                 std::string target_tag_name,
                                 std::string target_element_id,
-                                bool trusted);
+                                bool trusted,
+                                EventScope scope);
+
+// Opens a dispatch that does not pass through Blink's Node event dispatcher:
+// the at-target dispatch EventTarget performs for a target that is not a Node,
+// the dispatch a window performs for its own load and pageshow events with the
+// document as target, and the IndexedDB dispatcher's request, transaction, and
+// database propagation. Returns true only when this call opened the dispatch,
+// so a hook that finds the event already being recorded neither adds path
+// entries to it nor completes it. The original target is described the same
+// way a listener target is. Path entries follow through
+// RecordBlinkDispatchPathTarget and the start record through
+// CompleteBlinkDispatchStart.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool BeginBlinkTargetDispatch(uintptr_t event_identity,
+                              std::string target_kind,
+                              std::string target_interface_name,
+                              uintptr_t target_identity,
+                              int document_node_id,
+                              int target_node_id,
+                              std::string target_tag_name,
+                              std::string target_element_id,
+                              std::string event_name,
+                              bool trusted,
+                              EventScope scope);
+
+// Adds one entry, in Blink path order, to a dispatch opened by
+// BeginBlinkTargetDispatch. Such a path has no tree scopes, so each entry's
+// scope reports only the original target's node identifier, when the original
+// target is a Node, and whether composedPath() returns this entry to a
+// listener on it, which Blink decides per entry for these paths.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDispatchPathTarget(uintptr_t event_identity,
+                                   std::string target_kind,
+                                   std::string target_interface_name,
+                                   uintptr_t target_identity,
+                                   int document_node_id,
+                                   int target_node_id,
+                                   std::string target_tag_name,
+                                   std::string target_element_id,
+                                   int scope_target_node_id,
+                                   bool visible_to_listener);
 
 // Adds one Node entry to the active dispatch path, in Blink path order.
 COMPONENT_EXPORT(RECORDER_BRIDGE)

@@ -17,10 +17,11 @@ param(
 
     # The capture has to outlast the fixture's page-lifecycle phase, which is
     # scheduled by this script after the page reports visible and completes
-    # 3.5 seconds later, and every fixture page that runs after it. The default
+    # 3.5 seconds later, and every fixture page that runs after it, including
+    # the worker dispatch fixture's service worker installation. The default
     # leaves room for a slow launch.
     [ValidateRange(5, 300)]
-    [int] $DurationSeconds = 35
+    [int] $DurationSeconds = 45
 )
 
 $ErrorActionPreference = "Stop"
@@ -838,6 +839,15 @@ function Start-CookieFixtureServer {
         [Parameter(Mandatory = $true)]
         [string] $ShadowPage,
 
+        # The worker and non-Node dispatch logging fixture, served at /workers,
+        # and its worker scripts, keyed by path. It shares the cookie fixture's
+        # origin and sets no cookie of its own.
+        [Parameter(Mandatory = $true)]
+        [string] $WorkerPage,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable] $WorkerScripts,
+
         # The network logging fixture, served at /network behind a redirect
         # from /network-start, with its worker, script, and data responses.
         [Parameter(Mandatory = $true)]
@@ -869,6 +879,8 @@ function Start-CookieFixtureServer {
                 $InteractionPage,
                 $LayoutPage,
                 $ShadowPage,
+                $WorkerPage,
+                $WorkerScripts,
                 $NetworkPage,
                 $NetworkWorker,
                 $NetworkSessionValue,
@@ -1045,6 +1057,20 @@ function Start-CookieFixtureServer {
                         $contentType = "text/html; charset=utf-8"
                         $body = $ShadowPage
                     }
+                    elseif ($path -eq "/workers") {
+                        $status = "200 OK"
+                        $contentType = "text/html; charset=utf-8"
+                        $body = $WorkerPage
+                    }
+                    elseif ($WorkerScripts.ContainsKey($path)) {
+                        $status = "200 OK"
+                        $contentType = "text/javascript; charset=utf-8"
+                        $body = $WorkerScripts[$path]
+                    }
+                    elseif ($path -eq "/workers/worker-data") {
+                        $status = "200 OK"
+                        $body = "worker dispatch data"
+                    }
                     elseif ($path -eq "/network-start") {
                         $status = "302 Found"
                         $body = "redirect"
@@ -1137,7 +1163,7 @@ function Start-CookieFixtureServer {
             $CookieValue
         ).AddArgument($InteractionPage).AddArgument($LayoutPage).AddArgument(
             $ShadowPage
-        ).AddArgument(
+        ).AddArgument($WorkerPage).AddArgument($WorkerScripts).AddArgument(
             $NetworkPage
         ).AddArgument($NetworkWorker).AddArgument(
             $NetworkSessionValue
@@ -2099,6 +2125,239 @@ function Invoke-ShadowFixture {
     $run
 }
 
+# The worker and non-Node dispatch logging fixture, served at /workers. Its
+# listeners are on the window, on EventTargets that are not Nodes, on IndexedDB
+# requests, transactions, and databases, and in dedicated, shared, and service
+# worker global scopes, so the logger has listener and dispatch records from
+# each path Blink dispatches through outside its Node event dispatcher. Each
+# window listener reports the composedPath() length it saw and its event
+# phase, which the verifier compares with the records. The page shares the
+# cookie fixture's origin and sets no cookie of its own.
+$workerFixturePage = @'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Worker dispatch logging fixture</title>
+</head>
+<body>
+<h1>Worker dispatch logging fixture</h1>
+<p id="worker-log">Running</p>
+<script>
+const workerObserved = {};
+// Reports what a listener saw while its event was being dispatched, since
+// composedPath() is empty once dispatch ends.
+function workerSeen(event) {
+  return {
+    trusted: event.isTrusted,
+    phase: event.eventPhase,
+    composedPathLength: event.composedPath().length,
+    targetIsDocument: event.target === document,
+    targetIsWindow: event.target === window
+  };
+}
+// Registers one listener and resolves with what it saw and the event's data.
+function workerOnce(target, type, options) {
+  return new Promise(function (resolve) {
+    target.addEventListener(type, function (event) {
+      const seen = workerSeen(event);
+      seen.data = event.data === undefined ? null : event.data;
+      resolve(seen);
+    }, options);
+  });
+}
+function workerWithin(promise, what) {
+  return Promise.race([promise, new Promise(function (resolve, reject) {
+    setTimeout(function () {
+      reject(new Error(what + " did not finish within 10 seconds"));
+    }, 10000);
+  })]);
+}
+const workerLoaded = workerOnce(window, "load");
+const workerPageshow = workerOnce(window, "pageshow");
+function workerRequestDone(request) {
+  return new Promise(function (resolve, reject) {
+    request.addEventListener("success", function () { resolve(request.result); });
+    request.addEventListener("error", function () { reject(request.error); });
+  });
+}
+async function workerIndexedDb() {
+  const name = "a11y-recorder-worker-fixture";
+  await workerRequestDone(indexedDB.deleteDatabase(name));
+  const openRequest = indexedDB.open(name, 1);
+  openRequest.addEventListener("upgradeneeded", function () {
+    openRequest.result.createObjectStore("items");
+  });
+  const db = await workerRequestDone(openRequest);
+  const put = [];
+  function note(where) {
+    return function (event) {
+      const seen = workerSeen(event);
+      seen.where = where;
+      put.push(seen);
+    };
+  }
+  db.addEventListener("success", note("database"), true);
+  const transaction = db.transaction("items", "readwrite");
+  transaction.addEventListener("success", note("transaction"), true);
+  const complete = workerOnce(transaction, "complete");
+  const request = transaction.objectStore("items").put("fixture value", "fixture-key");
+  request.addEventListener("success", note("request"));
+  const completed = await complete;
+  db.close();
+  await workerRequestDone(indexedDB.deleteDatabase(name));
+  return { put: put, complete: completed };
+}
+async function workerServiceWorker() {
+  const registration = await navigator.serviceWorker.register(
+    "/workers/sw.js", { scope: "/workers/sw-scope/" });
+  const worker = registration.installing || registration.waiting || registration.active;
+  if (worker.state !== "activated") {
+    await new Promise(function (resolve) {
+      worker.addEventListener("statechange", function () {
+        if (worker.state === "activated") {
+          resolve();
+        }
+      });
+    });
+  }
+  const reply = workerOnce(navigator.serviceWorker, "message");
+  navigator.serviceWorker.startMessages();
+  worker.postMessage("service-message");
+  const replied = await reply;
+  return { reply: replied, unregistered: await registration.unregister() };
+}
+window.workerFixture = {
+  run: async function () {
+    workerObserved.load = await workerWithin(workerLoaded, "The load event");
+    workerObserved.pageshow = await workerWithin(workerPageshow, "The pageshow event");
+
+    const windowMessage = workerOnce(window, "message");
+    window.postMessage("window-message", location.origin);
+    workerObserved.windowMessage = await workerWithin(windowMessage, "The window message");
+
+    const windowCustom = workerOnce(window, "fixture-window");
+    window.dispatchEvent(new Event("fixture-window"));
+    workerObserved.windowCustom = await windowCustom;
+
+    const controller = new AbortController();
+    const aborted = workerOnce(controller.signal, "abort");
+    controller.abort();
+    workerObserved.abort = await aborted;
+
+    const plain = new EventTarget();
+    const custom = workerOnce(plain, "fixture-custom");
+    plain.dispatchEvent(new Event("fixture-custom"));
+    workerObserved.custom = await custom;
+
+    const channel = new MessageChannel();
+    const portMessage = workerOnce(channel.port1, "message");
+    channel.port1.start();
+    channel.port2.postMessage("port-message");
+    workerObserved.port = await workerWithin(portMessage, "The MessageChannel message");
+    channel.port1.close();
+    channel.port2.close();
+
+    workerObserved.indexedDb = await workerWithin(workerIndexedDb(), "The IndexedDB steps");
+
+    const dedicated = new Worker("/workers/dedicated.js");
+    const dedicatedReply = workerOnce(dedicated, "message");
+    dedicated.postMessage("dedicated-message");
+    workerObserved.dedicated = await workerWithin(dedicatedReply, "The dedicated worker");
+    dedicated.terminate();
+
+    const shared = new SharedWorker("/workers/shared.js");
+    const sharedReply = workerOnce(shared.port, "message");
+    shared.port.start();
+    shared.port.postMessage("shared-message");
+    workerObserved.shared = await workerWithin(sharedReply, "The shared worker");
+    shared.port.close();
+
+    workerObserved.service = await workerWithin(workerServiceWorker(), "The service worker");
+
+    workerObserved.outcome = "completed";
+    document.getElementById("worker-log").textContent = "Completed";
+    return JSON.stringify(workerObserved);
+  }
+};
+document.title = "Worker dispatch logging fixture ready";
+</script>
+</body>
+</html>
+'@
+
+# The worker scripts the worker dispatch fixture starts, keyed by the path the
+# fixture server serves each from. The dedicated worker fetches from its own
+# scope, so its network records carry the token its listener records carry.
+$workerFixtureScripts = @{
+    "/workers/dedicated.js" = @'
+self.addEventListener("message", function (event) {
+  fetch("/workers/worker-data", { cache: "no-store" })
+    .then(function (response) { return response.text(); })
+    .then(function (text) { self.postMessage({ echoed: event.data, fetched: text }); });
+});
+'@
+    "/workers/shared.js" = @'
+self.addEventListener("connect", function (event) {
+  const port = event.ports[0];
+  port.addEventListener("message", function (message) {
+    port.postMessage("shared:" + message.data);
+  });
+  port.start();
+});
+'@
+    "/workers/sw.js" = @'
+self.addEventListener("install", function (event) {
+  event.waitUntil(self.skipWaiting());
+});
+self.addEventListener("activate", function (event) {
+  event.waitUntil(Promise.resolve());
+});
+self.addEventListener("message", function (event) {
+  event.source.postMessage("service:" + event.data);
+});
+'@
+}
+
+# Opens the worker and non-Node dispatch logging fixture in a foreground tab,
+# runs its listeners and workers once, and closes the tab. The page does not
+# need to paint, but the foreground fixture helper already handles readiness,
+# the returned tab, and cleanup. This step only makes the page dispatch events
+# so the logger has records to emit; the verifier is what checks them.
+function Invoke-WorkerFixture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $DevToolsBase,
+
+        [Parameter(Mandatory = $true)]
+        [string] $FixtureUri,
+
+        # The tab to activate before the fixture tab closes.
+        [Parameter(Mandatory = $true)]
+        [string] $ReturnTargetId
+    )
+
+    $run = Invoke-ForegroundFixture `
+        -DevToolsBase $DevToolsBase `
+        -FixtureUri $FixtureUri `
+        -ReturnTargetId $ReturnTargetId `
+        -Name "worker dispatch logging fixture" `
+        -ReadyTitle "Worker dispatch logging fixture ready" `
+        -Steps @(
+            @{ Name = "Run"; Call = "workerFixture.run()" }
+        )
+    $report = ConvertFrom-Json $run.Steps.Run
+    if ((Get-CdpProperty $report "outcome") -ne "completed") {
+        throw (
+            "The worker dispatch logging fixture reported $($run.Steps.Run)."
+        )
+    }
+    [pscustomobject]@{
+        TargetId = $run.TargetId
+        Report = $run.Steps.Run
+    }
+}
+
 # Runs the network logging fixture in a background tab. The tab opens
 # /network-start, which redirects to the fixture page, and the fixture function
 # is then called with the per-run credential values and the URL of a closed
@@ -2490,6 +2749,8 @@ $layoutFixtureUri = $null
 $layoutFixtureSteps = $null
 $shadowFixtureUri = $null
 $shadowFixtureSteps = $null
+$workerFixtureUri = $null
+$workerFixtureReport = $null
 # The credential values the network logging fixture sends in request headers
 # and receives in a response header. They are generated per run so the verifier
 # can require that no record in the session contains them.
@@ -2533,6 +2794,8 @@ try {
         $interactionFixturePage `
         $layoutFixturePage `
         $shadowFixturePage `
+        $workerFixturePage `
+        $workerFixtureScripts `
         $networkFixturePage `
         $networkFixtureWorker `
         $networkSessionValue `
@@ -2545,6 +2808,10 @@ try {
     Write-Host "Serving the layout logging fixture at $layoutFixtureUri"
     $shadowFixtureUri = "$($cookieServer.BaseUri)shadow"
     Write-Host "Serving the shadow DOM logging fixture at $shadowFixtureUri"
+    $workerFixtureUri = "$($cookieServer.BaseUri)workers"
+    Write-Host (
+        "Serving the worker dispatch logging fixture at $workerFixtureUri"
+    )
     $networkStartUri = "$($cookieServer.BaseUri)network-start"
     $networkFixtureUri = "$($cookieServer.BaseUri)network"
     Write-Host (
@@ -2780,7 +3047,27 @@ try {
         throw
     }
 
-    # The network logging fixture makes a fifth page send fetches with
+    # The worker dispatch logging fixture makes another page dispatch events
+    # to the window with the document as target, to EventTargets that are not
+    # Nodes, and through IndexedDB, and runs dedicated, shared, and service
+    # workers that register and receive listeners of their own.
+    try {
+        $workerRun = Invoke-WorkerFixture `
+            $devToolsBase `
+            $workerFixtureUri `
+            $backgroundTargetId
+        $workerFixtureReport = $workerRun.Report
+        Write-Host (
+            "Ran the worker dispatch logging fixture in foreground target " +
+            "$($workerRun.TargetId). The page reported: $workerFixtureReport"
+        )
+    }
+    catch {
+        Stop-Job $captureJob -ErrorAction SilentlyContinue
+        throw
+    }
+
+    # The network logging fixture makes another page send fetches with
     # credential-bearing headers, follow a redirect, fail a request, reuse a
     # cached script, and fetch from a dedicated worker, so the capture holds
     # network metadata records for the logger to emit.
@@ -2921,6 +3208,8 @@ try {
         -LayoutFixtureSteps $layoutFixtureSteps `
         -ShadowFixtureUri $shadowFixtureUri `
         -ShadowFixtureSteps $shadowFixtureSteps `
+        -WorkerFixtureUri $workerFixtureUri `
+        -WorkerFixtureReport $workerFixtureReport `
         -NetworkFixtureUri $networkFixtureUri `
         -NetworkStartUri $networkStartUri `
         -NetworkRefusedUri $networkValues.refusedUrl `

@@ -37,6 +37,16 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $ShadowFixtureSteps,
 
+    # The URL the run script served the worker and non-Node dispatch logging
+    # fixture from. Its worker scripts are served beneath it.
+    [Parameter(Mandatory = $true)]
+    [string] $WorkerFixtureUri,
+
+    # What the worker dispatch fixture page reported, as its own JSON report of
+    # what each of its window listeners saw and what each worker replied.
+    [Parameter(Mandatory = $true)]
+    [string] $WorkerFixtureReport,
+
     # The URL the run script served the network logging fixture page from.
     # The page's data, script, and worker URLs all begin with it.
     [Parameter(Mandatory = $true)]
@@ -2168,6 +2178,27 @@ foreach ($listenerRecord in $listenerRecords) {
             throw (
                 "A main-world listener record reported a name or stable " +
                 "identifier Blink holds only for other worlds."
+            )
+        }
+        continue
+    }
+    # The worker dispatch fixture registers listeners in dedicated, shared, and
+    # service worker global scopes, whose scripts run in Blink's worker world.
+    # That world is accepted only on a record whose scope is a worker's.
+    $listenerScopeProperty = $listenerRecord.payload.PSObject.Properties["scope"]
+    $listenerScopeKind = $null
+    if ($listenerScopeProperty -and $null -ne $listenerScopeProperty.Value) {
+        $listenerScopeKind = $listenerScopeProperty.Value.contextKind
+    }
+    if ($world.kind -eq "worker-or-worklet") {
+        if ($listenerScopeKind -notin @(
+                "dedicated-worker",
+                "shared-worker",
+                "service-worker"
+            )) {
+            throw (
+                "A $($listenerRecord.eventType) record reported the worker " +
+                "world with the scope '$listenerScopeKind'."
             )
         }
         continue
@@ -4701,7 +4732,7 @@ foreach ($check in $scopeChecks) {
     ShadowDispatchDocumentIndex = $documentIndex
 } | Format-List
 
-# The run script serves a fifth page that sends a fetch with credential-bearing
+# The run script serves another page that sends a fetch with credential-bearing
 # and plain request headers, follows a redirected fetch, fails a fetch to a
 # closed port, loads one cacheable script twice, and fetches from a dedicated
 # worker, after reaching the page itself through a redirect. These checks
@@ -5451,6 +5482,406 @@ if ($transportEstablished.Count -ne 0) {
     DispatchOutcome = $completion.outcome
 } | Format-List
 
+# The run script serves a page whose listeners are on the window, on
+# EventTargets that are not Nodes, on IndexedDB requests, transactions, and
+# databases, and in dedicated, shared, and service worker global scopes. These
+# checks establish that the logger emitted a listener record for each of those
+# registrations naming the execution context it was made in, and a dispatch
+# record for each event those listeners received, with the path Blink fired
+# listeners along. They say nothing about whether the page's use of these
+# events is appropriate.
+$workerReport = ConvertFrom-Json $WorkerFixtureReport
+if ($workerReport.outcome -ne "completed" -or
+    $workerReport.windowMessage.data -ne "window-message" -or
+    $workerReport.port.data -ne "port-message" -or
+    $workerReport.dedicated.data.echoed -ne "dedicated-message" -or
+    $workerReport.dedicated.data.fetched -ne "worker dispatch data" -or
+    $workerReport.shared.data -ne "shared:shared-message" -or
+    $workerReport.service.reply.data -ne "service:service-message" -or
+    $workerReport.service.unregistered -ne $true -or
+    $workerReport.load.targetIsDocument -ne $true -or
+    @($workerReport.indexedDb.put).Count -ne 3) {
+    throw "The worker dispatch fixture page reported: $WorkerFixtureReport"
+}
+
+# Returns the script URL a listener record reports, or null when it reports
+# no location.
+function Get-ListenerLocationUrl {
+    param($Payload)
+
+    $location = $Payload.PSObject.Properties["location"]
+    if (-not $location -or $null -eq $location.Value) {
+        return $null
+    }
+    [string] $location.Value.url
+}
+
+# Returns what the fixture page reported for the IndexedDB listener on the
+# named object.
+function Get-WorkerPutReport {
+    param([string] $Where)
+
+    @($workerReport.indexedDb.put | Where-Object { $_.where -eq $Where })[0]
+}
+
+$workerListenerRecords = @(
+    $records |
+        Where-Object {
+            $url = $null
+            if ($_.channel -eq "browser.listener" -and
+                $_.eventType -eq "listener-registered") {
+                $url = Get-ListenerLocationUrl $_.payload
+            }
+            $null -ne $url -and $url.StartsWith($WorkerFixtureUri)
+        }
+)
+$workerDispatchRecords = @(
+    $records | Where-Object { $_.channel -eq "browser.dispatch" }
+)
+
+# Each registration the fixture makes, by event, target interface, scope, and
+# capture flag. Path lists the interfaces of the targets Blink fires listeners
+# on, in path order. Report is what the page's listener reported, where the
+# page could observe it; worker scopes report nothing back but their replies.
+$workerExpectations = @(
+    @{ Key = "load"; Event = "load"; Interface = "Window"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Window"); Trusted = $true; Report = $workerReport.load },
+    @{ Key = "pageshow"; Event = "pageshow"; Interface = "Window"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Window"); Trusted = $true; Report = $workerReport.pageshow },
+    @{ Key = "window-message"; Event = "message"; Interface = "Window"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Window"); Trusted = $null; Report = $workerReport.windowMessage },
+    @{ Key = "window-custom"; Event = "fixture-window"; Interface = "Window"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Window"); Trusted = $false; Report = $workerReport.windowCustom },
+    @{ Key = "abort"; Event = "abort"; Interface = "AbortSignal"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("AbortSignal"); Trusted = $true; Report = $workerReport.abort },
+    # Blink's interface name for a script-constructed EventTarget.
+    @{ Key = "custom"; Event = "fixture-custom"; Interface = "EventTargetImpl"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("EventTargetImpl"); Trusted = $false; Report = $workerReport.custom },
+    # The MessageChannel port and the shared worker's port on the page.
+    @{ Key = "window-ports"; Event = "message"; Interface = "MessagePort"; Scope = "window"; Capture = $false; Count = 2; Phase = "at-target"; Path = @("MessagePort"); Trusted = $null; Report = $null },
+    @{ Key = "idb-request"; Event = "success"; Interface = "IDBRequest"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("IDBRequest", "IDBTransaction", "IDBDatabase"); Trusted = $true; Report = (Get-WorkerPutReport "request") },
+    @{ Key = "idb-transaction"; Event = "success"; Interface = "IDBTransaction"; Scope = "window"; Capture = $true; Count = 1; Phase = "capturing"; Path = @("IDBRequest", "IDBTransaction", "IDBDatabase"); Trusted = $true; Report = (Get-WorkerPutReport "transaction") },
+    @{ Key = "idb-database"; Event = "success"; Interface = "IDBDatabase"; Scope = "window"; Capture = $true; Count = 1; Phase = "capturing"; Path = @("IDBRequest", "IDBTransaction", "IDBDatabase"); Trusted = $true; Report = (Get-WorkerPutReport "database") },
+    @{ Key = "idb-complete"; Event = "complete"; Interface = "IDBTransaction"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("IDBTransaction", "IDBDatabase"); Trusted = $true; Report = $workerReport.indexedDb.complete },
+    @{ Key = "dedicated-page"; Event = "message"; Interface = "Worker"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("Worker"); Trusted = $null; Report = $workerReport.dedicated },
+    @{ Key = "dedicated-message"; Event = "message"; Interface = "DedicatedWorkerGlobalScope"; Scope = "dedicated-worker"; Script = "dedicated.js"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("DedicatedWorkerGlobalScope"); Trusted = $null; Report = $null },
+    @{ Key = "shared-connect"; Event = "connect"; Interface = "SharedWorkerGlobalScope"; Scope = "shared-worker"; Script = "shared.js"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("SharedWorkerGlobalScope"); Trusted = $null; Report = $null },
+    @{ Key = "shared-port"; Event = "message"; Interface = "MessagePort"; Scope = "shared-worker"; Script = "shared.js"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("MessagePort"); Trusted = $null; Report = $null },
+    @{ Key = "service-install"; Event = "install"; Interface = "ServiceWorkerGlobalScope"; Scope = "service-worker"; Script = "sw.js"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("ServiceWorkerGlobalScope"); Trusted = $true; Report = $null },
+    @{ Key = "service-activate"; Event = "activate"; Interface = "ServiceWorkerGlobalScope"; Scope = "service-worker"; Script = "sw.js"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("ServiceWorkerGlobalScope"); Trusted = $true; Report = $null },
+    @{ Key = "service-message"; Event = "message"; Interface = "ServiceWorkerGlobalScope"; Scope = "service-worker"; Script = "sw.js"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("ServiceWorkerGlobalScope"); Trusted = $null; Report = $null },
+    @{ Key = "service-page"; Event = "message"; Interface = "ServiceWorkerContainer"; Scope = "window"; Capture = $false; Count = 1; Phase = "at-target"; Path = @("ServiceWorkerContainer"); Trusted = $null; Report = $workerReport.service.reply }
+)
+
+$workerChecked = @{}
+foreach ($expected in $workerExpectations) {
+    $what = "the worker dispatch fixture's $($expected.Key) listener"
+    $registrations = @(
+        $workerListenerRecords |
+            Where-Object {
+                $_.payload.eventName -eq $expected.Event -and
+                $_.payload.target.interfaceName -eq $expected.Interface -and
+                $_.payload.scope.contextKind -eq $expected.Scope -and
+                $_.payload.capture -eq $expected.Capture
+            }
+    )
+    if ($registrations.Count -ne $expected.Count) {
+        throw (
+            "$($registrations.Count) registrations were recorded for $what " +
+            "rather than $($expected.Count)."
+        )
+    }
+    $checked = New-Object System.Collections.ArrayList
+    foreach ($registrationRecord in $registrations) {
+        $registration = $registrationRecord.payload
+        $scope = $registration.scope
+        $target = $registration.target
+        $expectedKind = "other"
+        if ($expected.Interface -eq "Window") {
+            $expectedKind = "window"
+        }
+        if ($target.kind -ne $expectedKind -or $null -ne $target.nodeId -or
+            [string]::IsNullOrWhiteSpace($target.targetId)) {
+            throw (
+                "The registration for $what recorded target kind " +
+                "'$($target.kind)', node $($target.nodeId), and target " +
+                "identifier '$($target.targetId)'."
+            )
+        }
+        if ($expected.Scope -eq "window") {
+            if ($null -ne $scope.workerToken -or
+                $null -ne $scope.globalObjectUrl -or
+                $null -eq $registration.context.documentId -or
+                $target.documentId -ne $registration.context.documentId) {
+                throw (
+                    "The registration for $what recorded worker token " +
+                    "'$($scope.workerToken)', global URL " +
+                    "'$($scope.globalObjectUrl)', and documents " +
+                    "'$($registration.context.documentId)' and " +
+                    "'$($target.documentId)'."
+                )
+            }
+        }
+        else {
+            $scriptUri = "$WorkerFixtureUri/$($expected.Script)"
+            if ([string]::IsNullOrWhiteSpace($scope.workerToken) -or
+                $scope.globalObjectUrl -ne $scriptUri -or
+                $null -ne $registration.context.documentId -or
+                $null -ne $target.documentId -or
+                (Get-ListenerLocationUrl $registration) -ne $scriptUri -or
+                $null -eq $registration.world -or
+                $registration.world.kind -ne "worker-or-worklet") {
+                throw (
+                    "The registration for $what recorded worker token " +
+                    "'$($scope.workerToken)', global URL " +
+                    "'$($scope.globalObjectUrl)', documents " +
+                    "'$($registration.context.documentId)' and " +
+                    "'$($target.documentId)', and location " +
+                    "'$(Get-ListenerLocationUrl $registration)'."
+                )
+            }
+        }
+
+        $processId = $registration.context.processId
+        $invocations = @(
+            $workerDispatchRecords |
+                Where-Object {
+                    $_.eventType -eq "listener-invoked" -and
+                    $_.payload.listenerId -eq $registration.listenerId -and
+                    $_.payload.context.processId -eq $processId
+                }
+        )
+        if ($invocations.Count -ne 1) {
+            throw (
+                "$($invocations.Count) invocations were recorded for $what " +
+                "rather than one."
+            )
+        }
+        $invocation = $invocations[0].payload
+        if ($invocation.phase -ne $expected.Phase -or
+            $invocation.eventName -ne $expected.Event -or
+            $invocation.currentTarget.targetId -ne $target.targetId) {
+            throw (
+                "The invocation of $what recorded phase " +
+                "'$($invocation.phase)', event '$($invocation.eventName)', " +
+                "and current target '$($invocation.currentTarget.targetId)'."
+            )
+        }
+        $dispatchId = $invocation.dispatchId
+        $starts = @(
+            $workerDispatchRecords |
+                Where-Object {
+                    $_.eventType -eq "dispatch-started" -and
+                    $_.payload.dispatchId -eq $dispatchId -and
+                    $_.payload.context.processId -eq $processId
+                }
+        )
+        $ends = @(
+            $workerDispatchRecords |
+                Where-Object {
+                    $_.eventType -eq "dispatch-completed" -and
+                    $_.payload.dispatchId -eq $dispatchId -and
+                    $_.payload.context.processId -eq $processId
+                }
+        )
+        if ($starts.Count -ne 1 -or $ends.Count -ne 1) {
+            throw (
+                "The dispatch that invoked $what recorded $($starts.Count) " +
+                "starts and $($ends.Count) completions rather than one each."
+            )
+        }
+        if ([long] $starts[0].monotonicNanoseconds -gt
+                [long] $invocations[0].monotonicNanoseconds -or
+            [long] $invocations[0].monotonicNanoseconds -gt
+                [long] $ends[0].monotonicNanoseconds) {
+            throw "The dispatch that invoked $what recorded its records out of order."
+        }
+        $started = $starts[0].payload
+        if ($started.scope.contextKind -ne $scope.contextKind -or
+            $started.scope.workerToken -ne $scope.workerToken -or
+            $started.scope.globalObjectUrl -ne $scope.globalObjectUrl -or
+            $started.context.documentId -ne $registration.context.documentId) {
+            throw (
+                "The dispatch that invoked $what recorded scope " +
+                "'$($started.scope.contextKind)' with token " +
+                "'$($started.scope.workerToken)' and document " +
+                "'$($started.context.documentId)', which differ from its " +
+                "registration's."
+            )
+        }
+        if ($null -ne $expected.Trusted -and $started.trusted -ne $expected.Trusted) {
+            throw "The dispatch that invoked $what recorded trusted $($started.trusted)."
+        }
+        $path = @($started.composedPath)
+        $pathScopes = @($started.pathScopes)
+        $pathInterfaces = @($path | ForEach-Object { [string] $_.interfaceName })
+        if (($pathInterfaces -join ",") -ne ($expected.Path -join ",") -or
+            $pathScopes.Count -ne $path.Count) {
+            throw (
+                "The dispatch that invoked $what recorded the path " +
+                "[$($pathInterfaces -join ', ')] with $($pathScopes.Count) " +
+                "path scopes rather than [$($expected.Path -join ', ')]."
+            )
+        }
+        $currentIndex = -1
+        for ($index = 0; $index -lt $path.Count; $index++) {
+            $entry = $path[$index]
+            $pathScope = $pathScopes[$index]
+            $visible = @($pathScope.visiblePathIndexes)
+            if ($null -ne $entry.nodeId -or
+                $null -ne $pathScope.treeScopeRootNodeId -or
+                $null -ne $pathScope.shadowRootMode -or
+                $null -ne $pathScope.relatedTargetNodeId -or
+                $entry.documentId -ne $started.context.documentId) {
+                throw (
+                    "Path entry $index of the dispatch that invoked $what " +
+                    "recorded a node, tree scope, related target, or " +
+                    "document it does not have."
+                )
+            }
+            # composedPath() returns a window to its own listeners, and any
+            # other target only when Blink's runtime flag for doing so is on.
+            if (($entry.kind -eq "window" -and ($visible -join ",") -ne "$index") -or
+                $visible.Count -gt 1 -or
+                ($visible.Count -eq 1 -and $visible[0] -ne $index)) {
+                throw (
+                    "Path entry $index of the dispatch that invoked $what " +
+                    "recorded visible indexes [$($visible -join ', ')]."
+                )
+            }
+            if ($entry.targetId -eq $target.targetId) {
+                $currentIndex = $index
+            }
+        }
+        if ($currentIndex -lt 0) {
+            throw (
+                "The dispatch that invoked $what has no path entry for the " +
+                "listener's target."
+            )
+        }
+        if ($null -ne $expected.Report) {
+            $seenLength = [int] $expected.Report.composedPathLength
+            $visibleCount = @($pathScopes[$currentIndex].visiblePathIndexes).Count
+            if ($seenLength -ne $visibleCount) {
+                throw (
+                    "The dispatch that invoked $what recorded " +
+                    "$visibleCount visible path entries for the listener's " +
+                    "target, which saw $seenLength composed path entries."
+                )
+            }
+        }
+        $original = $started.originalTarget
+        if ($expected.Key -eq "load" -or
+            ($expected.Key -eq "pageshow" -and $expected.Report.targetIsDocument)) {
+            # A window's load and pageshow events target its document and fire
+            # only the window's listeners.
+            if ($original.kind -ne "node" -or $null -eq $original.nodeId -or
+                $original.documentId -ne $started.context.documentId) {
+                throw (
+                    "The dispatch that invoked $what recorded original " +
+                    "target kind '$($original.kind)' and node " +
+                    "$($original.nodeId) rather than the document."
+                )
+            }
+            foreach ($pathScope in $pathScopes) {
+                if ($pathScope.targetNodeId -ne $original.nodeId) {
+                    throw (
+                        "A path scope of the dispatch that invoked $what " +
+                        "recorded target node $($pathScope.targetNodeId) " +
+                        "rather than the document."
+                    )
+                }
+            }
+        }
+        elseif ($original.targetId -ne $path[0].targetId -or
+            $original.kind -ne $path[0].kind) {
+            throw (
+                "The dispatch that invoked $what recorded an original " +
+                "target that is not its first path entry."
+            )
+        }
+        $null = $checked.Add([pscustomobject]@{
+                Registration = $registration
+                Invocation = $invocation
+                Started = $started
+            })
+    }
+    $workerChecked[$expected.Key] = $checked
+}
+
+# The IndexedDB request's success event travels from the request through its
+# transaction to its database in one dispatch.
+$putDispatchIds = @(
+    foreach ($key in @("idb-request", "idb-transaction", "idb-database")) {
+        [string] $workerChecked[$key][0].Started.dispatchId
+    }
+) | Sort-Object -Unique
+if (@($putDispatchIds).Count -ne 1) {
+    throw (
+        "The IndexedDB put's request, transaction, and database listeners " +
+        "were invoked by $(@($putDispatchIds).Count) dispatches rather than one."
+    )
+}
+$putPath = @($workerChecked["idb-request"][0].Started.composedPath)
+$putTargets = @(
+    foreach ($key in @("idb-request", "idb-transaction", "idb-database")) {
+        [string] $workerChecked[$key][0].Registration.target.targetId
+    }
+)
+if ((@($putPath | ForEach-Object { [string] $_.targetId }) -join ",") -ne
+        ($putTargets -join ",")) {
+    throw (
+        "The IndexedDB put's dispatch path does not list the request, " +
+        "transaction, and database the listeners were registered on."
+    )
+}
+$completeRegistration = $workerChecked["idb-complete"][0].Registration
+$completePath = @($workerChecked["idb-complete"][0].Started.composedPath)
+if ($completePath[0].targetId -ne $completeRegistration.target.targetId -or
+    $completePath[1].targetId -ne $workerChecked["idb-database"][0].Registration.target.targetId) {
+    throw (
+        "The IndexedDB transaction's complete dispatch path does not list " +
+        "the transaction and then the database."
+    )
+}
+
+# Each worker's records carry its own token, and the dedicated worker's fetch
+# carries the token its listener records carry.
+$dedicatedToken = $workerChecked["dedicated-message"][0].Registration.scope.workerToken
+$sharedToken = $workerChecked["shared-connect"][0].Registration.scope.workerToken
+$serviceToken = $workerChecked["service-install"][0].Registration.scope.workerToken
+if ($workerChecked["shared-port"][0].Registration.scope.workerToken -ne $sharedToken -or
+    $workerChecked["service-activate"][0].Registration.scope.workerToken -ne $serviceToken -or
+    $workerChecked["service-message"][0].Registration.scope.workerToken -ne $serviceToken) {
+    throw "The listener records of one worker carried more than one worker token."
+}
+if (@($dedicatedToken, $sharedToken, $serviceToken | Sort-Object -Unique).Count -ne 3) {
+    throw "Two of the fixture's workers carried the same worker token."
+}
+$workerDataRequest = Select-NetworkRecord "request-will-be-sent" {
+    $_.payload.request.url -eq "$WorkerFixtureUri/worker-data" -and
+    $_.payload.scope.contextKind -eq "dedicated-worker"
+} "the worker dispatch fixture's dedicated worker fetch"
+if ($workerDataRequest.payload.scope.workerToken -ne $dedicatedToken -or
+    $workerDataRequest.payload.scope.globalObjectUrl -ne
+        "$WorkerFixtureUri/dedicated.js") {
+    throw (
+        "The dedicated worker's fetch carried token " +
+        "'$($workerDataRequest.payload.scope.workerToken)' and global URL " +
+        "'$($workerDataRequest.payload.scope.globalObjectUrl)', which differ " +
+        "from its listener records'."
+    )
+}
+
+[pscustomobject]@{
+    WorkerFixtureListenerRecords = $workerListenerRecords.Count
+    WorkerFixtureCheckedListeners = @(
+        $workerChecked.Values | ForEach-Object { $_ }
+    ).Count
+    LoadOriginalTargetNodeId =
+        $workerChecked["load"][0].Started.originalTarget.nodeId
+    PageshowTargetIsDocument = $workerReport.pageshow.targetIsDocument
+    IndexedDbPutPath = (@($putPath | ForEach-Object { $_.interfaceName }) -join " -> ")
+    DedicatedWorkerToken = $dedicatedToken
+    SharedWorkerToken = $sharedToken
+    ServiceWorkerToken = $serviceToken
+    DedicatedWorkerFetchRequestId = $workerDataRequest.payload.request.requestId
+} | Format-List
+
 Write-Host (
     "Blink propagation, listener, window event-target, default-handler, " +
     "DOM timer, " +
@@ -5460,7 +5891,7 @@ Write-Host (
     "accessibility serialization checkpoint, cookie operation, and " +
     "interaction-state change and checkpoint, layout and computed-style " +
     "checkpoint and its compositor presentation, shadow root, " +
-    "slot assignment, pseudo-element, and shadow-scoped dispatch path, and " +
-    "network " +
+    "slot assignment, pseudo-element, and shadow-scoped dispatch path, " +
+    "worker-scoped and non-Node listener dispatch, and network " +
     "metadata and realtime channel evidence verified."
 )
