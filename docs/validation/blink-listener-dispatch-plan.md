@@ -1862,3 +1862,62 @@ what the page observed. They do not evaluate the page's use of shadow DOM.
 
 The default capture duration is 35 seconds, up from 25, to cover the added
 page.
+
+### Measured result
+
+Revision `3d5b3b5` was run with the complete script on the same host,
+September 24, 2026, after a rebuild of Chromium with the protocol 0.28
+integration. The run script passed a 40-second capture duration. The capture
+validated 80,074 events and 211 artifacts and reported no network-service
+crashes. The recorder accepted 80,074 records and dropped none. The complete
+script exited with code 0, with no omission records of any kind, no bridge
+connection waits, and no bridge write or initialization failures.
+
+The validated session is:
+
+`C:\Users\Public\Downloads\A11yRecorderShadowDomLogging\sessions\20260925-034653-4629ec0746d04c3ca1590c895db91f47`
+
+The verifier reported:
+
+| Value | Result |
+| --- | --- |
+| Records read from the fixture document | 297 |
+| DOM checkpoints holding shadow roots | 2 |
+| Open shadow root node identifier | 118 |
+| Closed shadow root node identifier | 119 |
+| User-agent shadow root node identifier | 165 |
+| Slot assignment checkpoint | `dom-checkpoint-13`, `post-mutation` |
+| Stale slot assignment records | 0 |
+| Layout checkpoint used | `layout-checkpoint-12` |
+| Pseudo-element layout nodes | 4 |
+| Shadow roots counted by the layout checkpoint | 3 |
+| Layout nodes inside the user-agent shadow tree | 2 |
+| Mode of the shadow tree holding `#open-bold::before` | `open` |
+| Dispatch path entries for the `#closed-button` click | 7 |
+| Path index of the document | 5 |
+
+Each slot reported one assigned node, and the button, host, and document
+listeners saw composed paths of 7, 5, and 5 entries.
+
+Three earlier runs failed, and none of the failures was in the logger:
+
+1. At `72e131b` the run script stopped after the fixture step although the page
+   reported all three listeners. Windows PowerShell 5.1 writes a parsed JSON
+   array to the pipeline as one object, so the script counted one listener
+   report. The run and verify scripts now store the parsed array before
+   wrapping it (`91b8219`).
+2. At `91b8219` the verifier found no post-mutation checkpoint holding the
+   listener fixture's appended node. Checkpoint identifiers are unique only
+   within one renderer process, and the search counted nodes from other
+   renderers' checkpoints that shared the identifier. The added fixture page
+   brought such a renderer into the run.
+3. The same session, verified again outside the run, showed that the verifier
+   selected the shadow fixture's dispatch records by document token, which
+   dispatch records do not carry, and that the shadow checks overwrote two
+   variables the final summary reports. `3d5b3b5` narrows the checkpoint search
+   to the fixture document, selects dispatch records by the renderer document
+   identifier the fixture's DOM and layout records share, and renames the
+   variables.
+
+Subframes, slots nested through more than one shadow tree, declarative shadow
+roots, `::first-letter`, and `::first-line` were not exercised.

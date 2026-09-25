@@ -242,8 +242,8 @@ scroll offset, device pixel ratio, and zoom, and, for each element and laid-out
 text node up to 100000 nodes, its viewport-relative bounding rectangle and, for
 elements, the resolved values of a defined list of 283 computed-style
 properties. The hook reads only what Blink has already computed and never
-forces style or layout. Shadow-root content, pseudo-elements, and per-line
-geometry are not recorded; the property list and full limits are in
+forces style or layout. Per-line geometry is not recorded, and shadow-tree
+content and pseudo-elements are recorded from protocol 0.28; the property list and full limits are in
 [the layout and computed-style checkpoint evidence model](docs/architecture/layout-and-style-checkpoint-evidence-model.md).
 
 Protocol 0.26 records network metadata on the `browser.network` channel: each
