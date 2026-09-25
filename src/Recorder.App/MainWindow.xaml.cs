@@ -52,6 +52,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _statusTimer;
     private readonly DispatcherTimer _playbackTimer;
     private readonly Stopwatch _playbackStopwatch = new();
+    private readonly BusyIndicator _busy;
     private SessionCoordinator? _coordinator;
     private SessionAudioPlayer? _audioPlayer;
     private SessionPlaybackArchive? _playbackArchive;
@@ -71,6 +72,11 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _busy = new BusyIndicator(
+            this,
+            BusyPanel,
+            BusyProgressBar,
+            BusyTextBlock);
         OutputRootTextBox.Text = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "Windows A11y Recorder");
@@ -117,6 +123,7 @@ public partial class MainWindow : Window
         SetConfigurationEnabled(false);
         OpenRecordingButton.IsEnabled = false;
         StatusTextBlock.Text = "Starting recording.";
+        var busy = _busy.Begin("Starting recording.");
 
         try
         {
@@ -141,11 +148,14 @@ public partial class MainWindow : Window
             OpenFolderButton.IsEnabled = true;
             _statusTimer.Start();
             RefreshStatus();
+            busy.Dispose();
+            _busy.AnnounceCompleted("Recording started.");
             StopButton.Focus();
         }
         catch (Exception exception)
         {
             StatusTextBlock.Text = "Recording could not start.";
+            busy.Dispose();
             MessageBox.Show(
                 this,
                 exception.Message,
@@ -160,6 +170,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            busy.Dispose();
             _transitioning = false;
         }
     }
@@ -449,6 +460,7 @@ public partial class MainWindow : Window
         StatusTextBlock.Text = "Stopping and verifying session files.";
         string? completedSession = null;
         SessionPlaybackArchive? preparedArchive = null;
+        var busy = _busy.Begin("Stopping recording and verifying session files.");
 
         try
         {
@@ -459,10 +471,12 @@ public partial class MainWindow : Window
             StatusTextBlock.Text = status.State == RecordingSessionState.Completed
                 ? "Recording completed and session files verified."
                 : $"Recording stopped with errors. {status.Message}";
+            _busy.AnnounceCompleted(StatusTextBlock.Text);
         }
         catch (Exception exception)
         {
             StatusTextBlock.Text = "Recording stopped with an error.";
+            busy.Dispose();
             MessageBox.Show(
                 this,
                 exception.Message,
@@ -473,6 +487,7 @@ public partial class MainWindow : Window
         finally
         {
             await DisposeCoordinatorAsync();
+            busy.Dispose();
             SetConfigurationEnabled(true);
             OpenRecordingButton.IsEnabled = true;
             StartButton.IsEnabled = true;
@@ -507,6 +522,9 @@ public partial class MainWindow : Window
         PlaybackStatusTextBlock.Text = validate
             ? "Validating recording..."
             : "Loading recording...";
+        var busy = _busy.Begin(validate
+            ? "Validating and loading recording."
+            : "Loading recording for playback.");
 
         try
         {
@@ -581,6 +599,10 @@ public partial class MainWindow : Window
                 $"{_playbackArchive.Frames.Count:N0} frames | " +
                 $"{_playbackArchive.Events.Count:N0} events | " +
                 $"{_playbackArchive.AudioTracks.Count} audio tracks";
+            busy.Dispose();
+            _busy.AnnounceCompleted(
+                $"Recording loaded. {_playbackArchive.Frames.Count:N0} frames, " +
+                $"{_playbackArchive.Events.Count:N0} events.");
             PlayPauseButton.Focus();
         }
         catch (Exception exception)
@@ -593,6 +615,7 @@ public partial class MainWindow : Window
             VideoPlaceholderTextBlock.Text = "The recording could not be opened.";
             VideoPlaceholderTextBlock.Visibility = Visibility.Visible;
             PlaybackStatusTextBlock.Text = "Recording load failed.";
+            busy.Dispose();
             MessageBox.Show(
                 this,
                 exception.Message,
@@ -602,6 +625,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            busy.Dispose();
             OpenRecordingButton.IsEnabled =
                 _coordinator?.State != RecordingSessionState.Recording;
         }

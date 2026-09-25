@@ -190,6 +190,14 @@ from the product version.
 
 ### Changed
 
+- Show when the app is busy. Starting a recording, stopping and verifying it,
+  and loading or validating a recording for playback now set the wait cursor,
+  show a working indicator with text in the player status bar, and raise UI
+  Automation notification events, so a screen reader announces that the task
+  has started and asks the user to wait, then announces the outcome. The
+  indicator animates only when Windows animations are on. Error dialogs appear
+  after the wait cursor clears. Seeking is not covered, because its delay is a
+  blocking timeline redraw that needs to be made fast instead.
 - Read the event log once when a recording stops and once when a recording is
   opened. Stopping previously parsed every record to validate the archive and
   then parsed every record again to load the player, and opening a recording

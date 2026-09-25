@@ -537,16 +537,33 @@
 
       <Grid Grid.Row="4" Margin="0,8,0,0">
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
+        <StackPanel x:Name="BusyPanel"
+                    Grid.Column="0"
+                    Margin="0,0,12,0"
+                    Orientation="Horizontal"
+                    Visibility="Collapsed">
+          <ProgressBar x:Name="BusyProgressBar"
+                       Width="72"
+                       Height="12"
+                       Margin="0,0,6,0"
+                       VerticalAlignment="Center"
+                       AutomationProperties.Name="Working"
+                       AutomationProperties.HelpText="The recorder is busy. Please wait." />
+          <TextBlock x:Name="BusyTextBlock"
+                     VerticalAlignment="Center"
+                     FontWeight="SemiBold" />
+        </StackPanel>
         <TextBlock x:Name="PlaybackStatusTextBlock"
-                   Grid.Column="0"
+                   Grid.Column="1"
                    Foreground="{StaticResource MutedText}"
                    Text="No recording loaded."
                    TextTrimming="CharacterEllipsis"
                    AutomationProperties.LiveSetting="Polite" />
-        <TextBlock Grid.Column="1"
+        <TextBlock Grid.Column="2"
                    Foreground="{StaticResource MutedText}"
                    Text="Keyboard | Mouse | UIA | Window | Frames | Mic | System audio" />
       </Grid>
