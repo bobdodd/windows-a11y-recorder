@@ -872,6 +872,10 @@ $steps = [pscustomobject]@{
     ChromiumProcessIds = $chromiumIds
     TypedText = $typedText
 } | ConvertTo-Json -Depth 4 -Compress
+# Kept beside the session, not in it, so that a failed verification can be
+# repeated against the same recording without recording again.
+Set-Content -LiteralPath (Join-Path $outputRoot "$($session.Name).steps.json") `
+    -Value $steps -Encoding UTF8
 
 & $verifier -SessionPath $session.FullName -FixtureUri $fixtureUri -StepsJson $steps
 

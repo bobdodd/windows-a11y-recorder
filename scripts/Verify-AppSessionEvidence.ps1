@@ -390,6 +390,15 @@ if ($trustedTextKeys.Count -ne 5) {
 
 # Focus moves by mouse to the button and the text field, then forward to the
 # next button. Node identities come from the dispatch records' targets.
+#
+# focusTrigger is Blink's own FocusParams value, recorded as observed. Blink
+# sets it to user-gesture for sequential keyboard navigation, but its ordinary
+# mouse focus path in MouseEventManager builds FocusParams without a trigger,
+# so a click on a button or text field carries the default, script. The mouse
+# focus changes are therefore expected with the script trigger. That they came
+# from input and not from page script is checked instead by the record having
+# no script location, no script world, and no execution world, as the Blink
+# fixture verifier does for input-driven changes.
 function Find-FocusChange {
     param(
         [Parameter(Mandatory = $true)]
@@ -399,7 +408,11 @@ function Find-FocusChange {
         [string] $ElementId,
 
         [Parameter(Mandatory = $true)]
-        [string] $FocusType
+        [string] $FocusType,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("script", "user-gesture")]
+        [string] $FocusTrigger
     )
 
     $element = Get-DispatchElement $Dispatch $ElementId
@@ -413,7 +426,10 @@ function Find-FocusChange {
                 $_.payload.context.documentId -eq $documentId -and
                 $_.payload.focusedNodeId -eq $nodeId -and
                 $_.payload.focusType -eq $FocusType -and
-                $_.payload.focusTrigger -eq "user-gesture" -and
+                $_.payload.focusTrigger -eq $FocusTrigger -and
+                $null -eq $_.payload.location -and
+                $null -eq $_.payload.world -and
+                $null -eq $_.payload.context.executionWorldId -and
                 [long] $_.monotonicNanoseconds -ge (
                     [long] $Dispatch.monotonicNanoseconds + $earliestDispatchNanoseconds
                 )
@@ -422,16 +438,16 @@ function Find-FocusChange {
     )
     if ($changes.Count -eq 0) {
         throw (
-            "No $FocusType focus change by user gesture to " +
-            "#$ElementId was recorded."
+            "No $FocusType focus change with the $FocusTrigger trigger and " +
+            "no script origin to #$ElementId was recorded."
         )
     }
     $changes[0]
 }
 
-$buttonFocus = Find-FocusChange $buttonDown "app-button" "mouse"
-$textFocus = Find-FocusChange $textDown "app-text" "mouse"
-$nextFocus = Find-FocusChange $nextKeyUp "app-next" "forward"
+$buttonFocus = Find-FocusChange $buttonDown "app-button" "mouse" "script"
+$textFocus = Find-FocusChange $textDown "app-text" "mouse" "script"
+$nextFocus = Find-FocusChange $nextKeyUp "app-next" "forward" "user-gesture"
 
 $valueChanges = @(
     $rendererRecords |

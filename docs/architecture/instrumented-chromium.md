@@ -571,6 +571,13 @@ Four record types are emitted:
   `access-key`, or `page`), the focus trigger (`script` or `user-gesture`),
   `preventScroll`, `focusVisible` when the request stated it, and the node the
   focused element's `aria-activedescendant` resolved to at that moment.
+  The focus trigger is Blink's `FocusParams::focus_trigger` as passed to the
+  call, not a judgement of whether the user caused the change. Blink passes
+  `user-gesture` for sequential keyboard navigation, but its ordinary mouse
+  focus path leaves the default, `script`, so a mouse click that focuses a
+  control is recorded with focus type `mouse` and trigger `script`. Whether a
+  page script made the call is shown by the record's script location and
+  world, which are null for a change made by input.
 - `selection-changed`: the selection a frame holds once
   `FrameSelection::SetSelection` commits a change. It carries whether the user
   or the system set it, the selection type (`none`, `caret`, or `range`), the

@@ -68,8 +68,14 @@ interaction consistently.
   raw input record: `mousedown` and `click` on the button, `mousedown` and
   five `keydown` dispatches on the text field, and the Tab `keyup` on the
   second button.
-- Focus changes by user gesture: by mouse to the button and the text field,
-  and forward to the second button.
+- Focus changes caused by the input, with no script location, script world,
+  or execution world: by mouse to the button and the text field, and forward
+  to the second button. The recorded `focusTrigger` is Blink's own value. It
+  is `user-gesture` for the Tab move but `script` for the two mouse moves,
+  because Blink's ordinary mouse focus path in `MouseEventManager` leaves the
+  trigger at its default of `script`. The first app-launched run, on
+  2026-09-25, failed on this expectation; the recorder had logged Blink's
+  value correctly.
 - User edits of the text field whose last recorded value is `a11y`.
 - UI Automation focus changes to each of the three controls, by name, in an
   instrumented Chromium process, after the input that moved focus.
