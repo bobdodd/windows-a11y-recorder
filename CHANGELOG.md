@@ -168,6 +168,24 @@ from the product version.
 
 ### Changed
 
+- State UI Automation queue loss per episode, protect focus changes and
+  automation events from floods, and read element properties with each
+  event. A protocol 0.30 run with Microsoft Solitaire open received up to
+  1,588 UI Automation observations per second, mostly name changes on its
+  text elements. The 4,096-slot queue refused 3,226 observations, including
+  a focus change the application session verifier requires, and the archive
+  stated the loss only as one total at stop. The collector now writes one
+  `collector-omission` record for each run of refused observations, timed at
+  the last refusal, with `firstDroppedAtNanoseconds`,
+  `lastDroppedAtNanoseconds`, and `droppedByObservationType`. It keeps 512
+  slots that only focus changes and automation events may use. It subscribes
+  with a cache request, so UI Automation supplies the thirteen recorded
+  element properties with each event instead of the processor reading them
+  one call at a time, and each element snapshot states `propertySource` as
+  `event-cache` or `current-read`. The validator accepts the earlier total
+  form and checks the new fields for consistency. Whether caching prevents
+  overflow at these rates has not yet been measured. See
+  `docs/architecture/uia-overload-evidence.md`.
 - Copy the newest arrived Windows Graphics Capture frame instead of the
   oldest queued one. The protocol 0.30 application-launched session run
   measured every copied image as 350 to 768 ms old at the poll (median

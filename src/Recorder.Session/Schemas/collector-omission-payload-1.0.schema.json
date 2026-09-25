@@ -8,6 +8,20 @@
   "properties": {
     "reason": { "type": "string", "minLength": 1 },
     "count": { "type": "integer", "minimum": 0 },
-    "stream": { "enum": ["microphone", "system"] }
+    "stream": { "enum": ["microphone", "system"] },
+    "firstDroppedAtNanoseconds": { "type": "integer", "minimum": 0 },
+    "lastDroppedAtNanoseconds": { "type": "integer", "minimum": 0 },
+    "droppedByObservationType": {
+      "type": "object",
+      "propertyNames": {
+        "enum": ["focus-changed", "automation-event", "structure-changed", "property-changed"]
+      },
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    }
+  },
+  "dependentRequired": {
+    "firstDroppedAtNanoseconds": ["count", "lastDroppedAtNanoseconds", "droppedByObservationType"],
+    "lastDroppedAtNanoseconds": ["count", "firstDroppedAtNanoseconds", "droppedByObservationType"],
+    "droppedByObservationType": ["count", "firstDroppedAtNanoseconds", "lastDroppedAtNanoseconds"]
   }
 }

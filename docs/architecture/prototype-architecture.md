@@ -237,7 +237,7 @@ The named-pipe control protocol is:
 | --- | --- | --- |
 | Keyboard and mouse | Drop the new record rather than block the input callback | Count, first and last affected time, device, stream, queue depth, and reason |
 | Foreground and process transitions | Drop the new record | Count and affected interval, followed by a current-state checkpoint |
-| UI Automation events | Drop the new event | Event type counts and affected interval |
+| UI Automation events | Drop the new event, keeping reserved capacity for focus changes and automation events | One record per drop episode with event type counts, first and last refused arrival, and count |
 | UI Automation snapshot requests | Coalesce pending requests before collection | Trigger count, retained trigger, and delay |
 | Video frames | Drop the frame before encoding | Frame count, native timestamps, session interval, and encoder backlog |
 | Audio buffers | Drop the oldest queued buffer to retain current capture | Exact sample interval and track |

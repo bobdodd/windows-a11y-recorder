@@ -296,8 +296,10 @@ internal static class EventPayloadValidator
             case ("browser.network", "web-transport-closed"):
                 ValidateBrowserNetworkRealtime(payload, eventType, issues, lineNumber);
                 break;
-            case ("window.foreground", "collector-omission"):
             case ("accessibility.uia.events", "collector-omission"):
+                ValidateUiaOmission(record, payload, issues, lineNumber);
+                break;
+            case ("window.foreground", "collector-omission"):
             case ("graphics.desktop.frames", "collector-omission"):
             case ("audio.microphone", "collector-omission"):
             case ("audio.system", "collector-omission"):
@@ -465,6 +467,7 @@ internal static class EventPayloadValidator
                     NullableBoolean("isEnabled"),
                     NullableBoolean("isOffscreen"),
                     NullableObject("boundingRectangle"),
+                    OptionalEnum("propertySource", "event-cache", "current-read"),
                     RequiredStringArray("qualityFlags")
                 ],
                 issues,
@@ -4380,6 +4383,102 @@ internal static class EventPayloadValidator
             issues,
             line);
 
+    private static readonly string[] UiaObservationTypes =
+        ["focus-changed", "automation-event", "structure-changed", "property-changed"];
+
+    // A UI Automation queue-full omission written since per-episode drop
+    // records states the first and last refused arrival times and the count
+    // of each observation type, and is timed at the last refusal. Archives
+    // written before then carry one total count at stop and none of these
+    // fields.
+    private static void ValidateUiaOmission(
+        JsonElement record,
+        JsonElement payload,
+        ICollection<ArchiveValidationIssue> issues,
+        long line)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("reason"),
+                OptionalInteger("count", nonnegative: true),
+                OptionalInteger("firstDroppedAtNanoseconds", nonnegative: true),
+                OptionalInteger("lastDroppedAtNanoseconds", nonnegative: true),
+                OptionalObject("droppedByObservationType")
+            ],
+            issues,
+            line);
+
+        var hasFirst = payload.TryGetProperty("firstDroppedAtNanoseconds", out var first);
+        var hasLast = payload.TryGetProperty("lastDroppedAtNanoseconds", out var last);
+        var hasCounts = payload.TryGetProperty("droppedByObservationType", out var counts);
+        if (!hasFirst && !hasLast && !hasCounts)
+        {
+            return;
+        }
+
+        void Inconsistent(string message) =>
+            AddError(
+                issues,
+                "uia-omission-episode-inconsistent",
+                "events.ndjson#/payload",
+                message,
+                line);
+
+        if (ReadString(payload, "reason") != "uia-observation-queue-full")
+        {
+            Inconsistent("Only a queue-full omission states a drop episode.");
+            return;
+        }
+
+        if (!hasFirst || !hasLast || !hasCounts ||
+            !payload.TryGetProperty("count", out var count) ||
+            !IsInteger(first) || !IsInteger(last) || !IsInteger(count) ||
+            counts.ValueKind != JsonValueKind.Object)
+        {
+            Inconsistent(
+                "A drop episode states count, firstDroppedAtNanoseconds, " +
+                "lastDroppedAtNanoseconds, and droppedByObservationType together.");
+            return;
+        }
+
+        if (first.GetInt64() > last.GetInt64())
+        {
+            Inconsistent("The first refused arrival follows the last.");
+        }
+
+        if (record.TryGetProperty("monotonicNanoseconds", out var recordedAt) &&
+            IsInteger(recordedAt) &&
+            recordedAt.GetInt64() != last.GetInt64())
+        {
+            Inconsistent("A drop episode is timed at its last refused arrival.");
+        }
+
+        long sum = 0;
+        foreach (var entry in counts.EnumerateObject())
+        {
+            if (!UiaObservationTypes.Contains(entry.Name, StringComparer.Ordinal))
+            {
+                Inconsistent($"'{entry.Name}' is not a UI Automation observation type.");
+            }
+
+            if (!IsInteger(entry.Value) || entry.Value.GetInt64() <= 0)
+            {
+                Inconsistent("Each dropped observation type count is a positive integer.");
+                continue;
+            }
+
+            sum += entry.Value.GetInt64();
+        }
+
+        if (count.GetInt64() <= 0 || sum != count.GetInt64())
+        {
+            Inconsistent(
+                "The dropped observation type counts sum to the episode count, " +
+                "which is positive.");
+        }
+    }
+
     // A browser omission names how many records were lost and, when the
     // reporter knows which browser process lost them, carries that process
     // context. A reporter that cannot attribute the loss to one process omits
@@ -4674,6 +4773,14 @@ internal static class EventPayloadValidator
                 value.EnumerateArray().All(
                     item => item.ValueKind == JsonValueKind.Object),
             "must be an array of objects");
+
+    private static PropertyRule OptionalObject(string name) =>
+        new(
+            name,
+            false,
+            false,
+            value => value.ValueKind == JsonValueKind.Object,
+            "must be an object");
 
     private static PropertyRule NullableObject(string name) =>
         new(

@@ -4109,6 +4109,194 @@ public sealed class SessionArchiveValidatorTests
                 issue.Path.EndsWith("/monitorFrames/0/undeclared", StringComparison.Ordinal));
     }
 
+    private const string UiaDropEpisode = """
+        {
+          "reason": "uia-observation-queue-full",
+          "count": 7,
+          "firstDroppedAtNanoseconds": 40,
+          "lastDroppedAtNanoseconds": 100,
+          "droppedByObservationType": { "property-changed": 6, "focus-changed": 1 }
+        }
+        """;
+
+    private const string UiaPropertyChange = """
+        {
+          "eventId": "AutomationElementIdentifiers.NameProperty",
+          "changeType": null,
+          "runtimeId": null,
+          "newValue": "Next",
+          "element": {
+            "processId": 42,
+            "nativeWindowHandle": 0,
+            "automationId": "",
+            "name": "Next",
+            "className": "Button",
+            "frameworkId": "WPF",
+            "controlType": "ControlType.Button",
+            "localizedControlType": "button",
+            "hasKeyboardFocus": false,
+            "isKeyboardFocusable": true,
+            "isEnabled": true,
+            "isOffscreen": false,
+            "boundingRectangle": { "x": 0, "y": 0, "width": 10, "height": 10 },
+            "propertySource": "event-cache",
+            "qualityFlags": []
+          }
+        }
+        """;
+
+    [Fact]
+    public async Task AcceptsAUiaDropEpisode()
+    {
+        var issues = await ValidateUiaRecordAsync(
+            "collector-omission",
+            JsonNode.Parse(UiaDropEpisode)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public async Task AcceptsAUiaQueueFullOmissionWrittenBeforeDropEpisodes()
+    {
+        var payload = JsonNode.Parse("""
+            { "reason": "uia-observation-queue-full", "count": 3226 }
+            """)!;
+
+        var issues = await ValidateUiaRecordAsync("collector-omission", payload, 13641458100);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [InlineData("firstDroppedAtNanoseconds")]
+    [InlineData("lastDroppedAtNanoseconds")]
+    [InlineData("droppedByObservationType")]
+    [InlineData("count")]
+    public async Task RejectsAUiaDropEpisodeMissingAField(string removed)
+    {
+        var payload = JsonNode.Parse(UiaDropEpisode)!.AsObject();
+        payload.Remove(removed);
+
+        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAUiaDropEpisodeWhoseCountsDoNotSumToItsCount()
+    {
+        var payload = JsonNode.Parse(UiaDropEpisode)!;
+        payload["count"] = 8;
+
+        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAUiaDropEpisodeThatEndsBeforeItBegins()
+    {
+        var payload = JsonNode.Parse(UiaDropEpisode)!;
+        payload["firstDroppedAtNanoseconds"] = 101;
+
+        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsAUiaDropEpisodeNotTimedAtItsLastRefusal()
+    {
+        var issues = await ValidateUiaRecordAsync(
+            "collector-omission",
+            JsonNode.Parse(UiaDropEpisode)!,
+            101);
+
+        Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("selection-changed", 7)]
+    [InlineData("property-changed", 0)]
+    public async Task RejectsAUiaDropEpisodeWithAnInvalidTypeCount(string type, int value)
+    {
+        var payload = JsonNode.Parse(UiaDropEpisode)!;
+        payload["droppedByObservationType"] = new JsonObject { [type] = value };
+        payload["count"] = value;
+
+        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
+    }
+
+    [Fact]
+    public async Task RejectsADropEpisodeOnAnotherUiaOmissionReason()
+    {
+        var payload = JsonNode.Parse(UiaDropEpisode)!;
+        payload["reason"] = "uia-provider-read-timeout";
+
+        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("event-cache")]
+    [InlineData("current-read")]
+    [InlineData(null)]
+    public async Task AcceptsEachUiaPropertySource(string? source)
+    {
+        var payload = JsonNode.Parse(UiaPropertyChange)!;
+        if (source is null)
+        {
+            payload["element"]!.AsObject().Remove("propertySource");
+        }
+        else
+        {
+            payload["element"]!["propertySource"] = source;
+        }
+
+        var issues = await ValidateUiaRecordAsync("property-changed", payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public async Task RejectsAnUndeclaredUiaPropertySource()
+    {
+        var payload = JsonNode.Parse(UiaPropertyChange)!;
+        payload["element"]!["propertySource"] = "guessed";
+
+        var issues = await ValidateUiaRecordAsync("property-changed", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
+        ValidateUiaRecordAsync(string eventType, JsonNode payload, long timestamp = 100)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(
+            0,
+            timestamp,
+            "accessibility.uia.events",
+            eventType,
+            document.RootElement.Clone());
+        var directory = await CreateArchiveAsync([record]);
+
+        try
+        {
+            var result = await SessionArchiveValidator.ValidateAsync(
+                directory,
+                TestContext.Current.CancellationToken);
+            return result.Issues.ToList();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static async Task<IReadOnlyList<ArchiveValidationIssue>>
         ValidateDesktopFrameAsync(JsonNode payload)
     {

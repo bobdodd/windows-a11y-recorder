@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Automation;
 using Recorder.Contracts;
@@ -10,16 +9,41 @@ namespace Recorder.Collectors.Automation;
 public sealed class UiAutomationCollector : ICaptureCollector
 {
     private const int ObservationCapacity = 4_096;
+
+    // Slots only focus changes and automation events (invoke, selection, text
+    // changed) may use, so a flood of property or structure changes from any
+    // process cannot displace them.
+    private const int ReservedObservationCapacity = 512;
+
+    // The element properties every observation records. They are requested
+    // with each event, so UI Automation reads them when it raises the event
+    // instead of the processor reading them afterwards, one call each.
+    private static readonly AutomationProperty[] SnapshotProperties =
+    [
+        AutomationElement.ProcessIdProperty,
+        AutomationElement.NativeWindowHandleProperty,
+        AutomationElement.AutomationIdProperty,
+        AutomationElement.NameProperty,
+        AutomationElement.ClassNameProperty,
+        AutomationElement.FrameworkIdProperty,
+        AutomationElement.ControlTypeProperty,
+        AutomationElement.LocalizedControlTypeProperty,
+        AutomationElement.HasKeyboardFocusProperty,
+        AutomationElement.IsKeyboardFocusableProperty,
+        AutomationElement.IsEnabledProperty,
+        AutomationElement.IsOffscreenProperty,
+        AutomationElement.BoundingRectangleProperty
+    ];
+
     private readonly object _gate = new();
     private readonly ManualResetEventSlim _stopRequested = new(false);
-    private readonly Channel<Observation> _observations;
+    private ReservedCapacityQueue<Observation>? _observations;
     private Thread? _subscriptionThread;
     private Task? _processorTask;
     private TaskCompletionSource<bool>? _ready;
     private CollectorInitializationContext? _context;
     private long _eventSequence = -1;
     private long _lifecycleSequence = -1;
-    private long _observationsDropped;
     private bool _disposed;
 
     public UiAutomationCollector()
@@ -30,14 +54,6 @@ public sealed class UiAutomationCollector : ICaptureCollector
             typeof(UiAutomationCollector).Assembly.GetName().Version?.ToString() ?? "0.0.0",
             ["accessibility.uia.events"],
             "windows.ui-automation");
-        _observations = Channel.CreateBounded<Observation>(
-            new BoundedChannelOptions(ObservationCapacity)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.Wait,
-                AllowSynchronousContinuations = false
-            });
     }
 
     public CollectorDescriptor Descriptor { get; }
@@ -65,6 +81,11 @@ public sealed class UiAutomationCollector : ICaptureCollector
 
             LifecycleState = CollectorLifecycleState.Initializing;
             _context = context;
+            _observations = new ReservedCapacityQueue<Observation>(
+                ObservationCapacity,
+                ReservedObservationCapacity,
+                context.Clock.GetElapsedNanoseconds,
+                episode => Observation.ForDropEpisode(episode));
 
             if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
             {
@@ -119,7 +140,7 @@ public sealed class UiAutomationCollector : ICaptureCollector
         {
             LifecycleState = CollectorLifecycleState.Failed;
             HealthState = CollectorHealthState.Failed;
-            _observations.Writer.TryComplete();
+            _observations?.Abandon();
             return CollectorTransitionResult.Reject(
                 LifecycleState,
                 "uia-start-failed",
@@ -161,7 +182,14 @@ public sealed class UiAutomationCollector : ICaptureCollector
                 cancellationToken).ConfigureAwait(false);
         }
 
-        _observations.Writer.TryComplete();
+        DropEpisode? unwrittenEpisode = null;
+        if (_observations is not null)
+        {
+            unwrittenEpisode = await _observations.CompleteAsync(
+                TimeSpan.FromSeconds(5),
+                cancellationToken).ConfigureAwait(false);
+        }
+
         if (_processorTask is not null)
         {
             try
@@ -181,18 +209,16 @@ public sealed class UiAutomationCollector : ICaptureCollector
             }
         }
 
-        if (Interlocked.Read(ref _observationsDropped) > 0)
+        // Every admitted observation arrived before the unwritten episode
+        // began, so recording it after the processor keeps time order.
+        if (unwrittenEpisode is not null)
+        {
+            EmitDropEpisode(unwrittenEpisode);
+        }
+
+        if (_observations?.TotalDropped > 0)
         {
             HealthState = CollectorHealthState.Degraded;
-            EmitEvent(
-                "collector-omission",
-                new
-                {
-                    reason = "uia-observation-queue-full",
-                    count = Interlocked.Read(ref _observationsDropped)
-                },
-                CollectorClosingTimestamp.Resolve(_context?.Clock, boundary),
-                "evidence-dropped");
         }
 
         LifecycleState = CollectorLifecycleState.Stopped;
@@ -231,6 +257,19 @@ public sealed class UiAutomationCollector : ICaptureCollector
         try
         {
             var root = AutomationElement.RootElement;
+            var cacheRequest = new CacheRequest
+            {
+                TreeScope = TreeScope.Element,
+                AutomationElementMode = AutomationElementMode.Full
+            };
+            foreach (var property in SnapshotProperties)
+            {
+                cacheRequest.Add(property);
+            }
+
+            // Handlers added while the request is active receive each event's
+            // sender with these properties cached.
+            using var activeCacheRequest = cacheRequest.Activate();
             UiaAutomation.AddAutomationFocusChangedEventHandler(focusHandler);
             UiaAutomation.AddAutomationEventHandler(
                 InvokePattern.InvokedEvent,
@@ -364,31 +403,39 @@ public sealed class UiAutomationCollector : ICaptureCollector
         int[]? runtimeId,
         string? newValue)
     {
-        if (sender is not AutomationElement element || _context is null)
+        if (sender is not AutomationElement element || _observations is null)
         {
             return;
         }
 
-        var observation = new Observation(
-            element,
+        _observations.TryEnqueue(
             observationType,
-            eventId,
-            changeType,
-            runtimeId,
-            newValue,
-            _context.Clock.GetElapsedNanoseconds());
-
-        if (!_observations.Writer.TryWrite(observation))
-        {
-            Interlocked.Increment(ref _observationsDropped);
-        }
+            IsReservedObservationType(observationType),
+            arrivedAt => new Observation(
+                element,
+                observationType,
+                eventId,
+                changeType,
+                runtimeId,
+                newValue,
+                arrivedAt,
+                null));
     }
+
+    private static bool IsReservedObservationType(string observationType) =>
+        observationType is "focus-changed" or "automation-event";
 
     private async Task ProcessObservationsAsync()
     {
-        await foreach (var observation in _observations.Reader.ReadAllAsync().ConfigureAwait(false))
+        await foreach (var observation in _observations!.Reader.ReadAllAsync().ConfigureAwait(false))
         {
-            var snapshot = ReadElementSnapshot(observation.Element);
+            if (observation.DropEpisode is { } episode)
+            {
+                EmitDropEpisode(episode);
+                continue;
+            }
+
+            var snapshot = ReadElementSnapshot(observation.Element!);
             EmitEvent(
                 observation.ObservationType,
                 new
@@ -403,6 +450,21 @@ public sealed class UiAutomationCollector : ICaptureCollector
                 snapshot.QualityFlags.ToArray());
         }
     }
+
+    // One record per run of refused observations, timed at the last refusal.
+    private void EmitDropEpisode(DropEpisode episode) =>
+        EmitEvent(
+            "collector-omission",
+            new
+            {
+                reason = "uia-observation-queue-full",
+                count = episode.Count,
+                firstDroppedAtNanoseconds = episode.FirstDroppedAt,
+                lastDroppedAtNanoseconds = episode.LastDroppedAt,
+                droppedByObservationType = episode.CountsByKind
+            },
+            episode.LastDroppedAt,
+            "evidence-dropped");
 
     private void EmitEvent(
         string eventType,
@@ -447,7 +509,42 @@ public sealed class UiAutomationCollector : ICaptureCollector
             new { action, state = LifecycleState.ToString(), boundary.Utc }));
     }
 
+    // Reads the properties UI Automation cached when it raised the event. A
+    // sender delivered without them is read now instead, which the snapshot
+    // states, because its values may postdate the event.
     private static ElementSnapshot ReadElementSnapshot(AutomationElement element)
+    {
+        try
+        {
+            var cached = element.Cached;
+            return new ElementSnapshot(
+                cached.ProcessId,
+                cached.NativeWindowHandle,
+                cached.AutomationId,
+                cached.Name,
+                cached.ClassName,
+                cached.FrameworkId,
+                cached.ControlType?.ProgrammaticName,
+                cached.LocalizedControlType,
+                cached.HasKeyboardFocus,
+                cached.IsKeyboardFocusable,
+                cached.IsEnabled,
+                cached.IsOffscreen,
+                ToRectangle(cached.BoundingRectangle),
+                "event-cache",
+                []);
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (COMException)
+        {
+        }
+
+        return ReadCurrentElementSnapshot(element);
+    }
+
+    private static ElementSnapshot ReadCurrentElementSnapshot(AutomationElement element)
     {
         var qualityFlags = new List<string>();
 
@@ -469,6 +566,7 @@ public sealed class UiAutomationCollector : ICaptureCollector
                 current.IsEnabled,
                 current.IsOffscreen,
                 ToRectangle(rectangle),
+                "current-read",
                 qualityFlags);
         }
         catch (ElementNotAvailableException)
@@ -498,6 +596,7 @@ public sealed class UiAutomationCollector : ICaptureCollector
             null,
             null,
             null,
+            "current-read",
             qualityFlags);
     }
 
@@ -516,13 +615,18 @@ public sealed class UiAutomationCollector : ICaptureCollector
             : new RectangleSnapshot(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);
 
     private sealed record Observation(
-        AutomationElement Element,
+        AutomationElement? Element,
         string ObservationType,
         string EventId,
         string? ChangeType,
         int[]? RuntimeId,
         string? NewValue,
-        long MonotonicNanoseconds);
+        long MonotonicNanoseconds,
+        DropEpisode? DropEpisode)
+    {
+        public static Observation ForDropEpisode(DropEpisode episode) =>
+            new(null, "collector-omission", "", null, null, null, episode.LastDroppedAt, episode);
+    }
 
     private sealed record RectangleSnapshot(
         double X,
@@ -544,5 +648,6 @@ public sealed class UiAutomationCollector : ICaptureCollector
         bool? IsEnabled,
         bool? IsOffscreen,
         RectangleSnapshot? BoundingRectangle,
+        string PropertySource,
         IReadOnlyList<string> QualityFlags);
 }

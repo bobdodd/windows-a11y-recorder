@@ -309,7 +309,13 @@ The full-queue policy is `DropOldest` so current capture can continue. Every dro
 
 ### UI Automation events
 
-The event-handler path uses `DropWrite`. It MUST avoid synchronous tree traversal and property expansion.
+The event-handler path uses `DropWrite`. It MUST avoid synchronous tree traversal and property expansion. Element properties MUST be requested with each event through an active cache request, so UI Automation supplies them before the handler runs. Each element snapshot MUST state whether its values came from that cache or from a later current read.
+
+Focus changes and automation events MUST have reserved queue capacity that property and structure changes cannot use. All observation kinds share one queue, so records leave it in arrival order.
+
+Each run of refused observations MUST produce one omission record, timed at the last refusal, that states the count, the first and last refused arrival times, and the count per observation type. The record MUST be written before the next admitted observation, or at stop if the run is still open. See [UI Automation overload evidence](uia-overload-evidence.md).
+
+The unit test level MUST cover reserved admission, episode counts and times, episode records needing room, flushing at stop, and arrival order under concurrent producers. The validation level MUST record a session with a high-rate UI Automation source on the desktop.
 
 Snapshot triggers use `CoalesceRequest`. Coalescing applies to requests, not captured events. The retained request records all trigger identifiers that were merged.
 

@@ -501,10 +501,20 @@ function Find-UiaFocus {
                     $_.eventType -eq "collector-omission"
                 }
         )
+        $droppedFocus = (
+            $uiaOmissions |
+                Where-Object {
+                    $_.payload.PSObject.Properties.Name -contains "droppedByObservationType" -and
+                    $_.payload.droppedByObservationType.PSObject.Properties.Name -contains "focus-changed"
+                } |
+                ForEach-Object { [long] $_.payload.droppedByObservationType.'focus-changed' } |
+                Measure-Object -Sum
+        ).Sum
         throw (
             "UI Automation recorded no focus change to '$Name' after its input. " +
             "The UI Automation collector reported $($uiaOmissions.Count) omission " +
-            "record(s) in this session."
+            "record(s) in this session, which refused $([long] $droppedFocus) " +
+            "focus change(s)."
         )
     }
     $events[0]
@@ -751,6 +761,45 @@ $omissions = @(
         Sort-Object -Unique
 )
 
+# How UI Automation observations read their element properties, and what
+# each drop episode refused, by observation type.
+$uiaPropertySources = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "accessibility.uia.events" -and
+            $_.eventType -ne "collector-omission" -and
+            $_.payload.PSObject.Properties.Name -contains "element"
+        } |
+        ForEach-Object {
+            if ($_.payload.element.PSObject.Properties.Name -contains "propertySource") {
+                $_.payload.element.propertySource
+            }
+            else {
+                "unstated"
+            }
+        } |
+        Group-Object |
+        Sort-Object Name |
+        ForEach-Object { "$($_.Name)=$($_.Count)" }
+)
+$uiaDropEpisodes = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "accessibility.uia.events" -and
+            $_.eventType -eq "collector-omission" -and
+            $_.payload.PSObject.Properties.Name -contains "droppedByObservationType"
+        }
+)
+$uiaDroppedByType = @(
+    $uiaDropEpisodes |
+        ForEach-Object { $_.payload.droppedByObservationType.PSObject.Properties } |
+        Group-Object Name |
+        Sort-Object Name |
+        ForEach-Object {
+            "$($_.Name)=$(($_.Group | ForEach-Object { [long] $_.Value } | Measure-Object -Sum).Sum)"
+        }
+)
+
 [pscustomobject]@{
     RendererProcessId = $rendererProcessId
     ChromiumProcesses = $chromiumProcessIds.Count
@@ -772,6 +821,9 @@ $omissions = @(
     LayoutCheckpoints = $layoutCompletions.Count
     AccessibilityCheckpoints = $accessibilityCompletions.Count
     FramesDuringInput = $inputFrames.Count
+    UiaPropertySources = ($uiaPropertySources -join "; ")
+    UiaDropEpisodes = $uiaDropEpisodes.Count
+    UiaDroppedByType = ($uiaDroppedByType -join "; ")
     OmissionKinds = ($omissions -join "; ")
 } | Format-List
 

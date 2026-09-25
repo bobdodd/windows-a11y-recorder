@@ -905,6 +905,19 @@ foreach ($omissionLine in @(
         $lossReasons -contains $omission.payload.reason) {
         $browserLost += $count
     }
+    elseif ($omission.payload.PSObject.Properties.Name -contains "lastDroppedAtNanoseconds") {
+        # A UI Automation drop episode: when it happened and what it refused.
+        $first = [double] $omission.payload.firstDroppedAtNanoseconds / 1e9
+        $last = [double] $omission.payload.lastDroppedAtNanoseconds / 1e9
+        $types = @(
+            $omission.payload.droppedByObservationType.PSObject.Properties |
+                ForEach-Object { "$($_.Name)=$($_.Value)" }
+        ) -join ","
+        $otherOmissions += (
+            "$($omission.channel) $($omission.payload.reason) $count " +
+            "at $($first.ToString('0.000'))-$($last.ToString('0.000')) s ($types)"
+        )
+    }
     else {
         $otherOmissions += "$($omission.channel) $($omission.payload.reason) $count"
     }
