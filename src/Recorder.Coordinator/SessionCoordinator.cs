@@ -19,6 +19,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
     private readonly List<CollectorRuntime> _collectors = [];
     private SessionClock? _clock;
     private NdjsonEventWriter? _writer;
+    private ArtifactHashRegistry _artifactHashes = new();
     private RecordingOptions? _options;
     private string? _sessionId;
     private string? _sessionDirectory;
@@ -91,8 +92,10 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 $"Recording started {_startedUtc:O}{Environment.NewLine}",
                 cancellationToken).ConfigureAwait(false);
 
+            _artifactHashes = new ArtifactHashRegistry();
             _writer = new NdjsonEventWriter(
-                Path.Combine(_sessionDirectory, "events.ndjson"));
+                Path.Combine(_sessionDirectory, "events.ndjson"),
+                artifactHashes: _artifactHashes);
             _collectors.Clear();
             foreach (var collector in _collectorFactory(options))
             {
@@ -105,7 +108,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 _sessionId,
                 _sessionDirectory,
                 _clock,
-                _writer);
+                _writer,
+                _artifactHashes);
 
             foreach (var runtime in _collectors)
             {
@@ -237,9 +241,11 @@ public sealed class SessionCoordinator : IAsyncDisposable
             _message = failures.Count == 0
                 ? "Recording completed."
                 : string.Join(Environment.NewLine, failures);
-            // Hash every artifact exactly once. The failure rewrite below
-            // reuses this inventory, and finalization validation skips the
-            // reread because these hashes were computed from the same files.
+            // Hash every artifact exactly once: the event log and frames were
+            // hashed as they were written, and the rest are hashed here. The
+            // failure rewrite below reuses this inventory, and finalization
+            // validation skips the reread because these hashes describe the
+            // same files.
             var artifacts = await BuildArtifactInventoryAsync(cancellationToken)
                 .ConfigureAwait(false);
             await WriteManifestAsync(
@@ -492,6 +498,21 @@ public sealed class SessionCoordinator : IAsyncDisposable
                  .Order(StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var relativePath = Path.GetRelativePath(_sessionDirectory!, path)
+                .Replace('\\', '/');
+            // A writer that hashed the file as it wrote it has already
+            // supplied the hash. Files no writer reported, such as logs
+            // written by other processes, or files changed since they were
+            // reported, are read and hashed here.
+            if (_artifactHashes.TryGetUnchanged(path, out var writtenHash))
+            {
+                artifacts.Add(new SessionArtifact(
+                    relativePath,
+                    new FileInfo(path).Length,
+                    writtenHash));
+                continue;
+            }
+
             await using var stream = new FileStream(
                 path,
                 FileMode.Open,
@@ -502,7 +523,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
             var hash = await SHA256.HashDataAsync(stream, cancellationToken)
                 .ConfigureAwait(false);
             artifacts.Add(new SessionArtifact(
-                Path.GetRelativePath(_sessionDirectory!, path).Replace('\\', '/'),
+                relativePath,
                 stream.Length,
                 Convert.ToHexString(hash).ToLowerInvariant()));
         }

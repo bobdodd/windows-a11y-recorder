@@ -262,6 +262,8 @@ The active session is always a directory. It contains:
 
 Each NDJSON append is a complete UTF-8 line. Writers flush at bounded intervals and on control boundaries. Media is segmented so an interrupted final segment cannot invalidate earlier segments.
 
+The terminal manifest lists every artifact with its size and SHA-256 hash. A writer that produces a file sequentially computes the hash over the bytes as it writes them and reports it to the session's artifact hash registry when it closes the file; the event log writer and the desktop frame writer do this. A reported hash is used only while the file still has the reported size and the last-write time it had when the hash was reported. Any other file, including files written by other processes such as Chromium's log, files whose writer rewrites them in place such as WAV headers, and files changed after their hash was reported, is read and hashed from disk at finalization. A reported hash describes the bytes the recorder wrote, not a later read of the disk, so opening a recording with hash verification still rereads and checks every artifact.
+
 A checkpoint records:
 
 - Last durable persistence sequence per stream.

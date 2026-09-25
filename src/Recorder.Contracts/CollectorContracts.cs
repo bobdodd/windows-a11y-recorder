@@ -88,11 +88,17 @@ public sealed record CollectorTransitionResult(
         new(false, state, code, message);
 }
 
+/// <param name="ArtifactHashes">
+/// Where a collector reports the hash of a session file it writes, computed
+/// as it writes the file. Null when the host does not collect them; the
+/// manifest then hashes the file from disk.
+/// </param>
 public sealed record CollectorInitializationContext(
     string SessionId,
     string SessionDirectory,
     ISessionClock Clock,
-    IRecorderEventSink EventSink);
+    IRecorderEventSink EventSink,
+    IArtifactHashRegistry? ArtifactHashes = null);
 
 public sealed record SessionBoundary(long MonotonicNanoseconds, DateTimeOffset Utc);
 

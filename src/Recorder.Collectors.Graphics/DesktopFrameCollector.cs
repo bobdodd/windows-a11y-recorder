@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows.Media;
@@ -327,8 +328,9 @@ public sealed class DesktopFrameCollector : ICaptureCollector
             $"{sequence:D10}.png");
         var finalPath = Path.Combine(_context.SessionDirectory, relativePath);
         var temporaryPath = finalPath + ".tmp";
-        WritePng(temporaryPath, width, height, stride, pixels);
+        var (byteLength, sha256) = WritePng(temporaryPath, width, height, stride, pixels);
         File.Move(temporaryPath, finalPath);
+        _context.ArtifactHashes?.Record(finalPath, byteLength, sha256);
 
         var completedAt = _context.Clock.GetElapsedNanoseconds();
         var monitorFrames = DescribeMonitorFrames(monitorTimings);
@@ -496,7 +498,10 @@ public sealed class DesktopFrameCollector : ICaptureCollector
             AccessViolationException;
     }
 
-    private static void WritePng(
+    // The PNG is encoded in memory and hashed there, so the manifest can list
+    // the frame's SHA-256 without reading the file again when recording
+    // stops. The hash covers exactly the bytes written to the file.
+    private static (long ByteLength, byte[] Sha256) WritePng(
         string path,
         int width,
         int height,
@@ -516,15 +521,23 @@ public sealed class DesktopFrameCollector : ICaptureCollector
 
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var stream = new FileStream(
+        using var encoded = new MemoryStream();
+        encoder.Save(encoded);
+        var bytes = encoded.GetBuffer().AsSpan(0, checked((int)encoded.Length));
+        var sha256 = SHA256.HashData(bytes);
+        using (var stream = new FileStream(
             path,
             FileMode.CreateNew,
             FileAccess.Write,
             FileShare.None,
             bufferSize: 64 * 1024,
-            FileOptions.SequentialScan);
-        encoder.Save(stream);
-        stream.Flush(flushToDisk: true);
+            FileOptions.SequentialScan))
+        {
+            stream.Write(bytes);
+            stream.Flush(flushToDisk: true);
+        }
+
+        return (bytes.Length, sha256);
     }
 
     private void EmitFrameEvent(

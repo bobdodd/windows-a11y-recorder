@@ -190,6 +190,18 @@ from the product version.
 
 ### Changed
 
+- Hash the event log and desktop frames while they are written instead of
+  rereading them when recording stops. `NdjsonEventWriter` updates a SHA-256
+  hash with each line it writes, and the desktop frame collector encodes each
+  PNG in memory, hashes it, and writes those bytes. Each reports the hash to
+  an `ArtifactHashRegistry` that the coordinator creates for the session and
+  passes to collectors in `CollectorInitializationContext.ArtifactHashes`.
+  The manifest uses a reported hash only while the file keeps the reported
+  size and last-write time; other files, such as Chromium's log, WAV audio
+  whose header is rewritten at close, and copied crash reports, are still
+  hashed from disk at stop. Opening a recording with hash verification still
+  rereads every artifact. On a 1.35 GB recording, hashing at stop took about
+  1.1 s, most of it the event log.
 - Stop holding every event record's text in memory during playback. Each
   timeline event now keeps the byte offset and length of its line in
   `events.ndjson`, and the event inspector reads the record from the file

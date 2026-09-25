@@ -126,6 +126,102 @@ public sealed class SessionCoordinatorTests
         Directory.Delete(outputRoot, recursive: true);
     }
 
+    [Fact]
+    public async Task HashesFromDiskAnArtifactChangedAfterItsHashWasReported()
+    {
+        var outputRoot = Path.Combine(
+            Path.GetTempPath(),
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var coordinator = new SessionCoordinator(
+                _ => [new FakeCollector(), new ReportingFileCollector()]);
+            await coordinator.StartAsync(
+                new RecordingOptions { OutputRoot = outputRoot },
+                TestContext.Current.CancellationToken);
+
+            var stopped = await coordinator.StopAsync(
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(RecordingSessionState.Completed, stopped.State);
+            var verified = await SessionArchiveValidator.ValidateAsync(
+                stopped.SessionDirectory!,
+                TestContext.Current.CancellationToken);
+            Assert.True(verified.IsValid);
+            Assert.True(verified.ArtifactHashesVerified);
+        }
+        finally
+        {
+            if (Directory.Exists(outputRoot))
+            {
+                Directory.Delete(outputRoot, recursive: true);
+            }
+        }
+    }
+
+    // Writes a file, reports its hash, then appends to it, as a writer that
+    // reopened a finished file would. The manifest must describe the file on
+    // disk, not the reported hash.
+    private sealed class ReportingFileCollector : ICaptureCollector
+    {
+        private CollectorInitializationContext? _context;
+
+        public CollectorDescriptor Descriptor { get; } =
+            CollectorDescriptor.Create(
+                "test.reporting",
+                nameof(ReportingFileCollector),
+                "1.0",
+                [],
+                "test");
+
+        public CollectorLifecycleState LifecycleState { get; private set; } =
+            CollectorLifecycleState.Created;
+
+        public CollectorHealthState HealthState => CollectorHealthState.Healthy;
+
+        public ValueTask<CapabilityResult> InitializeAsync(
+            CollectorInitializationContext context,
+            CancellationToken cancellationToken)
+        {
+            _context = context;
+            LifecycleState = CollectorLifecycleState.Ready;
+            return ValueTask.FromResult(CapabilityResult.Supported());
+        }
+
+        public ValueTask<CollectorTransitionResult> StartAsync(
+            SessionBoundary boundary,
+            CancellationToken cancellationToken)
+        {
+            LifecycleState = CollectorLifecycleState.Running;
+            return ValueTask.FromResult(
+                CollectorTransitionResult.Success(LifecycleState));
+        }
+
+        public ValueTask<CollectorTransitionResult> StopAsync(
+            SessionBoundary boundary,
+            CancellationToken cancellationToken)
+        {
+            var path = Path.Combine(_context!.SessionDirectory, "reported.bin");
+            byte[] written = [1, 2, 3];
+            File.WriteAllBytes(path, written);
+            Assert.NotNull(_context.ArtifactHashes);
+            _context.ArtifactHashes.Record(
+                path,
+                written.Length,
+                System.Security.Cryptography.SHA256.HashData(written));
+            File.AppendAllText(path, "changed");
+            LifecycleState = CollectorLifecycleState.Stopped;
+            return ValueTask.FromResult(
+                CollectorTransitionResult.Success(LifecycleState));
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            LifecycleState = CollectorLifecycleState.Disposed;
+            return ValueTask.CompletedTask;
+        }
+    }
+
     private sealed class FakeCollector : ICaptureCollector
     {
         private CollectorInitializationContext? _context;

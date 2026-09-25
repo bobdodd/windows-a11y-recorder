@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Channels;
 using Recorder.Contracts;
@@ -10,14 +11,28 @@ public sealed class NdjsonEventWriter : IRecorderEventSink, IAsyncDisposable
     private readonly FileStream _stream;
     private readonly Task _writerTask;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly string _path;
+    private readonly IArtifactHashRegistry? _artifactHashes;
+    private readonly IncrementalHash _hash =
+        IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+    private long _bytesWritten;
     private long _accepted;
     private long _dropped;
     private bool _completed;
 
-    public NdjsonEventWriter(string path, int capacity = 16_384)
+    /// <param name="artifactHashes">
+    /// Receives the SHA-256 hash of the log, computed over each line as it is
+    /// written, when the writer is disposed.
+    /// </param>
+    public NdjsonEventWriter(
+        string path,
+        int capacity = 16_384,
+        IArtifactHashRegistry? artifactHashes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
+        _path = Path.GetFullPath(path);
+        _artifactHashes = artifactHashes;
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         _stream = new FileStream(
@@ -65,10 +80,19 @@ public sealed class NdjsonEventWriter : IRecorderEventSink, IAsyncDisposable
 
         _completed = true;
         _channel.Writer.TryComplete();
-        await _writerTask.ConfigureAwait(false);
-        await _stream.FlushAsync().ConfigureAwait(false);
-        _stream.Flush(flushToDisk: true);
-        await _stream.DisposeAsync().ConfigureAwait(false);
+        try
+        {
+            await _writerTask.ConfigureAwait(false);
+            await _stream.FlushAsync().ConfigureAwait(false);
+            _stream.Flush(flushToDisk: true);
+            await _stream.DisposeAsync().ConfigureAwait(false);
+            _artifactHashes?.Record(_path, _bytesWritten, _hash.GetHashAndReset());
+        }
+        finally
+        {
+            await _stream.DisposeAsync().ConfigureAwait(false);
+            _hash.Dispose();
+        }
     }
 
     private async Task WriteLoopAsync()
@@ -82,6 +106,8 @@ public sealed class NdjsonEventWriter : IRecorderEventSink, IAsyncDisposable
             json.CopyTo(line, 0);
             line[^1] = (byte)'\n';
             await _stream.WriteAsync(line).ConfigureAwait(false);
+            _hash.AppendData(line);
+            _bytesWritten += line.Length;
             recordsSinceFlush++;
 
             if (recordsSinceFlush >= 256)

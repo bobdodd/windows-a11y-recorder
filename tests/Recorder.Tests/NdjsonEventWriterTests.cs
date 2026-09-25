@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using Recorder.Contracts;
 using Recorder.Session;
@@ -44,6 +45,48 @@ public sealed class NdjsonEventWriterTests
             using var document = JsonDocument.Parse(lines[index]);
             Assert.Equal((ulong)index, document.RootElement.GetProperty("sequence").GetUInt64());
         }
+
+        Directory.Delete(directory, recursive: true);
+    }
+
+    [Fact]
+    public async Task ReportsHashOfWrittenBytesWhenDisposed()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "events.ndjson");
+        var descriptor = CollectorDescriptor.Create(
+            "test.collector",
+            "test",
+            "1.0",
+            ["test.events"],
+            "test");
+        var registry = new ArtifactHashRegistry();
+
+        await using (var writer = new NdjsonEventWriter(
+            path,
+            capacity: 64,
+            artifactHashes: registry))
+        {
+            for (ulong sequence = 0; sequence < 50; sequence++)
+            {
+                Assert.True(writer.TryWrite(RecorderEventFactory.Create(
+                    "session",
+                    descriptor,
+                    "test.events",
+                    sequence,
+                    (long)sequence,
+                    "test",
+                    new { value = sequence })));
+            }
+        }
+
+        var bytes = await File.ReadAllBytesAsync(
+            path,
+            TestContext.Current.CancellationToken);
+        Assert.True(registry.TryGetUnchanged(path, out var hash));
+        Assert.Equal(
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            hash);
 
         Directory.Delete(directory, recursive: true);
     }
