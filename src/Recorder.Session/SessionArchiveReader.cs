@@ -12,16 +12,28 @@ public sealed record SessionPlaybackArchive(
     IReadOnlyList<BrowserNavigationCorrelation> BrowserNavigations)
 {
     /// <summary>
-    /// Reads an event's complete record from the event log. Playback keeps
-    /// only where each record is, so its text is read when it is needed.
+    /// Where complete event records are read from when the events were not
+    /// loaded from the event log. Null when they were, and records are read
+    /// from events.ndjson.
+    /// </summary>
+    public ISessionEventRecordSource? RecordSource { get; init; }
+
+    /// <summary>
+    /// Reads an event's complete record. Playback keeps only where each
+    /// record is, so its text is read when it is needed.
     /// </summary>
     /// <exception cref="InvalidDataException">
-    /// The bytes at the recorded location are no longer that event, which
+    /// The record at the recorded location is no longer that event, which
     /// means the event log changed after the recording was opened.
     /// </exception>
     public string ReadEventJson(SessionTimelineEvent item)
     {
         ArgumentNullException.ThrowIfNull(item);
+        if (RecordSource is not null)
+        {
+            return RecordSource.ReadEventJson(item);
+        }
+
         var bytes = new byte[item.ByteLength];
         using (var stream = new FileStream(
                    Path.Combine(SessionDirectory, "events.ndjson"),
@@ -61,10 +73,32 @@ public sealed record SessionPlaybackArchive(
 }
 
 /// <summary>
-/// One event in the playback timeline. The complete record stays in the
-/// event log at <see cref="ByteOffset"/>; read it with
+/// Reads an event's complete record from where the recording is stored.
+/// </summary>
+public interface ISessionEventRecordSource
+{
+    /// <exception cref="InvalidDataException">
+    /// The stored record is not that event.
+    /// </exception>
+    string ReadEventJson(SessionTimelineEvent item);
+}
+
+/// <summary>
+/// One event in the playback timeline. The complete record stays where the
+/// recording is stored; read it with
 /// <see cref="SessionPlaybackArchive.ReadEventJson"/>.
 /// </summary>
+/// <param name="Line">
+/// The record's line in events.ndjson, or, for a recording loaded from the
+/// database, its position in the order the database stored events.
+/// </param>
+/// <param name="ByteOffset">
+/// Where the record's line starts in events.ndjson; zero for a recording
+/// loaded from the database.
+/// </param>
+/// <param name="EventKey">
+/// The event's key in the database, for a recording loaded from it.
+/// </param>
 public sealed record SessionTimelineEvent(
     long Line,
     string EventId,
@@ -74,7 +108,8 @@ public sealed record SessionTimelineEvent(
     long MonotonicNanoseconds,
     string Summary,
     long ByteOffset,
-    int ByteLength);
+    int ByteLength,
+    long? EventKey = null);
 
 public sealed record SessionVideoFrame(
     long MonotonicNanoseconds,
@@ -228,7 +263,7 @@ public static class SessionArchiveReader
             : $"{sessionId}:{collectorId}:{channel}:{sequence.Value}";
     }
 
-    private static string CreateSummary(
+    internal static string CreateSummary(
         string channel,
         string eventType,
         JsonElement payload)

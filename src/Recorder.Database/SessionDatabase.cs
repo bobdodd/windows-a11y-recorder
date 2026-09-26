@@ -76,6 +76,21 @@ public sealed class SessionDatabase : IAsyncDisposable
     }
 
     /// <summary>
+    /// Opens a recording for playback from the database, if the database
+    /// holds it complete. The session folder's name is the recording's
+    /// session key; its frames and audio are read from the folder.
+    /// </summary>
+    public Task<DatabasePlaybackResult> OpenRecordingAsync(
+        string sessionDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return new DatabasePlaybackReader(_server.DataSource).OpenAsync(
+            sessionDirectory,
+            cancellationToken);
+    }
+
+    /// <summary>
     /// The file a recording's events are spilled to while the database is
     /// not accepting writes. It is in the database's data directory rather
     /// than the session folder, so the session files do not change while the

@@ -15,6 +15,69 @@ namespace Recorder.Session;
 /// </remarks>
 public sealed class SessionPlaybackArchiveBuilder
 {
+    /// <summary>
+    /// The channels whose payloads playback reads, for summaries, frames,
+    /// audio tracks, and browser navigation. The payloads of other channels
+    /// are not needed to build the archive.
+    /// </summary>
+    public static IReadOnlyList<string> PayloadChannels { get; } =
+    [
+        "window.foreground",
+        "accessibility.uia.events",
+        "session.annotations",
+        "graphics.desktop.frames"
+    ];
+
+    /// <summary>
+    /// Channel prefixes whose payloads playback reads, as
+    /// <see cref="PayloadChannels"/>.
+    /// </summary>
+    public static IReadOnlyList<string> PayloadChannelPrefixes { get; } =
+    [
+        "audio.",
+        "browser."
+    ];
+
+    /// <summary>
+    /// The top-level payload properties playback reads. A reader that stores
+    /// payloads elsewhere can pass only these to <see cref="AddEvent"/>.
+    /// </summary>
+    public static IReadOnlyList<string> PayloadProperties { get; } =
+    [
+        "automationId",
+        "checkpointId",
+        "committed",
+        "context",
+        "controlType",
+        "device",
+        "eventName",
+        "height",
+        "name",
+        "navigationId",
+        "navigationKind",
+        "note",
+        "outcome",
+        "path",
+        "primaryPage",
+        "processName",
+        "reason",
+        "registrationKind",
+        "rendererProcessId",
+        "sameDocument",
+        "stream",
+        "title",
+        "truncated",
+        "url",
+        "width"
+    ];
+
+    /// <summary>
+    /// Whether playback reads the payloads of a channel's events.
+    /// </summary>
+    public static bool ReadsPayload(string channel) =>
+        PayloadChannels.Contains(channel, StringComparer.Ordinal) ||
+        PayloadChannelPrefixes.Any(prefix => channel.StartsWith(prefix, StringComparison.Ordinal));
+
     private readonly string _root;
     private readonly List<SessionTimelineEvent> _events = [];
     private readonly List<SessionVideoFrame> _frames = [];
@@ -54,6 +117,42 @@ public sealed class SessionPlaybackArchiveBuilder
             byteLength,
             record,
             out var payload);
+        AddCore(timelineEvent, payload);
+    }
+
+    /// <summary>
+    /// Adds an event read from a store other than the event log. Payload
+    /// need hold only <see cref="PayloadProperties"/>, and only for channels
+    /// where <see cref="ReadsPayload"/> is true; otherwise pass default.
+    /// </summary>
+    public void AddEvent(
+        long line,
+        string eventId,
+        string evidenceClass,
+        string channel,
+        string eventType,
+        long monotonicNanoseconds,
+        JsonElement payload,
+        long eventKey)
+    {
+        ThrowIfBuilt();
+        AddCore(
+            new SessionTimelineEvent(
+                line,
+                eventId,
+                evidenceClass,
+                channel,
+                eventType,
+                monotonicNanoseconds,
+                SessionArchiveReader.CreateSummary(channel, eventType, payload),
+                0,
+                0,
+                eventKey),
+            payload);
+    }
+
+    private void AddCore(SessionTimelineEvent timelineEvent, JsonElement payload)
+    {
         var timestamp = timelineEvent.MonotonicNanoseconds;
         _maximumTimestamp = Math.Max(_maximumTimestamp, timestamp);
         _events.Add(timelineEvent);
@@ -105,6 +204,30 @@ public sealed class SessionPlaybackArchiveBuilder
             manifestPath,
             cancellationToken).ConfigureAwait(false);
         return Build(manifest);
+    }
+
+    /// <summary>
+    /// Builds an archive whose events were added with
+    /// <see cref="AddEvent"/>, reading complete records from
+    /// <paramref name="recordSource"/>. The session folder must hold
+    /// manifest.json; frames and audio are read from it.
+    /// </summary>
+    public async Task<SessionPlaybackArchive> BuildAsync(
+        ISessionEventRecordSource recordSource,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(recordSource);
+        var manifestPath = Path.Combine(_root, "manifest.json");
+        if (!File.Exists(manifestPath))
+        {
+            throw new InvalidDataException(
+                "The recording's folder does not contain manifest.json.");
+        }
+
+        var manifest = await SessionArchiveReader.ReadManifestAsync(
+            manifestPath,
+            cancellationToken).ConfigureAwait(false);
+        return Build(manifest) with { RecordSource = recordSource };
     }
 
     internal SessionPlaybackArchive Build(SessionManifest manifest)

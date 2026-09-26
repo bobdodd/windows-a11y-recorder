@@ -277,8 +277,32 @@ only once the database version is tested in full. It adds the
   session folder, so the session files and their manifest do not change
   while the writer drains it.
 - **Transition.** The session files, including `events.ndjson`, are still
-  written in full, and the player still reads them. They are removed only
-  once the player reads from the database and that removal is agreed.
+  written in full. The player reads a recording from the database when the
+  database holds it complete, and from the session files otherwise. The
+  files are removed only once that removal is agreed.
+- **Playback.** `DatabasePlaybackReader` finds a recording by its session
+  key, which is the session folder's name. Only a recording stored as
+  completed is opened from the database; a recording that is not found, or
+  is stored as recording, failed, or interrupted, is opened from its session
+  files, and the app shows the reason with the recording. A database that
+  cannot be read is treated the same way. The reader loads every event's
+  envelope in one query ordered by event key, and for the channels the
+  timeline summarizes, and the frame, audio, and browser channels, it
+  transfers only the payload properties the player uses, projected in the
+  database. The timeline is still held in memory in full; it is not paged.
+  An event's complete record is read from the database only when it is
+  selected in the inspector, and is rebuilt from the envelope columns and
+  child tables. The rebuilt record matches the event log's record in content
+  but not byte for byte: `jsonb` does not keep a payload's property order,
+  quality flags are returned in the order their names were first stored, and
+  numbers are returned as PostgreSQL normalizes them. `manifest.json` is
+  still read from the session folder, and frames and audio are still read
+  from their files. A recording opened from the database is not revalidated
+  from its session files, because the database stores it as completed only
+  when finalization validation passed. On the Linux development sandbox, a
+  recording of 100,000 events with payloads of about 2 KB loaded from the
+  database in about 1 s, in two runs of a debug build. That figure is not a
+  measurement on the target machine.
 - **App.** The app starts the database when its window loads, with the data
   directory `%LOCALAPPDATA%\Windows A11y Recorder\Database`, and stops it
   when the window closes. Recording is not available until the start
@@ -286,8 +310,9 @@ only once the database version is tested in full. It adds the
   are written to session files only. The build copies `.postgres\pgsql`, when
   present, to `pgsql` in the app's output folder.
 
-Still to come on the branch: the player's queries, typed evidence and identity tables per channel,
-removing what this retires, the revised privacy policy and threat model, and
+Still to come on the branch: paging the timeline instead of holding it in
+memory, typed evidence and identity tables per channel, removing what this
+retires, including `events.ndjson` once that is agreed, the revised privacy policy and threat model, and
 the hour-long Windows system test.
 
 A throughput probe on the Linux development sandbox, with two processor cores

@@ -5,6 +5,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
+    <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Migrations\*.sql" />

@@ -41,6 +41,14 @@ from the product version.
   earlier run are marked interrupted. The app shows the database's written
   and unwritten counts, and records to session files only, saying so, if the
   database cannot start.
+- Open recordings for playback from the PostgreSQL session store, on the
+  `postgres-session-store` branch. A recording the database holds as
+  completed is loaded from the database, with the payload properties the
+  player uses projected in the database and each event's complete record read
+  when it is selected in the inspector. Other recordings, and all recordings
+  when the database cannot be read, are opened from their session files, and
+  the app says which source it read and why. Frames, audio, and
+  `manifest.json` are still read from the session folder.
 - Record worker and non-Node dispatch evidence. Protocol 0.31 records
   listener and dispatch evidence in dedicated, shared, and service worker
   global scopes, for dispatches to EventTargets that are not Nodes, for a

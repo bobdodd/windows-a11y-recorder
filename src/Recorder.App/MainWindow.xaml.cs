@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using Npgsql;
 using Recorder.Coordinator;
 using Recorder.Database;
 using Recorder.Session;
@@ -445,7 +446,7 @@ public partial class MainWindow : Window
                 InvalidDataException or InvalidOperationException or JsonException)
         {
             EventDetailsTextBox.Text =
-                $"The complete record for event line {e.TimelineEvent.Line} " +
+                $"The complete record for event {e.TimelineEvent.EventId} " +
                 $"could not be read: {exception.Message}";
         }
         EventDetailsTextBox.CaretIndex = 0;
@@ -591,7 +592,10 @@ public partial class MainWindow : Window
         }
     }
 
-    // A prepared archive was built from the read finalization validation
+    // A recording the database holds complete is loaded from the database,
+    // without reading or validating its event log; its frames and audio are
+    // still read from the session folder. Otherwise the session files are
+    // read. A prepared archive was built from the read finalization validation
     // made, so it is used as is. Otherwise, opening with validation builds
     // the archive from the validator's read, and opening without validation
     // reads the archive once to load it. The event log is read once in each
@@ -613,39 +617,56 @@ public partial class MainWindow : Window
 
         try
         {
-            SessionPlaybackArchive archive;
-            if (preparedArchive is not null)
+            SessionPlaybackArchive? archive = null;
+            string source;
+            var fromDatabase = await TryOpenFromDatabaseAsync(sessionDirectory);
+            if (fromDatabase.Archive is not null)
             {
-                archive = preparedArchive;
-            }
-            else if (validate)
-            {
-                var playback = new SessionPlaybackArchiveBuilder(sessionDirectory);
-                var validation = await SessionArchiveValidator.ValidateAsync(
-                    sessionDirectory,
-                    ArchiveValidationOptions.Default,
-                    playback);
-                if (!validation.IsValid)
-                {
-                    var problems = string.Join(
-                        Environment.NewLine,
-                        validation.Issues
-                            .Where(issue =>
-                                issue.Severity == ArchiveValidationSeverity.Error)
-                            .Take(8)
-                            .Select(issue =>
-                                $"{issue.Code}: {issue.Message}"));
-                    throw new InvalidDataException(
-                        "The recording failed archive validation." +
-                        Environment.NewLine +
-                        problems);
-                }
-
-                archive = await playback.BuildAsync();
+                archive = fromDatabase.Archive;
+                source = "from the database";
             }
             else
             {
-                archive = await SessionArchiveReader.LoadAsync(sessionDirectory);
+                source = fromDatabase.Reason is null
+                    ? "from session files"
+                    : $"from session files. {fromDatabase.Reason}";
+            }
+
+            if (archive is null)
+            {
+                if (preparedArchive is not null)
+                {
+                    archive = preparedArchive;
+                }
+                else if (validate)
+                {
+                    var playback = new SessionPlaybackArchiveBuilder(sessionDirectory);
+                    var validation = await SessionArchiveValidator.ValidateAsync(
+                        sessionDirectory,
+                        ArchiveValidationOptions.Default,
+                        playback);
+                    if (!validation.IsValid)
+                    {
+                        var problems = string.Join(
+                            Environment.NewLine,
+                            validation.Issues
+                                .Where(issue =>
+                                    issue.Severity == ArchiveValidationSeverity.Error)
+                                .Take(8)
+                                .Select(issue =>
+                                    $"{issue.Code}: {issue.Message}"));
+                        throw new InvalidDataException(
+                            "The recording failed archive validation." +
+                            Environment.NewLine +
+                            problems);
+                    }
+
+                    archive = await playback.BuildAsync();
+                }
+                else
+                {
+                    archive = await SessionArchiveReader.LoadAsync(sessionDirectory);
+                }
             }
 
             CloseAudio();
@@ -683,10 +704,12 @@ public partial class MainWindow : Window
                 $"{_playbackArchive.Manifest.SessionId} | " +
                 $"{_playbackArchive.Frames.Count:N0} frames | " +
                 $"{_playbackArchive.Events.Count:N0} events | " +
-                $"{_playbackArchive.AudioTracks.Count} audio tracks";
+                $"{_playbackArchive.AudioTracks.Count} audio tracks | " +
+                $"Read {source}";
             busy.Dispose();
             _busy.AnnounceCompleted(
-                $"Recording loaded. {_playbackArchive.Frames.Count:N0} frames, " +
+                $"Recording loaded {source}. " +
+                $"{_playbackArchive.Frames.Count:N0} frames, " +
                 $"{_playbackArchive.Events.Count:N0} events.");
             PlayPauseButton.Focus();
         }
@@ -713,6 +736,36 @@ public partial class MainWindow : Window
             busy.Dispose();
             OpenRecordingButton.IsEnabled =
                 _coordinator?.State != RecordingSessionState.Recording;
+        }
+    }
+
+    // The database is read first. A recording it does not hold complete, or
+    // a database that cannot be read, is opened from its session files, and
+    // the reason is shown with the recording.
+    private async Task<DatabasePlaybackResult> TryOpenFromDatabaseAsync(
+        string sessionDirectory)
+    {
+        if (_database is null)
+        {
+            return new DatabasePlaybackResult(
+                null,
+                null,
+                "The database is not available.");
+        }
+
+        try
+        {
+            return await _database.OpenRecordingAsync(sessionDirectory);
+        }
+        catch (Exception exception) when (
+            exception is NpgsqlException or InvalidOperationException or
+                InvalidDataException or IOException or JsonException or
+                ObjectDisposedException)
+        {
+            return new DatabasePlaybackResult(
+                null,
+                null,
+                $"The database could not be read: {exception.Message}");
         }
     }
 
