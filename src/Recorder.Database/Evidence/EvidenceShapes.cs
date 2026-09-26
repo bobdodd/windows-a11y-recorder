@@ -84,10 +84,12 @@ internal sealed class NameField(string json, Presence presence, string? column =
 /// A nested object whose members are columns of the owning table, named with
 /// the object's prefix. An object that is not required has a has_ column.
 /// </summary>
-internal sealed class InlineField(string json, Presence presence, IReadOnlyList<Field> fields)
+internal sealed class InlineField(string json, Presence presence, IReadOnlyList<Field> fields, string? column = null)
     : Field(json, presence)
 {
     public IReadOnlyList<Field> Fields { get; } = fields;
+
+    public override string Column { get; } = column ?? EvidenceNaming.Snake(json);
 }
 
 /// <summary>
@@ -292,6 +294,12 @@ internal static class EvidenceLayout
             {
                 Add(field, string.Empty, true, columns);
             }
+        }
+
+        var tooLong = columns.FirstOrDefault(column => column.Name.Length > 63);
+        if (tooLong is not null)
+        {
+            throw new InvalidOperationException($"Column {tooLong.Name} of table {table.Name} is longer than PostgreSQL allows.");
         }
 
         var duplicate = columns.GroupBy(column => column.Name).FirstOrDefault(group => group.Count() > 1);

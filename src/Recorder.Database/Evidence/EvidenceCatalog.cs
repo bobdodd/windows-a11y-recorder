@@ -727,6 +727,358 @@ internal static class EvidenceCatalog
         Bool("highResolutionTicks"),
         Int("notSwappedCount"));
 
+    public static readonly EvidenceTable NetworkScopes = Identity(
+        "browser_network_scopes",
+        Name("contextKind"),
+        Text("workerToken", N),
+        Text("globalObjectUrl", N));
+
+    public static readonly EvidenceTable DocumentCookieReads = Evidence(
+        "browser_document_cookie_reads",
+        Context(),
+        Text("accessId"),
+        Text("cookieUrl", N),
+        Name("outcome"),
+        Name("servedFrom", N),
+        Int("cookieCount"),
+        TextList("cookieNames", R, "browser_document_cookie_read_names"),
+        Bool("cookieNamesTruncated"),
+        ScriptLocation(),
+        World());
+
+    public static readonly EvidenceTable DocumentCookieWrites = Evidence(
+        "browser_document_cookie_writes",
+        Context(),
+        Text("accessId"),
+        Text("cookieUrl", N),
+        Name("outcome"),
+        Text("name"),
+        new InlineField(
+            "attributes",
+            R,
+            [
+                Text("domain", N),
+                Text("path", N),
+                Name("sameSite", N),
+                Bool("partitioned"),
+                Bool("expiresPresent"),
+                Bool("secure"),
+                Bool("httpOnly"),
+                Bool("maxAgePresent"),
+                NameList("attributeNames", R, "browser_document_cookie_write_attribute_names")
+            ]),
+        ScriptLocation(),
+        World());
+
+    public static readonly EvidenceTable CookieStoreRequests = Evidence(
+        "browser_cookie_store_requests",
+        Context(),
+        Text("requestId"),
+        Name("method"),
+        Name("contextKind"),
+        Name("outcome"),
+        Text("name", N),
+        Text("url", N),
+        new InlineField(
+            "attributes",
+            N,
+            [
+                Text("domain", N),
+                Text("path", N),
+                Name("sameSite", N),
+                Bool("partitioned"),
+                Bool("expiresPresent")
+            ]),
+        ScriptLocation(),
+        World());
+
+    public static readonly EvidenceTable CookieStoreResults = Evidence(
+        "browser_cookie_store_results",
+        Context(),
+        Text("requestId"),
+        Name("method"),
+        Name("outcome"),
+        Bool("success", N),
+        Int("cookieCount", N),
+        TextList("cookieNames", N, "browser_cookie_store_result_names"),
+        Bool("cookieNamesTruncated", N));
+
+    public static readonly EvidenceTable CookieStoreChanges = Evidence(
+        "browser_cookie_store_changes",
+        Context(),
+        Name("contextKind"),
+        Text("name"),
+        Text("domain"),
+        Text("path"),
+        Name("cause"),
+        Bool("dispatched"));
+
+    public static readonly EvidenceTable CookieAccesses = Evidence(
+        "browser_cookie_accesses",
+        Context(),
+        Name("observer"),
+        Text("navigationId", N),
+        BigInt("rendererProcessId", N),
+        Name("accessType"),
+        Text("url"),
+        Text("frameOrigin", N),
+        Text("topFrameOrigin", N),
+        Text("requestId", N),
+        Bool("adTagged"),
+        Int("cookieCount"),
+        Cookies("browser_cookie_access_cookies"),
+        Bool("cookiesTruncated"));
+
+    public static readonly EvidenceTable NetworkRequests = Evidence(
+        "browser_network_requests",
+        Context(),
+        Scope(),
+        NetworkRequest("request", "browser_network_request_headers"),
+        Bool("redirect"),
+        NetworkResponse("redirectResponse", N, "browser_network_request_redirect_headers", "redirect"),
+        ScriptLocation(),
+        World());
+
+    public static readonly EvidenceTable NetworkResponses = Evidence(
+        "browser_network_responses",
+        Context(),
+        Scope(),
+        Text("inspectorId"),
+        Text("requestId", N),
+        Name("responseSource"),
+        NetworkResponse("response", R, "browser_network_response_headers"));
+
+    public static readonly EvidenceTable NetworkRequestFinishes = Evidence(
+        "browser_network_request_finishes",
+        Context(),
+        Scope(),
+        Text("inspectorId"),
+        Double("encodedDataLength", N),
+        Double("decodedBodyLength"),
+        Double("finishBeforeRecordMilliseconds", N));
+
+    public static readonly EvidenceTable NetworkRequestFailures = Evidence(
+        "browser_network_request_failures",
+        Context(),
+        Scope(),
+        Text("inspectorId"),
+        Text("url"),
+        Int("netError"),
+        Name("netErrorName", N),
+        Bool("cancellation"),
+        Bool("timeout"),
+        Bool("accessCheck"),
+        Bool("blockedByResponse"),
+        Bool("blockedByOrb"),
+        Bool("hasCopyInCache"),
+        Bool("cancelledFromHttpError"),
+        Bool("internal"),
+        Name("blockedReason", N),
+        new InlineField("corsError", N, [Name("error"), Text("failedParameter", N)]));
+
+    public static readonly EvidenceTable NetworkMemoryCacheHits = Evidence(
+        "browser_network_memory_cache_hits",
+        Context(),
+        Scope(),
+        Bool("staticData"),
+        NetworkRequest("request", "browser_network_memory_cache_hit_request_headers"),
+        NetworkResponse("response", R, "browser_network_memory_cache_hit_response_headers"));
+
+    public static readonly EvidenceTable NetworkRequestHeadersSent = new(
+        "browser_network_request_headers_sent",
+        TableKind.Evidence,
+        [
+            Context(),
+            Text("devtoolsAgentId", N),
+            Text("requestId"),
+            .. Headers("headers", "headerCount", "headersTruncated", "browser_network_request_headers_sent_headers"),
+            Int("cookieCount"),
+            Cookies("browser_network_sent_request_cookies"),
+            Bool("cookiesTruncated"),
+            Double("sentBeforeRecordMilliseconds", N)
+        ]);
+
+    public static readonly EvidenceTable NetworkResponseHeadersReceived = new(
+        "browser_network_response_headers_received",
+        TableKind.Evidence,
+        [
+            Context(),
+            Text("devtoolsAgentId", N),
+            Text("requestId"),
+            .. Headers("headers", "headerCount", "headersTruncated", "browser_network_response_headers_received_headers"),
+            Int("cookieCount"),
+            Cookies("browser_network_received_response_cookies"),
+            Bool("cookiesTruncated"),
+            Int("status")
+        ]);
+
+    public static readonly EvidenceTable NetworkNavigationResponses = new(
+        "browser_network_navigation_responses",
+        TableKind.Evidence,
+        [
+            Context(),
+            Text("navigationId"),
+            Text("requestId", N),
+            Text("url"),
+            Name("method"),
+            Bool("committed"),
+            Bool("errorPage"),
+            Bool("sameDocument"),
+            Bool("download"),
+            Bool("backForwardCache"),
+            Int("netError"),
+            Name("netErrorName", N),
+            TextList("redirectChain", R, "browser_network_navigation_redirect_chains"),
+            .. Headers(
+                "requestHeaders",
+                "requestHeaderCount",
+                "requestHeadersTruncated",
+                "browser_network_navigation_request_headers"),
+            new InlineField(
+                "response",
+                N,
+                [
+                    Int("status"),
+                    Text("statusText"),
+                    Name("mimeType", N),
+                    Bool("wasCached"),
+                    RemoteAddress(),
+                    Name("connectionInfo", N),
+                    .. Headers("headers", "headerCount", "headersTruncated", "browser_network_navigation_response_headers")
+                ]),
+            Timing("navigationStartBeforeRecordMilliseconds", NavigationTimingPhases)
+        ]);
+
+    public static readonly EvidenceTable WebSocketCreations = Evidence(
+        "browser_websocket_creations",
+        Context(),
+        Scope(),
+        ScriptLocation(),
+        World(),
+        Text("inspectorId"),
+        Text("url"),
+        Text("requestedProtocols", N));
+
+    public static readonly EvidenceTable WebSocketHandshakeRequests = new(
+        "browser_websocket_handshake_requests",
+        TableKind.Evidence,
+        [
+            Context(),
+            Scope(),
+            Text("inspectorId"),
+            Text("url"),
+            TextList("cookieNames", R, "browser_websocket_handshake_request_cookie_names"),
+            .. Headers("headers", "headerCount", "headersTruncated", "browser_websocket_handshake_request_headers")
+        ]);
+
+    public static readonly EvidenceTable WebSocketHandshakeResponses = new(
+        "browser_websocket_handshake_responses",
+        TableKind.Evidence,
+        [
+            Context(),
+            Scope(),
+            Text("inspectorId"),
+            .. RealtimeResponse("browser_websocket_handshake_response"),
+            Text("extensions", N)
+        ]);
+
+    public static readonly EvidenceTable WebSocketMessagesSent = Evidence(
+        "browser_websocket_messages_sent",
+        Context(),
+        Scope(),
+        ScriptLocation(),
+        World(),
+        Text("inspectorId"),
+        Name("opcode"),
+        Double("payloadLength"),
+        RealtimeText("payload", N, "browser_websocket_message_sent_withheld"));
+
+    public static readonly EvidenceTable WebSocketMessagesReceived = Evidence(
+        "browser_websocket_messages_received",
+        Context(),
+        Scope(),
+        Text("inspectorId"),
+        Name("opcode"),
+        Double("payloadLength"),
+        RealtimeText("payload", N, "browser_websocket_message_received_withheld"));
+
+    public static readonly EvidenceTable WebSocketCloseRequests = Evidence(
+        "browser_websocket_close_requests",
+        Context(),
+        Scope(),
+        ScriptLocation(),
+        World(),
+        Text("inspectorId"),
+        Int("code", N),
+        RealtimeText("reason", R, "browser_websocket_close_request_withheld"));
+
+    public static readonly EvidenceTable WebSocketErrors = Evidence(
+        "browser_websocket_errors",
+        Context(),
+        Scope(),
+        Text("inspectorId"),
+        Text("message"));
+
+    public static readonly EvidenceTable WebSocketClosures = Evidence(
+        "browser_websocket_closures",
+        Context(),
+        Scope(),
+        Text("inspectorId"),
+        Name("cause"),
+        Bool("wasClean", N),
+        Int("code", N),
+        RealtimeText("reason", N, "browser_websocket_closure_withheld"));
+
+    public static readonly EvidenceTable EventSourceMessages = Evidence(
+        "browser_event_source_messages",
+        Context(),
+        Scope(),
+        Text("inspectorId"),
+        Text("url"),
+        Text("eventType"),
+        RealtimeText("lastEventId", R, "browser_event_source_last_event_id_withheld"),
+        Double("dataLength"),
+        RealtimeText("data", R, "browser_event_source_data_withheld"));
+
+    public static readonly EvidenceTable WebTransportCreations = Evidence(
+        "browser_web_transport_creations",
+        Context(),
+        Scope(),
+        ScriptLocation(),
+        World(),
+        Text("transportId"),
+        Text("url"));
+
+    public static readonly EvidenceTable WebTransportEstablishments = new(
+        "browser_web_transport_establishments",
+        TableKind.Evidence,
+        [
+            Context(),
+            Scope(),
+            Text("transportId"),
+            .. RealtimeResponse("browser_web_transport_establishment"),
+            Double("maxDatagramSize", N)
+        ]);
+
+    public static readonly EvidenceTable WebTransportCloseRequests = Evidence(
+        "browser_web_transport_close_requests",
+        Context(),
+        Scope(),
+        ScriptLocation(),
+        World(),
+        Text("transportId"),
+        Double("code", N),
+        RealtimeText("reason", N, "browser_web_transport_close_request_withheld"));
+
+    public static readonly EvidenceTable WebTransportClosures = Evidence(
+        "browser_web_transport_closures",
+        Context(),
+        Scope(),
+        Text("transportId"),
+        Bool("abrupt"),
+        Double("code", N),
+        RealtimeText("reason", N, "browser_web_transport_closure_withheld"));
+
     public static readonly EvidenceTable CollectorOmissions = Evidence(
         "collector_omissions",
             Name("reason"),
@@ -779,6 +1131,17 @@ internal static class EvidenceCatalog
         [
             LayoutCheckpointStarts, LayoutCheckpointNodes, LayoutCheckpointCompletions, PresentationRequests,
             PresentationsNotSwapped, PresentationSwaps, PresentationFeedback
+        ]),
+        (7, "browser_network_evidence",
+        [
+            DocumentCookieReads, DocumentCookieWrites, CookieStoreRequests, CookieStoreResults,
+            CookieStoreChanges, CookieAccesses, NetworkRequests, NetworkResponses, NetworkRequestFinishes,
+            NetworkRequestFailures, NetworkMemoryCacheHits, NetworkRequestHeadersSent,
+            NetworkResponseHeadersReceived, NetworkNavigationResponses, WebSocketCreations,
+            WebSocketHandshakeRequests, WebSocketHandshakeResponses, WebSocketMessagesSent,
+            WebSocketMessagesReceived, WebSocketCloseRequests, WebSocketErrors, WebSocketClosures,
+            EventSourceMessages, WebTransportCreations, WebTransportEstablishments,
+            WebTransportCloseRequests, WebTransportClosures
         ])
     ];
 
@@ -832,7 +1195,34 @@ internal static class EvidenceCatalog
             [("browser.presentation", "presentation-requested")] = PresentationRequests,
             [("browser.presentation", "presentation-not-swapped")] = PresentationsNotSwapped,
             [("browser.presentation", "presentation-swapped")] = PresentationSwaps,
-            [("browser.presentation", "presentation-feedback")] = PresentationFeedback
+            [("browser.presentation", "presentation-feedback")] = PresentationFeedback,
+            [("browser.cookie", "document-cookie-read")] = DocumentCookieReads,
+            [("browser.cookie", "document-cookie-write")] = DocumentCookieWrites,
+            [("browser.cookie", "cookie-store-request")] = CookieStoreRequests,
+            [("browser.cookie", "cookie-store-result")] = CookieStoreResults,
+            [("browser.cookie", "cookie-store-change")] = CookieStoreChanges,
+            [("browser.cookie", "cookie-access")] = CookieAccesses,
+            [("browser.network", "request-will-be-sent")] = NetworkRequests,
+            [("browser.network", "response-received")] = NetworkResponses,
+            [("browser.network", "request-finished")] = NetworkRequestFinishes,
+            [("browser.network", "request-failed")] = NetworkRequestFailures,
+            [("browser.network", "memory-cache-hit")] = NetworkMemoryCacheHits,
+            [("browser.network", "request-headers-sent")] = NetworkRequestHeadersSent,
+            [("browser.network", "response-headers-received")] = NetworkResponseHeadersReceived,
+            [("browser.network", "navigation-response")] = NetworkNavigationResponses,
+            [("browser.network", "websocket-created")] = WebSocketCreations,
+            [("browser.network", "websocket-handshake-request")] = WebSocketHandshakeRequests,
+            [("browser.network", "websocket-handshake-response")] = WebSocketHandshakeResponses,
+            [("browser.network", "websocket-message-sent")] = WebSocketMessagesSent,
+            [("browser.network", "websocket-message-received")] = WebSocketMessagesReceived,
+            [("browser.network", "websocket-close-requested")] = WebSocketCloseRequests,
+            [("browser.network", "websocket-error")] = WebSocketErrors,
+            [("browser.network", "websocket-closed")] = WebSocketClosures,
+            [("browser.network", "event-source-message")] = EventSourceMessages,
+            [("browser.network", "web-transport-created")] = WebTransportCreations,
+            [("browser.network", "web-transport-established")] = WebTransportEstablishments,
+            [("browser.network", "web-transport-close-requested")] = WebTransportCloseRequests,
+            [("browser.network", "web-transport-closed")] = WebTransportClosures
         };
 
         foreach (var type in new[] { "listener-registered", "listener-removed", "listener-callback-replaced" })
@@ -1025,14 +1415,14 @@ internal static class EvidenceCatalog
     private static Field BigInt(string json, Presence presence = R, string? column = null) =>
         new ScalarField(json, ScalarType.BigInt, presence, column);
 
-    private static Field Double(string json, Presence presence = R) =>
-        new ScalarField(json, ScalarType.Double, presence);
+    private static Field Double(string json, Presence presence = R, string? column = null) =>
+        new ScalarField(json, ScalarType.Double, presence, column);
 
     private static Field Bool(string json, Presence presence = R) =>
         new ScalarField(json, ScalarType.Boolean, presence);
 
-    private static Field Name(string json, Presence presence = R) =>
-        new NameField(json, presence);
+    private static Field Name(string json, Presence presence = R, string? column = null) =>
+        new NameField(json, presence, column);
 
     private static Field IntegerRectangle(string json, Presence presence) =>
         new InlineField(json, presence, [Int("x"), Int("y"), Int("width"), Int("height")]);
@@ -1042,6 +1432,188 @@ internal static class EvidenceCatalog
 
     private static EvidenceTable ScalarList(string name, ScalarType type, Presence item = R) =>
         new(name, TableKind.Child, [new ScalarField(string.Empty, type, item, "value")], scalarItem: true);
+
+    private static Field TextList(string json, Presence presence, string name) =>
+        new ListField(json, presence, ScalarList(name, ScalarType.Text));
+
+    private static Field Context() => new IdentityField("context", R, BrowserContexts);
+
+    private static Field Scope() => new IdentityField("scope", R, NetworkScopes);
+
+    private static Field ScriptLocation() => new IdentityField("location", N, ScriptLocations);
+
+    private static Field World() => new IdentityField("world", N, ExecutionWorlds);
+
+    private static Field RemoteAddress() =>
+        new InlineField("remoteAddress", N, [Text("ip"), Int("port")]);
+
+    // A header list, its count, and its truncation flag, as the network
+    // payloads carry them.
+    private static Field[] Headers(string list, string count, string truncated, string table) =>
+    [
+        Int(count),
+        new ListField(
+            list,
+            R,
+            new EvidenceTable(
+                table,
+                TableKind.Child,
+                [Name("name"), Text("value", N), Bool("valueRedacted"), Name("redactionReason", N)])),
+        Bool(truncated)
+    ];
+
+    // A cookie as a cookie access or a wire header list reports it, without
+    // its value.
+    private static Field Cookies(string table) =>
+        new ListField(
+            "cookies",
+            R,
+            new EvidenceTable(
+                table,
+                TableKind.Child,
+                [
+                    Text("name"),
+                    Bool("parsed"),
+                    Text("domain", N),
+                    Text("path", N),
+                    Name("sameSite", N),
+                    Bool("secure", N),
+                    Bool("httpOnly", N),
+                    Bool("hostOnly", N),
+                    Bool("partitioned", N),
+                    Bool("persistent", N),
+                    Bool("expired", N),
+                    Bool("included"),
+                    NameList("exclusionReasons", R, table + "_exclusion_reasons"),
+                    NameList("warningReasons", R, table + "_warning_reasons"),
+                    Name("exemptionReason", N)
+                ]));
+
+    private static Field NetworkRequest(string json, string headersTable) =>
+        new InlineField(
+            json,
+            R,
+            [
+                Text("inspectorId"),
+                Text("requestId", N),
+                Text("url"),
+                Name("method"),
+                Name("resourceType"),
+                new InlineField(
+                    "initiator",
+                    R,
+                    [
+                        Name("type", N),
+                        Text("url", N),
+                        Int("line", N, "line_number"),
+                        Int("column", N, "column_number"),
+                        Bool("linkPreload")
+                    ]),
+                Bool("internal"),
+                Name("destination"),
+                Name("mode"),
+                Name("credentialsMode"),
+                Name("redirectMode"),
+                Name("cacheMode"),
+                Name("priority"),
+                Name("initialPriority"),
+                Name("fetchPriorityHint"),
+                Name("renderBlocking"),
+                Text("referrer", N),
+                Name("referrerPolicy"),
+                Bool("keepalive"),
+                Bool("userGesture"),
+                Bool("adResource"),
+                Bool("formSubmission"),
+                .. Headers("headers", "headerCount", "headersTruncated", headersTable)
+            ]);
+
+    private static string[] ResponseTimingPhases =>
+    [
+        "proxyStart", "proxyEnd", "domainLookupStart", "domainLookupEnd", "connectStart", "connectEnd",
+        "sslStart", "sslEnd", "workerStart", "workerReady", "workerFetchStart", "workerRespondWithSettled",
+        "workerRouterEvaluationStart", "workerCacheLookupStart", "sendStart", "sendEnd",
+        "receiveHeadersStart", "receiveHeadersEnd", "receiveNonInformationalHeadersStart",
+        "receiveEarlyHintsStart", "pushStart", "pushEnd", "responseEnd"
+    ];
+
+    private static string[] NavigationTimingPhases =>
+    [
+        "loaderStart", "firstRequestStart", "firstResponseStart", "firstLoaderCallback", "finalRequestStart",
+        "finalResponseStart", "finalNonInformationalResponseStart", "finalLoaderCallback", "requestFailed",
+        "commitSent", "commitReceived", "commitReplySent", "didCommit", "finalRequestDomainLookupStart",
+        "finalRequestDomainLookupEnd", "finalRequestConnectStart", "finalRequestConnectEnd",
+        "finalRequestSslStart"
+    ];
+
+    private static Field Timing(string start, string[] phases) =>
+        new InlineField(
+            "timing",
+            N,
+            [Double(start, N), .. phases.Select(phase => Double(phase, N))]);
+
+    private static Field NetworkResponse(string json, Presence presence, string headersTable, string? column = null) =>
+        new InlineField(
+            json,
+            presence,
+            [
+                Text("url"),
+                Text("responseUrl", N),
+                Int("status"),
+                Text("statusText"),
+                Name("mimeType"),
+                Name("charset", N),
+                Name("alpnProtocol", N),
+                Name("connectionInfo", N),
+                RemoteAddress(),
+                Double("connectionId"),
+                Bool("connectionReused"),
+                Bool("wasCached"),
+                Bool("fetchedViaServiceWorker"),
+                Name("serviceWorkerResponseSource"),
+                Bool("inPrefetchCache"),
+                Bool("networkAccessed"),
+                Bool("fromArchive"),
+                Bool("cookieInRequest"),
+                Name("responseType"),
+                Double("encodedDataLength", N),
+                Double("expectedContentLength"),
+                .. Headers("headers", "headerCount", "headersTruncated", headersTable),
+                Timing("requestStartBeforeRecordMilliseconds", ResponseTimingPhases)
+            ],
+            column);
+
+    // A recorded realtime text, with the offsets where a credential was
+    // withheld.
+    private static Field RealtimeText(string json, Presence presence, string withheldTable) =>
+        new InlineField(
+            json,
+            presence,
+            [
+                Text("text"),
+                Bool("truncated"),
+                new ListField(
+                    "withheld",
+                    R,
+                    new EvidenceTable(
+                        withheldTable,
+                        TableKind.Child,
+                        [Int("offset", R, "text_offset"), Name("reason")]))
+            ]);
+
+    // The handshake response members a WebSocket or WebTransport connection
+    // reports.
+    private static Field[] RealtimeResponse(string table) =>
+    [
+        Text("url", N),
+        Name("httpVersion", N),
+        Int("status"),
+        Text("statusText", N),
+        RemoteAddress(),
+        Text("selectedProtocol", N),
+        TextList("setCookieNames", R, table + "_set_cookie_names"),
+        .. Headers("headers", "headerCount", "headersTruncated", table + "_headers")
+    ];
 
     private static Field NameList(string json, Presence presence, string name) =>
         new ListField(

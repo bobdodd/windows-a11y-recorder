@@ -88,6 +88,12 @@ from the product version.
   each of their event types, covering layout checkpoints and their nodes,
   computed styles, and pseudo-elements, and presentation requests,
   not-swapped outcomes, swaps, and feedback.
+- Store browser cookie and network payloads in typed evidence tables, on
+  the `postgres-session-store` branch. Migration 0007 adds a table for each
+  of their event types, covering document and Cookie Store cookie access,
+  cookie accesses, network requests, responses, completions, failures,
+  memory cache hits, wire headers, navigation responses, and WebSocket,
+  EventSource, and WebTransport records.
 - Keep timeline keyboard stepping within a lane. Left, Right, Home, and End
   move among the events of the selected event's lane, or the lane last
   clicked, and Up and Down select the nearest event in the next lane above
