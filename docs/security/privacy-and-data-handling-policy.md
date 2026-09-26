@@ -3,8 +3,8 @@
 ## Status and scope
 
 - **Status:** Adopted
-- **Applies to:** Every channel the recorder captures, the archive, diagnostic
-  logs, and anything derived from them
+- **Applies to:** Every channel the recorder captures, the stored recording,
+  diagnostic logs, and anything derived from them
 - **Companion document:** [Threat model](threat-model.md)
 
 The recorder is a tool for professional auditors testing websites and
@@ -26,6 +26,15 @@ Two kinds of data are never recorded:
 Browser crash reports are the one exception, described under
 [Diagnostic logs](#diagnostic-logs). They are raw process memory, which no rule
 can filter.
+
+## Where a recording is stored
+
+A recording's events are stored in the app's own PostgreSQL database, in a
+data directory under the recording user's local application data folder. The
+session folder holds the manifest, the frames and audio files, and the
+diagnostic logs described below. There is no event log file. The two rules
+below apply to what is stored in both places. See
+[Session database](../architecture/session-database.md).
 
 ## Cookie values
 
@@ -76,7 +85,7 @@ The cookie rule is implemented for every cookie path the recorder observes.
 The secret rule is implemented only for the recorder's own secrets, which are
 kept out of session evidence and diagnostic logs. The detection of API-key-like
 values in captured content is not implemented. Until it is, such a value can
-reach the archive through:
+reach a stored recording through:
 
 - DOM attribute values and character data, including inline script text.
 - Text-control values on the `browser.interaction` channel.
@@ -88,7 +97,7 @@ Network metadata withholds, at source, the values of `Cookie`, `Set-Cookie`,
 whose name contains a credential word such as `key`, `token`, `secret`, or
 `auth`, and of header values that begin with an HTTP authentication scheme or
 contain a JSON Web Token. Each withheld header is recorded by name with the
-reason. A credential can still reach the archive through network records in:
+reason. A credential can still reach a stored recording through network records in:
 
 - Request, response, redirect, and referrer URLs, which are recorded in full.
 - A header whose name and value match none of those rules.
@@ -99,7 +108,7 @@ marker any JSON Web Token, any HTTP authentication credential such as a
 `Bearer` token, and the value of any JSON member, query or form pair, or colon
 pair whose name contains a credential word, and records the marker's offset and
 the reason. Binary message content is never recorded. A credential can still
-reach the archive through realtime records in:
+reach a stored recording through realtime records in:
 
 - WebSocket and WebTransport URLs, which are recorded in full.
 - Message text in a field or format none of those rules describe.

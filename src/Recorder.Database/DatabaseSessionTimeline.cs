@@ -111,10 +111,7 @@ internal sealed class DatabaseEventNames
             channel,
             eventType,
             reader.GetInt64(6),
-            SessionArchiveReader.CreateSummary(channel, eventType, payload),
-            0,
-            0,
-            eventKey);
+            SessionPlaybackArchiveBuilder.CreateSummary(channel, eventType, payload));
         return (item, payload);
     }
 }
@@ -219,13 +216,13 @@ public sealed class DatabaseSessionTimeline : ISessionTimeline
                 "(e.monotonic_nanoseconds, e.event_key) > ($4, $5)",
                 Ascending,
                 channels,
-                [from.MonotonicNanoseconds, from.Line],
+                [from.MonotonicNanoseconds, from.EventKey],
                 cancellationToken)
             : QueryAsync(
                 "(e.monotonic_nanoseconds, e.event_key) < ($4, $5)",
                 Descending,
                 channels,
-                [from.MonotonicNanoseconds, from.Line],
+                [from.MonotonicNanoseconds, from.EventKey],
                 cancellationToken);
     }
 

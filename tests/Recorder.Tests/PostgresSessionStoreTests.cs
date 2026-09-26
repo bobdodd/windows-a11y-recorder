@@ -133,6 +133,9 @@ public sealed class PostgresSessionStoreTests(EmbeddedPostgresFixture fixture)
         var record = Event(sessionKey, collector, 7, 1_500, "test.dom", "dom-snapshot", new { node = "a" }, "clock-mapped", "partial")
             with
             {
+                // An inferred record, so that every envelope field is valid
+                // together: related evidence and analysis provenance.
+                EvidenceClass = EvidenceClasses.Inferred,
                 ClockMappingId = "chromium:browser-1:42",
                 NativeTimestamp = new NativeTimestamp("chromium-monotonic", 987_654_321, "microseconds"),
                 TimestampUncertaintyNanoseconds = 250_000,
@@ -188,7 +191,7 @@ public sealed class PostgresSessionStoreTests(EmbeddedPostgresFixture fixture)
         Assert.Equal(collector.ImplementationVersion, reader.GetString(13));
         Assert.Equal(collector.CaptureMethod, reader.GetString(14));
         Assert.Equal(RecorderEvent.CurrentSchemaVersion, reader.GetString(15));
-        Assert.Equal(EvidenceClasses.Observed, reader.GetString(16));
+        Assert.Equal(EvidenceClasses.Inferred, reader.GetString(16));
         Assert.Equal("{\"node\": \"a\"}", reader.GetString(17));
         Assert.Equal(["clock-mapped", "partial"], reader.GetFieldValue<string[]>(18));
         Assert.Equal(["other:1", "other:2"], reader.GetFieldValue<string[]>(19));

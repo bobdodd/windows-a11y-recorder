@@ -9,8 +9,8 @@ using static Recorder.Tests.DatabaseTestSupport;
 namespace Recorder.Tests;
 
 /// <summary>
-/// The coordinator writing recordings to a real PostgreSQL server as well as
-/// to the session files.
+/// The coordinator writing recordings to a real PostgreSQL server. The session
+/// folder holds only the manifest and media files.
 /// </summary>
 public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
 {
@@ -45,7 +45,7 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WritesTheRecordingToTheDatabaseAndTheSessionFiles()
+    public async Task WritesTheRecordingToTheDatabase()
     {
         var token = TestContext.Current.CancellationToken;
         await using var database = await SessionDatabase.StartAsync(Options, token);
@@ -56,7 +56,7 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
         {
             await coordinator.StartAsync(new RecordingOptions { OutputRoot = _outputRoot }, token);
             Assert.True(coordinator.AddMarker("In the database"));
-            stopped = await coordinator.StopAsync(preparePlayback: true, token);
+            stopped = await coordinator.StopAsync(token);
         }
 
         Assert.Equal(RecordingSessionState.Completed, stopped.State);
@@ -68,18 +68,8 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
         Assert.Equal(0, status.Dropped);
         Assert.Equal(0, status.Unwritten);
 
-        var fileEvents = (await File.ReadAllLinesAsync(
-                Path.Combine(stopped.SessionDirectory!, "events.ndjson"),
-                token))
-            .Where(line => line.Length > 0)
-            .Select(line =>
-            {
-                using var document = System.Text.Json.JsonDocument.Parse(line);
-                return (
-                    document.RootElement.GetProperty("channel").GetString()!,
-                    document.RootElement.GetProperty("sequence").GetInt64());
-            })
-            .ToList();
+        Assert.False(File.Exists(Path.Combine(stopped.SessionDirectory!, "events.ndjson")));
+        Assert.False(Directory.Exists(Path.Combine(stopped.SessionDirectory!, "validation")));
         var sessionKey = Path.GetFileName(stopped.SessionDirectory!);
         var recordingId = await RecordingIdAsync(database, sessionKey, token);
         Assert.Equal(RecordingStatus.Completed, await database.Store.GetStatusAsync(recordingId, token));
@@ -96,9 +86,13 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
                 stored.Add((reader.GetString(0), reader.GetInt64(1)));
             }
 
+            Assert.Equal(stopped.AcceptedEvents, stored.Count);
+            Assert.Contains(("session.annotations", 0L), stored);
             Assert.Equal(
-                fileEvents.Order(),
-                stored.Order());
+                [0L, 1L],
+                stored.Where(item => item.Channel == "test.database.events")
+                    .Select(item => item.Sequence)
+                    .Order());
         }
 
         await using (var recording = database.Server.DataSource.CreateCommand(
@@ -179,8 +173,9 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
             stopped = await coordinator.StopAsync(token);
         }
 
-        // The session files are complete whatever the database did.
-        Assert.Equal(RecordingSessionState.Completed, stopped.State);
+        // Events the database did not take fail the recording.
+        Assert.Equal(RecordingSessionState.Failed, stopped.State);
+        Assert.Contains("were not written to the database", stopped.Message);
         var status = Assert.IsType<RecordingDatabaseStatus>(stopped.Database);
         Assert.True(status.Unwritten > 0);
         Assert.NotNull(status.Problem);
@@ -195,6 +190,111 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
             Path.GetFileName(stopped.SessionDirectory!),
             token);
         Assert.Equal(RecordingStatus.Interrupted, await restarted.Store.GetStatusAsync(recordingId, token));
+    }
+
+    [Fact]
+    public async Task FinalizesManifestAndRemovesRecordingMarker()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var database = await SessionDatabase.StartAsync(Options, token);
+        await using var coordinator = new SessionCoordinator(_ => [new EventCollector()], database);
+        var started = await coordinator.StartAsync(new RecordingOptions { OutputRoot = _outputRoot }, token);
+        Assert.Equal(RecordingSessionState.Recording, started.State);
+        Assert.True(File.Exists(Path.Combine(started.SessionDirectory!, ".recording")));
+        Assert.True(coordinator.AddMarker("Reached search results"));
+
+        var stopped = await coordinator.StopAsync(token);
+
+        Assert.Equal(RecordingSessionState.Completed, stopped.State);
+        Assert.False(File.Exists(Path.Combine(stopped.SessionDirectory!, ".recording")));
+        using var manifest = System.Text.Json.JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(stopped.SessionDirectory!, "manifest.json"), token));
+        var root = manifest.RootElement;
+        Assert.Equal("1.1", root.GetProperty("schemaVersion").GetString());
+        Assert.Equal("completed", root.GetProperty("status").GetString());
+        Assert.NotEqual(System.Text.Json.JsonValueKind.Null, root.GetProperty("endedUtc").ValueKind);
+        Assert.True(root.GetProperty("durationNanoseconds").GetInt64() > 0);
+        Assert.Equal(3, root.GetProperty("acceptedEventCount").GetInt64());
+        Assert.Equal(0, root.GetProperty("droppedEventCount").GetInt64());
+        Assert.DoesNotContain(
+            root.GetProperty("artifacts").EnumerateArray(),
+            item => item.GetProperty("path").GetString() == "events.ndjson");
+
+        var opened = await database.OpenRecordingAsync(stopped.SessionDirectory!, token);
+        var archive = Assert.IsType<SessionPlaybackArchive>(opened.Archive);
+        Assert.Equal(RecordingStatus.Completed, opened.Status);
+        Assert.Equal(3, archive.Timeline.Count);
+    }
+
+    [Fact]
+    public async Task HashesFromDiskAnArtifactChangedAfterItsHashWasReported()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var database = await SessionDatabase.StartAsync(Options, token);
+        await using var coordinator = new SessionCoordinator(
+            _ => [new EventCollector(), new ReportingFileCollector()],
+            database);
+        await coordinator.StartAsync(new RecordingOptions { OutputRoot = _outputRoot }, token);
+
+        var stopped = await coordinator.StopAsync(token);
+
+        Assert.Equal(RecordingSessionState.Completed, stopped.State);
+        var path = Path.Combine(stopped.SessionDirectory!, "reported.bin");
+        var onDisk = await File.ReadAllBytesAsync(path, token);
+        using var manifest = System.Text.Json.JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(stopped.SessionDirectory!, "manifest.json"), token));
+        var artifact = manifest.RootElement.GetProperty("artifacts")
+            .EnumerateArray()
+            .Single(item => item.GetProperty("path").GetString() == "reported.bin");
+        Assert.Equal(onDisk.Length, artifact.GetProperty("sizeBytes").GetInt64());
+        Assert.Equal(
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(onDisk)),
+            artifact.GetProperty("sha256").GetString()!.ToLowerInvariant());
+    }
+
+    [Fact]
+    public async Task AnEventThatFailsItsChecksFailsTheRecording()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var database = await SessionDatabase.StartAsync(Options, token);
+        await using var coordinator = new SessionCoordinator(
+            _ => [new EventCollector(repeatSequence: true)],
+            database);
+        await coordinator.StartAsync(new RecordingOptions { OutputRoot = _outputRoot }, token);
+
+        var stopped = await coordinator.StopAsync(token);
+
+        Assert.Equal(RecordingSessionState.Failed, stopped.State);
+        Assert.Contains("failed their checks and were not stored", stopped.Message);
+        Assert.Contains("sequence-not-increasing", stopped.Message);
+        Assert.Equal(1, Assert.IsType<RecordingDatabaseStatus>(stopped.Database).Rejected);
+        using var manifest = System.Text.Json.JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(stopped.SessionDirectory!, "manifest.json"), token));
+        Assert.Equal("failed", manifest.RootElement.GetProperty("status").GetString());
+
+        var recordingId = await RecordingIdAsync(
+            database,
+            Path.GetFileName(stopped.SessionDirectory!),
+            token);
+        Assert.Equal(RecordingStatus.Failed, await database.Store.GetStatusAsync(recordingId, token));
+        var opened = await database.OpenRecordingAsync(stopped.SessionDirectory!, token);
+        Assert.NotNull(opened.Archive);
+        Assert.Equal(RecordingStatus.Failed, opened.Status);
+    }
+
+    [Fact]
+    public async Task OnlyOneProcessUsesTheDatabaseAtATime()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using (var database = await SessionDatabase.StartAsync(Options, token))
+        {
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => SessionDatabase.StartAsync(Options, token));
+            Assert.Contains("Another Windows A11y Recorder process", exception.Message);
+        }
+
+        await using var restarted = await SessionDatabase.StartAsync(Options, token);
+        Assert.Equal(0, restarted.InterruptedRecordingsAtStart);
     }
 
     private static async Task<Guid> RecordingIdAsync(
@@ -225,7 +325,68 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
         NpgsqlConnection.ClearAllPools();
     }
 
-    private sealed class EventCollector(bool blockStart = false) : ICaptureCollector
+    // Writes a file, reports its hash, then appends to it, as a writer that
+    // reopened a finished file would. The manifest must describe the file on
+    // disk, not the reported hash.
+    private sealed class ReportingFileCollector : ICaptureCollector
+    {
+        private CollectorInitializationContext? _context;
+
+        public CollectorDescriptor Descriptor { get; } =
+            CollectorDescriptor.Create(
+                "test.reporting",
+                nameof(ReportingFileCollector),
+                "1.0",
+                [],
+                "test");
+
+        public CollectorLifecycleState LifecycleState { get; private set; } =
+            CollectorLifecycleState.Created;
+
+        public CollectorHealthState HealthState => CollectorHealthState.Healthy;
+
+        public ValueTask<CapabilityResult> InitializeAsync(
+            CollectorInitializationContext context,
+            CancellationToken cancellationToken)
+        {
+            _context = context;
+            LifecycleState = CollectorLifecycleState.Ready;
+            return ValueTask.FromResult(CapabilityResult.Supported());
+        }
+
+        public ValueTask<CollectorTransitionResult> StartAsync(
+            SessionBoundary boundary,
+            CancellationToken cancellationToken)
+        {
+            LifecycleState = CollectorLifecycleState.Running;
+            return ValueTask.FromResult(CollectorTransitionResult.Success(LifecycleState));
+        }
+
+        public ValueTask<CollectorTransitionResult> StopAsync(
+            SessionBoundary boundary,
+            CancellationToken cancellationToken)
+        {
+            var path = Path.Combine(_context!.SessionDirectory, "reported.bin");
+            byte[] written = [1, 2, 3];
+            File.WriteAllBytes(path, written);
+            Assert.NotNull(_context.ArtifactHashes);
+            _context.ArtifactHashes.Record(
+                path,
+                written.Length,
+                System.Security.Cryptography.SHA256.HashData(written));
+            File.AppendAllText(path, "changed");
+            LifecycleState = CollectorLifecycleState.Stopped;
+            return ValueTask.FromResult(CollectorTransitionResult.Success(LifecycleState));
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            LifecycleState = CollectorLifecycleState.Disposed;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class EventCollector(bool blockStart = false, bool repeatSequence = false) : ICaptureCollector
     {
         private CollectorInitializationContext? _context;
         private long _sequence = -1;
@@ -284,7 +445,9 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
 
         private void Write(string action, long monotonicNanoseconds)
         {
-            var sequence = unchecked((ulong)Interlocked.Increment(ref _sequence));
+            var sequence = repeatSequence
+                ? 0UL
+                : unchecked((ulong)Interlocked.Increment(ref _sequence));
             Assert.True(_context!.EventSink.TryWrite(RecorderEventFactory.Create(
                 _context.SessionId,
                 Descriptor,

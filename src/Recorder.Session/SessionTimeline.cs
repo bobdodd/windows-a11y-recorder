@@ -3,7 +3,7 @@ namespace Recorder.Session;
 /// <summary>
 /// Time-ordered access to a recording's timeline events, without requiring
 /// every event to be held in memory. Events are ordered by monotonic time,
-/// and events with the same time by <see cref="SessionTimelineEvent.Line"/>.
+/// and events with the same time by <see cref="SessionTimelineEvent.EventKey"/>.
 /// Every lookup is limited to the channels passed to it.
 /// </summary>
 public interface ISessionTimeline
@@ -183,7 +183,7 @@ public sealed class InMemorySessionTimeline : ISessionTimeline
 
     /// <param name="events">
     /// Events in timeline order: ascending monotonic time, and ascending
-    /// <see cref="SessionTimelineEvent.Line"/> among events with the same time.
+    /// <see cref="SessionTimelineEvent.EventKey"/> among events with the same time.
     /// </param>
     public InMemorySessionTimeline(
         IReadOnlyList<SessionTimelineEvent> events,
@@ -301,7 +301,7 @@ public sealed class InMemorySessionTimeline : ISessionTimeline
     public static int Compare(SessionTimelineEvent left, SessionTimelineEvent right)
     {
         var time = left.MonotonicNanoseconds.CompareTo(right.MonotonicNanoseconds);
-        return time != 0 ? time : left.Line.CompareTo(right.Line);
+        return time != 0 ? time : left.EventKey.CompareTo(right.EventKey);
     }
 
     private SessionTimelineEvent? At(int index) =>

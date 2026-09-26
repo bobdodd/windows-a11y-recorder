@@ -134,7 +134,7 @@ Required test levels:
   newest arrival kept with its time; every replaced arrival released exactly
   once and counted; the count restarted by a take; release on close; and
   exactly one arrival held after concurrent offers.
-- Unit tests for the archive validator: `frameSelection` values; the selection
+- Unit tests for the payload validator: `frameSelection` values; the selection
   fields required on every monitor of a `newest-arrived` frame and rejected
   without one; `frameSelection` rejected on a GDI fallback frame; a reused
   image with released frames rejected; earlier archives without the fields

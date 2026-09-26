@@ -15,8 +15,10 @@ baseline scope and known limitations.
 The repository contains a working technical prototype. The managed solution
 currently implements:
 
-- A shared session clock, append-only event writer, manifest finalization, and
-  archive validation.
+- A shared session clock, per-record event checks, manifest finalization, and
+  an embedded PostgreSQL database, owned by the app, that stores every event
+  and serves playback. See the [session database](docs/architecture/session-database.md)
+  record.
 - Raw keyboard and mouse input capture.
 - Foreground-window and process observation.
 - Desktop frame capture with Windows Graphics Capture and a GDI fallback.

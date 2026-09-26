@@ -1,15 +1,15 @@
 # Session Database
 
-Status: decided, not implemented. This record states the decision and the
-design it implies. It replaces the file-based event log and the checks built
-around it once implemented.
+Status: decided, implemented on the `postgres-session-store` branch and not
+yet merged. This record states the decision and the design it implies. It
+replaced the file-based event log and the checks built around it.
 
 ## Context
 
-The recorder writes every event to one append-only file, `events.ndjson`, per
-recording. Stopping a recording validates the archive by parsing every record,
-and opening a recording parses every record again to build the player's
-timeline. Both costs grow with the length of the recording.
+Before this decision, the recorder wrote every event to one append-only file,
+`events.ndjson`, per recording. Stopping a recording validated the archive by
+parsing every record, and opening a recording parsed every record again to
+build the player's timeline. Both costs grew with the length of the recording.
 
 Measured on the maintainer's PC (September 25, 2026):
 
@@ -51,8 +51,8 @@ before the player can respond does not scale to that use.
 7. **Old recordings are not migrated.** File-based sessions made before this
    change are not imported and the new player does not open them.
 
-The integrity of a recording rests on the database: constraints, transactions,
-and write-ahead logging, rather than on per-file hashes and a manifest. The
+The integrity of a recording's events rests on the database: constraints,
+transactions, and write-ahead logging, rather than on a hashed event log. The
 recorder is a testing tool; its records are not prepared as evidence for legal
 proceedings.
 
@@ -146,11 +146,13 @@ recording.
 - One database writer takes events from the queue and writes them in batches
   with binary `COPY`, by size or by time, whichever comes first.
 - The writer maps each event to its rows, resolving identities to keys it
-  caches for the recording. The per-record checks the archive validator makes
-  today (required envelope fields, known channel, monotonic time within a
-  channel) run in the writer before a record is sent, or as table
-  constraints. A record that fails is
-  counted and reported on the recording, as the validator reports it today.
+  caches for the recording. The per-record checks the finalization archive
+  check used to make (envelope fields, event identifier, evidence class,
+  sequence and time order within a channel, and the payload's shape for its
+  channel and event type) run in the writer before a record is sent, or as
+  table constraints. A record that fails is not stored; it is counted, its
+  reason is stored with the recording, and the recording is stored as
+  failed.
 - **Buffering.** While the database is not accepting writes, batches are held
   in memory up to a fixed limit, then in a temporary spill file in the
   database's data directory, which the writer drains in order and deletes once the
@@ -199,13 +201,33 @@ after it is generally available and has had minor releases.
 
 ## What this retires
 
-When implemented, the following are removed rather than kept alongside:
-`events.ndjson` and `NdjsonEventWriter`, the manifest's artifact inventory and
-`ArtifactHashRegistry` for the event log, the finalization archive check,
-`SessionArchiveReader`, `NdjsonLineReader`, and `SessionPlaybackArchiveBuilder`.
-The capture host uses the same database writer. The privacy and data handling
-policy and the threat model describe session files and are revised in the same
+The following were removed rather than kept alongside: `events.ndjson` and
+`NdjsonEventWriter`, the event log's entry in the manifest's artifact inventory
+and in `ArtifactHashRegistry`, the finalization archive check
+(`SessionArchiveValidator`) and its report, `SessionArchiveReader`,
+`NdjsonLineReader`, and the coordinator's copying of each event to both the
+file and the database. The capture host uses the same database and writer. The
+privacy and data handling policy and the threat model were revised in the same
 change.
+
+Three parts remain, in a changed role:
+
+- `manifest.json` stays in the session folder. It states the recording's
+  settings, collectors, outcome, and counts, and its artifact inventory lists
+  and hashes the media files, which are not yet database rows.
+- `SessionPlaybackArchiveBuilder` builds the player's frames, audio tracks, and
+  browser navigations from the events the database reader supplies.
+- The per-record checks moved into the writer: `EventRecordValidator` checks
+  the envelope and `EventPayloadValidator` the payload. They check each record
+  and its order within its stream. They do not check that an event a record
+  cites exists in the recording, which the archive check did across the whole
+  file, because a record may cite an event that has not yet arrived.
+- The archive check also compared each media file with its size and hash in
+  the manifest, and the manifest's counts and status with the event log. No
+  check of the session folder runs at stop now; the manifest's hashes are
+  computed and written, and nothing compares the files with them later.
+  Duplicate event identifiers, which the archive check reported, are refused
+  by the database's unique key.
 
 ## Required tests
 
@@ -239,9 +261,14 @@ only once the database version is tested in full. It adds the
   table name exceeds PostgreSQL's 63-byte identifier limit and is truncated.
   Deleting a recording detaches and drops its partitions, referring tables
   first, and then deletes its row.
-- **Writing.** `PostgresEventWriter` makes the archive validator's per-record
-  checks, rejecting a record with the validator's code into
-  `event_rejections`. It holds up to 256 MB in memory, then writes to a spill
+- **Writing.** `PostgresEventWriter` checks each record with
+  `EventRecordValidator`, which checks the envelope and passes the payload to
+  `EventPayloadValidator`, and rejects a record that fails into
+  `event_rejections` with the first issue's code, such as
+  `event-sequence-not-increasing` or `payload-property-unexpected`. The
+  writer's result names the first rejection, and a recording with any
+  rejected or unwritten events is stored as failed, with a failure reason
+  that gives the count and the first rejection. It holds up to 256 MB in memory, then writes to a spill
   file of up to 8 GB, and records events refused beyond that as omission runs
   in `writer_omissions`. A batch the database refuses for a reason other than
   an outage is written event by event, so one bad record refuses only itself.
@@ -310,13 +337,18 @@ only once the database version is tested in full. It adds the
   writes, without trailing fractional zeros; a number stored as a double
   reads back in PostgreSQL's shortest form, so a browser's `544.0` reads back
   as `544`; and property order is not kept.
-  A payload member the catalog does not hold, a member of the wrong type, and
-  text containing a NUL character, which PostgreSQL text cannot store, are
-  refused with a reason such as `payload-member-unmapped:payload/colour` in
-  `event_rejections`, rather than stored in part.
+  A payload member the validator does not allow is refused as
+  `payload-property-unexpected`. A payload member the catalog does not hold,
+  a member of the wrong type, and text containing a NUL character, which
+  PostgreSQL text cannot store, are refused by the evidence tables with a
+  reason such as `payload-member-unmapped:payload/colour` or
+  `payload-text-nul:payload/note` in `event_rejections`, rather than stored
+  in part.
 - **Other channels.** Every event type of the recorder's built-in channels
-  has evidence tables, and the writer refuses an event of a built-in channel
-  whose type has none, with the reason `event-type-unmapped`. The payload of
+  has evidence tables. The writer refuses an event of a built-in channel whose
+  type the validator does not define, with the reason
+  `event-type-unsupported`, and one whose type has no evidence tables, with
+  the reason `event-type-unmapped`. The payload of
   an event on a channel the recorder does not define, which has no evidence
   model, is stored in `event_payloads_other_channels` as `jsonb`, and the
   player reads it from there. Migration 0008 renamed the transitional
@@ -330,34 +362,39 @@ only once the database version is tested in full. It adds the
   which is not committed. The integration tests use those binaries, or the
   directory named by `RECORDER_POSTGRES_BIN`.
 
-- **Recording.** `SessionDatabase` starts the server, marks recordings an
-  earlier run left in the recording state as interrupted, and holds one
-  project, named "Default project", until projects are exposed in the app.
-  When the coordinator is given one, each recording is created in the
-  database with its capture settings when it starts, its collectors are
-  registered with their capability, and each event and marker goes to the
-  session files and then to the database writer. At stop the collectors'
-  final lifecycle and health states are recorded, the writer drains while the
-  session files are inventoried and validated, and the recording's status,
-  end time, duration, and event counts are stored. A recording whose files
-  are complete but whose events were not all written is stored as failed,
-  with the unwritten count as its failure reason. The coordinator's status
-  reports the writer's accepted, written, rejected, dropped, and unwritten
-  counts and any database problem, and the app shows them.
+- **Recording.** `SessionDatabase` takes a lock file next to the data
+  directory, starts the server, marks recordings an earlier run left in the
+  recording state as interrupted, and holds one project, named "Default
+  project", until projects are exposed in the app. Only one recorder process
+  uses the database at a time: while the app has it open, the capture host
+  refuses to start, and the reverse, with the message "Another Windows A11y
+  Recorder process is using the database." The coordinator requires a
+  database. Each recording is created in the database with its capture
+  settings when it starts, its collectors are registered with their
+  capability, and each event and marker goes to the database writer. At stop
+  the collectors stop, their final lifecycle and health states are recorded,
+  the writer drains, the manifest is written with the outcome, the counts,
+  and the media inventory, and the recording's status, end time, duration,
+  and event counts are stored. A collector that fails to stop, or any event
+  that was rejected or not written, makes the recording failed, in both the
+  manifest and the database. The coordinator's status reports the writer's
+  accepted, written, rejected, dropped, and unwritten counts and any database
+  problem, and the app and capture host show them.
 - **Spill location.** A recording's spill file is
   `spill\<session key>.ndjson` in the database's data directory, not the
-  session folder, so the session files and their manifest do not change
-  while the writer drains it.
-- **Transition.** The session files, including `events.ndjson`, are still
-  written in full. The player reads a recording from the database when the
-  database holds it complete, and from the session files otherwise. The
-  files are removed only once that removal is agreed.
+  session folder. It is a buffer, not a log: the writer deletes it once it
+  has drained it, and keeps it only when the store could not be reached
+  before the completion timeout.
+- **Session folder.** A recording's folder holds `manifest.json`, the frames
+  and audio files, and, while the recording runs, a `.recording` marker. It
+  holds no event log.
 - **Playback.** `DatabasePlaybackReader` finds a recording by its session
-  key, which is the session folder's name. Only a recording stored as
-  completed is opened from the database; a recording that is not found, or
-  is stored as recording, failed, or interrupted, is opened from its session
-  files, and the app shows the reason with the recording. A database that
-  cannot be read is treated the same way. Opening a recording reads only
+  key, which is the session folder's name. A recording stored as completed,
+  failed, or interrupted is opened from the database, and the app shows a
+  failed or interrupted status with the recording, since such a recording
+  holds every event that was stored before it ended. A recording still being
+  recorded, and one the database does not hold, are not opened, and the app
+  shows the reason. There is no other source of events. Opening a recording reads only
   the events that frames, audio tracks, and browser navigation are built
   from, with the payload properties the player uses projected in the
   database, and one grouped pass over the recording's events that gives the
@@ -371,21 +408,19 @@ only once the database version is tested in full. It adds the
   for each shown channel, one entry of the index on recording, channel,
   time, and event key (migration 0002), and returns the best of those.
   Events with the same time are ordered by event key, which follows the
-  order they were stored in; a recording read from its session files orders
-  them by line, which gives the same order. Queries are asynchronous, so the
+  order they were stored in. Queries are asynchronous, so the
   window stays responsive while one runs, and a result that arrives after
   the user has moved on is discarded.
   An event's complete record is read from the database only when it is
   selected in the inspector, and is rebuilt from the envelope columns and
   child tables, and its payload from the evidence tables. The rebuilt record
-  matches the event log's record in content but not byte for byte, in the
+  matches the written record in content but not byte for byte, in the
   stored forms described above: a payload's property order is not kept,
   quality flags are returned in the order their names were first stored, and
   numbers are returned as PostgreSQL normalizes them. `manifest.json` is
-  still read from the session folder, and frames and audio are still read
-  from their files. A recording opened from the database is not revalidated
-  from its session files, because the database stores it as completed only
-  when finalization validation passed. On the Linux development sandbox, a
+  read from the session folder, and frames and audio are read from their
+  files. Records are checked when they are written, not again when a
+  recording is opened. On the Linux development sandbox, a
   recording of 100,000 events with payloads of about 2 KB opened from the
   database in about 145 ms, and 200 timeline lookups took about 224 ms in
   total, in one run of a debug build. Before paging, the same recording
@@ -397,12 +432,17 @@ only once the database version is tested in full. It adds the
   directory `%LOCALAPPDATA%\Windows A11y Recorder\Database`, and stops it
   when the window closes. Recording is not available until the start
   attempt ends. If the server cannot start, the app says so, and recordings
-  are written to session files only. The build copies `.postgres\pgsql`, when
-  present, to `pgsql` in the app's output folder.
+  can be neither made nor opened. The capture host starts the same database
+  in the same data directory. The builds of both copy `.postgres\pgsql`, when
+  present, to `pgsql` in their output folders.
 
-Still to come on the branch: removing what this
-retires, including `events.ndjson` once that is agreed, the revised privacy policy and threat model, and
-the hour-long Windows system test.
+Still to come on the branch: media rows for frames and audio, which would let
+the manifest's artifact inventory go, and the hour-long Windows system test.
+The Windows validation scripts `Run-AppSessionValidation.ps1`,
+`Verify-AppSessionEvidence.ps1`, `Run-BlinkValidation.ps1`, and
+`Verify-BlinkEvidence.ps1` read `events.ndjson` and the archive check's
+report, and do not run against a recording made on this branch until they
+read the database instead.
 
 A throughput probe on the Linux development sandbox, with two processor cores
 and a debug build, wrote 200,000 events with payloads of about 2.8 KB at about

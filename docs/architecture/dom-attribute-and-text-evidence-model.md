@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented for protocol 0.16. The recorder bridge, the Blink hooks, the archive
+Implemented for protocol 0.16. The recorder bridge, the Blink hooks, the payload
 validator, and the reference-fixture validation all reflect this document.
 Protocol 0.15 introduced this evidence and was validated on the reference
 platform at revision `6aeb57b`. Protocol 0.16 reverses the direction of the
@@ -127,7 +127,7 @@ transitions it covers, described under the trigger integration below.
 absent: an added attribute has no previous value and a removed attribute has no
 current value. The bridge derives the absent side from the change type rather
 than accepting it from the caller, so the record cannot contradict itself, and
-the archive validator rejects a record that does. The change type itself is
+the payload validator rejects a record that does. The change type itself is
 derived in the Blink hook from which value is null rather than from the calling
 function, so a modification that upstream reports with a null old or new value is
 recorded as an addition or a removal.
@@ -284,7 +284,7 @@ Because attribute and character-data mutations now queue checkpoints of their
 own, the document no longer produces exactly one post-mutation checkpoint. The
 structural checkpoint is identified by the node it added.
 
-Archive validation must reject a transition record whose document context does
+Validation must reject a transition record whose document context does
 not match a known document, and reject a record that reports a value length
 greater than the recorded value without truncation state.
 

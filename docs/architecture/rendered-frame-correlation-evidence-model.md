@@ -135,14 +135,14 @@ pixel buffer is allocated and before the dequeue loop, which can wait up to
 dequeue time was recorded as an upper bound on the composition time. Windows
 validation after the change to newest-frame selection disproved that: the
 composition time was 12.2 to 15.5 ms after the dequeue for every image. The
-dequeue time is still recorded, as a measurement, and the archive validator no
+dequeue time is still recorded, as a measurement, and the payload validator no
 longer orders the two; see
 [the WGC newest-frame selection note](wgc-newest-frame-selection.md).
 
 A frame captured by the GDI fallback has no composition time. Its
 `monitorFrames` entries state each monitor and leave the timing fields null.
-Archives written before this slice omit `monitorFrames`; the archive validator
-accepts that.
+Recordings written before this slice omit `monitorFrames`; the payload
+validator accepts that.
 
 Recording the timestamp does not change which WGC frame is copied. The pool
 returns the oldest queued frame, so a captured image can be older than the

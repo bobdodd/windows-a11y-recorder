@@ -137,7 +137,7 @@ that were withheld.
 Handshake and response headers follow the header value rules of the
 [network metadata evidence model](network-metadata-evidence-model.md#header-values).
 
-The archive validator rejects text longer than 4096 UTF-16 code units, a
+The payload validator rejects text longer than 4096 UTF-16 code units, a
 withheld offset that does not mark a `[withheld]` marker in order, a text
 message without text or a binary message with text, a `dropped` closure without
 its clean flag or a `disconnected` closure with one, a WebTransport close
@@ -165,7 +165,7 @@ with a code or reason.
 - A cookie without a name whose value contains `=` cannot be told apart from a
   named cookie, as in any `Cookie` header.
 - WebTransport sessions need an HTTP/3 server, so establishment is covered by
-  the archive validator and receiver tests but not by the Windows validation
+  the payload validator and receiver tests but not by the Windows validation
   run.
 
 ## Validation

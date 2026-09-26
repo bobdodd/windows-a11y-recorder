@@ -5,7 +5,7 @@ namespace Recorder.Tests;
 /// <summary>
 /// Payloads of the shapes the recorder's collectors write, one or more for
 /// every channel and event type with evidence tables. Each is valid for the
-/// session archive validator, and each is written the way System.Text.Json
+/// payload validator, and each is written the way System.Text.Json
 /// writes it, so a payload rebuilt from its tables reads back unchanged.
 /// </summary>
 internal static class EvidenceSamples

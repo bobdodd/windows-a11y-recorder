@@ -17,7 +17,7 @@ The prototype will be one installed Windows product containing the recorder proc
 
 All capture runs locally. No capture path requires a screen-reader add-on, browser extension, external browser driver, network service, or administrator privileges. Browser tests run in the instrumented Chromium build included in the same installation.
 
-The active recording is an append-only directory. Raw evidence is written once and never revised. Derived and inferred data are created only after capture and stored separately.
+The active recording's events are stored in the app's own database, and its media in a session directory (see [session database](session-database.md)). Raw evidence is written once and never revised. Derived and inferred data are created only after capture and stored separately.
 
 ## Component ownership
 
@@ -250,6 +250,14 @@ Queue defaults are proposed by each collector but must be constrained by a proce
 
 ## Archive writing and recovery
 
+The [session database](session-database.md) decision supersedes the event
+streams described here. Events are rows in the app's own PostgreSQL database,
+written while the recording runs, and there are no NDJSON event streams. A
+recording the app left in the recording state is marked interrupted at the
+next start and opens with the events it stored. The session directory holds
+the manifest, the media files, and the diagnostic logs. The rest of this
+section is the original proposal.
+
 The active session is always a directory. It contains:
 
 - An initial immutable manifest.
@@ -262,7 +270,7 @@ The active session is always a directory. It contains:
 
 Each NDJSON append is a complete UTF-8 line. Writers flush at bounded intervals and on control boundaries. Media is segmented so an interrupted final segment cannot invalidate earlier segments.
 
-The terminal manifest lists every artifact with its size and SHA-256 hash. A writer that produces a file sequentially computes the hash over the bytes as it writes them and reports it to the session's artifact hash registry when it closes the file; the event log writer and the desktop frame writer do this. A reported hash is used only while the file still has the reported size and the last-write time it had when the hash was reported. Any other file, including files written by other processes such as Chromium's log, files whose writer rewrites them in place such as WAV headers, and files changed after their hash was reported, is read and hashed from disk at finalization. A reported hash describes the bytes the recorder wrote, not a later read of the disk, so opening a recording with hash verification still rereads and checks every artifact.
+The terminal manifest lists every artifact with its size and SHA-256 hash. A writer that produces a file sequentially computes the hash over the bytes as it writes them and reports it to the session's artifact hash registry when it closes the file; the desktop frame writer does this. A reported hash is used only while the file still has the reported size and the last-write time it had when the hash was reported. Any other file, including files written by other processes such as Chromium's log, files whose writer rewrites them in place such as WAV headers, and files changed after their hash was reported, is read and hashed from disk at finalization. A reported hash describes the bytes the recorder wrote, not a later read of the disk, so opening a recording with hash verification still rereads and checks every artifact.
 
 A checkpoint records:
 

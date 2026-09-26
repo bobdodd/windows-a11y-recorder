@@ -14,8 +14,8 @@
   </ItemGroup>
   <!-- The PostgreSQL server the app runs as its database, fetched into the
        repository by scripts/Get-PostgresBinaries.ps1 and copied to pgsql in
-       the output folder. Without it the app records to session files only
-       and says so when it starts. -->
+       the output folder. Without it the app cannot record or open
+       recordings, and says so when it starts. -->
   <PropertyGroup>
     <PostgresBinariesRoot>$(MSBuildThisFileDirectory)..\..\.postgres\pgsql\</PostgresBinariesRoot>
   </PropertyGroup>

@@ -178,7 +178,7 @@ The bridge withholds a value in three cases, recorded as the reason:
 - `credential-value`: the value begins with an HTTP authentication scheme such
   as `Bearer` or `Basic`, or contains a JSON Web Token.
 
-The archive validator rejects a record in which one of the five credential
+The payload validator rejects a record in which one of the five credential
 headers carries a value.
 
 ## Limits

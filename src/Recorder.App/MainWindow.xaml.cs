@@ -111,18 +111,9 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
     }
 
-    private static string DatabaseBinaryDirectory =>
-        Path.Combine(AppContext.BaseDirectory, "pgsql", "bin");
-
-    private static string DatabaseDataDirectory =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Windows A11y Recorder",
-            "Database");
-
-    // The database starts before a recording can. A database that cannot
-    // start does not stop the app: recordings are written to session files
-    // only, and the app says so now and whenever a recording starts.
+    // The database starts before a recording can. Recordings are stored in
+    // it and opened from it, so while it cannot start the app neither
+    // records nor opens recordings, and says why.
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
@@ -133,10 +124,7 @@ public partial class MainWindow : Window
         var busy = _busy.Begin("Starting the database.");
         try
         {
-            _database = await SessionDatabase.StartAsync(new EmbeddedPostgresOptions(
-                DatabaseBinaryDirectory,
-                DatabaseDataDirectory,
-                new CurrentUserSecretProtector()));
+            _database = await SessionDatabase.StartAsync(RecorderDatabaseLocation.ForCurrentUser());
             StatusTextBlock.Text = _database.InterruptedRecordingsAtStart == 0
                 ? "Ready to record."
                 : $"Ready to record. {_database.InterruptedRecordingsAtStart:N0} recordings left open " +
@@ -152,7 +140,8 @@ public partial class MainWindow : Window
             MessageBox.Show(
                 this,
                 $"{exception.Message}{Environment.NewLine}{Environment.NewLine}" +
-                "Recordings will be written to session files only.",
+                "Recordings cannot be made or opened until the database starts. " +
+                "Close the app and start it again.",
                 "The database could not start",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -161,18 +150,18 @@ public partial class MainWindow : Window
         {
             busy.Dispose();
             _transitioning = false;
-            StartButton.IsEnabled = true;
-            OpenRecordingButton.IsEnabled = true;
+            StartButton.IsEnabled = _database is not null;
+            OpenRecordingButton.IsEnabled = _database is not null;
         }
     }
 
     private string DatabaseUnavailableText =>
-        $"The database could not start, so recordings are written to session files only. " +
+        "The database could not start, so recordings cannot be made or opened. " +
         _databaseStartError;
 
     private async void StartButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_transitioning)
+        if (_transitioning || _database is null)
         {
             return;
         }
@@ -225,9 +214,7 @@ public partial class MainWindow : Window
             _statusTimer.Start();
             RefreshStatus();
             busy.Dispose();
-            _busy.AnnounceCompleted(_database is null
-                ? "Recording started. " + DatabaseUnavailableText
-                : "Recording started.");
+            _busy.AnnounceCompleted("Recording started.");
             StopButton.Focus();
         }
         catch (Exception exception)
@@ -317,7 +304,7 @@ public partial class MainWindow : Window
         };
         if (dialog.ShowDialog(this) == true)
         {
-            await LoadSessionAsync(dialog.FolderName, validate: true);
+            await LoadSessionAsync(dialog.FolderName);
         }
     }
 
@@ -554,19 +541,17 @@ public partial class MainWindow : Window
         _statusTimer.Stop();
         StopButton.IsEnabled = false;
         MarkerButton.IsEnabled = false;
-        StatusTextBlock.Text = "Stopping and verifying session files.";
+        StatusTextBlock.Text = "Stopping and storing the recording.";
         string? completedSession = null;
-        SessionPlaybackArchive? preparedArchive = null;
-        var busy = _busy.Begin("Stopping recording and verifying session files.");
+        var busy = _busy.Begin("Stopping recording and storing its events.");
 
         try
         {
-            var status = await _coordinator.StopAsync(preparePlayback: true);
+            var status = await _coordinator.StopAsync();
             completedSession = status.SessionDirectory;
-            preparedArchive = _coordinator.FinalizedPlaybackArchive;
             RefreshStatus(status);
             StatusTextBlock.Text = status.State == RecordingSessionState.Completed
-                ? "Recording completed and session files verified."
+                ? "Recording completed and stored."
                 : $"Recording stopped with errors. {status.Message}";
             if (status.Database?.Problem is { } databaseProblem)
             {
@@ -600,89 +585,31 @@ public partial class MainWindow : Window
 
         if (Directory.Exists(completedSession))
         {
-            await LoadSessionAsync(
-                completedSession,
-                validate: false,
-                preparedArchive);
+            await LoadSessionAsync(completedSession);
         }
     }
 
-    // A recording the database holds complete is loaded from the database,
-    // without reading or validating its event log; its frames and audio are
-    // still read from the session folder. Otherwise the session files are
-    // read. A prepared archive was built from the read finalization validation
-    // made, so it is used as is. Otherwise, opening with validation builds
-    // the archive from the validator's read, and opening without validation
-    // reads the archive once to load it. The event log is read once in each
-    // case.
-    private async Task LoadSessionAsync(
-        string sessionDirectory,
-        bool validate,
-        SessionPlaybackArchive? preparedArchive = null)
+    // A recording is opened from the database; its frames and audio are
+    // read from the session folder. A recording the database does not hold,
+    // or one still being recorded, is not opened, and the reason is shown.
+    // A recording stored as failed or interrupted opens with the events the
+    // database holds, and its stored status is shown with it.
+    private async Task LoadSessionAsync(string sessionDirectory)
     {
         PausePlayback();
         SetPlaybackEnabled(false);
         OpenRecordingButton.IsEnabled = false;
-        PlaybackStatusTextBlock.Text = validate
-            ? "Validating recording..."
-            : "Loading recording...";
-        var busy = _busy.Begin(validate
-            ? "Validating and loading recording."
-            : "Loading recording for playback.");
+        PlaybackStatusTextBlock.Text = "Loading recording...";
+        var busy = _busy.Begin("Loading recording for playback.");
 
         try
         {
-            SessionPlaybackArchive? archive = null;
-            string source;
-            var fromDatabase = await TryOpenFromDatabaseAsync(sessionDirectory);
-            if (fromDatabase.Archive is not null)
-            {
-                archive = fromDatabase.Archive;
-                source = "from the database";
-            }
-            else
-            {
-                source = fromDatabase.Reason is null
-                    ? "from session files"
-                    : $"from session files. {fromDatabase.Reason}";
-            }
-
-            if (archive is null)
-            {
-                if (preparedArchive is not null)
-                {
-                    archive = preparedArchive;
-                }
-                else if (validate)
-                {
-                    var playback = new SessionPlaybackArchiveBuilder(sessionDirectory);
-                    var validation = await SessionArchiveValidator.ValidateAsync(
-                        sessionDirectory,
-                        ArchiveValidationOptions.Default,
-                        playback);
-                    if (!validation.IsValid)
-                    {
-                        var problems = string.Join(
-                            Environment.NewLine,
-                            validation.Issues
-                                .Where(issue =>
-                                    issue.Severity == ArchiveValidationSeverity.Error)
-                                .Take(8)
-                                .Select(issue =>
-                                    $"{issue.Code}: {issue.Message}"));
-                        throw new InvalidDataException(
-                            "The recording failed archive validation." +
-                            Environment.NewLine +
-                            problems);
-                    }
-
-                    archive = await playback.BuildAsync();
-                }
-                else
-                {
-                    archive = await SessionArchiveReader.LoadAsync(sessionDirectory);
-                }
-            }
+            var opened = await OpenFromDatabaseAsync(sessionDirectory);
+            var archive = opened.Archive ?? throw new InvalidDataException(
+                opened.Reason ?? "The database could not open this recording.");
+            var source = opened.Status is null or RecordingStatus.Completed
+                ? "from the database"
+                : $"from the database. Stored as {opened.Status.Value.ToString().ToLowerInvariant()}";
 
             CloseAudio();
             _playbackArchive = archive;
@@ -755,10 +682,7 @@ public partial class MainWindow : Window
         }
     }
 
-    // The database is read first. A recording it does not hold complete, or
-    // a database that cannot be read, is opened from its session files, and
-    // the reason is shown with the recording.
-    private async Task<DatabasePlaybackResult> TryOpenFromDatabaseAsync(
+    private async Task<DatabasePlaybackResult> OpenFromDatabaseAsync(
         string sessionDirectory)
     {
         if (_database is null)
@@ -766,7 +690,7 @@ public partial class MainWindow : Window
             return new DatabasePlaybackResult(
                 null,
                 null,
-                "The database is not available.");
+                DatabaseUnavailableText);
         }
 
         try

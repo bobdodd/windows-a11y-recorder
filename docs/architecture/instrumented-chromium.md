@@ -398,7 +398,8 @@ archive would otherwise keep reporting the form of a callback Blink no longer
 holds. That path emits a `listener-callback-replaced` record which keeps the
 listener identity and reports the form of the replacing callback. A form outside
 the schema is normalized to `add-event-listener`, because an out-of-schema value
-would fail archive validation for the whole session rather than for one record.
+would be rejected by the recorder's per-record checks and so fail the whole
+recording rather than lose one record.
 
 Protocol version 0.20 reports where each listener record came from.
 `CaptureSourceLocation(ExecutionContext*)` is called in each listener hook and
@@ -434,8 +435,8 @@ that record reports a null `world` and a null `executionWorldId` rather than
 claiming the main world. Blink classifies both isolated and inspector-isolated
 worlds as isolated, so the inspector's worlds are tested first and reported as
 `inspector-isolated`. A world type the recorder does not name is reported as
-`other`, because an out-of-schema value would fail archive validation for the
-whole session.
+`other`, because an out-of-schema value would be rejected by the recorder's
+per-record checks and so fail the whole recording.
 
 Protocol version 0.22 states browser evidence that was lost rather than
 captured. Two paths can lose a record. A renderer's own pipe write can fail,
@@ -982,7 +983,7 @@ Successful connections and browser exits are persisted on the
 - A failed authentication or handshake produces no lifecycle record. The
   rejection is stated as a `collector-omission` record with the reason
   `browser-connection-rejected` on the `browser.listener` channel.
-- The three lifecycle payloads are closed shapes the archive validator checks, as are
+- The three lifecycle payloads are closed shapes the recorder's per-record checks enforce, as are
   the three accessibility checkpoint payloads. An accessibility checkpoint must
   name a renderer process and the Chromium document token it serialized, and
   carries no DOM document node identity, because the serialization is not taken

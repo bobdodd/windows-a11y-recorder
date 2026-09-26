@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Recorder.Contracts;
+using Recorder.Session;
 
 namespace Recorder.Database;
 
@@ -12,6 +13,10 @@ namespace Recorder.Database;
 /// </param>
 /// <param name="RejectedCount">Events refused because they failed a check.</param>
 /// <param name="WrittenCount">Events stored in the database.</param>
+/// <param name="FirstRejection">
+/// The channel, event type, and check code of the first rejected event, or
+/// null when no event was rejected.
+/// </param>
 /// <param name="UnwrittenCount">
 /// Accepted events not stored when the writer finished, because the database
 /// did not accept them in time. They remain in <paramref name="SpillPath"/>.
@@ -23,7 +28,8 @@ public sealed record PostgresEventWriterResult(
     long WrittenCount,
     long UnwrittenCount,
     string? SpillPath,
-    string? LastError);
+    string? LastError,
+    string? FirstRejection = null);
 
 /// <summary>
 /// Writes a recording's events to the database during capture. Events are
@@ -43,15 +49,13 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     };
 
     private readonly IEventBatchTarget _target;
-    private readonly string _sessionKey;
     private readonly PostgresEventWriterOptions _options;
     private readonly Channel<RecorderEvent> _channel;
     private readonly Queue<BufferedEvent> _memory = new();
     private readonly SpillFile _spill;
     private readonly List<WriterRejection> _rejections = [];
     private readonly List<WriterOmission> _omissions = [];
-    private readonly Dictionary<(string Instance, string Channel), ulong> _lastSequence = [];
-    private readonly Dictionary<(string Instance, string Channel, string Clock), long> _lastTime = [];
+    private readonly EventRecordValidator _validator;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _loop;
     private long _memoryBytes;
@@ -64,6 +68,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     private long _rejected;
     private long _written;
     private string? _lastError;
+    private string? _firstRejection;
     private bool _completed;
     private PostgresEventWriterResult? _result;
 
@@ -79,7 +84,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfLessThan(options.ChannelCapacity, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.BatchSize, 1);
         _target = target;
-        _sessionKey = sessionKey;
+        _validator = new EventRecordValidator(sessionKey);
         _options = options;
         _nextEventKey = firstEventKey;
         _spill = new SpillFile(options.SpillPath);
@@ -166,7 +171,8 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
             WrittenCount,
             unwritten,
             unwritten > 0 ? _spill.Path : null,
-            _lastError);
+            _lastError,
+            _firstRejection);
         return _result;
     }
 
@@ -360,6 +366,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     private void Reject(RecorderEvent record, string reason)
     {
         Interlocked.Increment(ref _rejected);
+        _firstRejection ??= $"{record.Channel} {record.EventType}: {reason}";
         _rejections.Add(new WriterRejection(
             _nextRejectionOrdinal++,
             reason,
@@ -368,80 +375,10 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
             record.Sequence));
     }
 
-    // The per-record checks the archive validator made on the event log,
-    // made once as each event arrives. The codes are the validator's codes.
-    private string? Check(RecorderEvent record)
-    {
-        if (!SessionSchemaVersions.IsSupportedEvent(record.SchemaVersion))
-        {
-            return "event-version-unsupported";
-        }
-
-        if (!string.Equals(record.SessionId, _sessionKey, StringComparison.Ordinal))
-        {
-            return "event-session-mismatch";
-        }
-
-        if (IsBlank(record.CollectorType) || IsBlank(record.CollectorInstanceId) ||
-            IsBlank(record.Channel) || IsBlank(record.CaptureMethod) || IsBlank(record.EventType) ||
-            (record.NativeTimestamp is { } native && (IsBlank(native.Domain) || IsBlank(native.Unit))))
-        {
-            return "event-string-invalid";
-        }
-
-        if (IsBlank(record.ProducerVersion) || IsBlank(record.ClockMappingId) ||
-            !EvidenceClassIds.ContainsKey(record.EvidenceClass ?? string.Empty))
-        {
-            return "event-provenance-invalid";
-        }
-
-        if (!string.Equals(
-                record.EventId,
-                RecorderEventFactory.CreateEventId(
-                    record.SessionId,
-                    record.CollectorInstanceId,
-                    record.Channel,
-                    record.Sequence),
-                StringComparison.Ordinal))
-        {
-            return "event-id-invalid";
-        }
-
-        if (record.Sequence > long.MaxValue)
-        {
-            return "event-sequence-invalid";
-        }
-
-        if (record.MonotonicNanoseconds < 0 || record.TimestampUncertaintyNanoseconds < 0)
-        {
-            return "event-time-invalid";
-        }
-
-        if (record.QualityFlags.Any(IsBlank))
-        {
-            return "event-quality-flags-invalid";
-        }
-
-        var stream = (record.CollectorInstanceId, record.Channel);
-        if (_lastSequence.TryGetValue(stream, out var previousSequence) &&
-            record.Sequence <= previousSequence)
-        {
-            return "event-sequence-not-increasing";
-        }
-
-        var clock = (record.CollectorInstanceId, record.Channel, record.ClockMappingId);
-        if (_lastTime.TryGetValue(clock, out var previousTime) &&
-            record.MonotonicNanoseconds < previousTime)
-        {
-            return "event-time-regressed";
-        }
-
-        _lastSequence[stream] = record.Sequence;
-        _lastTime[clock] = record.MonotonicNanoseconds;
-        return null;
-    }
+    // Rejects an event with the code of its first issue.
+    private string? Check(RecorderEvent record) =>
+        _validator.Validate(record) is [var first, ..] ? first.Code : null;
 
     internal static short EvidenceClassId(string evidenceClass) => EvidenceClassIds[evidenceClass];
 
-    private static bool IsBlank(string? value) => string.IsNullOrWhiteSpace(value);
 }

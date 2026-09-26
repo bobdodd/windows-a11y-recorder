@@ -317,8 +317,8 @@ The required test levels are:
   that forces style, layout, or a lifecycle update, and the property list in
   the hook matches this document and the verifier.
 - Contract tests of the recorder: every record shape the bridge writes is
-  accepted, an undeclared member is rejected at ingest and by archive
-  validation, and archive validation rejects a rectangle without a layout
+  accepted, an undeclared member is rejected at ingest and by payload
+  validation, and payload validation rejects a rectangle without a layout
   object, a text node with a computed style, a negative size, a non-string
   style value, a duplicated property name, a checkpoint that names
   itself as previous, and a node count above the maximum.

@@ -40,7 +40,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
     }
 
     [Fact]
-    public async Task LoadsTheSamePlaybackAsTheSessionFiles()
+    public async Task LoadsTheSamePlaybackAsTheEventsBuildInMemory()
     {
         var token = TestContext.Current.CancellationToken;
         var sessionKey = "playback-" + Guid.NewGuid().ToString("N");
@@ -49,49 +49,47 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         await WriteSessionFilesAsync(directory, sessionKey, events, token);
         await WriteRecordingAsync(sessionKey, events, RecordingStatus.Completed, token);
 
-        var fromFiles = await SessionArchiveReader.LoadAsync(directory, token);
+        var inMemory = await LoadInMemoryAsync(directory, events, token);
         var result = await new DatabasePlaybackReader(fixture.Server.DataSource).OpenAsync(directory, token);
 
         Assert.Null(result.Reason);
         Assert.Equal(RecordingStatus.Completed, result.Status);
         var fromDatabase = Assert.IsType<SessionPlaybackArchive>(result.Archive);
         Assert.NotNull(fromDatabase.RecordSource);
-        Assert.Null(fromFiles.RecordSource);
-        Assert.Equal(fromFiles.SessionDirectory, fromDatabase.SessionDirectory);
+        Assert.Equal(inMemory.SessionDirectory, fromDatabase.SessionDirectory);
         Assert.Equal(
-            JsonSerializer.Serialize(fromFiles.Manifest, JsonOptions),
+            JsonSerializer.Serialize(inMemory.Manifest, JsonOptions),
             JsonSerializer.Serialize(fromDatabase.Manifest, JsonOptions));
-        Assert.Equal(fromFiles.DurationNanoseconds, fromDatabase.DurationNanoseconds);
+        Assert.Equal(inMemory.DurationNanoseconds, fromDatabase.DurationNanoseconds);
         Assert.Empty(fromDatabase.Events);
-        var fileTimeline = await WalkAsync(fromFiles.Timeline, token);
+        var memoryTimeline = await WalkAsync(inMemory.Timeline, token);
         var databaseTimeline = await WalkAsync(fromDatabase.Timeline, token);
-        Assert.Equal(fileTimeline.Select(Shape), databaseTimeline.Select(Shape));
-        Assert.Equal(fromFiles.Timeline.Count, fromDatabase.Timeline.Count);
+        Assert.Equal(memoryTimeline.Select(Shape), databaseTimeline.Select(Shape));
+        Assert.Equal(inMemory.Timeline.Count, fromDatabase.Timeline.Count);
         Assert.Equal(
-            fromFiles.Timeline.ChannelCounts.OrderBy(pair => pair.Key, StringComparer.Ordinal),
+            inMemory.Timeline.ChannelCounts.OrderBy(pair => pair.Key, StringComparer.Ordinal),
             fromDatabase.Timeline.ChannelCounts.OrderBy(pair => pair.Key, StringComparer.Ordinal));
-        Assert.Equal(fromFiles.Frames, fromDatabase.Frames);
-        Assert.Equal(fromFiles.AudioTracks, fromDatabase.AudioTracks);
-        Assert.Equal(fromFiles.BrowserNavigations, fromDatabase.BrowserNavigations);
+        Assert.Equal(inMemory.Frames, fromDatabase.Frames);
+        Assert.Equal(inMemory.AudioTracks, fromDatabase.AudioTracks);
+        Assert.Equal(inMemory.BrowserNavigations, fromDatabase.BrowserNavigations);
         Assert.Single(fromDatabase.Frames);
         Assert.Single(fromDatabase.AudioTracks);
         Assert.Single(fromDatabase.BrowserNavigations);
         Assert.Contains(databaseTimeline, item => item.Summary == "session-marker: In the database");
 
-        // Every complete record reads back as the event log's record, with
-        // the payload's properties possibly in another order.
-        var fileEvents = fromFiles.Events.ToDictionary(item => item.EventId);
+        // Every complete record reads back as the record written, with the
+        // payload's properties possibly in another order.
+        var memoryEvents = inMemory.Events.ToDictionary(item => item.EventId);
         foreach (var item in databaseTimeline)
         {
-            Assert.NotNull(item.EventKey);
             Assert.Equal(
-                Canonical(fromFiles.ReadEventJson(fileEvents[item.EventId])),
+                Canonical(inMemory.ReadEventJson(memoryEvents[item.EventId])),
                 Canonical(fromDatabase.ReadEventJson(item)));
         }
     }
 
     [Fact]
-    public async Task DoesNotOpenARecordingTheDatabaseDoesNotHoldComplete()
+    public async Task OpensInterruptedRecordingsButNotMissingOrLiveOnes()
     {
         var token = TestContext.Current.CancellationToken;
         var reader = new DatabasePlaybackReader(fixture.Server.DataSource);
@@ -103,14 +101,22 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
 
         var sessionKey = "interrupted-" + Guid.NewGuid().ToString("N");
         await WriteRecordingAsync(sessionKey, VariedEvents(sessionKey), RecordingStatus.Interrupted, token);
-        var interrupted = await reader.OpenAsync(Path.Combine(_root, sessionKey), token);
-        Assert.Null(interrupted.Archive);
+        var interruptedDirectory = Path.Combine(_root, sessionKey);
+        await WriteSessionFilesAsync(interruptedDirectory, sessionKey, VariedEvents(sessionKey), token);
+        var interrupted = await reader.OpenAsync(interruptedDirectory, token);
+        Assert.NotNull(interrupted.Archive);
         Assert.Equal(RecordingStatus.Interrupted, interrupted.Status);
-        Assert.Contains("interrupted", interrupted.Reason);
+
+        var liveKey = "live-" + Guid.NewGuid().ToString("N");
+        await WriteRecordingAsync(liveKey, VariedEvents(liveKey), RecordingStatus.Recording, token);
+        var live = await reader.OpenAsync(Path.Combine(_root, liveKey), token);
+        Assert.Null(live.Archive);
+        Assert.Equal(RecordingStatus.Recording, live.Status);
+        Assert.Equal("The recording is still being recorded.", live.Reason);
     }
 
     [Fact]
-    public async Task AnswersTimelineLookupsAsTheSessionFilesDo()
+    public async Task AnswersTimelineLookupsAsTheInMemoryTimelineDoes()
     {
         var token = TestContext.Current.CancellationToken;
         var sessionKey = "lookups-" + Guid.NewGuid().ToString("N");
@@ -135,16 +141,16 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
 
         await WriteSessionFilesAsync(directory, sessionKey, events, token);
         await WriteRecordingAsync(sessionKey, events, RecordingStatus.Completed, token);
-        var fromFiles = (await SessionArchiveReader.LoadAsync(directory, token)).Timeline;
+        var inMemory = (await LoadInMemoryAsync(directory, events, token)).Timeline;
         var fromDatabase = Assert.IsType<SessionPlaybackArchive>(
             (await new DatabasePlaybackReader(fixture.Server.DataSource).OpenAsync(directory, token)).Archive)
             .Timeline;
         Assert.IsType<DatabaseSessionTimeline>(fromDatabase);
 
-        var fileOrder = await WalkAsync(fromFiles, token);
+        var memoryOrder = await WalkAsync(inMemory, token);
         var databaseOrder = await WalkAsync(fromDatabase, token);
         Assert.Equal(events.Count, databaseOrder.Count);
-        Assert.Equal(fileOrder.Select(Shape), databaseOrder.Select(Shape));
+        Assert.Equal(memoryOrder.Select(Shape), databaseOrder.Select(Shape));
 
         IReadOnlySet<string>[] subsets =
         [
@@ -161,23 +167,23 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             var target = random.NextInt64(-10, duration + 10);
             var start = random.NextInt64(0, duration);
             var end = start + random.NextInt64(0, duration / 4);
-            var from = random.Next(fileOrder.Count);
+            var from = random.Next(memoryOrder.Count);
             var forward = random.Next(2) == 0;
 
             Assert.Equal(
-                Shape(await fromFiles.AtOrBeforeAsync(target, subset, token)),
+                Shape(await inMemory.AtOrBeforeAsync(target, subset, token)),
                 Shape(await fromDatabase.AtOrBeforeAsync(target, subset, token)));
             Assert.Equal(
-                Shape(await fromFiles.NearestAsync(target, start, end, subset, token)),
+                Shape(await inMemory.NearestAsync(target, start, end, subset, token)),
                 Shape(await fromDatabase.NearestAsync(target, start, end, subset, token)));
             Assert.Equal(
-                Shape(await fromFiles.AdjacentAsync(fileOrder[from], forward, subset, token)),
+                Shape(await inMemory.AdjacentAsync(memoryOrder[from], forward, subset, token)),
                 Shape(await fromDatabase.AdjacentAsync(databaseOrder[from], forward, subset, token)));
             Assert.Equal(
-                Shape(await fromFiles.EndAsync(forward, subset, token)),
+                Shape(await inMemory.EndAsync(forward, subset, token)),
                 Shape(await fromDatabase.EndAsync(forward, subset, token)));
             Assert.Equal(
-                fromFiles.Occupancy.OccupiedColumns(subset, start, end - start + 1, 500),
+                inMemory.Occupancy.OccupiedColumns(subset, start, end - start + 1, 500),
                 fromDatabase.Occupancy.OccupiedColumns(subset, start, end - start + 1, 500));
         }
     }
@@ -318,13 +324,39 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             Path.Combine(directory, "manifest.json"),
             JsonSerializer.Serialize(manifest, JsonOptions),
             token);
-        var log = new StringBuilder();
+    }
+
+    // The reference the database's playback is compared with: the same
+    // events added to a builder that keeps them in memory.
+    private static async Task<SessionPlaybackArchive> LoadInMemoryAsync(
+        string directory,
+        IReadOnlyList<RecorderEvent> events,
+        CancellationToken token)
+    {
+        var builder = new SessionPlaybackArchiveBuilder(directory);
+        var records = new List<string>();
         foreach (var record in events)
         {
-            log.Append(JsonSerializer.Serialize(record, JsonOptions)).Append('\n');
+            var json = JsonSerializer.Serialize(record, JsonOptions);
+            using var document = JsonDocument.Parse(json);
+            records.Add(json);
+            builder.AddEvent(
+                records.Count,
+                record.EventId,
+                record.EvidenceClass,
+                record.Channel,
+                record.EventType,
+                record.MonotonicNanoseconds,
+                document.RootElement.GetProperty("payload").Clone());
         }
 
-        await File.WriteAllTextAsync(Path.Combine(directory, "events.ndjson"), log.ToString(), token);
+        return await builder.BuildAsync(new RecordList(records), token);
+    }
+
+    private sealed class RecordList(IReadOnlyList<string> records) : ISessionEventRecordSource
+    {
+        public string ReadEventJson(SessionTimelineEvent item) =>
+            records[(int)item.EventKey - 1];
     }
 
     private async Task WriteRecordingAsync(
@@ -357,10 +389,13 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             Assert.Equal(0, written.RejectedCount);
         }
 
-        await store.CompleteRecordingAsync(
-            recordingId,
-            new RecordingCompletion(status, DateTimeOffset.UtcNow, 2_000_000_000, events.Count, 0, null),
-            token);
+        if (status != RecordingStatus.Recording)
+        {
+            await store.CompleteRecordingAsync(
+                recordingId,
+                new RecordingCompletion(status, DateTimeOffset.UtcNow, 2_000_000_000, events.Count, 0, null),
+                token);
+        }
     }
 
     // Every event, in timeline order, by stepping from the first.

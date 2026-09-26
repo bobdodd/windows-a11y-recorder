@@ -91,7 +91,7 @@ A worker or worklet global scope has no document. A record in such a scope
 reports a null `context.documentId`, and each of its targets reports a null
 `documentId`. Only a target that is not a Node can occur there. A record in a
 window scope, and an earlier record that carries no scope, must name its
-document on every target, as before. The session validator enforces these
+document on every target, as before. The payload validator enforces these
 rules under the code `browser-event-scope-inconsistent`.
 
 ## Dispatches Outside The Node Dispatcher
@@ -140,7 +140,7 @@ The records use the existing event types: `dispatch-started`, one
 - Contract ingest tests: a worker target, a worker listener, a worker
   dispatch, and a window-scoped dispatch are accepted as the bridge writes
   them.
-- Session validator tests: a worker listener without a document is accepted;
+- Payload validator tests: a worker listener without a document is accepted;
   a Node target in a worker scope, a worker record that names a document, and
   a target without a document outside a worker scope are rejected.
 - Windows end-to-end validation in the instrumented browser, against a

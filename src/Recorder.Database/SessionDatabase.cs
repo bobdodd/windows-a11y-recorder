@@ -17,14 +17,17 @@ public sealed class SessionDatabase : IAsyncDisposable
 
     private readonly EmbeddedPostgresServer _server;
     private readonly RecordingStore _store;
+    private readonly FileStream _processLock;
     private bool _disposed;
 
     private SessionDatabase(
+        FileStream processLock,
         EmbeddedPostgresServer server,
         RecordingStore store,
         Guid projectId,
         int interruptedRecordings)
     {
+        _processLock = processLock;
         _server = server;
         _store = store;
         ProjectId = projectId;
@@ -53,12 +56,29 @@ public sealed class SessionDatabase : IAsyncDisposable
     /// Starts or attaches to the server, marks recordings left open by an
     /// earlier instance as interrupted, and ensures the default project.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Another process is using the database. Only one process at a time
+    /// uses a data directory, because starting marks every open recording
+    /// interrupted, including one another process is still recording.
+    /// </exception>
     public static async Task<SessionDatabase> StartAsync(
         EmbeddedPostgresOptions options,
         CancellationToken cancellationToken = default)
     {
-        var server = await EmbeddedPostgresServer.StartAsync(options, cancellationToken)
-            .ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(options);
+        var processLock = AcquireProcessLock(options.DataDirectory);
+        EmbeddedPostgresServer server;
+        try
+        {
+            server = await EmbeddedPostgresServer.StartAsync(options, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            await processLock.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+
         try
         {
             var store = new RecordingStore(server.DataSource);
@@ -66,19 +86,39 @@ public sealed class SessionDatabase : IAsyncDisposable
                 .ConfigureAwait(false);
             var projectId = await store.EnsureProjectAsync(DefaultProjectName, cancellationToken)
                 .ConfigureAwait(false);
-            return new SessionDatabase(server, store, projectId, interrupted);
+            return new SessionDatabase(processLock, server, store, projectId, interrupted);
         }
         catch
         {
             await server.DisposeAsync().ConfigureAwait(false);
+            await processLock.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
 
+    // A file beside the data directory, held open without sharing for as
+    // long as this instance runs. The operating system releases it when the
+    // process ends, however it ends.
+    private static FileStream AcquireProcessLock(string dataDirectory)
+    {
+        var path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dataDirectory)) + ".lock";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        try
+        {
+            return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException exception)
+        {
+            throw new InvalidOperationException(
+                "Another Windows A11y Recorder process is using the database.",
+                exception);
+        }
+    }
+
     /// <summary>
-    /// Opens a recording for playback from the database, if the database
-    /// holds it complete. The session folder's name is the recording's
-    /// session key; its frames and audio are read from the folder.
+    /// Opens a recording for playback from the database. The session
+    /// folder's name is the recording's session key; its frames and audio
+    /// are read from the folder.
     /// </summary>
     public Task<DatabasePlaybackResult> OpenRecordingAsync(
         string sessionDirectory,
@@ -134,6 +174,7 @@ public sealed class SessionDatabase : IAsyncDisposable
 
         _disposed = true;
         await _server.DisposeAsync().ConfigureAwait(false);
+        await _processLock.DisposeAsync().ConfigureAwait(false);
     }
 }
 
@@ -183,9 +224,37 @@ public sealed class DatabaseRecording : IAsyncDisposable
         _written ??= await Writer.CompleteAsync().ConfigureAwait(false);
 
     /// <summary>
+    /// Why writing made a recording failed: events that failed their checks
+    /// and were not stored, and accepted events the database did not take
+    /// in time. Empty when every accepted event was stored.
+    /// </summary>
+    public static IReadOnlyList<string> WritingFailures(PostgresEventWriterResult written)
+    {
+        ArgumentNullException.ThrowIfNull(written);
+        var reasons = new List<string>();
+        if (written.RejectedCount > 0)
+        {
+            reasons.Add(
+                $"{written.RejectedCount} events failed their checks and were not stored. " +
+                $"The first was {written.FirstRejection}.");
+        }
+
+        if (written.UnwrittenCount > 0)
+        {
+            reasons.Add(
+                $"{written.UnwrittenCount} accepted events were not written to the database " +
+                $"and remain in {written.SpillPath}." +
+                (written.LastError is null ? string.Empty : $" Last error: {written.LastError}"));
+        }
+
+        return reasons;
+    }
+
+    /// <summary>
     /// Finishes writing, if that has not been done, and stores the
-    /// recording's final status and counts. Events the writer could not
-    /// write make a completed recording failed, with the reason stated.
+    /// recording's final status and counts. Events that failed their checks,
+    /// and events the writer could not write, make a completed recording
+    /// failed, with the reasons stated after <paramref name="failure"/>.
     /// </summary>
     public async Task<DatabaseRecordingResult> CompleteAsync(
         RecordingStatus status,
@@ -201,16 +270,11 @@ public sealed class DatabaseRecording : IAsyncDisposable
             reasons.Add(failure);
         }
 
-        if (written.UnwrittenCount > 0)
+        var writing = WritingFailures(written);
+        reasons.AddRange(writing);
+        if (writing.Count > 0 && status == RecordingStatus.Completed)
         {
-            reasons.Add(
-                $"{written.UnwrittenCount} accepted events were not written to the database " +
-                $"and remain in {written.SpillPath}." +
-                (written.LastError is null ? string.Empty : $" Last error: {written.LastError}"));
-            if (status == RecordingStatus.Completed)
-            {
-                status = RecordingStatus.Failed;
-            }
+            status = RecordingStatus.Failed;
         }
 
         try

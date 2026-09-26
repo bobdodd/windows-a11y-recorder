@@ -9,7 +9,7 @@ namespace Recorder.Database;
 /// <summary>
 /// The outcome of opening a recording for playback from the database. When
 /// <see cref="Archive"/> is null, <see cref="Reason"/> says why the database
-/// cannot provide the recording, and the caller reads the session files.
+/// cannot provide the recording.
 /// </summary>
 public sealed record DatabasePlaybackResult(
     SessionPlaybackArchive? Archive,
@@ -27,8 +27,9 @@ public sealed record DatabasePlaybackResult(
 public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
 {
     /// <summary>
-    /// Opens the recording whose session key is the session folder's name,
-    /// if the database holds it complete.
+    /// Opens the recording whose session key is the session folder's name.
+    /// A recording stored as completed, failed, or interrupted opens with
+    /// the events the database holds; one still being recorded does not.
     /// </summary>
     public async Task<DatabasePlaybackResult> OpenAsync(
         string sessionDirectory,
@@ -58,13 +59,12 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
             status = (RecordingStatus)reader.GetInt16(1);
         }
 
-        if (status != RecordingStatus.Completed)
+        if (status == RecordingStatus.Recording)
         {
             return new DatabasePlaybackResult(
                 null,
                 status,
-                $"The database holds this recording as {status.ToString().ToLowerInvariant()}, " +
-                "not completed.");
+                "The recording is still being recorded.");
         }
 
         var archive = await LoadAsync(recordingId, sessionKey, root, cancellationToken)
@@ -131,14 +131,13 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
             {
                 var (item, payload) = names.Read(reader);
                 builder.AddEvent(
-                    item.Line,
+                    item.EventKey,
                     item.EventId,
                     item.EvidenceClass,
                     item.Channel,
                     item.EventType,
                     item.MonotonicNanoseconds,
-                    payload,
-                    item.Line);
+                    payload);
             }
         }
 
@@ -182,7 +181,7 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
 
 /// <summary>
 /// Reads an event's complete record from the database and writes it in the
-/// event log's JSON form. The record states what was stored: quality flags
+/// recorder's event JSON form. The record states what was stored: quality flags
 /// are a set and are listed in the order their names were first stored, and
 /// the payload's properties are in the order PostgreSQL keeps jsonb keys.
 /// </summary>
@@ -196,11 +195,7 @@ public sealed class DatabaseEventRecordSource(
     public string ReadEventJson(SessionTimelineEvent item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        if (item.EventKey is not { } eventKey)
-        {
-            throw new InvalidDataException(
-                "The event was not loaded from the database, so it has no database key.");
-        }
+        var eventKey = item.EventKey;
 
         // A payload is in its event type's evidence table or, for a channel
         // the recorder does not define, in the jsonb payload table.

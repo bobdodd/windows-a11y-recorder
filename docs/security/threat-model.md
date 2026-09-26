@@ -48,7 +48,7 @@ Availability matters because missing evidence can invalidate a study. It does no
 - Event and media sequence information.
 - Omission and health records.
 - Collector configuration and capability results.
-- Archive checkpoints and validation results.
+- Per-record check results, stored as event rejections, and each recording's stored status.
 - Derived and inferred analysis with evidence links.
 - Redaction decisions and export manifests.
 
@@ -107,7 +107,12 @@ Boundary interpretation:
 - The browser-evidence pipe grants transport access only to the current Windows logon session and Chromium's lockdown restricting SID. A noninteractive token without a logon SID falls back to its current-user SID. An untrusted-integrity label permits sandboxed renderers to connect, but the unpredictable pipe name and per-session authentication token remain required before evidence is accepted.
 - Windows APIs, devices, tested applications, and UI Automation providers cross an untrusted input boundary.
 - Evidence crosses from volatile process memory into encrypted storage.
+- Events cross from the recorder process into the app's own PostgreSQL server over a loopback TCP port, which other local processes can reach. The server accepts only loopback connections and requires a password generated when its data directory is created and stored protected with user-scoped Windows Data Protection API protection.
 - Review and export cross from protected raw evidence into wider human and device access.
+
+### Current implementation
+
+The encrypted archive in the diagram is the proposed design and is not implemented. Events are stored in the app's PostgreSQL database, in a data directory under the recording user's local application data folder, without encryption by the recorder. The manifest, media files, and diagnostic logs are files in the session folder. See [Session database](../architecture/session-database.md).
 
 ## Assumptions
 
@@ -187,7 +192,7 @@ Controls:
 - Give diagnostics reserved capacity independent of evidence queues.
 - Maintain atomic omission accumulators when diagnostics queues are full.
 - Reconcile source sequence allocation, queue acceptance, persistence sequence, and terminal counts.
-- Require archive validation before status becomes completed.
+- Check each record before it is stored, and store a recording as completed only when no record was rejected or left unwritten.
 - Treat missing terminal records as partial, not successful.
 
 #### Archive path manipulation

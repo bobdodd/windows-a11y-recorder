@@ -61,14 +61,12 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     [Fact]
     public void EverySampleIsAValidPayloadAndEveryMappedEventTypeHasOne()
     {
-        var index = 0;
         foreach (var (channel, eventType, payload) in EvidenceSamples.All.Concat(
                      EvidenceSamples.Normalized.Select(item => (item.Channel, item.EventType, item.Payload))))
         {
-            var issues = new List<ArchiveValidationIssue>();
-            using var record = JsonDocument.Parse(
-                $"{{\"channel\":\"{channel}\",\"eventType\":\"{eventType}\",\"monotonicNanoseconds\":2000,\"payload\":{payload}}}");
-            EventPayloadValidator.Validate(record.RootElement, issues, index++);
+            var issues = new List<EventValidationIssue>();
+            using var document = JsonDocument.Parse(payload);
+            EventPayloadValidator.Validate(channel, eventType, document.RootElement, 2000, issues);
             Assert.True(issues.Count == 0, $"{channel} {eventType}: {string.Join("; ", issues.Select(item => item.Message))}");
         }
 
@@ -109,7 +107,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             var record = events[index];
             var item = new SessionTimelineEvent(
                 keys[index], record.EventId, record.EvidenceClass, record.Channel, record.EventType,
-                record.MonotonicNanoseconds, record.EventType, 0, 0, keys[index]);
+                record.MonotonicNanoseconds, record.EventType);
             using var read = JsonDocument.Parse(source.ReadEventJson(item));
             Assert.Equal(expected[index], Canonical(read.RootElement.GetProperty("payload")));
         }
@@ -176,7 +174,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         Assert.Equal(1, result.WrittenCount);
         Assert.Equal(2, result.RejectedCount);
         Assert.Equal(
-            ["payload-member-unmapped:payload/colour session-marker", "payload-text-nul:payload/note session-marker"],
+            ["payload-property-unexpected session-marker", "payload-text-nul:payload/note session-marker"],
             await RejectionsAsync(recordingId));
         Assert.Equal(1, await CountAsync("session_markers", recordingId));
     }
@@ -197,7 +195,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
 
         Assert.Equal(1, result.WrittenCount);
         Assert.Equal(1, result.RejectedCount);
-        Assert.Equal(["event-type-unmapped marker"], await RejectionsAsync(recordingId));
+        Assert.Equal(["event-type-unsupported marker"], await RejectionsAsync(recordingId));
         Assert.Equal(1, await CountAsync("event_payloads_other_channels", recordingId));
     }
 
@@ -208,15 +206,36 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             "test.evidence", "evidence-collector", "Evidence collector", "1.0.0", "1.0", channels, "test-capture");
         var sequences = channels.ToDictionary(channel => channel, _ => firstSequence);
         return EvidenceSamples.All
-            .Select((sample, index) => Event(
-                sessionKey,
-                collector,
-                sequences[sample.Channel]++,
-                (long)firstSequence * 1_000_000 + index * 1_000L,
-                sample.Channel,
-                sample.EventType,
-                Json(sample.Payload)))
+            .Select((sample, index) =>
+            {
+                var time = (long)firstSequence * 1_000_000 + 10_000 + index * 1_000L;
+                return Event(
+                    sessionKey,
+                    collector,
+                    sequences[sample.Channel]++,
+                    time,
+                    sample.Channel,
+                    sample.EventType,
+                    Json(TimedAt(sample.Payload, time)));
+            })
             .ToList();
+    }
+
+    // A drop episode is timed at its last refused arrival, so a sample that
+    // states one is moved to the time of the event that carries it.
+    private static string TimedAt(string payload, long time)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(payload)!.AsObject();
+        if (!node.ContainsKey("lastDroppedAtNanoseconds"))
+        {
+            return payload;
+        }
+
+        var span = node["lastDroppedAtNanoseconds"]!.GetValue<long>() -
+            node["firstDroppedAtNanoseconds"]!.GetValue<long>();
+        node["lastDroppedAtNanoseconds"] = time;
+        node["firstDroppedAtNanoseconds"] = time - span;
+        return node.ToJsonString();
     }
 
     private async Task<(string SessionKey, Guid RecordingId)> CreateRecordingAsync()

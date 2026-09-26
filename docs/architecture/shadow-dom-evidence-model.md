@@ -166,8 +166,8 @@ The required test levels are:
   place, the hooks call the bridge with the declared arities, and the hooks
   contain no call that forces slot assignment, style, or layout.
 - Contract tests of the recorder: every record shape the bridge writes is
-  accepted, an undeclared member is rejected at ingest and by archive
-  validation, and archive validation rejects a slot record whose count and list
+  accepted, an undeclared member is rejected at ingest and by payload
+  validation, and payload validation rejects a slot record whose count and list
   disagree, a pseudo-element record without its pseudo-element member or with
   inconsistent generated-text lengths, a node whose shadow host and mode
   disagree, counts above the node count, and path scopes whose length or

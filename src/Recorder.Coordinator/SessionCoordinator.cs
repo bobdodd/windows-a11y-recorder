@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.Text.Json;
 using Recorder.Contracts;
 using Recorder.Database;
 using Recorder.Session;
@@ -9,21 +8,15 @@ namespace Recorder.Coordinator;
 
 public sealed class SessionCoordinator : IAsyncDisposable
 {
-    // Finalization validation checks the manifest the coordinator has just
-    // written from hashes it has just computed, so it does not reread every
-    // artifact to recompute them. Opening a recording later verifies hashes.
-    private static readonly ArchiveValidationOptions FinalizationValidation =
-        new(VerifyArtifactHashes: false);
-
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
     private readonly Func<RecordingOptions, IReadOnlyList<ICaptureCollector>> _collectorFactory;
     private readonly List<CollectorRuntime> _collectors = [];
-    private readonly SessionDatabase? _database;
+    private readonly SessionDatabase _database;
     private SessionClock? _clock;
-    private NdjsonEventWriter? _writer;
     private IRecorderEventSink? _sink;
     private DatabaseRecording? _databaseRecording;
     private DatabaseRecordingResult? _databaseResult;
+    private PostgresEventWriterResult? _written;
     private string? _databaseProblem;
     private ArtifactHashRegistry _artifactHashes = new();
     private RecordingOptions? _options;
@@ -35,14 +28,15 @@ public sealed class SessionCoordinator : IAsyncDisposable
     private long _annotationSequence = -1;
 
     /// <param name="database">
-    /// The database each recording is also written to, or null to write only
-    /// the session files.
+    /// The database each recording's events are written to. The session
+    /// folder holds only the manifest and media files.
     /// </param>
     public SessionCoordinator(
         Func<RecordingOptions, IReadOnlyList<ICaptureCollector>> collectorFactory,
-        SessionDatabase? database = null)
+        SessionDatabase database)
     {
         ArgumentNullException.ThrowIfNull(collectorFactory);
+        ArgumentNullException.ThrowIfNull(database);
         _collectorFactory = collectorFactory;
         _database = database;
     }
@@ -58,8 +52,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
             _sessionDirectory,
             _startedUtc,
             TimeSpan.FromTicks(elapsedNanoseconds / 100),
-            _writer?.AcceptedCount ?? 0,
-            _writer?.DroppedCount ?? 0,
+            AcceptedCount(),
+            DroppedCount(),
             _collectors.Select(runtime => new CollectorStatus(
                 runtime.Collector.Descriptor.CollectorType,
                 runtime.Collector.LifecycleState,
@@ -71,6 +65,17 @@ public sealed class SessionCoordinator : IAsyncDisposable
             DatabaseStatus());
     }
 
+    // Counts once writing has finished, when the writer's result is final.
+    private long AcceptedCount() =>
+        _databaseResult?.Writer.AcceptedCount ??
+        _written?.AcceptedCount ??
+        _databaseRecording?.Writer.AcceptedCount ?? 0;
+
+    private long DroppedCount() =>
+        _databaseResult?.Writer.DroppedCount ??
+        _written?.DroppedCount ??
+        _databaseRecording?.Writer.DroppedCount ?? 0;
+
     private RecordingDatabaseStatus? DatabaseStatus()
     {
         if (_databaseRecording is null)
@@ -79,7 +84,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
         }
 
         var writer = _databaseRecording.Writer;
-        var result = _databaseResult?.Writer;
+        var result = _databaseResult?.Writer ?? _written;
         return new RecordingDatabaseStatus(
             result?.AcceptedCount ?? writer.AcceptedCount,
             result?.WrittenCount ?? writer.WrittenCount,
@@ -114,6 +119,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
             _annotationSequence = -1;
             _databaseRecording = null;
             _databaseResult = null;
+            _written = null;
             _databaseProblem = null;
             _clock = new SessionClock();
             _startedUtc = _clock.OriginUtc;
@@ -128,25 +134,18 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
 
             _artifactHashes = new ArtifactHashRegistry();
-            _writer = new NdjsonEventWriter(
-                Path.Combine(_sessionDirectory, "events.ndjson"),
-                artifactHashes: _artifactHashes);
-            _sink = _writer;
-            if (_database is not null)
-            {
-                _databaseRecording = await _database.BeginRecordingAsync(
-                    new RecordingDefinition(
-                        _sessionId,
-                        _startedUtc.Value,
-                        _clock.Frequency,
-                        _clock.OriginTimestamp,
-                        RuntimeInformation.OSDescription,
-                        RuntimeInformation.FrameworkDescription,
-                        RuntimeInformation.ProcessArchitecture.ToString(),
-                        CaptureSettings(options)),
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-                _sink = new TeeEventSink(_writer, _databaseRecording.Writer);
-            }
+            _databaseRecording = await _database.BeginRecordingAsync(
+                new RecordingDefinition(
+                    _sessionId,
+                    _startedUtc.Value,
+                    _clock.Frequency,
+                    _clock.OriginTimestamp,
+                    RuntimeInformation.OSDescription,
+                    RuntimeInformation.FrameworkDescription,
+                    RuntimeInformation.ProcessArchitecture.ToString(),
+                    CaptureSettings(options)),
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+            _sink = _databaseRecording.Writer;
 
             _collectors.Clear();
             foreach (var collector in _collectorFactory(options))
@@ -232,25 +231,12 @@ public sealed class SessionCoordinator : IAsyncDisposable
             new { note = string.IsNullOrWhiteSpace(note) ? null : note.Trim() }));
     }
 
-    /// <summary>
-    /// The playback archive prepared during the last stop that requested it,
-    /// built from the same read of the event log that finalization validation
-    /// made. Null when the stop did not request playback.
-    /// </summary>
-    public SessionPlaybackArchive? FinalizedPlaybackArchive { get; private set; }
-
-    public Task<RecordingSessionStatus> StopAsync(
-        CancellationToken cancellationToken = default) =>
-        StopAsync(preparePlayback: false, cancellationToken);
-
     public async Task<RecordingSessionStatus> StopAsync(
-        bool preparePlayback,
         CancellationToken cancellationToken = default)
     {
         await _transitionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            FinalizedPlaybackArchive = null;
             ThrowIfDisposed();
             if (State != RecordingSessionState.Recording)
             {
@@ -282,89 +268,31 @@ public sealed class SessionCoordinator : IAsyncDisposable
 
             await RecordCollectorStatesAsync().ConfigureAwait(false);
             await DisposeCollectorsAsync().ConfigureAwait(false);
-            if (_writer is not null)
-            {
-                await _writer.DisposeAsync().ConfigureAwait(false);
-            }
-
-            // The database writer drains while the manifest and validation
-            // below read the session files.
-            var databaseWriting = _databaseRecording?.FinishWritingAsync();
             var endedUtc = DateTimeOffset.UtcNow;
-            var completion = failures.Count == 0 ? "completed" : "failed";
+
+            // Every event is in the database, or reported as not written,
+            // before the manifest states the recording's outcome and counts.
+            _written = await _databaseRecording!.FinishWritingAsync().ConfigureAwait(false);
+            var collectorFailure = failures.Count == 0
+                ? null
+                : string.Join(Environment.NewLine, failures);
+            failures.AddRange(DatabaseRecording.WritingFailures(_written));
             State = failures.Count == 0
                 ? RecordingSessionState.Completed
                 : RecordingSessionState.Failed;
             _message = failures.Count == 0
                 ? "Recording completed."
                 : string.Join(Environment.NewLine, failures);
-            // Hash every artifact exactly once: the event log and frames were
-            // hashed as they were written, and the rest are hashed here. The
-            // failure rewrite below reuses this inventory, and finalization
-            // validation skips the reread because these hashes describe the
-            // same files.
-            var artifacts = await BuildArtifactInventoryAsync(cancellationToken)
-                .ConfigureAwait(false);
             await WriteManifestAsync(
-                completion,
+                failures.Count == 0 ? "completed" : "failed",
                 endedUtc,
                 failures.Count == 0 ? null : _message,
-                cancellationToken,
-                artifacts).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
             DeleteRecordingMarker();
-            var playback = preparePlayback
-                ? new SessionPlaybackArchiveBuilder(_sessionDirectory!)
-                : null;
-            var validation = await SessionArchiveValidator.ValidateAsync(
-                _sessionDirectory!,
-                FinalizationValidation,
-                playback,
-                cancellationToken).ConfigureAwait(false);
-            if (!validation.IsValid)
-            {
-                State = RecordingSessionState.Failed;
-                _message = "Archive validation failed: " +
-                    string.Join(
-                        "; ",
-                        validation.Issues
-                            .Where(issue =>
-                                issue.Severity == ArchiveValidationSeverity.Error)
-                            .Take(5)
-                            .Select(issue => $"{issue.Code} at {issue.Path}"));
-                await WriteManifestAsync(
-                    "failed",
-                    endedUtc,
-                    _message,
-                    cancellationToken,
-                    artifacts).ConfigureAwait(false);
-                playback = preparePlayback
-                    ? new SessionPlaybackArchiveBuilder(_sessionDirectory!)
-                    : null;
-                validation = await SessionArchiveValidator.ValidateAsync(
-                    _sessionDirectory!,
-                    FinalizationValidation,
-                    playback,
-                    cancellationToken).ConfigureAwait(false);
-            }
-
-            await SessionArchiveValidator.WriteReportAsync(
-                _sessionDirectory!,
-                validation,
-                cancellationToken).ConfigureAwait(false);
-            if (databaseWriting is not null)
-            {
-                await databaseWriting.ConfigureAwait(false);
-            }
-
             await CompleteDatabaseRecordingAsync(
-                State == RecordingSessionState.Completed
-                    ? RecordingStatus.Completed
-                    : RecordingStatus.Failed,
+                collectorFailure is null ? RecordingStatus.Completed : RecordingStatus.Failed,
                 endedUtc,
-                State == RecordingSessionState.Completed ? null : _message).ConfigureAwait(false);
-            FinalizedPlaybackArchive = await BuildPlaybackAsync(
-                playback,
-                cancellationToken).ConfigureAwait(false);
+                collectorFailure).ConfigureAwait(false);
             return GetStatus();
         }
         finally
@@ -387,10 +315,6 @@ public sealed class SessionCoordinator : IAsyncDisposable
         else
         {
             await DisposeCollectorsAsync().ConfigureAwait(false);
-            if (_writer is not null)
-            {
-                await _writer.DisposeAsync().ConfigureAwait(false);
-            }
         }
 
         if (_databaseRecording is not null)
@@ -400,30 +324,6 @@ public sealed class SessionCoordinator : IAsyncDisposable
 
         _transitionLock.Dispose();
         _disposed = true;
-    }
-
-    // A playback archive that cannot be built leaves the property null, so
-    // the caller falls back to loading the archive itself and reports the
-    // failure there. Finalization has already written the manifest and
-    // validation report, and playback must not change the stop outcome.
-    private static async Task<SessionPlaybackArchive?> BuildPlaybackAsync(
-        SessionPlaybackArchiveBuilder? playback,
-        CancellationToken cancellationToken)
-    {
-        if (playback is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            return await playback.BuildAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (
-            exception is InvalidDataException or JsonException or IOException)
-        {
-            return null;
-        }
     }
 
     private static RecordingCaptureSettings CaptureSettings(RecordingOptions options) =>
@@ -521,11 +421,6 @@ public sealed class SessionCoordinator : IAsyncDisposable
         }
 
         await DisposeCollectorsAsync().ConfigureAwait(false);
-        if (_writer is not null)
-        {
-            await _writer.DisposeAsync().ConfigureAwait(false);
-        }
-
         await CompleteDatabaseRecordingAsync(
             RecordingStatus.Failed,
             DateTimeOffset.UtcNow,
@@ -538,14 +433,6 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 exception.ToString(),
                 CancellationToken.None).ConfigureAwait(false);
             DeleteRecordingMarker();
-            var validation = await SessionArchiveValidator.ValidateAsync(
-                _sessionDirectory,
-                FinalizationValidation,
-                CancellationToken.None).ConfigureAwait(false);
-            await SessionArchiveValidator.WriteReportAsync(
-                _sessionDirectory,
-                validation,
-                CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -614,8 +501,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 runtime.Collector.LifecycleState.ToString(),
                 runtime.Collector.HealthState.ToString())).ToArray(),
             artifacts,
-            _writer?.AcceptedCount ?? 0,
-            _writer?.DroppedCount ?? 0,
+            AcceptedCount(),
+            DroppedCount(),
             failure);
         await SessionManifestWriter.WriteAsync(
             Path.Combine(_sessionDirectory, "manifest.json"),
@@ -639,20 +526,17 @@ public sealed class SessionCoordinator : IAsyncDisposable
                      !string.Equals(
                          Path.GetFileName(path),
                          ".recording",
-                         StringComparison.OrdinalIgnoreCase) &&
-                     !string.Equals(
-                         Path.GetRelativePath(_sessionDirectory!, path).Replace('\\', '/'),
-                         SessionArchiveValidator.ReportRelativePath,
                          StringComparison.OrdinalIgnoreCase))
                  .Order(StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var relativePath = Path.GetRelativePath(_sessionDirectory!, path)
                 .Replace('\\', '/');
-            // A writer that hashed the file as it wrote it has already
-            // supplied the hash. Files no writer reported, such as logs
-            // written by other processes, or files changed since they were
-            // reported, are read and hashed here.
+            // A collector that hashed the file as it wrote it, as the frame
+            // collector does, has already supplied the hash. Files no
+            // collector reported, such as audio and logs written by other
+            // processes, or files changed since they were reported, are read
+            // and hashed here.
             if (_artifactHashes.TryGetUnchanged(path, out var writtenHash))
             {
                 artifacts.Add(new SessionArtifact(

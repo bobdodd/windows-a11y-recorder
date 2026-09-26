@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Recorder.Coordinator;
+using Recorder.Database;
 using Recorder.WindowsCapture;
 
 if (!OperatingSystem.IsWindows())
@@ -72,7 +73,21 @@ for (var index = 0; index < args.Length; index++)
             return 64;
     }
 }
-await using var coordinator = new SessionCoordinator(WindowsCollectorFactory.Create);
+// The capture host records to the same database as the app. Only one of
+// them can use it at a time.
+SessionDatabase database;
+try
+{
+    database = await SessionDatabase.StartAsync(RecorderDatabaseLocation.ForCurrentUser());
+}
+catch (Exception exception)
+{
+    Console.Error.WriteLine($"The database could not start. {exception.Message}");
+    return 4;
+}
+
+await using var databaseLifetime = database;
+await using var coordinator = new SessionCoordinator(WindowsCollectorFactory.Create, database);
 try
 {
     var status = await coordinator.StartAsync(new RecordingOptions
@@ -116,6 +131,18 @@ try
     Console.WriteLine(
         $"Stopped. Accepted {status.AcceptedEvents:N0} records; " +
         $"dropped {status.DroppedEvents:N0}.");
+    if (status.Database is { } stored)
+    {
+        Console.WriteLine(
+            $"Database: {stored.Written:N0} written, {stored.Rejected:N0} rejected, " +
+            $"{stored.Dropped:N0} dropped, {stored.Unwritten:N0} not written.");
+    }
+
+    if (status.State != RecordingSessionState.Completed)
+    {
+        Console.Error.WriteLine(status.Message);
+    }
+
     return status.State == RecordingSessionState.Completed ? 0 : 3;
 }
 catch (Exception exception)

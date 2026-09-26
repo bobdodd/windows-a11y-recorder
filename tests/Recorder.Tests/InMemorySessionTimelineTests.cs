@@ -165,6 +165,6 @@ public sealed class InMemorySessionTimelineTests
     private static InMemorySessionTimeline Build(IReadOnlyList<SessionTimelineEvent> events) =>
         new(events, events.Count == 0 ? 0 : events[^1].MonotonicNanoseconds);
 
-    private static SessionTimelineEvent Event(string channel, long time, long line) =>
-        new(line, Guid.NewGuid().ToString("N"), "observed", channel, "test", time, "", 0, 0);
+    private static SessionTimelineEvent Event(string channel, long time, long key) =>
+        new(key, Guid.NewGuid().ToString("N"), "observed", channel, "test", time, "");
 }

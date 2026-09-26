@@ -33,29 +33,26 @@ internal static class EventPayloadValidator
     /// <summary>Whether the recorder defines the channel.</summary>
     public static bool IsBuiltInChannel(string channel) => BuiltInChannels.Contains(channel);
 
+    /// <summary>
+    /// Checks one event's payload against its channel and event type.
+    /// Payloads on channels the recorder does not define are not checked.
+    /// </summary>
     public static void Validate(
-        JsonElement record,
-        ICollection<ArchiveValidationIssue> issues,
-        long lineNumber)
+        string channel,
+        string eventType,
+        JsonElement payload,
+        long monotonicNanoseconds,
+        ICollection<EventValidationIssue> issues)
     {
-        var channel = ReadString(record, "channel");
-        var eventType = ReadString(record, "eventType");
-        if (channel is null || eventType is null)
-        {
-            return;
-        }
-
-        if (!record.TryGetProperty("payload", out var payload) ||
-            payload.ValueKind != JsonValueKind.Object)
+        if (payload.ValueKind != JsonValueKind.Object)
         {
             if (BuiltInChannels.Contains(channel))
             {
                 AddError(
                     issues,
                     "event-payload-not-object",
-                    "events.ndjson#/payload",
-                    "Built-in event payloads must be JSON objects.",
-                    lineNumber);
+                    "#/payload",
+                    "Built-in event payloads must be JSON objects.");
             }
 
             return;
@@ -64,76 +61,73 @@ internal static class EventPayloadValidator
         switch ((channel, eventType))
         {
             case ("collector.lifecycle", "collector-lifecycle"):
-                ValidateLifecycle(payload, issues, lineNumber);
+                ValidateLifecycle(payload, issues);
                 break;
             case ("session.annotations", "session-marker"):
-                ValidateAnnotation(payload, issues, lineNumber);
+                ValidateAnnotation(payload, issues);
                 break;
             case ("input.keyboard", "raw-keyboard"):
-                ValidateRawKeyboard(payload, issues, lineNumber);
+                ValidateRawKeyboard(payload, issues);
                 break;
             case ("input.mouse", "raw-mouse"):
-                ValidateRawMouse(payload, issues, lineNumber);
+                ValidateRawMouse(payload, issues);
                 break;
             case ("window.foreground", "foreground-window"):
-                ValidateForegroundWindow(payload, issues, lineNumber);
+                ValidateForegroundWindow(payload, issues);
                 break;
             case ("accessibility.uia.events", "focus-changed"):
             case ("accessibility.uia.events", "automation-event"):
             case ("accessibility.uia.events", "structure-changed"):
             case ("accessibility.uia.events", "property-changed"):
-                ValidateUiaEvent(payload, issues, lineNumber);
+                ValidateUiaEvent(payload, issues);
                 break;
             case ("graphics.desktop.frames", "desktop-frame"):
-                ValidateDesktopFrame(payload, issues, lineNumber);
+                ValidateDesktopFrame(payload, issues);
                 break;
             case ("audio.microphone", "audio-stream-started"):
             case ("audio.microphone", "audio-stream-stopped"):
             case ("audio.system", "audio-stream-started"):
             case ("audio.system", "audio-stream-stopped"):
-                ValidateAudioStream(payload, issues, lineNumber);
+                ValidateAudioStream(payload, issues);
                 break;
             case ("audio.microphone", "audio-buffer"):
             case ("audio.system", "audio-buffer"):
-                ValidateAudioBuffer(payload, issues, lineNumber);
+                ValidateAudioBuffer(payload, issues);
                 break;
             case ("audio.microphone", "audio-stream-error"):
             case ("audio.system", "audio-stream-error"):
-                ValidateAudioError(payload, issues, lineNumber);
+                ValidateAudioError(payload, issues);
                 break;
             case ("browser.lifecycle", "browser-connected"):
-                ValidateBrowserConnected(payload, issues, lineNumber);
+                ValidateBrowserConnected(payload, issues);
                 break;
             case ("browser.lifecycle", "browser-exited"):
-                ValidateBrowserExited(payload, issues, lineNumber);
+                ValidateBrowserExited(payload, issues);
                 break;
             case ("browser.lifecycle", "browser-clock-synchronized"):
-                ValidateBrowserClockSynchronized(payload, issues, lineNumber);
+                ValidateBrowserClockSynchronized(payload, issues);
                 break;
             case ("browser.accessibility", "accessibility-checkpoint-started"):
                 ValidateBrowserAccessibilityCheckpointStarted(
                     payload,
-                    issues,
-                    lineNumber);
+                    issues);
                 break;
             case ("browser.accessibility", "accessibility-checkpoint-node"):
                 ValidateBrowserAccessibilityCheckpointNode(
                     payload,
-                    issues,
-                    lineNumber);
+                    issues);
                 break;
             case (
                 "browser.accessibility",
                 "accessibility-checkpoint-completed"):
                 ValidateBrowserAccessibilityCheckpointCompleted(
                     payload,
-                    issues,
-                    lineNumber);
+                    issues);
                 break;
             case ("browser.listener", "listener-registered"):
             case ("browser.listener", "listener-removed"):
             case ("browser.listener", "listener-callback-replaced"):
-                ValidateBrowserListener(payload, issues, lineNumber);
+                ValidateBrowserListener(payload, issues);
                 break;
             case ("browser.dispatch", "dispatch-started"):
             case ("browser.dispatch", "listener-invoked"):
@@ -141,151 +135,146 @@ internal static class EventPayloadValidator
                 ValidateBrowserDispatch(
                     payload,
                     issues,
-                    lineNumber,
                     requireDefaultAction: false);
                 break;
             case ("browser.dispatch", "default-action"):
                 ValidateBrowserDispatch(
                     payload,
                     issues,
-                    lineNumber,
                     requireDefaultAction: true);
                 break;
             case ("browser.timer", "timer-scheduled"):
             case ("browser.timer", "timer-fired"):
             case ("browser.timer", "timer-cancelled"):
-                ValidateBrowserTimer(payload, issues, lineNumber);
+                ValidateBrowserTimer(payload, issues);
                 break;
             case ("browser.scheduler", "wake-up-deferred"):
-                ValidateBrowserScheduler(payload, issues, lineNumber);
+                ValidateBrowserScheduler(payload, issues);
                 break;
             case ("browser.navigation", "navigation-started"):
                 ValidateBrowserNavigation(
                     payload,
                     issues,
-                    lineNumber,
                     completed: false);
                 break;
             case ("browser.navigation", "navigation-completed"):
                 ValidateBrowserNavigation(
                     payload,
                     issues,
-                    lineNumber,
                     completed: true);
                 break;
             case ("browser.dom", "dom-checkpoint-started"):
-                ValidateBrowserDomCheckpointStarted(payload, issues, lineNumber);
+                ValidateBrowserDomCheckpointStarted(payload, issues);
                 break;
             case ("browser.dom", "dom-checkpoint-node"):
-                ValidateBrowserDomCheckpointNode(payload, issues, lineNumber);
+                ValidateBrowserDomCheckpointNode(payload, issues);
                 break;
             case ("browser.dom", "dom-checkpoint-node-attribute"):
-                ValidateBrowserDomCheckpointNodeAttribute(payload, issues, lineNumber);
+                ValidateBrowserDomCheckpointNodeAttribute(payload, issues);
                 break;
             case ("browser.dom", "dom-checkpoint-shadow-root"):
-                ValidateBrowserDomCheckpointShadowRoot(payload, issues, lineNumber);
+                ValidateBrowserDomCheckpointShadowRoot(payload, issues);
                 break;
             case ("browser.dom", "dom-checkpoint-slot-assignment"):
-                ValidateBrowserDomCheckpointSlotAssignment(payload, issues, lineNumber);
+                ValidateBrowserDomCheckpointSlotAssignment(payload, issues);
                 break;
             case ("browser.dom", "dom-checkpoint-completed"):
-                ValidateBrowserDomCheckpointCompleted(payload, issues, lineNumber);
+                ValidateBrowserDomCheckpointCompleted(payload, issues);
                 break;
             case ("browser.dom", "dom-attribute-changed"):
-                ValidateBrowserDomAttributeChanged(payload, issues, lineNumber);
+                ValidateBrowserDomAttributeChanged(payload, issues);
                 break;
             case ("browser.dom", "dom-character-data-changed"):
-                ValidateBrowserDomCharacterDataChanged(payload, issues, lineNumber);
+                ValidateBrowserDomCharacterDataChanged(payload, issues);
                 break;
             case ("browser.cookie", "document-cookie-read"):
-                ValidateBrowserDocumentCookieRead(payload, issues, lineNumber);
+                ValidateBrowserDocumentCookieRead(payload, issues);
                 break;
             case ("browser.cookie", "document-cookie-write"):
-                ValidateBrowserDocumentCookieWrite(payload, issues, lineNumber);
+                ValidateBrowserDocumentCookieWrite(payload, issues);
                 break;
             case ("browser.cookie", "cookie-store-request"):
-                ValidateBrowserCookieStoreRequest(payload, issues, lineNumber);
+                ValidateBrowserCookieStoreRequest(payload, issues);
                 break;
             case ("browser.cookie", "cookie-store-result"):
-                ValidateBrowserCookieStoreResult(payload, issues, lineNumber);
+                ValidateBrowserCookieStoreResult(payload, issues);
                 break;
             case ("browser.cookie", "cookie-store-change"):
-                ValidateBrowserCookieStoreChange(payload, issues, lineNumber);
+                ValidateBrowserCookieStoreChange(payload, issues);
                 break;
             case ("browser.cookie", "cookie-access"):
-                ValidateBrowserCookieAccess(payload, issues, lineNumber);
+                ValidateBrowserCookieAccess(payload, issues);
                 break;
             case ("browser.interaction", "focus-changed"):
-                ValidateBrowserFocusChanged(payload, issues, lineNumber);
+                ValidateBrowserFocusChanged(payload, issues);
                 break;
             case ("browser.interaction", "selection-changed"):
-                ValidateBrowserSelectionChanged(payload, issues, lineNumber);
+                ValidateBrowserSelectionChanged(payload, issues);
                 break;
             case ("browser.interaction", "text-control-value-changed"):
-                ValidateBrowserTextControlValueChanged(payload, issues, lineNumber);
+                ValidateBrowserTextControlValueChanged(payload, issues);
                 break;
             case ("browser.interaction", "active-descendant-reference-set"):
                 ValidateBrowserActiveDescendantReferenceSet(
-                    payload, issues, lineNumber);
+                    payload, issues);
                 break;
             case ("browser.interaction", "interaction-checkpoint-started"):
                 ValidateBrowserInteractionCheckpointStarted(
-                    payload, issues, lineNumber);
+                    payload, issues);
                 break;
             case ("browser.interaction", "interaction-checkpoint-text-control"):
                 ValidateBrowserInteractionCheckpointTextControl(
-                    payload, issues, lineNumber);
+                    payload, issues);
                 break;
             case ("browser.interaction", "interaction-checkpoint-completed"):
                 ValidateBrowserInteractionCheckpointCompleted(
-                    payload, issues, lineNumber);
+                    payload, issues);
                 break;
             case ("browser.layout", "layout-checkpoint-started"):
-                ValidateBrowserLayoutCheckpointStarted(payload, issues, lineNumber);
+                ValidateBrowserLayoutCheckpointStarted(payload, issues);
                 break;
             case ("browser.layout", "layout-checkpoint-node"):
-                ValidateBrowserLayoutCheckpointNode(payload, issues, lineNumber);
+                ValidateBrowserLayoutCheckpointNode(payload, issues);
                 break;
             case ("browser.layout", "layout-checkpoint-completed"):
-                ValidateBrowserLayoutCheckpointCompleted(payload, issues, lineNumber);
+                ValidateBrowserLayoutCheckpointCompleted(payload, issues);
                 break;
             case ("browser.presentation", "presentation-requested"):
-                ValidateBrowserPresentationRequested(payload, issues, lineNumber);
+                ValidateBrowserPresentationRequested(payload, issues);
                 break;
             case ("browser.presentation", "presentation-not-swapped"):
-                ValidateBrowserPresentationNotSwapped(payload, issues, lineNumber);
+                ValidateBrowserPresentationNotSwapped(payload, issues);
                 break;
             case ("browser.presentation", "presentation-swapped"):
-                ValidateBrowserPresentationSwapped(payload, issues, lineNumber);
+                ValidateBrowserPresentationSwapped(payload, issues);
                 break;
             case ("browser.presentation", "presentation-feedback"):
-                ValidateBrowserPresentationFeedback(payload, issues, lineNumber);
+                ValidateBrowserPresentationFeedback(payload, issues);
                 break;
             case ("browser.network", "request-will-be-sent"):
-                ValidateBrowserNetworkRequestWillBeSent(payload, issues, lineNumber);
+                ValidateBrowserNetworkRequestWillBeSent(payload, issues);
                 break;
             case ("browser.network", "response-received"):
-                ValidateBrowserNetworkResponseReceived(payload, issues, lineNumber);
+                ValidateBrowserNetworkResponseReceived(payload, issues);
                 break;
             case ("browser.network", "request-finished"):
-                ValidateBrowserNetworkRequestFinished(payload, issues, lineNumber);
+                ValidateBrowserNetworkRequestFinished(payload, issues);
                 break;
             case ("browser.network", "request-failed"):
-                ValidateBrowserNetworkRequestFailed(payload, issues, lineNumber);
+                ValidateBrowserNetworkRequestFailed(payload, issues);
                 break;
             case ("browser.network", "memory-cache-hit"):
-                ValidateBrowserNetworkMemoryCacheHit(payload, issues, lineNumber);
+                ValidateBrowserNetworkMemoryCacheHit(payload, issues);
                 break;
             case ("browser.network", "request-headers-sent"):
             case ("browser.network", "response-headers-received"):
                 ValidateBrowserNetworkWireHeaders(
                     payload,
                     eventType == "response-headers-received",
-                    issues,
-                    lineNumber);
+                    issues);
                 break;
             case ("browser.network", "navigation-response"):
-                ValidateBrowserNetworkNavigationResponse(payload, issues, lineNumber);
+                ValidateBrowserNetworkNavigationResponse(payload, issues);
                 break;
             case ("browser.network", "websocket-created"):
             case ("browser.network", "websocket-handshake-request"):
@@ -300,16 +289,16 @@ internal static class EventPayloadValidator
             case ("browser.network", "web-transport-established"):
             case ("browser.network", "web-transport-close-requested"):
             case ("browser.network", "web-transport-closed"):
-                ValidateBrowserNetworkRealtime(payload, eventType, issues, lineNumber);
+                ValidateBrowserNetworkRealtime(payload, eventType, issues);
                 break;
             case ("accessibility.uia.events", "collector-omission"):
-                ValidateUiaOmission(record, payload, issues, lineNumber);
+                ValidateUiaOmission(monotonicNanoseconds, payload, issues);
                 break;
             case ("window.foreground", "collector-omission"):
             case ("graphics.desktop.frames", "collector-omission"):
             case ("audio.microphone", "collector-omission"):
             case ("audio.system", "collector-omission"):
-                ValidateOmission(payload, issues, lineNumber);
+                ValidateOmission(payload, issues);
                 break;
             case ("browser.lifecycle", "collector-omission"):
             case ("browser.accessibility", "collector-omission"):
@@ -324,7 +313,7 @@ internal static class EventPayloadValidator
             case ("browser.layout", "collector-omission"):
             case ("browser.presentation", "collector-omission"):
             case ("browser.network", "collector-omission"):
-                ValidateBrowserOmission(payload, issues, lineNumber);
+                ValidateBrowserOmission(payload, issues);
                 break;
             default:
                 if (BuiltInChannels.Contains(channel))
@@ -332,9 +321,8 @@ internal static class EventPayloadValidator
                     AddError(
                         issues,
                         "event-type-unsupported",
-                        "events.ndjson#/eventType",
-                        $"Event type '{eventType}' is not defined for built-in channel '{channel}'.",
-                        lineNumber);
+                        "#/eventType",
+                        $"Event type '{eventType}' is not defined for built-in channel '{channel}'.");
                 }
 
                 break;
@@ -343,8 +331,7 @@ internal static class EventPayloadValidator
 
     private static void ValidateLifecycle(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -352,23 +339,19 @@ internal static class EventPayloadValidator
                 RequiredString("state"),
                 RequiredDateTime("utc")
             ],
-            issues,
-            line);
+            issues);
 
     private static void ValidateAnnotation(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [NullableString("note")],
-            issues,
-            line);
+            issues);
 
     private static void ValidateRawKeyboard(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -379,13 +362,11 @@ internal static class EventPayloadValidator
                 RequiredInteger("message", nonnegative: true),
                 RequiredInteger("extraInformation", nonnegative: true)
             ],
-            issues,
-            line);
+            issues);
 
     private static void ValidateRawMouse(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -401,13 +382,11 @@ internal static class EventPayloadValidator
                 RequiredInteger("cursorY"),
                 RequiredInteger("foregroundProcessId", nonnegative: true)
             ],
-            issues,
-            line);
+            issues);
 
     private static void ValidateForegroundWindow(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -430,17 +409,15 @@ internal static class EventPayloadValidator
                 NullableObject("bounds"),
                 NullableObject("monitor")
             ],
-            issues,
-            line);
+            issues);
 
-        ValidateOptionalObject(payload, "bounds", ValidateIntegerRectangle, issues, line);
-        ValidateOptionalObject(payload, "monitor", ValidateMonitor, issues, line);
+        ValidateOptionalObject(payload, "bounds", ValidateIntegerRectangle, issues);
+        ValidateOptionalObject(payload, "monitor", ValidateMonitor, issues);
     }
 
     private static void ValidateUiaEvent(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -451,8 +428,7 @@ internal static class EventPayloadValidator
                 NullableString("newValue"),
                 RequiredObject("element")
             ],
-            issues,
-            line);
+            issues);
 
         if (payload.TryGetProperty("element", out var element) &&
             element.ValueKind == JsonValueKind.Object)
@@ -477,22 +453,19 @@ internal static class EventPayloadValidator
                     RequiredStringArray("qualityFlags")
                 ],
                 issues,
-                line,
-                "events.ndjson#/payload/element");
+                "#/payload/element");
             ValidateOptionalObject(
                 element,
                 "boundingRectangle",
                 ValidateNumberRectangle,
                 issues,
-                line,
-                "events.ndjson#/payload/element");
+                "#/payload/element");
         }
     }
 
     private static void ValidateDesktopFrame(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -515,9 +488,8 @@ internal static class EventPayloadValidator
                 OptionalNullableEnum("frameSelection", "newest-arrived"),
                 OptionalObjectArray("monitorFrames")
             ],
-            issues,
-            line);
-        ValidateDesktopMonitorFrames(payload, issues, line);
+            issues);
+        ValidateDesktopMonitorFrames(payload, issues);
     }
 
     // Archives written before per-monitor composition timing omit
@@ -526,8 +498,7 @@ internal static class EventPayloadValidator
     // none, because GDI has no composition time.
     private static void ValidateDesktopMonitorFrames(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty("monitorFrames", out var monitorFrames) ||
             monitorFrames.ValueKind != JsonValueKind.Array)
@@ -549,16 +520,15 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "desktop-frame-selection-inconsistent",
-                "events.ndjson#/payload/frameSelection",
+                "#/payload/frameSelection",
                 "Only a Windows Graphics Capture frame has a frame selection; " +
-                    "a GDI fallback frame must leave it null.",
-                line);
+                    "a GDI fallback frame must leave it null.");
         }
 
         var index = 0;
         foreach (var monitorFrame in monitorFrames.EnumerateArray())
         {
-            var pointer = $"events.ndjson#/payload/monitorFrames/{index}";
+            var pointer = $"#/payload/monitorFrames/{index}";
             index++;
             if (monitorFrame.ValueKind != JsonValueKind.Object)
             {
@@ -581,7 +551,6 @@ internal static class EventPayloadValidator
                     OptionalNullableBoolean("reusedPreviousImage")
                 ],
                 issues,
-                line,
                 pointer);
 
             var timed = new[]
@@ -605,8 +574,7 @@ internal static class EventPayloadValidator
                         ? "A Windows Graphics Capture frame must state the " +
                             "composition time and dequeue attempts of every monitor image."
                         : "A GDI fallback frame has no composition time, so its " +
-                            "monitor entries must leave the timing fields null.",
-                    line);
+                            "monitor entries must leave the timing fields null.");
             }
 
             var selectionStated = new[] { "supersededFrameCount", "reusedPreviousImage" }
@@ -626,8 +594,7 @@ internal static class EventPayloadValidator
                             "for every monitor, how many arrived frames it released " +
                             "and whether it reused the previous image."
                         : "Only a frame that keeps the newest arrived image states " +
-                            "released frames and image reuse.",
-                    line);
+                            "released frames and image reuse.");
             }
 
             if (monitorFrame.TryGetProperty("reusedPreviousImage", out var reused) &&
@@ -641,8 +608,7 @@ internal static class EventPayloadValidator
                     "desktop-monitor-frame-selection-inconsistent",
                     pointer,
                     "A reused image means no frame arrived since the previous " +
-                        "capture, so no arrived frame can have been released.",
-                    line);
+                        "capture, so no arrived frame can have been released.");
             }
 
             // The composition time is not ordered with the dequeue time.
@@ -660,17 +626,15 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "desktop-monitor-frame-count-inconsistent",
-                "events.ndjson#/payload/monitorFrames",
+                "#/payload/monitorFrames",
                 $"The frame records {monitorFrames.GetArrayLength()} monitor " +
-                    $"images for {count} captured monitors.",
-                line);
+                    $"images for {count} captured monitors.");
         }
     }
 
     private static void ValidateAudioStream(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -688,8 +652,7 @@ internal static class EventPayloadValidator
                 OptionalNullableNumber("rmsAmplitude", nonnegative: true),
                 OptionalNullableNumber("rmsDbfs")
             ],
-            issues,
-            line);
+            issues);
 
         if (payload.TryGetProperty("format", out var format) &&
             format.ValueKind == JsonValueKind.Object)
@@ -705,15 +668,13 @@ internal static class EventPayloadValidator
                     RequiredInteger("averageBytesPerSecond", positive: true)
                 ],
                 issues,
-                line,
-                "events.ndjson#/payload/format");
+                "#/payload/format");
         }
     }
 
     private static void ValidateAudioBuffer(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -727,13 +688,11 @@ internal static class EventPayloadValidator
                 RequiredInteger("estimatedFirstSampleMonotonicNanoseconds", nonnegative: true),
                 RequiredInteger("callbackMonotonicNanoseconds", nonnegative: true)
             ],
-            issues,
-            line);
+            issues);
 
     private static void ValidateAudioError(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -741,8 +700,7 @@ internal static class EventPayloadValidator
                 NullableString("errorType"),
                 NullableString("message")
             ],
-            issues,
-            line);
+            issues);
 
     // A lifecycle record states which process connected and what it spoke. The
     // receiver already requires a browser process to carry neither a parent nor
@@ -750,8 +708,7 @@ internal static class EventPayloadValidator
     // present here and null for the browser process rather than absent.
     private static void ValidateBrowserConnected(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -763,8 +720,7 @@ internal static class EventPayloadValidator
                 NullableInteger("parentProcessId", nonnegative: true),
                 NullableInteger("childProcessId", nonnegative: true)
             ],
-            issues,
-            line);
+            issues);
 
     // The exit code is the process exit status Windows reports, which is signed
     // here and also given as the unsigned hexadecimal form Windows status codes
@@ -772,8 +728,7 @@ internal static class EventPayloadValidator
     // report it.
     private static void ValidateBrowserExited(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -784,8 +739,7 @@ internal static class EventPayloadValidator
                 NullableDateTime("exitedUtc"),
                 RequiredBoolean("requestedByRecorder")
             ],
-            issues,
-            line);
+            issues);
 
     // The clock record carries the mapping identity and the uncertainty the
     // recorder estimated for it, which is a nonnegative half round trip rather
@@ -793,8 +747,7 @@ internal static class EventPayloadValidator
     // because it does not fit a JSON number on every platform.
     private static void ValidateBrowserClockSynchronized(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -808,13 +761,11 @@ internal static class EventPayloadValidator
                 RequiredString("monotonicFrequency"),
                 RequiredInteger("uncertaintyNanoseconds", nonnegative: true)
             ],
-            issues,
-            line);
+            issues);
 
     private static void ValidateBrowserAccessibilityCheckpointStarted(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -826,16 +777,14 @@ internal static class EventPayloadValidator
                 RequiredInteger("updateCount", nonnegative: true),
                 RequiredInteger("eventCount", nonnegative: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererTokenContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererTokenContext(payload, issues);
     }
 
     private static void ValidateBrowserAccessibilityCheckpointNode(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -853,16 +802,14 @@ internal static class EventPayloadValidator
                 RequiredText("serializedProperties"),
                 RequiredBoolean("focused")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererTokenContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererTokenContext(payload, issues);
     }
 
     private static void ValidateBrowserAccessibilityCheckpointCompleted(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -876,16 +823,14 @@ internal static class EventPayloadValidator
                 RequiredInteger("updateCount", nonnegative: true),
                 RequiredInteger("eventCount", nonnegative: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererTokenContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererTokenContext(payload, issues);
     }
 
     private static void ValidateBrowserListener(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -907,20 +852,18 @@ internal static class EventPayloadValidator
                 NullableObject("world"),
                 OptionalObject("scope")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateBrowserEventTargetProperty(payload, "target", issues, line);
-        ValidateBrowserLocationProperty(payload, issues, line);
-        ValidateBrowserExecutionWorldProperty(payload, issues, line);
-        ValidateNetworkScopeProperty(payload, issues, line);
-        ValidateBrowserEventScope(payload, ["target"], issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserEventTargetProperty(payload, "target", issues);
+        ValidateBrowserLocationProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
+        ValidateNetworkScopeProperty(payload, issues);
+        ValidateBrowserEventScope(payload, ["target"], issues);
     }
 
     private static void ValidateBrowserDispatch(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         bool requireDefaultAction)
     {
         ValidateShape(
@@ -956,19 +899,17 @@ internal static class EventPayloadValidator
                 RequiredObjectArray("pathScopes"),
                 OptionalObject("scope")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateBrowserEventTargetProperty(payload, "originalTarget", issues, line);
-        ValidateBrowserEventTargetProperty(payload, "currentTarget", issues, line);
-        ValidateBrowserEventTargetArrayProperty(payload, "composedPath", issues, line);
-        ValidateBrowserDispatchPathScopes(payload, issues, line);
-        ValidateNetworkScopeProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserEventTargetProperty(payload, "originalTarget", issues);
+        ValidateBrowserEventTargetProperty(payload, "currentTarget", issues);
+        ValidateBrowserEventTargetArrayProperty(payload, "composedPath", issues);
+        ValidateBrowserDispatchPathScopes(payload, issues);
+        ValidateNetworkScopeProperty(payload, issues);
         ValidateBrowserEventScope(
             payload,
             ["originalTarget", "currentTarget", "composedPath"],
-            issues,
-            line);
+            issues);
     }
 
     private static readonly string[] DocumentFreeScopeKinds =
@@ -984,8 +925,7 @@ internal static class EventPayloadValidator
     private static void ValidateBrowserEventScope(
         JsonElement payload,
         IReadOnlyList<string> targetProperties,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         string? scopeKind = null;
         if (payload.TryGetProperty("scope", out var scope) &&
@@ -1004,9 +944,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-event-scope-inconsistent",
-                "events.ndjson#/payload/context/documentId",
-                $"A record in a {scopeKind} scope belongs to no document.",
-                line);
+                "#/payload/context/documentId",
+                $"A record in a {scopeKind} scope belongs to no document.");
         }
 
         foreach (var property in targetProperties)
@@ -1018,7 +957,7 @@ internal static class EventPayloadValidator
 
             if (value.ValueKind == JsonValueKind.Object)
             {
-                CheckTarget(value, $"events.ndjson#/payload/{property}");
+                CheckTarget(value, $"#/payload/{property}");
             }
             else if (value.ValueKind == JsonValueKind.Array)
             {
@@ -1029,7 +968,7 @@ internal static class EventPayloadValidator
                     {
                         CheckTarget(
                             entry,
-                            $"events.ndjson#/payload/{property}/{index}");
+                            $"#/payload/{property}/{index}");
                     }
                     index++;
                 }
@@ -1046,8 +985,7 @@ internal static class EventPayloadValidator
                     issues,
                     "browser-event-scope-inconsistent",
                     $"{path}/documentId",
-                    $"A target in a {scopeKind} scope belongs to no document.",
-                    line);
+                    $"A target in a {scopeKind} scope belongs to no document.");
             }
             else if (documentFree && kind != "other")
             {
@@ -1055,8 +993,7 @@ internal static class EventPayloadValidator
                     issues,
                     "browser-event-scope-inconsistent",
                     path,
-                    $"A {scopeKind} scope has no {kind} event target.",
-                    line);
+                    $"A {scopeKind} scope has no {kind} event target.");
             }
             else if (!documentFree && !hasDocument)
             {
@@ -1066,8 +1003,7 @@ internal static class EventPayloadValidator
                     $"{path}/documentId",
                     scopeKind is null
                         ? "A record that names no scope must name its document."
-                        : $"A target in a {scopeKind} scope must name its document.",
-                    line);
+                        : $"A target in a {scopeKind} scope must name its document.");
             }
         }
     }
@@ -1076,8 +1012,7 @@ internal static class EventPayloadValidator
     // every visible path index names an entry of the recorded path.
     private static void ValidateBrowserDispatchPathScopes(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty("pathScopes", out var scopes) ||
             scopes.ValueKind != JsonValueKind.Array ||
@@ -1093,17 +1028,16 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-dispatch-path-scopes-inconsistent",
-                "events.ndjson#/payload/pathScopes",
+                "#/payload/pathScopes",
                 $"The dispatch records {scopes.GetArrayLength()} path scopes " +
-                    $"for a composed path of {pathLength} entries.",
-                line);
+                    $"for a composed path of {pathLength} entries.");
             return;
         }
 
         var index = 0;
         foreach (var scope in scopes.EnumerateArray())
         {
-            var pointer = $"events.ndjson#/payload/pathScopes/{index}";
+            var pointer = $"#/payload/pathScopes/{index}";
             ValidateShape(
                 scope,
                 [
@@ -1125,7 +1059,6 @@ internal static class EventPayloadValidator
                     RequiredInteger("unmatchedVisibleTargetCount", nonnegative: true)
                 ],
                 issues,
-                line,
                 pointer);
             if (HasNonnullProperty(scope, "shadowRootMode") &&
                 !HasNonnullProperty(scope, "treeScopeRootNodeId"))
@@ -1135,8 +1068,7 @@ internal static class EventPayloadValidator
                     "browser-dispatch-path-scopes-inconsistent",
                     pointer,
                     "A shadow root mode was recorded without the shadow root " +
-                        "that roots the scope.",
-                    line);
+                        "that roots the scope.");
             }
             index++;
         }
@@ -1144,8 +1076,7 @@ internal static class EventPayloadValidator
 
     private static void ValidateBrowserTimer(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1173,20 +1104,17 @@ internal static class EventPayloadValidator
                 NullableString("cancellationReason"),
                 OptionalNullableBoolean("didTimeout")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
         ValidateBrowserLocationProperty(
             payload,
             issues,
-            line,
             "callbackLocation");
     }
 
     private static void ValidateBrowserScheduler(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1211,9 +1139,8 @@ internal static class EventPayloadValidator
                     "decisionBoundary",
                     "task-queue-throttler")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
 
         var desiredText = ReadString(payload, "desiredWakeUpTicks");
         var allowedText = ReadString(payload, "allowedWakeUpTicks");
@@ -1225,9 +1152,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-scheduler-wake-up-order-invalid",
-                "events.ndjson#/payload",
-                "Scheduler wake-up ticks must be nonnegative decimal integers with allowedWakeUpTicks greater than desiredWakeUpTicks.",
-                line);
+                "#/payload",
+                "Scheduler wake-up ticks must be nonnegative decimal integers with allowedWakeUpTicks greater than desiredWakeUpTicks.");
         }
     }
 
@@ -1258,19 +1184,17 @@ internal static class EventPayloadValidator
 
     private static void ValidateInteractionCommon(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
-        ValidateBrowserLocationProperty(payload, issues, line);
-        ValidateBrowserExecutionWorldProperty(payload, issues, line);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateBrowserLocationProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
     }
 
     private static void ValidateBrowserFocusChanged(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1289,9 +1213,8 @@ internal static class EventPayloadValidator
                 NullableObject("location"),
                 NullableObject("world")
             ],
-            issues,
-            line);
-        ValidateInteractionCommon(payload, issues, line);
+            issues);
+        ValidateInteractionCommon(payload, issues);
 
         var requested = ReadNullableInteger(payload, "requestedNodeId");
         var focused = ReadNullableInteger(payload, "focusedNodeId");
@@ -1306,10 +1229,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-focus-outcome-inconsistent",
-                "events.ndjson#/payload/outcome",
+                "#/payload/outcome",
                 $"Outcome '{outcome}' does not follow from the requested and " +
-                    $"focused nodes, which give '{expected}'.",
-                line);
+                    $"focused nodes, which give '{expected}'.");
         }
         if (focused is null &&
             ReadNullableInteger(payload, "activeDescendantNodeId") is not null)
@@ -1317,16 +1239,14 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-focus-active-descendant-without-focus",
-                "events.ndjson#/payload/activeDescendantNodeId",
-                "An active descendant is reported while no element is focused.",
-                line);
+                "#/payload/activeDescendantNodeId",
+                "An active descendant is reported while no element is focused.");
         }
     }
 
     private static void ValidateBrowserSelectionChanged(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1346,9 +1266,8 @@ internal static class EventPayloadValidator
                 NullableObject("location"),
                 NullableObject("world")
             ],
-            issues,
-            line);
-        ValidateInteractionCommon(payload, issues, line);
+            issues);
+        ValidateInteractionCommon(payload, issues);
 
         var selectionType = ReadString(payload, "selectionType");
         if (selectionType is not null)
@@ -1361,8 +1280,7 @@ internal static class EventPayloadValidator
                 "browser-selection-positions-inconsistent",
                 $"Selection positions must be present exactly when the " +
                     $"selection type is not 'none'; it is '{selectionType}'.",
-                issues,
-                line);
+                issues);
         }
         string[] textControl =
         [
@@ -1379,22 +1297,19 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-selection-text-control-inconsistent",
-                "events.ndjson#/payload/textControlNodeId",
-                "Text-control selection fields must be all present or all null.",
-                line);
+                "#/payload/textControlNodeId",
+                "Text-control selection fields must be all present or all null.");
         }
         ValidateOrderedRange(
             payload,
             "textControlSelectionStart",
             "textControlSelectionEnd",
-            issues,
-            line);
+            issues);
     }
 
     private static void ValidateBrowserTextControlValueChanged(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1413,13 +1328,12 @@ internal static class EventPayloadValidator
                 NullableObject("location"),
                 NullableObject("world")
             ],
-            issues,
-            line);
-        ValidateInteractionCommon(payload, issues, line);
+            issues);
+        ValidateInteractionCommon(payload, issues);
         ValidateTruncatedText(
-            payload, "value", "valueLength", "valueTruncated", issues, line);
+            payload, "value", "valueLength", "valueTruncated", issues);
         ValidateOrderedRange(
-            payload, "selectionStart", "selectionEnd", issues, line);
+            payload, "selectionStart", "selectionEnd", issues);
         var value = ReadString(payload, "value");
         var maximum = ReadNullableInteger(payload, "maximumValueLength");
         if (value is not null && maximum is not null && value.Length > maximum)
@@ -1427,17 +1341,15 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-text-control-value-over-maximum",
-                "events.ndjson#/payload/value",
+                "#/payload/value",
                 $"The recorded value holds {value.Length} units, more than " +
-                    $"the stated maximum of {maximum}.",
-                line);
+                    $"the stated maximum of {maximum}.");
         }
     }
 
     private static void ValidateBrowserActiveDescendantReferenceSet(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1448,9 +1360,8 @@ internal static class EventPayloadValidator
                 NullableObject("location"),
                 NullableObject("world")
             ],
-            issues,
-            line);
-        ValidateInteractionCommon(payload, issues, line);
+            issues);
+        ValidateInteractionCommon(payload, issues);
     }
 
     // Checkpoint identities are "<prefix><sequence>" with a positive decimal
@@ -1464,8 +1375,7 @@ internal static class EventPayloadValidator
 
     private static void ValidateInteractionCheckpointIdentity(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         var checkpointId = ReadString(payload, "checkpointId");
         if (checkpointId is not null &&
@@ -1474,16 +1384,14 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-interaction-checkpoint-id-invalid",
-                "events.ndjson#/payload/checkpointId",
-                $"'{checkpointId}' is not an interaction checkpoint identity.",
-                line);
+                "#/payload/checkpointId",
+                $"'{checkpointId}' is not an interaction checkpoint identity.");
         }
     }
 
     private static void ValidateBrowserInteractionCheckpointStarted(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1509,11 +1417,10 @@ internal static class EventPayloadValidator
                 RequiredInteger("maximumTextControls", positive: true),
                 RequiredInteger("maximumValueLength", positive: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
-        ValidateInteractionCheckpointIdentity(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateInteractionCheckpointIdentity(payload, issues);
 
         var sourceChannel = ReadString(payload, "sourceChannel");
         var reason = ReadString(payload, "reason");
@@ -1532,10 +1439,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-interaction-checkpoint-source-invalid",
-                "events.ndjson#/payload/sourceCheckpointId",
+                "#/payload/sourceCheckpointId",
                 $"'{sourceCheckpointId}' is not a checkpoint identity of the " +
-                    $"'{sourceChannel}' channel.",
-                line);
+                    $"'{sourceChannel}' channel.");
         }
         if (sourcePrefix is not null && reason is not null &&
             !sourceReasons.Contains(reason))
@@ -1543,10 +1449,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-interaction-checkpoint-reason-inconsistent",
-                "events.ndjson#/payload/reason",
+                "#/payload/reason",
                 $"Reason '{reason}' is not one the '{sourceChannel}' channel " +
-                    "records.",
-                line);
+                    "records.");
         }
 
         var focused = ReadNullableInteger(payload, "focusedNodeId");
@@ -1556,9 +1461,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-interaction-checkpoint-active-descendant-without-focus",
-                "events.ndjson#/payload/activeDescendantNodeId",
-                "An active descendant is reported while no element is focused.",
-                line);
+                "#/payload/activeDescendantNodeId",
+                "An active descendant is reported while no element is focused.");
         }
         if (focused is null &&
             payload.TryGetProperty("focusVisible", out var focusVisible) &&
@@ -1567,9 +1471,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-interaction-checkpoint-focus-visible-without-focus",
-                "events.ndjson#/payload/focusVisible",
-                "Focus is reported visible while no element is focused.",
-                line);
+                "#/payload/focusVisible",
+                "Focus is reported visible while no element is focused.");
         }
 
         var selectionType = ReadString(payload, "selectionType");
@@ -1582,15 +1485,13 @@ internal static class EventPayloadValidator
                 "browser-interaction-checkpoint-selection-inconsistent",
                 $"Selection positions must be present exactly when the " +
                     $"selection type is not 'none'; it is '{selectionType}'.",
-                issues,
-                line);
+                issues);
         }
     }
 
     private static void ValidateBrowserInteractionCheckpointTextControl(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1607,21 +1508,19 @@ internal static class EventPayloadValidator
                 RequiredInteger("selectionEnd", nonnegative: true),
                 RequiredEnum("selectionDirection", SelectionDirections)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
-        ValidateInteractionCheckpointIdentity(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateInteractionCheckpointIdentity(payload, issues);
         ValidateTruncatedText(
-            payload, "value", "valueLength", "valueTruncated", issues, line);
+            payload, "value", "valueLength", "valueTruncated", issues);
         ValidateOrderedRange(
-            payload, "selectionStart", "selectionEnd", issues, line);
+            payload, "selectionStart", "selectionEnd", issues);
     }
 
     private static void ValidateBrowserInteractionCheckpointCompleted(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1632,11 +1531,10 @@ internal static class EventPayloadValidator
                 RequiredBoolean("truncated"),
                 RequiredInteger("maximumTextControls", positive: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
-        ValidateInteractionCheckpointIdentity(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateInteractionCheckpointIdentity(payload, issues);
         var count = ReadNullableInteger(payload, "textControlCount");
         var maximum = ReadNullableInteger(payload, "maximumTextControls");
         if (count is not null && maximum is not null && count > maximum)
@@ -1644,10 +1542,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-interaction-checkpoint-count-over-maximum",
-                "events.ndjson#/payload/textControlCount",
+                "#/payload/textControlCount",
                 $"The checkpoint reports {count} text controls, more than " +
-                    $"the stated maximum of {maximum}.",
-                line);
+                    $"the stated maximum of {maximum}.");
         }
     }
 
@@ -1670,8 +1567,7 @@ internal static class EventPayloadValidator
 
     private static void ValidateBrowserNetworkRequestWillBeSent(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1684,15 +1580,14 @@ internal static class EventPayloadValidator
                 NullableObject("location"),
                 NullableObject("world")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateNetworkScopeProperty(payload, issues, line);
-        ValidateBrowserLocationProperty(payload, issues, line);
-        ValidateBrowserExecutionWorldProperty(payload, issues, line);
-        ValidateOptionalObject(payload, "request", ValidateNetworkRequest, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateNetworkScopeProperty(payload, issues);
+        ValidateBrowserLocationProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
+        ValidateOptionalObject(payload, "request", ValidateNetworkRequest, issues);
         ValidateOptionalObject(
-            payload, "redirectResponse", ValidateNetworkResponse, issues, line);
+            payload, "redirectResponse", ValidateNetworkResponse, issues);
 
         var redirect = payload.TryGetProperty("redirect", out var redirectValue) &&
             redirectValue.ValueKind == JsonValueKind.True;
@@ -1701,16 +1596,14 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-network-redirect-response",
-                "events.ndjson#/payload/redirectResponse",
-                "A redirect reports its redirect response and a first request reports none.",
-                line);
+                "#/payload/redirectResponse",
+                "A redirect reports its redirect response and a first request reports none.");
         }
     }
 
     private static void ValidateBrowserNetworkResponseReceived(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1722,18 +1615,16 @@ internal static class EventPayloadValidator
                 RequiredEnum("responseSource", "memory-cache", "loader"),
                 RequiredObject("response")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateNetworkScopeProperty(payload, issues, line);
-        ValidateInspectorId(payload, issues, line);
-        ValidateOptionalObject(payload, "response", ValidateNetworkResponse, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateNetworkScopeProperty(payload, issues);
+        ValidateInspectorId(payload, issues);
+        ValidateOptionalObject(payload, "response", ValidateNetworkResponse, issues);
     }
 
     private static void ValidateBrowserNetworkRequestFinished(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1745,17 +1636,15 @@ internal static class EventPayloadValidator
                 RequiredNumber("decodedBodyLength", nonnegative: true),
                 RequiredNullableNumber("finishBeforeRecordMilliseconds")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateNetworkScopeProperty(payload, issues, line);
-        ValidateInspectorId(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateNetworkScopeProperty(payload, issues);
+        ValidateInspectorId(payload, issues);
     }
 
     private static void ValidateBrowserNetworkRequestFailed(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1777,28 +1666,24 @@ internal static class EventPayloadValidator
                 NullableString("blockedReason"),
                 NullableObject("corsError")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateNetworkScopeProperty(payload, issues, line);
-        ValidateInspectorId(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateNetworkScopeProperty(payload, issues);
+        ValidateInspectorId(payload, issues);
         ValidateOptionalObject(
             payload,
             "corsError",
-            (value, list, number, path) => ValidateShape(
+            (value, list, path) => ValidateShape(
                 value,
                 [RequiredString("error"), NullableString("failedParameter")],
                 list,
-                number,
                 path),
-            issues,
-            line);
+            issues);
     }
 
     private static void ValidateBrowserNetworkMemoryCacheHit(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1809,19 +1694,17 @@ internal static class EventPayloadValidator
                 RequiredObject("request"),
                 RequiredObject("response")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateNetworkScopeProperty(payload, issues, line);
-        ValidateOptionalObject(payload, "request", ValidateNetworkRequest, issues, line);
-        ValidateOptionalObject(payload, "response", ValidateNetworkResponse, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateNetworkScopeProperty(payload, issues);
+        ValidateOptionalObject(payload, "request", ValidateNetworkRequest, issues);
+        ValidateOptionalObject(payload, "response", ValidateNetworkResponse, issues);
     }
 
     private static void ValidateBrowserNetworkWireHeaders(
         JsonElement payload,
         bool response,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         List<PropertyRule> rules =
         [
@@ -1839,16 +1722,15 @@ internal static class EventPayloadValidator
             response
                 ? RequiredInteger("status", nonnegative: true)
                 : RequiredNullableNumber("sentBeforeRecordMilliseconds"));
-        ValidateShape(payload, rules, issues, line);
-        ValidateBrowserContextProperty(payload, issues, line);
+        ValidateShape(payload, rules, issues);
+        ValidateBrowserContextProperty(payload, issues);
         ValidateNetworkHeaders(
             payload,
             "headers",
             "headerCount",
             "headersTruncated",
             issues,
-            line,
-            "events.ndjson#/payload");
+            "#/payload");
 
         if (payload.TryGetProperty("cookies", out var cookies) &&
             cookies.ValueKind == JsonValueKind.Array)
@@ -1858,20 +1740,19 @@ internal static class EventPayloadValidator
             {
                 if (cookie.ValueKind == JsonValueKind.Object)
                 {
-                    ValidateCookieAccessEntry(cookie, index, issues, line);
+                    ValidateCookieAccessEntry(cookie, index, issues);
                 }
 
                 index++;
             }
 
-            ValidateCookieNameCount(payload, "cookies", "cookiesTruncated", issues, line);
+            ValidateCookieNameCount(payload, "cookies", "cookiesTruncated", issues);
         }
     }
 
     private static void ValidateBrowserNetworkNavigationResponse(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -1895,21 +1776,19 @@ internal static class EventPayloadValidator
                 NullableObject("response"),
                 NullableObject("timing")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
         ValidateNetworkHeaders(
             payload,
             "requestHeaders",
             "requestHeaderCount",
             "requestHeadersTruncated",
             issues,
-            line,
-            "events.ndjson#/payload");
+            "#/payload");
         ValidateOptionalObject(
             payload,
             "response",
-            (value, list, number, path) =>
+            (value, list, path) =>
             {
                 ValidateShape(
                     value,
@@ -1925,19 +1804,17 @@ internal static class EventPayloadValidator
                         RequiredBoolean("headersTruncated")
                     ],
                     list,
-                    number,
                     path);
                 ValidateOptionalObject(
-                    value, "remoteAddress", ValidateNetworkRemoteAddress, list, number, path);
+                    value, "remoteAddress", ValidateNetworkRemoteAddress, list, path);
                 ValidateNetworkHeaders(
-                    value, "headers", "headerCount", "headersTruncated", list, number, path);
+                    value, "headers", "headerCount", "headersTruncated", list, path);
             },
-            issues,
-            line);
+            issues);
         ValidateOptionalObject(
             payload,
             "timing",
-            (value, list, number, path) => ValidateNetworkTiming(
+            (value, list, path) => ValidateNetworkTiming(
                 value,
                 "navigationStartBeforeRecordMilliseconds",
                 [
@@ -1950,10 +1827,8 @@ internal static class EventPayloadValidator
                     "finalRequestConnectEnd", "finalRequestSslStart"
                 ],
                 list,
-                number,
                 path),
-            issues,
-            line);
+            issues);
     }
 
     // The most UTF-16 code units a recorded message, event field, or close
@@ -1967,8 +1842,7 @@ internal static class EventPayloadValidator
     private static void ValidateBrowserNetworkRealtime(
         JsonElement payload,
         string eventType,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         List<PropertyRule> rules =
         [
@@ -2052,19 +1926,19 @@ internal static class EventPayloadValidator
                 break;
         }
 
-        ValidateShape(payload, rules, issues, line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateNetworkScopeProperty(payload, issues, line);
+        ValidateShape(payload, rules, issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateNetworkScopeProperty(payload, issues);
         if (scriptCall)
         {
-            ValidateBrowserLocationProperty(payload, issues, line);
-            ValidateBrowserExecutionWorldProperty(payload, issues, line);
+            ValidateBrowserLocationProperty(payload, issues);
+            ValidateBrowserExecutionWorldProperty(payload, issues);
         }
 
-        ValidateRealtimeId(payload, transport ? "transportId" : "inspectorId", issues, line);
+        ValidateRealtimeId(payload, transport ? "transportId" : "inspectorId", issues);
         foreach (var property in textProperties)
         {
-            ValidateOptionalObject(payload, property, ValidateRealtimeText, issues, line);
+            ValidateOptionalObject(payload, property, ValidateRealtimeText, issues);
         }
 
         if (payload.TryGetProperty("headers", out _))
@@ -2075,13 +1949,12 @@ internal static class EventPayloadValidator
                 "headerCount",
                 "headersTruncated",
                 issues,
-                line,
-                "events.ndjson#/payload");
+                "#/payload");
         }
 
         ValidateOptionalObject(
-            payload, "remoteAddress", ValidateNetworkRemoteAddress, issues, line);
-        ValidateRealtimeConsistency(payload, eventType, issues, line);
+            payload, "remoteAddress", ValidateNetworkRemoteAddress, issues);
+        ValidateRealtimeConsistency(payload, eventType, issues);
     }
 
     private static void AddRealtimeHeaderRules(List<PropertyRule> rules)
@@ -2106,8 +1979,7 @@ internal static class EventPayloadValidator
     private static void ValidateRealtimeId(
         JsonElement payload,
         string property,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         var id = ReadString(payload, property);
         if (id is not null && !ulong.TryParse(
@@ -2119,9 +1991,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-network-inspector-id-invalid",
-                $"events.ndjson#/payload/{property}",
-                $"{property} must be an unsigned decimal integer string.",
-                line);
+                $"#/payload/{property}",
+                $"{property} must be an unsigned decimal integer string.");
         }
     }
 
@@ -2129,8 +2000,7 @@ internal static class EventPayloadValidator
     // reported, in order, where the text carries the withheld marker.
     private static void ValidateRealtimeText(
         JsonElement value,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path)
     {
         ValidateShape(
@@ -2141,7 +2011,6 @@ internal static class EventPayloadValidator
                 RequiredObjectArray("withheld")
             ],
             issues,
-            line,
             path);
         var text = ReadString(value, "text");
         if (text is null)
@@ -2155,8 +2024,7 @@ internal static class EventPayloadValidator
                 issues,
                 "browser-network-text-too-long",
                 $"{path}/text",
-                $"A recorded text holds at most {RealtimeTextLimit} UTF-16 code units.",
-                line);
+                $"A recorded text holds at most {RealtimeTextLimit} UTF-16 code units.");
         }
 
         if (!value.TryGetProperty("withheld", out var withheld) ||
@@ -2183,7 +2051,6 @@ internal static class EventPayloadValidator
                     RequiredEnum("reason", RealtimeWithheldReasons)
                 ],
                 issues,
-                line,
                 partPath);
             if (!part.TryGetProperty("offset", out var offsetValue) ||
                 !offsetValue.TryGetInt32(out var offset) || offset < 0)
@@ -2201,8 +2068,7 @@ internal static class EventPayloadValidator
                     issues,
                     "browser-network-withheld-offset",
                     $"{partPath}/offset",
-                    "A withheld part is reported in order at an offset where the text holds the withheld marker.",
-                    line);
+                    "A withheld part is reported in order at an offset where the text holds the withheld marker.");
                 continue;
             }
 
@@ -2213,8 +2079,7 @@ internal static class EventPayloadValidator
     private static void ValidateRealtimeConsistency(
         JsonElement payload,
         string eventType,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         string? problem = null;
         string property = "payload";
@@ -2267,21 +2132,19 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-network-realtime-inconsistent",
-                $"events.ndjson#/payload/{property}",
-                problem,
-                line);
+                $"#/payload/{property}",
+                problem);
         }
     }
 
     private static void ValidateNetworkScopeProperty(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateOptionalObject(
             payload,
             "scope",
-            (value, list, number, path) =>
+            (value, list, path) =>
             {
                 ValidateShape(
                     value,
@@ -2291,7 +2154,6 @@ internal static class EventPayloadValidator
                         NullableString("globalObjectUrl")
                     ],
                     list,
-                    number,
                     path);
                 if (ReadString(value, "contextKind") == "window" &&
                     HasNonnullProperty(value, "workerToken"))
@@ -2300,19 +2162,16 @@ internal static class EventPayloadValidator
                         list,
                         "browser-network-scope-invalid",
                         $"{path}/workerToken",
-                        "A window scope carries no worker token.",
-                        number);
+                        "A window scope carries no worker token.");
                 }
             },
-            issues,
-            line);
+            issues);
     }
 
     private static void ValidateInspectorId(
         JsonElement value,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
-        string path = "events.ndjson#/payload")
+        ICollection<EventValidationIssue> issues,
+        string path = "#/payload")
     {
         var id = ReadString(value, "inspectorId");
         if (id is not null && !ulong.TryParse(
@@ -2325,15 +2184,13 @@ internal static class EventPayloadValidator
                 issues,
                 "browser-network-inspector-id-invalid",
                 $"{path}/inspectorId",
-                "An inspector id must be an unsigned decimal integer string.",
-                line);
+                "An inspector id must be an unsigned decimal integer string.");
         }
     }
 
     private static void ValidateNetworkRequest(
         JsonElement value,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path)
     {
         ValidateShape(
@@ -2366,13 +2223,12 @@ internal static class EventPayloadValidator
                 RequiredBoolean("headersTruncated")
             ],
             issues,
-            line,
             path);
-        ValidateInspectorId(value, issues, line, path);
+        ValidateInspectorId(value, issues, path);
         ValidateOptionalObject(
             value,
             "initiator",
-            (initiator, list, number, initiatorPath) => ValidateShape(
+            (initiator, list, initiatorPath) => ValidateShape(
                 initiator,
                 [
                     NullableString("type"),
@@ -2382,19 +2238,16 @@ internal static class EventPayloadValidator
                     RequiredBoolean("linkPreload")
                 ],
                 list,
-                number,
                 initiatorPath),
             issues,
-            line,
             path);
         ValidateNetworkHeaders(
-            value, "headers", "headerCount", "headersTruncated", issues, line, path);
+            value, "headers", "headerCount", "headersTruncated", issues, path);
     }
 
     private static void ValidateNetworkResponse(
         JsonElement value,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path)
     {
         ValidateShape(
@@ -2427,16 +2280,15 @@ internal static class EventPayloadValidator
                 NullableObject("timing")
             ],
             issues,
-            line,
             path);
         ValidateOptionalObject(
-            value, "remoteAddress", ValidateNetworkRemoteAddress, issues, line, path);
+            value, "remoteAddress", ValidateNetworkRemoteAddress, issues, path);
         ValidateNetworkHeaders(
-            value, "headers", "headerCount", "headersTruncated", issues, line, path);
+            value, "headers", "headerCount", "headersTruncated", issues, path);
         ValidateOptionalObject(
             value,
             "timing",
-            (timing, list, number, timingPath) => ValidateNetworkTiming(
+            (timing, list, timingPath) => ValidateNetworkTiming(
                 timing,
                 "requestStartBeforeRecordMilliseconds",
                 [
@@ -2450,17 +2302,14 @@ internal static class EventPayloadValidator
                     "pushStart", "pushEnd", "responseEnd"
                 ],
                 list,
-                number,
                 timingPath),
             issues,
-            line,
             path);
     }
 
     private static void ValidateNetworkRemoteAddress(
         JsonElement value,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path) =>
         ValidateShape(
             value,
@@ -2475,20 +2324,18 @@ internal static class EventPayloadValidator
                     "must be an integer from 0 to 65535")
             ],
             issues,
-            line,
             path);
 
     private static void ValidateNetworkTiming(
         JsonElement value,
         string startProperty,
         IReadOnlyList<string> phases,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path)
     {
         List<PropertyRule> rules = [RequiredNullableNumber(startProperty)];
         rules.AddRange(phases.Select(phase => RequiredNullableNumber(phase)));
-        ValidateShape(value, rules, issues, line, path);
+        ValidateShape(value, rules, issues, path);
     }
 
     // Checks one header list against its count and truncation flag, and checks
@@ -2499,8 +2346,7 @@ internal static class EventPayloadValidator
         string listProperty,
         string countProperty,
         string truncatedProperty,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path)
     {
         if (!parent.TryGetProperty(listProperty, out var list) ||
@@ -2528,7 +2374,6 @@ internal static class EventPayloadValidator
                     NullableEnum("redactionReason", NetworkRedactionReasons)
                 ],
                 issues,
-                line,
                 headerPath);
             var redacted = header.TryGetProperty("valueRedacted", out var redactedValue) &&
                 redactedValue.ValueKind == JsonValueKind.True;
@@ -2540,8 +2385,7 @@ internal static class EventPayloadValidator
                     issues,
                     "browser-network-header-redaction",
                     headerPath,
-                    "A withheld header value is null with a reason, and a recorded one has no reason.",
-                    line);
+                    "A withheld header value is null with a reason, and a recorded one has no reason.");
             }
 
             var name = ReadString(header, "name");
@@ -2551,8 +2395,7 @@ internal static class EventPayloadValidator
                     issues,
                     "browser-network-credential-header-value",
                     $"{headerPath}/value",
-                    $"The value of a '{name}' header must not be recorded.",
-                    line);
+                    $"The value of a '{name}' header must not be recorded.");
             }
         }
 
@@ -2571,15 +2414,13 @@ internal static class EventPayloadValidator
                 issues,
                 "browser-network-header-count",
                 $"{path}/{listProperty}",
-                $"{countProperty} must equal the listed headers unless the list is marked truncated, in which case it must exceed them.",
-                line);
+                $"{countProperty} must equal the listed headers unless the list is marked truncated, in which case it must exceed them.");
         }
     }
 
     private static void ValidateBrowserLayoutCheckpointStarted(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -2597,10 +2438,9 @@ internal static class EventPayloadValidator
                 RequiredInteger("maximumNodes", positive: true),
                 RequiredStringArray("styleProperties")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
         if (payload.TryGetProperty("viewport", out var viewport) &&
             viewport.ValueKind == JsonValueKind.Object)
         {
@@ -2611,8 +2451,7 @@ internal static class EventPayloadValidator
                     RequiredNumber("height", nonnegative: true)
                 ],
                 issues,
-                line,
-                "events.ndjson#/payload/viewport");
+                "#/payload/viewport");
         }
         if (payload.TryGetProperty("scrollOffset", out var scroll) &&
             scroll.ValueKind == JsonValueKind.Object)
@@ -2621,8 +2460,7 @@ internal static class EventPayloadValidator
                 scroll,
                 [RequiredNumber("x"), RequiredNumber("y")],
                 issues,
-                line,
-                "events.ndjson#/payload/scrollOffset");
+                "#/payload/scrollOffset");
         }
         var previous = ReadString(payload, "previousCheckpointId");
         if (previous is not null && previous == ReadString(payload, "checkpointId"))
@@ -2630,9 +2468,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-layout-checkpoint-previous-self",
-                "events.ndjson#/payload/previousCheckpointId",
-                "A layout checkpoint names itself as its previous checkpoint.",
-                line);
+                "#/payload/previousCheckpointId",
+                "A layout checkpoint names itself as its previous checkpoint.");
         }
         if (payload.TryGetProperty("styleProperties", out var properties) &&
             properties.ValueKind == JsonValueKind.Array)
@@ -2646,17 +2483,15 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-layout-style-properties-invalid",
-                    "events.ndjson#/payload/styleProperties",
-                    "The style property list must be nonempty and hold no duplicates.",
-                    line);
+                    "#/payload/styleProperties",
+                    "The style property list must be nonempty and hold no duplicates.");
             }
         }
     }
 
     private static void ValidateBrowserLayoutCheckpointNode(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -2684,20 +2519,18 @@ internal static class EventPayloadValidator
                 NullableInteger("shadowHostNodeId", positive: true),
                 NullableEnum("shadowRootMode", "open", "closed", "user-agent")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
-        ValidateBrowserLayoutPseudoElement(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateBrowserLayoutPseudoElement(payload, issues);
         if (HasNonnullProperty(payload, "shadowHostNodeId") !=
             HasNonnullProperty(payload, "shadowRootMode"))
         {
             AddError(
                 issues,
                 "browser-layout-shadow-scope-inconsistent",
-                "events.ndjson#/payload/shadowHostNodeId",
-                "A shadow host and a shadow root mode must be recorded together.",
-                line);
+                "#/payload/shadowHostNodeId",
+                "A shadow host and a shadow root mode must be recorded together.");
         }
 
         var hasRect = payload.TryGetProperty("boundingClientRect", out var rect) &&
@@ -2713,8 +2546,7 @@ internal static class EventPayloadValidator
                     RequiredNumber("height", nonnegative: true)
                 ],
                 issues,
-                line,
-                "events.ndjson#/payload/boundingClientRect");
+                "#/payload/boundingClientRect");
         }
         if (payload.TryGetProperty("layoutObjectPresent", out var layoutObject) &&
             IsBoolean(layoutObject) &&
@@ -2723,10 +2555,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-layout-rect-inconsistent",
-                "events.ndjson#/payload/boundingClientRect",
+                "#/payload/boundingClientRect",
                 "A bounding rectangle must be present exactly when the node has " +
-                    "a layout object.",
-                line);
+                    "a layout object.");
         }
         if (ReadString(payload, "nodeType") == "text")
         {
@@ -2737,10 +2568,9 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-layout-text-node-inconsistent",
-                    "events.ndjson#/payload/nodeType",
+                    "#/payload/nodeType",
                     "A text node record must have a layout object and no " +
-                        "computed style.",
-                    line);
+                        "computed style.");
             }
         }
     }
@@ -2749,8 +2579,7 @@ internal static class EventPayloadValidator
     // other record does.
     private static void ValidateBrowserLayoutPseudoElement(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         var isPseudo = ReadString(payload, "nodeType") == "pseudo-element";
         var hasPseudo = payload.TryGetProperty("pseudoElement", out var pseudo) &&
@@ -2760,17 +2589,16 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-layout-pseudo-element-inconsistent",
-                "events.ndjson#/payload/pseudoElement",
+                "#/payload/pseudoElement",
                 "A pseudo-element description must be present exactly when the " +
-                    "record is a pseudo-element.",
-                line);
+                    "record is a pseudo-element.");
         }
         if (!hasPseudo)
         {
             return;
         }
 
-        const string pointer = "events.ndjson#/payload/pseudoElement";
+        const string pointer = "#/payload/pseudoElement";
         ValidateShape(
             pseudo,
             [
@@ -2781,21 +2609,18 @@ internal static class EventPayloadValidator
                 RequiredBoolean("generatedTextTruncated")
             ],
             issues,
-            line,
             pointer);
         ValidateTruncatedText(
             pseudo,
             "generatedText",
             "generatedTextLength",
             "generatedTextTruncated",
-            issues,
-            line);
+            issues);
     }
 
     private static void ValidateBrowserLayoutCheckpointCompleted(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -2809,10 +2634,9 @@ internal static class EventPayloadValidator
                 RequiredInteger("pseudoElementCount", nonnegative: true),
                 RequiredInteger("shadowRootCount", nonnegative: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
         var count = ReadNullableInteger(payload, "nodeCount");
         var maximum = ReadNullableInteger(payload, "maximumNodes");
         if (count is not null && maximum is not null && count > maximum)
@@ -2820,10 +2644,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-layout-node-count-over-maximum",
-                "events.ndjson#/payload/nodeCount",
+                "#/payload/nodeCount",
                 $"The checkpoint reports {count} nodes, more than the stated " +
-                    $"maximum of {maximum}.",
-                line);
+                    $"maximum of {maximum}.");
         }
         var pseudoCount = ReadNullableInteger(payload, "pseudoElementCount");
         if (count is not null && pseudoCount is not null && pseudoCount > count)
@@ -2831,10 +2654,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-layout-pseudo-element-count-over-node-count",
-                "events.ndjson#/payload/pseudoElementCount",
+                "#/payload/pseudoElementCount",
                 $"The checkpoint reports {pseudoCount} pseudo-elements among " +
-                    $"{count} nodes.",
-                line);
+                    $"{count} nodes.");
         }
     }
 
@@ -2941,11 +2763,10 @@ internal static class EventPayloadValidator
 
     private static void ValidatePresentationBase(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
         var requestId = ReadString(payload, "requestId");
         if (requestId is not null &&
             !IsCheckpointIdentity(requestId, "presentation-request-"))
@@ -2953,9 +2774,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-request-id-invalid",
-                "events.ndjson#/payload/requestId",
-                $"'{requestId}' is not a presentation request identity.",
-                line);
+                "#/payload/requestId",
+                $"'{requestId}' is not a presentation request identity.");
         }
         if (payload.TryGetProperty("localRootFrameToken", out var token) &&
             token.ValueKind == JsonValueKind.String &&
@@ -2964,16 +2784,14 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-frame-token-empty",
-                "events.ndjson#/payload/localRootFrameToken",
-                "A named local root must carry a nonempty frame token.",
-                line);
+                "#/payload/localRootFrameToken",
+                "A named local root must carry a nonempty frame token.");
         }
     }
 
     private static void ValidateBrowserPresentationRequested(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -2987,9 +2805,8 @@ internal static class EventPayloadValidator
                 RequiredBoolean("highResolutionTicks"),
                 RequiredInteger("maximumNotSwappedRecords", positive: true)
             ],
-            issues,
-            line);
-        ValidatePresentationBase(payload, issues, line);
+            issues);
+        ValidatePresentationBase(payload, issues);
         var checkpointId = ReadString(payload, "layoutCheckpointId");
         if (checkpointId is not null &&
             !IsCheckpointIdentity(checkpointId, "layout-checkpoint-"))
@@ -2997,9 +2814,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-checkpoint-id-invalid",
-                "events.ndjson#/payload/layoutCheckpointId",
-                $"'{checkpointId}' is not a layout checkpoint identity.",
-                line);
+                "#/payload/layoutCheckpointId",
+                $"'{checkpointId}' is not a layout checkpoint identity.");
         }
         if (!payload.TryGetProperty("queued", out var queuedValue) ||
             !IsBoolean(queuedValue))
@@ -3028,19 +2844,17 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-request-inconsistent",
-                "events.ndjson#/payload",
+                "#/payload",
                 "A queued request names its widget and source frame number " +
                     "with no reason; a request without a widget names none; " +
                     "a request on a widget that does not composite names the " +
-                    "widget but no frame number.",
-                line);
+                    "widget but no frame number.");
         }
     }
 
     private static void ValidateBrowserPresentationNotSwapped(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3058,9 +2872,8 @@ internal static class EventPayloadValidator
                 NullablePositiveDecimalText("timestampTicks"),
                 NullablePositiveDecimalText("timestampTimeTicksMicroseconds")
             ],
-            issues,
-            line);
-        ValidatePresentationBase(payload, issues, line);
+            issues);
+        ValidatePresentationBase(payload, issues);
         var reason = ReadString(payload, "reason");
         var action = ReadString(payload, "action");
         // The promise breaks on the reasons Chromium's own presentation-time
@@ -3072,9 +2885,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-not-swapped-action-inconsistent",
-                "events.ndjson#/payload/action",
-                $"A '{reason}' outcome cannot be '{action}'.",
-                line);
+                "#/payload/action",
+                $"A '{reason}' outcome cannot be '{action}'.");
         }
         var index = ReadNullableInteger(payload, "notSwappedIndex");
         var count = ReadNullableInteger(payload, "notSwappedCount");
@@ -3083,9 +2895,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-not-swapped-count-inconsistent",
-                "events.ndjson#/payload/notSwappedCount",
-                "The count of not-swapped calls must be one more than the index.",
-                line);
+                "#/payload/notSwappedCount",
+                "The count of not-swapped calls must be one more than the index.");
         }
         if (HasNonnullProperty(payload, "timestampTicks") &&
             !HasNonnullProperty(payload, "timestampTimeTicksMicroseconds"))
@@ -3093,17 +2904,15 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-ticks-without-time",
-                "events.ndjson#/payload/timestampTicks",
+                "#/payload/timestampTicks",
                 "A counter value is derived from Chromium's time, so it cannot " +
-                    "appear without it.",
-                line);
+                    "appear without it.");
         }
     }
 
     private static void ValidateBrowserPresentationSwapped(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3112,15 +2921,13 @@ internal static class EventPayloadValidator
                 RequiredFrameToken("frameToken"),
                 RequiredInteger("notSwappedCount", nonnegative: true)
             ],
-            issues,
-            line);
-        ValidatePresentationBase(payload, issues, line);
+            issues);
+        ValidatePresentationBase(payload, issues);
     }
 
     private static void ValidateBrowserPresentationFeedback(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3138,9 +2945,8 @@ internal static class EventPayloadValidator
                 RequiredBoolean("highResolutionTicks"),
                 RequiredInteger("notSwappedCount", nonnegative: true)
             ],
-            issues,
-            line);
-        ValidatePresentationBase(payload, issues, line);
+            issues);
+        ValidatePresentationBase(payload, issues);
         if (payload.TryGetProperty("flags", out var flags) &&
             flags.ValueKind == JsonValueKind.Array)
         {
@@ -3158,10 +2964,9 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-presentation-feedback-flags-invalid",
-                    "events.ndjson#/payload/flags",
+                    "#/payload/flags",
                     "Feedback flags must be distinct names of " +
-                        "gfx::PresentationFeedback flags.",
-                    line);
+                        "gfx::PresentationFeedback flags.");
             }
         }
         if (payload.TryGetProperty("highResolutionTicks", out var highResolution) &&
@@ -3171,9 +2976,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-ticks-without-high-resolution",
-                "events.ndjson#/payload",
-                "Counter values are derived only from a high-resolution clock.",
-                line);
+                "#/payload",
+                "Counter values are derived only from a high-resolution clock.");
         }
         if (HasNonnullProperty(payload, "presentedTicks") &&
             !HasNonnullProperty(payload, "presentedTimeTicksMicroseconds"))
@@ -3181,10 +2985,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-presentation-ticks-without-time",
-                "events.ndjson#/payload/presentedTicks",
+                "#/payload/presentedTicks",
                 "A counter value is derived from Chromium's time, so it cannot " +
-                    "appear without it.",
-                line);
+                    "appear without it.");
         }
     }
 
@@ -3201,8 +3004,7 @@ internal static class EventPayloadValidator
         bool present,
         string code,
         string message,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         var consistent = properties.All(property =>
             (payload.TryGetProperty(property, out var value) &&
@@ -3212,9 +3014,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 code,
-                $"events.ndjson#/payload/{properties[0]}",
-                message,
-                line);
+                $"#/payload/{properties[0]}",
+                message);
         }
     }
 
@@ -3222,8 +3023,7 @@ internal static class EventPayloadValidator
         JsonElement payload,
         string startProperty,
         string endProperty,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         var start = ReadNullableInteger(payload, startProperty);
         var end = ReadNullableInteger(payload, endProperty);
@@ -3232,17 +3032,15 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-selection-range-reversed",
-                $"events.ndjson#/payload/{endProperty}",
+                $"#/payload/{endProperty}",
                 $"Property '{endProperty}' ({end}) precedes " +
-                    $"'{startProperty}' ({start}).",
-                line);
+                    $"'{startProperty}' ({start}).");
         }
     }
 
     private static void ValidateBrowserDocumentCookieRead(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3264,19 +3062,17 @@ internal static class EventPayloadValidator
                 NullableObject("location"),
                 NullableObject("world")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateBrowserLocationProperty(payload, issues, line);
-        ValidateBrowserExecutionWorldProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserLocationProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
         ValidateCookieNameCount(
-            payload, "cookieNames", "cookieNamesTruncated", issues, line);
+            payload, "cookieNames", "cookieNamesTruncated", issues);
     }
 
     private static void ValidateBrowserDocumentCookieWrite(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3295,18 +3091,16 @@ internal static class EventPayloadValidator
                 NullableObject("location"),
                 NullableObject("world")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateBrowserLocationProperty(payload, issues, line);
-        ValidateBrowserExecutionWorldProperty(payload, issues, line);
-        ValidateCookieWriteAttributes(payload, documentCookie: true, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserLocationProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
+        ValidateCookieWriteAttributes(payload, documentCookie: true, issues);
     }
 
     private static void ValidateBrowserCookieStoreRequest(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3322,11 +3116,10 @@ internal static class EventPayloadValidator
                 NullableObject("location"),
                 NullableObject("world")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateBrowserLocationProperty(payload, issues, line);
-        ValidateBrowserExecutionWorldProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserLocationProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
 
         var write = payload.TryGetProperty("method", out var method) &&
             method.ValueKind == JsonValueKind.String &&
@@ -3338,21 +3131,19 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-cookie-store-attributes",
-                "events.ndjson#/payload/attributes",
-                "A Cookie Store write reports its attributes and a read reports null attributes.",
-                line);
+                "#/payload/attributes",
+                "A Cookie Store write reports its attributes and a read reports null attributes.");
         }
 
         if (hasAttributes)
         {
-            ValidateCookieWriteAttributes(payload, documentCookie: false, issues, line);
+            ValidateCookieWriteAttributes(payload, documentCookie: false, issues);
         }
     }
 
     private static void ValidateBrowserCookieStoreResult(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3366,9 +3157,8 @@ internal static class EventPayloadValidator
                 NullableTextArray("cookieNames"),
                 NullableBoolean("cookieNamesTruncated")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
 
         var read = payload.TryGetProperty("method", out var method) &&
             method.ValueKind == JsonValueKind.String &&
@@ -3382,22 +3172,20 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-cookie-store-result-shape",
-                "events.ndjson#/payload",
-                "A Cookie Store read result reports cookie names and a write result reports success.",
-                line);
+                "#/payload",
+                "A Cookie Store read result reports cookie names and a write result reports success.");
         }
 
         if (hasNames)
         {
             ValidateCookieNameCount(
-                payload, "cookieNames", "cookieNamesTruncated", issues, line);
+                payload, "cookieNames", "cookieNamesTruncated", issues);
         }
     }
 
     private static void ValidateBrowserCookieStoreChange(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3410,15 +3198,13 @@ internal static class EventPayloadValidator
                 RequiredString("cause"),
                 RequiredBoolean("dispatched")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
     }
 
     private static void ValidateBrowserCookieAccess(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3437,9 +3223,8 @@ internal static class EventPayloadValidator
                 RequiredObjectArray("cookies"),
                 RequiredBoolean("cookiesTruncated")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
 
         var navigationObserver = payload.TryGetProperty("observer", out var observer) &&
             observer.ValueKind == JsonValueKind.String &&
@@ -3449,9 +3234,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-cookie-access-observer",
-                "events.ndjson#/payload/navigationId",
-                "A navigation-observed cookie access names its navigation and a frame-observed one does not.",
-                line);
+                "#/payload/navigationId",
+                "A navigation-observed cookie access names its navigation and a frame-observed one does not.");
         }
 
         if (!payload.TryGetProperty("cookies", out var cookies) ||
@@ -3465,22 +3249,21 @@ internal static class EventPayloadValidator
         {
             if (cookie.ValueKind == JsonValueKind.Object)
             {
-                ValidateCookieAccessEntry(cookie, index, issues, line);
+                ValidateCookieAccessEntry(cookie, index, issues);
             }
 
             index++;
         }
 
-        ValidateCookieNameCount(payload, "cookies", "cookiesTruncated", issues, line);
+        ValidateCookieNameCount(payload, "cookies", "cookiesTruncated", issues);
     }
 
     private static void ValidateCookieAccessEntry(
         JsonElement cookie,
         int index,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
-        var path = $"events.ndjson#/payload/cookies/{index}";
+        var path = $"#/payload/cookies/{index}";
         ValidateShape(
             cookie,
             [
@@ -3501,7 +3284,6 @@ internal static class EventPayloadValidator
                 NullableString("exemptionReason")
             ],
             issues,
-            line,
             path);
 
         var parsed = cookie.TryGetProperty("parsed", out var parsedValue) &&
@@ -3519,8 +3301,7 @@ internal static class EventPayloadValidator
                     issues,
                     "browser-cookie-access-entry-shape",
                     $"{path}/{attribute}",
-                    "A parsed cookie reports every attribute and an unparsed Set-Cookie line reports none.",
-                    line);
+                    "A parsed cookie reports every attribute and an unparsed Set-Cookie line reports none.");
             }
         }
     }
@@ -3528,8 +3309,7 @@ internal static class EventPayloadValidator
     private static void ValidateCookieWriteAttributes(
         JsonElement payload,
         bool documentCookie,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty("attributes", out var attributes) ||
             attributes.ValueKind != JsonValueKind.Object)
@@ -3557,8 +3337,7 @@ internal static class EventPayloadValidator
             attributes,
             rules,
             issues,
-            line,
-            "events.ndjson#/payload/attributes");
+            "#/payload/attributes");
     }
 
     // A cookie list reports the full count and holds every entry unless it
@@ -3567,8 +3346,7 @@ internal static class EventPayloadValidator
         JsonElement payload,
         string listProperty,
         string truncatedProperty,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty(listProperty, out var list) ||
             list.ValueKind != JsonValueKind.Array ||
@@ -3587,16 +3365,14 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-cookie-count",
-                $"events.ndjson#/payload/{listProperty}",
-                "cookieCount must equal the listed cookies unless the list is marked truncated, in which case it must exceed them.",
-                line);
+                $"#/payload/{listProperty}",
+                "cookieCount must equal the listed cookies unless the list is marked truncated, in which case it must exceed them.");
         }
     }
 
     private static void ValidateBrowserNavigation(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         bool completed)
     {
         ValidateShape(
@@ -3639,9 +3415,8 @@ internal static class EventPayloadValidator
                     : NullableString("outcome"),
                 NullableInteger("rendererProcessId")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
 
         var frameType = ReadString(payload, "frameType");
         var parentFrameId = ReadString(payload, "parentFrameId");
@@ -3658,9 +3433,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-navigation-subframe-parent-mismatch",
-                "events.ndjson#/payload/parentFrameId",
-                "A subframe must identify the same direct parent and owning document frame.",
-                line);
+                "#/payload/parentFrameId",
+                "A subframe must identify the same direct parent and owning document frame.");
         }
 
         if (frameType != "subframe" && parentFrameId is not null)
@@ -3668,9 +3442,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-navigation-main-frame-parent-present",
-                "events.ndjson#/payload/parentFrameId",
-                "A main frame must not identify a direct parent frame.",
-                line);
+                "#/payload/parentFrameId",
+                "A main frame must not identify a direct parent frame.");
         }
 
         if (frameType == "primary-main-frame" && !primaryPage)
@@ -3678,9 +3451,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-navigation-primary-page-mismatch",
-                "events.ndjson#/payload/primaryPage",
-                "A primary main frame must belong to the primary page.",
-                line);
+                "#/payload/primaryPage",
+                "A primary main frame must belong to the primary page.");
         }
 
         if (payload.TryGetProperty("context", out var context) &&
@@ -3697,9 +3469,8 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-navigation-context-invalid",
-                    "events.ndjson#/payload/context",
-                    "Navigation evidence must have browser-process provenance and page and frame identities.",
-                    line);
+                    "#/payload/context",
+                    "Navigation evidence must have browser-process provenance and page and frame identities.");
             }
 
             if (frameType == "subframe" && pageId == frameId)
@@ -3707,9 +3478,8 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-navigation-subframe-page-mismatch",
-                    "events.ndjson#/payload/context/pageId",
-                    "A subframe must have distinct page and frame identities.",
-                    line);
+                    "#/payload/context/pageId",
+                    "A subframe must have distinct page and frame identities.");
             }
 
             if (frameType != "subframe" && pageId != frameId)
@@ -3717,9 +3487,8 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-navigation-main-frame-page-mismatch",
-                    "events.ndjson#/payload/context/pageId",
-                    "A main frame must identify the root of its own page.",
-                    line);
+                    "#/payload/context/pageId",
+                    "A main frame must identify the root of its own page.");
             }
 
             var committed = payload.TryGetProperty(
@@ -3732,9 +3501,8 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-navigation-document-before-commit",
-                    "events.ndjson#/payload/context/documentId",
-                    "Document identity and token must be null before commit and after an uncommitted completion.",
-                    line);
+                    "#/payload/context/documentId",
+                    "Document identity and token must be null before commit and after an uncommitted completion.");
             }
 
             if (completed && committed &&
@@ -3743,9 +3511,8 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-navigation-committed-document-missing",
-                    "events.ndjson#/payload/context/documentId",
-                    "A committed navigation must identify its resulting document and document token.",
-                    line);
+                    "#/payload/context/documentId",
+                    "A committed navigation must identify its resulting document and document token.");
             }
 
             var rendererProcessId = payload.TryGetProperty(
@@ -3760,9 +3527,8 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-navigation-renderer-before-commit",
-                    "events.ndjson#/payload/rendererProcessId",
-                    "Renderer process identity must be null before commit and after an uncommitted completion.",
-                    line);
+                    "#/payload/rendererProcessId",
+                    "Renderer process identity must be null before commit and after an uncommitted completion.");
             }
 
             if (completed && committed &&
@@ -3771,9 +3537,8 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-navigation-committed-renderer-missing",
-                    "events.ndjson#/payload/rendererProcessId",
-                    "A committed navigation must identify the renderer process hosting its document.",
-                    line);
+                    "#/payload/rendererProcessId",
+                    "A committed navigation must identify the renderer process hosting its document.");
             }
         }
 
@@ -3788,9 +3553,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-navigation-kind-mismatch",
-                "events.ndjson#/payload/navigationKind",
-                "navigationKind must agree with sameDocument.",
-                line);
+                "#/payload/navigationKind",
+                "navigationKind must agree with sameDocument.");
         }
 
         if (completed &&
@@ -3801,9 +3565,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-navigation-outcome-mismatch",
-                "events.ndjson#/payload/outcome",
-                "An uncommitted navigation must have outcome not-committed.",
-                line);
+                "#/payload/outcome",
+                "An uncommitted navigation must have outcome not-committed.");
         }
 
         if (completed &&
@@ -3822,17 +3585,15 @@ internal static class EventPayloadValidator
                 AddError(
                     issues,
                     "browser-navigation-outcome-mismatch",
-                    "events.ndjson#/payload/outcome",
-                    $"A committed navigation must have outcome {expectedOutcome}.",
-                    line);
+                    "#/payload/outcome",
+                    $"A committed navigation must have outcome {expectedOutcome}.");
             }
         }
     }
 
     private static void ValidateBrowserDomCheckpointStarted(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3842,16 +3603,14 @@ internal static class EventPayloadValidator
                 RequiredEnum("reason", "finished-parsing", "post-mutation"),
                 RequiredInteger("maximumNodes", positive: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
     }
 
     private static void ValidateBrowserDomCheckpointNode(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3871,16 +3630,14 @@ internal static class EventPayloadValidator
                     "other"),
                 RequiredString("nodeName")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
     }
 
     private static void ValidateBrowserDomCheckpointNodeAttribute(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3896,23 +3653,20 @@ internal static class EventPayloadValidator
                 RequiredBoolean("attributeValueTruncated"),
                 RequiredInteger("maximumValueLength", positive: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
         ValidateTruncatedText(
             payload,
             "attributeValue",
             "attributeValueLength",
             "attributeValueTruncated",
-            issues,
-            line);
+            issues);
     }
 
     private static void ValidateBrowserDomCheckpointShadowRoot(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3930,16 +3684,14 @@ internal static class EventPayloadValidator
                 RequiredBoolean("availableToElementInternals"),
                 NullableText("referenceTarget")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
     }
 
     private static void ValidateBrowserDomCheckpointSlotAssignment(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -3963,10 +3715,9 @@ internal static class EventPayloadValidator
                 RequiredInteger("maximumAssignedNodes", positive: true),
                 RequiredBoolean("assignmentCurrent")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
         var count = ReadNullableInteger(payload, "assignedNodeCount");
         var maximum = ReadNullableInteger(payload, "maximumAssignedNodes");
         if (count is null || maximum is null ||
@@ -3987,10 +3738,9 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-dom-slot-assignment-inconsistent",
-                "events.ndjson#/payload/assignedNodeIds",
+                "#/payload/assignedNodeIds",
                 $"The slot records {recorded} assigned nodes of {count}, which " +
-                    "does not agree with its truncation flag and maximum.",
-                line);
+                    "does not agree with its truncation flag and maximum.");
         }
     }
 
@@ -3999,8 +3749,7 @@ internal static class EventPayloadValidator
     // consumer unable to decide whether a transition was covered.
     private static void ValidateTransitionCoverage(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty("coveredTransitionCount", out var countValue) ||
             countValue.ValueKind != JsonValueKind.Number ||
@@ -4016,9 +3765,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-dom-checkpoint-coverage-inconsistent",
-                "events.ndjson#/payload/coveredTransitionCount",
-                "A checkpoint covering no transition named a transition bound.",
-                line);
+                "#/payload/coveredTransitionCount",
+                "A checkpoint covering no transition named a transition bound.");
             return;
         }
 
@@ -4027,17 +3775,15 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-dom-checkpoint-coverage-inconsistent",
-                "events.ndjson#/payload/coveredTransitionCount",
+                "#/payload/coveredTransitionCount",
                 "A checkpoint covering transitions did not name the first and " +
-                "last transition it covers.",
-                line);
+                "last transition it covers.");
         }
     }
 
     private static void ValidateBrowserDomCheckpointCompleted(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -4058,17 +3804,15 @@ internal static class EventPayloadValidator
                 RequiredInteger("shadowRootCount", nonnegative: true),
                 RequiredInteger("slotCount", nonnegative: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
-        ValidateTransitionCoverage(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateTransitionCoverage(payload, issues);
     }
 
     private static void ValidateBrowserDomAttributeChanged(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -4090,31 +3834,27 @@ internal static class EventPayloadValidator
                 RequiredBoolean("previousAttributeValueTruncated"),
                 RequiredInteger("maximumValueLength", positive: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
         ValidateTruncatedText(
             payload,
             "attributeValue",
             "attributeValueLength",
             "attributeValueTruncated",
-            issues,
-            line);
+            issues);
         ValidateTruncatedText(
             payload,
             "previousAttributeValue",
             "previousAttributeValueLength",
             "previousAttributeValueTruncated",
-            issues,
-            line);
-        ValidateAttributeChangeTransition(payload, issues, line);
+            issues);
+        ValidateAttributeChangeTransition(payload, issues);
     }
 
     private static void ValidateBrowserDomCharacterDataChanged(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -4132,30 +3872,26 @@ internal static class EventPayloadValidator
                 RequiredBoolean("previousTextTruncated"),
                 RequiredInteger("maximumValueLength", positive: true)
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
-        ValidateRendererDocumentContext(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
         ValidateTruncatedText(
             payload,
             "text",
             "textLength",
             "textTruncated",
-            issues,
-            line);
+            issues);
         ValidateTruncatedText(
             payload,
             "previousText",
             "previousTextLength",
             "previousTextTruncated",
-            issues,
-            line);
+            issues);
     }
 
     private static void ValidateAttributeChangeTransition(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         var changeType = ReadString(payload, "changeType");
         if (changeType is null)
@@ -4180,10 +3916,9 @@ internal static class EventPayloadValidator
         AddError(
             issues,
             "browser-dom-attribute-change-inconsistent",
-            "events.ndjson#/payload/changeType",
+            "#/payload/changeType",
             $"An attribute change of type '{changeType}' does not carry the " +
-            "value and previous value that change type requires.",
-            line);
+            "value and previous value that change type requires.");
     }
 
     private static void ValidateTruncatedText(
@@ -4191,8 +3926,7 @@ internal static class EventPayloadValidator
         string textProperty,
         string lengthProperty,
         string truncatedProperty,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty(textProperty, out var text) ||
             text.ValueKind != JsonValueKind.String ||
@@ -4217,17 +3951,15 @@ internal static class EventPayloadValidator
         AddError(
             issues,
             "browser-dom-text-truncation-inconsistent",
-            $"events.ndjson#/payload/{lengthProperty}",
+            $"#/payload/{lengthProperty}",
             $"Property '{lengthProperty}' reports {reportedLength} units for a " +
             $"recorded value of {recordedLength} units while " +
-            $"'{truncatedProperty}' is {(isTruncated ? "true" : "false")}.",
-            line);
+            $"'{truncatedProperty}' is {(isTruncated ? "true" : "false")}.");
     }
 
     private static void ValidateRendererDocumentContext(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty("context", out var context) ||
             context.ValueKind != JsonValueKind.Object)
@@ -4241,9 +3973,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-dom-context-invalid",
-                "events.ndjson#/payload/context",
-                "DOM checkpoint evidence must identify a renderer document and its Chromium document token.",
-                line);
+                "#/payload/context",
+                "DOM checkpoint evidence must identify a renderer document and its Chromium document token.");
         }
     }
 
@@ -4252,8 +3983,7 @@ internal static class EventPayloadValidator
     // identity, because the serialization is not taken at a DOM checkpoint.
     private static void ValidateRendererTokenContext(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty("context", out var context) ||
             context.ValueKind != JsonValueKind.Object)
@@ -4266,17 +3996,15 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-accessibility-context-invalid",
-                "events.ndjson#/payload/context",
+                "#/payload/context",
                 "Accessibility checkpoint evidence must identify a renderer " +
-                    "and the Chromium document token it serialized.",
-                line);
+                    "and the Chromium document token it serialized.");
         }
     }
 
     private static void ValidateBrowserContextProperty(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty("context", out var context) ||
             context.ValueKind != JsonValueKind.Object)
@@ -4299,15 +4027,13 @@ internal static class EventPayloadValidator
                 NullableString("documentToken")
             ],
             issues,
-            line,
-            "events.ndjson#/payload/context");
+            "#/payload/context");
     }
 
     private static void ValidateBrowserEventTargetProperty(
         JsonElement payload,
         string property,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty(property, out var target) ||
             target.ValueKind != JsonValueKind.Object)
@@ -4318,15 +4044,13 @@ internal static class EventPayloadValidator
         ValidateBrowserEventTarget(
             target,
             issues,
-            line,
-            $"events.ndjson#/payload/{property}");
+            $"#/payload/{property}");
     }
 
     private static void ValidateBrowserEventTargetArrayProperty(
         JsonElement payload,
         string property,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty(property, out var targets) ||
             targets.ValueKind != JsonValueKind.Array)
@@ -4342,8 +4066,7 @@ internal static class EventPayloadValidator
                 ValidateBrowserEventTarget(
                     target,
                     issues,
-                    line,
-                    $"events.ndjson#/payload/{property}/{index}");
+                    $"#/payload/{property}/{index}");
             }
             index++;
         }
@@ -4354,8 +4077,7 @@ internal static class EventPayloadValidator
     // target identifier instead, so the identity required depends on the kind.
     private static void ValidateBrowserEventTarget(
         JsonElement target,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path)
     {
         ValidateShape(
@@ -4372,7 +4094,6 @@ internal static class EventPayloadValidator
                 RequiredStringArray("classes")
             ],
             issues,
-            line,
             path);
 
         var kind = ReadString(target, "kind");
@@ -4382,8 +4103,7 @@ internal static class EventPayloadValidator
                 issues,
                 "browser-event-target-identity",
                 path,
-                "a node event target must report its nodeId",
-                line);
+                "a node event target must report its nodeId");
         }
 
         if (kind is "window" or "other")
@@ -4394,8 +4114,7 @@ internal static class EventPayloadValidator
                     issues,
                     "browser-event-target-identity",
                     path,
-                    $"a {kind} event target has no nodeId",
-                    line);
+                    $"a {kind} event target has no nodeId");
             }
 
             if (!HasNonnullProperty(target, "targetId"))
@@ -4404,16 +4123,14 @@ internal static class EventPayloadValidator
                     issues,
                     "browser-event-target-identity",
                     path,
-                    $"a {kind} event target must report its targetId",
-                    line);
+                    $"a {kind} event target must report its targetId");
             }
         }
     }
 
     private static void ValidateBrowserLocationProperty(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string property = "location")
     {
         if (!payload.TryGetProperty(property, out var location) ||
@@ -4433,8 +4150,7 @@ internal static class EventPayloadValidator
                 NullableString("sourceHash")
             ],
             issues,
-            line,
-            $"events.ndjson#/payload/{property}");
+            $"#/payload/{property}");
     }
 
     // A listener record that names a world must also report that world in its
@@ -4443,8 +4159,7 @@ internal static class EventPayloadValidator
     // consumer read two different answers from one record.
     private static void ValidateBrowserExecutionWorldProperty(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         if (!payload.TryGetProperty("world", out var world) ||
             world.ValueKind != JsonValueKind.Object)
@@ -4468,8 +4183,7 @@ internal static class EventPayloadValidator
                 NullableString("stableId")
             ],
             issues,
-            line,
-            "events.ndjson#/payload/world");
+            "#/payload/world");
 
         if (!payload.TryGetProperty("context", out var context) ||
             context.ValueKind != JsonValueKind.Object)
@@ -4482,9 +4196,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-execution-world-identity",
-                "events.ndjson#/payload/context/executionWorldId",
-                "a record that names a world must report its executionWorldId",
-                line);
+                "#/payload/context/executionWorldId",
+                "a record that names a world must report its executionWorldId");
             return;
         }
 
@@ -4501,16 +4214,14 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "browser-execution-world-identity",
-                "events.ndjson#/payload/context/executionWorldId",
-                $"a record whose world is {worldId} must report {expected}",
-                line);
+                "#/payload/context/executionWorldId",
+                $"a record whose world is {worldId} must report {expected}");
         }
     }
 
     private static void ValidateOmission(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line) =>
+        ICollection<EventValidationIssue> issues) =>
         ValidateShape(
             payload,
             [
@@ -4518,8 +4229,7 @@ internal static class EventPayloadValidator
                 OptionalInteger("count", nonnegative: true),
                 OptionalEnum("stream", "microphone", "system")
             ],
-            issues,
-            line);
+            issues);
 
     private static readonly string[] UiaObservationTypes =
         ["focus-changed", "automation-event", "structure-changed", "property-changed"];
@@ -4530,10 +4240,9 @@ internal static class EventPayloadValidator
     // written before then carry one total count at stop and none of these
     // fields.
     private static void ValidateUiaOmission(
-        JsonElement record,
+        long recordedAt,
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -4544,8 +4253,7 @@ internal static class EventPayloadValidator
                 OptionalInteger("lastDroppedAtNanoseconds", nonnegative: true),
                 OptionalObject("droppedByObservationType")
             ],
-            issues,
-            line);
+            issues);
 
         var hasFirst = payload.TryGetProperty("firstDroppedAtNanoseconds", out var first);
         var hasLast = payload.TryGetProperty("lastDroppedAtNanoseconds", out var last);
@@ -4559,9 +4267,8 @@ internal static class EventPayloadValidator
             AddError(
                 issues,
                 "uia-omission-episode-inconsistent",
-                "events.ndjson#/payload",
-                message,
-                line);
+                "#/payload",
+                message);
 
         if (ReadString(payload, "reason") != "uia-observation-queue-full")
         {
@@ -4585,9 +4292,7 @@ internal static class EventPayloadValidator
             Inconsistent("The first refused arrival follows the last.");
         }
 
-        if (record.TryGetProperty("monotonicNanoseconds", out var recordedAt) &&
-            IsInteger(recordedAt) &&
-            recordedAt.GetInt64() != last.GetInt64())
+        if (recordedAt != last.GetInt64())
         {
             Inconsistent("A drop episode is timed at its last refused arrival.");
         }
@@ -4623,8 +4328,7 @@ internal static class EventPayloadValidator
     // the context rather than naming a process it did not observe.
     private static void ValidateBrowserOmission(
         JsonElement payload,
-        ICollection<ArchiveValidationIssue> issues,
-        long line)
+        ICollection<EventValidationIssue> issues)
     {
         ValidateShape(
             payload,
@@ -4633,15 +4337,13 @@ internal static class EventPayloadValidator
                 OptionalInteger("count", nonnegative: true),
                 OptionalNullableObject("context")
             ],
-            issues,
-            line);
-        ValidateBrowserContextProperty(payload, issues, line);
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
     }
 
     private static void ValidateIntegerRectangle(
         JsonElement value,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path) =>
         ValidateShape(
             value,
@@ -4652,13 +4354,11 @@ internal static class EventPayloadValidator
                 RequiredInteger("height", nonnegative: true)
             ],
             issues,
-            line,
             path);
 
     private static void ValidateNumberRectangle(
         JsonElement value,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path) =>
         ValidateShape(
             value,
@@ -4669,13 +4369,11 @@ internal static class EventPayloadValidator
                 RequiredNumber("height", nonnegative: true)
             ],
             issues,
-            line,
             path);
 
     private static void ValidateMonitor(
         JsonElement value,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
+        ICollection<EventValidationIssue> issues,
         string path)
     {
         ValidateShape(
@@ -4687,33 +4385,30 @@ internal static class EventPayloadValidator
                 RequiredBoolean("isPrimary")
             ],
             issues,
-            line,
             path);
-        ValidateOptionalObject(value, "bounds", ValidateIntegerRectangle, issues, line, path);
-        ValidateOptionalObject(value, "workArea", ValidateIntegerRectangle, issues, line, path);
+        ValidateOptionalObject(value, "bounds", ValidateIntegerRectangle, issues, path);
+        ValidateOptionalObject(value, "workArea", ValidateIntegerRectangle, issues, path);
     }
 
     private static void ValidateOptionalObject(
         JsonElement parent,
         string property,
-        Action<JsonElement, ICollection<ArchiveValidationIssue>, long, string> validate,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
-        string parentPath = "events.ndjson#/payload")
+        Action<JsonElement, ICollection<EventValidationIssue>, string> validate,
+        ICollection<EventValidationIssue> issues,
+        string parentPath = "#/payload")
     {
         if (parent.TryGetProperty(property, out var value) &&
             value.ValueKind == JsonValueKind.Object)
         {
-            validate(value, issues, line, $"{parentPath}/{property}");
+            validate(value, issues, $"{parentPath}/{property}");
         }
     }
 
     private static void ValidateShape(
         JsonElement payload,
         IReadOnlyList<PropertyRule> rules,
-        ICollection<ArchiveValidationIssue> issues,
-        long line,
-        string path = "events.ndjson#/payload")
+        ICollection<EventValidationIssue> issues,
+        string path = "#/payload")
     {
         var ruleMap = rules.ToDictionary(rule => rule.Name, StringComparer.Ordinal);
         foreach (var rule in rules.Where(rule => rule.Required))
@@ -4724,8 +4419,7 @@ internal static class EventPayloadValidator
                     issues,
                     "payload-property-missing",
                     $"{path}/{rule.Name}",
-                    $"Required payload property '{rule.Name}' is missing.",
-                    line);
+                    $"Required payload property '{rule.Name}' is missing.");
             }
         }
 
@@ -4737,8 +4431,7 @@ internal static class EventPayloadValidator
                     issues,
                     "payload-property-unexpected",
                     $"{path}/{property.Name}",
-                    $"Payload property '{property.Name}' is not defined for this event type.",
-                    line);
+                    $"Payload property '{property.Name}' is not defined for this event type.");
                 continue;
             }
 
@@ -4753,8 +4446,7 @@ internal static class EventPayloadValidator
                     issues,
                     "payload-property-invalid",
                     $"{path}/{property.Name}",
-                    $"Payload property '{property.Name}' {rule.Expectation}.",
-                    line);
+                    $"Payload property '{property.Name}' {rule.Expectation}.");
             }
         }
     }
@@ -5068,17 +4760,11 @@ internal static class EventPayloadValidator
             : null;
 
     private static void AddError(
-        ICollection<ArchiveValidationIssue> issues,
+        ICollection<EventValidationIssue> issues,
         string code,
         string path,
-        string message,
-        long line) =>
-        issues.Add(new ArchiveValidationIssue(
-            code,
-            ArchiveValidationSeverity.Error,
-            path,
-            message,
-            line));
+        string message) =>
+        issues.Add(new EventValidationIssue(code, path, message));
 
     private sealed record PropertyRule(
         string Name,

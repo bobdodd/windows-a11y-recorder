@@ -117,8 +117,8 @@ public static class CollectorClosingTimestamp
     /// has already queued, so records the collector emits afterwards, such as
     /// an omission that reports dropped evidence, would carry a timestamp
     /// earlier than evidence they are written after. That regresses monotonic
-    /// order within the collector's channel, which the archive validator
-    /// rejects. Reading the clock at emission time is an observation of when
+    /// order within the collector's channel, which the per-record event checks
+    /// reject. Reading the clock at emission time is an observation of when
     /// the closing record was produced rather than an adjustment of a recorded
     /// one, and the boundary is retained as a floor for a collector whose clock
     /// is unavailable or has not advanced.

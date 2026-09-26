@@ -3,13 +3,19 @@ using Recorder.Session;
 
 namespace Recorder.Tests;
 
-public sealed class SessionArchiveReaderTests
+/// <summary>
+/// Building a playback archive from events as a store reads them: frames,
+/// audio tracks, and browser navigation correlation.
+/// </summary>
+public sealed class SessionPlaybackArchiveBuilderTests
 {
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
+    private readonly List<string> _events = [];
+
     [Fact]
-    public async Task LoadsFramesAudioAndLegacyEvents()
+    public async Task LoadsFramesAndAudio()
     {
         var directory = CreateDirectory();
         try
@@ -50,7 +56,7 @@ public sealed class SessionArchiveReaderTests
                         })
                 ]);
 
-            var archive = await LoadBothWaysAsync(directory);
+            var archive = await LoadAsync(directory);
 
             Assert.Equal(2_000_000_000, archive.DurationNanoseconds);
             var frame = Assert.Single(archive.Frames);
@@ -95,7 +101,7 @@ public sealed class SessionArchiveReaderTests
                         })
                 ]);
 
-            var archive = await LoadBothWaysAsync(directory);
+            var archive = await LoadAsync(directory);
 
             Assert.Empty(archive.Frames);
             Assert.Single(archive.Events);
@@ -243,7 +249,7 @@ public sealed class SessionArchiveReaderTests
                         })
                 ]);
 
-            var archive = await LoadBothWaysAsync(directory);
+            var archive = await LoadAsync(directory);
 
             var navigation = Assert.Single(archive.BrowserNavigations);
             Assert.Equal("https://example.test/", navigation.Url);
@@ -354,7 +360,7 @@ public sealed class SessionArchiveReaderTests
                         })
                 ]);
 
-            var archive = await LoadBothWaysAsync(directory);
+            var archive = await LoadAsync(directory);
 
             var navigation = Assert.Single(
                 archive.BrowserNavigations,
@@ -368,141 +374,36 @@ public sealed class SessionArchiveReaderTests
         }
     }
 
-    [Fact]
-    public async Task ValidatorReadReportsUnreadableEventLine()
+    // Adds the events written for the test to a builder, as the database
+    // reader adds the events it reads, and builds the archive.
+    private async Task<SessionPlaybackArchive> LoadAsync(string directory)
     {
-        var directory = CreateDirectory();
-        try
+        var builder = new SessionPlaybackArchiveBuilder(directory);
+        var records = new List<string>();
+        foreach (var json in _events)
         {
-            await WriteManifestAsync(directory, 1_000_000_000);
-            await File.WriteAllTextAsync(
-                Path.Combine(directory, "events.ndjson"),
-                "{\"channel\":\n",
-                TestContext.Current.CancellationToken);
-            var playback = new SessionPlaybackArchiveBuilder(directory);
-
-            var validation = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                ArchiveValidationOptions.Default,
-                playback,
-                TestContext.Current.CancellationToken);
-
-            Assert.Contains(
-                validation.Issues,
-                issue => issue.Code == "event-json-invalid");
-            await Assert.ThrowsAsync<InvalidDataException>(
-                () => playback.BuildAsync(TestContext.Current.CancellationToken));
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            builder.AddEvent(
+                records.Count + 1,
+                root.GetProperty("eventId").GetString()!,
+                root.GetProperty("evidenceClass").GetString()!,
+                root.GetProperty("channel").GetString()!,
+                root.GetProperty("eventType").GetString()!,
+                root.GetProperty("monotonicNanoseconds").GetInt64(),
+                root.GetProperty("payload").Clone());
+            records.Add(json);
         }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
 
-    [Fact]
-    public async Task ReadsEachRecordFromItsLocationInTheEventLog()
-    {
-        var directory = CreateDirectory();
-        try
-        {
-            await WriteManifestAsync(directory, 1_000_000_000);
-            var lines = new[]
-            {
-                RawEvent("first", 10, "plain"),
-                RawEvent("second", 20, "caf\u00e9 \u65e5\u672c \ud83d\ude00"),
-                RawEvent("third", 30, new string('x', 300_000)),
-                RawEvent("fourth", 40, "last line has no line ending")
-            };
-            var bytes = new List<byte>(System.Text.Encoding.UTF8.GetPreamble());
-            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(lines[0] + "\r\n"));
-            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(lines[1] + "\n"));
-            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(" \t\n"));
-            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(lines[2] + "\n"));
-            bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(lines[3]));
-            await File.WriteAllBytesAsync(
-                Path.Combine(directory, "events.ndjson"),
-                bytes.ToArray(),
-                TestContext.Current.CancellationToken);
-
-            var archive = await LoadBothWaysAsync(directory);
-
-            Assert.Equal(
-                new long[] { 1, 2, 4, 5 },
-                archive.Events.Select(item => item.Line));
-            Assert.Equal(
-                lines,
-                archive.Events.Select(archive.ReadEventJson));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task ReportsARecordThatMovedAfterTheRecordingWasOpened()
-    {
-        var directory = CreateDirectory();
-        try
-        {
-            await WriteManifestAsync(directory, 1_000_000_000);
-            var eventPath = Path.Combine(directory, "events.ndjson");
-            await File.WriteAllTextAsync(
-                eventPath,
-                RawEvent("first", 10, "a") + "\n" + RawEvent("second", 20, "b") + "\n",
-                TestContext.Current.CancellationToken);
-            var archive = await SessionArchiveReader.LoadAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            await File.WriteAllTextAsync(
-                eventPath,
-                RawEvent("second", 20, "b") + "\n" + RawEvent("first", 10, "a") + "\n",
-                TestContext.Current.CancellationToken);
-
-            var exception = Assert.Throws<InvalidDataException>(
-                () => archive.ReadEventJson(archive.Events[0]));
-            Assert.Contains("changed after the recording was opened", exception.Message);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
-
-    private static string RawEvent(string eventId, long timestamp, string note) =>
-        "{\"eventId\":\"" + eventId + "\",\"channel\":\"test.channel\"," +
-        "\"eventType\":\"test\",\"monotonicNanoseconds\":" + timestamp + "," +
-        "\"payload\":{\"note\":\"" + note + "\"}}";
-
-    // Loads the archive with the reader's own read and with the validator's
-    // read, asserts the two playback archives are the same, and returns the
-    // reader's archive.
-    private static async Task<SessionPlaybackArchive> LoadBothWaysAsync(
-        string directory)
-    {
-        var loaded = await SessionArchiveReader.LoadAsync(
-            directory,
+        return await builder.BuildAsync(
+            new RecordList(records),
             TestContext.Current.CancellationToken);
-        var playback = new SessionPlaybackArchiveBuilder(directory);
-        await SessionArchiveValidator.ValidateAsync(
-            directory,
-            ArchiveValidationOptions.Default,
-            playback,
-            TestContext.Current.CancellationToken);
-        var built = await playback.BuildAsync(TestContext.Current.CancellationToken);
+    }
 
-        Assert.Equal(loaded.SessionDirectory, built.SessionDirectory);
-        Assert.Equal(loaded.DurationNanoseconds, built.DurationNanoseconds);
-        Assert.Equal(loaded.Events, built.Events);
-        Assert.Equal(loaded.Frames, built.Frames);
-        Assert.Equal(loaded.AudioTracks, built.AudioTracks);
-        Assert.Equal(
-            JsonSerializer.Serialize(loaded.BrowserNavigations, JsonOptions),
-            JsonSerializer.Serialize(built.BrowserNavigations, JsonOptions));
-        Assert.Equal(
-            JsonSerializer.Serialize(loaded.Manifest, JsonOptions),
-            JsonSerializer.Serialize(built.Manifest, JsonOptions));
-        return loaded;
+    private sealed class RecordList(IReadOnlyList<string> records) : ISessionEventRecordSource
+    {
+        public string ReadEventJson(SessionTimelineEvent item) =>
+            records[(int)item.EventKey - 1];
     }
 
     private static string CreateDirectory()
@@ -541,16 +442,13 @@ public sealed class SessionArchiveReaderTests
             TestContext.Current.CancellationToken);
     }
 
-    private static async Task WriteEventsAsync(
+    private Task WriteEventsAsync(
         string directory,
         IReadOnlyList<object> events)
     {
-        await using var writer = new StreamWriter(
-            Path.Combine(directory, "events.ndjson"));
-        foreach (var item in events)
-        {
-            await writer.WriteLineAsync(JsonSerializer.Serialize(item, JsonOptions));
-        }
+        Assert.True(Directory.Exists(directory));
+        _events.AddRange(events.Select(item => JsonSerializer.Serialize(item, JsonOptions)));
+        return Task.CompletedTask;
     }
 
     private static object CreateEvent(
@@ -566,6 +464,8 @@ public sealed class SessionArchiveReaderTests
             collectorInstanceId = "0123456789abcdef0123456789abcdef",
             channel,
             captureMethod = "test",
+            eventId = $"test-session:{channel}:{timestamp}",
+            evidenceClass = "observed",
             sequence = timestamp,
             monotonicNanoseconds = timestamp,
             observedUtc = DateTimeOffset.UtcNow,

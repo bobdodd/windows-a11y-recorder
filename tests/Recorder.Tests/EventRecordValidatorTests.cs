@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Recorder.Contracts;
@@ -6,180 +5,43 @@ using Recorder.Session;
 
 namespace Recorder.Tests;
 
-public sealed class SessionArchiveValidatorTests
+/// <summary>
+/// The checks each event passes before the database stores it.
+/// </summary>
+public sealed class EventRecordValidatorTests
 {
     [Fact]
-    public async Task AcceptsValidTerminalArchive()
+    public void AcceptsValidEvents()
     {
-        var directory = await CreateArchiveAsync(
+        IReadOnlyList<RecorderEvent> events = (
             [CreateEvent(0, 100), CreateEvent(1, 200)]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Equal(2, result.EventsValidated);
-            Assert.Equal(1, result.ArtifactsValidated);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task DetectsChangedArtifactBytes()
+    public void DetectsSequenceAndTimestampRegression()
     {
-        var directory = await CreateArchiveAsync([CreateEvent(0, 100)]);
-        try
-        {
-            await File.AppendAllTextAsync(
-                Path.Combine(directory, "events.ndjson"),
-                "{}\n",
-                TestContext.Current.CancellationToken);
-
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "artifact-size-mismatch");
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "artifact-hash-mismatch");
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "event-count-mismatch");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task SkippingHashVerificationKeepsStructuralArtifactChecks()
-    {
-        var directory = await CreateArchiveAsync([CreateEvent(0, 100)]);
-        try
-        {
-            var eventPath = Path.Combine(directory, "events.ndjson");
-            var bytes = await File.ReadAllBytesAsync(
-                eventPath,
-                TestContext.Current.CancellationToken);
-            var index = Array.IndexOf(bytes, (byte)'{');
-            bytes[index + 1] = bytes[index + 1] == (byte)' '
-                ? (byte)'\t'
-                : (byte)' ';
-            await File.WriteAllBytesAsync(
-                eventPath,
-                bytes,
-                TestContext.Current.CancellationToken);
-            var options = new ArchiveValidationOptions(VerifyArtifactHashes: false);
-
-            var skipped = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                options,
-                TestContext.Current.CancellationToken);
-            var verified = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-
-            Assert.False(skipped.ArtifactHashesVerified);
-            Assert.Equal(1, skipped.ArtifactsValidated);
-            Assert.DoesNotContain(
-                skipped.Issues,
-                issue => issue.Code == "artifact-hash-mismatch");
-            Assert.True(verified.ArtifactHashesVerified);
-            Assert.Contains(
-                verified.Issues,
-                issue => issue.Code == "artifact-hash-mismatch");
-
-            await File.AppendAllTextAsync(
-                eventPath,
-                "{}\n",
-                TestContext.Current.CancellationToken);
-            var resized = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                options,
-                TestContext.Current.CancellationToken);
-            Assert.Contains(
-                resized.Issues,
-                issue => issue.Code == "artifact-size-mismatch");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task SkippingHashVerificationRejectsMalformedHash()
-    {
-        var directory = await CreateArchiveAsync([CreateEvent(0, 100)]);
-        try
-        {
-            var manifestPath = Path.Combine(directory, "manifest.json");
-            var manifest = JsonNode.Parse(await File.ReadAllTextAsync(
-                manifestPath,
-                TestContext.Current.CancellationToken))!;
-            manifest["artifacts"]![0]!["sha256"] = "not-a-hash";
-            await File.WriteAllTextAsync(
-                manifestPath,
-                manifest.ToJsonString(),
-                TestContext.Current.CancellationToken);
-
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                new ArchiveValidationOptions(VerifyArtifactHashes: false),
-                TestContext.Current.CancellationToken);
-
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "artifact-hash-invalid");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task DetectsSequenceAndTimestampRegression()
-    {
-        var directory = await CreateArchiveAsync(
+        IReadOnlyList<RecorderEvent> events = (
             [CreateEvent(2, 200), CreateEvent(1, 100)]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "event-sequence-not-increasing");
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "event-time-regressed");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "event-sequence-not-increasing");
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "event-time-regressed");
     }
 
     [Fact]
-    public async Task AcceptsTimestampOverlapAcrossIndependentClockMappings()
+    public void AcceptsTimestampOverlapAcrossIndependentClockMappings()
     {
-        var directory = await CreateArchiveAsync(
+        IReadOnlyList<RecorderEvent> events = (
             [
                 CreateEvent(0, 200) with
                 {
@@ -190,66 +52,15 @@ public sealed class SessionArchiveValidatorTests
                     ClockMappingId = "chromium:browser-1:200"
                 }
             ]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(
-                result.IsValid,
-                JsonSerializer.Serialize(result.Issues, JsonOptions));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(
+            result.IsValid,
+            JsonSerializer.Serialize(result.Issues, JsonOptions));
     }
 
     [Fact]
-    public async Task DetectsUnsafeAndUnlistedArtifactPaths()
-    {
-        var directory = await CreateArchiveAsync([CreateEvent(0, 100)]);
-        try
-        {
-            await File.WriteAllTextAsync(
-                Path.Combine(directory, "unexpected.txt"),
-                "not declared",
-                TestContext.Current.CancellationToken);
-            var manifestPath = Path.Combine(directory, "manifest.json");
-            var manifest = JsonSerializer.Deserialize<SessionManifest>(
-                await File.ReadAllTextAsync(
-                    manifestPath,
-                    TestContext.Current.CancellationToken),
-                JsonOptions)!;
-            var unsafeArtifact = new SessionArtifact("../outside.bin", 0, new string('0', 64));
-            await SessionManifestWriter.WriteAsync(
-                manifestPath,
-                manifest with { Artifacts = [.. manifest.Artifacts, unsafeArtifact] },
-                TestContext.Current.CancellationToken);
-
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "artifact-path-unsafe");
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "artifact-not-declared" &&
-                    issue.Path == "unexpected.txt");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task DetectsInvalidBuiltInChannelPayload()
+    public void DetectsInvalidBuiltInChannelPayload()
     {
         var record = CreateEvent(
             0,
@@ -264,28 +75,19 @@ public sealed class SessionArchiveValidatorTests
                 virtualKey = 65,
                 message = 256
             });
-        var directory = await CreateArchiveAsync([record]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        IReadOnlyList<RecorderEvent> events = ([record]);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "payload-property-missing" &&
-                    issue.Path.EndsWith("/extraInformation", StringComparison.Ordinal));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "payload-property-missing" &&
+                issue.Path.EndsWith("/extraInformation", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task DetectsUnknownEventOnBuiltInChannel()
+    public void DetectsUnknownEventOnBuiltInChannel()
     {
         var record = CreateEvent(
             0,
@@ -293,26 +95,17 @@ public sealed class SessionArchiveValidatorTests
             "input.mouse",
             "future-mouse-event",
             new { value = 1 });
-        var directory = await CreateArchiveAsync([record]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        IReadOnlyList<RecorderEvent> events = ([record]);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "event-type-unsupported");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "event-type-unsupported");
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserListenerEvidence()
+    public void AcceptsInstrumentedBrowserListenerEvidence()
     {
         var context = new
         {
@@ -366,25 +159,16 @@ public sealed class SessionArchiveValidatorTests
                 location,
                 world = MainWorld()
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserDispatchStartEvidence()
+    public void AcceptsInstrumentedBrowserDispatchStartEvidence()
     {
         var context = new
         {
@@ -433,25 +217,16 @@ public sealed class SessionArchiveValidatorTests
                 defaultAction = (string?)null,
                 outcome = (string?)null
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsAWindowEventTargetWithoutANodeIdentifier()
+    public void AcceptsAWindowEventTargetWithoutANodeIdentifier()
     {
         var context = new
         {
@@ -496,25 +271,16 @@ public sealed class SessionArchiveValidatorTests
                 location = (object?)null,
                 world = MainWorld()
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task RejectsANonNodeEventTargetThatClaimsANodeIdentifier()
+    public void RejectsANonNodeEventTargetThatClaimsANodeIdentifier()
     {
         var context = new
         {
@@ -558,32 +324,23 @@ public sealed class SessionArchiveValidatorTests
                 once = false,
                 location = (object?)null
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "browser-event-target-identity" &&
-                    issue.Message.Contains(
-                        "has no nodeId",
-                        StringComparison.Ordinal));
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "browser-event-target-identity" &&
-                    issue.Message.Contains(
-                        "must report its targetId",
-                        StringComparison.Ordinal));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "browser-event-target-identity" &&
+                issue.Message.Contains(
+                    "has no nodeId",
+                    StringComparison.Ordinal));
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "browser-event-target-identity" &&
+                issue.Message.Contains(
+                    "must report its targetId",
+                    StringComparison.Ordinal));
     }
 
     // Protocol 0.31 names the execution context of every listener and
@@ -591,9 +348,9 @@ public sealed class SessionArchiveValidatorTests
     // name none and can hold only a non-Node target, while a record that names
     // no scope, as earlier archives do, must still name its document.
     [Fact]
-    public async Task AcceptsAWorkerListenerThatNamesNoDocument()
+    public void AcceptsAWorkerListenerThatNamesNoDocument()
     {
-        var issues = await ValidateListenerScopeAsync(
+        var issues = ValidateListenerScope(
             contextDocumentId: null,
             targetKind: "other",
             targetDocumentId: null,
@@ -603,9 +360,9 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsANodeTargetInAWorkerScope()
+    public void RejectsANodeTargetInAWorkerScope()
     {
-        var issues = await ValidateListenerScopeAsync(
+        var issues = ValidateListenerScope(
             contextDocumentId: null,
             targetKind: "node",
             targetDocumentId: null,
@@ -618,9 +375,9 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAWorkerRecordThatNamesADocument()
+    public void RejectsAWorkerRecordThatNamesADocument()
     {
-        var issues = await ValidateListenerScopeAsync(
+        var issues = ValidateListenerScope(
             contextDocumentId: "dom-document-8",
             targetKind: "other",
             targetDocumentId: "dom-document-8",
@@ -629,22 +386,22 @@ public sealed class SessionArchiveValidatorTests
         Assert.Contains(
             issues,
             issue => issue.Code == "browser-event-scope-inconsistent" &&
-                issue.Path == "events.ndjson#/payload/context/documentId");
+                issue.Path == "#/payload/context/documentId");
         Assert.Contains(
             issues,
             issue => issue.Code == "browser-event-scope-inconsistent" &&
-                issue.Path == "events.ndjson#/payload/target/documentId");
+                issue.Path == "#/payload/target/documentId");
     }
 
     [Fact]
-    public async Task RejectsATargetWithoutADocumentOutsideAWorkerScope()
+    public void RejectsATargetWithoutADocumentOutsideAWorkerScope()
     {
-        var unscoped = await ValidateListenerScopeAsync(
+        var unscoped = ValidateListenerScope(
             contextDocumentId: "dom-document-8",
             targetKind: "other",
             targetDocumentId: null,
             scopeKind: null);
-        var window = await ValidateListenerScopeAsync(
+        var window = ValidateListenerScope(
             contextDocumentId: "dom-document-8",
             targetKind: "other",
             targetDocumentId: null,
@@ -660,8 +417,7 @@ public sealed class SessionArchiveValidatorTests
                 issue.Message.Contains("window scope", StringComparison.Ordinal));
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidateListenerScopeAsync(
+    private static IReadOnlyList<EventValidationIssue> ValidateListenerScope(
             string? contextDocumentId,
             string targetKind,
             string? targetDocumentId,
@@ -725,22 +481,13 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Listener,
             BrowserEvidenceEventTypes.ListenerRegistered,
             payload);
-        var directory = await CreateArchiveAsync([record]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        IReadOnlyList<RecorderEvent> events = ([record]);
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
     [Fact]
-    public async Task RejectsANodeEventTargetWithoutANodeIdentifier()
+    public void RejectsANodeEventTargetWithoutANodeIdentifier()
     {
         var context = new
         {
@@ -784,30 +531,21 @@ public sealed class SessionArchiveValidatorTests
                 once = false,
                 location = (object?)null
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "browser-event-target-identity" &&
-                    issue.Message.Contains(
-                        "must report its nodeId",
-                        StringComparison.Ordinal));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "browser-event-target-identity" &&
+                issue.Message.Contains(
+                    "must report its nodeId",
+                    StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserDefaultActionEvidence()
+    public void AcceptsInstrumentedBrowserDefaultActionEvidence()
     {
         var context = new
         {
@@ -868,25 +606,16 @@ public sealed class SessionArchiveValidatorTests
                 outcome = "invoked",
                 currentTarget = target
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsABrowserOmissionThatStatesLostRecords()
+    public void AcceptsABrowserOmissionThatStatesLostRecords()
     {
         // An omission record is how the archive states evidence that was lost
         // rather than captured, so it must validate on a browser channel both
@@ -925,25 +654,16 @@ public sealed class SessionArchiveValidatorTests
                 reason = BrowserEvidenceOmissionReasons.SinkRefusedRecord,
                 count = 2
             });
-        var directory = await CreateArchiveAsync([attributed, unattributed]);
+        IReadOnlyList<RecorderEvent> events = ([attributed, unattributed]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsBrowserExitAndRejectsItWithoutItsRequester()
+    public void AcceptsBrowserExitAndRejectsItWithoutItsRequester()
     {
         // The exit record states whether the recorder asked for the exit, so
         // a record that omits it cannot be read as either.
@@ -974,34 +694,22 @@ public sealed class SessionArchiveValidatorTests
                 exitCodeHex = "0x00000000",
                 exitedUtc = DateTimeOffset.UtcNow
             });
-        var validDirectory = await CreateArchiveAsync([exited]);
-        var invalidDirectory = await CreateArchiveAsync([incomplete]);
+        IReadOnlyList<RecorderEvent> validEvents = ([exited]);
+        IReadOnlyList<RecorderEvent> invalidEvents = ([incomplete]);
 
-        try
-        {
-            var valid = await SessionArchiveValidator.ValidateAsync(
-                validDirectory,
-                TestContext.Current.CancellationToken);
-            var invalid = await SessionArchiveValidator.ValidateAsync(
-                invalidDirectory,
-                TestContext.Current.CancellationToken);
+        var valid = Validate(validEvents);
+        var invalid = Validate(invalidEvents);
 
-            Assert.True(valid.IsValid);
-            Assert.Empty(valid.Issues);
-            Assert.False(invalid.IsValid);
-            Assert.Contains(
-                invalid.Issues,
-                issue => issue.Code == "payload-property-missing");
-        }
-        finally
-        {
-            Directory.Delete(validDirectory, recursive: true);
-            Directory.Delete(invalidDirectory, recursive: true);
-        }
+        Assert.True(valid.IsValid);
+        Assert.Empty(valid.Issues);
+        Assert.False(invalid.IsValid);
+        Assert.Contains(
+            invalid.Issues,
+            issue => issue.Code == "payload-property-missing");
     }
 
     [Fact]
-    public async Task RejectsABrowserOmissionThatReportsAnUnknownFact()
+    public void RejectsABrowserOmissionThatReportsAnUnknownFact()
     {
         // The omission shape is closed, so a fact no reporter is defined to
         // report fails validation instead of entering the archive unchecked.
@@ -1016,27 +724,18 @@ public sealed class SessionArchiveValidatorTests
                 count = 1,
                 stream = "microphone"
             });
-        var directory = await CreateArchiveAsync([omission]);
+        IReadOnlyList<RecorderEvent> events = ([omission]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "payload-property-unexpected");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "payload-property-unexpected");
     }
 
     [Fact]
-    public async Task AcceptsBrowserLifecycleEvidence()
+    public void AcceptsBrowserLifecycleEvidence()
     {
         var connected = CreateEvent(
             0,
@@ -1070,25 +769,16 @@ public sealed class SessionArchiveValidatorTests
                 monotonicFrequency = "10000000",
                 uncertaintyNanoseconds = 12_500L
             });
-        var directory = await CreateArchiveAsync([connected, synchronized]);
+        IReadOnlyList<RecorderEvent> events = ([connected, synchronized]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task RejectsBrowserLifecycleEvidenceThatReportsAnUnknownFact()
+    public void RejectsBrowserLifecycleEvidenceThatReportsAnUnknownFact()
     {
         // The lifecycle shape is closed, so a fact the receiver is not defined
         // to report fails validation instead of entering the archive unchecked.
@@ -1108,27 +798,18 @@ public sealed class SessionArchiveValidatorTests
                 childProcessId = (int?)4321,
                 commandLine = "--headless"
             });
-        var directory = await CreateArchiveAsync([connected]);
+        IReadOnlyList<RecorderEvent> events = ([connected]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "payload-property-unexpected");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "payload-property-unexpected");
     }
 
     [Fact]
-    public async Task AcceptsBrowserAccessibilityCheckpointEvidence()
+    public void AcceptsBrowserAccessibilityCheckpointEvidence()
     {
         var context = new
         {
@@ -1193,25 +874,16 @@ public sealed class SessionArchiveValidatorTests
                 updateCount = 1,
                 eventCount = 0
             });
-        var directory = await CreateArchiveAsync([started, node, completed]);
+        IReadOnlyList<RecorderEvent> events = ([started, node, completed]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task RejectsAnAccessibilityNodeThatReportsAnUnknownFact()
+    public void RejectsAnAccessibilityNodeThatReportsAnUnknownFact()
     {
         // The node shape is closed, so a property the bridge is not defined to
         // send fails validation instead of entering the archive unchecked.
@@ -1248,27 +920,18 @@ public sealed class SessionArchiveValidatorTests
                 focused = false,
                 violation = "missing-accessible-name"
             });
-        var directory = await CreateArchiveAsync([node]);
+        IReadOnlyList<RecorderEvent> events = ([node]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "payload-property-unexpected");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "payload-property-unexpected");
     }
 
     [Fact]
-    public async Task RejectsAnAccessibilityCheckpointFromOutsideARenderer()
+    public void RejectsAnAccessibilityCheckpointFromOutsideARenderer()
     {
         // A checkpoint states which renderer document was serialized, so a
         // record that names the browser process instead is not usable evidence.
@@ -1298,28 +961,19 @@ public sealed class SessionArchiveValidatorTests
                 updateCount = 1,
                 eventCount = 0
             });
-        var directory = await CreateArchiveAsync([started]);
+        IReadOnlyList<RecorderEvent> events = ([started]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "browser-accessibility-context-invalid");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "browser-accessibility-context-invalid");
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserTimerEvidence()
+    public void AcceptsInstrumentedBrowserTimerEvidence()
     {
         var context = new
         {
@@ -1370,25 +1024,16 @@ public sealed class SessionArchiveValidatorTests
                 callbackLocation = (object?)null,
                 cancellationReason = (string?)null
             });
-        var directory = await CreateArchiveAsync([scheduled, fired]);
+        IReadOnlyList<RecorderEvent> events = ([scheduled, fired]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserAnimationFrameEvidence()
+    public void AcceptsInstrumentedBrowserAnimationFrameEvidence()
     {
         var context = new
         {
@@ -1441,25 +1086,16 @@ public sealed class SessionArchiveValidatorTests
                 cancellationReason = (string?)null,
                 didTimeout = (bool?)null
             });
-        var directory = await CreateArchiveAsync([scheduled, fired]);
+        IReadOnlyList<RecorderEvent> events = ([scheduled, fired]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserIdleCallbackEvidence()
+    public void AcceptsInstrumentedBrowserIdleCallbackEvidence()
     {
         var context = new
         {
@@ -1512,25 +1148,16 @@ public sealed class SessionArchiveValidatorTests
                 cancellationReason = (string?)null,
                 didTimeout = true
             });
-        var directory = await CreateArchiveAsync([scheduled, fired]);
+        IReadOnlyList<RecorderEvent> events = ([scheduled, fired]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserSchedulerDecisionEvidence()
+    public void AcceptsInstrumentedBrowserSchedulerDecisionEvidence()
     {
         var deferred = CreateEvent(
             0,
@@ -1562,25 +1189,16 @@ public sealed class SessionArchiveValidatorTests
                 blockType = "all-tasks",
                 decisionBoundary = "task-queue-throttler"
             });
-        var directory = await CreateArchiveAsync([deferred]);
+        IReadOnlyList<RecorderEvent> events = ([deferred]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserNavigationEvidence()
+    public void AcceptsInstrumentedBrowserNavigationEvidence()
     {
         var record = CreateEvent(
             0,
@@ -1617,25 +1235,16 @@ public sealed class SessionArchiveValidatorTests
                 outcome = "committed",
                 rendererProcessId = 3400
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task RejectsCommittedNavigationWithoutRendererDocumentCorrelation()
+    public void RejectsCommittedNavigationWithoutRendererDocumentCorrelation()
     {
         var record = CreateEvent(
             0,
@@ -1672,34 +1281,25 @@ public sealed class SessionArchiveValidatorTests
                 outcome = "committed",
                 rendererProcessId = (int?)null
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code ==
-                    "browser-navigation-committed-document-missing");
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code ==
-                    "browser-navigation-committed-renderer-missing");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code ==
+                "browser-navigation-committed-document-missing");
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code ==
+                "browser-navigation-committed-renderer-missing");
     }
 
     [Fact]
-    public async Task RejectsSubframeNavigationWithoutParentIdentity()
+    public void RejectsSubframeNavigationWithoutParentIdentity()
     {
         var record = CreateEvent(
             0,
@@ -1736,29 +1336,20 @@ public sealed class SessionArchiveValidatorTests
                 outcome = "committed",
                 rendererProcessId = 3400
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code ==
-                    "browser-navigation-subframe-parent-mismatch");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code ==
+                "browser-navigation-subframe-parent-mismatch");
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserDomCheckpointEvidence()
+    public void AcceptsInstrumentedBrowserDomCheckpointEvidence()
     {
         var context = new
         {
@@ -1909,25 +1500,16 @@ public sealed class SessionArchiveValidatorTests
                     slotCount = 0
                 })
         };
-        var directory = await CreateArchiveAsync(records);
+        IReadOnlyList<RecorderEvent> events = (records);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsInstrumentedBrowserDomStateChangeEvidence()
+    public void AcceptsInstrumentedBrowserDomStateChangeEvidence()
     {
         var context = new
         {
@@ -2009,25 +1591,16 @@ public sealed class SessionArchiveValidatorTests
                     maximumValueLength = 4096
                 })
         };
-        var directory = await CreateArchiveAsync(records);
+        IReadOnlyList<RecorderEvent> events = (records);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsTruncatedDomAttributeValueThatReportsItsFullLength()
+    public void AcceptsTruncatedDomAttributeValueThatReportsItsFullLength()
     {
         var record = CreateEvent(
             0,
@@ -2047,24 +1620,15 @@ public sealed class SessionArchiveValidatorTests
                 attributeValueTruncated = true,
                 maximumValueLength = 16
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
     }
 
     [Fact]
-    public async Task RejectsDomAttributeValueLengthWithoutTruncationState()
+    public void RejectsDomAttributeValueLengthWithoutTruncationState()
     {
         var record = CreateEvent(
             0,
@@ -2084,24 +1648,15 @@ public sealed class SessionArchiveValidatorTests
                 attributeValueTruncated = false,
                 maximumValueLength = 4096
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "browser-dom-text-truncation-inconsistent");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "browser-dom-text-truncation-inconsistent");
     }
 
     [Theory]
@@ -2109,7 +1664,7 @@ public sealed class SessionArchiveValidatorTests
     [InlineData(0, "dom-transition-1", null)]
     [InlineData(2, null, null)]
     [InlineData(2, "dom-transition-1", null)]
-    public async Task RejectsDomCheckpointWithHalfStatedTransitionCoverage(
+    public void RejectsDomCheckpointWithHalfStatedTransitionCoverage(
         int coveredTransitionCount,
         string? coveredTransitionFirstId,
         string? coveredTransitionLastId)
@@ -2137,31 +1692,22 @@ public sealed class SessionArchiveValidatorTests
                 shadowRootCount = 0,
                 slotCount = 0
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "browser-dom-checkpoint-coverage-inconsistent");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "browser-dom-checkpoint-coverage-inconsistent");
     }
 
     [Theory]
     [InlineData("added", "true", "false")]
     [InlineData("removed", "true", null)]
     [InlineData("changed", null, "false")]
-    public async Task RejectsDomAttributeChangeThatContradictsItsChangeType(
+    public void RejectsDomAttributeChangeThatContradictsItsChangeType(
         string changeType,
         string? value,
         string? previousValue)
@@ -2188,28 +1734,19 @@ public sealed class SessionArchiveValidatorTests
                 previousAttributeValueTruncated = false,
                 maximumValueLength = 4096
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "browser-dom-attribute-change-inconsistent");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "browser-dom-attribute-change-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsDomCharacterDataChangeWithoutDocumentToken()
+    public void RejectsDomCharacterDataChangeWithoutDocumentToken()
     {
         var record = CreateEvent(
             0,
@@ -2243,23 +1780,14 @@ public sealed class SessionArchiveValidatorTests
                 previousTextTruncated = false,
                 maximumValueLength = 4096
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "browser-dom-context-invalid");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "browser-dom-context-invalid");
     }
 
     private static object CreateRendererDocumentContext() =>
@@ -2278,7 +1806,7 @@ public sealed class SessionArchiveValidatorTests
         };
 
     [Fact]
-    public async Task RejectsDomCheckpointWithoutDocumentToken()
+    public void RejectsDomCheckpointWithoutDocumentToken()
     {
         var record = CreateEvent(
             0,
@@ -2304,27 +1832,18 @@ public sealed class SessionArchiveValidatorTests
                 reason = "finished-parsing",
                 maximumNodes = 512
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "browser-dom-context-invalid");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "browser-dom-context-invalid");
     }
 
     [Fact]
-    public async Task AcceptsEveryListenerRegistrationFormAtTheArchiveBoundary()
+    public void AcceptsEveryListenerRegistrationFormAtTheArchiveBoundary()
     {
         // Blink registers an addEventListener call, an on-event attribute
         // assignment, and an inline content attribute through one path, and
@@ -2398,25 +1917,16 @@ public sealed class SessionArchiveValidatorTests
                 BrowserEvidenceEventTypes.ListenerRemoved,
                 Listener("listener-2", "event-handler-property"))
         };
-        var directory = await CreateArchiveAsync(records);
+        IReadOnlyList<RecorderEvent> events = (records);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task RejectsAListenerRegistrationFormTheSchemaDoesNotDefine()
+    public void RejectsAListenerRegistrationFormTheSchemaDoesNotDefine()
     {
         // A registration form outside the schema would let an unreviewed
         // reading of how a listener was created reach the archive, so it is
@@ -2461,29 +1971,20 @@ public sealed class SessionArchiveValidatorTests
                 once = false,
                 location = (object?)null
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "payload-property-invalid" &&
-                    issue.Path.EndsWith("/registrationKind", StringComparison.Ordinal));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/registrationKind", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task RejectsAListenerLocationLineTheSchemaDoesNotAllow()
+    public void RejectsAListenerLocationLineTheSchemaDoesNotAllow()
     {
         // A negative line is not a line Blink can report, so it is a defect in
         // the recorder rather than a fact about the session, and it is rejected
@@ -2536,29 +2037,20 @@ public sealed class SessionArchiveValidatorTests
                     sourceHash = (string?)null
                 }
             });
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "payload-property-invalid" &&
-                    issue.Path.EndsWith("/location/line", StringComparison.Ordinal));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/location/line", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task AcceptsAListenerRegisteredFromAnIsolatedWorld()
+    public void AcceptsAListenerRegisteredFromAnIsolatedWorld()
     {
         // An isolated world is the world an extension or the inspector runs
         // script in. The world named on the record and the world named in its
@@ -2570,24 +2062,15 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Listener,
             BrowserEvidenceEventTypes.ListenerRegistered,
             CreateListenerWithWorld("world-13", "isolated", 13));
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
     }
 
     [Fact]
-    public async Task RejectsAListenerWorldItsContextContradicts()
+    public void RejectsAListenerWorldItsContextContradicts()
     {
         // A record that names one world on the payload and another in its
         // context gives a consumer two answers to the same question, so the
@@ -2599,31 +2082,22 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Listener,
             BrowserEvidenceEventTypes.ListenerRegistered,
             CreateListenerWithWorld("world-0", "isolated", 13));
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "browser-execution-world-identity" &&
-                    issue.Path.EndsWith(
-                        "/context/executionWorldId",
-                        StringComparison.Ordinal));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "browser-execution-world-identity" &&
+                issue.Path.EndsWith(
+                    "/context/executionWorldId",
+                    StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task RejectsAListenerWorldWithNoExecutionWorldIdentity()
+    public void RejectsAListenerWorldWithNoExecutionWorldIdentity()
     {
         // The context identity is what correlates records from one world, so a
         // record that names a world without it cannot be grouped with the rest
@@ -2634,27 +2108,18 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Listener,
             BrowserEvidenceEventTypes.ListenerRegistered,
             CreateListenerWithWorld(null, "isolated", 13));
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "browser-execution-world-identity");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "browser-execution-world-identity");
     }
 
     [Fact]
-    public async Task RejectsAListenerWorldKindTheSchemaDoesNotAllow()
+    public void RejectsAListenerWorldKindTheSchemaDoesNotAllow()
     {
         // The recorder names the world types Blink has, and reports a type it
         // does not name as other. A kind outside that set is a defect in the
@@ -2665,25 +2130,16 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Listener,
             BrowserEvidenceEventTypes.ListenerRegistered,
             CreateListenerWithWorld("world-13", "extension", 13));
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue =>
-                    issue.Code == "payload-property-invalid" &&
-                    issue.Path.EndsWith("/world/kind", StringComparison.Ordinal));
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/world/kind", StringComparison.Ordinal));
     }
 
     // A registration made by a page's own script belongs to the main world,
@@ -2751,7 +2207,7 @@ public sealed class SessionArchiveValidatorTests
         };
 
     [Fact]
-    public async Task AcceptsCorrelatedBrowserListenerLifecycleEvidence()
+    public void AcceptsCorrelatedBrowserListenerLifecycleEvidence()
     {
         var context = new
         {
@@ -2875,21 +2331,12 @@ public sealed class SessionArchiveValidatorTests
                     true,
                     "canceled-by-event-handler"))
         };
-        var directory = await CreateArchiveAsync(records);
+        IReadOnlyList<RecorderEvent> events = (records);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     public static TheoryData<string, string> CookieRecords()
@@ -2905,23 +2352,23 @@ public sealed class SessionArchiveValidatorTests
 
     [Theory]
     [MemberData(nameof(CookieRecords))]
-    public async Task AcceptsEveryCookieRecordShape(string eventType, string json)
+    public void AcceptsEveryCookieRecordShape(string eventType, string json)
     {
-        var issues = await ValidateCookieRecordAsync(eventType, JsonNode.Parse(json)!);
+        var issues = ValidateCookieRecord(eventType, JsonNode.Parse(json)!);
 
         Assert.Empty(issues);
     }
 
     [Theory]
     [MemberData(nameof(CookieRecords))]
-    public async Task RejectsCookieValuesAtTheArchiveBoundary(
+    public void RejectsCookieValuesAtTheArchiveBoundary(
         string eventType,
         string json)
     {
         var payload = JsonNode.Parse(json)!;
         payload["value"] = "must-not-be-recorded";
 
-        var issues = await ValidateCookieRecordAsync(eventType, payload);
+        var issues = ValidateCookieRecord(eventType, payload);
 
         Assert.Contains(
             issues,
@@ -2931,12 +2378,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsCookieValuesInsideCookieAccessEntries()
+    public void RejectsCookieValuesInsideCookieAccessEntries()
     {
         var payload = JsonNode.Parse(BrowserCookiePayloads.CookieAccess)!;
         payload["cookies"]![1]!["value"] = "must-not-be-recorded";
 
-        var issues = await ValidateCookieRecordAsync("cookie-access", payload);
+        var issues = ValidateCookieRecord("cookie-access", payload);
 
         Assert.Contains(
             issues,
@@ -2946,35 +2393,35 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsACookieCountThatDisagreesWithItsList()
+    public void RejectsACookieCountThatDisagreesWithItsList()
     {
         var payload = JsonNode.Parse(BrowserCookiePayloads.DocumentCookieRead)!;
         payload["cookieCount"] = 3;
 
-        var issues = await ValidateCookieRecordAsync("document-cookie-read", payload);
+        var issues = ValidateCookieRecord("document-cookie-read", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-cookie-count");
     }
 
     [Fact]
-    public async Task AcceptsATruncatedCookieListWithALargerCount()
+    public void AcceptsATruncatedCookieListWithALargerCount()
     {
         var payload = JsonNode.Parse(BrowserCookiePayloads.DocumentCookieRead)!;
         payload["cookieCount"] = 300;
         payload["cookieNamesTruncated"] = true;
 
-        var issues = await ValidateCookieRecordAsync("document-cookie-read", payload);
+        var issues = ValidateCookieRecord("document-cookie-read", payload);
 
         Assert.Empty(issues);
     }
 
     [Fact]
-    public async Task RejectsAnUnparsedCookieAccessEntryThatReportsAttributes()
+    public void RejectsAnUnparsedCookieAccessEntryThatReportsAttributes()
     {
         var payload = JsonNode.Parse(BrowserCookiePayloads.CookieAccess)!;
         payload["cookies"]![1]!["domain"] = "example.test";
 
-        var issues = await ValidateCookieRecordAsync("cookie-access", payload);
+        var issues = ValidateCookieRecord("cookie-access", payload);
 
         Assert.Contains(
             issues,
@@ -2982,12 +2429,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsACookieStoreReadThatReportsWriteAttributes()
+    public void RejectsACookieStoreReadThatReportsWriteAttributes()
     {
         var payload = JsonNode.Parse(BrowserCookiePayloads.CookieStoreWriteRequest)!;
         payload["method"] = "get";
 
-        var issues = await ValidateCookieRecordAsync("cookie-store-request", payload);
+        var issues = ValidateCookieRecord("cookie-store-request", payload);
 
         Assert.Contains(
             issues,
@@ -2995,12 +2442,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsACookieStoreWriteResultThatReportsNames()
+    public void RejectsACookieStoreWriteResultThatReportsNames()
     {
         var payload = JsonNode.Parse(BrowserCookiePayloads.CookieStoreReadResult)!;
         payload["method"] = "set";
 
-        var issues = await ValidateCookieRecordAsync("cookie-store-result", payload);
+        var issues = ValidateCookieRecord("cookie-store-result", payload);
 
         Assert.Contains(
             issues,
@@ -3008,28 +2455,27 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsANavigationCookieAccessWithoutItsNavigation()
+    public void RejectsANavigationCookieAccessWithoutItsNavigation()
     {
         var payload = JsonNode.Parse(BrowserCookiePayloads.CookieAccess)!;
         payload["observer"] = "navigation";
 
-        var issues = await ValidateCookieRecordAsync("cookie-access", payload);
+        var issues = ValidateCookieRecord("cookie-access", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-cookie-access-observer");
     }
 
     [Fact]
-    public async Task RejectsTheRetiredCookieOperationRecord()
+    public void RejectsTheRetiredCookieOperationRecord()
     {
         var payload = JsonNode.Parse(BrowserCookiePayloads.DocumentCookieRead)!;
 
-        var issues = await ValidateCookieRecordAsync("cookie-operation", payload);
+        var issues = ValidateCookieRecord("cookie-operation", payload);
 
         Assert.Contains(issues, issue => issue.Code == "event-type-unsupported");
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidateCookieRecordAsync(string eventType, JsonNode payload)
+    private static IReadOnlyList<EventValidationIssue> ValidateCookieRecord(string eventType, JsonNode payload)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(
@@ -3038,19 +2484,10 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Cookie,
             eventType,
             document.RootElement.Clone());
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
     public static TheoryData<string, string> InteractionRecords()
@@ -3066,9 +2503,9 @@ public sealed class SessionArchiveValidatorTests
 
     [Theory]
     [MemberData(nameof(InteractionRecords))]
-    public async Task AcceptsEveryInteractionRecordShape(string eventType, string json)
+    public void AcceptsEveryInteractionRecordShape(string eventType, string json)
     {
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             eventType, JsonNode.Parse(json)!);
 
         Assert.Empty(issues);
@@ -3076,14 +2513,14 @@ public sealed class SessionArchiveValidatorTests
 
     [Theory]
     [MemberData(nameof(InteractionRecords))]
-    public async Task RejectsAnUndeclaredInteractionProperty(
+    public void RejectsAnUndeclaredInteractionProperty(
         string eventType,
         string json)
     {
         var payload = JsonNode.Parse(json)!;
         payload["undeclared"] = 1;
 
-        var issues = await ValidateInteractionRecordAsync(eventType, payload);
+        var issues = ValidateInteractionRecord(eventType, payload);
 
         Assert.Contains(
             issues,
@@ -3093,24 +2530,24 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAFocusOutcomeTheNodesDoNotSupport()
+    public void RejectsAFocusOutcomeTheNodesDoNotSupport()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.ScriptFocusChanged)!;
         payload["focusedNodeId"] = 45;
 
-        var issues = await ValidateInteractionRecordAsync("focus-changed", payload);
+        var issues = ValidateInteractionRecord("focus-changed", payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "browser-focus-outcome-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAnActiveDescendantWithoutFocus()
+    public void RejectsAnActiveDescendantWithoutFocus()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.FocusCleared)!;
         payload["activeDescendantNodeId"] = 52;
 
-        var issues = await ValidateInteractionRecordAsync("focus-changed", payload);
+        var issues = ValidateInteractionRecord("focus-changed", payload);
 
         Assert.Contains(
             issues,
@@ -3118,24 +2555,24 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnEmptySelectionThatReportsPositions()
+    public void RejectsAnEmptySelectionThatReportsPositions()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.TextControlSelection)!;
         payload["selectionType"] = "none";
 
-        var issues = await ValidateInteractionRecordAsync("selection-changed", payload);
+        var issues = ValidateInteractionRecord("selection-changed", payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "browser-selection-positions-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAPartialTextControlSelection()
+    public void RejectsAPartialTextControlSelection()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.TextControlSelection)!;
         payload["textControlSelectionDirection"] = null;
 
-        var issues = await ValidateInteractionRecordAsync("selection-changed", payload);
+        var issues = ValidateInteractionRecord("selection-changed", payload);
 
         Assert.Contains(
             issues,
@@ -3143,25 +2580,25 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAReversedTextControlValueSelection()
+    public void RejectsAReversedTextControlValueSelection()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.UserEditedValue)!;
         payload["selectionStart"] = 3;
         payload["selectionEnd"] = 1;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "text-control-value-changed", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-selection-range-reversed");
     }
 
     [Fact]
-    public async Task RejectsATextControlValueLengthThatDisagreesWithTheValue()
+    public void RejectsATextControlValueLengthThatDisagreesWithTheValue()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.UserEditedValue)!;
         payload["valueLength"] = 4;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "text-control-value-changed", payload);
 
         Assert.Contains(
@@ -3169,12 +2606,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsARecordedValueLongerThanItsMaximum()
+    public void RejectsARecordedValueLongerThanItsMaximum()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.UserEditedValue)!;
         payload["maximumValueLength"] = 2;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "text-control-value-changed", payload);
 
         Assert.Contains(
@@ -3184,7 +2621,7 @@ public sealed class SessionArchiveValidatorTests
     [Theory]
     [InlineData("browser.dom", "rendering-update", "dom-checkpoint-3")]
     [InlineData("browser.layout", "post-mutation", "layout-checkpoint-12")]
-    public async Task RejectsAnInteractionCheckpointReasonItsSourceDoesNotRecord(
+    public void RejectsAnInteractionCheckpointReasonItsSourceDoesNotRecord(
         string sourceChannel,
         string reason,
         string sourceCheckpointId)
@@ -3194,7 +2631,7 @@ public sealed class SessionArchiveValidatorTests
         payload["reason"] = reason;
         payload["sourceCheckpointId"] = sourceCheckpointId;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "interaction-checkpoint-started", payload);
 
         Assert.Contains(
@@ -3207,13 +2644,13 @@ public sealed class SessionArchiveValidatorTests
     [InlineData("layout-checkpoint-")]
     [InlineData("layout-checkpoint-012")]
     [InlineData("layout-checkpoint-1x")]
-    public async Task RejectsAnInteractionCheckpointSourceOfAnotherChannel(
+    public void RejectsAnInteractionCheckpointSourceOfAnotherChannel(
         string sourceCheckpointId)
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
         payload["sourceCheckpointId"] = sourceCheckpointId;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "interaction-checkpoint-started", payload);
 
         Assert.Contains(
@@ -3222,12 +2659,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAMalformedInteractionCheckpointIdentity()
+    public void RejectsAMalformedInteractionCheckpointIdentity()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.CheckpointCompleted)!;
         payload["checkpointId"] = "layout-checkpoint-7";
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "interaction-checkpoint-completed", payload);
 
         Assert.Contains(
@@ -3235,12 +2672,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnInteractionCheckpointActiveDescendantWithoutFocus()
+    public void RejectsAnInteractionCheckpointActiveDescendantWithoutFocus()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
         payload["focusedNodeId"] = null;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "interaction-checkpoint-started", payload);
 
         Assert.Contains(
@@ -3250,12 +2687,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsVisibleFocusWithoutAFocusedElement()
+    public void RejectsVisibleFocusWithoutAFocusedElement()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.DomCheckpointStarted)!;
         payload["focusVisible"] = true;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "interaction-checkpoint-started", payload);
 
         Assert.Contains(
@@ -3265,12 +2702,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnInteractionCheckpointSelectionWithoutPositions()
+    public void RejectsAnInteractionCheckpointSelectionWithoutPositions()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.DomCheckpointStarted)!;
         payload["focusOffset"] = null;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "interaction-checkpoint-started", payload);
 
         Assert.Contains(
@@ -3280,12 +2717,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnInteractionCheckpointTextControlLengthMismatch()
+    public void RejectsAnInteractionCheckpointTextControlLengthMismatch()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.CheckpointTextControl)!;
         payload["valueLength"] = 12;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "interaction-checkpoint-text-control", payload);
 
         Assert.Contains(
@@ -3293,12 +2730,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsMoreInteractionCheckpointTextControlsThanTheMaximum()
+    public void RejectsMoreInteractionCheckpointTextControlsThanTheMaximum()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.CheckpointCompleted)!;
         payload["textControlCount"] = 513;
 
-        var issues = await ValidateInteractionRecordAsync(
+        var issues = ValidateInteractionRecord(
             "interaction-checkpoint-completed", payload);
 
         Assert.Contains(
@@ -3307,7 +2744,7 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task AcceptsAnInteractionOmissionRecord()
+    public void AcceptsAnInteractionOmissionRecord()
     {
         var payload = JsonNode.Parse("""
             {
@@ -3328,7 +2765,7 @@ public sealed class SessionArchiveValidatorTests
             }
             """)!;
 
-        var issues = await ValidateInteractionRecordAsync("collector-omission", payload);
+        var issues = ValidateInteractionRecord("collector-omission", payload);
 
         Assert.Empty(issues);
     }
@@ -3346,21 +2783,21 @@ public sealed class SessionArchiveValidatorTests
 
     [Theory]
     [MemberData(nameof(LayoutRecords))]
-    public async Task AcceptsEveryLayoutRecordShape(string eventType, string json)
+    public void AcceptsEveryLayoutRecordShape(string eventType, string json)
     {
-        var issues = await ValidateLayoutRecordAsync(eventType, JsonNode.Parse(json)!);
+        var issues = ValidateLayoutRecord(eventType, JsonNode.Parse(json)!);
 
         Assert.Empty(issues);
     }
 
     [Theory]
     [MemberData(nameof(LayoutRecords))]
-    public async Task RejectsAnUndeclaredLayoutProperty(string eventType, string json)
+    public void RejectsAnUndeclaredLayoutProperty(string eventType, string json)
     {
         var payload = JsonNode.Parse(json)!;
         payload["undeclared"] = 1;
 
-        var issues = await ValidateLayoutRecordAsync(eventType, payload);
+        var issues = ValidateLayoutRecord(eventType, payload);
 
         Assert.Contains(
             issues,
@@ -3370,12 +2807,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnUndeclaredViewportProperty()
+    public void RejectsAnUndeclaredViewportProperty()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.FirstCheckpointStarted)!;
         payload["viewport"]!["depth"] = 1;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-started", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-started", payload);
 
         Assert.Contains(
             issues,
@@ -3385,47 +2822,47 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsADuplicatedStyleProperty()
+    public void RejectsADuplicatedStyleProperty()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.FirstCheckpointStarted)!;
         payload["styleProperties"] = new JsonArray("display", "display");
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-started", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-started", payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "browser-layout-style-properties-invalid");
     }
 
     [Fact]
-    public async Task RejectsACheckpointThatNamesItselfAsPrevious()
+    public void RejectsACheckpointThatNamesItselfAsPrevious()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.LaterCheckpointStarted)!;
         payload["previousCheckpointId"] = "layout-checkpoint-2";
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-started", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-started", payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "browser-layout-checkpoint-previous-self");
     }
 
     [Fact]
-    public async Task RejectsARectangleWithoutALayoutObject()
+    public void RejectsARectangleWithoutALayoutObject()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
         payload["layoutObjectPresent"] = false;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-node", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-layout-rect-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsANegativeRectangleSize()
+    public void RejectsANegativeRectangleSize()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
         payload["boundingClientRect"]!["width"] = -1;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-node", payload);
 
         Assert.Contains(
             issues,
@@ -3435,12 +2872,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsANonStringStyleValue()
+    public void RejectsANonStringStyleValue()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
         payload["computedStyle"]!["width"] = 120;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-node", payload);
 
         Assert.Contains(
             issues,
@@ -3450,24 +2887,24 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsATextNodeWithAComputedStyle()
+    public void RejectsATextNodeWithAComputedStyle()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.TextNode)!;
         payload["computedStyle"] = new JsonObject { ["color"] = "rgb(0, 0, 0)" };
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-node", payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "browser-layout-text-node-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsANodeCountAboveTheMaximum()
+    public void RejectsANodeCountAboveTheMaximum()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.CheckpointCompleted)!;
         payload["maximumNodes"] = 5;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-completed", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-completed", payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "browser-layout-node-count-over-maximum");
@@ -3486,21 +2923,21 @@ public sealed class SessionArchiveValidatorTests
 
     [Theory]
     [MemberData(nameof(NetworkRecords))]
-    public async Task AcceptsEveryNetworkRecordShape(string eventType, string json)
+    public void AcceptsEveryNetworkRecordShape(string eventType, string json)
     {
-        var issues = await ValidateNetworkRecordAsync(eventType, JsonNode.Parse(json)!);
+        var issues = ValidateNetworkRecord(eventType, JsonNode.Parse(json)!);
 
         Assert.Empty(issues);
     }
 
     [Theory]
     [MemberData(nameof(NetworkRecords))]
-    public async Task RejectsAnUndeclaredNetworkProperty(string eventType, string json)
+    public void RejectsAnUndeclaredNetworkProperty(string eventType, string json)
     {
         var payload = JsonNode.Parse(json)!;
         payload["undeclared"] = 1;
 
-        var issues = await ValidateNetworkRecordAsync(eventType, payload);
+        var issues = ValidateNetworkRecord(eventType, payload);
 
         Assert.Contains(
             issues,
@@ -3510,7 +2947,7 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsARecordedCredentialHeaderValue()
+    public void RejectsARecordedCredentialHeaderValue()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.RequestHeadersSent)!;
         var cookie = payload["headers"]![1]!;
@@ -3518,7 +2955,7 @@ public sealed class SessionArchiveValidatorTests
         cookie["valueRedacted"] = false;
         cookie["redactionReason"] = null;
 
-        var issues = await ValidateNetworkRecordAsync("request-headers-sent", payload);
+        var issues = ValidateNetworkRecord("request-headers-sent", payload);
 
         Assert.Contains(
             issues,
@@ -3526,96 +2963,96 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAWithheldHeaderThatCarriesAValue()
+    public void RejectsAWithheldHeaderThatCarriesAValue()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.RequestWillBeSent)!;
         payload["request"]!["headers"]![2]!["value"] = "secret";
 
-        var issues = await ValidateNetworkRecordAsync("request-will-be-sent", payload);
+        var issues = ValidateNetworkRecord("request-will-be-sent", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-header-redaction");
     }
 
     [Fact]
-    public async Task RejectsAHeaderCountThatDisagreesWithTheList()
+    public void RejectsAHeaderCountThatDisagreesWithTheList()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.NavigationResponse)!;
         payload["requestHeaderCount"] = 4;
 
-        var issues = await ValidateNetworkRecordAsync("navigation-response", payload);
+        var issues = ValidateNetworkRecord("navigation-response", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-header-count");
     }
 
     [Fact]
-    public async Task RejectsARedirectWithoutARedirectResponse()
+    public void RejectsARedirectWithoutARedirectResponse()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.RedirectRequestWillBeSent)!;
         payload["redirectResponse"] = null;
 
-        var issues = await ValidateNetworkRecordAsync("request-will-be-sent", payload);
+        var issues = ValidateNetworkRecord("request-will-be-sent", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-redirect-response");
     }
 
     [Fact]
-    public async Task RejectsAWithheldOffsetThatMissesTheMarker()
+    public void RejectsAWithheldOffsetThatMissesTheMarker()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.WebSocketMessageSent)!;
         payload["payload"]!["withheld"]![0]!["offset"] = 3;
 
-        var issues = await ValidateNetworkRecordAsync("websocket-message-sent", payload);
+        var issues = ValidateNetworkRecord("websocket-message-sent", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-withheld-offset");
     }
 
     [Fact]
-    public async Task RejectsARecordedTextOverTheLimit()
+    public void RejectsARecordedTextOverTheLimit()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.EventSourceMessage)!;
         payload["data"]!["text"] = new string('a', 4097);
 
-        var issues = await ValidateNetworkRecordAsync("event-source-message", payload);
+        var issues = ValidateNetworkRecord("event-source-message", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-text-too-long");
     }
 
     [Fact]
-    public async Task RejectsABinaryMessageThatCarriesText()
+    public void RejectsABinaryMessageThatCarriesText()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.WebSocketBinaryMessageReceived)!;
         payload["payload"] = JsonNode.Parse(
             """{ "text": "x", "truncated": false, "withheld": [] }""");
 
-        var issues = await ValidateNetworkRecordAsync("websocket-message-received", payload);
+        var issues = ValidateNetworkRecord("websocket-message-received", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-realtime-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsADisconnectedChannelThatReportsACloseCode()
+    public void RejectsADisconnectedChannelThatReportsACloseCode()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.WebSocketDisconnected)!;
         payload["code"] = 1006;
 
-        var issues = await ValidateNetworkRecordAsync("websocket-closed", payload);
+        var issues = ValidateNetworkRecord("websocket-closed", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-realtime-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAnAbruptWebTransportCloseWithACode()
+    public void RejectsAnAbruptWebTransportCloseWithACode()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.WebTransportClosed)!;
         payload["code"] = 0.0;
 
-        var issues = await ValidateNetworkRecordAsync("web-transport-closed", payload);
+        var issues = ValidateNetworkRecord("web-transport-closed", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-realtime-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsARecordedSetCookieValueOnAHandshake()
+    public void RejectsARecordedSetCookieValueOnAHandshake()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.WebSocketHandshakeResponse)!;
         var cookie = payload["headers"]![1]!;
@@ -3623,7 +3060,7 @@ public sealed class SessionArchiveValidatorTests
         cookie["valueRedacted"] = false;
         cookie["redactionReason"] = null;
 
-        var issues = await ValidateNetworkRecordAsync("websocket-handshake-response", payload);
+        var issues = ValidateNetworkRecord("websocket-handshake-response", payload);
 
         Assert.Contains(
             issues,
@@ -3631,40 +3068,40 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsANonDecimalTransportId()
+    public void RejectsANonDecimalTransportId()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.WebTransportCreated)!;
         payload["transportId"] = "wt-1";
 
-        var issues = await ValidateNetworkRecordAsync("web-transport-created", payload);
+        var issues = ValidateNetworkRecord("web-transport-created", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-inspector-id-invalid");
     }
 
     [Fact]
-    public async Task RejectsANonDecimalInspectorId()
+    public void RejectsANonDecimalInspectorId()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.RequestFinished)!;
         payload["inspectorId"] = "request-17";
 
-        var issues = await ValidateNetworkRecordAsync("request-finished", payload);
+        var issues = ValidateNetworkRecord("request-finished", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-network-inspector-id-invalid");
     }
 
     [Fact]
-    public async Task AcceptsAnUnreportedTransferredLengthAndRejectsANegativeOne()
+    public void AcceptsAnUnreportedTransferredLengthAndRejectsANegativeOne()
     {
         var response = JsonNode.Parse(BrowserNetworkPayloads.ResponseReceived)!;
         response["response"]!["encodedDataLength"] = null;
         var finished = JsonNode.Parse(BrowserNetworkPayloads.RequestFinished)!;
         finished["encodedDataLength"] = null;
 
-        Assert.Empty(await ValidateNetworkRecordAsync("response-received", response));
-        Assert.Empty(await ValidateNetworkRecordAsync("request-finished", finished));
+        Assert.Empty(ValidateNetworkRecord("response-received", response));
+        Assert.Empty(ValidateNetworkRecord("request-finished", finished));
 
         finished["encodedDataLength"] = -1.0;
-        var issues = await ValidateNetworkRecordAsync("request-finished", finished);
+        var issues = ValidateNetworkRecord("request-finished", finished);
 
         Assert.Contains(
             issues,
@@ -3674,12 +3111,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnUndeclaredTimingPhase()
+    public void RejectsAnUndeclaredTimingPhase()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.ResponseReceived)!;
         payload["response"]!["timing"]!["bodyStart"] = 1.0;
 
-        var issues = await ValidateNetworkRecordAsync("response-received", payload);
+        var issues = ValidateNetworkRecord("response-received", payload);
 
         Assert.Contains(
             issues,
@@ -3689,31 +3126,30 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnUnparsedWireCookieWithAttributes()
+    public void RejectsAnUnparsedWireCookieWithAttributes()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.ResponseHeadersReceived)!;
         payload["cookies"]![0]!["domain"] = "example.test";
 
-        var issues = await ValidateNetworkRecordAsync("response-headers-received", payload);
+        var issues = ValidateNetworkRecord("response-headers-received", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-cookie-access-entry-shape");
     }
 
     [Fact]
-    public async Task AcceptsANetworkOmission()
+    public void AcceptsANetworkOmission()
     {
         var payload = JsonNode.Parse(
             """
             { "reason": "browser-evidence-write-failed", "count": 3 }
             """)!;
 
-        var issues = await ValidateNetworkRecordAsync("collector-omission", payload);
+        var issues = ValidateNetworkRecord("collector-omission", payload);
 
         Assert.Empty(issues);
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidateNetworkRecordAsync(string eventType, JsonNode payload)
+    private static IReadOnlyList<EventValidationIssue> ValidateNetworkRecord(string eventType, JsonNode payload)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(
@@ -3722,19 +3158,10 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Network,
             eventType,
             document.RootElement.Clone());
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
     public static TheoryData<string, string, string> ShadowDomRecords() =>
@@ -3748,19 +3175,19 @@ public sealed class SessionArchiveValidatorTests
 
     [Theory]
     [MemberData(nameof(ShadowDomRecords))]
-    public async Task AcceptsEveryShadowDomRecordShape(
+    public void AcceptsEveryShadowDomRecordShape(
         string channel,
         string eventType,
         string json)
     {
-        var issues = await ValidateRecordAsync(channel, eventType, JsonNode.Parse(json)!);
+        var issues = ValidateRecord(channel, eventType, JsonNode.Parse(json)!);
 
         Assert.Empty(issues);
     }
 
     [Theory]
     [MemberData(nameof(ShadowDomRecords))]
-    public async Task RejectsAnUndeclaredShadowDomProperty(
+    public void RejectsAnUndeclaredShadowDomProperty(
         string channel,
         string eventType,
         string json)
@@ -3768,7 +3195,7 @@ public sealed class SessionArchiveValidatorTests
         var payload = JsonNode.Parse(json)!;
         payload["undeclared"] = 1;
 
-        var issues = await ValidateRecordAsync(channel, eventType, payload);
+        var issues = ValidateRecord(channel, eventType, payload);
 
         Assert.Contains(
             issues,
@@ -3778,12 +3205,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnUnknownShadowRootMode()
+    public void RejectsAnUnknownShadowRootMode()
     {
         var payload = JsonNode.Parse(BrowserShadowDomPayloads.ShadowRoot)!;
         payload["mode"] = "hidden";
 
-        var issues = await ValidateRecordAsync(
+        var issues = ValidateRecord(
             BrowserEvidenceChannels.Dom,
             "dom-checkpoint-shadow-root",
             payload);
@@ -3796,12 +3223,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsASlotAssignmentWhoseTruncationDisagreesWithItsCount()
+    public void RejectsASlotAssignmentWhoseTruncationDisagreesWithItsCount()
     {
         var payload = JsonNode.Parse(BrowserShadowDomPayloads.SlotAssignment)!;
         payload["assignedNodeCount"] = 3;
 
-        var issues = await ValidateRecordAsync(
+        var issues = ValidateRecord(
             BrowserEvidenceChannels.Dom,
             "dom-checkpoint-slot-assignment",
             payload);
@@ -3812,12 +3239,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsPathScopesThatDoNotMatchTheComposedPath()
+    public void RejectsPathScopesThatDoNotMatchTheComposedPath()
     {
         var payload = JsonNode.Parse(BrowserShadowDomPayloads.DispatchStarted)!;
         payload["pathScopes"]!.AsArray().RemoveAt(4);
 
-        var issues = await ValidateRecordAsync(
+        var issues = ValidateRecord(
             BrowserEvidenceChannels.Dispatch,
             "dispatch-started",
             payload);
@@ -3828,12 +3255,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAVisiblePathIndexOutsideTheComposedPath()
+    public void RejectsAVisiblePathIndexOutsideTheComposedPath()
     {
         var payload = JsonNode.Parse(BrowserShadowDomPayloads.DispatchStarted)!;
         payload["pathScopes"]![2]!["visiblePathIndexes"]!.AsArray().Add(5);
 
-        var issues = await ValidateRecordAsync(
+        var issues = ValidateRecord(
             BrowserEvidenceChannels.Dispatch,
             "dispatch-started",
             payload);
@@ -3848,12 +3275,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAShadowRootModeWithoutItsScopeRoot()
+    public void RejectsAShadowRootModeWithoutItsScopeRoot()
     {
         var payload = JsonNode.Parse(BrowserShadowDomPayloads.DispatchStarted)!;
         payload["pathScopes"]![0]!["treeScopeRootNodeId"] = null;
 
-        var issues = await ValidateRecordAsync(
+        var issues = ValidateRecord(
             BrowserEvidenceChannels.Dispatch,
             "dispatch-started",
             payload);
@@ -3864,12 +3291,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAnElementRecordCarryingAPseudoElementDescription()
+    public void RejectsAnElementRecordCarryingAPseudoElementDescription()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.PseudoElementNode)!;
         payload["nodeType"] = "element";
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-node", payload);
 
         Assert.Contains(
             issues,
@@ -3877,12 +3304,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsAPseudoElementWithoutItsDescription()
+    public void RejectsAPseudoElementWithoutItsDescription()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.PseudoElementNode)!;
         payload["pseudoElement"] = null;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-node", payload);
 
         Assert.Contains(
             issues,
@@ -3890,23 +3317,23 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsGeneratedTextLongerThanItsReportedLength()
+    public void RejectsGeneratedTextLongerThanItsReportedLength()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.PseudoElementNode)!;
         payload["pseudoElement"]!["generatedTextLength"] = 2;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-node", payload);
 
         Assert.NotEmpty(issues);
     }
 
     [Fact]
-    public async Task RejectsAShadowHostWithoutAShadowRootMode()
+    public void RejectsAShadowHostWithoutAShadowRootMode()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.ShadowTreeElementNode)!;
         payload["shadowRootMode"] = null;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-node", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-node", payload);
 
         Assert.Contains(
             issues,
@@ -3914,40 +3341,29 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsMorePseudoElementsThanNodes()
+    public void RejectsMorePseudoElementsThanNodes()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.CheckpointCompleted)!;
         payload["pseudoElementCount"] = 10;
 
-        var issues = await ValidateLayoutRecordAsync("layout-checkpoint-completed", payload);
+        var issues = ValidateLayoutRecord("layout-checkpoint-completed", payload);
 
         Assert.Contains(
             issues,
             issue => issue.Code == "browser-layout-pseudo-element-count-over-node-count");
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidateRecordAsync(string channel, string eventType, JsonNode payload)
+    private static IReadOnlyList<EventValidationIssue> ValidateRecord(string channel, string eventType, JsonNode payload)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(0, 100, channel, eventType, document.RootElement.Clone());
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidateLayoutRecordAsync(string eventType, JsonNode payload)
+    private static IReadOnlyList<EventValidationIssue> ValidateLayoutRecord(string eventType, JsonNode payload)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(
@@ -3956,19 +3372,10 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Layout,
             eventType,
             document.RootElement.Clone());
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
     public static TheoryData<string, string> PresentationRecords()
@@ -3984,9 +3391,9 @@ public sealed class SessionArchiveValidatorTests
 
     [Theory]
     [MemberData(nameof(PresentationRecords))]
-    public async Task AcceptsEveryPresentationRecordShape(string eventType, string json)
+    public void AcceptsEveryPresentationRecordShape(string eventType, string json)
     {
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             eventType, JsonNode.Parse(json)!);
 
         Assert.Empty(issues);
@@ -3994,14 +3401,14 @@ public sealed class SessionArchiveValidatorTests
 
     [Theory]
     [MemberData(nameof(PresentationRecords))]
-    public async Task RejectsAnUndeclaredPresentationProperty(
+    public void RejectsAnUndeclaredPresentationProperty(
         string eventType,
         string json)
     {
         var payload = JsonNode.Parse(json)!;
         payload["undeclared"] = 1;
 
-        var issues = await ValidatePresentationRecordAsync(eventType, payload);
+        var issues = ValidatePresentationRecord(eventType, payload);
 
         Assert.Contains(
             issues,
@@ -4015,7 +3422,7 @@ public sealed class SessionArchiveValidatorTests
     [InlineData("requestId", "presentation-request-07", "browser-presentation-request-id-invalid")]
     [InlineData("layoutCheckpointId", "interaction-checkpoint-12", "browser-presentation-checkpoint-id-invalid")]
     [InlineData("notQueuedReason", "no-widget", "browser-presentation-request-inconsistent")]
-    public async Task RejectsAnInconsistentPresentationRequest(
+    public void RejectsAnInconsistentPresentationRequest(
         string property,
         string value,
         string code)
@@ -4023,19 +3430,19 @@ public sealed class SessionArchiveValidatorTests
         var payload = JsonNode.Parse(BrowserPresentationPayloads.QueuedRequest)!;
         payload[property] = value;
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-requested", payload);
 
         Assert.Contains(issues, issue => issue.Code == code);
     }
 
     [Fact]
-    public async Task RejectsARequestWithoutAWidgetThatNamesAFrameNumber()
+    public void RejectsARequestWithoutAWidgetThatNamesAFrameNumber()
     {
         var payload = JsonNode.Parse(BrowserPresentationPayloads.RequestWithoutWidget)!;
         payload["sourceFrameNumber"] = 4;
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-requested", payload);
 
         Assert.Contains(
@@ -4046,12 +3453,12 @@ public sealed class SessionArchiveValidatorTests
     [InlineData("frameSinkId", "3-2")]
     [InlineData("frameSinkId", "3:")]
     [InlineData("frameSinkId", "4294967296:2")]
-    public async Task RejectsAMalformedFrameSinkIdentity(string property, string value)
+    public void RejectsAMalformedFrameSinkIdentity(string property, string value)
     {
         var payload = JsonNode.Parse(BrowserPresentationPayloads.Swapped)!;
         payload[property] = value;
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-swapped", payload);
 
         Assert.Contains(issues, issue => issue.Code == "payload-property-invalid");
@@ -4062,12 +3469,12 @@ public sealed class SessionArchiveValidatorTests
     [InlineData("4294967296")]
     [InlineData("017")]
     [InlineData("-3")]
-    public async Task RejectsAFrameTokenOutsideTheUnsignedRange(string token)
+    public void RejectsAFrameTokenOutsideTheUnsignedRange(string token)
     {
         var payload = JsonNode.Parse(BrowserPresentationPayloads.Swapped)!;
         payload["frameToken"] = token;
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-swapped", payload);
 
         Assert.Contains(issues, issue => issue.Code == "payload-property-invalid");
@@ -4078,7 +3485,7 @@ public sealed class SessionArchiveValidatorTests
     [InlineData("activation-fails", "broken")]
     [InlineData("swap-fails", "kept-active")]
     [InlineData("commit-no-update", "kept-active")]
-    public async Task RejectsANotSwappedActionChromiumWouldNotTake(
+    public void RejectsANotSwappedActionChromiumWouldNotTake(
         string reason,
         string action)
     {
@@ -4086,7 +3493,7 @@ public sealed class SessionArchiveValidatorTests
         payload["reason"] = reason;
         payload["action"] = action;
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-not-swapped", payload);
 
         Assert.Contains(
@@ -4095,12 +3502,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsANotSwappedCountThatDoesNotFollowTheIndex()
+    public void RejectsANotSwappedCountThatDoesNotFollowTheIndex()
     {
         var payload = JsonNode.Parse(BrowserPresentationPayloads.KeptActive)!;
         payload["notSwappedCount"] = 3;
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-not-swapped", payload);
 
         Assert.Contains(
@@ -4111,12 +3518,12 @@ public sealed class SessionArchiveValidatorTests
     [Theory]
     [InlineData("vsync", "vsync")]
     [InlineData("vsync", "tearing")]
-    public async Task RejectsFeedbackFlagsChromiumDoesNotDefine(string first, string second)
+    public void RejectsFeedbackFlagsChromiumDoesNotDefine(string first, string second)
     {
         var payload = JsonNode.Parse(BrowserPresentationPayloads.Feedback)!;
         payload["flags"] = new JsonArray(first, second);
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-feedback", payload);
 
         Assert.Contains(
@@ -4124,12 +3531,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsCounterTicksFromALowResolutionClock()
+    public void RejectsCounterTicksFromALowResolutionClock()
     {
         var payload = JsonNode.Parse(BrowserPresentationPayloads.Feedback)!;
         payload["highResolutionTicks"] = false;
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-feedback", payload);
 
         Assert.Contains(
@@ -4138,12 +3545,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task RejectsCounterTicksWithoutChromiumTime()
+    public void RejectsCounterTicksWithoutChromiumTime()
     {
         var payload = JsonNode.Parse(BrowserPresentationPayloads.Feedback)!;
         payload["presentedTimeTicksMicroseconds"] = null;
 
-        var issues = await ValidatePresentationRecordAsync(
+        var issues = ValidatePresentationRecord(
             "presentation-feedback", payload);
 
         Assert.Contains(
@@ -4151,12 +3558,12 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task AcceptsAPresentationOmission()
+    public void AcceptsAPresentationOmission()
     {
         var payload = JsonNode.Parse(
             """{"reason":"browser-evidence-write-failed","count":2}""")!;
 
-        var issues = await ValidatePresentationRecordAsync("collector-omission", payload);
+        var issues = ValidatePresentationRecord("collector-omission", payload);
 
         Assert.Empty(issues);
     }
@@ -4198,28 +3605,28 @@ public sealed class SessionArchiveValidatorTests
         """;
 
     [Fact]
-    public async Task AcceptsADesktopFrameWithMonitorCompositionTimes()
+    public void AcceptsADesktopFrameWithMonitorCompositionTimes()
     {
-        var issues = await ValidateDesktopFrameAsync(
+        var issues = ValidateDesktopFrame(
             JsonNode.Parse(WindowsGraphicsCaptureFrame)!);
 
         Assert.Empty(issues);
     }
 
     [Fact]
-    public async Task AcceptsADesktopFrameWrittenBeforeMonitorCompositionTimes()
+    public void AcceptsADesktopFrameWrittenBeforeMonitorCompositionTimes()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!.AsObject();
         payload.Remove("frameSelection");
         payload.Remove("monitorFrames");
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Empty(issues);
     }
 
     [Fact]
-    public async Task AcceptsADesktopFrameWrittenBeforeNewestArrivedSelection()
+    public void AcceptsADesktopFrameWrittenBeforeNewestArrivedSelection()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!.AsObject();
         payload.Remove("frameSelection");
@@ -4227,20 +3634,20 @@ public sealed class SessionArchiveValidatorTests
         monitor.Remove("supersededFrameCount");
         monitor.Remove("reusedPreviousImage");
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Empty(issues);
     }
 
     [Fact]
-    public async Task AcceptsAReusedPreviousImage()
+    public void AcceptsAReusedPreviousImage()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         var monitor = payload["monitorFrames"]![0]!;
         monitor["supersededFrameCount"] = 0;
         monitor["reusedPreviousImage"] = true;
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Empty(issues);
     }
@@ -4248,44 +3655,44 @@ public sealed class SessionArchiveValidatorTests
     [Theory]
     [InlineData("supersededFrameCount")]
     [InlineData("reusedPreviousImage")]
-    public async Task RejectsANewestArrivedFrameWithoutMonitorSelectionFields(
+    public void RejectsANewestArrivedFrameWithoutMonitorSelectionFields(
         string nulledProperty)
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         payload["monitorFrames"]![0]![nulledProperty] = null;
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "desktop-monitor-frame-selection-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsMonitorSelectionFieldsWithoutAFrameSelection()
+    public void RejectsMonitorSelectionFieldsWithoutAFrameSelection()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!.AsObject();
         payload.Remove("frameSelection");
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "desktop-monitor-frame-selection-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAReusedImageThatReleasedArrivedFrames()
+    public void RejectsAReusedImageThatReleasedArrivedFrames()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         payload["monitorFrames"]![0]!["reusedPreviousImage"] = true;
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "desktop-monitor-frame-selection-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAFrameSelectionOnAGdiFallbackFrame()
+    public void RejectsAFrameSelectionOnAGdiFallbackFrame()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         payload["backend"] = "gdi-bitblt";
@@ -4304,19 +3711,19 @@ public sealed class SessionArchiveValidatorTests
             monitor[property] = null;
         }
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "desktop-frame-selection-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAnUndeclaredFrameSelection()
+    public void RejectsAnUndeclaredFrameSelection()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         payload["frameSelection"] = "oldest-queued";
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Contains(
             issues,
@@ -4326,7 +3733,7 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task AcceptsAGdiFallbackFrameWithoutCompositionTimes()
+    public void AcceptsAGdiFallbackFrameWithoutCompositionTimes()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         payload["backend"] = "gdi-bitblt";
@@ -4340,7 +3747,7 @@ public sealed class SessionArchiveValidatorTests
         monitor["supersededFrameCount"] = null;
         monitor["reusedPreviousImage"] = null;
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Empty(issues);
     }
@@ -4350,7 +3757,7 @@ public sealed class SessionArchiveValidatorTests
     [InlineData("windows-graphics-capture", "dequeuedAtNanoseconds")]
     [InlineData("windows-graphics-capture", "tryGetNextFrameAttempts")]
     [InlineData("gdi-bitblt", null)]
-    public async Task RejectsMonitorTimingThatDoesNotMatchTheBackend(
+    public void RejectsMonitorTimingThatDoesNotMatchTheBackend(
         string backend,
         string? nulledProperty)
     {
@@ -4361,14 +3768,14 @@ public sealed class SessionArchiveValidatorTests
             payload["monitorFrames"]![0]![nulledProperty] = null;
         }
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "desktop-monitor-frame-timing-inconsistent");
     }
 
     [Fact]
-    public async Task AcceptsAMonitorImageWhoseCompositionTimeFollowsItsDequeue()
+    public void AcceptsAMonitorImageWhoseCompositionTimeFollowsItsDequeue()
     {
         // Windows reported SystemRelativeTime up to one display refresh after
         // the pool delivered the frame.
@@ -4376,30 +3783,30 @@ public sealed class SessionArchiveValidatorTests
         var composedAt = payload["monitorFrames"]![0]!["compositedAtNanoseconds"]!.GetValue<long>();
         payload["monitorFrames"]![0]!["dequeuedAtNanoseconds"] = composedAt - 15_000_000;
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Empty(issues);
     }
 
     [Fact]
-    public async Task RejectsMonitorFramesThatDoNotMatchTheMonitorCount()
+    public void RejectsMonitorFramesThatDoNotMatchTheMonitorCount()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         payload["monitorCount"] = 2;
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Contains(
             issues, issue => issue.Code == "desktop-monitor-frame-count-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAnUndeclaredMonitorFrameProperty()
+    public void RejectsAnUndeclaredMonitorFrameProperty()
     {
         var payload = JsonNode.Parse(WindowsGraphicsCaptureFrame)!;
         payload["monitorFrames"]![0]!["undeclared"] = 1;
 
-        var issues = await ValidateDesktopFrameAsync(payload);
+        var issues = ValidateDesktopFrame(payload);
 
         Assert.Contains(
             issues,
@@ -4445,9 +3852,9 @@ public sealed class SessionArchiveValidatorTests
         """;
 
     [Fact]
-    public async Task AcceptsAUiaDropEpisode()
+    public void AcceptsAUiaDropEpisode()
     {
-        var issues = await ValidateUiaRecordAsync(
+        var issues = ValidateUiaRecord(
             "collector-omission",
             JsonNode.Parse(UiaDropEpisode)!);
 
@@ -4455,13 +3862,13 @@ public sealed class SessionArchiveValidatorTests
     }
 
     [Fact]
-    public async Task AcceptsAUiaQueueFullOmissionWrittenBeforeDropEpisodes()
+    public void AcceptsAUiaQueueFullOmissionWrittenBeforeDropEpisodes()
     {
         var payload = JsonNode.Parse("""
             { "reason": "uia-observation-queue-full", "count": 3226 }
             """)!;
 
-        var issues = await ValidateUiaRecordAsync("collector-omission", payload, 13641458100);
+        var issues = ValidateUiaRecord("collector-omission", payload, 13641458100);
 
         Assert.Empty(issues);
     }
@@ -4471,42 +3878,42 @@ public sealed class SessionArchiveValidatorTests
     [InlineData("lastDroppedAtNanoseconds")]
     [InlineData("droppedByObservationType")]
     [InlineData("count")]
-    public async Task RejectsAUiaDropEpisodeMissingAField(string removed)
+    public void RejectsAUiaDropEpisodeMissingAField(string removed)
     {
         var payload = JsonNode.Parse(UiaDropEpisode)!.AsObject();
         payload.Remove(removed);
 
-        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+        var issues = ValidateUiaRecord("collector-omission", payload);
 
         Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAUiaDropEpisodeWhoseCountsDoNotSumToItsCount()
+    public void RejectsAUiaDropEpisodeWhoseCountsDoNotSumToItsCount()
     {
         var payload = JsonNode.Parse(UiaDropEpisode)!;
         payload["count"] = 8;
 
-        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+        var issues = ValidateUiaRecord("collector-omission", payload);
 
         Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAUiaDropEpisodeThatEndsBeforeItBegins()
+    public void RejectsAUiaDropEpisodeThatEndsBeforeItBegins()
     {
         var payload = JsonNode.Parse(UiaDropEpisode)!;
         payload["firstDroppedAtNanoseconds"] = 101;
 
-        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+        var issues = ValidateUiaRecord("collector-omission", payload);
 
         Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsAUiaDropEpisodeNotTimedAtItsLastRefusal()
+    public void RejectsAUiaDropEpisodeNotTimedAtItsLastRefusal()
     {
-        var issues = await ValidateUiaRecordAsync(
+        var issues = ValidateUiaRecord(
             "collector-omission",
             JsonNode.Parse(UiaDropEpisode)!,
             101);
@@ -4517,24 +3924,24 @@ public sealed class SessionArchiveValidatorTests
     [Theory]
     [InlineData("selection-changed", 7)]
     [InlineData("property-changed", 0)]
-    public async Task RejectsAUiaDropEpisodeWithAnInvalidTypeCount(string type, int value)
+    public void RejectsAUiaDropEpisodeWithAnInvalidTypeCount(string type, int value)
     {
         var payload = JsonNode.Parse(UiaDropEpisode)!;
         payload["droppedByObservationType"] = new JsonObject { [type] = value };
         payload["count"] = value;
 
-        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+        var issues = ValidateUiaRecord("collector-omission", payload);
 
         Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
     }
 
     [Fact]
-    public async Task RejectsADropEpisodeOnAnotherUiaOmissionReason()
+    public void RejectsADropEpisodeOnAnotherUiaOmissionReason()
     {
         var payload = JsonNode.Parse(UiaDropEpisode)!;
         payload["reason"] = "uia-provider-read-timeout";
 
-        var issues = await ValidateUiaRecordAsync("collector-omission", payload);
+        var issues = ValidateUiaRecord("collector-omission", payload);
 
         Assert.Contains(issues, issue => issue.Code == "uia-omission-episode-inconsistent");
     }
@@ -4543,7 +3950,7 @@ public sealed class SessionArchiveValidatorTests
     [InlineData("event-cache")]
     [InlineData("current-read")]
     [InlineData(null)]
-    public async Task AcceptsEachUiaPropertySource(string? source)
+    public void AcceptsEachUiaPropertySource(string? source)
     {
         var payload = JsonNode.Parse(UiaPropertyChange)!;
         if (source is null)
@@ -4555,24 +3962,23 @@ public sealed class SessionArchiveValidatorTests
             payload["element"]!["propertySource"] = source;
         }
 
-        var issues = await ValidateUiaRecordAsync("property-changed", payload);
+        var issues = ValidateUiaRecord("property-changed", payload);
 
         Assert.Empty(issues);
     }
 
     [Fact]
-    public async Task RejectsAnUndeclaredUiaPropertySource()
+    public void RejectsAnUndeclaredUiaPropertySource()
     {
         var payload = JsonNode.Parse(UiaPropertyChange)!;
         payload["element"]!["propertySource"] = "guessed";
 
-        var issues = await ValidateUiaRecordAsync("property-changed", payload);
+        var issues = ValidateUiaRecord("property-changed", payload);
 
         Assert.NotEmpty(issues);
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidateUiaRecordAsync(string eventType, JsonNode payload, long timestamp = 100)
+    private static IReadOnlyList<EventValidationIssue> ValidateUiaRecord(string eventType, JsonNode payload, long timestamp = 100)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(
@@ -4581,23 +3987,13 @@ public sealed class SessionArchiveValidatorTests
             "accessibility.uia.events",
             eventType,
             document.RootElement.Clone());
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidateDesktopFrameAsync(JsonNode payload)
+    private static IReadOnlyList<EventValidationIssue> ValidateDesktopFrame(JsonNode payload)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(
@@ -4606,23 +4002,13 @@ public sealed class SessionArchiveValidatorTests
             "graphics.desktop.frames",
             "desktop-frame",
             document.RootElement.Clone());
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidatePresentationRecordAsync(string eventType, JsonNode payload)
+    private static IReadOnlyList<EventValidationIssue> ValidatePresentationRecord(string eventType, JsonNode payload)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(
@@ -4631,23 +4017,13 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Presentation,
             eventType,
             document.RootElement.Clone());
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
-    private static async Task<IReadOnlyList<ArchiveValidationIssue>>
-        ValidateInteractionRecordAsync(string eventType, JsonNode payload)
+    private static IReadOnlyList<EventValidationIssue> ValidateInteractionRecord(string eventType, JsonNode payload)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
         var record = CreateEvent(
@@ -4656,23 +4032,14 @@ public sealed class SessionArchiveValidatorTests
             BrowserEvidenceChannels.Interaction,
             eventType,
             document.RootElement.Clone());
-        var directory = await CreateArchiveAsync([record]);
+        IReadOnlyList<RecorderEvent> events = ([record]);
 
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-            return result.Issues.ToList();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var result = Validate(events);
+        return result.Issues.ToList();
     }
 
     [Fact]
-    public async Task AllowsExtensionChannelWithCustomPayload()
+    public void AllowsExtensionChannelWithCustomPayload()
     {
         var record = CreateEvent(
             0,
@@ -4680,24 +4047,15 @@ public sealed class SessionArchiveValidatorTests
             "extension.vendor.telemetry",
             "vendor-sample",
             42);
-        var directory = await CreateArchiveAsync([record]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        IReadOnlyList<RecorderEvent> events = ([record]);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task AcceptsDerivedEvidenceWithResolvableProvenance()
+    public void AcceptsDerivedEvidenceWithResolvableProvenance()
     {
         var observed = CreateEvent(0, 100);
         var derived = AnalysisEventFactory.CreateDerived(
@@ -4710,25 +4068,19 @@ public sealed class SessionArchiveValidatorTests
             new { from = "button-a", to = "button-b" },
             [observed.EventId],
             "adjacent keyboard focus observations");
-        var directory = await CreateArchiveAsync([observed, derived]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        IReadOnlyList<RecorderEvent> events = ([observed, derived]);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     [Fact]
-    public async Task DetectsDuplicateEventIdsAndMissingEvidenceReferences()
+    public void EventIdsAreUniqueByConstructionAndCitedEvidenceIsNotResolved()
     {
+        // An event ID is formed from its stream and sequence, so a reused ID
+        // is either malformed or repeats a sequence. Whether cited evidence
+        // exists is not checked: it may not have arrived yet.
         var observed = CreateEvent(0, 100);
         var duplicate = CreateEvent(1, 200) with
         {
@@ -4745,25 +4097,15 @@ public sealed class SessionArchiveValidatorTests
             ["missing-event-id"],
             "temporal input pattern",
             "medium");
-        var directory = await CreateArchiveAsync([observed, inferred, duplicate]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        IReadOnlyList<RecorderEvent> events = ([observed, inferred, duplicate]);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(result.Issues, issue => issue.Code == "event-id-duplicate");
-            Assert.Contains(result.Issues, issue => issue.Code == "related-evidence-not-found");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal("event-id-invalid", issue.Code);
     }
 
     [Fact]
-    public async Task DetectsInvalidInferenceConfidence()
+    public void DetectsInvalidInferenceConfidence()
     {
         var observed = CreateEvent(0, 100);
         var inferred = AnalysisEventFactory.CreateInferred(
@@ -4777,26 +4119,17 @@ public sealed class SessionArchiveValidatorTests
             [observed.EventId],
             "temporal input pattern",
             "certain");
-        var directory = await CreateArchiveAsync([observed, inferred]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        IReadOnlyList<RecorderEvent> events = ([observed, inferred]);
+        var result = Validate(events);
 
-            Assert.False(result.IsValid);
-            Assert.Contains(
-                result.Issues,
-                issue => issue.Code == "inference-confidence-invalid");
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue => issue.Code == "inference-confidence-invalid");
     }
 
     [Fact]
-    public async Task AcceptsUnknownEvidenceWithReason()
+    public void AcceptsUnknownEvidenceWithReason()
     {
         var observed = CreateEvent(0, 100);
         var unknown = AnalysisEventFactory.CreateUnknown(
@@ -4810,55 +4143,11 @@ public sealed class SessionArchiveValidatorTests
             [observed.EventId],
             "candidate comparison",
             "The captured evidence does not distinguish the two commands.");
-        var directory = await CreateArchiveAsync([observed, unknown]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
+        IReadOnlyList<RecorderEvent> events = ([observed, unknown]);
+        var result = Validate(events);
 
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task AcceptsLegacyVersion10Event()
-    {
-        var legacyEvent = new
-        {
-            schemaVersion = SessionSchemaVersions.LegacyEvent,
-            sessionId = "test-session",
-            collectorType = "test.collector",
-            collectorInstanceId = "0123456789abcdef0123456789abcdef",
-            channel = "test.events",
-            captureMethod = "test",
-            sequence = 0,
-            monotonicNanoseconds = 100,
-            observedUtc = DateTimeOffset.UtcNow,
-            eventType = "test-event",
-            payload = new { value = 0 },
-            qualityFlags = Array.Empty<string>()
-        };
-        var directory = await CreateArchiveFromJsonAsync(
-            [JsonSerializer.Serialize(legacyEvent, JsonOptions)]);
-        try
-        {
-            var result = await SessionArchiveValidator.ValidateAsync(
-                directory,
-                TestContext.Current.CancellationToken);
-
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Issues);
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Issues);
     }
 
     private static readonly JsonSerializerOptions JsonOptions =
@@ -4906,61 +4195,16 @@ public sealed class SessionArchiveValidatorTests
             ["test.events"],
             captureMethod);
 
-    private static async Task<string> CreateArchiveAsync(
-        IReadOnlyList<RecorderEvent> events)
+    // Runs one validator over the events in order, as the database writer
+    // does for a recording.
+    private static ValidationResult Validate(IReadOnlyList<RecorderEvent> events)
     {
-        var lines = events
-            .Select(record => JsonSerializer.Serialize(record, JsonOptions))
-            .ToArray();
-        return await CreateArchiveFromJsonAsync(lines);
+        var validator = new EventRecordValidator("test-session");
+        var issues = events.SelectMany(validator.Validate).ToList();
+        return new ValidationResult(issues.Count == 0, issues);
     }
 
-    private static async Task<string> CreateArchiveFromJsonAsync(
-        IReadOnlyList<string> eventLines)
-    {
-        var directory = Path.Combine(
-            Path.GetTempPath(),
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        var eventPath = Path.Combine(directory, "events.ndjson");
-        await using (var writer = new StreamWriter(eventPath))
-        {
-            foreach (var line in eventLines)
-            {
-                await writer.WriteLineAsync(line);
-            }
-        }
-
-        var eventBytes = await File.ReadAllBytesAsync(
-            eventPath,
-            TestContext.Current.CancellationToken);
-        var artifact = new SessionArtifact(
-            "events.ndjson",
-            eventBytes.LongLength,
-            Convert.ToHexString(SHA256.HashData(eventBytes)).ToLowerInvariant());
-        var started = DateTimeOffset.UtcNow.AddSeconds(-1);
-        var manifest = new SessionManifest(
-            SessionSchemaVersions.Manifest,
-            "test-session",
-            "completed",
-            started,
-            started.AddSeconds(1),
-            1_000_000_000,
-            10_000_000,
-            1,
-            "Windows",
-            ".NET",
-            "X64",
-            new SessionRecordingConfiguration(true, true, true, true, 5, false, false),
-            [],
-            [artifact],
-            eventLines.Count,
-            0,
-            null);
-        await SessionManifestWriter.WriteAsync(
-            Path.Combine(directory, "manifest.json"),
-            manifest,
-            TestContext.Current.CancellationToken);
-        return directory;
-    }
+    private sealed record ValidationResult(
+        bool IsValid,
+        IReadOnlyList<EventValidationIssue> Issues);
 }

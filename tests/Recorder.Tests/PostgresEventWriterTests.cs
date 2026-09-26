@@ -64,7 +64,7 @@ public sealed class PostgresEventWriterTests : IDisposable
                 "event-sequence-not-increasing",
                 "event-time-regressed",
                 "event-id-invalid",
-                "event-provenance-invalid"
+                "evidence-class-invalid"
             ],
             target.Rejections.Select(rejection => rejection.Reason));
         Assert.Equal(Enumerable.Range(0, 5), target.Rejections.Select(rejection => rejection.Ordinal));

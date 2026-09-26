@@ -3,16 +3,11 @@ using System.Text.Json;
 namespace Recorder.Session;
 
 /// <summary>
-/// Builds a playback archive from event records as another reader parses
-/// them, so one pass over the event log can serve both validation and
-/// playback.
+/// Builds a playback archive from the events a store reads, in the order it
+/// stored them. The store provides the timeline and complete records; the
+/// builder keeps what playback needs when a recording opens: its duration,
+/// frames, audio tracks, and browser navigation.
 /// </summary>
-/// <remarks>
-/// Records must be added in event-log order. A record the caller could not
-/// parse as a JSON object is reported with <see cref="AddUnreadable"/>, and
-/// building then fails in the same way <see cref="SessionArchiveReader"/>
-/// fails on that record.
-/// </remarks>
 public sealed class SessionPlaybackArchiveBuilder
 {
     /// <summary>
@@ -86,7 +81,6 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<BrowserEventProjection> _browserProjections = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
-    private string? _unreadable;
     private bool _built;
 
     /// <param name="retainEvents">
@@ -125,58 +119,30 @@ public sealed class SessionPlaybackArchiveBuilder
 
     public string SessionDirectory => _root;
 
-    /// <param name="byteOffset">
-    /// Where the record's line starts in events.ndjson, in bytes.
-    /// </param>
-    /// <param name="byteLength">
-    /// The line's length in bytes, without its line ending.
-    /// </param>
-    public void Add(long lineNumber, long byteOffset, int byteLength, JsonElement record)
-    {
-        ThrowIfBuilt();
-        if (record.ValueKind != JsonValueKind.Object)
-        {
-            AddUnreadable(lineNumber, "The event is not a JSON object.");
-            return;
-        }
-
-        var timelineEvent = SessionArchiveReader.CreateTimelineEvent(
-            lineNumber,
-            byteOffset,
-            byteLength,
-            record,
-            out var payload);
-        AddCore(timelineEvent, payload);
-    }
-
     /// <summary>
-    /// Adds an event read from a store other than the event log. Payload
+    /// Adds an event read from the store. Payload
     /// need hold only <see cref="PayloadProperties"/>, and only for channels
     /// where <see cref="ReadsPayload"/> is true; otherwise pass default.
     /// </summary>
     public void AddEvent(
-        long line,
+        long eventKey,
         string eventId,
         string evidenceClass,
         string channel,
         string eventType,
         long monotonicNanoseconds,
-        JsonElement payload,
-        long eventKey)
+        JsonElement payload)
     {
         ThrowIfBuilt();
         AddCore(
             new SessionTimelineEvent(
-                line,
+                eventKey,
                 eventId,
                 evidenceClass,
                 channel,
                 eventType,
                 monotonicNanoseconds,
-                SessionArchiveReader.CreateSummary(channel, eventType, payload),
-                0,
-                0,
-                eventKey),
+                CreateSummary(channel, eventType, payload)),
             payload);
     }
 
@@ -201,42 +167,19 @@ public sealed class SessionPlaybackArchiveBuilder
             timelineEvent.EventType == "desktop-frame" &&
             payload.ValueKind == JsonValueKind.Object)
         {
-            SessionArchiveReader.AddFrame(_root, timestamp, payload, _frames);
+            AddFrame(_root, timestamp, payload, _frames);
         }
 
         if (timelineEvent.Channel.StartsWith("audio.", StringComparison.Ordinal) &&
             timelineEvent.EventType == "audio-stream-started" &&
             payload.ValueKind == JsonValueKind.Object)
         {
-            SessionArchiveReader.AddAudioTrack(
+            AddAudioTrack(
                 _root,
                 timestamp,
                 payload,
                 _audioTracks);
         }
-    }
-
-    public void AddUnreadable(long lineNumber, string reason)
-    {
-        ThrowIfBuilt();
-        _unreadable ??= $"Event line {lineNumber} could not be read: {reason}";
-    }
-
-    public async Task<SessionPlaybackArchive> BuildAsync(
-        CancellationToken cancellationToken = default)
-    {
-        var manifestPath = Path.Combine(_root, "manifest.json");
-        if (!File.Exists(manifestPath) ||
-            !File.Exists(Path.Combine(_root, "events.ndjson")))
-        {
-            throw new InvalidDataException(
-                "The selected folder does not contain manifest.json and events.ndjson.");
-        }
-
-        var manifest = await SessionArchiveReader.ReadManifestAsync(
-            manifestPath,
-            cancellationToken).ConfigureAwait(false);
-        return Build(manifest);
     }
 
     /// <summary>
@@ -257,7 +200,7 @@ public sealed class SessionPlaybackArchiveBuilder
                 "The recording's folder does not contain manifest.json.");
         }
 
-        var manifest = await SessionArchiveReader.ReadManifestAsync(
+        var manifest = await ReadManifestAsync(
             manifestPath,
             cancellationToken).ConfigureAwait(false);
         return Build(manifest) with { RecordSource = recordSource };
@@ -266,11 +209,6 @@ public sealed class SessionPlaybackArchiveBuilder
     internal SessionPlaybackArchive Build(SessionManifest manifest)
     {
         ThrowIfBuilt();
-        if (_unreadable is not null)
-        {
-            throw new InvalidDataException(_unreadable);
-        }
-
         _built = true;
         _events.Sort(InMemorySessionTimeline.Compare);
         _frames.Sort(static (left, right) =>
@@ -299,4 +237,191 @@ public sealed class SessionPlaybackArchiveBuilder
                 "The playback archive has already been built.");
         }
     }
+
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web);
+
+    private static async Task<SessionManifest> ReadManifestAsync(
+        string manifestPath,
+        CancellationToken cancellationToken)
+    {
+        await using var manifestStream = File.OpenRead(manifestPath);
+        return await JsonSerializer.DeserializeAsync<SessionManifest>(
+            manifestStream,
+            JsonOptions,
+            cancellationToken).ConfigureAwait(false) ??
+            throw new InvalidDataException("The session manifest is empty.");
+    }
+
+    private static void AddFrame(
+        string root,
+        long timestamp,
+        JsonElement payload,
+        ICollection<SessionVideoFrame> frames)
+    {
+        var path = ReadString(payload, "path");
+        if (!TryResolvePath(root, path, out var absolutePath) ||
+            !File.Exists(absolutePath))
+        {
+            return;
+        }
+
+        frames.Add(new SessionVideoFrame(
+            timestamp,
+            path!,
+            absolutePath,
+            ReadInt32(payload, "width") ?? 0,
+            ReadInt32(payload, "height") ?? 0));
+    }
+
+    private static void AddAudioTrack(
+        string root,
+        long timestamp,
+        JsonElement payload,
+        IDictionary<string, SessionAudioTrack> tracks)
+    {
+        var stream = ReadString(payload, "stream");
+        var path = ReadString(payload, "path");
+        if (string.IsNullOrWhiteSpace(stream) ||
+            !TryResolvePath(root, path, out var absolutePath) ||
+            !File.Exists(absolutePath))
+        {
+            return;
+        }
+
+        tracks[stream] = new SessionAudioTrack(
+            stream,
+            path!,
+            absolutePath,
+            timestamp);
+    }
+
+    /// <summary>
+    /// The timeline's one-line description of an event, from its channel,
+    /// type, and the payload properties playback reads.
+    /// </summary>
+    public static string CreateSummary(
+        string channel,
+        string eventType,
+        JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return eventType;
+        }
+
+        if (channel == "window.foreground")
+        {
+            var title = ReadString(payload, "title");
+            var process = ReadString(payload, "processName");
+            return JoinSummary(eventType, process, title);
+        }
+
+        if (channel == "accessibility.uia.events")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "name"),
+                ReadString(payload, "automationId"),
+                ReadString(payload, "controlType"));
+        }
+
+        if (channel == "session.annotations")
+        {
+            return JoinSummary(eventType, ReadString(payload, "note"));
+        }
+
+        if (channel.StartsWith("audio.", StringComparison.Ordinal))
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "stream"),
+                ReadString(payload, "device"));
+        }
+
+        if (channel == "browser.navigation")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "url"),
+                ReadString(payload, "navigationKind"),
+                ReadString(payload, "outcome"));
+        }
+
+        if (channel == "browser.dispatch")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "eventName"),
+                ReadString(payload, "outcome"));
+        }
+
+        if (channel == "browser.listener")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "eventName"),
+                ReadString(payload, "registrationKind"));
+        }
+
+        if (channel == "browser.dom")
+        {
+            return JoinSummary(
+                eventType,
+                ReadString(payload, "reason"),
+                ReadString(payload, "checkpointId"));
+        }
+
+        return eventType;
+    }
+
+    private static string JoinSummary(string fallback, params string?[] values)
+    {
+        var useful = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return useful.Length == 0
+            ? fallback
+            : $"{fallback}: {string.Join(", ", useful)}";
+    }
+
+    private static bool TryResolvePath(
+        string root,
+        string? relativePath,
+        out string absolutePath)
+    {
+        absolutePath = string.Empty;
+        if (string.IsNullOrWhiteSpace(relativePath) ||
+            Path.IsPathRooted(relativePath))
+        {
+            return false;
+        }
+
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(root) +
+            Path.DirectorySeparatorChar;
+        var candidate = Path.GetFullPath(
+            Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!candidate.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        absolutePath = candidate;
+        return true;
+    }
+
+    private static string? ReadString(JsonElement value, string property) =>
+        value.TryGetProperty(property, out var item) &&
+        item.ValueKind == JsonValueKind.String
+            ? item.GetString()
+            : null;
+
+    private static int? ReadInt32(JsonElement value, string property) =>
+        value.TryGetProperty(property, out var item) &&
+        item.ValueKind == JsonValueKind.Number &&
+        item.TryGetInt32(out var result)
+            ? result
+            : null;
 }

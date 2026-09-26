@@ -100,6 +100,24 @@ from the product version.
   `event_payloads_other_channels` and removes each recording that still held
   a built-in payload in it. The writer refuses an event of a built-in
   channel whose type has no evidence tables.
+- Retire `events.ndjson`, on the `postgres-session-store` branch. Events are
+  written only to the PostgreSQL session store, and the session folder holds
+  `manifest.json`, which still inventories and hashes the media files, the
+  frames and audio, and the diagnostic logs. `NdjsonEventWriter`,
+  `SessionArchiveReader`, `NdjsonLineReader`, and the finalization archive
+  check (`SessionArchiveValidator`) and its report are removed. The writer
+  now checks each record's envelope with `EventRecordValidator` and its
+  payload with `EventPayloadValidator` before storing it; a record that fails
+  is not stored, and a recording with any rejected or unwritten event is
+  stored as failed. Whether a cited event exists, and whether media files
+  match the manifest, are no longer checked. The app and the capture host
+  both require the database, use the same data directory, and cannot run at
+  the same time; the database takes a lock file to enforce this. Failed and
+  interrupted recordings open from the database with their status shown.
+  The session database record, privacy policy, threat model, architecture,
+  collector contract, and evidence-model documents are updated. The Windows
+  validation scripts still read `events.ndjson` and do not yet run against
+  these recordings.
 - Keep timeline keyboard stepping within a lane. Left, Right, Home, and End
   move among the events of the selected event's lane, or the lane last
   clicked, and Up and Down select the nearest event in the next lane above

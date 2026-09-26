@@ -72,7 +72,7 @@ remains stable across same-document navigation.
 - A prerender or guest main frame may have no owning document represented in
   this protocol boundary.
 
-The archive validator rejects contradictions for relationships it can
+The payload validator rejects contradictions for relationships it can
 determine from one record. Cross-record validation is performed by the
 deterministic fixture verifier.
 
