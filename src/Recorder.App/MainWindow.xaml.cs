@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using Recorder.Coordinator;
+using Recorder.Database;
 using Recorder.Session;
 using Recorder.WindowsCapture;
 
@@ -56,6 +57,8 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _announcedHealthReasons =
         new(StringComparer.Ordinal);
     private SessionCoordinator? _coordinator;
+    private SessionDatabase? _database;
+    private string? _databaseStartError;
     private SessionAudioPlayer? _audioPlayer;
     private SessionPlaybackArchive? _playbackArchive;
     private IReadOnlyList<SessionTimelineEvent> _visibleTimelineEvents = [];
@@ -95,7 +98,67 @@ public partial class MainWindow : Window
             Dispatcher);
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         Closing += OnClosing;
+        Loaded += OnLoaded;
     }
+
+    private static string DatabaseBinaryDirectory =>
+        Path.Combine(AppContext.BaseDirectory, "pgsql", "bin");
+
+    private static string DatabaseDataDirectory =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Windows A11y Recorder",
+            "Database");
+
+    // The database starts before a recording can. A database that cannot
+    // start does not stop the app: recordings are written to session files
+    // only, and the app says so now and whenever a recording starts.
+    private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= OnLoaded;
+        _transitioning = true;
+        StartButton.IsEnabled = false;
+        OpenRecordingButton.IsEnabled = false;
+        StatusTextBlock.Text = "Starting the database.";
+        var busy = _busy.Begin("Starting the database.");
+        try
+        {
+            _database = await SessionDatabase.StartAsync(new EmbeddedPostgresOptions(
+                DatabaseBinaryDirectory,
+                DatabaseDataDirectory,
+                new CurrentUserSecretProtector()));
+            StatusTextBlock.Text = _database.InterruptedRecordingsAtStart == 0
+                ? "Ready to record."
+                : $"Ready to record. {_database.InterruptedRecordingsAtStart:N0} recordings left open " +
+                    "by an earlier run were marked interrupted in the database.";
+            busy.Dispose();
+            _busy.AnnounceCompleted(StatusTextBlock.Text);
+        }
+        catch (Exception exception)
+        {
+            _databaseStartError = exception.Message;
+            StatusTextBlock.Text = DatabaseUnavailableText;
+            busy.Dispose();
+            MessageBox.Show(
+                this,
+                $"{exception.Message}{Environment.NewLine}{Environment.NewLine}" +
+                "Recordings will be written to session files only.",
+                "The database could not start",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        finally
+        {
+            busy.Dispose();
+            _transitioning = false;
+            StartButton.IsEnabled = true;
+            OpenRecordingButton.IsEnabled = true;
+        }
+    }
+
+    private string DatabaseUnavailableText =>
+        $"The database could not start, so recordings are written to session files only. " +
+        _databaseStartError;
 
     private async void StartButton_Click(object sender, RoutedEventArgs e)
     {
@@ -130,7 +193,7 @@ public partial class MainWindow : Window
 
         try
         {
-            _coordinator = new SessionCoordinator(WindowsCollectorFactory.Create);
+            _coordinator = new SessionCoordinator(WindowsCollectorFactory.Create, _database);
             var status = await _coordinator.StartAsync(new RecordingOptions
             {
                 OutputRoot = OutputRootTextBox.Text,
@@ -152,7 +215,9 @@ public partial class MainWindow : Window
             _statusTimer.Start();
             RefreshStatus();
             busy.Dispose();
-            _busy.AnnounceCompleted("Recording started.");
+            _busy.AnnounceCompleted(_database is null
+                ? "Recording started. " + DatabaseUnavailableText
+                : "Recording started.");
             StopButton.Focus();
         }
         catch (Exception exception)
@@ -487,6 +552,10 @@ public partial class MainWindow : Window
             StatusTextBlock.Text = status.State == RecordingSessionState.Completed
                 ? "Recording completed and session files verified."
                 : $"Recording stopped with errors. {status.Message}";
+            if (status.Database?.Problem is { } databaseProblem)
+            {
+                StatusTextBlock.Text += $" Database: {databaseProblem}";
+            }
             _busy.AnnounceCompleted(StatusTextBlock.Text);
         }
         catch (Exception exception)
@@ -1145,7 +1214,8 @@ public partial class MainWindow : Window
             $"Duration: {status.Elapsed:hh\\:mm\\:ss}";
         EvidenceTextBlock.Text =
             $"Events: {status.AcceptedEvents:N0} accepted, " +
-            $"{status.DroppedEvents:N0} dropped";
+            $"{status.DroppedEvents:N0} dropped" +
+            DatabaseEvidenceText(status.Database);
         CollectorStatusListBox.ItemsSource = status.Collectors.Select(collector =>
             collector.HealthReason is null
                 ? $"{collector.CollectorType}: {collector.Lifecycle}, {collector.Health}"
@@ -1167,7 +1237,42 @@ public partial class MainWindow : Window
                     _busy.AnnounceAlert(reason);
                 }
             }
+
+            // Spoken once per recording, for the same reason.
+            if (status.Database?.Unavailable == true &&
+                _announcedHealthReasons.Add("database\nunavailable"))
+            {
+                _busy.AnnounceAlert(
+                    "The database is not accepting writes. Its events are being held " +
+                    "until it does.");
+            }
         }
+    }
+
+    private string DatabaseEvidenceText(RecordingDatabaseStatus? database)
+    {
+        if (database is null)
+        {
+            return _databaseStartError is null ? string.Empty : ". Database: not running";
+        }
+
+        var text = $". Database: {database.Written:N0} written";
+        if (database.Rejected > 0)
+        {
+            text += $", {database.Rejected:N0} rejected";
+        }
+
+        if (database.Dropped > 0)
+        {
+            text += $", {database.Dropped:N0} dropped";
+        }
+
+        if (database.Unwritten > 0)
+        {
+            text += $", {database.Unwritten:N0} not written";
+        }
+
+        return database.Unavailable ? text + ", not accepting writes" : text;
     }
 
     private void SetConfigurationEnabled(bool enabled)
@@ -1304,6 +1409,26 @@ public partial class MainWindow : Window
         }
 
         await DisposeCoordinatorAsync();
+        if (_database is not null)
+        {
+            var busy = _busy.Begin("Stopping the database.");
+            try
+            {
+                await _database.DisposeAsync();
+            }
+            catch (Exception)
+            {
+                // The server is stopped with pg_ctl's fast mode. If that
+                // fails, the next start attaches to the running server or
+                // recovers the cluster, so closing is not held up.
+            }
+            finally
+            {
+                busy.Dispose();
+                _database = null;
+            }
+        }
+
         _allowClose = true;
         Application.Current.Shutdown();
     }

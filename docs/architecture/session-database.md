@@ -153,7 +153,7 @@ recording.
   counted and reported on the recording, as the validator reports it today.
 - **Buffering.** While the database is not accepting writes, batches are held
   in memory up to a fixed limit, then in a temporary spill file in the
-  recording's folder, which the writer drains in order and deletes once the
+  database's data directory, which the writer drains in order and deletes once the
   database accepts writes again. Buffering is bounded, as the architecture
   requires of every queue. If the bound is reached, events are refused and the
   refusal is recorded as a `collector-omission`, the same way queue loss is
@@ -222,8 +222,8 @@ change.
 ## Implementation status
 
 The implementation is on the `postgres-session-store` branch and is merged
-only once the database version is tested in full. Its first part is the
-`Recorder.Database` project, which the app does not use yet.
+only once the database version is tested in full. It adds the
+`Recorder.Database` project and connects the coordinator and app to it.
 
 - **Server.** `EmbeddedPostgresServer` runs `initdb` on first start with
   SCRAM-SHA-256 authentication, UTF-8 encoding, no locale, a generated
@@ -258,8 +258,35 @@ only once the database version is tested in full. Its first part is the
   which is not committed. The integration tests use those binaries, or the
   directory named by `RECORDER_POSTGRES_BIN`.
 
-Still to come on the branch: the coordinator and app writing to the store,
-the player's queries, typed evidence and identity tables per channel,
+- **Recording.** `SessionDatabase` starts the server, marks recordings an
+  earlier run left in the recording state as interrupted, and holds one
+  project, named "Default project", until projects are exposed in the app.
+  When the coordinator is given one, each recording is created in the
+  database with its capture settings when it starts, its collectors are
+  registered with their capability, and each event and marker goes to the
+  session files and then to the database writer. At stop the collectors'
+  final lifecycle and health states are recorded, the writer drains while the
+  session files are inventoried and validated, and the recording's status,
+  end time, duration, and event counts are stored. A recording whose files
+  are complete but whose events were not all written is stored as failed,
+  with the unwritten count as its failure reason. The coordinator's status
+  reports the writer's accepted, written, rejected, dropped, and unwritten
+  counts and any database problem, and the app shows them.
+- **Spill location.** A recording's spill file is
+  `spill\<session key>.ndjson` in the database's data directory, not the
+  session folder, so the session files and their manifest do not change
+  while the writer drains it.
+- **Transition.** The session files, including `events.ndjson`, are still
+  written in full, and the player still reads them. They are removed only
+  once the player reads from the database and that removal is agreed.
+- **App.** The app starts the database when its window loads, with the data
+  directory `%LOCALAPPDATA%\Windows A11y Recorder\Database`, and stops it
+  when the window closes. Recording is not available until the start
+  attempt ends. If the server cannot start, the app says so, and recordings
+  are written to session files only. The build copies `.postgres\pgsql`, when
+  present, to `pgsql` in the app's output folder.
+
+Still to come on the branch: the player's queries, typed evidence and identity tables per channel,
 removing what this retires, the revised privacy policy and threat model, and
 the hour-long Windows system test.
 

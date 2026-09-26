@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Recorder.Contracts;
+using Recorder.Database;
 using Recorder.Session;
 
 namespace Recorder.Coordinator;
@@ -17,8 +18,13 @@ public sealed class SessionCoordinator : IAsyncDisposable
     private readonly SemaphoreSlim _transitionLock = new(1, 1);
     private readonly Func<RecordingOptions, IReadOnlyList<ICaptureCollector>> _collectorFactory;
     private readonly List<CollectorRuntime> _collectors = [];
+    private readonly SessionDatabase? _database;
     private SessionClock? _clock;
     private NdjsonEventWriter? _writer;
+    private IRecorderEventSink? _sink;
+    private DatabaseRecording? _databaseRecording;
+    private DatabaseRecordingResult? _databaseResult;
+    private string? _databaseProblem;
     private ArtifactHashRegistry _artifactHashes = new();
     private RecordingOptions? _options;
     private string? _sessionId;
@@ -28,11 +34,17 @@ public sealed class SessionCoordinator : IAsyncDisposable
     private bool _disposed;
     private long _annotationSequence = -1;
 
+    /// <param name="database">
+    /// The database each recording is also written to, or null to write only
+    /// the session files.
+    /// </param>
     public SessionCoordinator(
-        Func<RecordingOptions, IReadOnlyList<ICaptureCollector>> collectorFactory)
+        Func<RecordingOptions, IReadOnlyList<ICaptureCollector>> collectorFactory,
+        SessionDatabase? database = null)
     {
         ArgumentNullException.ThrowIfNull(collectorFactory);
         _collectorFactory = collectorFactory;
+        _database = database;
     }
 
     public RecordingSessionState State { get; private set; } = RecordingSessionState.Idle;
@@ -55,7 +67,27 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 runtime.Capability?.Status,
                 runtime.Capability?.Limitations ?? [],
                 runtime.Collector.HealthReason)).ToArray(),
-            _message);
+            _message,
+            DatabaseStatus());
+    }
+
+    private RecordingDatabaseStatus? DatabaseStatus()
+    {
+        if (_databaseRecording is null)
+        {
+            return null;
+        }
+
+        var writer = _databaseRecording.Writer;
+        var result = _databaseResult?.Writer;
+        return new RecordingDatabaseStatus(
+            result?.AcceptedCount ?? writer.AcceptedCount,
+            result?.WrittenCount ?? writer.WrittenCount,
+            result?.RejectedCount ?? writer.RejectedCount,
+            result?.DroppedCount ?? writer.DroppedCount,
+            result?.UnwrittenCount ?? 0,
+            result is null && writer.IsDatabaseUnavailable,
+            _databaseProblem);
     }
 
     public async Task<RecordingSessionStatus> StartAsync(
@@ -80,6 +112,9 @@ public sealed class SessionCoordinator : IAsyncDisposable
             _message = "Preparing recording session.";
             _options = options;
             _annotationSequence = -1;
+            _databaseRecording = null;
+            _databaseResult = null;
+            _databaseProblem = null;
             _clock = new SessionClock();
             _startedUtc = _clock.OriginUtc;
             _sessionId = $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}";
@@ -96,6 +131,23 @@ public sealed class SessionCoordinator : IAsyncDisposable
             _writer = new NdjsonEventWriter(
                 Path.Combine(_sessionDirectory, "events.ndjson"),
                 artifactHashes: _artifactHashes);
+            _sink = _writer;
+            if (_database is not null)
+            {
+                _databaseRecording = await _database.BeginRecordingAsync(
+                    new RecordingDefinition(
+                        _sessionId,
+                        _startedUtc.Value,
+                        _clock.Frequency,
+                        _clock.OriginTimestamp,
+                        RuntimeInformation.OSDescription,
+                        RuntimeInformation.FrameworkDescription,
+                        RuntimeInformation.ProcessArchitecture.ToString(),
+                        CaptureSettings(options)),
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                _sink = new TeeEventSink(_writer, _databaseRecording.Writer);
+            }
+
             _collectors.Clear();
             foreach (var collector in _collectorFactory(options))
             {
@@ -108,7 +160,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 _sessionId,
                 _sessionDirectory,
                 _clock,
-                _writer,
+                _sink,
                 _artifactHashes);
 
             foreach (var runtime in _collectors)
@@ -137,6 +189,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 }
             }
 
+            await RegisterCollectorsAsync(cancellationToken).ConfigureAwait(false);
             State = RecordingSessionState.Recording;
             _message = "Recording.";
             await WriteManifestAsync("recording", null, null, cancellationToken)
@@ -159,7 +212,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
     public bool AddMarker(string? note = null)
     {
         if (State != RecordingSessionState.Recording ||
-            _writer is null ||
+            _sink is null ||
             _clock is null ||
             _sessionId is null)
         {
@@ -169,7 +222,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
         var descriptor = AnnotationDescriptor.Value;
         var sequence = unchecked(
             (ulong)Interlocked.Increment(ref _annotationSequence));
-        return _writer.TryWrite(RecorderEventFactory.Create(
+        return _sink.TryWrite(RecorderEventFactory.Create(
             _sessionId,
             descriptor,
             "session.annotations",
@@ -227,12 +280,16 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 }
             }
 
+            await RecordCollectorStatesAsync().ConfigureAwait(false);
             await DisposeCollectorsAsync().ConfigureAwait(false);
             if (_writer is not null)
             {
                 await _writer.DisposeAsync().ConfigureAwait(false);
             }
 
+            // The database writer drains while the manifest and validation
+            // below read the session files.
+            var databaseWriting = _databaseRecording?.FinishWritingAsync();
             var endedUtc = DateTimeOffset.UtcNow;
             var completion = failures.Count == 0 ? "completed" : "failed";
             State = failures.Count == 0
@@ -294,6 +351,17 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 _sessionDirectory!,
                 validation,
                 cancellationToken).ConfigureAwait(false);
+            if (databaseWriting is not null)
+            {
+                await databaseWriting.ConfigureAwait(false);
+            }
+
+            await CompleteDatabaseRecordingAsync(
+                State == RecordingSessionState.Completed
+                    ? RecordingStatus.Completed
+                    : RecordingStatus.Failed,
+                endedUtc,
+                State == RecordingSessionState.Completed ? null : _message).ConfigureAwait(false);
             FinalizedPlaybackArchive = await BuildPlaybackAsync(
                 playback,
                 cancellationToken).ConfigureAwait(false);
@@ -325,6 +393,11 @@ public sealed class SessionCoordinator : IAsyncDisposable
             }
         }
 
+        if (_databaseRecording is not null)
+        {
+            await _databaseRecording.DisposeAsync().ConfigureAwait(false);
+        }
+
         _transitionLock.Dispose();
         _disposed = true;
     }
@@ -352,6 +425,78 @@ public sealed class SessionCoordinator : IAsyncDisposable
             return null;
         }
     }
+
+    private static RecordingCaptureSettings CaptureSettings(RecordingOptions options) =>
+        new(
+            options.CaptureKeyboardAndMouse,
+            options.CaptureUiAutomation,
+            options.CaptureForegroundWindow,
+            options.CaptureDesktopFrames,
+            options.FramesPerSecond,
+            options.CaptureMicrophone,
+            options.CaptureSystemAudio);
+
+    private Task RegisterCollectorsAsync(CancellationToken cancellationToken) =>
+        _databaseRecording is null
+            ? Task.CompletedTask
+            : _databaseRecording.RegisterCollectorsAsync(
+                _collectors.Select(runtime => new CollectorRegistration(
+                    runtime.Collector.Descriptor,
+                    runtime.Capability?.Status,
+                    runtime.Capability?.Limitations ?? [],
+                    runtime.Collector.LifecycleState,
+                    runtime.Collector.HealthState)).ToArray(),
+                cancellationToken);
+
+    // Collector states at stop go to the database as they go to the
+    // manifest. A database that cannot take them does not change how the
+    // recording stops; the problem is reported with the database status.
+    private async Task RecordCollectorStatesAsync()
+    {
+        try
+        {
+            await RegisterCollectorsAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AddDatabaseProblem($"Collector states were not stored: {exception.Message}");
+        }
+    }
+
+    private async Task CompleteDatabaseRecordingAsync(
+        RecordingStatus status,
+        DateTimeOffset endedUtc,
+        string? failure)
+    {
+        if (_databaseRecording is null || _databaseResult is not null)
+        {
+            return;
+        }
+
+        _databaseResult = await _databaseRecording.CompleteAsync(
+            status,
+            endedUtc,
+            _clock?.GetElapsedNanoseconds() ?? 0,
+            failure,
+            CancellationToken.None).ConfigureAwait(false);
+        var writer = _databaseResult.Writer;
+        if (writer.UnwrittenCount > 0)
+        {
+            AddDatabaseProblem(
+                $"{writer.UnwrittenCount:N0} events were not written to the database " +
+                $"and remain in {writer.SpillPath}.");
+        }
+
+        if (_databaseResult.CompletionError is { } error)
+        {
+            AddDatabaseProblem($"The recording's final status was not stored: {error}");
+        }
+    }
+
+    private void AddDatabaseProblem(string problem) =>
+        _databaseProblem = _databaseProblem is null
+            ? problem
+            : _databaseProblem + Environment.NewLine + problem;
 
     private SessionBoundary Boundary() =>
         new(_clock!.GetElapsedNanoseconds(), DateTimeOffset.UtcNow);
@@ -381,6 +526,10 @@ public sealed class SessionCoordinator : IAsyncDisposable
             await _writer.DisposeAsync().ConfigureAwait(false);
         }
 
+        await CompleteDatabaseRecordingAsync(
+            RecordingStatus.Failed,
+            DateTimeOffset.UtcNow,
+            exception.Message).ConfigureAwait(false);
         if (_sessionDirectory is not null)
         {
             await WriteManifestAsync(

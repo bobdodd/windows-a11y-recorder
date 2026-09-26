@@ -33,6 +33,14 @@ from the product version.
   and app use. Event payloads are held in a transitional `jsonb` table until
   each channel has typed evidence tables; that table is removed before the
   branch is merged.
+- Write recordings to the PostgreSQL session store as well as the session
+  files, on the `postgres-session-store` branch. The app starts the database
+  when its window loads and stops it on close; each recording is created with
+  its capture settings and collectors, its events and markers are written,
+  and its final status and counts are stored. Recordings left open by an
+  earlier run are marked interrupted. The app shows the database's written
+  and unwritten counts, and records to session files only, saying so, if the
+  database cannot start.
 - Record worker and non-Node dispatch evidence. Protocol 0.31 records
   listener and dispatch evidence in dedicated, shared, and service worker
   global scopes, for dispatches to EventTargets that are not Nodes, for a

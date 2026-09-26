@@ -2,5 +2,6 @@
   <ItemGroup>
     <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
     <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
+    <ProjectReference Include="../Recorder.Database/Recorder.Database.csproj" />
   </ItemGroup>
 </Project>

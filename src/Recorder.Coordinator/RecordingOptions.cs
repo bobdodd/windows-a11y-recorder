@@ -37,7 +37,28 @@ public sealed record RecordingSessionStatus(
     long AcceptedEvents,
     long DroppedEvents,
     IReadOnlyList<CollectorStatus> Collectors,
-    string? Message);
+    string? Message,
+    RecordingDatabaseStatus? Database = null);
+
+/// <summary>
+/// The recording's events in the database, while they are also written to
+/// the event log. Null when the recording is not written to a database.
+/// </summary>
+/// <param name="Unavailable">True while the most recent write failed.</param>
+/// <param name="Unwritten">
+/// Accepted events not written when writing finished. Zero while recording.
+/// </param>
+/// <param name="Problem">
+/// Why the database recording is incomplete, or null when it is not.
+/// </param>
+public sealed record RecordingDatabaseStatus(
+    long Accepted,
+    long Written,
+    long Rejected,
+    long Dropped,
+    long Unwritten,
+    bool Unavailable,
+    string? Problem);
 
 public sealed record CollectorStatus(
     string CollectorType,

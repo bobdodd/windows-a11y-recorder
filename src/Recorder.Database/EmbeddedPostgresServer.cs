@@ -71,6 +71,7 @@ public sealed class EmbeddedPostgresServer : IAsyncDisposable
     public string ConnectionString { get; }
     public NpgsqlDataSource DataSource { get; }
 
+    public string DataDirectory => _options.DataDirectory;
     public string ClusterDirectory => Path.Combine(_options.DataDirectory, ClusterDirectoryName);
     public string LogPath => Path.Combine(_options.DataDirectory, LogFileName);
 
