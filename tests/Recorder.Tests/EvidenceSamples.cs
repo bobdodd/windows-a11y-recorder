@@ -75,6 +75,12 @@ internal static class EvidenceSamples
     private static readonly string Scheduler =
         J("'queueName':'frame-throttleable','queueType':12,'throttlingType':'background','desiredWakeUpTicks':'123456000','allowedWakeUpTicks':'124000000',");
 
+    private static readonly string AxContext =
+        J("{'browserInstanceId':'browser-1','processId':4100,'processType':'renderer','profileId':null,'browserContextId':'context-1','pageId':'page-1','frameId':'frame-1','documentId':null,'executionWorldId':null,'documentToken':'TOKEN-1'}");
+
+    private static readonly string World =
+        J("{'kind':'isolated','blinkWorldId':1,'name':'extension','stableId':null}");
+
     public static IReadOnlyList<(string Channel, string EventType, string Payload)> All { get; } =
     [
         ("collector.lifecycle", "collector-lifecycle",
@@ -267,7 +273,63 @@ internal static class EvidenceSamples
         ("browser.interaction", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
         ("browser.layout", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
         ("browser.presentation", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
-        ("browser.network", "collector-omission", J("{'reason':'browser-queue-full','count':1}"))
+        ("browser.network", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.accessibility", "accessibility-checkpoint-started",
+            J("{'context':") + AxContext + J(",'checkpointId':'accessibility-checkpoint-1','reason':'renderer-serialization','maximumNodes':5000,'updateCount':3,'eventCount':7}")),
+        ("browser.accessibility", "accessibility-checkpoint-node",
+            J("{'context':") + AxContext + J(",'checkpointId':'accessibility-checkpoint-1','nodeIndex':0,'accessibilityNodeId':1,'parentAccessibilityNodeId':null,'domNodeId':null,'role':144,'roleName':'rootWebArea','name':'Example','description':'','serializedProperties':'{}','focused':false}")),
+        ("browser.accessibility", "accessibility-checkpoint-node",
+            J("{'context':") + AxContext + J(",'checkpointId':'accessibility-checkpoint-1','nodeIndex':1,'accessibilityNodeId':-7,'parentAccessibilityNodeId':1,'domNodeId':42,'role':9,'roleName':'button','name':'Save','description':'Saves the form','serializedProperties':'{\\'hasPopup\\':false}','focused':true}")),
+        ("browser.accessibility", "accessibility-checkpoint-completed",
+            J("{'context':") + AxContext + J(",'checkpointId':'accessibility-checkpoint-1','reason':'renderer-serialization','nodeCount':2,'truncated':false,'maximumNodes':5000,'updateCount':3,'eventCount':7}")),
+        ("browser.dom", "dom-checkpoint-started",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','reason':'finished-parsing','maximumNodes':10000}")),
+        ("browser.dom", "dom-checkpoint-node",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','nodeIndex':0,'nodeId':19,'parentNodeId':null,'nodeType':'document','nodeName':'#document'}")),
+        ("browser.dom", "dom-checkpoint-node",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','nodeIndex':1,'nodeId':42,'parentNodeId':19,'nodeType':'element','nodeName':'BUTTON'}")),
+        ("browser.dom", "dom-checkpoint-node-attribute",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','nodeId':42,'attributeIndex':0,'attributeNamespace':null,'attributeName':'aria-label','attributeValue':'Sa','attributeValueLength':4,'attributeValueTruncated':true,'maximumValueLength':2}")),
+        ("browser.dom", "dom-checkpoint-node-attribute",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','nodeId':43,'attributeIndex':1,'attributeNamespace':'http://www.w3.org/1999/xlink','attributeName':'href','attributeValue':'','attributeValueLength':0,'attributeValueTruncated':false,'maximumValueLength':1024}")),
+        ("browser.dom", "dom-checkpoint-shadow-root",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','nodeId':61,'hostNodeId':60,'mode':'closed','delegatesFocus':true,'slotAssignment':'named','clonable':false,'serializable':false,'declarative':false,'availableToElementInternals':true,'referenceTarget':null}")),
+        ("browser.dom", "dom-checkpoint-shadow-root",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','nodeId':71,'hostNodeId':70,'mode':'open','delegatesFocus':false,'slotAssignment':'manual','clonable':true,'serializable':true,'declarative':true,'availableToElementInternals':false,'referenceTarget':'inner'}")),
+        ("browser.dom", "dom-checkpoint-slot-assignment",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','nodeId':63,'assignedNodeIds':[64,null,66],'assignedNodeCount':4,'assignedNodesTruncated':true,'maximumAssignedNodes':3,'assignmentCurrent':true}")),
+        ("browser.dom", "dom-checkpoint-slot-assignment",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','nodeId':73,'assignedNodeIds':[],'assignedNodeCount':0,'assignedNodesTruncated':false,'maximumAssignedNodes':3,'assignmentCurrent':false}")),
+        ("browser.dom", "dom-checkpoint-completed",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-1','reason':'finished-parsing','nodeCount':2,'truncated':false,'maximumNodes':10000,'attributeCount':2,'attributesTruncated':false,'maximumAttributesPerNode':64,'maximumValueLength':1024,'coveredTransitionCount':0,'coveredTransitionFirstId':null,'coveredTransitionLastId':null,'shadowRootCount':2,'slotCount':2}")),
+        ("browser.dom", "dom-checkpoint-completed",
+            J("{'context':") + Context + J(",'checkpointId':'dom-checkpoint-2','reason':'post-mutation','nodeCount':10000,'truncated':true,'maximumNodes':10000,'attributeCount':900,'attributesTruncated':true,'maximumAttributesPerNode':64,'maximumValueLength':1024,'coveredTransitionCount':2,'coveredTransitionFirstId':'dom-transition-1','coveredTransitionLastId':'dom-transition-2','shadowRootCount':0,'slotCount':0}")),
+        ("browser.dom", "dom-attribute-changed",
+            J("{'context':") + Context + J(",'transitionId':'dom-transition-1','nodeId':42,'nodeName':'BUTTON','attributeNamespace':null,'attributeName':'aria-expanded','changeType':'changed','attributeValue':'true','attributeValueLength':4,'attributeValueTruncated':false,'previousAttributeValue':'false','previousAttributeValueLength':5,'previousAttributeValueTruncated':false,'maximumValueLength':1024}")),
+        ("browser.dom", "dom-attribute-changed",
+            J("{'context':") + Context + J(",'transitionId':'dom-transition-2','nodeId':42,'nodeName':'BUTTON','attributeNamespace':null,'attributeName':'hidden','changeType':'removed','attributeValue':null,'attributeValueLength':null,'attributeValueTruncated':false,'previousAttributeValue':'','previousAttributeValueLength':0,'previousAttributeValueTruncated':false,'maximumValueLength':1024}")),
+        ("browser.dom", "dom-character-data-changed",
+            J("{'context':") + Context + J(",'transitionId':'dom-transition-3','nodeId':44,'parentNodeId':42,'nodeType':'text','text':'Saved','textLength':5,'textTruncated':false,'previousText':'Sav','previousTextLength':4,'previousTextTruncated':true,'maximumValueLength':3}")),
+        ("browser.interaction", "focus-changed",
+            J("{'context':") + Context + J(",'previousNodeId':null,'requestedNodeId':42,'focusedNodeId':42,'outcome':'focused','activeDescendantNodeId':null,'focusType':'forward','focusTrigger':'user-gesture','preventScroll':false,'focusVisible':true,'location':null,'world':null}")),
+        ("browser.interaction", "focus-changed",
+            J("{'context':") + WorldContext + J(",'previousNodeId':42,'requestedNodeId':50,'focusedNodeId':51,'outcome':'redirected','activeDescendantNodeId':52,'focusType':'script','focusTrigger':'script','preventScroll':true,'focusVisible':null,'location':") + Location + J(",'world':") + World + "}"),
+        ("browser.interaction", "selection-changed",
+            J("{'context':") + Context + J(",'setBy':'user','selectionType':'range','anchorNodeId':44,'anchorOffset':0,'focusNodeId':44,'focusOffset':5,'directional':true,'textControlNodeId':45,'textControlSelectionStart':1,'textControlSelectionEnd':3,'textControlSelectionDirection':'backward','location':null,'world':null}")),
+        ("browser.interaction", "selection-changed",
+            J("{'context':") + WorldContext + J(",'setBy':'system','selectionType':'none','anchorNodeId':null,'anchorOffset':null,'focusNodeId':null,'focusOffset':null,'directional':false,'textControlNodeId':null,'textControlSelectionStart':null,'textControlSelectionEnd':null,'textControlSelectionDirection':null,'location':") + Location + J(",'world':") + World + "}"),
+        ("browser.interaction", "text-control-value-changed",
+            J("{'context':") + Context + J(",'nodeId':45,'controlType':'text','source':'user-edit','value':'hel','valueLength':5,'valueTruncated':true,'maximumValueLength':3,'selectionStart':3,'selectionEnd':3,'selectionDirection':'none','location':null,'world':null}")),
+        ("browser.interaction", "active-descendant-reference-set",
+            J("{'context':") + WorldContext + J(",'nodeId':50,'referencedNodeId':52,'location':") + Location + J(",'world':") + World + "}"),
+        ("browser.interaction", "interaction-checkpoint-started",
+            J("{'context':") + Context + J(",'checkpointId':'interaction-checkpoint-1','sourceCheckpointId':'dom-checkpoint-1','sourceChannel':'browser.dom','reason':'finished-parsing','documentHasFocus':true,'focusedNodeId':42,'focusVisible':true,'activeDescendantNodeId':52,'lastFocusType':'forward','selectionType':'caret','anchorNodeId':44,'anchorOffset':2,'focusNodeId':44,'focusOffset':2,'directional':false,'maximumTextControls':32,'maximumValueLength':1024}")),
+        ("browser.interaction", "interaction-checkpoint-started",
+            J("{'context':") + Context + J(",'checkpointId':'interaction-checkpoint-2','sourceCheckpointId':'layout-checkpoint-3','sourceChannel':'browser.layout','reason':'rendering-update','documentHasFocus':false,'focusedNodeId':null,'focusVisible':false,'activeDescendantNodeId':null,'lastFocusType':'none','selectionType':'none','anchorNodeId':null,'anchorOffset':null,'focusNodeId':null,'focusOffset':null,'directional':false,'maximumTextControls':32,'maximumValueLength':1024}")),
+        ("browser.interaction", "interaction-checkpoint-text-control",
+            J("{'context':") + Context + J(",'checkpointId':'interaction-checkpoint-1','textControlIndex':0,'nodeId':45,'controlType':'textarea','value':'hello','valueLength':5,'valueTruncated':false,'selectionStart':0,'selectionEnd':5,'selectionDirection':'forward'}")),
+        ("browser.interaction", "interaction-checkpoint-completed",
+            J("{'context':") + Context + J(",'checkpointId':'interaction-checkpoint-1','textControlCount':1,'truncated':false,'maximumTextControls':32}"))
     ];
 
     /// <summary>

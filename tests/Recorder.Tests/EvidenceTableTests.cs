@@ -128,11 +128,11 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         var (sessionKey, recordingId) = await CreateRecordingAsync();
 
         // One window with a process and one without, one monitor, two UI
-        // Automation elements, seven browser contexts, two audio paths and
+        // Automation elements, eight browser contexts, two audio paths and
         // two navigation URLs, three foreground windows, eight event
         // targets, two script locations, one world and two scopes.
         await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
-        long[] once = [2, 1, 2, 7, 4, 3, 8, 2, 1, 2];
+        long[] once = [2, 1, 2, 8, 4, 3, 8, 2, 1, 2];
         Assert.Equal(once, await IdentityCountsAsync(recordingId));
 
         // A resumed recording has a new writer, which does not look up the

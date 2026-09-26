@@ -251,7 +251,8 @@ only once the database version is tested in full. It adds the
   its channel and event type, generated from the evidence catalog in
   `src/Recorder.Database/Evidence/EvidenceCatalog.cs`. The catalog assigns
   its tables to migrations: `0003_evidence_tables.sql` and
-  `0004_browser_script_evidence.sql` are generated from it, and a test
+  `0004_browser_script_evidence.sql`, and `0005_browser_document_evidence.sql`
+  are generated from it, and a test
   requires each file to match; setting `RECORDER_REGENERATE_EVIDENCE_MIGRATION`
   to `1` while running that test rewrites them. A table is created by the
   first migration whose event types reach it, and partition orders continue
@@ -279,7 +280,12 @@ only once the database version is tested in full. It adds the
   omissions of those channels. The second slice, migration 0004, covers
   browser listeners, event dispatch with its composed path and path scopes,
   timers, scheduler wake-up deferrals, and navigations, and the collector
-  omissions of every browser channel.
+  omissions of every browser channel. The third slice, migration 0005, covers
+  the browser accessibility, DOM, and interaction channels: accessibility,
+  DOM, and interaction checkpoints with their nodes, attributes, shadow
+  roots, slot assignments, and text controls, DOM attribute and character
+  data changes, and focus, selection, text control value, and active
+  descendant changes. A slot's assigned node list keeps its null entries.
 - **Stored forms.** The rebuilt payload matches the written payload in
   content, with these normal forms: a member the validator allows to be
   absent, when written as null, reads back absent; a UTC time is stored to
@@ -373,8 +379,8 @@ only once the database version is tested in full. It adds the
   are written to session files only. The build copies `.postgres\pgsql`, when
   present, to `pgsql` in the app's output folder.
 
-Still to come on the branch: evidence tables for the browser DOM, accessibility, interaction, layout,
-presentation, cookie, and network channels, removing what this
+Still to come on the branch: evidence tables for the browser layout, presentation, cookie, and network
+channels, removing what this
 retires, including `events.ndjson` once that is agreed, the revised privacy policy and threat model, and
 the hour-long Windows system test.
 

@@ -77,6 +77,12 @@ from the product version.
   navigation URLs stored once per recording, and a dispatch's composed path
   and path scopes in child tables. Each evidence migration now adds only the
   tables it introduces, so a database that applied 0003 is upgraded in place.
+- Store browser accessibility, DOM, and interaction payloads in typed
+  evidence tables, on the `postgres-session-store` branch. Migration 0005
+  adds a table for each of their event types, covering checkpoints and their
+  nodes, attributes, shadow roots, slot assignments, and text controls, DOM
+  attribute and character data changes, and focus, selection, text control
+  value, and active descendant changes.
 - Keep timeline keyboard stepping within a lane. Left, Right, Home, and End
   move among the events of the selected event's lane, or the lane last
   clicked, and Up and Down select the nearest event in the next lane above

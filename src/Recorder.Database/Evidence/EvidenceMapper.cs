@@ -109,12 +109,13 @@ internal sealed class EvidenceMapper
         if (table.ScalarItem)
         {
             var field = table.Fields.Single();
-            if (value.ValueKind == JsonValueKind.Null)
+            var present = value.ValueKind != JsonValueKind.Null;
+            if (!present && field.Presence == Presence.Required)
             {
                 throw new EvidenceMappingException($"payload-member-null:{path}");
             }
 
-            Fill(field, value, true, true, path, context, ref index, string.Empty);
+            Fill(field, value, present, true, path, context, ref index, string.Empty);
         }
         else
         {

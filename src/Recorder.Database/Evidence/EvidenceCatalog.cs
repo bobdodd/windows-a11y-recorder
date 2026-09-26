@@ -371,6 +371,249 @@ internal static class EvidenceCatalog
 
     // One table for the omission records of every channel. Each channel's
     // omission states a subset of these members; the validator states which.
+    public static readonly EvidenceTable AccessibilityCheckpointStarts = Evidence(
+        "browser_accessibility_checkpoint_starts",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Name("reason"),
+        Int("maximumNodes"),
+        Int("updateCount"),
+        Int("eventCount"));
+
+    public static readonly EvidenceTable AccessibilityCheckpointNodes = Evidence(
+        "browser_accessibility_checkpoint_nodes",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Int("nodeIndex"),
+        BigInt("accessibilityNodeId"),
+        BigInt("parentAccessibilityNodeId", N),
+        BigInt("domNodeId", N),
+        Int("role"),
+        Name("roleName"),
+        Text("name"),
+        Text("description"),
+        Text("serializedProperties"),
+        Bool("focused"));
+
+    public static readonly EvidenceTable AccessibilityCheckpointCompletions = Evidence(
+        "browser_accessibility_checkpoint_completions",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Name("reason"),
+        Int("nodeCount"),
+        Bool("truncated"),
+        Int("maximumNodes"),
+        Int("updateCount"),
+        Int("eventCount"));
+
+    public static readonly EvidenceTable DomCheckpointStarts = Evidence(
+        "browser_dom_checkpoint_starts",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Name("reason"),
+        Int("maximumNodes"));
+
+    public static readonly EvidenceTable DomCheckpointNodes = Evidence(
+        "browser_dom_checkpoint_nodes",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Int("nodeIndex"),
+        BigInt("nodeId"),
+        BigInt("parentNodeId", N),
+        Name("nodeType"),
+        Name("nodeName"));
+
+    public static readonly EvidenceTable DomCheckpointAttributes = Evidence(
+        "browser_dom_checkpoint_attributes",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        BigInt("nodeId"),
+        Int("attributeIndex"),
+        Name("attributeNamespace", N),
+        Name("attributeName"),
+        Text("attributeValue"),
+        Int("attributeValueLength"),
+        Bool("attributeValueTruncated"),
+        Int("maximumValueLength"));
+
+    public static readonly EvidenceTable DomCheckpointShadowRoots = Evidence(
+        "browser_dom_checkpoint_shadow_roots",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        BigInt("nodeId"),
+        BigInt("hostNodeId"),
+        Name("mode"),
+        Bool("delegatesFocus"),
+        Name("slotAssignment"),
+        Bool("clonable"),
+        Bool("serializable"),
+        Bool("declarative"),
+        Bool("availableToElementInternals"),
+        Text("referenceTarget", N));
+
+    public static readonly EvidenceTable DomCheckpointSlotAssignments = Evidence(
+        "browser_dom_checkpoint_slot_assignments",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        BigInt("nodeId"),
+        new ListField(
+            "assignedNodeIds",
+            R,
+            ScalarList("browser_dom_checkpoint_slot_assigned_nodes", ScalarType.BigInt, N)),
+        Int("assignedNodeCount"),
+        Bool("assignedNodesTruncated"),
+        Int("maximumAssignedNodes"),
+        Bool("assignmentCurrent"));
+
+    public static readonly EvidenceTable DomCheckpointCompletions = Evidence(
+        "browser_dom_checkpoint_completions",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Name("reason"),
+        Int("nodeCount"),
+        Bool("truncated"),
+        Int("maximumNodes"),
+        Int("attributeCount"),
+        Bool("attributesTruncated"),
+        Int("maximumAttributesPerNode"),
+        Int("maximumValueLength"),
+        Int("coveredTransitionCount"),
+        Text("coveredTransitionFirstId", N),
+        Text("coveredTransitionLastId", N),
+        Int("shadowRootCount"),
+        Int("slotCount"));
+
+    public static readonly EvidenceTable DomAttributeChanges = Evidence(
+        "browser_dom_attribute_changes",
+        new IdentityField("context", R, BrowserContexts),
+        Text("transitionId"),
+        BigInt("nodeId"),
+        Name("nodeName"),
+        Name("attributeNamespace", N),
+        Name("attributeName"),
+        Name("changeType"),
+        Text("attributeValue", N),
+        Int("attributeValueLength", N),
+        Bool("attributeValueTruncated"),
+        Text("previousAttributeValue", N),
+        Int("previousAttributeValueLength", N),
+        Bool("previousAttributeValueTruncated"),
+        Int("maximumValueLength"));
+
+    public static readonly EvidenceTable DomCharacterDataChanges = Evidence(
+        "browser_dom_character_data_changes",
+        new IdentityField("context", R, BrowserContexts),
+        Text("transitionId"),
+        BigInt("nodeId"),
+        BigInt("parentNodeId", N),
+        Name("nodeType"),
+        Text("text"),
+        Int("textLength"),
+        Bool("textTruncated"),
+        Text("previousText"),
+        Int("previousTextLength"),
+        Bool("previousTextTruncated"),
+        Int("maximumValueLength"));
+
+    public static readonly EvidenceTable FocusChanges = Evidence(
+        "browser_focus_changes",
+        new IdentityField("context", R, BrowserContexts),
+        BigInt("previousNodeId", N),
+        BigInt("requestedNodeId", N),
+        BigInt("focusedNodeId", N),
+        Name("outcome"),
+        BigInt("activeDescendantNodeId", N),
+        Name("focusType"),
+        Name("focusTrigger"),
+        Bool("preventScroll"),
+        Bool("focusVisible", N),
+        new IdentityField("location", N, ScriptLocations),
+        new IdentityField("world", N, ExecutionWorlds));
+
+    public static readonly EvidenceTable SelectionChanges = Evidence(
+        "browser_selection_changes",
+        new IdentityField("context", R, BrowserContexts),
+        Name("setBy"),
+        Name("selectionType"),
+        BigInt("anchorNodeId", N),
+        Int("anchorOffset", N),
+        BigInt("focusNodeId", N),
+        Int("focusOffset", N),
+        Bool("directional"),
+        BigInt("textControlNodeId", N),
+        Int("textControlSelectionStart", N),
+        Int("textControlSelectionEnd", N),
+        Name("textControlSelectionDirection", N),
+        new IdentityField("location", N, ScriptLocations),
+        new IdentityField("world", N, ExecutionWorlds));
+
+    public static readonly EvidenceTable TextControlValueChanges = Evidence(
+        "browser_text_control_value_changes",
+        new IdentityField("context", R, BrowserContexts),
+        BigInt("nodeId"),
+        Name("controlType"),
+        Name("source"),
+        Text("value"),
+        Int("valueLength"),
+        Bool("valueTruncated"),
+        Int("maximumValueLength"),
+        Int("selectionStart"),
+        Int("selectionEnd"),
+        Name("selectionDirection"),
+        new IdentityField("location", N, ScriptLocations),
+        new IdentityField("world", N, ExecutionWorlds));
+
+    public static readonly EvidenceTable ActiveDescendantReferences = Evidence(
+        "browser_active_descendant_references",
+        new IdentityField("context", R, BrowserContexts),
+        BigInt("nodeId"),
+        BigInt("referencedNodeId"),
+        new IdentityField("location", N, ScriptLocations),
+        new IdentityField("world", N, ExecutionWorlds));
+
+    public static readonly EvidenceTable InteractionCheckpointStarts = Evidence(
+        "browser_interaction_checkpoint_starts",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Text("sourceCheckpointId"),
+        Name("sourceChannel"),
+        Name("reason"),
+        Bool("documentHasFocus"),
+        BigInt("focusedNodeId", N),
+        Bool("focusVisible"),
+        BigInt("activeDescendantNodeId", N),
+        Name("lastFocusType"),
+        Name("selectionType"),
+        BigInt("anchorNodeId", N),
+        Int("anchorOffset", N),
+        BigInt("focusNodeId", N),
+        Int("focusOffset", N),
+        Bool("directional"),
+        Int("maximumTextControls"),
+        Int("maximumValueLength"));
+
+    public static readonly EvidenceTable InteractionCheckpointTextControls = Evidence(
+        "browser_interaction_checkpoint_text_controls",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Int("textControlIndex"),
+        BigInt("nodeId"),
+        Name("controlType"),
+        Text("value"),
+        Int("valueLength"),
+        Bool("valueTruncated"),
+        Int("selectionStart"),
+        Int("selectionEnd"),
+        Name("selectionDirection"));
+
+    public static readonly EvidenceTable InteractionCheckpointCompletions = Evidence(
+        "browser_interaction_checkpoint_completions",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Int("textControlCount"),
+        Bool("truncated"),
+        Int("maximumTextControls"));
+
     public static readonly EvidenceTable CollectorOmissions = Evidence(
         "collector_omissions",
             Name("reason"),
@@ -410,6 +653,14 @@ internal static class EvidenceCatalog
         (4, "browser_script_evidence",
         [
             BrowserListeners, BrowserDispatches, BrowserTimers, BrowserSchedulerDeferrals, BrowserNavigations
+        ]),
+        (5, "browser_document_evidence",
+        [
+            AccessibilityCheckpointStarts, AccessibilityCheckpointNodes, AccessibilityCheckpointCompletions,
+            DomCheckpointStarts, DomCheckpointNodes, DomCheckpointAttributes, DomCheckpointShadowRoots,
+            DomCheckpointSlotAssignments, DomCheckpointCompletions, DomAttributeChanges, DomCharacterDataChanges,
+            FocusChanges, SelectionChanges, TextControlValueChanges, ActiveDescendantReferences,
+            InteractionCheckpointStarts, InteractionCheckpointTextControls, InteractionCheckpointCompletions
         ])
     ];
 
@@ -438,7 +689,25 @@ internal static class EvidenceCatalog
             [("browser.lifecycle", "browser-clock-synchronized")] = BrowserClockSynchronizations,
             [("browser.scheduler", "wake-up-deferred")] = BrowserSchedulerDeferrals,
             [("browser.navigation", "navigation-started")] = BrowserNavigations,
-            [("browser.navigation", "navigation-completed")] = BrowserNavigations
+            [("browser.navigation", "navigation-completed")] = BrowserNavigations,
+            [("browser.accessibility", "accessibility-checkpoint-started")] = AccessibilityCheckpointStarts,
+            [("browser.accessibility", "accessibility-checkpoint-node")] = AccessibilityCheckpointNodes,
+            [("browser.accessibility", "accessibility-checkpoint-completed")] = AccessibilityCheckpointCompletions,
+            [("browser.dom", "dom-checkpoint-started")] = DomCheckpointStarts,
+            [("browser.dom", "dom-checkpoint-node")] = DomCheckpointNodes,
+            [("browser.dom", "dom-checkpoint-node-attribute")] = DomCheckpointAttributes,
+            [("browser.dom", "dom-checkpoint-shadow-root")] = DomCheckpointShadowRoots,
+            [("browser.dom", "dom-checkpoint-slot-assignment")] = DomCheckpointSlotAssignments,
+            [("browser.dom", "dom-checkpoint-completed")] = DomCheckpointCompletions,
+            [("browser.dom", "dom-attribute-changed")] = DomAttributeChanges,
+            [("browser.dom", "dom-character-data-changed")] = DomCharacterDataChanges,
+            [("browser.interaction", "focus-changed")] = FocusChanges,
+            [("browser.interaction", "selection-changed")] = SelectionChanges,
+            [("browser.interaction", "text-control-value-changed")] = TextControlValueChanges,
+            [("browser.interaction", "active-descendant-reference-set")] = ActiveDescendantReferences,
+            [("browser.interaction", "interaction-checkpoint-started")] = InteractionCheckpointStarts,
+            [("browser.interaction", "interaction-checkpoint-text-control")] = InteractionCheckpointTextControls,
+            [("browser.interaction", "interaction-checkpoint-completed")] = InteractionCheckpointCompletions
         };
 
         foreach (var type in new[] { "listener-registered", "listener-removed", "listener-callback-replaced" })
@@ -646,8 +915,8 @@ internal static class EvidenceCatalog
     private static Field NumberRectangle(string json, Presence presence) =>
         new InlineField(json, presence, [Double("x"), Double("y"), Double("width"), Double("height")]);
 
-    private static EvidenceTable ScalarList(string name, ScalarType type) =>
-        new(name, TableKind.Child, [new ScalarField(string.Empty, type, R, "value")], scalarItem: true);
+    private static EvidenceTable ScalarList(string name, ScalarType type, Presence item = R) =>
+        new(name, TableKind.Child, [new ScalarField(string.Empty, type, item, "value")], scalarItem: true);
 
     private static Field NameList(string json, Presence presence, string name) =>
         new ListField(
