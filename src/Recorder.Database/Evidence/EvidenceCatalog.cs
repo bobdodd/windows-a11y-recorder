@@ -62,6 +62,40 @@ internal static class EvidenceCatalog
         Text("executionWorldId", N),
         Text("documentToken", N));
 
+    public static readonly EvidenceTable BrowserEventTargets = Identity(
+        "browser_event_targets",
+        Name("kind"),
+        Name("interfaceName", N),
+        Text("targetId", N),
+        Text("documentId", N),
+        BigInt("nodeId", N),
+        Text("backendNodeId", N),
+        Name("tagName", N),
+        Text("elementId", N),
+        NameList("classes", R, "browser_event_target_classes"));
+
+    public static readonly EvidenceTable ScriptLocations = Identity(
+        "script_locations",
+        Text("scriptId", N),
+        Text("url", N),
+        Int("line", N, "line_number"),
+        Int("column", N, "column_number"),
+        Text("functionName", N),
+        Text("sourceHash", N));
+
+    public static readonly EvidenceTable ExecutionWorlds = Identity(
+        "execution_worlds",
+        Name("kind"),
+        Int("blinkWorldId"),
+        Text("name", N),
+        Text("stableId", N));
+
+    public static readonly EvidenceTable ExecutionScopes = Identity(
+        "execution_scopes",
+        Name("contextKind"),
+        Text("workerToken", N),
+        Text("globalObjectUrl", N));
+
     // Evidence tables.
     public static readonly EvidenceTable CollectorLifecycle = Evidence(
         "collector_lifecycle_events",
@@ -234,6 +268,107 @@ internal static class EvidenceCatalog
         Text("monotonicFrequency"),
         BigInt("uncertaintyNanoseconds"));
 
+    public static readonly EvidenceTable BrowserListeners = Evidence(
+        "browser_listener_events",
+        new IdentityField("context", R, BrowserContexts),
+        Text("listenerId"),
+        Name("eventName"),
+        Name("registrationKind"),
+        new IdentityField("target", R, BrowserEventTargets),
+        Bool("capture"),
+        Bool("passive"),
+        Bool("once"),
+        new IdentityField("location", N, ScriptLocations),
+        new IdentityField("world", N, ExecutionWorlds),
+        new IdentityField("scope", O, ExecutionScopes));
+
+    public static readonly EvidenceTable BrowserDispatches = Evidence(
+        "browser_dispatch_events",
+        new IdentityField("context", R, BrowserContexts),
+        Text("dispatchId"),
+        Name("eventName"),
+        Bool("trusted"),
+        new IdentityField("originalTarget", N, BrowserEventTargets),
+        new ListField(
+            "composedPath",
+            R,
+            new EvidenceTable(
+                "browser_dispatch_path_targets",
+                TableKind.Child,
+                [new IdentityField(string.Empty, R, BrowserEventTargets, "target_key")],
+                scalarItem: true)),
+        Name("phase"),
+        Text("listenerId", N),
+        Bool("defaultPrevented"),
+        Bool("propagationStopped"),
+        Bool("immediatePropagationStopped"),
+        Name("defaultAction", N),
+        Name("outcome", N),
+        new IdentityField("currentTarget", O, BrowserEventTargets),
+        new ListField(
+            "pathScopes",
+            R,
+            new EvidenceTable(
+                "browser_dispatch_path_scopes",
+                TableKind.Child,
+                [
+                    BigInt("treeScopeRootNodeId", N),
+                    Name("shadowRootMode", N),
+                    BigInt("targetNodeId", N),
+                    BigInt("relatedTargetNodeId", N),
+                    new ListField(
+                        "visiblePathIndexes",
+                        R,
+                        ScalarList("browser_dispatch_path_scope_visible_indexes", ScalarType.Integer)),
+                    Int("unmatchedVisibleTargetCount")
+                ])),
+        new IdentityField("scope", O, ExecutionScopes));
+
+    public static readonly EvidenceTable BrowserTimers = Evidence(
+        "browser_timer_events",
+        new IdentityField("context", R, BrowserContexts),
+        Text("timerId"),
+        Name("timerKind"),
+        Double("requestedDelayMilliseconds", N),
+        Double("effectiveDelayMilliseconds", N),
+        Int("nestingLevel"),
+        Bool("throttled", N),
+        Name("pageLifecycleState"),
+        new IdentityField("callbackLocation", N, ScriptLocations),
+        Name("cancellationReason", N),
+        Bool("didTimeout", O));
+
+    public static readonly EvidenceTable BrowserSchedulerDeferrals = Evidence(
+        "browser_scheduler_deferrals",
+        new IdentityField("context", R, BrowserContexts),
+        Name("queueName"),
+        Int("queueType"),
+        Name("throttlingType"),
+        Text("desiredWakeUpTicks"),
+        Text("allowedWakeUpTicks"),
+        Double("deferralMilliseconds"),
+        Bool("hasReadyTask"),
+        Name("blockType"),
+        Name("decisionBoundary"));
+
+    public static readonly EvidenceTable BrowserNavigations = Evidence(
+        "browser_navigations",
+        new IdentityField("context", R, BrowserContexts),
+        Text("parentFrameId", N),
+        Text("parentOrOuterDocumentFrameId", N),
+        Name("frameType"),
+        Bool("primaryPage"),
+        Text("navigationId"),
+        new IdentityField("url", R, Texts),
+        Name("navigationKind"),
+        Bool("rendererInitiated"),
+        Bool("sameDocument"),
+        Bool("committed", N),
+        Bool("errorPage", N),
+        Int("netErrorCode", N),
+        Name("outcome", N),
+        BigInt("rendererProcessId", N));
+
     // One table for the omission records of every channel. Each channel's
     // omission states a subset of these members; the validator states which.
     public static readonly EvidenceTable CollectorOmissions = Evidence(
@@ -259,10 +394,34 @@ internal static class EvidenceCatalog
         BuildEventTypes();
 
     /// <summary>
-    /// Every table in creation order: identities first, in dependency order,
+    /// The migration that adds each group of evidence tables, in version
+    /// order. A table is created by the first migration whose evidence tables
+    /// reach it, so a later group adds only the tables it introduces, and an
+    /// applied migration is never changed.
+    /// </summary>
+    public static readonly IReadOnlyList<(int Version, string Name, EvidenceTable[] Evidence)> Migrations =
+    [
+        (3, "evidence_tables",
+        [
+            CollectorLifecycle, SessionMarkers, RawKeyboard, RawMouse, ForegroundWindows, DesktopFrames,
+            BrowserConnections, BrowserExits, BrowserClockSynchronizations, UiaEvents, AudioStreams,
+            AudioBuffers, AudioStreamErrors, CollectorOmissions
+        ]),
+        (4, "browser_script_evidence",
+        [
+            BrowserListeners, BrowserDispatches, BrowserTimers, BrowserSchedulerDeferrals, BrowserNavigations
+        ])
+    ];
+
+    /// <summary>
+    /// Every table with the migration that creates it, in creation order:
+    /// by migration, and within one, identities first in dependency order,
     /// then evidence tables, then child tables after their owners.
     /// </summary>
-    public static readonly IReadOnlyList<EvidenceTable> Tables = BuildTables();
+    public static readonly IReadOnlyList<(int Version, EvidenceTable Table)> VersionedTables = BuildTables();
+
+    /// <summary>Every table in creation order.</summary>
+    public static readonly IReadOnlyList<EvidenceTable> Tables = [.. VersionedTables.Select(item => item.Table)];
 
     private static Dictionary<(string, string), EvidenceTable> BuildEventTypes()
     {
@@ -276,8 +435,26 @@ internal static class EvidenceCatalog
             [("graphics.desktop.frames", "desktop-frame")] = DesktopFrames,
             [("browser.lifecycle", "browser-connected")] = BrowserConnections,
             [("browser.lifecycle", "browser-exited")] = BrowserExits,
-            [("browser.lifecycle", "browser-clock-synchronized")] = BrowserClockSynchronizations
+            [("browser.lifecycle", "browser-clock-synchronized")] = BrowserClockSynchronizations,
+            [("browser.scheduler", "wake-up-deferred")] = BrowserSchedulerDeferrals,
+            [("browser.navigation", "navigation-started")] = BrowserNavigations,
+            [("browser.navigation", "navigation-completed")] = BrowserNavigations
         };
+
+        foreach (var type in new[] { "listener-registered", "listener-removed", "listener-callback-replaced" })
+        {
+            map[("browser.listener", type)] = BrowserListeners;
+        }
+
+        foreach (var type in new[] { "dispatch-started", "listener-invoked", "dispatch-completed", "default-action" })
+        {
+            map[("browser.dispatch", type)] = BrowserDispatches;
+        }
+
+        foreach (var type in new[] { "timer-scheduled", "timer-fired", "timer-cancelled" })
+        {
+            map[("browser.timer", type)] = BrowserTimers;
+        }
 
         foreach (var type in new[] { "focus-changed", "automation-event", "structure-changed", "property-changed" })
         {
@@ -295,7 +472,10 @@ internal static class EvidenceCatalog
         foreach (var channel in new[]
                  {
                      "accessibility.uia.events", "window.foreground", "graphics.desktop.frames",
-                     "audio.microphone", "audio.system", "browser.lifecycle"
+                     "audio.microphone", "audio.system", "browser.lifecycle", "browser.accessibility",
+                     "browser.listener", "browser.dispatch", "browser.timer", "browser.scheduler",
+                     "browser.navigation", "browser.dom", "browser.cookie", "browser.interaction",
+                     "browser.layout", "browser.presentation", "browser.network"
                  })
         {
             map[(channel, "collector-omission")] = CollectorOmissions;
@@ -304,81 +484,95 @@ internal static class EvidenceCatalog
         return map;
     }
 
-    private static List<EvidenceTable> BuildTables()
+    private static List<(int Version, EvidenceTable Table)> BuildTables()
     {
         foreach (var table in ByEventType.Values.Distinct())
         {
             table.BindChildren();
         }
 
-        var ordered = new List<EvidenceTable>();
+        var unassigned = ByEventType.Values.Distinct()
+            .Except(Migrations.SelectMany(migration => migration.Evidence))
+            .ToArray();
+        if (unassigned.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"Evidence tables {string.Join(", ", unassigned.Select(table => table.Name))} have no migration.");
+        }
+
+        var result = new List<(int, EvidenceTable)>();
         var seen = new HashSet<EvidenceTable>();
-
-        void AddIdentity(EvidenceTable table)
+        foreach (var (version, _, evidence) in Migrations)
         {
-            if (!seen.Add(table))
-            {
-                return;
-            }
+            var ordered = new List<EvidenceTable>();
 
-            foreach (var dependency in Dependencies(table.Fields))
+            void AddIdentity(EvidenceTable table)
             {
-                AddIdentity(dependency);
-            }
+                if (!seen.Add(table))
+                {
+                    return;
+                }
 
-            table.BindChildren();
-            ordered.Add(table);
-            AddChildren(table);
-        }
-
-        void AddChildren(EvidenceTable table)
-        {
-            foreach (var child in table.Children)
-            {
-                foreach (var dependency in Dependencies(child.Fields))
+                foreach (var dependency in Dependencies(table.Fields))
                 {
                     AddIdentity(dependency);
                 }
 
-                if (seen.Add(child))
-                {
-                    ordered.Add(child);
-                    AddChildren(child);
-                }
-            }
-        }
-
-        var evidence = ByEventType.Values.Distinct().ToArray();
-        foreach (var table in evidence)
-        {
-            foreach (var dependency in Dependencies(table.Fields))
-            {
-                AddIdentity(dependency);
-            }
-
-            foreach (var child in AllChildren(table))
-            {
-                foreach (var dependency in Dependencies(child.Fields))
-                {
-                    AddIdentity(dependency);
-                }
-            }
-        }
-
-        foreach (var table in evidence)
-        {
-            if (seen.Add(table))
-            {
+                table.BindChildren();
                 ordered.Add(table);
+                AddChildren(table);
             }
+
+            void AddChildren(EvidenceTable table)
+            {
+                foreach (var child in table.Children)
+                {
+                    foreach (var dependency in Dependencies(child.Fields))
+                    {
+                        AddIdentity(dependency);
+                    }
+
+                    if (seen.Add(child))
+                    {
+                        ordered.Add(child);
+                        AddChildren(child);
+                    }
+                }
+            }
+
+            foreach (var table in evidence)
+            {
+                foreach (var dependency in Dependencies(table.Fields))
+                {
+                    AddIdentity(dependency);
+                }
+
+                foreach (var child in AllChildren(table))
+                {
+                    foreach (var dependency in Dependencies(child.Fields))
+                    {
+                        AddIdentity(dependency);
+                    }
+                }
+            }
+
+            foreach (var table in evidence)
+            {
+                if (seen.Add(table))
+                {
+                    ordered.Add(table);
+                }
+            }
+
+            foreach (var table in evidence)
+            {
+                AddChildren(table);
+            }
+
+            result.AddRange(ordered.Select(table => (version, table)));
         }
 
-        foreach (var table in evidence)
-        {
-            AddChildren(table);
-        }
-
-        return ordered;
+        return result;
     }
 
     private static IEnumerable<EvidenceTable> AllChildren(EvidenceTable table)
@@ -431,8 +625,8 @@ internal static class EvidenceCatalog
     private static Field Text(string json, Presence presence = R, string? column = null) =>
         new ScalarField(json, ScalarType.Text, presence, column);
 
-    private static Field Int(string json, Presence presence = R) =>
-        new ScalarField(json, ScalarType.Integer, presence);
+    private static Field Int(string json, Presence presence = R, string? column = null) =>
+        new ScalarField(json, ScalarType.Integer, presence, column);
 
     private static Field BigInt(string json, Presence presence = R, string? column = null) =>
         new ScalarField(json, ScalarType.BigInt, presence, column);

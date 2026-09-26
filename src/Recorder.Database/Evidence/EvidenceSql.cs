@@ -18,39 +18,43 @@ internal static class EvidenceSql
 
     private static readonly ConcurrentDictionary<EvidenceTable, string> PayloadExpressions = new();
 
-    /// <summary>The migration that creates the evidence tables.</summary>
-    public static string Migration()
+    /// <summary>The migration that creates the evidence tables of the version.</summary>
+    public static string Migration(int version)
     {
         var builder = new StringBuilder();
         builder.Append(
             "-- Evidence tables. Generated from src/Recorder.Database/Evidence/EvidenceCatalog.cs\n" +
             "-- by EvidenceSql.Migration(); a test requires this file to match. Edit the\n" +
             "-- catalog, not this file. See docs/architecture/session-database.md.\n\n");
-        builder.Append(
-            "-- Strings from small or recurring vocabularies, stored once and referenced\n" +
-            "-- by key from every evidence table.\n" +
-            "CREATE TABLE names (\n" +
-            "    name_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n" +
-            "    name text NOT NULL UNIQUE\n" +
-            ");\n\n");
+        if (version == EvidenceCatalog.Migrations[0].Version)
+        {
+            builder.Append(
+                "-- Strings from small or recurring vocabularies, stored once and referenced\n" +
+                "-- by key from every evidence table.\n" +
+                "CREATE TABLE names (\n" +
+                "    name_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n" +
+                "    name text NOT NULL UNIQUE\n" +
+                ");\n\n");
+        }
 
-        foreach (var table in EvidenceCatalog.Tables)
+        // Partition orders continue across migrations, so each table keeps
+        // the prefix it was created with.
+        var tables = EvidenceCatalog.VersionedTables
+            .Select((item, index) => (item.Version, item.Table, Order: FirstPartitionOrder + index))
+            .Where(item => item.Version == version)
+            .ToArray();
+        foreach (var (_, table, _) in tables)
         {
             builder.Append(CreateTable(table)).Append('\n');
         }
 
         builder.Append(
             "INSERT INTO recording_partitioned_tables (table_name, partition_prefix, partition_order) VALUES\n");
-        var order = FirstPartitionOrder;
         builder.Append(string.Join(
             ",\n",
-            EvidenceCatalog.Tables.Select(table =>
-            {
-                var current = order++;
-                return string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"    ('{table.Name}', 'pt{current}', {current})");
-            })));
+            tables.Select(item => string.Create(
+                CultureInfo.InvariantCulture,
+                $"    ('{item.Table.Name}', 'pt{item.Order}', {item.Order})"))));
         builder.Append(";\n");
         return builder.ToString();
     }

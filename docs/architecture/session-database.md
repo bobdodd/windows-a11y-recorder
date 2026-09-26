@@ -249,18 +249,25 @@ only once the database version is tested in full. It adds the
   recording stops, the spill file is kept and its path is reported.
 - **Evidence tables.** An event's payload is stored in typed tables chosen by
   its channel and event type, generated from the evidence catalog in
-  `src/Recorder.Database/Evidence/EvidenceCatalog.cs`. Migration
-  `0003_evidence_tables.sql` is generated from the catalog, and a test
-  requires the two to match; setting `RECORDER_REGENERATE_EVIDENCE_MIGRATION`
-  to `1` while running that test rewrites the file. Each payload member is a
+  `src/Recorder.Database/Evidence/EvidenceCatalog.cs`. The catalog assigns
+  its tables to migrations: `0003_evidence_tables.sql` and
+  `0004_browser_script_evidence.sql` are generated from it, and a test
+  requires each file to match; setting `RECORDER_REGENERATE_EVIDENCE_MIGRATION`
+  to `1` while running that test rewrites them. A table is created by the
+  first migration whose event types reach it, and partition orders continue
+  from one migration to the next, so a later migration adds tables without
+  changing one a database has already applied. A recording created before a
+  migration has no partitions of the tables that migration adds, so resuming
+  it afterwards refuses events of those types. Each payload member is a
   column, except that:
   - strings from small or recurring vocabularies, such as reasons, states,
     process names, and control types, are stored once in `names` and
     referenced by `name_id`;
   - nested objects that recur within a recording are identities, stored once
     per recording and referenced by key: windows, monitors, UI Automation
-    elements, browser contexts, and repeated texts such as an audio buffer's
-    file path. A writer stores each distinct value once; a resumed recording
+    elements, browser contexts, browser event targets, script locations,
+    execution worlds and scopes, and repeated texts such as an audio buffer's
+    file path or a navigation URL. A writer stores each distinct value once; a resumed recording
     has a new writer, which stores its identities again under new keys;
   - other nested objects are flattened into the owning row, with a
     `has_<member>` column when the object may be null;
@@ -269,12 +276,17 @@ only once the database version is tested in full. It adds the
   The first slice covers collector lifecycle, session markers, raw keyboard
   and mouse input, the foreground window, UI Automation events, desktop
   frames, microphone and system audio, browser lifecycle, and the collector
-  omissions of those channels.
+  omissions of those channels. The second slice, migration 0004, covers
+  browser listeners, event dispatch with its composed path and path scopes,
+  timers, scheduler wake-up deferrals, and navigations, and the collector
+  omissions of every browser channel.
 - **Stored forms.** The rebuilt payload matches the written payload in
   content, with these normal forms: a member the validator allows to be
   absent, when written as null, reads back absent; a UTC time is stored to
   the tenth of a microsecond and reads back in the form System.Text.Json
-  writes, without trailing fractional zeros; and property order is not kept.
+  writes, without trailing fractional zeros; a number stored as a double
+  reads back in PostgreSQL's shortest form, so a browser's `544.0` reads back
+  as `544`; and property order is not kept.
   A payload member the catalog does not hold, a member of the wrong type, and
   text containing a NUL character, which PostgreSQL text cannot store, are
   refused with a reason such as `payload-member-unmapped:payload/colour` in
@@ -361,7 +373,8 @@ only once the database version is tested in full. It adds the
   are written to session files only. The build copies `.postgres\pgsql`, when
   present, to `pgsql` in the app's output folder.
 
-Still to come on the branch: evidence tables for the remaining browser channels, removing what this
+Still to come on the branch: evidence tables for the browser DOM, accessibility, interaction, layout,
+presentation, cookie, and network channels, removing what this
 retires, including `events.ndjson` once that is agreed, the revised privacy policy and threat model, and
 the hour-long Windows system test.
 

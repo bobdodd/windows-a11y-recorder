@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Npgsql;
@@ -16,20 +17,27 @@ public sealed class EvidenceMigrationTests
     // difference before committing it.
     private const string RegenerateVariable = "RECORDER_REGENERATE_EVIDENCE_MIGRATION";
 
+    // A migration, once applied, is never changed: a test that fails here
+    // after a catalog edit means the edit changes tables an earlier
+    // migration created, and belongs in a new migration instead.
     [Fact]
-    public void TheMigrationIsTheOneTheCatalogGenerates()
+    public void EachMigrationIsTheOneTheCatalogGenerates()
     {
-        var generated = EvidenceSql.Migration();
-        if (Environment.GetEnvironmentVariable(RegenerateVariable) == "1")
+        foreach (var (version, name, _) in EvidenceCatalog.Migrations)
         {
-            File.WriteAllText(MigrationPath(), generated.ReplaceLineEndings("\n"));
-        }
+            var file = string.Create(CultureInfo.InvariantCulture, $"{version:D4}_{name}.sql");
+            var generated = EvidenceSql.Migration(version);
+            if (Environment.GetEnvironmentVariable(RegenerateVariable) == "1")
+            {
+                File.WriteAllText(MigrationPath(file), generated.ReplaceLineEndings("\n"));
+            }
 
-        Assert.Contains(DatabaseMigrator.Migrations, item => item.Name.EndsWith("0003_evidence_tables.sql", StringComparison.Ordinal));
-        Assert.Equal(generated, File.ReadAllText(MigrationPath()).ReplaceLineEndings("\n"));
+            Assert.Contains(DatabaseMigrator.Migrations, item => item.Name.EndsWith(file, StringComparison.Ordinal));
+            Assert.Equal(generated, File.ReadAllText(MigrationPath(file)).ReplaceLineEndings("\n"));
+        }
     }
 
-    private static string MigrationPath()
+    private static string MigrationPath(string file)
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
              directory is not null;
@@ -37,8 +45,7 @@ public sealed class EvidenceMigrationTests
         {
             if (File.Exists(Path.Combine(directory.FullName, "windows-a11y-recorder.slnx")))
             {
-                return Path.Combine(
-                    directory.FullName, "src", "Recorder.Database", "Migrations", "0003_evidence_tables.sql");
+                return Path.Combine(directory.FullName, "src", "Recorder.Database", "Migrations", file);
             }
         }
 
@@ -121,9 +128,11 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         var (sessionKey, recordingId) = await CreateRecordingAsync();
 
         // One window with a process and one without, one monitor, two UI
-        // Automation elements, one browser context, two audio paths.
+        // Automation elements, seven browser contexts, two audio paths and
+        // two navigation URLs, three foreground windows, eight event
+        // targets, two script locations, one world and two scopes.
         await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
-        long[] once = [2, 1, 2, 1, 2, 3];
+        long[] once = [2, 1, 2, 7, 4, 3, 8, 2, 1, 2];
         Assert.Equal(once, await IdentityCountsAsync(recordingId));
 
         // A resumed recording has a new writer, which does not look up the
@@ -139,7 +148,11 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         await CountAsync("uia_elements", recordingId),
         await CountAsync("browser_contexts", recordingId),
         await CountAsync("recording_texts", recordingId),
-        await CountAsync("foreground_windows", recordingId)
+        await CountAsync("foreground_windows", recordingId),
+        await CountAsync("browser_event_targets", recordingId),
+        await CountAsync("script_locations", recordingId),
+        await CountAsync("execution_worlds", recordingId),
+        await CountAsync("execution_scopes", recordingId)
     ];
 
     [Fact]

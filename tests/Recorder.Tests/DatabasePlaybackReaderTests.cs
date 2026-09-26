@@ -249,15 +249,6 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             "session.annotations",
             "input.keyboard");
         var analyzer = Collector("test.analyzer", "analysis.test");
-        var context = new
-        {
-            browserInstanceId = "browser-1",
-            processId = 1,
-            processType = "browser",
-            documentId = "document-1",
-            documentToken = "TOKEN-1",
-            frameId = "frame-1"
-        };
         var keyboard = Event(sessionKey, collector, 0, 700, "input.keyboard", "key-down",
             new { virtualKey = 65, scanCode = 30, text = "a" }, "flag-one", "flag-two") with
         {
@@ -275,19 +266,9 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             Event(sessionKey, collector, 0, 400, "audio.microphone", "audio-stream-started",
                 Json(EvidenceSamples.AudioStarted("microphone", "audio/microphone.wav"))),
             Event(sessionKey, collector, 0, 500, "browser.navigation", "navigation-started",
-                new { context, navigationId = "navigation-1", url = "https://example.test/", primaryPage = true, sameDocument = false }),
+                Json(EvidenceSamples.Sample("browser.navigation", "navigation-started"))),
             Event(sessionKey, collector, 1, 550, "browser.navigation", "navigation-completed",
-                new
-                {
-                    context,
-                    navigationId = "navigation-1",
-                    url = "https://example.test/",
-                    primaryPage = true,
-                    sameDocument = false,
-                    committed = true,
-                    outcome = "committed",
-                    rendererProcessId = 20
-                }),
+                Json(EvidenceSamples.Sample("browser.navigation", "navigation-completed"))),
             Event(sessionKey, collector, 0, 600, "session.annotations", "marker",
                 new { note = "In the database", text = (string?)null }),
             keyboard,

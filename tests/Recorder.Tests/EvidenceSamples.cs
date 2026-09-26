@@ -36,6 +36,45 @@ internal static class EvidenceSamples
         @"{""encoding"":""pcm"",""sampleRate"":48000,""channels"":2,""bitsPerSample"":16,""blockAlign"":4," +
         @"""averageBytesPerSecond"":192000}";
 
+    private static string J(string json) => json.Replace('\'', '"');
+
+    private static readonly string WorldContext =
+        J("{'browserInstanceId':'browser-1','processId':4100,'processType':'renderer','profileId':null,'browserContextId':'context-1','pageId':'page-1','frameId':'frame-1','documentId':'document-1','executionWorldId':'world-1','documentToken':'TOKEN-1'}");
+
+    private static readonly string WorkerContext =
+        J("{'browserInstanceId':'browser-1','processId':4100,'processType':'renderer','profileId':null,'browserContextId':'context-1','pageId':null,'frameId':null,'documentId':null,'executionWorldId':null,'documentToken':null}");
+
+    private static readonly string NavigationContext =
+        J("{'browserInstanceId':'browser-1','processId':4000,'processType':'browser','profileId':null,'browserContextId':'context-1','pageId':'frame-12','frameId':'frame-12','documentId':null,'executionWorldId':null,'documentToken':null}");
+
+    private static readonly string CommittedContext =
+        J("{'browserInstanceId':'browser-1','processId':4000,'processType':'browser','profileId':null,'browserContextId':'context-1','pageId':'frame-12','frameId':'frame-12','documentId':'document-40','executionWorldId':null,'documentToken':'TOKEN-40'}");
+
+    private static readonly string SubframeContext =
+        J("{'browserInstanceId':'browser-1','processId':4000,'processType':'browser','profileId':null,'browserContextId':'context-1','pageId':'frame-12','frameId':'frame-13','documentId':null,'executionWorldId':null,'documentToken':null}");
+
+    private static readonly string ButtonTarget =
+        J("{'kind':'node','interfaceName':'HTMLButtonElement','targetId':null,'documentId':'document-1','nodeId':42,'backendNodeId':'blink-node-42','tagName':'BUTTON','elementId':'save','classes':['primary','large']}");
+
+    private static readonly string WindowTarget =
+        J("{'kind':'window','interfaceName':'Window','targetId':'window-1','documentId':'document-1','nodeId':null,'backendNodeId':null,'tagName':null,'elementId':null,'classes':[]}");
+
+    private static readonly string WorkerTarget =
+        J("{'kind':'other','interfaceName':'DedicatedWorkerGlobalScope','targetId':'worker-global-1','documentId':null,'nodeId':null,'backendNodeId':null,'tagName':null,'elementId':null,'classes':[]}");
+
+    private static readonly string Location =
+        J("{'scriptId':'script-2','url':'https://example.test/app.js','line':18,'column':4,'functionName':'activate','sourceHash':'sha256:test'}");
+
+    private static readonly string BareLocation =
+        J("{'scriptId':null,'url':null,'line':null,'column':null,'functionName':null,'sourceHash':null}");
+
+    private static readonly string OneStepPath =
+        J("'composedPath':[") + ButtonTarget + "," + WindowTarget + "]," +
+        J("'pathScopes':[{'treeScopeRootNodeId':19,'shadowRootMode':null,'targetNodeId':42,'relatedTargetNodeId':null,'visiblePathIndexes':[0,1],'unmatchedVisibleTargetCount':0},{'treeScopeRootNodeId':null,'shadowRootMode':null,'targetNodeId':42,'relatedTargetNodeId':null,'visiblePathIndexes':[],'unmatchedVisibleTargetCount':1}]");
+
+    private static readonly string Scheduler =
+        J("'queueName':'frame-throttleable','queueType':12,'throttlingType':'background','desiredWakeUpTicks':'123456000','allowedWakeUpTicks':'124000000',");
+
     public static IReadOnlyList<(string Channel, string EventType, string Payload)> All { get; } =
     [
         ("collector.lifecycle", "collector-lifecycle",
@@ -158,13 +197,84 @@ internal static class EvidenceSamples
             @"""monotonicFrequency"":""10000000"",""uncertaintyNanoseconds"":250000}"),
         ("browser.lifecycle", "collector-omission",
             @"{""reason"":""browser-queue-full"",""count"":2,""context"":" + Context + "}"),
-        ("browser.lifecycle", "collector-omission", @"{""reason"":""browser-queue-full"",""count"":1}")
+        ("browser.lifecycle", "collector-omission", @"{""reason"":""browser-queue-full"",""count"":1}"),
+        ("browser.listener", "listener-registered",
+            J("{'context':") + Context + J(",'listenerId':'listener-7','eventName':'click','registrationKind':'add-event-listener','target':") +
+            ButtonTarget + J(",'capture':false,'passive':false,'once':false,'location':") + Location + J(",'world':null}")),
+        ("browser.listener", "listener-removed",
+            J("{'context':") + WorldContext + J(",'listenerId':'listener-8','eventName':'keydown','registrationKind':'inline-attribute','target':") +
+            WindowTarget + J(",'capture':true,'passive':true,'once':true,'location':") + BareLocation +
+            J(",'world':{'kind':'isolated','blinkWorldId':1,'name':'extension','stableId':null},") +
+            J("'scope':{'contextKind':'window','workerToken':null,'globalObjectUrl':'https://example.test/'}}")),
+        ("browser.listener", "listener-callback-replaced",
+            J("{'context':") + WorkerContext + J(",'listenerId':'listener-9','eventName':'message','registrationKind':'event-handler-property','target':") +
+            WorkerTarget + J(",'capture':false,'passive':false,'once':false,'location':null,'world':null,") +
+            J("'scope':{'contextKind':'dedicated-worker','workerToken':'WORKER-1','globalObjectUrl':'https://example.test/worker.js'}}")),
+        ("browser.dispatch", "dispatch-started", BrowserShadowDomPayloads.DispatchStarted),
+        ("browser.dispatch", "listener-invoked",
+            J("{'context':") + Context + J(",'dispatchId':'dispatch-5','eventName':'click','trusted':true,'originalTarget':") + ButtonTarget + "," +
+            OneStepPath + J(",'phase':'at-target','listenerId':'listener-7','defaultPrevented':true,'propagationStopped':false,") +
+            J("'immediatePropagationStopped':false,'defaultAction':null,'outcome':null,'currentTarget':") + ButtonTarget + "}"),
+        ("browser.dispatch", "dispatch-completed",
+            J("{'context':") + WorkerContext + J(",'dispatchId':'dispatch-6','eventName':'message','trusted':false,'originalTarget':null,") +
+            J("'composedPath':[") + WorkerTarget + J("],'pathScopes':[{'treeScopeRootNodeId':null,'shadowRootMode':null,'targetNodeId':null,") +
+            J("'relatedTargetNodeId':null,'visiblePathIndexes':[0],'unmatchedVisibleTargetCount':0}],'phase':'none','listenerId':null,") +
+            J("'defaultPrevented':false,'propagationStopped':true,'immediatePropagationStopped':true,'defaultAction':null,'outcome':null,") +
+            J("'scope':{'contextKind':'dedicated-worker','workerToken':'WORKER-1','globalObjectUrl':'https://example.test/worker.js'}}")),
+        ("browser.dispatch", "default-action",
+            J("{'context':") + Context + J(",'dispatchId':'dispatch-5','eventName':'click','trusted':true,'originalTarget':") + ButtonTarget + "," +
+            OneStepPath + J(",'phase':'none','listenerId':null,'defaultPrevented':false,'propagationStopped':false,") +
+            J("'immediatePropagationStopped':false,'defaultAction':'blink-default-event-handler','outcome':'invoked','currentTarget':") +
+            ButtonTarget + "}"),
+        ("browser.timer", "timer-scheduled",
+            J("{'context':") + Context + J(",'timerId':'timer-1','timerKind':'timeout','requestedDelayMilliseconds':100,") +
+            J("'effectiveDelayMilliseconds':100.5,'nestingLevel':0,'throttled':null,'pageLifecycleState':'visible','callbackLocation':") +
+            Location + J(",'cancellationReason':null}")),
+        ("browser.timer", "timer-fired",
+            J("{'context':") + Context + J(",'timerId':'timer-2','timerKind':'idle-callback','requestedDelayMilliseconds':null,") +
+            J("'effectiveDelayMilliseconds':null,'nestingLevel':3,'throttled':true,'pageLifecycleState':'hidden','callbackLocation':null,") +
+            J("'cancellationReason':null,'didTimeout':true}")),
+        ("browser.timer", "timer-cancelled",
+            J("{'context':") + Context + J(",'timerId':'timer-1','timerKind':'timeout','requestedDelayMilliseconds':100,") +
+            J("'effectiveDelayMilliseconds':100.5,'nestingLevel':0,'throttled':false,'pageLifecycleState':'visible','callbackLocation':") +
+            Location + J(",'cancellationReason':'clear-timeout','didTimeout':false}")),
+        ("browser.scheduler", "wake-up-deferred",
+            J("{'context':") + WorkerContext + "," + Scheduler +
+            J("'deferralMilliseconds':544.25,'hasReadyTask':false,'blockType':'all-tasks','decisionBoundary':'task-queue-throttler'}")),
+        ("browser.navigation", "navigation-started",
+            J("{'context':") + NavigationContext + J(",'parentFrameId':null,'parentOrOuterDocumentFrameId':null,'frameType':'primary-main-frame',") +
+            J("'primaryPage':true,'navigationId':'navigation-40','url':'https://example.test/','navigationKind':'cross-document',") +
+            J("'rendererInitiated':false,'sameDocument':false,'committed':null,'errorPage':null,'netErrorCode':null,'outcome':null,") +
+            J("'rendererProcessId':null}")),
+        ("browser.navigation", "navigation-completed",
+            J("{'context':") + CommittedContext + J(",'parentFrameId':null,'parentOrOuterDocumentFrameId':null,'frameType':'primary-main-frame',") +
+            J("'primaryPage':true,'navigationId':'navigation-40','url':'https://example.test/','navigationKind':'cross-document',") +
+            J("'rendererInitiated':false,'sameDocument':false,'committed':true,'errorPage':false,'netErrorCode':0,'outcome':'committed',") +
+            J("'rendererProcessId':4100}")),
+        ("browser.navigation", "navigation-completed",
+            J("{'context':") + SubframeContext + J(",'parentFrameId':'frame-12','parentOrOuterDocumentFrameId':'frame-12','frameType':'subframe',") +
+            J("'primaryPage':true,'navigationId':'navigation-41','url':'https://ads.example.test/','navigationKind':'cross-document',") +
+            J("'rendererInitiated':true,'sameDocument':false,'committed':false,'errorPage':false,'netErrorCode':-3,'outcome':'not-committed',") +
+            J("'rendererProcessId':null}")),
+        ("browser.listener", "collector-omission", J("{'reason':'browser-queue-full','count':3,'context':") + Context + "}"),
+        ("browser.dispatch", "collector-omission", J("{'reason':'browser-queue-full'}")),
+        ("browser.timer", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.scheduler", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.navigation", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.accessibility", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.dom", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.cookie", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.interaction", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.layout", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.presentation", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.network", "collector-omission", J("{'reason':'browser-queue-full','count':1}"))
     ];
 
     /// <summary>
     /// Payloads the tables store in a normal form, with the payload read
-    /// back: an optional member written as null reads back absent, and a
-    /// UTC time reads back without trailing fractional zeros.
+    /// back: an optional member written as null reads back absent, a UTC
+    /// time reads back without trailing fractional zeros, and a number held
+    /// as a double reads back in its shortest form.
     /// </summary>
     public static IReadOnlyList<(string Channel, string EventType, string Payload, string Expected)> Normalized { get; } =
     [
@@ -178,8 +288,24 @@ internal static class EvidenceSamples
             @"{""action"":""stop"",""state"":""stopped"",""utc"":""2026-09-25T12:00:01.5+00:00""}"),
         ("browser.lifecycle", "collector-omission",
             @"{""reason"":""browser-queue-full"",""count"":1,""context"":null}",
-            @"{""reason"":""browser-queue-full"",""count"":1}")
+            @"{""reason"":""browser-queue-full"",""count"":1}"),
+        ("browser.scheduler", "wake-up-deferred",
+            J("{'context':") + WorkerContext + "," + Scheduler +
+            J("'deferralMilliseconds':544.0,'hasReadyTask':true,'blockType':'new-tasks-only','decisionBoundary':'task-queue-throttler'}"),
+            J("{'context':") + WorkerContext + "," + Scheduler +
+            J("'deferralMilliseconds':544,'hasReadyTask':true,'blockType':'new-tasks-only','decisionBoundary':'task-queue-throttler'}")),
+        ("browser.dispatch", "dispatch-completed",
+            J("{'context':") + Context + J(",'dispatchId':'dispatch-5','eventName':'click','trusted':true,'originalTarget':") + ButtonTarget + "," +
+            OneStepPath + J(",'phase':'none','listenerId':null,'defaultPrevented':false,'propagationStopped':false,") +
+            J("'immediatePropagationStopped':false,'defaultAction':null,'outcome':null,'currentTarget':null}"),
+            J("{'context':") + Context + J(",'dispatchId':'dispatch-5','eventName':'click','trusted':true,'originalTarget':") + ButtonTarget + "," +
+            OneStepPath + J(",'phase':'none','listenerId':null,'defaultPrevented':false,'propagationStopped':false,") +
+            J("'immediatePropagationStopped':false,'defaultAction':null,'outcome':null}"))
     ];
+
+    /// <summary>The first sample of the event type.</summary>
+    public static string Sample(string channel, string eventType) =>
+        All.First(item => item.Channel == channel && item.EventType == eventType).Payload;
 
     /// <summary>A UI Automation focus change to the named element.</summary>
     public static string Focus(string name, string controlType = "Button") =>

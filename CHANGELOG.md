@@ -69,6 +69,14 @@ from the product version.
   arrays and maps in child tables. The writer refuses a payload member the
   catalog does not hold. The player rebuilds payloads from these tables.
   Other event types are still held in the transitional `jsonb` table.
+- Store browser listener, dispatch, timer, scheduler, and navigation
+  payloads in typed evidence tables, on the `postgres-session-store` branch.
+  Migration 0004, generated from the same catalog, adds tables for those
+  event types and for the collector omissions of every browser channel, with
+  event targets, script locations, execution worlds and scopes, and
+  navigation URLs stored once per recording, and a dispatch's composed path
+  and path scopes in child tables. Each evidence migration now adds only the
+  tables it introduces, so a database that applied 0003 is upgraded in place.
 - Keep timeline keyboard stepping within a lane. Left, Right, Home, and End
   move among the events of the selected event's lane, or the lane last
   clicked, and Up and Down select the nearest event in the next lane above
