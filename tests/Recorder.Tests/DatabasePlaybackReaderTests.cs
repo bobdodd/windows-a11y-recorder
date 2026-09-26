@@ -76,7 +76,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         Assert.Single(fromDatabase.Frames);
         Assert.Single(fromDatabase.AudioTracks);
         Assert.Single(fromDatabase.BrowserNavigations);
-        Assert.Contains(databaseTimeline, item => item.Summary == "marker: In the database");
+        Assert.Contains(databaseTimeline, item => item.Summary == "session-marker: In the database");
 
         // Every complete record reads back as the event log's record, with
         // the payload's properties possibly in another order.
@@ -115,7 +115,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         var token = TestContext.Current.CancellationToken;
         var sessionKey = "lookups-" + Guid.NewGuid().ToString("N");
         var directory = Path.Combine(_root, sessionKey);
-        string[] channels = ["input.mouse", "accessibility.uia.events", "session.annotations"];
+        string[] channels = ["test.pointer", "accessibility.uia.events", "test.notes"];
         var collector = Collector("test.lookups", channels);
         var random = new Random(1234);
         var time = 0L;
@@ -191,7 +191,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         var token = TestContext.Current.CancellationToken;
         var sessionKey = "large-" + Guid.NewGuid().ToString("N");
         var directory = Path.Combine(_root, sessionKey);
-        var collector = Collector("test.large", "input.mouse", "accessibility.uia.events");
+        var collector = Collector("test.large", "test.pointer", "accessibility.uia.events");
         var padding = new string('x', 2_000);
         var events = new List<RecorderEvent>(100_000);
         for (var index = 0; index < 100_000; index++)
@@ -199,7 +199,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             events.Add(index % 4 == 0
                 ? Event(sessionKey, collector, (ulong)index, index * 1_000L, "accessibility.uia.events",
                     "focus-changed", Json(EvidenceSamples.Focus($"Control {index} {padding}")))
-                : Event(sessionKey, collector, (ulong)index, index * 1_000L, "input.mouse",
+                : Event(sessionKey, collector, (ulong)index, index * 1_000L, "test.pointer",
                     "mouse-move", new { x = index, y = index, padding }));
         }
 
@@ -241,15 +241,15 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
     {
         var collector = Collector(
             "test.varied",
-            "window.foreground",
+            "test.windows",
             "accessibility.uia.events",
             "graphics.desktop.frames",
             "audio.microphone",
             "browser.navigation",
             "session.annotations",
-            "input.keyboard");
+            "test.keys");
         var analyzer = Collector("test.analyzer", "analysis.test");
-        var keyboard = Event(sessionKey, collector, 0, 700, "input.keyboard", "key-down",
+        var keyboard = Event(sessionKey, collector, 0, 700, "test.keys", "key-down",
             new { virtualKey = 65, scanCode = 30, text = "a" }, "flag-one", "flag-two") with
         {
             NativeTimestamp = new NativeTimestamp("raw-input", 123_456_789, "milliseconds"),
@@ -257,7 +257,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         };
         return
         [
-            Event(sessionKey, collector, 0, 100, "window.foreground", "foreground-changed",
+            Event(sessionKey, collector, 0, 100, "test.windows", "foreground-changed",
                 new { title = "Editor", processName = "notepad", processId = 42, bounds = new { x = 1, y = 2 } }),
             Event(sessionKey, collector, 0, 200, "accessibility.uia.events", "focus-changed",
                 Json(EvidenceSamples.Focus("Save"))),
@@ -269,8 +269,8 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
                 Json(EvidenceSamples.Sample("browser.navigation", "navigation-started"))),
             Event(sessionKey, collector, 1, 550, "browser.navigation", "navigation-completed",
                 Json(EvidenceSamples.Sample("browser.navigation", "navigation-completed"))),
-            Event(sessionKey, collector, 0, 600, "session.annotations", "marker",
-                new { note = "In the database", text = (string?)null }),
+            Event(sessionKey, collector, 0, 600, "session.annotations", "session-marker",
+                new { note = "In the database" }),
             keyboard,
             AnalysisEventFactory.CreateDerived(
                 sessionKey,

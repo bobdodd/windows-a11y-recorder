@@ -202,8 +202,8 @@ public sealed class DatabaseEventRecordSource(
                 "The event was not loaded from the database, so it has no database key.");
         }
 
-        // A payload is in its event type's evidence table or, for event types
-        // without one yet, in the transitional jsonb payload table.
+        // A payload is in its event type's evidence table or, for a channel
+        // the recorder does not define, in the jsonb payload table.
         var payloadColumn = EvidenceCatalog.ByEventType.TryGetValue((item.Channel, item.EventType), out var table)
             ? $"coalesce((SELECT {EvidenceSql.PayloadExpression(table)}::text FROM {table.Name} t " +
                 "WHERE t.recording_id = $1 AND t.event_key = $2), p.payload::text)"
@@ -231,7 +231,7 @@ public sealed class DatabaseEventRecordSource(
             "JOIN event_types et ON et.event_type_id = e.event_type_id " +
             "LEFT JOIN timestamp_domains td ON td.timestamp_domain_id = e.native_timestamp_domain_id " +
             "LEFT JOIN timestamp_units tu ON tu.timestamp_unit_id = e.native_timestamp_unit_id " +
-            "LEFT JOIN event_payloads_unmapped p ON p.recording_id = $1 AND p.event_key = $2 " +
+            "LEFT JOIN event_payloads_other_channels p ON p.recording_id = $1 AND p.event_key = $2 " +
             "LEFT JOIN event_analysis a ON a.recording_id = $1 AND a.event_key = $2 " +
             "WHERE e.recording_id = $1 AND e.event_key = $2");
         command.Parameters.AddWithValue(recordingId);

@@ -30,9 +30,19 @@ public static class DatabaseMigrator
             .OrderBy(migration => migration.version)
             .ToArray();
 
-    public static async Task ApplyAsync(
+    public static Task ApplyAsync(
         NpgsqlDataSource dataSource,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ApplyAsync(dataSource, int.MaxValue, cancellationToken);
+
+    /// <summary>
+    /// Applies the migrations up to and including a version, so a test can
+    /// build the schema an earlier release left and then upgrade it.
+    /// </summary>
+    internal static async Task ApplyAsync(
+        NpgsqlDataSource dataSource,
+        int throughVersion,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken)
@@ -45,7 +55,7 @@ public static class DatabaseMigrator
             "applied_utc timestamptz NOT NULL DEFAULT now())",
             cancellationToken).ConfigureAwait(false);
 
-        foreach (var (version, resource) in Migrations)
+        foreach (var (version, resource) in Migrations.Where(migration => migration.Version <= throughVersion))
         {
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
                 .ConfigureAwait(false);

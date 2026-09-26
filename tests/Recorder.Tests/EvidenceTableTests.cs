@@ -101,7 +101,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         await WriteAsync(sessionKey, recordingId, events);
 
         Assert.Equal(events.Count, await CountAsync("events", recordingId));
-        Assert.Equal(0, await CountAsync("event_payloads_unmapped", recordingId));
+        Assert.Equal(0, await CountAsync("event_payloads_other_channels", recordingId));
         var source = new DatabaseEventRecordSource(DataSource, recordingId, sessionKey);
         var keys = await EventKeysAsync(recordingId);
         for (var index = 0; index < events.Count; index++)
@@ -179,6 +179,26 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             ["payload-member-unmapped:payload/colour session-marker", "payload-text-nul:payload/note session-marker"],
             await RejectionsAsync(recordingId));
         Assert.Equal(1, await CountAsync("session_markers", recordingId));
+    }
+
+    [Fact]
+    public async Task StoresOnlyOtherChannelsPayloadsAsJsonAndRefusesBuiltInTypesWithoutTables()
+    {
+        var (sessionKey, recordingId) = await CreateRecordingAsync();
+        var collector = Collector("test.evidence", "session.annotations", "test.channel");
+        var result = await WriteAsync(
+            sessionKey,
+            recordingId,
+            [
+                Event(sessionKey, collector, 0, 10, "test.channel", "test-event", Json("""{"value":1}""")),
+                Event(sessionKey, collector, 0, 20, "session.annotations", "marker", Json("""{"note":"refused"}"""))
+            ],
+            expectRejections: true);
+
+        Assert.Equal(1, result.WrittenCount);
+        Assert.Equal(1, result.RejectedCount);
+        Assert.Equal(["event-type-unmapped marker"], await RejectionsAsync(recordingId));
+        Assert.Equal(1, await CountAsync("event_payloads_other_channels", recordingId));
     }
 
     private static List<RecorderEvent> SampleEvents(string sessionKey, ulong firstSequence = 0)

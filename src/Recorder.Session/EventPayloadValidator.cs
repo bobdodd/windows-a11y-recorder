@@ -30,6 +30,9 @@ internal static class EventPayloadValidator
         "browser.network"
     ];
 
+    /// <summary>Whether the recorder defines the channel.</summary>
+    public static bool IsBuiltInChannel(string channel) => BuiltInChannels.Contains(channel);
+
     public static void Validate(
         JsonElement record,
         ICollection<ArchiveValidationIssue> issues,

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
 using Recorder.Database.Evidence;
+using Recorder.Session;
 
 namespace Recorder.Database;
 
@@ -142,6 +143,11 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
             }
 
             await ResolveNamesAsync(evidence, cancellationToken).ConfigureAwait(false);
+        }
+        else if (EventPayloadValidator.IsBuiltInChannel(record.Channel))
+        {
+            // A built-in payload has evidence tables or is not stored.
+            return (null, "event-type-unmapped");
         }
 
         if (!_clockMappings.TryGetValue(record.ClockMappingId, out var clockMapping))
@@ -426,8 +432,8 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
             }
         }
 
-        // Transitional: a payload whose event type has no evidence table yet
-        // is stored as jsonb. See Migrations/0001_core.sql.
+        // The payload of a channel the recorder does not define is stored as
+        // jsonb. See Migrations/0008_other_channel_payloads.sql.
         var unmapped = rows.Where(row => row.Evidence is null).ToArray();
         if (unmapped.Length == 0)
         {
@@ -435,7 +441,7 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         }
 
         await using (var importer = await connection.BeginBinaryImportAsync(
-            "COPY event_payloads_unmapped (recording_id, event_key, payload) FROM STDIN (FORMAT BINARY)",
+            "COPY event_payloads_other_channels (recording_id, event_key, payload) FROM STDIN (FORMAT BINARY)",
             cancellationToken).ConfigureAwait(false))
         {
             foreach (var row in unmapped)

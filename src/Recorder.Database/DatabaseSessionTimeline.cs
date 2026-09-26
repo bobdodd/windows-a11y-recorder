@@ -19,15 +19,15 @@ internal sealed class DatabaseEventNames
     private static readonly IReadOnlySet<string> PlaybackProperties =
         SessionPlaybackArchiveBuilder.PayloadProperties.ToHashSet(StringComparer.Ordinal);
 
-    // Transitional: payloads of event types without evidence tables are in
-    // the jsonb payload table until those tables exist.
+    // The payloads of channels the recorder does not define are in the jsonb
+    // payload table.
     private static readonly string UnmappedProjection =
         "(SELECT jsonb_strip_nulls(jsonb_build_object(" +
         string.Join(
             ", ",
             SessionPlaybackArchiveBuilder.PayloadProperties.Select(property =>
                 $"'{property}', p.payload -> '{property}'")) +
-        "))::text FROM event_payloads_unmapped p WHERE p.recording_id = $1 AND p.event_key = e.event_key)";
+        "))::text FROM event_payloads_other_channels p WHERE p.recording_id = $1 AND p.event_key = e.event_key)";
 
     private string? _columns;
 

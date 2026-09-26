@@ -94,6 +94,12 @@ from the product version.
   cookie accesses, network requests, responses, completions, failures,
   memory cache hits, wire headers, navigation responses, and WebSocket,
   EventSource, and WebTransport records.
+- Keep `jsonb` payloads only for channels the recorder does not define, on
+  the `postgres-session-store` branch. Migration 0008 renames the
+  transitional `event_payloads_unmapped` table to
+  `event_payloads_other_channels` and removes each recording that still held
+  a built-in payload in it. The writer refuses an event of a built-in
+  channel whose type has no evidence tables.
 - Keep timeline keyboard stepping within a lane. Left, Right, Home, and End
   move among the events of the selected event's lane, or the lane last
   clicked, and Up and Down select the nearest event in the next lane above

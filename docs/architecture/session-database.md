@@ -314,11 +314,15 @@ only once the database version is tested in full. It adds the
   text containing a NUL character, which PostgreSQL text cannot store, are
   refused with a reason such as `payload-member-unmapped:payload/colour` in
   `event_rejections`, rather than stored in part.
-- **Transitional payload table.** Payloads of event types the catalog does
-  not cover yet are stored in `event_payloads_unmapped` as `jsonb`, which the
-  player also reads for recordings written before the evidence tables. This
-  contradicts the decision against `jsonb` for evidence-model fields, and the
-  table is emptied and dropped before the branch is merged.
+- **Other channels.** Every event type of the recorder's built-in channels
+  has evidence tables, and the writer refuses an event of a built-in channel
+  whose type has none, with the reason `event-type-unmapped`. The payload of
+  an event on a channel the recorder does not define, which has no evidence
+  model, is stored in `event_payloads_other_channels` as `jsonb`, and the
+  player reads it from there. Migration 0008 renamed the transitional
+  `event_payloads_unmapped` table to this name, and removed each recording
+  that still held a built-in payload in it, as the recording store removes a
+  recording. The session folders of removed recordings are left on disk.
 - **Binaries.** `scripts/Get-PostgresBinaries.ps1` downloads the EDB Windows
   x64 binaries archive for 18.6, checks its SHA-256 against the value computed
   from the archive downloaded on September 25, 2026, and extracts the server
@@ -396,7 +400,7 @@ only once the database version is tested in full. It adds the
   are written to session files only. The build copies `.postgres\pgsql`, when
   present, to `pgsql` in the app's output folder.
 
-Still to come on the branch: removing the transitional `event_payloads_unmapped` table, removing what this
+Still to come on the branch: removing what this
 retires, including `events.ndjson` once that is agreed, the revised privacy policy and threat model, and
 the hour-long Windows system test.
 

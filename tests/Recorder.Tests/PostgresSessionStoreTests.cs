@@ -128,9 +128,9 @@ public sealed class PostgresSessionStoreTests(EmbeddedPostgresFixture fixture)
     public async Task StoresEveryEnvelopeFieldExactly()
     {
         var (sessionKey, recordingId, _) = await CreateRecordingAsync();
-        var collector = Collector("test.collector", "browser.dom");
+        var collector = Collector("test.collector", "test.dom");
         var observed = new DateTimeOffset(2026, 9, 25, 12, 0, 1, TimeSpan.Zero).AddTicks(1_234_567);
-        var record = Event(sessionKey, collector, 7, 1_500, "browser.dom", "dom-snapshot", new { node = "a" }, "clock-mapped", "partial")
+        var record = Event(sessionKey, collector, 7, 1_500, "test.dom", "dom-snapshot", new { node = "a" }, "clock-mapped", "partial")
             with
             {
                 ClockMappingId = "chromium:browser-1:42",
@@ -165,7 +165,7 @@ public sealed class PostgresSessionStoreTests(EmbeddedPostgresFixture fixture)
             "JOIN collector_kinds k ON k.collector_kind_id = rc.collector_kind_id " +
             "JOIN event_schema_versions v USING (event_schema_version_id) " +
             "JOIN evidence_classes x USING (evidence_class_id) " +
-            "JOIN event_payloads_unmapped p ON p.recording_id = e.recording_id AND p.event_key = e.event_key " +
+            "JOIN event_payloads_other_channels p ON p.recording_id = e.recording_id AND p.event_key = e.event_key " +
             "JOIN event_analysis a ON a.recording_id = e.recording_id AND a.event_key = e.event_key " +
             "WHERE e.recording_id = $1");
         command.Parameters.AddWithValue(recordingId);
@@ -174,7 +174,7 @@ public sealed class PostgresSessionStoreTests(EmbeddedPostgresFixture fixture)
 
         Assert.Equal(7L, reader.GetInt64(0));
         Assert.Equal(1_500L, reader.GetInt64(1));
-        Assert.Equal("browser.dom", reader.GetString(2));
+        Assert.Equal("test.dom", reader.GetString(2));
         Assert.Equal("dom-snapshot", reader.GetString(3));
         Assert.Equal("chromium:browser-1:42", reader.GetString(4));
         var stored = reader.GetFieldValue<DateTime>(5).Ticks + reader.GetInt16(6);
