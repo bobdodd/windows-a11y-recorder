@@ -20,6 +20,19 @@ from the product version.
 
 ### Added
 
+- Start the PostgreSQL session store, on the `postgres-session-store` branch
+  and not yet used by the app. `Recorder.Database` starts and owns a
+  PostgreSQL 18 server for the current Windows user, listening only on the
+  loopback interface with a password protected by Windows data protection;
+  applies versioned migrations; creates projects and recordings with one
+  partition of each event table per recording; and writes events with binary
+  `COPY` through `PostgresEventWriter`, which makes the archive validator's
+  per-record checks, buffers in memory and then in a bounded spill file while
+  the database is unavailable, and records refused and omitted events.
+  `scripts/Get-PostgresBinaries.ps1` fetches the server binaries the tests
+  and app use. Event payloads are held in a transitional `jsonb` table until
+  each channel has typed evidence tables; that table is removed before the
+  branch is merged.
 - Record worker and non-Node dispatch evidence. Protocol 0.31 records
   listener and dispatch evidence in dedicated, shared, and service worker
   global scopes, for dispatches to EventTargets that are not Nodes, for a

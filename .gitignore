@@ -62,3 +62,6 @@ Desktop.ini
 *.log
 *.dmp
 *.dump
+
+# PostgreSQL binaries fetched by scripts/Get-PostgresBinaries.ps1
+.postgres/

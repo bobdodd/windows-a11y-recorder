@@ -219,9 +219,63 @@ change.
   collector enabled, measuring stop time, open time, seek time, memory use,
   and database size, in an ordinary, non-administrator session.
 
+## Implementation status
+
+The implementation is on the `postgres-session-store` branch and is merged
+only once the database version is tested in full. Its first part is the
+`Recorder.Database` project, which the app does not use yet.
+
+- **Server.** `EmbeddedPostgresServer` runs `initdb` on first start with
+  SCRAM-SHA-256 authentication, UTF-8 encoding, no locale, a generated
+  password stored protected for the current Windows user, and
+  `listen_addresses` set to `127.0.0.1` with no Unix-domain socket. It
+  attaches to a server an earlier instance left running, and otherwise starts
+  one with `pg_ctl`.
+- **Migrations.** `DatabaseMigrator` applies the embedded SQL migrations in
+  order, each in its own transaction, under an advisory lock.
+- **Partitions.** `RecordingStore` creates one partition of each event table
+  when it creates a recording, named by a short table prefix and the
+  recording key, such as `ev_<key>`, because a name built from the full
+  table name exceeds PostgreSQL's 63-byte identifier limit and is truncated.
+  Deleting a recording detaches and drops its partitions, referring tables
+  first, and then deletes its row.
+- **Writing.** `PostgresEventWriter` makes the archive validator's per-record
+  checks, rejecting a record with the validator's code into
+  `event_rejections`. It holds up to 256 MB in memory, then writes to a spill
+  file of up to 8 GB, and records events refused beyond that as omission runs
+  in `writer_omissions`. A batch the database refuses for a reason other than
+  an outage is written event by event, so one bad record refuses only itself.
+  If the store cannot be reached within the completion timeout when
+  recording stops, the spill file is kept and its path is reported.
+- **Transitional payload table.** Until each channel has typed evidence
+  tables, an event's payload is stored in `event_payloads_unmapped` as
+  `jsonb`. This contradicts the decision against `jsonb` for evidence-model
+  fields, and the table is emptied and dropped before the branch is merged.
+- **Binaries.** `scripts/Get-PostgresBinaries.ps1` downloads the EDB Windows
+  x64 binaries archive for 18.6, checks its SHA-256 against the value computed
+  from the archive downloaded on September 25, 2026, and extracts the server
+  programs, libraries, shared files, and licences into `.postgres\pgsql`,
+  which is not committed. The integration tests use those binaries, or the
+  directory named by `RECORDER_POSTGRES_BIN`.
+
+Still to come on the branch: the coordinator and app writing to the store,
+the player's queries, typed evidence and identity tables per channel,
+removing what this retires, the revised privacy policy and threat model, and
+the hour-long Windows system test.
+
+A throughput probe on the Linux development sandbox, with two processor cores
+and a debug build, wrote 200,000 events with payloads of about 2.8 KB at about
+13,000 events per second with no spilling, of which about 12 s was spent in
+the database writes. When the producer outran the database so the memory
+bound was reached, the spill file roughly halved the rate. The measured
+recording averaged about 3,600 events per second. These figures are from one
+run on a machine unlike the target and are not a substitute for the system
+test.
+
 ## Open items
 
-- The size PostgreSQL 18 adds to the app installation.
+- The size PostgreSQL 18 adds to the app installation. The extracted server
+  subset is 1,576 files and about 128 MB before any further pruning.
 - Whether identical checkpoint node states are stored once, decided by
   measurement.
 - The storage size per hour of the normalized store, measured by the system

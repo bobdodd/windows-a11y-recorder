@@ -87,7 +87,7 @@ public static class RecorderEventFactory
             Analysis = null
         };
 
-    internal static string CreateEventId(
+    public static string CreateEventId(
         string sessionId,
         string producerInstanceId,
         string channel,

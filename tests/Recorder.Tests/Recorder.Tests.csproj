@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Recorder.Contracts/Recorder.Contracts.csproj" />
     <ProjectReference Include="../../src/Recorder.Session/Recorder.Session.csproj" />
+    <ProjectReference Include="../../src/Recorder.Database/Recorder.Database.csproj" />
     <ProjectReference Include="../../src/Recorder.Coordinator/Recorder.Coordinator.csproj" />
     <ProjectReference Include="../../src/Recorder.Collectors.Browser/Recorder.Collectors.Browser.csproj" />
   </ItemGroup>
