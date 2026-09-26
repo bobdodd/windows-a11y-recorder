@@ -250,9 +250,9 @@ only once the database version is tested in full. It adds the
 - **Evidence tables.** An event's payload is stored in typed tables chosen by
   its channel and event type, generated from the evidence catalog in
   `src/Recorder.Database/Evidence/EvidenceCatalog.cs`. The catalog assigns
-  its tables to migrations: `0003_evidence_tables.sql` and
-  `0004_browser_script_evidence.sql`, and `0005_browser_document_evidence.sql`
-  are generated from it, and a test
+  its tables to migrations: `0003_evidence_tables.sql`,
+  `0004_browser_script_evidence.sql`, `0005_browser_document_evidence.sql`,
+  and `0006_browser_rendering_evidence.sql` are generated from it, and a test
   requires each file to match; setting `RECORDER_REGENERATE_EVIDENCE_MIGRATION`
   to `1` while running that test rewrites them. A table is created by the
   first migration whose event types reach it, and partition orders continue
@@ -286,6 +286,13 @@ only once the database version is tested in full. It adds the
   roots, slot assignments, and text controls, DOM attribute and character
   data changes, and focus, selection, text control value, and active
   descendant changes. A slot's assigned node list keeps its null entries.
+  The fourth slice, migration 0006, covers the browser layout and
+  presentation channels: layout checkpoints with their nodes, computed
+  styles, and pseudo-elements, and presentation requests, not-swapped
+  outcomes, swaps, and feedback. A computed style value that is null is
+  stored as a NULL value, and a null computed style is kept apart from an
+  empty one. Presentation tick and microsecond values stay decimal text, as
+  the payload carries them.
 - **Stored forms.** The rebuilt payload matches the written payload in
   content, with these normal forms: a member the validator allows to be
   absent, when written as null, reads back absent; a UTC time is stored to
@@ -379,7 +386,7 @@ only once the database version is tested in full. It adds the
   are written to session files only. The build copies `.postgres\pgsql`, when
   present, to `pgsql` in the app's output folder.
 
-Still to come on the branch: evidence tables for the browser layout, presentation, cookie, and network
+Still to come on the branch: evidence tables for the browser cookie and network
 channels, removing what this
 retires, including `events.ndjson` once that is agreed, the revised privacy policy and threat model, and
 the hour-long Windows system test.

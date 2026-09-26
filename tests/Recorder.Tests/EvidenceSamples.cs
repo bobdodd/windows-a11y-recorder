@@ -329,7 +329,31 @@ internal static class EvidenceSamples
         ("browser.interaction", "interaction-checkpoint-text-control",
             J("{'context':") + Context + J(",'checkpointId':'interaction-checkpoint-1','textControlIndex':0,'nodeId':45,'controlType':'textarea','value':'hello','valueLength':5,'valueTruncated':false,'selectionStart':0,'selectionEnd':5,'selectionDirection':'forward'}")),
         ("browser.interaction", "interaction-checkpoint-completed",
-            J("{'context':") + Context + J(",'checkpointId':'interaction-checkpoint-1','textControlCount':1,'truncated':false,'maximumTextControls':32}"))
+            J("{'context':") + Context + J(",'checkpointId':'interaction-checkpoint-1','textControlCount':1,'truncated':false,'maximumTextControls':32}")),
+        ("browser.layout", "layout-checkpoint-started",
+            J("{'context':") + Context + J(",'checkpointId':'layout-checkpoint-3','reason':'rendering-update','previousCheckpointId':null,'styleResolutionCount':4,'layoutCount':2,'viewport':{'width':1280,'height':720.5},'scrollOffset':{'x':0,'y':-12.25},'devicePixelRatio':1.25,'layoutZoomFactor':1,'maximumNodes':5000,'styleProperties':['display','visibility','outline-style']}")),
+        ("browser.layout", "layout-checkpoint-started",
+            J("{'context':") + Context + J(",'checkpointId':'layout-checkpoint-4','reason':'rendering-update','previousCheckpointId':'layout-checkpoint-3','styleResolutionCount':0,'layoutCount':0,'viewport':{'width':0,'height':0},'scrollOffset':{'x':10,'y':0},'devicePixelRatio':2,'layoutZoomFactor':0.5,'maximumNodes':5000,'styleProperties':['display']}")),
+        ("browser.layout", "layout-checkpoint-node",
+            J("{'context':") + Context + J(",'checkpointId':'layout-checkpoint-3','nodeIndex':0,'nodeId':42,'nodeType':'element','nodeName':'BUTTON','layoutObjectPresent':true,'displayLocked':false,'boundingClientRect':{'x':8,'y':16.5,'width':120,'height':32},'computedStyle':{'display':'inline-block','visibility':'visible','outline-style':null},'pseudoElement':null,'shadowHostNodeId':null,'shadowRootMode':null}")),
+        ("browser.layout", "layout-checkpoint-node",
+            J("{'context':") + Context + J(",'checkpointId':'layout-checkpoint-3','nodeIndex':1,'nodeId':44,'nodeType':'text','nodeName':'#text','layoutObjectPresent':true,'displayLocked':false,'boundingClientRect':{'x':10,'y':20,'width':40,'height':18},'computedStyle':null,'pseudoElement':null,'shadowHostNodeId':60,'shadowRootMode':'closed'}")),
+        ("browser.layout", "layout-checkpoint-node",
+            J("{'context':") + Context + J(",'checkpointId':'layout-checkpoint-3','nodeIndex':2,'nodeId':80,'nodeType':'pseudo-element','nodeName':'::before','layoutObjectPresent':false,'displayLocked':true,'boundingClientRect':null,'computedStyle':{},'pseudoElement':{'originatingNodeId':42,'pseudoType':'before','generatedText':'\\u2192 ','generatedTextLength':2,'generatedTextTruncated':false},'shadowHostNodeId':null,'shadowRootMode':null}")),
+        ("browser.layout", "layout-checkpoint-completed",
+            J("{'context':") + Context + J(",'checkpointId':'layout-checkpoint-3','reason':'rendering-update','nodeCount':3,'truncated':false,'maximumNodes':5000,'pseudoElementCount':1,'shadowRootCount':1}")),
+        ("browser.presentation", "presentation-requested",
+            J("{'context':") + Context + J(",'requestId':'presentation-request-1','frameSinkId':'3:5','localRootFrameToken':'5E1B0A4C2D7F4E3A9B8C6D5E4F3A2B1C','layoutCheckpointId':'layout-checkpoint-3','queued':true,'notQueuedReason':null,'sourceFrameNumber':88,'isMainFrameWidget':true,'highResolutionTicks':true,'maximumNotSwappedRecords':8}")),
+        ("browser.presentation", "presentation-requested",
+            J("{'context':") + Context + J(",'requestId':'presentation-request-2','frameSinkId':null,'localRootFrameToken':null,'layoutCheckpointId':'layout-checkpoint-4','queued':false,'notQueuedReason':'no-widget','sourceFrameNumber':null,'isMainFrameWidget':null,'highResolutionTicks':false,'maximumNotSwappedRecords':8}")),
+        ("browser.presentation", "presentation-not-swapped",
+            J("{'context':") + Context + J(",'requestId':'presentation-request-1','frameSinkId':'3:5','localRootFrameToken':'5E1B0A4C2D7F4E3A9B8C6D5E4F3A2B1C','reason':'commit-fails','action':'kept-active','notSwappedIndex':0,'notSwappedCount':1,'timestampTicks':null,'timestampTimeTicksMicroseconds':'1234567890'}")),
+        ("browser.presentation", "presentation-swapped",
+            J("{'context':") + Context + J(",'requestId':'presentation-request-1','frameSinkId':'3:5','localRootFrameToken':'5E1B0A4C2D7F4E3A9B8C6D5E4F3A2B1C','frameToken':'4294967295','notSwappedCount':1}")),
+        ("browser.presentation", "presentation-feedback",
+            J("{'context':") + Context + J(",'requestId':'presentation-request-1','frameSinkId':'3:5','localRootFrameToken':'5E1B0A4C2D7F4E3A9B8C6D5E4F3A2B1C','frameToken':'17','presentedTicks':'98765432109','presentedTimeTicksMicroseconds':'1234567999','intervalMicroseconds':'16667','flags':['vsync','hw-completion'],'receivedCompositorFrameTicks':'98765000000','drawStartTicks':null,'swapStartTicks':'98765100000','swapEndTicks':'98765200000','highResolutionTicks':true,'notSwappedCount':1}")),
+        ("browser.presentation", "presentation-feedback",
+            J("{'context':") + Context + J(",'requestId':'presentation-request-2','frameSinkId':'3:5','localRootFrameToken':'5E1B0A4C2D7F4E3A9B8C6D5E4F3A2B1C','frameToken':'18','presentedTicks':null,'presentedTimeTicksMicroseconds':null,'intervalMicroseconds':'0','flags':[],'receivedCompositorFrameTicks':null,'drawStartTicks':null,'swapStartTicks':null,'swapEndTicks':null,'highResolutionTicks':false,'notSwappedCount':0}"))
     ];
 
     /// <summary>

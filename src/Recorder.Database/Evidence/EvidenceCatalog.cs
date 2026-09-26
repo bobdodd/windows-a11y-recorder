@@ -614,6 +614,119 @@ internal static class EvidenceCatalog
         Bool("truncated"),
         Int("maximumTextControls"));
 
+    public static readonly EvidenceTable LayoutCheckpointStarts = Evidence(
+        "browser_layout_checkpoint_starts",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Name("reason"),
+        Text("previousCheckpointId", N),
+        Int("styleResolutionCount"),
+        Int("layoutCount"),
+        new InlineField("viewport", R, [Double("width"), Double("height")]),
+        new InlineField("scrollOffset", R, [Double("x"), Double("y")]),
+        Double("devicePixelRatio"),
+        Double("layoutZoomFactor"),
+        Int("maximumNodes"),
+        NameList("styleProperties", R, "browser_layout_checkpoint_style_properties"));
+
+    public static readonly EvidenceTable LayoutCheckpointNodes = Evidence(
+        "browser_layout_checkpoint_nodes",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Int("nodeIndex"),
+        BigInt("nodeId"),
+        Name("nodeType"),
+        Name("nodeName"),
+        Bool("layoutObjectPresent"),
+        Bool("displayLocked"),
+        NumberRectangle("boundingClientRect", N),
+        new MapField(
+            "computedStyle",
+            N,
+            new EvidenceTable(
+                "browser_layout_checkpoint_computed_styles",
+                TableKind.Child,
+                [Text(string.Empty, N, "value")],
+                scalarItem: true,
+                mapEntry: true)),
+        new InlineField(
+            "pseudoElement",
+            N,
+            [
+                BigInt("originatingNodeId", N),
+                Name("pseudoType"),
+                Text("generatedText"),
+                Int("generatedTextLength"),
+                Bool("generatedTextTruncated")
+            ]),
+        BigInt("shadowHostNodeId", N),
+        Name("shadowRootMode", N));
+
+    public static readonly EvidenceTable LayoutCheckpointCompletions = Evidence(
+        "browser_layout_checkpoint_completions",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        Name("reason"),
+        Int("nodeCount"),
+        Bool("truncated"),
+        Int("maximumNodes"),
+        Int("pseudoElementCount"),
+        Int("shadowRootCount"));
+
+    public static readonly EvidenceTable PresentationRequests = Evidence(
+        "browser_presentation_requests",
+        new IdentityField("context", R, BrowserContexts),
+        Text("requestId"),
+        Text("frameSinkId", N),
+        Text("localRootFrameToken", N),
+        Text("layoutCheckpointId"),
+        Bool("queued"),
+        Name("notQueuedReason", N),
+        BigInt("sourceFrameNumber", N),
+        Bool("isMainFrameWidget", N),
+        Bool("highResolutionTicks"),
+        Int("maximumNotSwappedRecords"));
+
+    public static readonly EvidenceTable PresentationsNotSwapped = Evidence(
+        "browser_presentations_not_swapped",
+        new IdentityField("context", R, BrowserContexts),
+        Text("requestId"),
+        Text("frameSinkId"),
+        Text("localRootFrameToken"),
+        Name("reason"),
+        Name("action"),
+        Int("notSwappedIndex"),
+        Int("notSwappedCount"),
+        Text("timestampTicks", N),
+        Text("timestampTimeTicksMicroseconds", N));
+
+    public static readonly EvidenceTable PresentationSwaps = Evidence(
+        "browser_presentation_swaps",
+        new IdentityField("context", R, BrowserContexts),
+        Text("requestId"),
+        Text("frameSinkId"),
+        Text("localRootFrameToken"),
+        Text("frameToken"),
+        Int("notSwappedCount"));
+
+    public static readonly EvidenceTable PresentationFeedback = Evidence(
+        "browser_presentation_feedback",
+        new IdentityField("context", R, BrowserContexts),
+        Text("requestId"),
+        Text("frameSinkId"),
+        Text("localRootFrameToken"),
+        Text("frameToken"),
+        Text("presentedTicks", N),
+        Text("presentedTimeTicksMicroseconds", N),
+        Text("intervalMicroseconds"),
+        NameList("flags", R, "browser_presentation_feedback_flags"),
+        Text("receivedCompositorFrameTicks", N),
+        Text("drawStartTicks", N),
+        Text("swapStartTicks", N),
+        Text("swapEndTicks", N),
+        Bool("highResolutionTicks"),
+        Int("notSwappedCount"));
+
     public static readonly EvidenceTable CollectorOmissions = Evidence(
         "collector_omissions",
             Name("reason"),
@@ -661,6 +774,11 @@ internal static class EvidenceCatalog
             DomCheckpointSlotAssignments, DomCheckpointCompletions, DomAttributeChanges, DomCharacterDataChanges,
             FocusChanges, SelectionChanges, TextControlValueChanges, ActiveDescendantReferences,
             InteractionCheckpointStarts, InteractionCheckpointTextControls, InteractionCheckpointCompletions
+        ]),
+        (6, "browser_rendering_evidence",
+        [
+            LayoutCheckpointStarts, LayoutCheckpointNodes, LayoutCheckpointCompletions, PresentationRequests,
+            PresentationsNotSwapped, PresentationSwaps, PresentationFeedback
         ])
     ];
 
@@ -707,7 +825,14 @@ internal static class EvidenceCatalog
             [("browser.interaction", "active-descendant-reference-set")] = ActiveDescendantReferences,
             [("browser.interaction", "interaction-checkpoint-started")] = InteractionCheckpointStarts,
             [("browser.interaction", "interaction-checkpoint-text-control")] = InteractionCheckpointTextControls,
-            [("browser.interaction", "interaction-checkpoint-completed")] = InteractionCheckpointCompletions
+            [("browser.interaction", "interaction-checkpoint-completed")] = InteractionCheckpointCompletions,
+            [("browser.layout", "layout-checkpoint-started")] = LayoutCheckpointStarts,
+            [("browser.layout", "layout-checkpoint-node")] = LayoutCheckpointNodes,
+            [("browser.layout", "layout-checkpoint-completed")] = LayoutCheckpointCompletions,
+            [("browser.presentation", "presentation-requested")] = PresentationRequests,
+            [("browser.presentation", "presentation-not-swapped")] = PresentationsNotSwapped,
+            [("browser.presentation", "presentation-swapped")] = PresentationSwaps,
+            [("browser.presentation", "presentation-feedback")] = PresentationFeedback
         };
 
         foreach (var type in new[] { "listener-registered", "listener-removed", "listener-callback-replaced" })

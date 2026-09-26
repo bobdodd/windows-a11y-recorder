@@ -83,6 +83,11 @@ from the product version.
   nodes, attributes, shadow roots, slot assignments, and text controls, DOM
   attribute and character data changes, and focus, selection, text control
   value, and active descendant changes.
+- Store browser layout and presentation payloads in typed evidence tables,
+  on the `postgres-session-store` branch. Migration 0006 adds a table for
+  each of their event types, covering layout checkpoints and their nodes,
+  computed styles, and pseudo-elements, and presentation requests,
+  not-swapped outcomes, swaps, and feedback.
 - Keep timeline keyboard stepping within a lane. Left, Right, Home, and End
   move among the events of the selected event's lane, or the lane last
   clicked, and Up and Down select the nearest event in the next lane above
