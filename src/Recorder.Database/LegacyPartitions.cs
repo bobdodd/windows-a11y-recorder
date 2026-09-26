@@ -21,6 +21,9 @@ namespace Recorder.Database;
 /// </remarks>
 internal static partial class LegacyPartitions
 {
+    /// <summary>The migration whose legacy tables this empties.</summary>
+    public const int MigrationVersion = 9;
+
     public static async Task MoveAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
         if (await ScalarAsync(connection, null, "SELECT to_regclass('legacy_partitioned_tables') IS NULL", cancellationToken)

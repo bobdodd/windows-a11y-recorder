@@ -18,9 +18,9 @@ internal sealed record PendingName(string Value);
 internal sealed record EvidenceRow(EvidenceTable Table, object?[] Values);
 
 /// <summary>
-/// A recurring value stored once per recording. It is written in the first
-/// transaction that stores an event referring to it, and is known to be
-/// stored once that transaction commits.
+/// A recurring value stored once per recording. It is written by the write
+/// that claims it, the first to store an event referring to it, and is known
+/// to be stored once that write commits. Its rows are then released.
 /// </summary>
 internal sealed class IdentityRow(EvidenceTable table, long key)
 {
@@ -35,6 +35,25 @@ internal sealed class IdentityRow(EvidenceTable table, long key)
     public List<IdentityRow> Dependencies { get; } = [];
 
     public bool Stored { get; set; }
+
+    /// <summary>The write that claimed the identity, while it is not stored.</summary>
+    public WriteAttempt? Owner { get; set; }
+}
+
+/// <summary>
+/// One call that writes a batch. Writes are numbered in the order they are
+/// prepared; a write waits only for earlier writes, so waits cannot form a
+/// cycle.
+/// </summary>
+internal sealed class WriteAttempt(long order)
+{
+    public long Order { get; } = order;
+
+    /// <summary>The identities this write claimed while no write had.</summary>
+    public HashSet<IdentityRow> Fresh { get; } = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Completed when the write has committed or failed.</summary>
+    public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
 /// <summary>The rows that store one event's payload.</summary>

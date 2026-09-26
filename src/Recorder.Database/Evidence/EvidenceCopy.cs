@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -21,6 +22,28 @@ internal static class EvidenceCopy
     {
         var identities = EvidenceCatalog.Tables.Where(table => table.Kind == TableKind.Identity).ToArray();
         var keys = new Dictionary<EvidenceTable, long>();
+
+        // A database opened by the recorder has every table, since its
+        // migrations are applied first. The upgrade tests write recordings
+        // into the schema an earlier release left, which lacks the tables of
+        // later migrations; such a table has no keys yet.
+        await using (var present = new NpgsqlCommand(
+            "SELECT name FROM unnest($1::text[]) name WHERE to_regclass(name) IS NOT NULL",
+            connection))
+        {
+            present.Parameters.AddWithValue(identities.Select(table => table.Name).ToArray());
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            await using (var presentReader = await present.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (await presentReader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    names.Add(presentReader.GetString(0));
+                }
+            }
+
+            identities = [.. identities.Where(table => names.Contains(table.Name))];
+        }
+
         await using var command = new NpgsqlCommand(
             string.Join(
                 " UNION ALL ",
@@ -98,6 +121,56 @@ internal static class EvidenceCopy
             }
 
             await importer.CompleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Writes rows that may already be stored, keeping the stored ones. Each
+    /// table's rows are copied into a temporary table and inserted from it in
+    /// key order, so two transactions writing the same rows wait on them in
+    /// the same order and cannot deadlock.
+    /// </summary>
+    public static async Task CopyIgnoringConflictsAsync(
+        NpgsqlConnection connection,
+        Guid recordingId,
+        IEnumerable<EvidenceRow> rows,
+        CancellationToken cancellationToken)
+    {
+        foreach (var group in rows.GroupBy(row => row.Table).OrderBy(group => TableOrder[group.Key]))
+        {
+            var table = group.Key;
+            var staged = string.Create(CultureInfo.InvariantCulture, $"staged_rows_{TableOrder[table]}");
+            var columns = "recording_id, " + string.Join(", ", table.KeyColumns.Concat(table.Columns.Select(column => column.Name)));
+            await using (var create = new NpgsqlCommand(
+                $"CREATE TEMPORARY TABLE {staged} (LIKE {table.Name}) ON COMMIT DROP",
+                connection))
+            {
+                await create.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            var (sql, types) = Statements.GetOrAdd(table, Statement);
+            await using (var importer = await connection.BeginBinaryImportAsync(
+                "COPY " + staged + sql[(sql.IndexOf(' ', 5))..],
+                cancellationToken).ConfigureAwait(false))
+            {
+                foreach (var row in group)
+                {
+                    importer.StartRow();
+                    importer.Write(recordingId, NpgsqlDbType.Uuid);
+                    for (var index = 0; index < types.Length; index++)
+                    {
+                        Write(importer, row.Values[index], types[index]);
+                    }
+                }
+
+                await importer.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using var insert = new NpgsqlCommand(
+                $"INSERT INTO {table.Name} ({columns}) SELECT {columns} FROM {staged} " +
+                $"ORDER BY {string.Join(", ", table.KeyColumns)} ON CONFLICT DO NOTHING; DROP TABLE {staged}",
+                connection);
+            await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

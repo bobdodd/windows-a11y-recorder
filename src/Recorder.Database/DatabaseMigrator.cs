@@ -57,6 +57,14 @@ public static class DatabaseMigrator
 
         foreach (var (version, resource) in Migrations.Where(migration => migration.Version <= throughVersion))
         {
+            // Migration 0009 leaves rows in legacy tables for
+            // LegacyPartitions.MoveAsync to move. A later migration may change
+            // the tables they move into, so they are moved first.
+            if (version > LegacyPartitions.MigrationVersion)
+            {
+                await LegacyPartitions.MoveAsync(connection, cancellationToken).ConfigureAwait(false);
+            }
+
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
                 .ConfigureAwait(false);
             await using (var lockCommand = new NpgsqlCommand(
@@ -96,7 +104,10 @@ public static class DatabaseMigrator
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await LegacyPartitions.MoveAsync(connection, cancellationToken).ConfigureAwait(false);
+        if (throughVersion >= LegacyPartitions.MigrationVersion)
+        {
+            await LegacyPartitions.MoveAsync(connection, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static string ReadResource(string name)

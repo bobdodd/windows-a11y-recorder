@@ -5,127 +5,15 @@ using System.Text;
 namespace Recorder.Database.Evidence;
 
 /// <summary>
-/// The SQL generated from the evidence catalog: the tables that store
-/// payloads, and the expressions that rebuild a payload as jsonb.
+/// The SQL generated from the evidence catalog: the expressions that
+/// rebuild a payload as jsonb.
 /// </summary>
 internal static class EvidenceSql
 {
-    /// <summary>Where the partition order of the evidence tables starts.</summary>
-    public const int FirstPartitionOrder = 7;
-
-    /// <summary>
-    /// The last migration whose tables were partitioned by recording.
-    /// Migration 0009 made every per-recording table an ordinary table, so
-    /// a later migration creates ordinary tables and registers them in
-    /// recording_tables.
-    /// </summary>
-    public const int LastPartitionedVersion = 8;
-
     // jsonb_build_object takes at most 100 arguments.
     private const int PairsPerObject = 40;
 
     private static readonly ConcurrentDictionary<EvidenceTable, string> PayloadExpressions = new();
-
-    /// <summary>The migration that creates the evidence tables of the version.</summary>
-    public static string Migration(int version)
-    {
-        var builder = new StringBuilder();
-        builder.Append(
-            "-- Evidence tables. Generated from src/Recorder.Database/Evidence/EvidenceCatalog.cs\n" +
-            "-- by EvidenceSql.Migration(); a test requires this file to match. Edit the\n" +
-            "-- catalog, not this file. See docs/architecture/session-database.md.\n\n");
-        if (version == EvidenceCatalog.Migrations[0].Version)
-        {
-            builder.Append(
-                "-- Strings from small or recurring vocabularies, stored once and referenced\n" +
-                "-- by key from every evidence table.\n" +
-                "CREATE TABLE names (\n" +
-                "    name_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n" +
-                "    name text NOT NULL UNIQUE\n" +
-                ");\n\n");
-        }
-
-        // Table orders continue across migrations, so each table keeps the
-        // order, and up to version 8 the partition prefix, it was created
-        // with.
-        var tables = EvidenceCatalog.VersionedTables
-            .Select((item, index) => (item.Version, item.Table, Order: FirstPartitionOrder + index))
-            .Where(item => item.Version == version)
-            .ToArray();
-        var partitioned = version <= LastPartitionedVersion;
-        foreach (var (_, table, _) in tables)
-        {
-            builder.Append(CreateTable(table, partitioned)).Append('\n');
-        }
-
-        builder.Append(partitioned
-            ? "INSERT INTO recording_partitioned_tables (table_name, partition_prefix, partition_order) VALUES\n"
-            : "INSERT INTO recording_tables (table_name, table_order) VALUES\n");
-        builder.Append(string.Join(
-            ",\n",
-            tables.Select(item => partitioned
-                ? string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"    ('{item.Table.Name}', 'pt{item.Order}', {item.Order})")
-                : string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"    ('{item.Table.Name}', {item.Order})"))));
-        builder.Append(";\n");
-        return builder.ToString();
-    }
-
-    private static string CreateTable(EvidenceTable table, bool partitioned)
-    {
-        var lines = new List<string> { "recording_id uuid NOT NULL" };
-        var constraints = new List<string>();
-        switch (table.Kind)
-        {
-            case TableKind.Evidence:
-                lines.Add("event_key bigint NOT NULL");
-                constraints.Add(
-                    "FOREIGN KEY (recording_id, event_key)\n        REFERENCES events (recording_id, event_key)");
-                break;
-            case TableKind.Identity:
-                lines.Add("identity_key bigint NOT NULL");
-                break;
-            default:
-                lines.Add("owner_key bigint NOT NULL");
-                for (var level = 1; level < table.Depth; level++)
-                {
-                    lines.Add($"{EvidenceTable.Ordinal(level)} integer NOT NULL");
-                }
-
-                lines.Add(table.MapEntry
-                    ? "entry_name_id integer NOT NULL REFERENCES names (name_id)"
-                    : $"{EvidenceTable.Ordinal(table.Depth)} integer NOT NULL");
-                constraints.Add(
-                    $"FOREIGN KEY (recording_id, {string.Join(", ", table.ParentKeyColumns)})\n" +
-                    $"        REFERENCES {table.Owner!.Name} (recording_id, {string.Join(", ", table.OwnerKeyColumns)})");
-                break;
-        }
-
-        foreach (var column in table.Columns)
-        {
-            var line = $"{column.Name} {column.SqlType}{(column.NotNull ? " NOT NULL" : string.Empty)}";
-            if (column.References == "names (name_id)")
-            {
-                line += " REFERENCES names (name_id)";
-            }
-            else if (column.References is { } identity)
-            {
-                constraints.Add(
-                    $"FOREIGN KEY (recording_id, {column.Name})\n" +
-                    $"        REFERENCES {identity} (recording_id, identity_key)");
-            }
-
-            lines.Add(line);
-        }
-
-        constraints.Insert(0, $"PRIMARY KEY (recording_id, {string.Join(", ", table.KeyColumns)})");
-        return $"CREATE TABLE {table.Name} (\n    " +
-            string.Join(",\n    ", lines.Concat(constraints)) +
-            (partitioned ? "\n) PARTITION BY LIST (recording_id);\n" : "\n);\n");
-    }
 
     /// <summary>
     /// The jsonb expression that rebuilds the payload held by the row of

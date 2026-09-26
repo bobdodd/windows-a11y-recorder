@@ -10,30 +10,36 @@ using static Recorder.Tests.DatabaseTestSupport;
 
 namespace Recorder.Tests;
 
-/// <summary>The evidence migration, which needs no database.</summary>
+/// <summary>The migration files, which need no database.</summary>
 public sealed class EvidenceMigrationTests
 {
-    // Set to 1 to rewrite the migration from the catalog, then review the
-    // difference before committing it.
-    private const string RegenerateVariable = "RECORDER_REGENERATE_EVIDENCE_MIGRATION";
+    // A migration, once applied, is never changed. Migrations 0003 to 0007
+    // were generated from the catalog as it then stood; a later change to a
+    // table is a migration of its own. A test that fails here means an
+    // applied migration was edited.
+    private static readonly (string File, string Sha256)[] AppliedMigrations =
+    [
+        ("0001_core.sql", "5b9e6d606a2abf63950654b3b7f936983fd58307103be12c5b3b94637291fc27"),
+        ("0002_timeline_order.sql", "485785c7ce87c5b7d3f160330814ff5710f1d2c8c2cef78e8e5c327a206ba6d9"),
+        ("0003_evidence_tables.sql", "66135c9e8d9592d886b5ce91f06f7186053410dc56545e7aea619f5d1efd597b"),
+        ("0004_browser_script_evidence.sql", "8d25f574e5b6cec6e7237f811529e170855f6e2de6ffb89c413bce7723423c72"),
+        ("0005_browser_document_evidence.sql", "8b31f8ebf2301f03d7c45542f061e5f6c44dec1e37e30ca6a306c84aa963a968"),
+        ("0006_browser_rendering_evidence.sql", "30ad3a09cd2b0470e4ddd11fc8bc65ecd7bc9f07ab72367ed530687bc900b04c"),
+        ("0007_browser_network_evidence.sql", "9424060a3d3d608bed9310c537a24fe71f8cdb23fdc8d34e8aad9bc272cecc14"),
+        ("0008_other_channel_payloads.sql", "84fd19e366fc452632943b1fc728c400de0d1c164132efd153b7ef1e51ddd7ec"),
+        ("0009_unpartitioned_recording_tables.sql", "1bae83d161af368b5d74a35314051e0392a46a01db37c613b30b1f0f1ccb762a"),
+        ("0010_shared_computed_styles.sql", "c02a433d2c631188d087edcca5caaa6819793149083bd7c9263799c46e5e936e")
+    ];
 
-    // A migration, once applied, is never changed: a test that fails here
-    // after a catalog edit means the edit changes tables an earlier
-    // migration created, and belongs in a new migration instead.
     [Fact]
-    public void EachMigrationIsTheOneTheCatalogGenerates()
+    public void NoAppliedMigrationIsChanged()
     {
-        foreach (var (version, name, _) in EvidenceCatalog.Migrations)
+        foreach (var (file, sha256) in AppliedMigrations)
         {
-            var file = string.Create(CultureInfo.InvariantCulture, $"{version:D4}_{name}.sql");
-            var generated = EvidenceSql.Migration(version);
-            if (Environment.GetEnvironmentVariable(RegenerateVariable) == "1")
-            {
-                File.WriteAllText(MigrationPath(file), generated.ReplaceLineEndings("\n"));
-            }
-
             Assert.Contains(DatabaseMigrator.Migrations, item => item.Name.EndsWith(file, StringComparison.Ordinal));
-            Assert.Equal(generated, File.ReadAllText(MigrationPath(file)).ReplaceLineEndings("\n"));
+            var text = File.ReadAllText(MigrationPath(file)).ReplaceLineEndings("\n");
+            var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+            Assert.True(digest == sha256, $"{file} was changed after it was applied.");
         }
     }
 
@@ -251,6 +257,243 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     }
 
     /// <summary>
+    /// Batches written at once, each in its own transaction, store every
+    /// payload, and store each identity once, as one writer does.
+    /// </summary>
+    [Fact]
+    public async Task ParallelWritersStoreEveryPayloadAndEachIdentityOnce()
+    {
+        var (serialKey, serialId) = await CreateRecordingAsync();
+        var (parallelKey, parallelId) = await CreateRecordingAsync();
+        List<RecorderEvent> Rounds(string sessionKey) =>
+            [.. Enumerable.Range(0, 12).SelectMany(round => SampleEvents(sessionKey, (ulong)round * 1_000))];
+
+        var serial = Rounds(serialKey);
+        var parallel = Rounds(parallelKey);
+        await WriteAsync(serialKey, serialId, serial, options: new PostgresEventWriterOptions
+        {
+            SpillPath = string.Empty,
+            WriterConnections = 1
+        });
+        var result = await WriteAsync(parallelKey, parallelId, parallel, options: new PostgresEventWriterOptions
+        {
+            SpillPath = string.Empty,
+            BatchSize = 7,
+            BatchInterval = TimeSpan.Zero,
+            WriterConnections = 6
+        });
+        Assert.Equal(parallel.Count, result.WrittenCount);
+
+        foreach (var table in EvidenceCatalog.Tables.Where(table => table.Kind == TableKind.Identity))
+        {
+            Assert.True(
+                await CountAsync(table.Name, serialId) == await CountAsync(table.Name, parallelId),
+                $"{table.Name} holds a different number of rows.");
+        }
+
+        var keys = await EventKeysAsync(parallelId);
+        var source = new DatabaseEventRecordSource(DataSource, parallelId, parallelKey);
+        for (var index = 0; index < parallel.Count; index++)
+        {
+            var record = parallel[index];
+            var item = new SessionTimelineEvent(
+                keys[index], record.EventId, record.EvidenceClass, record.Channel, record.EventType,
+                record.MonotonicNanoseconds, record.EventType);
+            using var read = JsonDocument.Parse(source.ReadEventJson(item));
+            Assert.Equal(Canonical(record.Payload), Canonical(read.RootElement.GetProperty("payload")));
+        }
+    }
+
+    /// <summary>
+    /// The tables the migrations leave are the tables the catalog describes:
+    /// the same columns, types, nullability, primary keys, and foreign keys.
+    /// Every foreign key of a per-recording table is deferrable, and every
+    /// table is listed in recording_tables after the tables it refers to.
+    /// </summary>
+    [Fact]
+    public async Task TheMigratedTablesMatchTheCatalog()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var orders = new Dictionary<string, int>(StringComparer.Ordinal);
+        await using (var command = DataSource.CreateCommand("SELECT table_name, table_order FROM recording_tables"))
+        await using (var reader = await command.ExecuteReaderAsync(token))
+        {
+            while (await reader.ReadAsync(token))
+            {
+                orders[reader.GetString(0)] = reader.GetInt16(1);
+            }
+        }
+
+        foreach (var table in EvidenceCatalog.Tables)
+        {
+            var expected = new List<string> { "recording_id uuid not null" };
+            foreach (var key in table.KeyColumns)
+            {
+                var type = key is "event_key" or "identity_key" or "owner_key" ? "bigint" : "integer";
+                expected.Add($"{key} {type} not null");
+            }
+
+            foreach (var column in table.Columns)
+            {
+                var type = column.SqlType == "timestamptz" ? "timestamp with time zone" : column.SqlType;
+                expected.Add($"{column.Name} {type}{(column.NotNull ? " not null" : string.Empty)}");
+            }
+
+            expected.Sort(StringComparer.Ordinal);
+            Assert.Equal(expected, Sorted(await RowsAsync(
+                DataSource,
+                "SELECT attname || ' ' || format_type(atttypid, atttypmod) || CASE WHEN attnotnull THEN ' not null' ELSE '' END " +
+                $"FROM pg_attribute WHERE attrelid = '{table.Name}'::regclass AND attnum > 0 AND NOT attisdropped",
+                token)));
+
+            Assert.Equal(
+                [$"PRIMARY KEY (recording_id, {string.Join(", ", table.KeyColumns)})"],
+                await RowsAsync(
+                    DataSource,
+                    $"SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = '{table.Name}'::regclass AND contype = 'p'",
+                    token));
+
+            var references = new List<string>();
+            if (table.Kind == TableKind.Evidence)
+            {
+                references.Add("(recording_id, event_key) events (recording_id, event_key)");
+            }
+            else if (table.Kind == TableKind.Child)
+            {
+                references.Add(
+                    $"(recording_id, {string.Join(", ", table.ParentKeyColumns)}) {table.Owner!.Name} " +
+                    $"(recording_id, {string.Join(", ", table.OwnerKeyColumns)})");
+                if (table.MapEntry)
+                {
+                    references.Add("(entry_name_id) names (name_id)");
+                }
+            }
+
+            foreach (var column in table.Columns.Where(column => column.References is not null))
+            {
+                references.Add(column.References == "names (name_id)"
+                    ? $"({column.Name}) names (name_id)"
+                    : $"(recording_id, {column.Name}) {column.References} (recording_id, identity_key)");
+            }
+
+            references.Sort(StringComparer.Ordinal);
+            Assert.Equal(references, Sorted(await RowsAsync(
+                DataSource,
+                "SELECT '(' || (SELECT string_agg(a.attname, ', ' ORDER BY k.ordinality) FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ordinality) " +
+                "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum) || ') ' || c.confrelid::regclass::text || ' (' || " +
+                "(SELECT string_agg(a.attname, ', ' ORDER BY k.ordinality) FROM unnest(c.confkey) WITH ORDINALITY k(attnum, ordinality) " +
+                "JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum) || ')' " +
+                $"FROM pg_constraint c WHERE c.conrelid = '{table.Name}'::regclass AND c.contype = 'f'",
+                token)));
+
+            Assert.True(orders.ContainsKey(table.Name), $"{table.Name} is not in recording_tables.");
+        }
+
+        // Each per-recording table comes after the tables it refers to, and
+        // each of its foreign keys can be deferred by the writer.
+        Assert.Empty(await RowsAsync(
+            DataSource,
+            "SELECT c.conrelid::regclass::text || ' ' || c.conname FROM pg_constraint c " +
+            "JOIN recording_tables r ON r.table_name = c.conrelid::regclass::text " +
+            "LEFT JOIN recording_tables f ON f.table_name = c.confrelid::regclass::text " +
+            "WHERE c.contype = 'f' AND (NOT c.condeferrable OR c.condeferred OR f.table_order >= r.table_order)",
+            token));
+    }
+
+    /// <summary>
+    /// Migration 0010 moves the computed styles already stored into shared
+    /// styles, each distinct style of a recording once, and every payload
+    /// reads back as it was stored.
+    /// </summary>
+    [Fact]
+    public async Task Migration0010StoresEachDistinctComputedStyleOnceAndKeepsEveryPayload()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var database = "upgrade_" + Guid.NewGuid().ToString("N");
+        await using (var create = DataSource.CreateCommand($"CREATE DATABASE {database}"))
+        {
+            await create.ExecuteNonQueryAsync(token);
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder(fixture.Server.ConnectionString) { Database = database };
+        await using var dataSource = NpgsqlDataSource.Create(builder.ConnectionString);
+        await DatabaseMigrator.ApplyAsync(dataSource, token);
+
+        var (sessionKey, recordingId) = await CreateRecordingAsync(dataSource);
+        var events = SampleEvents(sessionKey);
+        var layout = events.Where(record => record.EventType == "layout-checkpoint-node").ToArray();
+        var styled = layout.First(record => record.Payload.GetProperty("computedStyle") is { ValueKind: JsonValueKind.Object } style &&
+            style.EnumerateObject().Any());
+        events.Add(styled with
+        {
+            EventId = RecorderEventFactory.CreateEventId(sessionKey, styled.CollectorInstanceId, styled.Channel, 5_000),
+            Sequence = 5_000,
+            MonotonicNanoseconds = 5_000_000_000,
+            Payload = Json(styled.Payload.GetRawText().Replace("\"nodeIndex\":0", "\"nodeIndex\":7", StringComparison.Ordinal))
+        });
+        await WriteAsync(sessionKey, recordingId, events, dataSource: dataSource);
+
+        // Returns the layout nodes to the tables of version 9, which held
+        // one row per property of each node's style, and applies 0010 again.
+        await using (var downgrade = dataSource.CreateCommand(
+            "CREATE TABLE browser_layout_checkpoint_computed_styles (" +
+            "recording_id uuid NOT NULL, owner_key bigint NOT NULL, " +
+            "entry_name_id integer NOT NULL REFERENCES names (name_id), value text, " +
+            "PRIMARY KEY (recording_id, owner_key, entry_name_id), FOREIGN KEY (recording_id, owner_key) " +
+            "REFERENCES browser_layout_checkpoint_nodes (recording_id, event_key));" +
+            "ALTER TABLE browser_layout_checkpoint_nodes ADD COLUMN has_computed_style boolean;" +
+            "UPDATE browser_layout_checkpoint_nodes SET has_computed_style = computed_style_key IS NOT NULL;" +
+            "ALTER TABLE browser_layout_checkpoint_nodes ALTER COLUMN has_computed_style SET NOT NULL;" +
+            "INSERT INTO browser_layout_checkpoint_computed_styles " +
+            "SELECT n.recording_id, n.event_key, e.entry_name_id, e.value FROM browser_layout_checkpoint_nodes n " +
+            "JOIN browser_computed_style_entries e ON e.recording_id = n.recording_id AND e.owner_key = n.computed_style_key;" +
+            "ALTER TABLE browser_layout_checkpoint_nodes DROP COLUMN computed_style_key;" +
+            "DROP TABLE browser_computed_style_entries, browser_computed_styles;" +
+            "DELETE FROM recording_tables WHERE table_name IN ('browser_computed_style_entries', 'browser_computed_styles');" +
+            "INSERT INTO recording_tables SELECT 'browser_layout_checkpoint_computed_styles', max(table_order) + 1 FROM recording_tables;" +
+            "DELETE FROM schema_migrations WHERE version = 10;"))
+        {
+            await downgrade.ExecuteNonQueryAsync(token);
+        }
+
+        Assert.NotEmpty(await RowsAsync(dataSource, "SELECT owner_key::text FROM browser_layout_checkpoint_computed_styles", token));
+        await DatabaseMigrator.ApplyAsync(dataSource, token);
+
+        var keys = await EventKeysAsync(recordingId, dataSource);
+        var source = new DatabaseEventRecordSource(dataSource, recordingId, sessionKey);
+        for (var index = 0; index < events.Count; index++)
+        {
+            var record = events[index];
+            var item = new SessionTimelineEvent(
+                keys[index], record.EventId, record.EvidenceClass, record.Channel, record.EventType,
+                record.MonotonicNanoseconds, record.EventType);
+            using var read = JsonDocument.Parse(source.ReadEventJson(item));
+            Assert.Equal(Canonical(record.Payload), Canonical(read.RootElement.GetProperty("payload")));
+        }
+
+        // The two nodes with the same style share it; the node without one
+        // has none; the empty style is a style with no entries.
+        var distinct = layout.Select(record => record.Payload.GetProperty("computedStyle"))
+            .Where(style => style.ValueKind == JsonValueKind.Object)
+            .Select(style => Canonical(style))
+            .Distinct()
+            .Count();
+        Assert.Equal(
+            [distinct.ToString(CultureInfo.InvariantCulture)],
+            await RowsAsync(dataSource, $"SELECT count(*)::text FROM browser_computed_styles WHERE recording_id = '{recordingId:D}'", token));
+        Assert.Equal(
+            ["1"],
+            await RowsAsync(
+                dataSource,
+                $"SELECT count(DISTINCT computed_style_key)::text FROM browser_layout_checkpoint_nodes WHERE recording_id = '{recordingId:D}' " +
+                $"AND event_key IN ({keys[events.IndexOf(styled)]}, {keys[^1]})",
+                token));
+        Assert.Equal(
+            ["t"],
+            await RowsAsync(dataSource, "SELECT CASE WHEN to_regclass('browser_layout_checkpoint_computed_styles') IS NULL THEN 't' ELSE 'f' END", token));
+    }
+
+    /// <summary>
     /// Migration 0009 moves every per-recording table out of its partitions
     /// into an ordinary table, keeping each row and each constraint and
     /// index under its name.
@@ -274,7 +517,14 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         {
             var (sessionKey, recordingId) = await CreateRecordingAsync(dataSource);
             await CreateLegacyPartitionsAsync(dataSource, recordingId, token);
-            await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey), dataSource: dataSource);
+
+            // Migration 0010 changed how layout nodes are stored, so the
+            // writer cannot store them in the tables of version 8.
+            await WriteAsync(
+                sessionKey,
+                recordingId,
+                [.. SampleEvents(sessionKey).Where(record => record.EventType != "layout-checkpoint-node")],
+                dataSource: dataSource);
             recordings.Add(recordingId);
         }
 
@@ -289,9 +539,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         var contents = await ContentsAsync(dataSource, tables, token);
         var constraints = await RowsAsync(dataSource, string.Format(CultureInfo.InvariantCulture, Constraints, "recording_partitioned_tables"), token);
         var indexes = await RowsAsync(dataSource, string.Format(CultureInfo.InvariantCulture, Indexes, "recording_partitioned_tables"), token);
-        Assert.StartsWith("events " + (3 * SampleEvents("count").Count).ToString(CultureInfo.InvariantCulture) + " ", contents.Single(row => row.StartsWith("events ", StringComparison.Ordinal)));
+        Assert.StartsWith("events " + (3 * SampleEvents("count").Count(record => record.EventType != "layout-checkpoint-node")).ToString(CultureInfo.InvariantCulture) + " ", contents.Single(row => row.StartsWith("events ", StringComparison.Ordinal)));
 
-        await DatabaseMigrator.ApplyAsync(dataSource, token);
+        await DatabaseMigrator.ApplyAsync(dataSource, 9, token);
 
         Assert.Equal(tables, await RowsAsync(dataSource, "SELECT table_name FROM recording_tables ORDER BY 1", token));
         Assert.Equal(contents, await ContentsAsync(dataSource, tables, token));
@@ -301,6 +551,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
 
         // A recording kept through the upgrade can be removed, and a new one
         // written.
+        await DatabaseMigrator.ApplyAsync(dataSource, token);
         await new RecordingStore(dataSource).DeleteRecordingAsync(recordings[0], token);
         Assert.Empty(await RowsAsync(dataSource, $"SELECT event_key::text FROM events WHERE recording_id = '{recordings[0]:D}'", token));
         var (newKey, newRecording) = await CreateRecordingAsync(dataSource);
@@ -324,6 +575,12 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         }
 
         return contents;
+    }
+
+    private static List<string> Sorted(List<string> rows)
+    {
+        rows.Sort(StringComparer.Ordinal);
+        return rows;
     }
 
     private static async Task<List<string>> RowsAsync(NpgsqlDataSource dataSource, string sql, CancellationToken token)
@@ -357,13 +614,14 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         Guid recordingId,
         IReadOnlyList<RecorderEvent> events,
         bool expectRejections = false,
-        NpgsqlDataSource? dataSource = null)
+        NpgsqlDataSource? dataSource = null,
+        PostgresEventWriterOptions? options = null)
     {
         dataSource ??= DataSource;
         var writer = new PostgresEventWriter(
             new PostgresEventBatchTarget(dataSource, recordingId),
             sessionKey,
-            new PostgresEventWriterOptions
+            (options ?? new PostgresEventWriterOptions { SpillPath = string.Empty }) with
             {
                 SpillPath = Path.Combine(fixture.DataDirectory, "spill", Guid.NewGuid().ToString("N") + ".ndjson"),
                 ChannelCapacity = events.Count
@@ -402,9 +660,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         return reasons;
     }
 
-    private async Task<List<long>> EventKeysAsync(Guid recordingId)
+    private async Task<List<long>> EventKeysAsync(Guid recordingId, NpgsqlDataSource? dataSource = null)
     {
-        await using var command = DataSource.CreateCommand(
+        await using var command = (dataSource ?? DataSource).CreateCommand(
             "SELECT event_key FROM events WHERE recording_id = $1 ORDER BY event_key");
         command.Parameters.AddWithValue(recordingId);
         var keys = new List<long>();

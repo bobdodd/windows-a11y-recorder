@@ -8,6 +8,12 @@ public sealed record PostgresEventWriterOptions
     /// <summary>The most events written in one transaction.</summary>
     public int BatchSize { get; init; } = 5_000;
 
+    /// <summary>
+    /// The most batches written at once, each on its own connection and in
+    /// its own transaction.
+    /// </summary>
+    public int WriterConnections { get; init; } = 4;
+
     /// <summary>The longest an accepted event waits before it is written.</summary>
     public TimeSpan BatchInterval { get; init; } = TimeSpan.FromMilliseconds(250);
 

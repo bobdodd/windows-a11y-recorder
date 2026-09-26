@@ -33,7 +33,8 @@ public sealed record PostgresEventWriterResult(
 
 /// <summary>
 /// Writes a recording's events to the database during capture. Events are
-/// checked, queued, and written in batches. While the database is not
+/// checked, queued, and written in batches, several at once, each in a
+/// transaction of its own. While the database is not
 /// accepting writes, events are held in memory, then in a spill file, both
 /// bounded; beyond the bound, events are dropped and the run of dropped
 /// events is recorded.
@@ -57,6 +58,8 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     private readonly List<WriterOmission> _omissions = [];
     private readonly EventRecordValidator _validator;
     private readonly CancellationTokenSource _stop = new();
+    private readonly List<InFlightBatch> _inFlight = [];
+    private readonly List<BufferedEvent> _unfinished = [];
     private readonly Task _loop;
     private long _memoryBytes;
     private long _nextEventKey;
@@ -67,7 +70,8 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     private long _dropped;
     private long _rejected;
     private long _written;
-    private string? _lastError;
+    private volatile string? _lastError;
+    private volatile bool _databaseUnavailable;
     private string? _firstRejection;
     private bool _completed;
     private PostgresEventWriterResult? _result;
@@ -83,6 +87,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.ChannelCapacity, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.BatchSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(options.WriterConnections, 1);
         _target = target;
         _validator = new EventRecordValidator(sessionKey);
         _options = options;
@@ -105,7 +110,11 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     public long WrittenCount => Interlocked.Read(ref _written);
 
     /// <summary>True while the most recent write attempt failed.</summary>
-    public bool IsDatabaseUnavailable { get; private set; }
+    public bool IsDatabaseUnavailable
+    {
+        get => _databaseUnavailable;
+        private set => _databaseUnavailable = value;
+    }
 
     public bool TryWrite(RecorderEvent record)
     {
@@ -149,7 +158,19 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
         }
 
         // Anything not written stays on disk, so it is not lost with the
-        // process, and is reported.
+        // process, and is reported: first the batches whose writes were
+        // stopped, then the events that were waiting, oldest first.
+        foreach (var buffered in _unfinished)
+        {
+            _spill.Append(buffered);
+        }
+
+        _unfinished.Clear();
+        while (_memory.TryDequeue(out var buffered))
+        {
+            _spill.Append(buffered);
+        }
+
         while (_channel.Reader.TryRead(out var late))
         {
             Accept(late);
@@ -185,61 +206,128 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     private async Task RunAsync()
     {
         var token = _stop.Token;
-        var retryDelay = _options.RetryInitialDelay;
         var batchOpened = DateTime.UtcNow;
-        while (true)
+        try
         {
-            token.ThrowIfCancellationRequested();
-            Drain();
-            var inputDone = _channel.Reader.Completion.IsCompleted;
-            if (_memory.Count == 0 && _spill.HasEvents)
+            while (true)
             {
-                foreach (var buffered in _spill.Read(_options.BatchSize))
+                token.ThrowIfCancellationRequested();
+                Drain();
+                Collect();
+                var inputDone = _channel.Reader.Completion.IsCompleted;
+                if (_memory.Count == 0 && _spill.HasEvents)
                 {
-                    _memory.Enqueue(buffered);
-                    _memoryBytes += buffered.EstimatedBytes;
+                    foreach (var buffered in _spill.Read(_options.BatchSize))
+                    {
+                        _memory.Enqueue(buffered);
+                        _memoryBytes += buffered.EstimatedBytes;
+                    }
                 }
-            }
 
-            if (inputDone)
-            {
-                CloseDropRun();
-            }
-
-            var hasWork = _memory.Count > 0 || _rejections.Count > 0 || _omissions.Count > 0;
-            if (!hasWork)
-            {
                 if (inputDone)
                 {
-                    return;
+                    CloseDropRun();
                 }
 
-                if (!await _channel.Reader.WaitToReadAsync(token).ConfigureAwait(false))
+                var pending = _memory.Count > 0 || _rejections.Count > 0 || _omissions.Count > 0;
+                if (!pending && _inFlight.Count == 0)
                 {
+                    if (inputDone)
+                    {
+                        return;
+                    }
+
+                    if (await _channel.Reader.WaitToReadAsync(token).ConfigureAwait(false))
+                    {
+                        batchOpened = DateTime.UtcNow;
+                    }
+
                     continue;
                 }
 
-                batchOpened = DateTime.UtcNow;
-                continue;
-            }
+                var waited = DateTime.UtcNow - batchOpened;
+                var ready = pending &&
+                    (inputDone || _spill.HasEvents || _memory.Count >= _options.BatchSize ||
+                     waited >= _options.BatchInterval);
 
-            var waited = DateTime.UtcNow - batchOpened;
-            if (!inputDone && !_spill.HasEvents && _memory.Count < _options.BatchSize &&
-                waited < _options.BatchInterval)
+                // While the database is not accepting writes, one batch is
+                // retried and the rest wait, so batches are stored in order
+                // when it returns.
+                var canStart = _inFlight.Count < _options.WriterConnections &&
+                    (_inFlight.Count == 0 || !IsDatabaseUnavailable);
+                if (ready && canStart)
+                {
+                    Start(token);
+                    batchOpened = DateTime.UtcNow;
+                    continue;
+                }
+
+                await WaitAsync(pending && !ready ? _options.BatchInterval - waited : null, token)
+                    .ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            // A write that has begun to commit finishes; the rest stop at
+            // cancellation. What was not stored is kept for the spill file.
+            if (_inFlight.Count > 0 && !_stop.IsCancellationRequested)
             {
-                await WaitForInputAsync(_options.BatchInterval - waited, token).ConfigureAwait(false);
-                continue;
+                await _stop.CancelAsync().ConfigureAwait(false);
             }
 
-            var events = _memory.Take(_options.BatchSize).ToArray();
-            var rejections = _rejections.ToArray();
-            var omissions = _omissions.ToArray();
-            IReadOnlyList<StoreRefusal> refusals;
+            foreach (var batch in _inFlight)
+            {
+                try
+                {
+                    await batch.Write.ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                }
+            }
+
+            Collect();
+            foreach (var batch in _inFlight)
+            {
+                _unfinished.AddRange(batch.Events);
+                _memoryBytes -= batch.Events.Sum(buffered => buffered.EstimatedBytes);
+                _rejections.InsertRange(0, batch.Rejections);
+                _omissions.InsertRange(0, batch.Omissions);
+            }
+
+            _inFlight.Clear();
+            _unfinished.Sort((left, right) => left.EventKey.CompareTo(right.EventKey));
+        }
+    }
+
+    // Starts writing the oldest events, with the rejections and omissions
+    // recorded so far, on a connection of its own. The write runs off this
+    // loop, so the loop keeps taking events while batches are mapped.
+    private void Start(CancellationToken token)
+    {
+        var events = new BufferedEvent[Math.Min(_options.BatchSize, _memory.Count)];
+        for (var index = 0; index < events.Length; index++)
+        {
+            events[index] = _memory.Dequeue();
+        }
+
+        var batch = new EventBatch(events, _rejections.ToArray(), _omissions.ToArray());
+        _rejections.Clear();
+        _omissions.Clear();
+        _inFlight.Add(new InFlightBatch(events, batch.Rejections, batch.Omissions, Task.Run(() => WriteUntilStoredAsync(batch, token), CancellationToken.None)));
+    }
+
+    // Retries until the batch is stored or the writer is stopped.
+    private async Task<IReadOnlyList<StoreRefusal>> WriteUntilStoredAsync(EventBatch batch, CancellationToken token)
+    {
+        var retryDelay = _options.RetryInitialDelay;
+        while (true)
+        {
             try
             {
-                refusals = await _target.WriteAsync(
-                    new EventBatch(events, rejections, omissions),
-                    token).ConfigureAwait(false);
+                var refusals = await _target.WriteAsync(batch, token).ConfigureAwait(false);
+                IsDatabaseUnavailable = false;
+                return refusals;
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -249,65 +337,62 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
             {
                 _lastError = exception.Message;
                 IsDatabaseUnavailable = true;
-                await WaitForInputAsync(retryDelay, token).ConfigureAwait(false);
+                await Task.Delay(retryDelay, token).ConfigureAwait(false);
                 retryDelay = TimeSpan.FromTicks(
                     Math.Min(retryDelay.Ticks * 2, _options.RetryMaximumDelay.Ticks));
-                continue;
             }
-
-            IsDatabaseUnavailable = false;
-            retryDelay = _options.RetryInitialDelay;
-            batchOpened = DateTime.UtcNow;
-            for (var index = 0; index < events.Length; index++)
-            {
-                _memoryBytes -= _memory.Dequeue().EstimatedBytes;
-            }
-
-            _rejections.RemoveRange(0, rejections.Length);
-            _omissions.RemoveRange(0, omissions.Length);
-            foreach (var refusal in refusals)
-            {
-                Reject(events[refusal.Index].Event, refusal.Reason);
-            }
-
-            Interlocked.Add(ref _written, events.Length - refusals.Count);
         }
     }
 
-    // Waits for the given time while still taking events from the queue, so
-    // producers are not refused while a batch waits or a write is retried.
-    private async Task WaitForInputAsync(TimeSpan delay, CancellationToken token)
+    // Takes the results of the writes that have finished, in the order they
+    // were started.
+    private void Collect()
     {
-        var until = DateTime.UtcNow + delay;
-        while (true)
+        for (var position = 0; position < _inFlight.Count;)
         {
-            Drain();
-            var remaining = until - DateTime.UtcNow;
-            if (remaining <= TimeSpan.Zero || _channel.Reader.Completion.IsCompleted)
+            var batch = _inFlight[position];
+            if (!batch.Write.IsCompletedSuccessfully)
             {
-                return;
+                position++;
+                continue;
             }
 
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-            timeout.CancelAfter(remaining);
-            try
+            _inFlight.RemoveAt(position);
+            _memoryBytes -= batch.Events.Sum(buffered => buffered.EstimatedBytes);
+            var refusals = batch.Write.Result;
+            foreach (var refusal in refusals)
             {
-                if (!await _channel.Reader.WaitToReadAsync(timeout.Token).ConfigureAwait(false))
-                {
-                    return;
-                }
-            }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested)
-            {
-                return;
+                Reject(batch.Events[refusal.Index].Event, refusal.Reason);
             }
 
-            if (_memory.Count >= _options.BatchSize && !IsDatabaseUnavailable)
-            {
-                Drain();
-                return;
-            }
+            Interlocked.Add(ref _written, batch.Events.Length - refusals.Count);
         }
+    }
+
+    // Waits for a write to finish, for input, or for the given time, while
+    // still taking events from the queue, so producers are not refused.
+    private async Task WaitAsync(TimeSpan? delay, CancellationToken token)
+    {
+        using var wake = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var waits = new List<Task>(_inFlight.Count + 2);
+        waits.AddRange(_inFlight.Select(batch => (Task)batch.Write));
+        if (!_channel.Reader.Completion.IsCompleted)
+        {
+            waits.Add(_channel.Reader.WaitToReadAsync(wake.Token).AsTask());
+        }
+
+        if (delay is { } time && time > TimeSpan.Zero)
+        {
+            waits.Add(Task.Delay(time, wake.Token));
+        }
+
+        if (waits.Count > 0)
+        {
+            await Task.WhenAny(waits).ConfigureAwait(false);
+        }
+
+        await wake.CancelAsync().ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
     }
 
     private void Drain()
@@ -380,5 +465,11 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
         _validator.Validate(record) is [var first, ..] ? first.Code : null;
 
     internal static short EvidenceClassId(string evidenceClass) => EvidenceClassIds[evidenceClass];
+
+    private sealed record InFlightBatch(
+        BufferedEvent[] Events,
+        IReadOnlyList<WriterRejection> Rejections,
+        IReadOnlyList<WriterOmission> Omissions,
+        Task<IReadOnlyList<StoreRefusal>> Write);
 
 }

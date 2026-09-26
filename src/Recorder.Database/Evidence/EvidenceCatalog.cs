@@ -614,6 +614,27 @@ internal static class EvidenceCatalog
         Bool("truncated"),
         Int("maximumTextControls"));
 
+    /// <summary>
+    /// A distinct computed style of a recording, stored once and referred to
+    /// by every layout node that reports it. See
+    /// Migrations/0010_shared_computed_styles.sql.
+    /// </summary>
+    public static readonly EvidenceTable ComputedStyles = new(
+        "browser_computed_styles",
+        TableKind.Identity,
+        [
+            new MapField(
+                string.Empty,
+                R,
+                new EvidenceTable(
+                    "browser_computed_style_entries",
+                    TableKind.Child,
+                    [Text(string.Empty, N, "value")],
+                    scalarItem: true,
+                    mapEntry: true))
+        ],
+        scalarItem: true);
+
     public static readonly EvidenceTable LayoutCheckpointStarts = Evidence(
         "browser_layout_checkpoint_starts",
         new IdentityField("context", R, BrowserContexts),
@@ -640,15 +661,7 @@ internal static class EvidenceCatalog
         Bool("layoutObjectPresent"),
         Bool("displayLocked"),
         NumberRectangle("boundingClientRect", N),
-        new MapField(
-            "computedStyle",
-            N,
-            new EvidenceTable(
-                "browser_layout_checkpoint_computed_styles",
-                TableKind.Child,
-                [Text(string.Empty, N, "value")],
-                scalarItem: true,
-                mapEntry: true)),
+        new IdentityField("computedStyle", N, ComputedStyles),
         new InlineField(
             "pseudoElement",
             N,
@@ -1102,10 +1115,12 @@ internal static class EvidenceCatalog
         BuildEventTypes();
 
     /// <summary>
-    /// The migration that adds each group of evidence tables, in version
-    /// order. A table is created by the first migration whose evidence tables
-    /// reach it, so a later group adds only the tables it introduces, and an
-    /// applied migration is never changed.
+    /// The migration that introduced each group of evidence tables, in
+    /// version order. Migrations 0003 to 0007 were generated from the catalog
+    /// as it then stood; an applied migration is never changed, so a later
+    /// change to a table is a migration of its own, such as 0010, which
+    /// replaced the per-node computed style rows with shared styles. A test
+    /// requires the tables the migrations leave to match the catalog.
     /// </summary>
     public static readonly IReadOnlyList<(int Version, string Name, EvidenceTable[] Evidence)> Migrations =
     [

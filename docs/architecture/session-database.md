@@ -140,16 +140,21 @@ tables per model, and is versioned with migrations the app applies at start.
   0009 replaced the partitions with ordinary tables.
 
 Layout checkpoint node records were about three quarters of a measured log.
-Whether identical node states in successive checkpoints are stored once and
-referenced is decided by measuring storage size and query time on an hour-long
-recording.
+Each node's computed style, a map of about 340 properties in a browser
+recording, was stored as one row per property for every node. Migration 0010
+stores each distinct computed style of a recording once, with its entries, and
+has each node refer to it; see Implementation status. Whether other identical
+node states in successive checkpoints are stored once and referenced is
+decided by measuring storage size and query time on an hour-long recording.
 
 ### Writing during capture
 
 - Collectors keep writing to the bounded in-memory queue they use today
   (`IRecorderEventSink`).
-- One database writer takes events from the queue and writes them in batches
-  with binary `COPY`, by size or by time, whichever comes first.
+- The database writer takes events from the queue in batches, by size or by
+  time, whichever comes first, and writes up to a configured number of
+  batches at once, each on its own connection with binary `COPY` in one
+  transaction. A batch is stored completely or not at all.
 - The writer maps each event to its rows, resolving identities to keys it
   caches for the recording. The per-record checks the finalization archive
   check used to make (envelope fields, event identifier, evidence class,
@@ -296,6 +301,53 @@ only once the database version is tested in full. It adds the
   limit, because the move takes as long as the data it copies. In the same
   sandbox, migrating a database of 60 recordings of 1,470 events each took
   about 127 seconds, during which the database is not yet open.
+- **Migration 0010.** Stores each distinct computed style of a recording once.
+  `browser_computed_styles` holds one row for each distinct style, and
+  `browser_computed_style_entries` its properties and values;
+  `browser_layout_checkpoint_nodes.computed_style_key` refers to it, and is
+  null for a node whose computed style is null. The migration moves existing
+  styles into the new tables, identifying equal styles by a SHA-256 digest of
+  their entries ordered by name identifier, and then drops the table of per-node
+  entries. It also makes every foreign key of the per-recording tables
+  deferrable, still checked at each statement unless a transaction defers
+  it. A test writes the evidence samples at version 10, returns the schema to
+  its version 9 form, applies 0010 again, and requires every payload to read
+  back unchanged and each distinct style to be stored once. On a 30-second
+  browser recording on the target Windows machine before this migration,
+  114,740 events were recorded and 10,875 were not written within the
+  completion timeout, because each node's style became about 340 rows.
+- **Parallel writing.** `PostgresEventWriter` writes up to
+  `WriterConnections` batches at once, four by default; while the database
+  is unavailable it retries one batch at a time. Each batch is written by
+  `PostgresEventBatchTarget` in one transaction that defers its foreign key
+  checks to commit, so a batch is stored completely or not at all and a
+  failure leaves no partial rows. Batches are prepared one at a time, in
+  order, and each identity a batch needs, such as a computed style, is
+  claimed by the first batch that needs it:
+  - a batch writes the identities it claimed with its own rows;
+  - a batch that needs an identity an earlier batch claimed waits for that
+    batch to finish before committing, so the row it refers to exists;
+  - if the earlier batch failed, the waiting batch writes the identity
+    itself, and so does a batch that needs an identity a later batch
+    claimed. Those writes go through a temporary table and insert only the
+    rows not yet present, so an identity is stored once whichever batch
+    commits first.
+  Events are ordered by their event key, not by commit order. At stop, the
+  events of batches not yet committed are spilled with the rest. Tests
+  require a writer never to exceed its configured number of batches at
+  once, and require parallel writing with small batches to store every
+  payload and the same number of identity rows as one writer. In throughput
+  checks on the development sandbox, a two-processor Linux machine, not on
+  the target Windows machine, 20,000 layout nodes sharing 200 distinct
+  340-property styles were written in 8.1 seconds with one connection and
+  4.7 seconds with four; 1,000 nodes with 1,000 distinct styles took 11 to
+  13.5 seconds either way, since they formed one batch. These times vary
+  between runs on that machine and do not predict times on the target.
+- **Schema checks.** A test holds the SHA-256 of each applied migration file,
+  so a migration a database may already have applied is not changed, and
+  compares the live schema of a migrated database with the evidence
+  catalog: each table's columns, primary key, foreign keys, and position in
+  `recording_tables`, and that every foreign key is deferrable.
 - **Writing.** `PostgresEventWriter` checks each record with
   `EventRecordValidator`, which checks the envelope and passes the payload to
   `EventPayloadValidator`, and rejects a record that fails into

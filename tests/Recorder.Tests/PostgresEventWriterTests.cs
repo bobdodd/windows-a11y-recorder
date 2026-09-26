@@ -35,7 +35,34 @@ public sealed class PostgresEventWriterTests : IDisposable
         Assert.Equal(7, result.WrittenCount);
         Assert.Equal(0, result.UnwrittenCount);
         Assert.All(target.Batches, batch => Assert.InRange(batch.Events.Count, 0, 3));
-        Assert.Equal(Enumerable.Range(0, 7).Select(key => (long)key), target.Written.Select(e => e.EventKey));
+        // Batches are written several at once, so they may be stored in any
+        // order; each event keeps the key it was given when accepted.
+        Assert.Equal(
+            Enumerable.Range(0, 7).Select(key => (long)key),
+            target.Written.Select(e => e.EventKey).Order());
+        Assert.All(target.Written, e => Assert.Equal((long)e.Event.Sequence - 1, e.EventKey));
+    }
+
+    [Fact]
+    public async Task WritesUpToTheConfiguredNumberOfBatchesAtOnce()
+    {
+        var target = new RecordingTarget { Hold = new TaskCompletionSource() };
+        var collector = Collector();
+        var writer = new PostgresEventWriter(target, SessionId, Options(batchSize: 1) with { WriterConnections = 3 });
+
+        for (ulong sequence = 1; sequence <= 5; sequence++)
+        {
+            Assert.True(writer.TryWrite(Event(SessionId, collector, sequence, (long)sequence * 10)));
+        }
+
+        await WaitUntil(() => target.Started == 3);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Assert.Equal(3, target.Started);
+        target.Hold.SetResult();
+
+        var result = await writer.CompleteAsync();
+        Assert.Equal(5, result.WrittenCount);
+        Assert.Equal(3, target.MostAtOnce);
     }
 
     [Fact]
@@ -71,7 +98,7 @@ public sealed class PostgresEventWriterTests : IDisposable
     }
 
     [Fact]
-    public async Task HoldsEventsWhileTheStoreIsUnavailableAndWritesThemInOrderWhenItReturns()
+    public async Task HoldsEventsWhileTheStoreIsUnavailableAndWritesThemWhenItReturns()
     {
         var target = new RecordingTarget { FailuresRemaining = 3 };
         var collector = Collector();
@@ -87,7 +114,7 @@ public sealed class PostgresEventWriterTests : IDisposable
         Assert.Equal(5, result.WrittenCount);
         Assert.Equal(0, result.DroppedCount);
         Assert.NotNull(result.LastError);
-        Assert.Equal([1UL, 2, 3, 4, 5], target.Written.Select(e => e.Event.Sequence));
+        Assert.Equal([1UL, 2, 3, 4, 5], target.Written.OrderBy(e => e.EventKey).Select(e => e.Event.Sequence));
     }
 
     [Fact]
@@ -109,7 +136,9 @@ public sealed class PostgresEventWriterTests : IDisposable
 
         Assert.Equal(20, result.WrittenCount);
         Assert.Equal(0, result.DroppedCount);
-        Assert.Equal(Enumerable.Range(1, 20).Select(n => (ulong)n), target.Written.Select(e => e.Event.Sequence));
+        Assert.Equal(
+            Enumerable.Range(1, 20).Select(n => (ulong)n),
+            target.Written.OrderBy(e => e.EventKey).Select(e => e.Event.Sequence));
         Assert.False(File.Exists(options.SpillPath));
     }
 
@@ -228,7 +257,38 @@ public sealed class PostgresEventWriterTests : IDisposable
         public List<WriterRejection> Rejections { get; } = [];
         public List<WriterOmission> Omissions { get; } = [];
 
-        public Task<IReadOnlyList<StoreRefusal>> WriteAsync(EventBatch batch, CancellationToken cancellationToken)
+        private int _running;
+
+        /// <summary>When set, each write waits for it before storing.</summary>
+        public TaskCompletionSource? Hold { get; init; }
+        public int Started;
+        public int MostAtOnce;
+
+        public async Task<IReadOnlyList<StoreRefusal>> WriteAsync(EventBatch batch, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref Started);
+            var running = Interlocked.Increment(ref _running);
+            lock (_gate)
+            {
+                MostAtOnce = Math.Max(MostAtOnce, running);
+            }
+
+            try
+            {
+                if (Hold is not null)
+                {
+                    await Hold.Task.WaitAsync(cancellationToken);
+                }
+
+                return Store(batch);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _running);
+            }
+        }
+
+        private IReadOnlyList<StoreRefusal> Store(EventBatch batch)
         {
             lock (_gate)
             {
@@ -253,7 +313,7 @@ public sealed class PostgresEventWriterTests : IDisposable
 
                 Rejections.AddRange(batch.Rejections);
                 Omissions.AddRange(batch.Omissions);
-                return Task.FromResult<IReadOnlyList<StoreRefusal>>(refusals);
+                return refusals;
             }
         }
     }
