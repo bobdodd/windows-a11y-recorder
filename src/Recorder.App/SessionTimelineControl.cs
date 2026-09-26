@@ -58,6 +58,10 @@ public sealed class SessionTimelineControl : FrameworkElement
     private long _viewportDurationNanoseconds;
     private SessionTimelineEvent? _selectedEvent;
 
+    // The lane keyboard stepping moves in: the selected event's lane, or the
+    // lane last clicked.
+    private int _currentLane;
+
     public SessionTimelineControl()
     {
         Focusable = true;
@@ -168,35 +172,86 @@ public sealed class SessionTimelineControl : FrameworkElement
         var end = start + _viewportDurationNanoseconds;
         var laneChannels = _shownByLane[lane];
         var shown = _shownChannels;
+        _currentLane = lane;
         e.Handled = true;
         SelectFromLookup(async timeline =>
             await timeline.NearestAsync(timestamp, start, end, laneChannels).ConfigureAwait(true) ??
             await timeline.NearestAsync(timestamp, start, end, shown).ConfigureAwait(true));
     }
 
+    // Left, Right, Home, and End move within the current lane; Up and Down
+    // move to the nearest event in the next lane above or below that has
+    // shown events. At either end of a lane, or with no lane beyond, the
+    // selection stays. With no selection, Left and Right select the lane's
+    // first event, and Up and Down search from the playhead.
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (_timeline is null || e.Key is not (Key.Left or Key.Right or Key.Home or Key.End))
+        if (_timeline is null ||
+            e.Key is not (Key.Left or Key.Right or Key.Home or Key.End or Key.Up or Key.Down))
         {
             return;
         }
 
         e.Handled = true;
-        var shown = _shownChannels;
-        var selected = _selectedEvent is { } item && shown.Contains(item.Channel) ? item : null;
-        var key = e.Key;
+        var selected = _selectedEvent is { } item && _shownChannels.Contains(item.Channel) ? item : null;
+        var lane = selected is null ? FirstShownLane(_currentLane) : GetLane(selected.Channel);
+        if (lane < 0)
+        {
+            return;
+        }
 
-        // With no selection, Left and Right select the first event; at
-        // either end of the timeline, the selection stays.
+        var key = e.Key;
+        var laneChannels = _shownByLane[lane];
+        if (key is Key.Up or Key.Down)
+        {
+            var next = NextShownLane(lane, key == Key.Down ? 1 : -1);
+            if (next < 0)
+            {
+                return;
+            }
+
+            var nextChannels = _shownByLane[next];
+            var time = selected?.MonotonicNanoseconds ?? _positionNanoseconds;
+            var duration = _durationNanoseconds;
+            _currentLane = next;
+            SelectFromLookup(timeline => timeline.NearestAsync(time, 0, duration, nextChannels));
+            return;
+        }
+
         SelectFromLookup(async timeline => key switch
         {
-            Key.Home => await timeline.EndAsync(last: false, shown).ConfigureAwait(true),
-            Key.End => await timeline.EndAsync(last: true, shown).ConfigureAwait(true),
-            _ when selected is null => await timeline.EndAsync(last: false, shown).ConfigureAwait(true),
-            _ => await timeline.AdjacentAsync(selected, key == Key.Right, shown).ConfigureAwait(true) ??
+            Key.Home => await timeline.EndAsync(last: false, laneChannels).ConfigureAwait(true),
+            Key.End => await timeline.EndAsync(last: true, laneChannels).ConfigureAwait(true),
+            _ when selected is null => await timeline.EndAsync(last: false, laneChannels).ConfigureAwait(true),
+            _ => await timeline.AdjacentAsync(selected, key == Key.Right, laneChannels).ConfigureAwait(true) ??
                 selected
         });
+    }
+
+    // The lane itself if it has shown events, or else the first lane that
+    // does, or -1.
+    private int FirstShownLane(int lane)
+    {
+        if (lane >= 0 && lane < _shownByLane.Length && _shownByLane[lane].Count > 0)
+        {
+            return lane;
+        }
+
+        return Array.FindIndex(_shownByLane, channels => channels.Count > 0);
+    }
+
+    private int NextShownLane(int lane, int direction)
+    {
+        for (var next = lane + direction; next >= 0 && next < _shownByLane.Length; next += direction)
+        {
+            if (_shownByLane[next].Count > 0)
+            {
+                return next;
+            }
+        }
+
+        return -1;
     }
 
     private async void SelectFromLookup(
@@ -351,6 +406,10 @@ public sealed class SessionTimelineControl : FrameworkElement
         }
 
         _selectedEvent = item;
+        if (item is not null)
+        {
+            _currentLane = GetLane(item.Channel);
+        }
         RedrawOverlay();
         SelectedEventChanged?.Invoke(
             this,

@@ -430,7 +430,7 @@
                                         SelectedEventChanged="TimelineControl_SelectedEventChanged"
                                         LookupFailed="TimelineControl_LookupFailed"
                                         AutomationProperties.Name="Selectable session event timeline"
-                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End while focused, to inspect captured values." />
+                                        AutomationProperties.HelpText="Click an event, or use Left, Right, Home, and End to move within a lane and Up and Down to move between lanes while focused, to inspect captured values." />
         </Border>
         <Grid Grid.Row="1" Margin="0,8,0,4">
           <Grid.ColumnDefinitions>

@@ -58,6 +58,10 @@ from the product version.
   channel and time index with one that also orders by event key. Recordings
   opened from session files use the same timeline interface over their
   events in memory, and events with the same time are now ordered by line.
+- Keep timeline keyboard stepping within a lane. Left, Right, Home, and End
+  move among the events of the selected event's lane, or the lane last
+  clicked, and Up and Down select the nearest event in the next lane above
+  or below that has shown events.
 - Record worker and non-Node dispatch evidence. Protocol 0.31 records
   listener and dispatch evidence in dedicated, shared, and service worker
   global scopes, for dispatches to EventTargets that are not Nodes, for a

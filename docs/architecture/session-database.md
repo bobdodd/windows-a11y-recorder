@@ -295,7 +295,7 @@ only once the database version is tested in full. It adds the
   at the greatest zoom, 32 times, a bucket is no wider than one pixel column
   on a timeline up to 4,096 pixels wide. The timeline's events are not held
   in memory: the event shown at the playhead, the event selected by a click,
-  and stepping with Left, Right, Home, and End are each a query that reads,
+  and stepping with the arrow keys, Home, and End are each a query that reads,
   for each shown channel, one entry of the index on recording, channel,
   time, and event key (migration 0002), and returns the best of those.
   Events with the same time are ordered by event key, which follows the
