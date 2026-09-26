@@ -128,11 +128,16 @@ tables per model, and is versioned with migrations the app applies at start.
   the data directory. Each has a row with its path, size, time, and the
   SHA-256 already computed while it was written. Large binary data stays out
   of the event tables so that event queries stay fast.
-- **Partitioning.** The event and evidence tables are partitioned by
-  recording
+- **Per-recording tables.** Every recording's events and evidence share
+  one set of ordinary tables, whose keys and indexes lead with the
+  recording, so a query for one recording reads only that recording's
+  entries. The tables were first partitioned by recording
   ([Table Partitioning](https://www.postgresql.org/docs/current/ddl-partitioning.html)),
-  so deleting a recording drops its partitions and a query for one recording
-  touches only that recording's data.
+  one partition of each of 135 tables per recording. Every foreign key
+  check on a written row then grew slower with each recording in the
+  database, and on a database of 39 recordings the writer fell behind a
+  recording and could not finish it; see Implementation status. Migration
+  0009 replaced the partitions with ordinary tables.
 
 Layout checkpoint node records were about three quarters of a measured log.
 Whether identical node states in successive checkpoints are stored once and
@@ -255,12 +260,42 @@ only once the database version is tested in full. It adds the
   one with `pg_ctl`.
 - **Migrations.** `DatabaseMigrator` applies the embedded SQL migrations in
   order, each in its own transaction, under an advisory lock.
-- **Partitions.** `RecordingStore` creates one partition of each event table
-  when it creates a recording, named by a short table prefix and the
-  recording key, such as `ev_<key>`, because a name built from the full
-  table name exceeds PostgreSQL's 63-byte identifier limit and is truncated.
-  Deleting a recording detaches and drops its partitions, referring tables
-  first, and then deletes its row.
+- **Per-recording tables.** `recording_tables` lists the tables that hold
+  rows of each recording, in an order that puts a referenced table before
+  the tables that refer to it. Creating a recording adds only its row.
+  Deleting a recording removes its rows from each listed table, referring
+  tables first, and then its recording row, in one transaction. The foreign
+  key checks are skipped while the listed tables' rows are removed, because
+  every row of the recording goes and a checked removal looks for referring
+  rows through columns no index leads with; the recording row is removed
+  with the checks in force. In one Linux test run on the development
+  sandbox, not on the target Windows machine, writing a recording of 44,100
+  events took 18.5 to 24.7 seconds with 40 earlier recordings in the
+  partitioned tables, and 4.5 seconds with 40 earlier recordings in the
+  ordinary tables. Deleting it took about 0.14 seconds with the checks
+  skipped; with them in force it took about 30 seconds, and a second
+  deletion exceeded the 30-second command limit.
+- **Migration 0009.** Creates each per-recording table again as an
+  ordinary table with the same name, columns, checks, keys, indexes, and
+  foreign keys, under the same constraint and index names, renames the
+  partitioned table `legacy_<order>`, and lists the tables in
+  `recording_tables`. Removing thousands of partitions in one transaction
+  locks each of them and every object that depends on them, which on a test
+  database of 20 recordings was about 92,000 locks, more than PostgreSQL's
+  lock table holds with its default `max_locks_per_transaction` of 64 for
+  each server process
+  ([Lock Management](https://www.postgresql.org/docs/current/runtime-config-locks.html)).
+  `LegacyPartitions`, which `DatabaseMigrator` runs after the migrations,
+  therefore finishes the move in small transactions: it drops the legacy
+  tables' foreign keys one at a time, then copies each recording's rows into
+  the ordinary tables and drops its partitions, one recording per
+  transaction, and then drops the empty legacy tables. On that test
+  database the migration took about 2,400 locks and each recording's move
+  about 2,500. Every step can be repeated, so an interrupted move continues
+  the next time the database opens. Migrations run without a command time
+  limit, because the move takes as long as the data it copies. In the same
+  sandbox, migrating a database of 60 recordings of 1,470 events each took
+  about 127 seconds, during which the database is not yet open.
 - **Writing.** `PostgresEventWriter` checks each record with
   `EventRecordValidator`, which checks the envelope and passes the payload to
   `EventPayloadValidator`, and rejects a record that fails into
@@ -283,12 +318,11 @@ only once the database version is tested in full. It adds the
   `0007_browser_network_evidence.sql` are generated from it, and a test
   requires each file to match; setting `RECORDER_REGENERATE_EVIDENCE_MIGRATION`
   to `1` while running that test rewrites them. A table is created by the
-  first migration whose event types reach it, and partition orders continue
+  first migration whose event types reach it, and table orders continue
   from one migration to the next, so a later migration adds tables without
-  changing one a database has already applied. A recording created before a
-  migration has no partitions of the tables that migration adds, so resuming
-  it afterwards refuses events of those types. Each payload member is a
-  column, except that:
+  changing one a database has already applied. A migration after 0008
+  creates ordinary tables and lists them in `recording_tables`. Each payload
+  member is a column, except that:
   - strings from small or recurring vocabularies, such as reasons, states,
     process names, and control types, are stored once in `names` and
     referenced by `name_id`;

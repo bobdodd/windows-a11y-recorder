@@ -94,4 +94,33 @@ internal static class DatabaseTestSupport
         using var document = JsonDocument.Parse(json);
         return document.RootElement.Clone();
     }
+
+    /// <summary>
+    /// Adds a recording's partition of each per-recording table, as the
+    /// recording store did before migration 0009, so a test can build a
+    /// recording in the schema an earlier release left.
+    /// </summary>
+    public static async Task CreateLegacyPartitionsAsync(
+        Npgsql.NpgsqlDataSource dataSource,
+        Guid recordingId,
+        CancellationToken cancellationToken)
+    {
+        var tables = new List<(string Table, string Prefix)>();
+        await using (var query = dataSource.CreateCommand(
+            "SELECT table_name, partition_prefix FROM recording_partitioned_tables ORDER BY partition_order"))
+        await using (var reader = await query.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                tables.Add((reader.GetString(0), reader.GetString(1)));
+            }
+        }
+
+        foreach (var (table, prefix) in tables)
+        {
+            await using var create = dataSource.CreateCommand(
+                $"CREATE TABLE {prefix}_{recordingId:N} PARTITION OF {table} FOR VALUES IN ('{recordingId:D}')");
+            await create.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
 }

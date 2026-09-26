@@ -11,7 +11,7 @@ namespace Recorder.Database;
 /// </summary>
 public static class DatabaseMigrator
 {
-    private const long AdvisoryLockKey = 0x5245434F52444552; // "RECORDER"
+    internal const long AdvisoryLockKey = 0x5245434F52444552; // "RECORDER"
 
     public static IReadOnlyList<(int Version, string Name)> Migrations { get; } =
         typeof(DatabaseMigrator).Assembly
@@ -95,6 +95,8 @@ public static class DatabaseMigrator
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        await LegacyPartitions.MoveAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     private static string ReadResource(string name)
@@ -111,7 +113,9 @@ public static class DatabaseMigrator
         string sql,
         CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        // No time limit: a migration that rewrites stored recordings, such as
+        // 0009, takes as long as the data it moves.
+        await using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }

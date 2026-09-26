@@ -112,12 +112,24 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             Assert.Equal(expected[index], Canonical(read.RootElement.GetProperty("payload")));
         }
 
-        // Deleting the recording drops its evidence partitions with the rest.
+        // Deleting the recording removes its rows from every per-recording
+        // table with the rest.
         await new RecordingStore(DataSource).DeleteRecordingAsync(recordingId, token);
-        await using var partitions = DataSource.CreateCommand(
-            "SELECT count(*) FROM pg_class WHERE relname LIKE $1");
-        partitions.Parameters.AddWithValue($"%_{recordingId:N}");
-        Assert.Equal(0L, await partitions.ExecuteScalarAsync(token));
+        await using var tables = DataSource.CreateCommand("SELECT table_name FROM recording_tables");
+        var names = new List<string>();
+        await using (var reader = await tables.ExecuteReaderAsync(token))
+        {
+            while (await reader.ReadAsync(token))
+            {
+                names.Add(reader.GetString(0));
+            }
+        }
+
+        Assert.True(names.Count > 100);
+        foreach (var name in names)
+        {
+            Assert.Equal(0, await CountAsync(name, recordingId));
+        }
     }
 
     [Fact]
@@ -238,9 +250,99 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         return node.ToJsonString();
     }
 
-    private async Task<(string SessionKey, Guid RecordingId)> CreateRecordingAsync()
+    /// <summary>
+    /// Migration 0009 moves every per-recording table out of its partitions
+    /// into an ordinary table, keeping each row and each constraint and
+    /// index under its name.
+    /// </summary>
+    [Fact]
+    public async Task Migration0009KeepsEveryRowConstraintAndIndexInOrdinaryTables()
     {
-        var store = new RecordingStore(DataSource);
+        var token = TestContext.Current.CancellationToken;
+        var database = "upgrade_" + Guid.NewGuid().ToString("N");
+        await using (var create = DataSource.CreateCommand($"CREATE DATABASE {database}"))
+        {
+            await create.ExecuteNonQueryAsync(token);
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder(fixture.Server.ConnectionString) { Database = database };
+        await using var dataSource = NpgsqlDataSource.Create(builder.ConnectionString);
+        await DatabaseMigrator.ApplyAsync(dataSource, 8, token);
+
+        var recordings = new List<Guid>();
+        for (var index = 0; index < 3; index++)
+        {
+            var (sessionKey, recordingId) = await CreateRecordingAsync(dataSource);
+            await CreateLegacyPartitionsAsync(dataSource, recordingId, token);
+            await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey), dataSource: dataSource);
+            recordings.Add(recordingId);
+        }
+
+        const string Constraints =
+            "SELECT c.conrelid::regclass::text || ' ' || c.conname || ' ' || pg_get_constraintdef(c.oid) " +
+            "FROM pg_constraint c WHERE c.conparentid = 0 AND c.contype IN ('p', 'u', 'f', 'c') " +
+            "AND c.conrelid::regclass::text IN (SELECT table_name FROM {0}) ORDER BY 1";
+        const string Indexes =
+            "SELECT replace(pg_get_indexdef(i.indexrelid), ' ON ONLY ', ' ON ') FROM pg_index i " +
+            "JOIN pg_class t ON t.oid = i.indrelid WHERE t.relname::text IN (SELECT table_name FROM {0}) ORDER BY 1";
+        var tables = await RowsAsync(dataSource, "SELECT table_name FROM recording_partitioned_tables ORDER BY 1", token);
+        var contents = await ContentsAsync(dataSource, tables, token);
+        var constraints = await RowsAsync(dataSource, string.Format(CultureInfo.InvariantCulture, Constraints, "recording_partitioned_tables"), token);
+        var indexes = await RowsAsync(dataSource, string.Format(CultureInfo.InvariantCulture, Indexes, "recording_partitioned_tables"), token);
+        Assert.StartsWith("events " + (3 * SampleEvents("count").Count).ToString(CultureInfo.InvariantCulture) + " ", contents.Single(row => row.StartsWith("events ", StringComparison.Ordinal)));
+
+        await DatabaseMigrator.ApplyAsync(dataSource, token);
+
+        Assert.Equal(tables, await RowsAsync(dataSource, "SELECT table_name FROM recording_tables ORDER BY 1", token));
+        Assert.Equal(contents, await ContentsAsync(dataSource, tables, token));
+        Assert.Equal(constraints, await RowsAsync(dataSource, string.Format(CultureInfo.InvariantCulture, Constraints, "recording_tables"), token));
+        Assert.Equal(indexes, await RowsAsync(dataSource, string.Format(CultureInfo.InvariantCulture, Indexes, "recording_tables"), token));
+        Assert.Empty(await RowsAsync(dataSource, "SELECT relname::text FROM pg_class WHERE relkind = 'p' OR relispartition", token));
+
+        // A recording kept through the upgrade can be removed, and a new one
+        // written.
+        await new RecordingStore(dataSource).DeleteRecordingAsync(recordings[0], token);
+        Assert.Empty(await RowsAsync(dataSource, $"SELECT event_key::text FROM events WHERE recording_id = '{recordings[0]:D}'", token));
+        var (newKey, newRecording) = await CreateRecordingAsync(dataSource);
+        await WriteAsync(newKey, newRecording, SampleEvents(newKey), dataSource: dataSource);
+        Assert.NotEmpty(await RowsAsync(dataSource, $"SELECT event_key::text FROM events WHERE recording_id = '{newRecording:D}'", token));
+    }
+
+    // The row count and a digest of every row of each table.
+    private static async Task<List<string>> ContentsAsync(
+        NpgsqlDataSource dataSource,
+        IEnumerable<string> tables,
+        CancellationToken token)
+    {
+        var contents = new List<string>();
+        foreach (var table in tables)
+        {
+            contents.AddRange(await RowsAsync(
+                dataSource,
+                $"SELECT '{table} ' || count(*) || ' ' || md5(coalesce(string_agg(t::text, '|' ORDER BY t::text), '')) FROM {table} t",
+                token));
+        }
+
+        return contents;
+    }
+
+    private static async Task<List<string>> RowsAsync(NpgsqlDataSource dataSource, string sql, CancellationToken token)
+    {
+        await using var command = dataSource.CreateCommand(sql);
+        var rows = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+        {
+            rows.Add(reader.GetString(0));
+        }
+
+        return rows;
+    }
+
+    private async Task<(string SessionKey, Guid RecordingId)> CreateRecordingAsync(
+        NpgsqlDataSource? dataSource = null)
+    {
+        var store = new RecordingStore(dataSource ?? DataSource);
         var projectId = await store.EnsureProjectAsync("Evidence", TestContext.Current.CancellationToken);
         var sessionKey = "evidence-" + Guid.NewGuid().ToString("N");
         var recordingId = await store.CreateRecordingAsync(
@@ -254,17 +356,19 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         string sessionKey,
         Guid recordingId,
         IReadOnlyList<RecorderEvent> events,
-        bool expectRejections = false)
+        bool expectRejections = false,
+        NpgsqlDataSource? dataSource = null)
     {
+        dataSource ??= DataSource;
         var writer = new PostgresEventWriter(
-            new PostgresEventBatchTarget(DataSource, recordingId),
+            new PostgresEventBatchTarget(dataSource, recordingId),
             sessionKey,
             new PostgresEventWriterOptions
             {
                 SpillPath = Path.Combine(fixture.DataDirectory, "spill", Guid.NewGuid().ToString("N") + ".ndjson"),
                 ChannelCapacity = events.Count
             },
-            await PostgresEventBatchTarget.NextEventKeyAsync(DataSource, recordingId, TestContext.Current.CancellationToken));
+            await PostgresEventBatchTarget.NextEventKeyAsync(dataSource, recordingId, TestContext.Current.CancellationToken));
         await using (writer)
         {
             foreach (var record in events)

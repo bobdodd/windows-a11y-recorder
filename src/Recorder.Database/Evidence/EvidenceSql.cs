@@ -13,6 +13,14 @@ internal static class EvidenceSql
     /// <summary>Where the partition order of the evidence tables starts.</summary>
     public const int FirstPartitionOrder = 7;
 
+    /// <summary>
+    /// The last migration whose tables were partitioned by recording.
+    /// Migration 0009 made every per-recording table an ordinary table, so
+    /// a later migration creates ordinary tables and registers them in
+    /// recording_tables.
+    /// </summary>
+    public const int LastPartitionedVersion = 8;
+
     // jsonb_build_object takes at most 100 arguments.
     private const int PairsPerObject = 40;
 
@@ -37,29 +45,36 @@ internal static class EvidenceSql
                 ");\n\n");
         }
 
-        // Partition orders continue across migrations, so each table keeps
-        // the prefix it was created with.
+        // Table orders continue across migrations, so each table keeps the
+        // order, and up to version 8 the partition prefix, it was created
+        // with.
         var tables = EvidenceCatalog.VersionedTables
             .Select((item, index) => (item.Version, item.Table, Order: FirstPartitionOrder + index))
             .Where(item => item.Version == version)
             .ToArray();
+        var partitioned = version <= LastPartitionedVersion;
         foreach (var (_, table, _) in tables)
         {
-            builder.Append(CreateTable(table)).Append('\n');
+            builder.Append(CreateTable(table, partitioned)).Append('\n');
         }
 
-        builder.Append(
-            "INSERT INTO recording_partitioned_tables (table_name, partition_prefix, partition_order) VALUES\n");
+        builder.Append(partitioned
+            ? "INSERT INTO recording_partitioned_tables (table_name, partition_prefix, partition_order) VALUES\n"
+            : "INSERT INTO recording_tables (table_name, table_order) VALUES\n");
         builder.Append(string.Join(
             ",\n",
-            tables.Select(item => string.Create(
-                CultureInfo.InvariantCulture,
-                $"    ('{item.Table.Name}', 'pt{item.Order}', {item.Order})"))));
+            tables.Select(item => partitioned
+                ? string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"    ('{item.Table.Name}', 'pt{item.Order}', {item.Order})")
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"    ('{item.Table.Name}', {item.Order})"))));
         builder.Append(";\n");
         return builder.ToString();
     }
 
-    private static string CreateTable(EvidenceTable table)
+    private static string CreateTable(EvidenceTable table, bool partitioned)
     {
         var lines = new List<string> { "recording_id uuid NOT NULL" };
         var constraints = new List<string>();
@@ -109,7 +124,7 @@ internal static class EvidenceSql
         constraints.Insert(0, $"PRIMARY KEY (recording_id, {string.Join(", ", table.KeyColumns)})");
         return $"CREATE TABLE {table.Name} (\n    " +
             string.Join(",\n    ", lines.Concat(constraints)) +
-            "\n) PARTITION BY LIST (recording_id);\n";
+            (partitioned ? "\n) PARTITION BY LIST (recording_id);\n" : "\n);\n");
     }
 
     /// <summary>

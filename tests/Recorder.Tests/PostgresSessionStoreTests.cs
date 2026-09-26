@@ -106,19 +106,18 @@ public sealed class PostgresSessionStoreTests(EmbeddedPostgresFixture fixture)
     }
 
     [Fact]
-    public async Task CreatesARecordingWithItsOwnPartitions()
+    public async Task CreatesARecordingInOrdinaryTables()
     {
         var (_, recordingId, _) = await CreateRecordingAsync();
 
-        await using var command = DataSource.CreateCommand(
-            "SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid " +
-            "WHERE c.relname LIKE $1 " +
-            "AND i.inhparent::regclass::text IN (SELECT table_name FROM recording_partitioned_tables)");
-        command.Parameters.AddWithValue($"%_{recordingId:N}");
-        await using var tables = DataSource.CreateCommand("SELECT count(*) FROM recording_partitioned_tables");
-        var expected = (long)(await tables.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
-        Assert.True(expected > 6);
-        Assert.Equal(expected, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        // Every per-recording table is an ordinary table, and a recording
+        // adds no table of its own.
+        await using var partitioned = DataSource.CreateCommand(
+            "SELECT count(*) FROM pg_class WHERE relkind = 'p' OR relispartition");
+        Assert.Equal(0L, await partitioned.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        await using var tables = DataSource.CreateCommand(
+            "SELECT count(*) FROM recording_tables r JOIN pg_class c ON c.relname = r.table_name AND c.relkind = 'r'");
+        Assert.True((long)(await tables.ExecuteScalarAsync(TestContext.Current.CancellationToken))! > 100);
         Assert.Equal(
             RecordingStatus.Recording,
             await new RecordingStore(DataSource).GetStatusAsync(recordingId, TestContext.Current.CancellationToken));

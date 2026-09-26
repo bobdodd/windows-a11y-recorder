@@ -31,7 +31,7 @@ public sealed class OtherChannelPayloadMigrationTests(EmbeddedPostgresFixture fi
         var removed = await RecordAsync(dataSource, store, project, withBuiltInJson: true, token);
         var kept = await RecordAsync(dataSource, store, project, withBuiltInJson: false, token);
 
-        await DatabaseMigrator.ApplyAsync(dataSource, token);
+        await DatabaseMigrator.ApplyAsync(dataSource, 8, token);
 
         Assert.Equal(0, await ScalarAsync(dataSource, "SELECT count(*) FROM recordings WHERE recording_id = $1", removed, token));
         Assert.Equal(0, await ScalarAsync(dataSource, "SELECT count(*) FROM pg_class WHERE relname LIKE '%' || $1", removed.ToString("N"), token));
@@ -44,7 +44,9 @@ public sealed class OtherChannelPayloadMigrationTests(EmbeddedPostgresFixture fi
             1,
             await ScalarAsync(dataSource, "SELECT count(*) FROM recording_partitioned_tables WHERE table_name = 'event_payloads_other_channels' AND partition_prefix = 'evpo'", null, token));
 
-        // A recording kept through the upgrade can still be removed.
+        // A recording kept through the upgrade, and through 0009, can still
+        // be removed.
+        await DatabaseMigrator.ApplyAsync(dataSource, token);
         await store.DeleteRecordingAsync(kept, token);
         Assert.Equal(0, await ScalarAsync(dataSource, "SELECT count(*) FROM recordings", null, token));
     }
@@ -64,6 +66,7 @@ public sealed class OtherChannelPayloadMigrationTests(EmbeddedPostgresFixture fi
     {
         var sessionKey = "upgrade-" + Guid.NewGuid().ToString("N");
         var recordingId = await store.CreateRecordingAsync(project, Definition(sessionKey), token);
+        await CreateLegacyPartitionsAsync(dataSource, recordingId, token);
         var collector = Collector("test.upgrade", "session.annotations");
         var writer = new PostgresEventWriter(
             new PostgresEventBatchTarget(dataSource, recordingId),

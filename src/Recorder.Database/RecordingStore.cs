@@ -69,8 +69,7 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
     }
 
     /// <summary>
-    /// Adds a recording in the recording state, with a partition of each
-    /// per-recording table, in one transaction.
+    /// Adds a recording in the recording state.
     /// </summary>
     public async Task<Guid> CreateRecordingAsync(
         Guid projectId,
@@ -114,19 +113,6 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
             insert.Parameters.AddWithValue(capture.CaptureSystemAudio);
             recordingId = (Guid)(await insert.ExecuteScalarAsync(cancellationToken)
                 .ConfigureAwait(false))!;
-        }
-
-        foreach (var (table, prefix) in await PartitionedTablesAsync(connection, transaction, cancellationToken)
-                     .ConfigureAwait(false))
-        {
-            // Both names come from the database and the recording key, not
-            // from user input.
-            await using var create = new NpgsqlCommand(
-                $"CREATE TABLE {PartitionName(prefix, recordingId)} PARTITION OF {table} " +
-                $"FOR VALUES IN ('{recordingId:D}')",
-                connection,
-                transaction);
-            await create.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -292,8 +278,8 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
     }
 
     /// <summary>
-    /// Removes a recording. Its partitions are dropped rather than deleted
-    /// row by row, so removal does not depend on the recording's size.
+    /// Removes a recording: its rows in every per-recording table, referring
+    /// tables first, and then its recording row, in one transaction.
     /// </summary>
     public async Task DeleteRecordingAsync(Guid recordingId, CancellationToken cancellationToken = default)
     {
@@ -301,32 +287,34 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
             .ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
-        var tables = await PartitionedTablesAsync(connection, transaction, cancellationToken)
+        var tables = await RecordingTablesAsync(connection, transaction, cancellationToken)
             .ConfigureAwait(false);
-        // Referring tables first. A referenced partition is detached before
-        // it is dropped, because PostgreSQL does not drop a partition that a
-        // partitioned table's foreign key refers to while it is attached.
-        foreach (var (table, prefix) in tables.Reverse())
-        {
-            var partition = PartitionName(prefix, recordingId);
-            await using var exists = new NpgsqlCommand(
-                "SELECT to_regclass($1) IS NOT NULL",
-                connection,
-                transaction);
-            exists.Parameters.AddWithValue(partition);
-            if (!(bool)(await exists.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!)
-            {
-                continue;
-            }
 
-            await using var detach = new NpgsqlCommand(
-                $"ALTER TABLE {table} DETACH PARTITION {partition}",
+        // Every row of the recording is removed from every per-recording
+        // table, so no row can be left referring to a removed one. The
+        // foreign key checks are skipped while those rows are removed:
+        // checked, each removed row of a referenced table would look for
+        // referring rows through a column no index leads with, and removal
+        // would grow with the square of the recording's size. The app's
+        // database user is the server's superuser, which may set this.
+        await ExecuteAsync(connection, transaction, "SET LOCAL session_replication_role = replica", cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var table in tables.Reverse())
+        {
+            // The name comes from the database, not from user input.
+            await using var rows = new NpgsqlCommand(
+                $"DELETE FROM {table} WHERE recording_id = $1",
                 connection,
                 transaction);
-            await detach.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            await using var drop = new NpgsqlCommand($"DROP TABLE {partition}", connection, transaction);
-            await drop.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            rows.Parameters.AddWithValue(recordingId);
+            await rows.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        // The recording row is removed with the checks and cascades in force,
+        // which remove its collectors, clock mappings, rejections, and
+        // omissions.
+        await ExecuteAsync(connection, transaction, "SET LOCAL session_replication_role = origin", cancellationToken)
+            .ConfigureAwait(false);
 
         await using (var delete = new NpgsqlCommand(
             "DELETE FROM recordings WHERE recording_id = $1",
@@ -340,24 +328,31 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    internal static string PartitionName(string prefix, Guid recordingId) =>
-        $"{prefix}_{recordingId:N}";
+    private static async Task ExecuteAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 
-    private static async Task<IReadOnlyList<(string Table, string Prefix)>> PartitionedTablesAsync(
+    private static async Task<IReadOnlyList<string>> RecordingTablesAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         CancellationToken cancellationToken)
     {
         await using var command = new NpgsqlCommand(
-            "SELECT table_name, partition_prefix FROM recording_partitioned_tables ORDER BY partition_order",
+            "SELECT table_name FROM recording_tables ORDER BY table_order",
             connection,
             transaction);
-        var tables = new List<(string, string)>();
+        var tables = new List<string>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken)
             .ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            tables.Add((reader.GetString(0), reader.GetString(1)));
+            tables.Add(reader.GetString(0));
         }
 
         return tables;
