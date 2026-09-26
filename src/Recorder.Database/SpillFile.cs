@@ -71,6 +71,21 @@ internal sealed class SpillFile(string path) : IDisposable
         }
 
         _writer.Flush();
+        ReadInto(events, maximum);
+
+        Count -= events.Count;
+        if (Count == 0)
+        {
+            // The reader is closed by now: Windows does not delete a file
+            // that is still open.
+            Delete();
+        }
+
+        return events;
+    }
+
+    private void ReadInto(List<BufferedEvent> events, int maximum)
+    {
         using var reader = new FileStream(
             Path,
             FileMode.Open,
@@ -106,14 +121,6 @@ internal sealed class SpillFile(string path) : IDisposable
                 start = end + 1;
             }
         }
-
-        Count -= events.Count;
-        if (Count == 0)
-        {
-            Delete();
-        }
-
-        return events;
     }
 
     /// <summary>Writes buffered bytes to disk and keeps the file.</summary>
