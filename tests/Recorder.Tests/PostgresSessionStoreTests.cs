@@ -112,9 +112,13 @@ public sealed class PostgresSessionStoreTests(EmbeddedPostgresFixture fixture)
 
         await using var command = DataSource.CreateCommand(
             "SELECT count(*) FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid " +
-            "WHERE c.relname LIKE $1");
+            "WHERE c.relname LIKE $1 " +
+            "AND i.inhparent::regclass::text IN (SELECT table_name FROM recording_partitioned_tables)");
         command.Parameters.AddWithValue($"%_{recordingId:N}");
-        Assert.Equal(6L, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        await using var tables = DataSource.CreateCommand("SELECT count(*) FROM recording_partitioned_tables");
+        var expected = (long)(await tables.ExecuteScalarAsync(TestContext.Current.CancellationToken))!;
+        Assert.True(expected > 6);
+        Assert.Equal(expected, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken));
         Assert.Equal(
             RecordingStatus.Recording,
             await new RecordingStore(DataSource).GetStatusAsync(recordingId, TestContext.Current.CancellationToken));

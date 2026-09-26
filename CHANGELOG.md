@@ -58,6 +58,17 @@ from the product version.
   channel and time index with one that also orders by event key. Recordings
   opened from session files use the same timeline interface over their
   events in memory, and events with the same time are now ordered by line.
+- Store event payloads in typed evidence tables, on the
+  `postgres-session-store` branch. Migration 0003, generated from an evidence
+  catalog, adds a table per event type for collector lifecycle, session
+  markers, raw keyboard and mouse input, the foreground window, UI
+  Automation events, desktop frames, microphone and system audio, browser
+  lifecycle, and those channels' collector omissions, with shared
+  vocabularies in `names`, recurring objects such as windows, monitors, UI
+  Automation elements, and browser contexts stored once per recording, and
+  arrays and maps in child tables. The writer refuses a payload member the
+  catalog does not hold. The player rebuilds payloads from these tables.
+  Other event types are still held in the transitional `jsonb` table.
 - Keep timeline keyboard stepping within a lane. Left, Right, Home, and End
   move among the events of the selected event's lane, or the lane last
   clicked, and Up and Down select the nearest event in the next lane above

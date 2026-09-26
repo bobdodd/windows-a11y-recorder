@@ -1,0 +1,163 @@
+using System.Collections.Concurrent;
+using Npgsql;
+using NpgsqlTypes;
+
+namespace Recorder.Database.Evidence;
+
+/// <summary>Writes evidence rows with binary COPY, and reads identity key state.</summary>
+internal static class EvidenceCopy
+{
+    private static readonly ConcurrentDictionary<EvidenceTable, (string Sql, NpgsqlDbType[] Types)> Statements = new();
+
+    private static readonly Dictionary<EvidenceTable, int> TableOrder = EvidenceCatalog.Tables
+        .Select((table, index) => (table, index))
+        .ToDictionary(pair => pair.table, pair => pair.index);
+
+    /// <summary>The next unused key of each identity table in a recording.</summary>
+    public static async Task<Dictionary<EvidenceTable, long>> NextIdentityKeysAsync(
+        NpgsqlConnection connection,
+        Guid recordingId,
+        CancellationToken cancellationToken)
+    {
+        var identities = EvidenceCatalog.Tables.Where(table => table.Kind == TableKind.Identity).ToArray();
+        var keys = new Dictionary<EvidenceTable, long>();
+        await using var command = new NpgsqlCommand(
+            string.Join(
+                " UNION ALL ",
+                identities.Select((table, index) =>
+                    $"SELECT {index}, coalesce(max(identity_key) + 1, 0) FROM {table.Name} WHERE recording_id = $1")),
+            connection);
+        command.Parameters.AddWithValue(recordingId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            keys[identities[reader.GetInt32(0)]] = reader.GetInt64(1);
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// The identities the events refer to that are not yet stored, each once
+    /// and after the identities it refers to.
+    /// </summary>
+    public static List<IdentityRow> UnstoredIdentities(IEnumerable<EvidenceRows> events)
+    {
+        var ordered = new List<IdentityRow>();
+        var seen = new HashSet<IdentityRow>(ReferenceEqualityComparer.Instance);
+
+        void Visit(IdentityRow identity)
+        {
+            if (identity.Stored || !seen.Add(identity))
+            {
+                return;
+            }
+
+            foreach (var dependency in identity.Dependencies)
+            {
+                Visit(dependency);
+            }
+
+            ordered.Add(identity);
+        }
+
+        foreach (var rows in events)
+        {
+            foreach (var identity in rows.Identities)
+            {
+                Visit(identity);
+            }
+        }
+
+        return ordered;
+    }
+
+    /// <summary>
+    /// Copies rows table by table in catalog order, so every row is written
+    /// after the rows it refers to.
+    /// </summary>
+    public static async Task CopyAsync(
+        NpgsqlConnection connection,
+        Guid recordingId,
+        IEnumerable<EvidenceRow> rows,
+        CancellationToken cancellationToken)
+    {
+        foreach (var group in rows.GroupBy(row => row.Table).OrderBy(group => TableOrder[group.Key]))
+        {
+            var (sql, types) = Statements.GetOrAdd(group.Key, Statement);
+            await using var importer = await connection.BeginBinaryImportAsync(sql, cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var row in group)
+            {
+                importer.StartRow();
+                importer.Write(recordingId, NpgsqlDbType.Uuid);
+                for (var index = 0; index < types.Length; index++)
+                {
+                    Write(importer, row.Values[index], types[index]);
+                }
+            }
+
+            await importer.CompleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static (string, NpgsqlDbType[]) Statement(EvidenceTable table)
+    {
+        var names = new List<string>(table.KeyColumns);
+        var types = new List<NpgsqlDbType>(table.KeyColumns.Select(column =>
+            column is "event_key" or "identity_key" or "owner_key" ? NpgsqlDbType.Bigint : NpgsqlDbType.Integer));
+        foreach (var column in table.Columns)
+        {
+            names.Add(column.Name);
+            types.Add(column.SqlType switch
+            {
+                "text" => NpgsqlDbType.Text,
+                "integer" => NpgsqlDbType.Integer,
+                "bigint" => NpgsqlDbType.Bigint,
+                "double precision" => NpgsqlDbType.Double,
+                "boolean" => NpgsqlDbType.Boolean,
+                "timestamptz" => NpgsqlDbType.TimestampTz,
+                "smallint" => NpgsqlDbType.Smallint,
+                _ => throw new InvalidOperationException($"Unknown column type {column.SqlType}.")
+            });
+        }
+
+        return (
+            $"COPY {table.Name} (recording_id, {string.Join(", ", names)}) FROM STDIN (FORMAT BINARY)",
+            [.. types]);
+    }
+
+    // Rows are written synchronously: the importer buffers them.
+    private static void Write(NpgsqlBinaryImporter importer, object? value, NpgsqlDbType type)
+    {
+        switch (value)
+        {
+            case null:
+                importer.WriteNull();
+                break;
+            case string text:
+                importer.Write(text, type);
+                break;
+            case int integer:
+                importer.Write(integer, type);
+                break;
+            case long bigint:
+                importer.Write(bigint, type);
+                break;
+            case short small:
+                importer.Write(small, type);
+                break;
+            case double number:
+                importer.Write(number, type);
+                break;
+            case bool flag:
+                importer.Write(flag, type);
+                break;
+            case DateTime instant:
+                importer.Write(instant, type);
+                break;
+            default:
+                throw new InvalidOperationException($"Cannot write a {value.GetType().Name} evidence value.");
+        }
+    }
+}

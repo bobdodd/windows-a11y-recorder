@@ -8,6 +8,9 @@
     <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Recorder.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <EmbeddedResource Include="Migrations\*.sql" />
   </ItemGroup>
 </Project>

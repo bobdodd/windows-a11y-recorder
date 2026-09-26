@@ -15,6 +15,7 @@ internal sealed class ReferenceKeys(NpgsqlDataSource dataSource)
     public const string EventSchemaVersions = "event_schema_versions";
     public const string TimestampDomains = "timestamp_domains";
     public const string TimestampUnits = "timestamp_units";
+    public const string Names = "names";
 
     private static readonly Dictionary<string, string> KeyColumns = new(StringComparer.Ordinal)
     {
@@ -23,7 +24,8 @@ internal sealed class ReferenceKeys(NpgsqlDataSource dataSource)
         [QualityFlags] = "quality_flag_id",
         [EventSchemaVersions] = "event_schema_version_id",
         [TimestampDomains] = "timestamp_domain_id",
-        [TimestampUnits] = "timestamp_unit_id"
+        [TimestampUnits] = "timestamp_unit_id",
+        [Names] = "name_id"
     };
 
     private readonly Dictionary<(string Table, string Name), int> _names = [];

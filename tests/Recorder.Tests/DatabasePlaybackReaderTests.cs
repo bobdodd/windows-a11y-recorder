@@ -128,7 +128,9 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             var lane = random.Next(10) == 0 ? 2 : random.Next(2);
             events.Add(Event(sessionKey, collector, sequences[lane]++, time, channels[lane],
                 lane == 1 ? "focus-changed" : "marker",
-                new { name = $"Control {index}", note = $"Note {index}" }));
+                lane == 1
+                    ? Json(EvidenceSamples.Focus($"Control {index}"))
+                    : new { name = $"Control {index}", note = $"Note {index}" }));
         }
 
         await WriteSessionFilesAsync(directory, sessionKey, events, token);
@@ -196,7 +198,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         {
             events.Add(index % 4 == 0
                 ? Event(sessionKey, collector, (ulong)index, index * 1_000L, "accessibility.uia.events",
-                    "focus-changed", new { name = $"Control {index}", controlType = "Button", padding })
+                    "focus-changed", Json(EvidenceSamples.Focus($"Control {index} {padding}")))
                 : Event(sessionKey, collector, (ulong)index, index * 1_000L, "input.mouse",
                     "mouse-move", new { x = index, y = index, padding }));
         }
@@ -228,7 +230,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
 
         lookups.Stop();
         Assert.Equal(
-            "focus-changed: Control 4, Button",
+            "focus-changed",
             (await timeline.AtOrBeforeAsync(4_500, uia, token))?.Summary);
         TestContext.Current.SendDiagnosticMessage(
             $"Opened {timeline.Count:N0} events from the database in {stopwatch.ElapsedMilliseconds:N0} ms; " +
@@ -267,11 +269,11 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             Event(sessionKey, collector, 0, 100, "window.foreground", "foreground-changed",
                 new { title = "Editor", processName = "notepad", processId = 42, bounds = new { x = 1, y = 2 } }),
             Event(sessionKey, collector, 0, 200, "accessibility.uia.events", "focus-changed",
-                new { name = "Save", automationId = "SaveButton", controlType = "Button", isEnabled = true }),
+                Json(EvidenceSamples.Focus("Save"))),
             Event(sessionKey, collector, 0, 300, "graphics.desktop.frames", "desktop-frame",
-                new { path = "frames/desktop/0000000000.png", width = 1920, height = 1080, byteLength = 3 }),
+                Json(EvidenceSamples.DesktopFrame("frames/desktop/0000000000.png"))),
             Event(sessionKey, collector, 0, 400, "audio.microphone", "audio-stream-started",
-                new { stream = "microphone", path = "audio/microphone.wav", device = "Test microphone" }),
+                Json(EvidenceSamples.AudioStarted("microphone", "audio/microphone.wav"))),
             Event(sessionKey, collector, 0, 500, "browser.navigation", "navigation-started",
                 new { context, navigationId = "navigation-1", url = "https://example.test/", primaryPage = true, sameDocument = false }),
             Event(sessionKey, collector, 1, 550, "browser.navigation", "navigation-completed",

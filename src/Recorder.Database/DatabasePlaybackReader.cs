@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Npgsql;
+using Recorder.Database.Evidence;
 using Recorder.Contracts;
 using Recorder.Session;
 
@@ -115,7 +116,7 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
         }
 
         await using (var command = dataSource.CreateCommand(
-            $"SELECT {DatabaseEventNames.Columns} FROM events e " +
+            $"SELECT {names.Columns} FROM events e " +
             "WHERE e.recording_id = $1 AND e.channel_id = ANY($3) ORDER BY e.event_key"))
         {
             command.Parameters.AddWithValue(recordingId);
@@ -201,11 +202,17 @@ public sealed class DatabaseEventRecordSource(
                 "The event was not loaded from the database, so it has no database key.");
         }
 
+        // A payload is in its event type's evidence table or, for event types
+        // without one yet, in the transitional jsonb payload table.
+        var payloadColumn = EvidenceCatalog.ByEventType.TryGetValue((item.Channel, item.EventType), out var table)
+            ? $"coalesce((SELECT {EvidenceSql.PayloadExpression(table)}::text FROM {table.Name} t " +
+                "WHERE t.recording_id = $1 AND t.event_key = $2), p.payload::text)"
+            : "p.payload::text";
         using var command = dataSource.CreateCommand(
             "SELECT sv.name, ec.name, k.collector_type, rc.instance_id, k.producer_version, " +
             "c.name, k.capture_method, e.sequence, e.monotonic_nanoseconds, cm.name, " +
             "td.name, e.native_timestamp_value, tu.name, e.timestamp_uncertainty_nanoseconds, " +
-            "e.observed_utc, e.observed_utc_tick_remainder, et.name, p.payload::text, " +
+            "e.observed_utc, e.observed_utc_tick_remainder, et.name, " + payloadColumn + ", " +
             "ARRAY(SELECT q.name FROM event_quality_flags f JOIN quality_flags q USING (quality_flag_id) " +
             "WHERE f.recording_id = $1 AND f.event_key = $2 ORDER BY q.quality_flag_id), " +
             "ARRAY(SELECT r.related_event_id FROM event_related_evidence r " +

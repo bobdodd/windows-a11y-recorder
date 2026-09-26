@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
+using Recorder.Database.Evidence;
 
 namespace Recorder.Database;
 
@@ -14,6 +16,7 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
     private readonly ReferenceKeys _keys = new(dataSource);
     private readonly Dictionary<string, (int Id, int Kind)> _collectors = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _clockMappings = new(StringComparer.Ordinal);
+    private EvidenceMapper? _mapper;
 
     /// <summary>The next unused event key of the recording.</summary>
     public static async Task<long> NextEventKeyAsync(
@@ -37,12 +40,21 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         ArgumentNullException.ThrowIfNull(batch);
         var refusals = new List<StoreRefusal>();
         var rows = new List<(int Index, EventRow Row)>(batch.Events.Count);
+        if (_mapper is null && batch.Events.Count > 0)
+        {
+            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken)
+                .ConfigureAwait(false);
+            _mapper = new EvidenceMapper(
+                await EvidenceCopy.NextIdentityKeysAsync(connection, recordingId, cancellationToken)
+                    .ConfigureAwait(false));
+        }
+
         for (var index = 0; index < batch.Events.Count; index++)
         {
-            var row = await ResolveAsync(batch.Events[index], cancellationToken).ConfigureAwait(false);
+            var (row, refusal) = await ResolveAsync(batch.Events[index], cancellationToken).ConfigureAwait(false);
             if (row is null)
             {
-                refusals.Add(new StoreRefusal(index, "event-collector-mismatch"));
+                refusals.Add(new StoreRefusal(index, refusal!));
                 continue;
             }
 
@@ -86,7 +98,9 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         return refusals;
     }
 
-    private async Task<EventRow?> ResolveAsync(BufferedEvent buffered, CancellationToken cancellationToken)
+    private async Task<(EventRow? Row, string? Refusal)> ResolveAsync(
+        BufferedEvent buffered,
+        CancellationToken cancellationToken)
     {
         var record = buffered.Event;
         var kind = await _keys.GetCollectorKindAsync(
@@ -107,7 +121,27 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
 
         if (collector.Kind != kind)
         {
-            return null;
+            return (null, "event-collector-mismatch");
+        }
+
+        EvidenceRows? evidence = null;
+        if (EvidenceCatalog.ByEventType.TryGetValue((record.Channel, record.EventType), out var table))
+        {
+            try
+            {
+                using var payload = JsonDocument.Parse(buffered.PayloadJson);
+                evidence = _mapper!.Map(table, buffered.EventKey, payload.RootElement);
+            }
+            catch (EvidenceMappingException exception)
+            {
+                return (null, exception.Reason);
+            }
+            catch (JsonException)
+            {
+                return (null, "payload-not-json");
+            }
+
+            await ResolveNamesAsync(evidence, cancellationToken).ConfigureAwait(false);
         }
 
         if (!_clockMappings.TryGetValue(record.ClockMappingId, out var clockMapping))
@@ -139,7 +173,7 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
 
         var ticks = record.ObservedUtc.UtcTicks;
         var remainder = (short)(ticks % 10);
-        return new EventRow(
+        return (new EventRow(
             buffered,
             collector.Id,
             (short)await _keys.GetAsync(ReferenceKeys.Channels, record.Channel, cancellationToken)
@@ -154,7 +188,32 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
             remainder,
             domain,
             unit,
-            flags);
+            flags,
+            evidence), null);
+    }
+
+    private async Task ResolveNamesAsync(EvidenceRows evidence, CancellationToken cancellationToken)
+    {
+        async Task ResolveAsync(IEnumerable<EvidenceRow> rows)
+        {
+            foreach (var row in rows)
+            {
+                for (var index = 0; index < row.Values.Length; index++)
+                {
+                    if (row.Values[index] is PendingName name)
+                    {
+                        row.Values[index] = await _keys.GetAsync(ReferenceKeys.Names, name.Value, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+
+        await ResolveAsync(evidence.Rows).ConfigureAwait(false);
+        foreach (var identity in EvidenceCopy.UnstoredIdentities([evidence]))
+        {
+            await ResolveAsync(identity.Rows).ConfigureAwait(false);
+        }
     }
 
     private async Task WriteCoreAsync(
@@ -169,10 +228,18 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
             .ConfigureAwait(false);
 
+        List<IdentityRow> identities = [];
         if (rows.Count > 0)
         {
             await CopyEventsAsync(connection, rows, cancellationToken).ConfigureAwait(false);
             await CopyChildrenAsync(connection, rows, cancellationToken).ConfigureAwait(false);
+            var evidence = rows.Where(row => row.Evidence is not null).Select(row => row.Evidence!).ToArray();
+            identities = EvidenceCopy.UnstoredIdentities(evidence);
+            await EvidenceCopy.CopyAsync(
+                connection,
+                recordingId,
+                identities.SelectMany(identity => identity.Rows).Concat(evidence.SelectMany(item => item.Rows)),
+                cancellationToken).ConfigureAwait(false);
         }
 
         foreach (var rejection in rejections)
@@ -222,6 +289,10 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var identity in identities)
+        {
+            identity.Stored = true;
+        }
     }
 
     private async Task CopyEventsAsync(
@@ -355,13 +426,19 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
             }
         }
 
-        // Transitional: every payload is stored as jsonb until its evidence
-        // model has tables. See Migrations/0001_core.sql.
+        // Transitional: a payload whose event type has no evidence table yet
+        // is stored as jsonb. See Migrations/0001_core.sql.
+        var unmapped = rows.Where(row => row.Evidence is null).ToArray();
+        if (unmapped.Length == 0)
+        {
+            return;
+        }
+
         await using (var importer = await connection.BeginBinaryImportAsync(
             "COPY event_payloads_unmapped (recording_id, event_key, payload) FROM STDIN (FORMAT BINARY)",
             cancellationToken).ConfigureAwait(false))
         {
-            foreach (var row in rows)
+            foreach (var row in unmapped)
             {
                 importer.StartRow();
                 importer.Write(recordingId, NpgsqlDbType.Uuid);
@@ -415,5 +492,6 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         short TickRemainder,
         short? NativeDomainId,
         short? NativeUnitId,
-        IReadOnlyList<int> QualityFlagIds);
+        IReadOnlyList<int> QualityFlagIds,
+        EvidenceRows? Evidence);
 }

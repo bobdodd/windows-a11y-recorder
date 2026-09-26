@@ -1,5 +1,8 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Npgsql;
+using Recorder.Database.Evidence;
 using Recorder.Contracts;
 using Recorder.Session;
 
@@ -12,14 +15,21 @@ namespace Recorder.Database;
 internal sealed class DatabaseEventNames
 {
     // The payload properties playback reads, selected in the database so the
-    // rest of each payload is not sent. Transitional, with the payload table.
-    private static readonly string PayloadProjection =
-        "jsonb_strip_nulls(jsonb_build_object(" +
+    // rest of each payload is not read.
+    private static readonly IReadOnlySet<string> PlaybackProperties =
+        SessionPlaybackArchiveBuilder.PayloadProperties.ToHashSet(StringComparer.Ordinal);
+
+    // Transitional: payloads of event types without evidence tables are in
+    // the jsonb payload table until those tables exist.
+    private static readonly string UnmappedProjection =
+        "(SELECT jsonb_strip_nulls(jsonb_build_object(" +
         string.Join(
             ", ",
             SessionPlaybackArchiveBuilder.PayloadProperties.Select(property =>
                 $"'{property}', p.payload -> '{property}'")) +
-        "))::text";
+        "))::text FROM event_payloads_unmapped p WHERE p.recording_id = $1 AND p.event_key = e.event_key)";
+
+    private string? _columns;
 
     public required string SessionKey { get; init; }
 
@@ -36,13 +46,37 @@ internal sealed class DatabaseEventNames
 
     /// <summary>
     /// The columns <see cref="Read"/> reads, for events aliased e, with the
-    /// recording as $1 and the payload channels as $2.
+    /// recording as $1 and the payload channels as $2. The payload column
+    /// reads each event type's evidence table.
     /// </summary>
-    public static string Columns =>
-        "e.event_key, e.recording_collector_id, e.channel_id, e.event_type_id, " +
-        "e.evidence_class_id, e.sequence, e.monotonic_nanoseconds, " +
-        "CASE WHEN e.channel_id = ANY($2) THEN (SELECT " + PayloadProjection + " " +
-        "FROM event_payloads_unmapped p WHERE p.recording_id = $1 AND p.event_key = e.event_key) END";
+    public string Columns => _columns ??= BuildColumns();
+
+    private string BuildColumns()
+    {
+        var channelIds = Channels.ToDictionary(pair => pair.Value, pair => pair.Key, StringComparer.Ordinal);
+        var eventTypeIds = EventTypes.ToDictionary(pair => pair.Value, pair => pair.Key, StringComparer.Ordinal);
+        var branches = new StringBuilder();
+        foreach (var ((channel, eventType), table) in EvidenceCatalog.ByEventType)
+        {
+            if (!SessionPlaybackArchiveBuilder.ReadsPayload(channel) ||
+                !channelIds.TryGetValue(channel, out var channelId) ||
+                !eventTypeIds.TryGetValue(eventType, out var eventTypeId))
+            {
+                continue;
+            }
+
+            branches.Append(CultureInfo.InvariantCulture,
+                $"WHEN e.channel_id = {channelId} AND e.event_type_id = {eventTypeId} THEN coalesce((SELECT " +
+                $"jsonb_strip_nulls({EvidenceSql.ProjectionExpression(table, PlaybackProperties)})::text " +
+                $"FROM {table.Name} t WHERE t.recording_id = $1 AND t.event_key = e.event_key), " +
+                $"{UnmappedProjection}) ");
+        }
+
+        return "e.event_key, e.recording_collector_id, e.channel_id, e.event_type_id, " +
+            "e.evidence_class_id, e.sequence, e.monotonic_nanoseconds, " +
+            "CASE WHEN NOT e.channel_id = ANY($2) THEN NULL " + branches +
+            "ELSE " + UnmappedProjection + " END";
+    }
 
     public short[] ChannelIds(IEnumerable<string> names)
     {
@@ -263,7 +297,7 @@ public sealed class DatabaseSessionTimeline : ISessionTimeline
         }
 
         await using var command = _dataSource.CreateCommand(
-            $"SELECT {DatabaseEventNames.Columns} FROM unnest($3::smallint[]) AS c (channel_id) " +
+            $"SELECT {_names.Columns} FROM unnest($3::smallint[]) AS c (channel_id) " +
             "CROSS JOIN LATERAL (SELECT * FROM events e " +
             "WHERE e.recording_id = $1 AND e.channel_id = c.channel_id AND " + condition +
             " ORDER BY " + order + " LIMIT 1) AS e " +

@@ -1,0 +1,275 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text;
+
+namespace Recorder.Database.Evidence;
+
+/// <summary>
+/// The SQL generated from the evidence catalog: the tables that store
+/// payloads, and the expressions that rebuild a payload as jsonb.
+/// </summary>
+internal static class EvidenceSql
+{
+    /// <summary>Where the partition order of the evidence tables starts.</summary>
+    public const int FirstPartitionOrder = 7;
+
+    // jsonb_build_object takes at most 100 arguments.
+    private const int PairsPerObject = 40;
+
+    private static readonly ConcurrentDictionary<EvidenceTable, string> PayloadExpressions = new();
+
+    /// <summary>The migration that creates the evidence tables.</summary>
+    public static string Migration()
+    {
+        var builder = new StringBuilder();
+        builder.Append(
+            "-- Evidence tables. Generated from src/Recorder.Database/Evidence/EvidenceCatalog.cs\n" +
+            "-- by EvidenceSql.Migration(); a test requires this file to match. Edit the\n" +
+            "-- catalog, not this file. See docs/architecture/session-database.md.\n\n");
+        builder.Append(
+            "-- Strings from small or recurring vocabularies, stored once and referenced\n" +
+            "-- by key from every evidence table.\n" +
+            "CREATE TABLE names (\n" +
+            "    name_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,\n" +
+            "    name text NOT NULL UNIQUE\n" +
+            ");\n\n");
+
+        foreach (var table in EvidenceCatalog.Tables)
+        {
+            builder.Append(CreateTable(table)).Append('\n');
+        }
+
+        builder.Append(
+            "INSERT INTO recording_partitioned_tables (table_name, partition_prefix, partition_order) VALUES\n");
+        var order = FirstPartitionOrder;
+        builder.Append(string.Join(
+            ",\n",
+            EvidenceCatalog.Tables.Select(table =>
+            {
+                var current = order++;
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"    ('{table.Name}', 'pt{current}', {current})");
+            })));
+        builder.Append(";\n");
+        return builder.ToString();
+    }
+
+    private static string CreateTable(EvidenceTable table)
+    {
+        var lines = new List<string> { "recording_id uuid NOT NULL" };
+        var constraints = new List<string>();
+        switch (table.Kind)
+        {
+            case TableKind.Evidence:
+                lines.Add("event_key bigint NOT NULL");
+                constraints.Add(
+                    "FOREIGN KEY (recording_id, event_key)\n        REFERENCES events (recording_id, event_key)");
+                break;
+            case TableKind.Identity:
+                lines.Add("identity_key bigint NOT NULL");
+                break;
+            default:
+                lines.Add("owner_key bigint NOT NULL");
+                for (var level = 1; level < table.Depth; level++)
+                {
+                    lines.Add($"{EvidenceTable.Ordinal(level)} integer NOT NULL");
+                }
+
+                lines.Add(table.MapEntry
+                    ? "entry_name_id integer NOT NULL REFERENCES names (name_id)"
+                    : $"{EvidenceTable.Ordinal(table.Depth)} integer NOT NULL");
+                constraints.Add(
+                    $"FOREIGN KEY (recording_id, {string.Join(", ", table.ParentKeyColumns)})\n" +
+                    $"        REFERENCES {table.Owner!.Name} (recording_id, {string.Join(", ", table.OwnerKeyColumns)})");
+                break;
+        }
+
+        foreach (var column in table.Columns)
+        {
+            var line = $"{column.Name} {column.SqlType}{(column.NotNull ? " NOT NULL" : string.Empty)}";
+            if (column.References == "names (name_id)")
+            {
+                line += " REFERENCES names (name_id)";
+            }
+            else if (column.References is { } identity)
+            {
+                constraints.Add(
+                    $"FOREIGN KEY (recording_id, {column.Name})\n" +
+                    $"        REFERENCES {identity} (recording_id, identity_key)");
+            }
+
+            lines.Add(line);
+        }
+
+        constraints.Insert(0, $"PRIMARY KEY (recording_id, {string.Join(", ", table.KeyColumns)})");
+        return $"CREATE TABLE {table.Name} (\n    " +
+            string.Join(",\n    ", lines.Concat(constraints)) +
+            "\n) PARTITION BY LIST (recording_id);\n";
+    }
+
+    /// <summary>
+    /// The jsonb expression that rebuilds the payload held by the row of
+    /// <paramref name="table"/> aliased t.
+    /// </summary>
+    public static string PayloadExpression(EvidenceTable table) =>
+        PayloadExpressions.GetOrAdd(table, key => new ExpressionBuilder().Row(key, "t", null));
+
+    /// <summary>
+    /// The jsonb expression that rebuilds only the named top-level payload
+    /// members of the row aliased t.
+    /// </summary>
+    public static string ProjectionExpression(EvidenceTable table, IReadOnlySet<string> properties) =>
+        new ExpressionBuilder().Row(table, "t", properties);
+
+    private sealed class ExpressionBuilder
+    {
+        private int _aliases;
+
+        public string Row(EvidenceTable table, string alias, IReadOnlySet<string>? properties)
+        {
+            if (table.ScalarItem)
+            {
+                return Value(table.Fields.Single(), alias, string.Empty, table);
+            }
+
+            return ObjectOf(table.Fields, alias, string.Empty, table, properties);
+        }
+
+        private string ObjectOf(
+            IReadOnlyList<Field> fields,
+            string alias,
+            string prefix,
+            EvidenceTable table,
+            IReadOnlySet<string>? properties)
+        {
+            var parts = new List<string>();
+            var pairs = new List<string>();
+
+            void Flush()
+            {
+                for (var start = 0; start < pairs.Count; start += PairsPerObject)
+                {
+                    parts.Add("jsonb_build_object(" +
+                        string.Join(", ", pairs.Skip(start).Take(PairsPerObject)) + ")");
+                }
+
+                pairs.Clear();
+            }
+
+            foreach (var field in fields)
+            {
+                if (field is GroupField group)
+                {
+                    var members = group.Identity.Fields.Where(member =>
+                        properties is null || properties.Contains(member.Json)).ToArray();
+                    if (members.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var inner = NextAlias();
+                    Flush();
+                    parts.Add(
+                        $"coalesce((SELECT {ObjectOf(members, inner, string.Empty, group.Identity, null)} " +
+                        $"FROM {group.Identity.Name} {inner} WHERE {inner}.recording_id = {alias}.recording_id " +
+                        $"AND {inner}.identity_key = {alias}.{prefix}{group.Column}), '{{}}'::jsonb)");
+                    continue;
+                }
+
+                if (properties is not null && !properties.Contains(field.Json))
+                {
+                    continue;
+                }
+
+                var value = Value(field, alias, prefix, table);
+                if (field.Presence == Presence.Optional)
+                {
+                    Flush();
+                    parts.Add(
+                        $"CASE WHEN ({value}) IS NULL THEN '{{}}'::jsonb " +
+                        $"ELSE jsonb_build_object('{field.Json}', {value}) END");
+                }
+                else
+                {
+                    pairs.Add($"'{field.Json}', {value}");
+                }
+            }
+
+            Flush();
+            return parts.Count switch
+            {
+                0 => "'{}'::jsonb",
+                1 => parts[0],
+                _ => "(" + string.Join(" || ", parts) + ")"
+            };
+        }
+
+        private string Value(Field field, string alias, string prefix, EvidenceTable table)
+        {
+            var column = $"{alias}.{prefix}{field.Column}";
+            switch (field)
+            {
+                case ScalarField { Type: ScalarType.Utc }:
+                    // The form System.Text.Json writes a UTC DateTimeOffset in:
+                    // up to seven fractional digits, without trailing zeros.
+                    return $"(to_char({column} AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS') || " +
+                        $"rtrim(rtrim('.' || to_char({column} AT TIME ZONE 'UTC', 'US') || {column}_tick::text, " +
+                        "'0'), '.') || '+00:00')";
+                case ScalarField:
+                    return column;
+                case NameField:
+                    var name = NextAlias();
+                    return $"(SELECT {name}.name FROM names {name} WHERE {name}.name_id = {column})";
+                case IdentityField identity:
+                    var inner = NextAlias();
+                    return $"(SELECT {Row(identity.Identity, inner, null)} FROM {identity.Identity.Name} {inner} " +
+                        $"WHERE {inner}.recording_id = {alias}.recording_id AND {inner}.identity_key = {column})";
+                case InlineField inline:
+                    var body = ObjectOf(inline.Fields, alias, prefix + inline.Column + "_", table, null);
+                    return Guarded(field, alias, prefix, body);
+                case ListField list:
+                    var item = NextAlias();
+                    return Guarded(
+                        field,
+                        alias,
+                        prefix,
+                        $"(SELECT coalesce(jsonb_agg({Row(list.Child, item, null)} " +
+                        $"ORDER BY {item}.{EvidenceTable.Ordinal(list.Child.Depth)}), '[]'::jsonb) " +
+                        $"FROM {list.Child.Name} {item} WHERE {ChildJoin(list.Child, item, alias)})");
+                case MapField map:
+                    var entry = NextAlias();
+                    var entryName = NextAlias();
+                    return Guarded(
+                        field,
+                        alias,
+                        prefix,
+                        $"(SELECT coalesce(jsonb_object_agg((SELECT {entryName}.name FROM names {entryName} " +
+                        $"WHERE {entryName}.name_id = {entry}.entry_name_id), {Row(map.Child, entry, null)}), " +
+                        $"'{{}}'::jsonb) FROM {map.Child.Name} {entry} WHERE {ChildJoin(map.Child, entry, alias)})");
+                default:
+                    throw new InvalidOperationException($"Unknown member kind {field.GetType().Name}.");
+            }
+        }
+
+        private static string Guarded(Field field, string alias, string prefix, string body) =>
+            EvidenceLayout.HasPresenceColumn(field)
+                ? $"CASE WHEN {alias}.{EvidenceLayout.PresenceColumn(prefix, field)} THEN {body} END"
+                : body;
+
+        private static string ChildJoin(EvidenceTable child, string childAlias, string ownerAlias)
+        {
+            var conditions = new List<string> { $"{childAlias}.recording_id = {ownerAlias}.recording_id" };
+            var parent = child.ParentKeyColumns;
+            var owner = child.OwnerKeyColumns;
+            for (var index = 0; index < parent.Count; index++)
+            {
+                conditions.Add($"{childAlias}.{parent[index]} = {ownerAlias}.{owner[index]}");
+            }
+
+            return string.Join(" AND ", conditions);
+        }
+
+        private string NextAlias() => "a" + (++_aliases).ToString(CultureInfo.InvariantCulture);
+    }
+}

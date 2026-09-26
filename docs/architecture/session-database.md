@@ -247,10 +247,43 @@ only once the database version is tested in full. It adds the
   an outage is written event by event, so one bad record refuses only itself.
   If the store cannot be reached within the completion timeout when
   recording stops, the spill file is kept and its path is reported.
-- **Transitional payload table.** Until each channel has typed evidence
-  tables, an event's payload is stored in `event_payloads_unmapped` as
-  `jsonb`. This contradicts the decision against `jsonb` for evidence-model
-  fields, and the table is emptied and dropped before the branch is merged.
+- **Evidence tables.** An event's payload is stored in typed tables chosen by
+  its channel and event type, generated from the evidence catalog in
+  `src/Recorder.Database/Evidence/EvidenceCatalog.cs`. Migration
+  `0003_evidence_tables.sql` is generated from the catalog, and a test
+  requires the two to match; setting `RECORDER_REGENERATE_EVIDENCE_MIGRATION`
+  to `1` while running that test rewrites the file. Each payload member is a
+  column, except that:
+  - strings from small or recurring vocabularies, such as reasons, states,
+    process names, and control types, are stored once in `names` and
+    referenced by `name_id`;
+  - nested objects that recur within a recording are identities, stored once
+    per recording and referenced by key: windows, monitors, UI Automation
+    elements, browser contexts, and repeated texts such as an audio buffer's
+    file path. A writer stores each distinct value once; a resumed recording
+    has a new writer, which stores its identities again under new keys;
+  - other nested objects are flattened into the owning row, with a
+    `has_<member>` column when the object may be null;
+  - arrays and maps are child tables keyed by their owner and position or
+    entry name.
+  The first slice covers collector lifecycle, session markers, raw keyboard
+  and mouse input, the foreground window, UI Automation events, desktop
+  frames, microphone and system audio, browser lifecycle, and the collector
+  omissions of those channels.
+- **Stored forms.** The rebuilt payload matches the written payload in
+  content, with these normal forms: a member the validator allows to be
+  absent, when written as null, reads back absent; a UTC time is stored to
+  the tenth of a microsecond and reads back in the form System.Text.Json
+  writes, without trailing fractional zeros; and property order is not kept.
+  A payload member the catalog does not hold, a member of the wrong type, and
+  text containing a NUL character, which PostgreSQL text cannot store, are
+  refused with a reason such as `payload-member-unmapped:payload/colour` in
+  `event_rejections`, rather than stored in part.
+- **Transitional payload table.** Payloads of event types the catalog does
+  not cover yet are stored in `event_payloads_unmapped` as `jsonb`, which the
+  player also reads for recordings written before the evidence tables. This
+  contradicts the decision against `jsonb` for evidence-model fields, and the
+  table is emptied and dropped before the branch is merged.
 - **Binaries.** `scripts/Get-PostgresBinaries.ps1` downloads the EDB Windows
   x64 binaries archive for 18.6, checks its SHA-256 against the value computed
   from the archive downloaded on September 25, 2026, and extracts the server
@@ -305,8 +338,9 @@ only once the database version is tested in full. It adds the
   the user has moved on is discarded.
   An event's complete record is read from the database only when it is
   selected in the inspector, and is rebuilt from the envelope columns and
-  child tables. The rebuilt record matches the event log's record in content
-  but not byte for byte: `jsonb` does not keep a payload's property order,
+  child tables, and its payload from the evidence tables. The rebuilt record
+  matches the event log's record in content but not byte for byte, in the
+  stored forms described above: a payload's property order is not kept,
   quality flags are returned in the order their names were first stored, and
   numbers are returned as PostgreSQL normalizes them. `manifest.json` is
   still read from the session folder, and frames and audio are still read
@@ -316,7 +350,9 @@ only once the database version is tested in full. It adds the
   recording of 100,000 events with payloads of about 2 KB opened from the
   database in about 145 ms, and 200 timeline lookups took about 224 ms in
   total, in one run of a debug build. Before paging, the same recording
-  loaded in about 1 s. These figures are not measurements on the target
+  loaded in about 1 s. With a quarter of those events, the UI Automation
+  events, read from evidence tables, one run opened the recording in about
+  154 ms and took about 304 ms for the 200 lookups. These figures are not measurements on the target
   machine, and a recording of an hour or more has not been measured.
 - **App.** The app starts the database when its window loads, with the data
   directory `%LOCALAPPDATA%\Windows A11y Recorder\Database`, and stops it
@@ -325,7 +361,7 @@ only once the database version is tested in full. It adds the
   are written to session files only. The build copies `.postgres\pgsql`, when
   present, to `pgsql` in the app's output folder.
 
-Still to come on the branch: typed evidence and identity tables per channel, removing what this
+Still to come on the branch: evidence tables for the remaining browser channels, removing what this
 retires, including `events.ndjson` once that is agreed, the revised privacy policy and threat model, and
 the hour-long Windows system test.
 
