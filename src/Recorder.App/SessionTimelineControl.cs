@@ -40,8 +40,9 @@ public sealed class SessionTimelineControl : FrameworkElement
     private readonly DrawingVisual _overlayLayer = new();
     private readonly VisualCollection _layers;
     private ISessionTimeline? _timeline;
-    private IReadOnlySet<string> _visibleChannels = new HashSet<string>();
-    private bool _showOtherChannels = true;
+    // The channels the filters show, as the window decides them, so the
+    // timeline and the filter summary always agree. Null shows every channel.
+    private IReadOnlySet<string>? _visibleChannels;
 
     // The recording's channels shown with the current filters, in all and
     // by lane and series.
@@ -110,12 +111,10 @@ public sealed class SessionTimelineControl : FrameworkElement
         RedrawAll();
     }
 
-    public void SetVisibleChannels(
-        IReadOnlySet<string> visibleChannels,
-        bool showOtherChannels)
+    public void SetVisibleChannels(IReadOnlySet<string> visibleChannels)
     {
+        ArgumentNullException.ThrowIfNull(visibleChannels);
         _visibleChannels = visibleChannels;
-        _showOtherChannels = showOtherChannels;
         _request++;
         RebuildShownChannels();
         if (_selectedEvent is not null && !_shownChannels.Contains(_selectedEvent.Channel))
@@ -395,8 +394,7 @@ public sealed class SessionTimelineControl : FrameworkElement
     }
 
     private bool IsChannelVisible(string channel) =>
-        _visibleChannels.Contains(channel) ||
-        (_showOtherChannels && !ChannelBrushes.ContainsKey(channel));
+        _visibleChannels is null || _visibleChannels.Contains(channel);
 
     private void SelectEvent(SessionTimelineEvent? item)
     {

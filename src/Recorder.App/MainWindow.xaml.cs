@@ -1181,7 +1181,7 @@ public partial class MainWindow : Window
         _visibleTimelineEventCount = _visibleTimelineChannels.Sum(
             channel => timeline.ChannelCounts[channel]);
         _nearestVersion++;
-        TimelineControl.SetVisibleChannels(visibleChannels, showOther);
+        TimelineControl.SetVisibleChannels(_visibleTimelineChannels);
         FilterSummaryTextBlock.Text =
             $"{_visibleTimelineEventCount:N0} of " +
             $"{timeline.Count:N0} events shown";

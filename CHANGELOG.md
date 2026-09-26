@@ -477,6 +477,11 @@ from the product version.
 
 ### Fixed
 
+- Hide browser events from the playback timeline when the Browser filter is
+  cleared. The timeline treated every channel without its own lane colour as
+  another channel, so browser events stayed drawn while Other was selected,
+  although the filter summary no longer counted them. The window now gives
+  the timeline the exact set of channels it shows.
 - Keep the UI Automation collector running when an event's element is gone
   before its cached properties are read. The cached read did not catch
   `ElementNotAvailableException`, so one such event ended the record stream
