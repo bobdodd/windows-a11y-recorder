@@ -49,6 +49,15 @@ from the product version.
   when the database cannot be read, are opened from their session files, and
   the app says which source it read and why. Frames, audio, and
   `manifest.json` are still read from the session folder.
+- Page the playback timeline for recordings opened from the PostgreSQL session
+  store, on the `postgres-session-store` branch. The player no longer holds
+  every event in memory: it draws the timeline from per-channel counts over
+  262,144 time buckets, read in one grouped query when the recording opens,
+  and the event at the playhead, the event under a click, and keyboard
+  stepping are each read by an indexed query. Migration 0002 replaces the
+  channel and time index with one that also orders by event key. Recordings
+  opened from session files use the same timeline interface over their
+  events in memory, and events with the same time are now ordered by line.
 - Record worker and non-Node dispatch evidence. Protocol 0.31 records
   listener and dispatch evidence in dedicated, shared, and service worker
   global scopes, for dispatches to EventTargets that are not Nodes, for a

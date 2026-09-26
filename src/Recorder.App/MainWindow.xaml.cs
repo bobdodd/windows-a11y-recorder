@@ -62,7 +62,16 @@ public partial class MainWindow : Window
     private string? _databaseStartError;
     private SessionAudioPlayer? _audioPlayer;
     private SessionPlaybackArchive? _playbackArchive;
-    private IReadOnlyList<SessionTimelineEvent> _visibleTimelineEvents = [];
+    private HashSet<string> _visibleTimelineChannels = new(StringComparer.Ordinal);
+    private long _visibleTimelineEventCount;
+
+    // The status line shows the event at or before the playhead. Lookups
+    // are coalesced: while one runs, only the latest position waits, and a
+    // result is discarded if the recording, filters, or status line changed
+    // since it was requested.
+    private long? _pendingNearestPosition;
+    private bool _nearestLookupRunning;
+    private long _nearestVersion;
     private long _playbackAnchorNanoseconds;
     private long _playbackPositionNanoseconds;
     private long _timelineViewportStartNanoseconds;
@@ -419,6 +428,12 @@ public partial class MainWindow : Window
         SetTimelineViewport((long)(e.NewValue * 1_000_000_000));
     }
 
+    private void TimelineControl_LookupFailed(object? sender, string message)
+    {
+        _nearestVersion++;
+        PlaybackStatusTextBlock.Text = $"The timeline could not be read: {message}";
+    }
+
     private void TimelineControl_SelectedEventChanged(
         object? sender,
         TimelineEventSelectedEventArgs e)
@@ -674,7 +689,7 @@ public partial class MainWindow : Window
             _playbackPositionNanoseconds = 0;
             _displayedFrameIndex = -1;
             TimelineControl.SetSession(
-                _playbackArchive.Events,
+                _playbackArchive.Timeline,
                 _playbackArchive.DurationNanoseconds);
             BrowserNavigationListBox.ItemsSource =
                 _playbackArchive.BrowserNavigations;
@@ -703,14 +718,15 @@ public partial class MainWindow : Window
             PlaybackStatusTextBlock.Text =
                 $"{_playbackArchive.Manifest.SessionId} | " +
                 $"{_playbackArchive.Frames.Count:N0} frames | " +
-                $"{_playbackArchive.Events.Count:N0} events | " +
+                $"{_playbackArchive.Timeline.Count:N0} events | " +
                 $"{_playbackArchive.AudioTracks.Count} audio tracks | " +
                 $"Read {source}";
+            _nearestVersion++;
             busy.Dispose();
             _busy.AnnounceCompleted(
                 $"Recording loaded {source}. " +
                 $"{_playbackArchive.Frames.Count:N0} frames, " +
-                $"{_playbackArchive.Events.Count:N0} events.");
+                $"{_playbackArchive.Timeline.Count:N0} events.");
             PlayPauseButton.Focus();
         }
         catch (Exception exception)
@@ -999,27 +1015,54 @@ public partial class MainWindow : Window
             $"{FormatTime(frame.MonotonicNanoseconds)}");
     }
 
-    private void DisplayNearestEvent(long positionNanoseconds)
+    private async void DisplayNearestEvent(long positionNanoseconds)
     {
-        if (_playbackArchive is null || _visibleTimelineEvents.Count == 0)
+        if (_playbackArchive is null || _visibleTimelineEventCount == 0)
         {
+            _nearestVersion++;
             PlaybackStatusTextBlock.Text = "No events match the current filters.";
             return;
         }
 
-        var index = FindEventAtOrBefore(
-            _visibleTimelineEvents,
-            positionNanoseconds);
-        if (index < 0)
+        _pendingNearestPosition = positionNanoseconds;
+        if (_nearestLookupRunning)
         {
-            PlaybackStatusTextBlock.Text = "No matching event before this position.";
             return;
         }
 
-        var item = _visibleTimelineEvents[index];
-        PlaybackStatusTextBlock.Text =
-            $"{FormatTime(item.MonotonicNanoseconds)} | " +
-            $"{item.Channel} | {item.Summary}";
+        _nearestLookupRunning = true;
+        try
+        {
+            while (_pendingNearestPosition is { } position && _playbackArchive is { } archive)
+            {
+                _pendingNearestPosition = null;
+                var version = _nearestVersion;
+                var item = await archive.Timeline
+                    .AtOrBeforeAsync(position, _visibleTimelineChannels)
+                    .ConfigureAwait(true);
+                if (version != _nearestVersion || !ReferenceEquals(archive, _playbackArchive))
+                {
+                    continue;
+                }
+
+                PlaybackStatusTextBlock.Text = item is null
+                    ? "No matching event before this position."
+                    : $"{FormatTime(item.MonotonicNanoseconds)} | " +
+                      $"{item.Channel} | {item.Summary}";
+            }
+        }
+        catch (Exception exception) when (
+            exception is NpgsqlException or InvalidOperationException or
+                InvalidDataException or ObjectDisposedException or IOException)
+        {
+            _pendingNearestPosition = null;
+            PlaybackStatusTextBlock.Text =
+                $"The timeline could not be read: {exception.Message}";
+        }
+        finally
+        {
+            _nearestLookupRunning = false;
+        }
     }
 
     private void StepFrame(int direction)
@@ -1096,7 +1139,8 @@ public partial class MainWindow : Window
     {
         if (_playbackArchive is null)
         {
-            _visibleTimelineEvents = [];
+            _visibleTimelineChannels = new HashSet<string>(StringComparer.Ordinal);
+            _visibleTimelineEventCount = 0;
             FilterSummaryTextBlock.Text = "No recording loaded.";
             return;
         }
@@ -1128,15 +1172,19 @@ public partial class MainWindow : Window
         }
         var showOther = FilterOtherCheckBox.IsChecked == true;
 
-        _visibleTimelineEvents = _playbackArchive.Events
-            .Where(item =>
-                visibleChannels.Contains(item.Channel) ||
-                (showOther && !FilteredChannels.Contains(item.Channel)))
-            .ToArray();
+        var timeline = _playbackArchive.Timeline;
+        _visibleTimelineChannels = timeline.ChannelCounts.Keys
+            .Where(channel =>
+                visibleChannels.Contains(channel) ||
+                (showOther && !FilteredChannels.Contains(channel)))
+            .ToHashSet(StringComparer.Ordinal);
+        _visibleTimelineEventCount = _visibleTimelineChannels.Sum(
+            channel => timeline.ChannelCounts[channel]);
+        _nearestVersion++;
         TimelineControl.SetVisibleChannels(visibleChannels, showOther);
         FilterSummaryTextBlock.Text =
-            $"{_visibleTimelineEvents.Count:N0} of " +
-            $"{_playbackArchive.Events.Count:N0} events shown";
+            $"{_visibleTimelineEventCount:N0} of " +
+            $"{timeline.Count:N0} events shown";
         DisplayNearestEvent(_playbackPositionNanoseconds);
     }
 
@@ -1506,30 +1554,6 @@ public partial class MainWindow : Window
         {
             var middle = low + ((high - low) / 2);
             if (frames[middle].MonotonicNanoseconds <= positionNanoseconds)
-            {
-                result = middle;
-                low = middle + 1;
-            }
-            else
-            {
-                high = middle - 1;
-            }
-        }
-
-        return result;
-    }
-
-    private static int FindEventAtOrBefore(
-        IReadOnlyList<SessionTimelineEvent> events,
-        long positionNanoseconds)
-    {
-        var low = 0;
-        var high = events.Count - 1;
-        var result = -1;
-        while (low <= high)
-        {
-            var middle = low + ((high - low) / 2);
-            if (events[middle].MonotonicNanoseconds <= positionNanoseconds)
             {
                 result = middle;
                 low = middle + 1;

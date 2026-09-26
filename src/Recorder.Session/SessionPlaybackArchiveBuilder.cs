@@ -84,14 +84,43 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly Dictionary<string, SessionAudioTrack> _audioTracks =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly List<BrowserEventProjection> _browserProjections = [];
+    private readonly bool _retainEvents;
     private long _maximumTimestamp;
     private string? _unreadable;
     private bool _built;
 
-    public SessionPlaybackArchiveBuilder(string sessionDirectory)
+    /// <param name="retainEvents">
+    /// Whether the archive holds every added event in
+    /// <see cref="SessionPlaybackArchive.Events"/>. A reader whose store
+    /// provides its own <see cref="ISessionTimeline"/> passes false, and adds
+    /// only the events that frames, audio tracks, and browser navigation are
+    /// built from.
+    /// </param>
+    public SessionPlaybackArchiveBuilder(string sessionDirectory, bool retainEvents = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionDirectory);
         _root = Path.GetFullPath(sessionDirectory);
+        _retainEvents = retainEvents;
+    }
+
+    /// <summary>
+    /// Whether the archive's frames, audio tracks, or browser navigation are
+    /// built from a channel's events: the events a reader must add when the
+    /// builder does not retain events.
+    /// </summary>
+    public static bool BuildsFrom(string channel) =>
+        channel == "graphics.desktop.frames" ||
+        channel.StartsWith("audio.", StringComparison.Ordinal) ||
+        channel.StartsWith("browser.", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Includes the time of an event that was not added, so the archive's
+    /// duration covers it.
+    /// </summary>
+    public void IncludeTimestamp(long monotonicNanoseconds)
+    {
+        ThrowIfBuilt();
+        _maximumTimestamp = Math.Max(_maximumTimestamp, monotonicNanoseconds);
     }
 
     public string SessionDirectory => _root;
@@ -155,7 +184,11 @@ public sealed class SessionPlaybackArchiveBuilder
     {
         var timestamp = timelineEvent.MonotonicNanoseconds;
         _maximumTimestamp = Math.Max(_maximumTimestamp, timestamp);
-        _events.Add(timelineEvent);
+        if (_retainEvents)
+        {
+            _events.Add(timelineEvent);
+        }
+
         var browserProjection = BrowserNavigationCorrelator.Project(
             timelineEvent,
             payload);
@@ -239,8 +272,7 @@ public sealed class SessionPlaybackArchiveBuilder
         }
 
         _built = true;
-        _events.Sort(static (left, right) =>
-            left.MonotonicNanoseconds.CompareTo(right.MonotonicNanoseconds));
+        _events.Sort(InMemorySessionTimeline.Compare);
         _frames.Sort(static (left, right) =>
             left.MonotonicNanoseconds.CompareTo(right.MonotonicNanoseconds));
         var duration = Math.Max(manifest.DurationNanoseconds ?? 0, _maximumTimestamp);

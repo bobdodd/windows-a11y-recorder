@@ -16,23 +16,15 @@ public sealed record DatabasePlaybackResult(
     string? Reason);
 
 /// <summary>
-/// Loads a recording's playback timeline from the database. Only the event
-/// envelope columns the timeline needs are read, with the payload
-/// properties playback reads for the channels that need them. Complete
-/// records are read one at a time when they are inspected.
+/// Opens a recording for playback from the database. The timeline is not
+/// loaded: it is read through a <see cref="DatabaseSessionTimeline"/> as
+/// playback needs it. Only the events that frames, audio tracks, and
+/// browser navigation are built from are read when the recording opens,
+/// with the payload properties playback reads. Complete records are read one
+/// at a time when they are inspected.
 /// </summary>
 public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
 {
-    // The payload properties playback reads, selected in the database so the
-    // rest of each payload is not sent. Transitional, with the payload table.
-    private static readonly string PayloadProjection =
-        "jsonb_strip_nulls(jsonb_build_object(" +
-        string.Join(
-            ", ",
-            SessionPlaybackArchiveBuilder.PayloadProperties.Select(property =>
-                $"'{property}', p.payload -> '{property}'")) +
-        "))::text";
-
     /// <summary>
     /// Opens the recording whose session key is the session folder's name,
     /// if the database holds it complete.
@@ -96,56 +88,71 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
             "SELECT recording_collector_id, instance_id FROM recording_collectors WHERE recording_id = $1",
             recordingId,
             cancellationToken).ConfigureAwait(false);
-        var payloadChannels = channels
-            .Where(channel => SessionPlaybackArchiveBuilder.ReadsPayload(channel.Value))
-            .Select(channel => channel.Key)
-            .ToArray();
+        var names = new DatabaseEventNames
+        {
+            SessionKey = sessionKey,
+            Channels = channels,
+            EventTypes = eventTypes,
+            EvidenceClasses = evidenceClasses,
+            Collectors = collectors,
+            PayloadChannelIds = channels
+                .Where(channel => SessionPlaybackArchiveBuilder.ReadsPayload(channel.Value))
+                .Select(channel => channel.Key)
+                .ToArray()
+        };
 
-        var builder = new SessionPlaybackArchiveBuilder(root);
+        // Only the events that frames, audio tracks, and browser navigation
+        // are built from are read here; the timeline queries the rest.
+        var builder = new SessionPlaybackArchiveBuilder(root, retainEvents: false);
         await using (var command = dataSource.CreateCommand(
-            "SELECT e.event_key, e.recording_collector_id, e.channel_id, e.event_type_id, " +
-            "e.evidence_class_id, e.sequence, e.monotonic_nanoseconds, " +
-            "CASE WHEN e.channel_id = ANY($2) THEN (SELECT " + PayloadProjection + " " +
-            "FROM event_payloads_unmapped p WHERE p.recording_id = $1 AND p.event_key = e.event_key) END " +
-            "FROM events e WHERE e.recording_id = $1 ORDER BY e.event_key"))
+            "SELECT max(monotonic_nanoseconds) FROM events WHERE recording_id = $1"))
         {
             command.Parameters.AddWithValue(recordingId);
-            command.Parameters.AddWithValue(payloadChannels);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken)
-                .ConfigureAwait(false);
-            long line = 0;
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            if (await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long latest)
             {
-                line++;
-                var eventKey = reader.GetInt64(0);
-                var channel = channels[reader.GetInt16(2)];
-                var sequence = reader.GetInt64(5);
-                JsonElement payload = default;
-                if (!reader.IsDBNull(7))
-                {
-                    using var document = JsonDocument.Parse(reader.GetString(7));
-                    payload = document.RootElement.Clone();
-                }
-
-                builder.AddEvent(
-                    line,
-                    RecorderEventFactory.CreateEventId(
-                        sessionKey,
-                        collectors[reader.GetInt32(1)],
-                        channel,
-                        unchecked((ulong)sequence)),
-                    evidenceClasses[reader.GetInt16(4)],
-                    channel,
-                    eventTypes[reader.GetInt32(3)],
-                    reader.GetInt64(6),
-                    payload,
-                    eventKey);
+                builder.IncludeTimestamp(latest);
             }
         }
 
-        return await builder.BuildAsync(
+        await using (var command = dataSource.CreateCommand(
+            $"SELECT {DatabaseEventNames.Columns} FROM events e " +
+            "WHERE e.recording_id = $1 AND e.channel_id = ANY($3) ORDER BY e.event_key"))
+        {
+            command.Parameters.AddWithValue(recordingId);
+            command.Parameters.AddWithValue(names.PayloadChannelIds);
+            command.Parameters.AddWithValue(channels
+                .Where(channel => SessionPlaybackArchiveBuilder.BuildsFrom(channel.Value))
+                .Select(channel => channel.Key)
+                .ToArray());
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken)
+                .ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var (item, payload) = names.Read(reader);
+                builder.AddEvent(
+                    item.Line,
+                    item.EventId,
+                    item.EvidenceClass,
+                    item.Channel,
+                    item.EventType,
+                    item.MonotonicNanoseconds,
+                    payload,
+                    item.Line);
+            }
+        }
+
+        var archive = await builder.BuildAsync(
             new DatabaseEventRecordSource(dataSource, recordingId, sessionKey),
             cancellationToken).ConfigureAwait(false);
+        return archive with
+        {
+            Timeline = await DatabaseSessionTimeline.LoadAsync(
+                dataSource,
+                recordingId,
+                names,
+                archive.DurationNanoseconds,
+                cancellationToken).ConfigureAwait(false)
+        };
     }
 
     private async Task<Dictionary<TKey, string>> NamesAsync<TKey>(

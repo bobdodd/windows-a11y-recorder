@@ -1,3 +1,5 @@
+using System.Data.Common;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -37,16 +39,24 @@ public sealed class SessionTimelineControl : FrameworkElement
     private readonly DrawingVisual _eventLayer = new();
     private readonly DrawingVisual _overlayLayer = new();
     private readonly VisualCollection _layers;
-    private IReadOnlyList<SessionTimelineEvent> _events = [];
+    private ISessionTimeline? _timeline;
     private IReadOnlySet<string> _visibleChannels = new HashSet<string>();
     private bool _showOtherChannels = true;
-    private SessionTimelineIndex _index = CreateIndex([], _ => false);
+
+    // The recording's channels shown with the current filters, in all and
+    // by lane and series.
+    private HashSet<string> _shownChannels = new(StringComparer.Ordinal);
+    private HashSet<string>[] _shownByLane = [];
+    private List<string>[] _shownBySeries = [];
+
+    // Lookups finish after the user may have moved on; only the latest
+    // request's answer is used.
+    private long _request;
     private long _durationNanoseconds;
     private long _positionNanoseconds;
     private long _viewportStartNanoseconds;
     private long _viewportDurationNanoseconds;
     private SessionTimelineEvent? _selectedEvent;
-    private int _selectedIndex = -1;
 
     public SessionTimelineControl()
     {
@@ -56,6 +66,9 @@ public sealed class SessionTimelineControl : FrameworkElement
     }
 
     public event EventHandler<TimelineEventSelectedEventArgs>? SelectedEventChanged;
+
+    /// <summary>Raised with a message when the timeline cannot be read.</summary>
+    public event EventHandler<string>? LookupFailed;
 
     public long PositionNanoseconds
     {
@@ -78,15 +91,17 @@ public sealed class SessionTimelineControl : FrameworkElement
     protected override Visual GetVisualChild(int index) => _layers[index];
 
     public void SetSession(
-        IReadOnlyList<SessionTimelineEvent> events,
+        ISessionTimeline timeline,
         long durationNanoseconds)
     {
-        _events = events;
+        ArgumentNullException.ThrowIfNull(timeline);
+        _timeline = timeline;
+        _request++;
         _durationNanoseconds = Math.Max(0, durationNanoseconds);
         _viewportStartNanoseconds = 0;
         _viewportDurationNanoseconds = _durationNanoseconds;
         _positionNanoseconds = 0;
-        RebuildIndex();
+        RebuildShownChannels();
         SelectEvent(null);
         RedrawAll();
     }
@@ -97,8 +112,9 @@ public sealed class SessionTimelineControl : FrameworkElement
     {
         _visibleChannels = visibleChannels;
         _showOtherChannels = showOtherChannels;
-        RebuildIndex();
-        if (_selectedEvent is not null && _selectedIndex < 0)
+        _request++;
+        RebuildShownChannels();
+        if (_selectedEvent is not null && !_shownChannels.Contains(_selectedEvent.Channel))
         {
             SelectEvent(null);
         }
@@ -148,38 +164,67 @@ public sealed class SessionTimelineControl : FrameworkElement
                 _viewportDurationNanoseconds);
         var laneHeight = Math.Max(3, ActualHeight / LaneCount);
         var lane = Math.Clamp((int)(point.Y / laneHeight), 0, LaneCount - 1);
-        var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
-        SelectEvent(
-            _index.NearestInLane(lane, timestamp, _viewportStartNanoseconds, viewportEnd) ??
-            _index.Nearest(timestamp, _viewportStartNanoseconds, viewportEnd));
+        var start = _viewportStartNanoseconds;
+        var end = start + _viewportDurationNanoseconds;
+        var laneChannels = _shownByLane[lane];
+        var shown = _shownChannels;
         e.Handled = true;
+        SelectFromLookup(async timeline =>
+            await timeline.NearestAsync(timestamp, start, end, laneChannels).ConfigureAwait(true) ??
+            await timeline.NearestAsync(timestamp, start, end, shown).ConfigureAwait(true));
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        var events = _index.VisibleEvents;
-        if (events.Count == 0)
+        if (_timeline is null || e.Key is not (Key.Left or Key.Right or Key.Home or Key.End))
         {
             return;
         }
 
-        var index = _selectedIndex;
-        SessionTimelineEvent? next = e.Key switch
-        {
-            Key.Left => events[Math.Max(0, index - 1)],
-            Key.Right => events[Math.Min(events.Count - 1, index + 1)],
-            Key.Home => events[0],
-            Key.End => events[^1],
-            _ => null
-        };
-        if (next is null)
-        {
-            return;
-        }
-
-        SelectEvent(next);
         e.Handled = true;
+        var shown = _shownChannels;
+        var selected = _selectedEvent is { } item && shown.Contains(item.Channel) ? item : null;
+        var key = e.Key;
+
+        // With no selection, Left and Right select the first event; at
+        // either end of the timeline, the selection stays.
+        SelectFromLookup(async timeline => key switch
+        {
+            Key.Home => await timeline.EndAsync(last: false, shown).ConfigureAwait(true),
+            Key.End => await timeline.EndAsync(last: true, shown).ConfigureAwait(true),
+            _ when selected is null => await timeline.EndAsync(last: false, shown).ConfigureAwait(true),
+            _ => await timeline.AdjacentAsync(selected, key == Key.Right, shown).ConfigureAwait(true) ??
+                selected
+        });
+    }
+
+    private async void SelectFromLookup(
+        Func<ISessionTimeline, Task<SessionTimelineEvent?>> lookup)
+    {
+        if (_timeline is not { } timeline)
+        {
+            return;
+        }
+
+        var request = ++_request;
+        try
+        {
+            var item = await lookup(timeline).ConfigureAwait(true);
+            if (request == _request)
+            {
+                SelectEvent(item);
+            }
+        }
+        catch (Exception exception) when (
+            exception is DbException or InvalidOperationException or
+                InvalidDataException or ObjectDisposedException or IOException)
+        {
+            if (request == _request)
+            {
+                LookupFailed?.Invoke(this, exception.Message);
+            }
+        }
     }
 
     private void RedrawAll()
@@ -211,8 +256,8 @@ public sealed class SessionTimelineControl : FrameworkElement
         {
             var lane = LaneOfSeries(series);
             var brush = BrushOfSeries(series);
-            foreach (var column in _index.OccupiedColumns(
-                         series,
+            foreach (var column in _timeline!.Occupancy.OccupiedColumns(
+                         _shownBySeries[series],
                          _viewportStartNanoseconds,
                          _viewportDurationNanoseconds,
                          columns))
@@ -238,7 +283,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         var laneHeight = Math.Max(3, ActualHeight / LaneCount);
         var viewportEnd = _viewportStartNanoseconds + _viewportDurationNanoseconds;
         if (_selectedEvent is not null &&
-            _selectedIndex >= 0 &&
+            _shownChannels.Contains(_selectedEvent.Channel) &&
             _selectedEvent.MonotonicNanoseconds >= _viewportStartNanoseconds &&
             _selectedEvent.MonotonicNanoseconds <= viewportEnd)
         {
@@ -262,6 +307,7 @@ public sealed class SessionTimelineControl : FrameworkElement
     }
 
     private bool CanDraw() =>
+        _timeline is not null &&
         _durationNanoseconds > 0 &&
         _viewportDurationNanoseconds > 0 &&
         ActualWidth > 0 &&
@@ -271,16 +317,27 @@ public sealed class SessionTimelineControl : FrameworkElement
         (timestamp - _viewportStartNanoseconds) /
         (double)_viewportDurationNanoseconds * ActualWidth;
 
-    private void RebuildIndex()
+    private void RebuildShownChannels()
     {
-        _index = CreateIndex(_events, IsChannelVisible);
-        _selectedIndex = _index.IndexOf(_selectedEvent);
-    }
+        _shownChannels = new HashSet<string>(StringComparer.Ordinal);
+        _shownByLane = Enumerable.Range(0, LaneCount)
+            .Select(_ => new HashSet<string>(StringComparer.Ordinal))
+            .ToArray();
+        _shownBySeries = Enumerable.Range(0, SeriesCount)
+            .Select(_ => new List<string>())
+            .ToArray();
+        foreach (var channel in _timeline?.ChannelCounts.Keys ?? [])
+        {
+            if (!IsChannelVisible(channel))
+            {
+                continue;
+            }
 
-    private static SessionTimelineIndex CreateIndex(
-        IReadOnlyList<SessionTimelineEvent> events,
-        Func<string, bool> isVisible) =>
-        new(events, isVisible, GetLane, GetSeries, LaneCount, SeriesCount);
+            _shownChannels.Add(channel);
+            _shownByLane[GetLane(channel)].Add(channel);
+            _shownBySeries[GetSeries(channel)].Add(channel);
+        }
+    }
 
     private bool IsChannelVisible(string channel) =>
         _visibleChannels.Contains(channel) ||
@@ -288,13 +345,12 @@ public sealed class SessionTimelineControl : FrameworkElement
 
     private void SelectEvent(SessionTimelineEvent? item)
     {
-        if (ReferenceEquals(_selectedEvent, item))
+        if (Equals(_selectedEvent, item))
         {
             return;
         }
 
         _selectedEvent = item;
-        _selectedIndex = _index.IndexOf(item);
         RedrawOverlay();
         SelectedEventChanged?.Invoke(
             this,

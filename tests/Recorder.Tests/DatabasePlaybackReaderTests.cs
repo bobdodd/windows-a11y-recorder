@@ -62,19 +62,26 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             JsonSerializer.Serialize(fromFiles.Manifest, JsonOptions),
             JsonSerializer.Serialize(fromDatabase.Manifest, JsonOptions));
         Assert.Equal(fromFiles.DurationNanoseconds, fromDatabase.DurationNanoseconds);
-        Assert.Equal(Timeline(fromFiles), Timeline(fromDatabase));
+        Assert.Empty(fromDatabase.Events);
+        var fileTimeline = await WalkAsync(fromFiles.Timeline, token);
+        var databaseTimeline = await WalkAsync(fromDatabase.Timeline, token);
+        Assert.Equal(fileTimeline.Select(Shape), databaseTimeline.Select(Shape));
+        Assert.Equal(fromFiles.Timeline.Count, fromDatabase.Timeline.Count);
+        Assert.Equal(
+            fromFiles.Timeline.ChannelCounts.OrderBy(pair => pair.Key, StringComparer.Ordinal),
+            fromDatabase.Timeline.ChannelCounts.OrderBy(pair => pair.Key, StringComparer.Ordinal));
         Assert.Equal(fromFiles.Frames, fromDatabase.Frames);
         Assert.Equal(fromFiles.AudioTracks, fromDatabase.AudioTracks);
         Assert.Equal(fromFiles.BrowserNavigations, fromDatabase.BrowserNavigations);
         Assert.Single(fromDatabase.Frames);
         Assert.Single(fromDatabase.AudioTracks);
         Assert.Single(fromDatabase.BrowserNavigations);
-        Assert.Contains(fromDatabase.Events, item => item.Summary == "marker: In the database");
+        Assert.Contains(databaseTimeline, item => item.Summary == "marker: In the database");
 
         // Every complete record reads back as the event log's record, with
         // the payload's properties possibly in another order.
         var fileEvents = fromFiles.Events.ToDictionary(item => item.EventId);
-        foreach (var item in fromDatabase.Events)
+        foreach (var item in databaseTimeline)
         {
             Assert.NotNull(item.EventKey);
             Assert.Equal(
@@ -102,9 +109,80 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         Assert.Contains("interrupted", interrupted.Reason);
     }
 
-    // Not a performance test. It records how long the database read takes
-    // for a recording of the size seen on Windows, so a change that makes it
-    // much slower is visible in the test output.
+    [Fact]
+    public async Task AnswersTimelineLookupsAsTheSessionFilesDo()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var sessionKey = "lookups-" + Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(_root, sessionKey);
+        string[] channels = ["input.mouse", "accessibility.uia.events", "session.annotations"];
+        var collector = Collector("test.lookups", channels);
+        var random = new Random(1234);
+        var time = 0L;
+        var sequences = new ulong[channels.Length];
+        var events = new List<RecorderEvent>();
+        for (var index = 0; index < 3_000; index++)
+        {
+            // Many events share a time, across and within channels.
+            time += random.Next(0, 3) == 0 ? 0 : random.Next(1, 5_000);
+            var lane = random.Next(10) == 0 ? 2 : random.Next(2);
+            events.Add(Event(sessionKey, collector, sequences[lane]++, time, channels[lane],
+                lane == 1 ? "focus-changed" : "marker",
+                new { name = $"Control {index}", note = $"Note {index}" }));
+        }
+
+        await WriteSessionFilesAsync(directory, sessionKey, events, token);
+        await WriteRecordingAsync(sessionKey, events, RecordingStatus.Completed, token);
+        var fromFiles = (await SessionArchiveReader.LoadAsync(directory, token)).Timeline;
+        var fromDatabase = Assert.IsType<SessionPlaybackArchive>(
+            (await new DatabasePlaybackReader(fixture.Server.DataSource).OpenAsync(directory, token)).Archive)
+            .Timeline;
+        Assert.IsType<DatabaseSessionTimeline>(fromDatabase);
+
+        var fileOrder = await WalkAsync(fromFiles, token);
+        var databaseOrder = await WalkAsync(fromDatabase, token);
+        Assert.Equal(events.Count, databaseOrder.Count);
+        Assert.Equal(fileOrder.Select(Shape), databaseOrder.Select(Shape));
+
+        IReadOnlySet<string>[] subsets =
+        [
+            channels.ToHashSet(),
+            new HashSet<string> { channels[0] },
+            new HashSet<string> { channels[1], channels[2] },
+            new HashSet<string> { channels[2] },
+            new HashSet<string>()
+        ];
+        var duration = time + 1;
+        for (var trial = 0; trial < 150; trial++)
+        {
+            var subset = subsets[trial % subsets.Length];
+            var target = random.NextInt64(-10, duration + 10);
+            var start = random.NextInt64(0, duration);
+            var end = start + random.NextInt64(0, duration / 4);
+            var from = random.Next(fileOrder.Count);
+            var forward = random.Next(2) == 0;
+
+            Assert.Equal(
+                Shape(await fromFiles.AtOrBeforeAsync(target, subset, token)),
+                Shape(await fromDatabase.AtOrBeforeAsync(target, subset, token)));
+            Assert.Equal(
+                Shape(await fromFiles.NearestAsync(target, start, end, subset, token)),
+                Shape(await fromDatabase.NearestAsync(target, start, end, subset, token)));
+            Assert.Equal(
+                Shape(await fromFiles.AdjacentAsync(fileOrder[from], forward, subset, token)),
+                Shape(await fromDatabase.AdjacentAsync(databaseOrder[from], forward, subset, token)));
+            Assert.Equal(
+                Shape(await fromFiles.EndAsync(forward, subset, token)),
+                Shape(await fromDatabase.EndAsync(forward, subset, token)));
+            Assert.Equal(
+                fromFiles.Occupancy.OccupiedColumns(subset, start, end - start + 1, 500),
+                fromDatabase.Occupancy.OccupiedColumns(subset, start, end - start + 1, 500));
+        }
+    }
+
+    // Not a performance test. It records how long the database read and
+    // timeline lookups take for a recording of the size seen on Windows, so
+    // a change that makes them much slower is visible in the test output.
     [Fact]
     public async Task LoadsALargeRecording()
     {
@@ -131,10 +209,30 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         stopwatch.Stop();
 
         var archive = Assert.IsType<SessionPlaybackArchive>(result.Archive);
-        Assert.Equal(events.Count, archive.Events.Count);
-        Assert.Contains(archive.Events, item => item.Summary == "focus-changed: Control 4, Button");
+        var timeline = archive.Timeline;
+        Assert.Equal(events.Count, timeline.Count);
+        Assert.Empty(archive.Events);
+
+        var all = timeline.ChannelCounts.Keys.ToHashSet();
+        var uia = new HashSet<string> { "accessibility.uia.events" };
+        var lookups = Stopwatch.StartNew();
+        for (var index = 0; index < 100; index++)
+        {
+            var target = index * 997_000L;
+            var item = await timeline.AtOrBeforeAsync(target, uia, token);
+            Assert.NotNull(item);
+            Assert.Equal("accessibility.uia.events", item.Channel);
+            Assert.True(item.MonotonicNanoseconds <= target);
+            Assert.NotNull(await timeline.NearestAsync(target, 0, archive.DurationNanoseconds, all, token));
+        }
+
+        lookups.Stop();
+        Assert.Equal(
+            "focus-changed: Control 4, Button",
+            (await timeline.AtOrBeforeAsync(4_500, uia, token))?.Summary);
         TestContext.Current.SendDiagnosticMessage(
-            $"Loaded {archive.Events.Count:N0} events from the database in {stopwatch.ElapsedMilliseconds:N0} ms.");
+            $"Opened {timeline.Count:N0} events from the database in {stopwatch.ElapsedMilliseconds:N0} ms; " +
+            $"200 lookups took {lookups.ElapsedMilliseconds:N0} ms.");
     }
 
     private static List<RecorderEvent> VariedEvents(string sessionKey)
@@ -282,17 +380,27 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             token);
     }
 
-    private static List<(string, string, string, string, long, string)> Timeline(SessionPlaybackArchive archive) =>
-        archive.Events
-            .Select(item => (
-                item.EventId,
-                item.EvidenceClass,
-                item.Channel,
-                item.EventType,
-                item.MonotonicNanoseconds,
-                item.Summary))
-            .OrderBy(item => item.EventId, StringComparer.Ordinal)
-            .ToList();
+    // Every event, in timeline order, by stepping from the first.
+    private static async Task<List<SessionTimelineEvent>> WalkAsync(
+        ISessionTimeline timeline,
+        CancellationToken token)
+    {
+        var channels = timeline.ChannelCounts.Keys.ToHashSet();
+        var items = new List<SessionTimelineEvent>();
+        for (var item = await timeline.EndAsync(last: false, channels, token);
+             item is not null;
+             item = await timeline.AdjacentAsync(item, forward: true, channels, token))
+        {
+            items.Add(item);
+        }
+
+        return items;
+    }
+
+    private static (string, string, string, string, long, string)? Shape(SessionTimelineEvent? item) =>
+        item is null
+            ? null
+            : (item.EventId, item.EvidenceClass, item.Channel, item.EventType, item.MonotonicNanoseconds, item.Summary);
 
     // The JSON with every object's properties in name order.
     private static string Canonical(string json)

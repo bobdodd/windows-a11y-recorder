@@ -285,11 +285,24 @@ only once the database version is tested in full. It adds the
   completed is opened from the database; a recording that is not found, or
   is stored as recording, failed, or interrupted, is opened from its session
   files, and the app shows the reason with the recording. A database that
-  cannot be read is treated the same way. The reader loads every event's
-  envelope in one query ordered by event key, and for the channels the
-  timeline summarizes, and the frame, audio, and browser channels, it
-  transfers only the payload properties the player uses, projected in the
-  database. The timeline is still held in memory in full; it is not paged.
+  cannot be read is treated the same way. Opening a recording reads only
+  the events that frames, audio tracks, and browser navigation are built
+  from, with the payload properties the player uses projected in the
+  database, and one grouped pass over the recording's events that gives the
+  number of events on each channel and which of 262,144 equal time buckets
+  hold events of each channel. The player draws the timeline from those
+  buckets, so an event can be drawn up to one bucket earlier than its time;
+  at the greatest zoom, 32 times, a bucket is no wider than one pixel column
+  on a timeline up to 4,096 pixels wide. The timeline's events are not held
+  in memory: the event shown at the playhead, the event selected by a click,
+  and stepping with Left, Right, Home, and End are each a query that reads,
+  for each shown channel, one entry of the index on recording, channel,
+  time, and event key (migration 0002), and returns the best of those.
+  Events with the same time are ordered by event key, which follows the
+  order they were stored in; a recording read from its session files orders
+  them by line, which gives the same order. Queries are asynchronous, so the
+  window stays responsive while one runs, and a result that arrives after
+  the user has moved on is discarded.
   An event's complete record is read from the database only when it is
   selected in the inspector, and is rebuilt from the envelope columns and
   child tables. The rebuilt record matches the event log's record in content
@@ -300,9 +313,11 @@ only once the database version is tested in full. It adds the
   from their files. A recording opened from the database is not revalidated
   from its session files, because the database stores it as completed only
   when finalization validation passed. On the Linux development sandbox, a
-  recording of 100,000 events with payloads of about 2 KB loaded from the
-  database in about 1 s, in two runs of a debug build. That figure is not a
-  measurement on the target machine.
+  recording of 100,000 events with payloads of about 2 KB opened from the
+  database in about 145 ms, and 200 timeline lookups took about 224 ms in
+  total, in one run of a debug build. Before paging, the same recording
+  loaded in about 1 s. These figures are not measurements on the target
+  machine, and a recording of an hour or more has not been measured.
 - **App.** The app starts the database when its window loads, with the data
   directory `%LOCALAPPDATA%\Windows A11y Recorder\Database`, and stops it
   when the window closes. Recording is not available until the start
@@ -310,8 +325,7 @@ only once the database version is tested in full. It adds the
   are written to session files only. The build copies `.postgres\pgsql`, when
   present, to `pgsql` in the app's output folder.
 
-Still to come on the branch: paging the timeline instead of holding it in
-memory, typed evidence and identity tables per channel, removing what this
+Still to come on the branch: typed evidence and identity tables per channel, removing what this
 retires, including `events.ndjson` once that is agreed, the revised privacy policy and threat model, and
 the hour-long Windows system test.
 

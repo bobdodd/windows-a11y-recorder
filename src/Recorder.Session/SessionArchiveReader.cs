@@ -18,6 +18,20 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public ISessionEventRecordSource? RecordSource { get; init; }
 
+    private ISessionTimeline? _timeline;
+
+    /// <summary>
+    /// The recording's timeline. For a recording read from its session
+    /// files, a timeline over <see cref="Events"/>; for one read from the
+    /// database, a timeline that queries it, and <see cref="Events"/> is
+    /// empty.
+    /// </summary>
+    public ISessionTimeline Timeline
+    {
+        get => _timeline ??= new InMemorySessionTimeline(Events, DurationNanoseconds);
+        init => _timeline = value;
+    }
+
     /// <summary>
     /// Reads an event's complete record. Playback keeps only where each
     /// record is, so its text is read when it is needed.
@@ -90,7 +104,8 @@ public interface ISessionEventRecordSource
 /// </summary>
 /// <param name="Line">
 /// The record's line in events.ndjson, or, for a recording loaded from the
-/// database, its position in the order the database stored events.
+/// database, its event key, which follows the order the database stored
+/// events in. Orders events that have the same time.
 /// </param>
 /// <param name="ByteOffset">
 /// Where the record's line starts in events.ndjson; zero for a recording
@@ -263,7 +278,11 @@ public static class SessionArchiveReader
             : $"{sessionId}:{collectorId}:{channel}:{sequence.Value}";
     }
 
-    internal static string CreateSummary(
+    /// <summary>
+    /// The timeline's one-line description of an event, from its channel,
+    /// type, and the payload properties playback reads.
+    /// </summary>
+    public static string CreateSummary(
         string channel,
         string eventType,
         JsonElement payload)
