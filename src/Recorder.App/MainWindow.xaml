@@ -506,16 +506,16 @@
                         Click="BrowserNavigationFilter_Click" />
               <CheckBox x:Name="ShowIframeNavigationsCheckBox"
                         Margin="0,0,12,0"
-                        IsChecked="True"
+                        IsChecked="False"
                         Content="Iframes"
                         Click="BrowserNavigationFilter_Click" />
               <CheckBox x:Name="ShowBrowserUiNavigationsCheckBox"
                         Margin="0,0,12,0"
-                        IsChecked="True"
+                        IsChecked="False"
                         Content="Browser UI"
                         Click="BrowserNavigationFilter_Click" />
               <CheckBox x:Name="ShowOtherFrameNavigationsCheckBox"
-                        IsChecked="True"
+                        IsChecked="False"
                         Content="Other frames"
                         Click="BrowserNavigationFilter_Click" />
             </WrapPanel>

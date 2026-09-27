@@ -453,7 +453,7 @@ indicate missing evidence. The kind of entry does not change what the
 recorder captures.
 
 The player's filter chooses which kinds are listed, shows how many of each
-kind the recording holds, and lists all kinds when a recording opens. The
+kind the recording holds, and lists only pages by default. The
 filter changes only the list; the recording keeps every navigation.
 
 This rule departs from the correlation rules above in two ways, both stated
