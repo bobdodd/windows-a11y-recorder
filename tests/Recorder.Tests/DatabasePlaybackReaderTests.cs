@@ -243,6 +243,89 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
             $"200 lookups took {lookups.ElapsedMilliseconds:N0} ms.");
     }
 
+    [Fact]
+    public async Task SeeksANavigationToTheFirstFrameComposedAfterItsPageWasPresented()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var sessionKey = "rendered-" + Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(_root, sessionKey);
+        var collector = Collector(
+            "test.rendered",
+            "browser.navigation",
+            "browser.layout",
+            "browser.presentation",
+            "graphics.desktop.frames");
+        var sequences = new Dictionary<string, ulong>();
+        var events = new List<RecorderEvent>();
+        void Add(long time, string channel, string eventType, string payload, long? ticks = null)
+        {
+            sequences.TryGetValue(channel, out var sequence);
+            sequences[channel] = sequence + 1;
+            var item = Event(sessionKey, collector, sequence, time, channel, eventType, Json(payload));
+            events.Add(ticks is { } value
+                ? item with { NativeTimestamp = new NativeTimestamp("chromium-monotonic", value, "ticks") }
+                : item);
+        }
+
+        // The page's document; the navigation's completion names it.
+        static string InDocument(string payload) =>
+            payload.Replace("\"documentToken\":\"TOKEN-1\"", "\"documentToken\":\"TOKEN-40\"");
+
+        Add(1_000_000, "browser.navigation", "navigation-started",
+            EvidenceSamples.Sample("browser.navigation", "navigation-started"));
+        Add(1_100_000, "browser.navigation", "navigation-completed",
+            EvidenceSamples.Sample("browser.navigation", "navigation-completed"));
+        Add(1_500_000, "graphics.desktop.frames", "desktop-frame", Frame(0, 1_400_000));
+        Add(2_000_000, "browser.layout", "layout-checkpoint-completed",
+            InDocument(EvidenceSamples.Sample("browser.layout", "layout-checkpoint-completed")), 50_000);
+        Add(2_000_100, "browser.presentation", "presentation-requested",
+            InDocument(EvidenceSamples.Sample("browser.presentation", "presentation-requested")), 50_001);
+
+        // Recorded at 2.1 ms with the browser clock at 1,000,000 ticks, of
+        // 100 ns each: presented 14,000 ticks later, at 3.5 ms.
+        Add(2_100_000, "browser.presentation", "presentation-feedback",
+            InDocument(EvidenceSamples.Sample("browser.presentation", "presentation-feedback"))
+                .Replace("\"presentedTicks\":\"98765432109\"", "\"presentedTicks\":\"1014000\""),
+            1_000_000);
+
+        // Composed after the checkpoint but before the presentation: the
+        // previous page.
+        Add(3_000_000, "graphics.desktop.frames", "desktop-frame", Frame(1, 2_900_000));
+        Add(3_600_000, "graphics.desktop.frames", "desktop-frame", Frame(2, 3_500_000));
+        Add(4_000_000, "graphics.desktop.frames", "desktop-frame", Frame(3, 3_900_000));
+
+        await WriteSessionFilesAsync(directory, sessionKey, events, token);
+        for (var index = 1; index <= 3; index++)
+        {
+            await File.WriteAllBytesAsync(
+                Path.Combine(directory, "frames", "desktop", $"{index:D10}.png"), [1, 2, 3], token);
+        }
+
+        await WriteRecordingAsync(sessionKey, events, RecordingStatus.Completed, token);
+        var result = await new DatabasePlaybackReader(fixture.Server.DataSource).OpenAsync(directory, token);
+
+        var archive = Assert.IsType<SessionPlaybackArchive>(result.Archive);
+        Assert.Equal(4, archive.Frames.Count);
+        var navigation = Assert.Single(archive.BrowserNavigations);
+        Assert.Equal("browser-1", navigation.BrowserInstanceId);
+        Assert.Equal("TOKEN-40", navigation.DocumentToken);
+        Assert.Equal(BrowserNavigationFrameBasis.PresentationFeedback, navigation.FirstFrameBasis);
+        Assert.Equal(3_600_000, navigation.FirstFrameNanoseconds);
+        Assert.Equal(3_600_000, navigation.SeekNanoseconds);
+    }
+
+    // A desktop frame on one monitor, composed at the time given.
+    private static string Frame(int index, long compositedAtNanoseconds) =>
+        @"{""path"":""frames/desktop/" + index.ToString("D10") + @".png"",""x"":0,""y"":0,""width"":1920,""height"":1080," +
+        @"""stride"":7680,""pixelFormat"":""bgra8"",""encodedFormat"":""png"",""byteLength"":3," +
+        @"""captureDurationNanoseconds"":1,""framesPerSecond"":5,""backend"":""windows-graphics-capture""," +
+        @"""monitorCount"":1,""fallbackReason"":null,""gdiFallbackFrameCount"":0,""frameSelection"":""newest-arrived""," +
+        @"""monitorFrames"":[{""monitorHandle"":65537,""x"":0,""y"":0,""width"":1920,""height"":1080," +
+        @"""systemRelativeTimeTicks"":900,""compositedAtNanoseconds"":" + compositedAtNanoseconds +
+        @",""dequeuedAtNanoseconds"":" + (compositedAtNanoseconds + 10) +
+        @",""tryGetNextFrameAttempts"":1,""supersededFrameCount"":0,""reusedPreviousImage"":false}]}";
+
+
     private static List<RecorderEvent> VariedEvents(string sessionKey)
     {
         var collector = Collector(

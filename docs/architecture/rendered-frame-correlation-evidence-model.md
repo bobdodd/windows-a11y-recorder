@@ -380,6 +380,96 @@ machine and are the measurement the dequeue-policy decision in the capture
 boundary section was waiting for. No change to the dequeue policy has been
 made.
 
+## Playback: a navigation's first frame
+
+Selecting a navigation in the player's navigation list seeks to the first
+captured frame that can show the navigation's page, not to the time the
+navigation started. The navigation's own records cannot place that frame: on
+the reference recording below, navigations completed about 5 ms after they
+started, and the address bar and tab title changed one or two captured frames
+before the page content did.
+
+When a recording is loaded for playback, `DatabasePlaybackReader` works out
+each navigation's first frame from the database, by
+`BrowserNavigationFrames.Apply`:
+
+1. The checkpoint is the first layout checkpoint of the navigation's browser
+   instance and document token that completed at or after the navigation
+   started and before the navigation's end, and whose rendering update has a
+   presentation time by the rules above. A checkpoint with no feedback, with a
+   `failure` flag, or without `presentedTicks` is skipped.
+2. The first frame is the first captured frame, among those whose image file
+   exists, whose composition time is at or after that presentation time. A
+   frame's composition time is the earliest `compositedAtNanoseconds` of its
+   monitors, or its record's time when none was recorded.
+3. When no checkpoint qualifies, the first frame is the first captured frame
+   composed at or after the navigation completed. The navigation list marks
+   such an entry `[No render evidence]`, and the correlation panel states that
+   the frame can still show the previous page.
+4. When neither applies, or no captured frame is composed late enough, the
+   player seeks to the navigation's start.
+
+The correlation panel describes the page navigation whose first frame is the
+latest at or before the playhead, so it changes page on the same frame the
+seek lands on. The navigation's end is the one the correlator already
+assigns: the next navigation's start in the same frame or, for a page
+navigation, the next page navigation's start.
+
+This rule departs from the correlation rules above in two ways, both stated
+as limits:
+
+- The presentation time is used without subtracting the browser clock
+  uncertainty. Subtracting it moves the join earlier and can select a frame
+  that still shows the previous page; the reference recording matched
+  without it.
+- Every monitor is treated as holding the browser window, by taking the
+  earliest composition time of a frame's monitors, because playback does not
+  yet use window evidence.
+
+The frequency that maps `presentedTicks` to session time is the one in the
+renderer process's `browser-clock-synchronized` record, or the recording's
+clock frequency when that record is missing.
+
+### Reference recording
+
+Session `20260927-125356-ce1cc2de3c884b12862f770d531ba127`, recorded on
+September 27, 2026, at commit `a66a3e4`, five page navigations on one site.
+Times are in milliseconds after each navigation started. The correct frame
+is the first whose full-size image shows the new page's content, checked by
+inspection.
+
+| Page | Presented | Last frame with previous content (composed) | First frame by the rule (composed) | Correct frame |
+| --- | --- | --- | --- | --- |
+| `/paradise` | 455.0 | 27 (354.9) | 28 (554.9) | 28 |
+| `/paradise/action-language` | 311.2 | 48 (244.5) | 49 (444.5) | 49 |
+| `/paradise/lineage` | 266.4 | 72 (133.0) | 73 (316.3) | 73 |
+| `/playgrounds/action-language` | 276.1 | 100 (176.1) | 101 (392.8) | 101 |
+| `/about` | 430.4 | 138 (380.3) | 139 (580.3) | 139 |
+
+Frame 48 already showed the new address and tab title with the previous
+page's content. Several layout checkpoints in the recording had no
+presentation feedback and were skipped by the rule.
+
+### Limits of the rule
+
+- It rests on five navigations on one site, on one machine, at the capture
+  rate of that recording.
+- It selects the frame after the first presented rendering update of the new
+  document. If a page first draws something small, such as a loading
+  indicator, the seek lands on that first redraw, not on the finished
+  content.
+- The smallest interval between the composition of the last frame with the
+  previous content and the presentation time was 50.1 ms, on `/about`. A
+  presentation time that maps more than that interval too early selects a
+  frame with the previous content. One that maps too late selects a frame
+  after the first that shows the page.
+- The fallback does not show the page: without a presented update, the frame
+  after completion can show the previous page, as frame 48 did.
+- Required test levels: unit tests of the selection rule, and a database
+  test that loads a recording from the store and checks the chosen frame.
+  A Windows recording with page navigations confirms the rule against
+  captured images.
+
 ## Decisions
 
 - The WGC dequeue policy is unchanged in this slice; see the recorder-side
@@ -393,3 +483,6 @@ made.
   same-origin and shares the page's widget, so that slice also needs a
   cross-site iframe fixture. The widget identity fields above are what it
   would join on.
+- Playback seeks a navigation to its first frame by presentation feedback,
+  with the navigation's completion as a marked fallback; see the playback
+  section. The rule is validated on one recording only.

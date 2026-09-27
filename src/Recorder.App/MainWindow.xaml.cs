@@ -473,7 +473,7 @@ public partial class MainWindow : Window
 
         PausePlayback();
         _updatingBrowserNavigationSelection = true;
-        SeekTo(navigation.StartNanoseconds, synchronizeAudio: false);
+        SeekTo(navigation.SeekNanoseconds, synchronizeAudio: false);
         _updatingBrowserNavigationSelection = false;
         DisplayBrowserCorrelation(navigation);
     }
@@ -833,11 +833,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        // A page navigation is shown from its first frame until the next
+        // page navigation's first frame, so the correlation describes the
+        // page the frame shows.
         var navigation = _playbackArchive.BrowserNavigations
-            .LastOrDefault(item =>
-                item.StartNanoseconds <= positionNanoseconds &&
-                positionNanoseconds < item.EndNanoseconds &&
-                item.PrimaryPage) ??
+            .Where(item =>
+                item.PrimaryPage &&
+                item.SeekNanoseconds <= positionNanoseconds)
+            .OrderBy(item => item.SeekNanoseconds)
+            .ThenBy(item => item.StartNanoseconds)
+            .LastOrDefault() ??
             _playbackArchive.BrowserNavigations
                 .LastOrDefault(item =>
                     item.StartNanoseconds <= positionNanoseconds &&
@@ -876,6 +881,7 @@ public partial class MainWindow : Window
         BrowserCorrelationTextBox.Text =
             $"{navigation.Url}{Environment.NewLine}" +
             $"{completion} Correlation basis: {navigation.CorrelationBasis}." +
+            $"{Environment.NewLine}{DescribeFirstFrame(navigation)}" +
             $"{Environment.NewLine}" +
             $"Renderer: {navigation.RendererProcessId?.ToString() ?? "not recorded"}; " +
             $"DOM checkpoints: {navigation.CheckpointCount:N0}; " +
@@ -891,12 +897,26 @@ public partial class MainWindow : Window
         AutomationProperties.SetHelpText(
             BrowserCorrelationTextBox,
             $"Navigation at {FormatTime(navigation.StartNanoseconds)}. " +
+            DescribeFirstFrame(navigation) + " " +
             $"{navigation.CheckpointCount:N0} DOM checkpoints, " +
             $"{navigation.AccessibilityCheckpointCount:N0} accessibility checkpoints, " +
             $"{navigation.DispatchCount:N0} dispatches, and " +
             $"{navigation.ListenerInvocationCount:N0} listener invocations. " +
             truncation + " " + accessibilityTruncation);
     }
+
+    private static string DescribeFirstFrame(BrowserNavigationCorrelation navigation) =>
+        navigation.FirstFrameBasis switch
+        {
+            BrowserNavigationFrameBasis.PresentationFeedback =>
+                $"First frame: {FormatTime(navigation.SeekNanoseconds)}, the first captured frame " +
+                "composed after Chromium presented the page's first rendering update.",
+            BrowserNavigationFrameBasis.NavigationCompletion =>
+                $"First frame: {FormatTime(navigation.SeekNanoseconds)}, the first captured frame " +
+                "composed after the navigation completed. No rendering update of the page was " +
+                "recorded as presented, so this frame can still show the previous page.",
+            _ => "No captured frame was matched to this navigation; playback goes to its start."
+        };
 
     private void DisplayFrameAt(long positionNanoseconds)
     {

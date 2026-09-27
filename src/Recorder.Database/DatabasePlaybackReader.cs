@@ -146,6 +146,13 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
             cancellationToken).ConfigureAwait(false);
         return archive with
         {
+            BrowserNavigations = archive.BrowserNavigations.Count == 0
+                ? archive.BrowserNavigations
+                : BrowserNavigationFrames.Apply(
+                    archive.BrowserNavigations,
+                    await PresentedCheckpointsAsync(recordingId, cancellationToken).ConfigureAwait(false),
+                    await FrameCompositionsAsync(recordingId, archive.Frames, cancellationToken)
+                        .ConfigureAwait(false)),
             Timeline = await DatabaseSessionTimeline.LoadAsync(
                 dataSource,
                 recordingId,
@@ -153,6 +160,105 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
                 archive.DurationNanoseconds,
                 cancellationToken).ConfigureAwait(false)
         };
+    }
+
+    // Layout checkpoints whose rendering update Chromium reported as
+    // presented. A request joins its checkpoint, and feedback its request,
+    // by browser instance, renderer process, and identity. Feedback flagged
+    // as a failure, or without a presentation time, is not a presentation.
+    // The presentation time maps to session time through the feedback
+    // record's envelope, scaled by the frequency in the process's
+    // browser-clock-synchronized record, or the recording's when that
+    // record is missing.
+    private const string PresentedCheckpointsSql = """
+        SELECT c.browser_instance_id, c.document_token, e.monotonic_nanoseconds,
+               fe.monotonic_nanoseconds + round(
+                   (pf.presented_ticks::numeric - fe.native_timestamp_value) * 1000000000 /
+                   coalesce(
+                       (SELECT s.monotonic_frequency::numeric FROM browser_clock_synchronizations s
+                         WHERE s.recording_id = fe.recording_id
+                           AND s.browser_instance_id = fc.browser_instance_id
+                           AND s.process_id = fc.process_id
+                         ORDER BY s.event_key LIMIT 1),
+                       r.clock_frequency))::bigint
+        FROM recordings r
+        JOIN browser_layout_checkpoint_completions lc ON lc.recording_id = r.recording_id
+        JOIN events e ON e.recording_id = lc.recording_id AND e.event_key = lc.event_key
+        JOIN browser_contexts c ON c.recording_id = lc.recording_id AND c.identity_key = lc.context_key
+        JOIN browser_presentation_requests q
+          ON q.recording_id = lc.recording_id AND q.layout_checkpoint_id = lc.checkpoint_id
+        JOIN browser_contexts qc ON qc.recording_id = q.recording_id AND qc.identity_key = q.context_key
+         AND qc.browser_instance_id = c.browser_instance_id AND qc.process_id = c.process_id
+        JOIN browser_presentation_feedback pf
+          ON pf.recording_id = q.recording_id AND pf.request_id = q.request_id
+        JOIN browser_contexts fc ON fc.recording_id = pf.recording_id AND fc.identity_key = pf.context_key
+         AND fc.browser_instance_id = c.browser_instance_id AND fc.process_id = c.process_id
+        JOIN events fe ON fe.recording_id = pf.recording_id AND fe.event_key = pf.event_key
+        WHERE r.recording_id = $1
+          AND c.document_token IS NOT NULL
+          AND pf.presented_ticks IS NOT NULL
+          AND fe.native_timestamp_value IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM browser_presentation_feedback_flags f
+              JOIN names n ON n.name_id = f.value_name_id
+              WHERE f.recording_id = pf.recording_id AND f.owner_key = pf.event_key
+                AND n.name = 'failure')
+        """;
+
+    // Each captured frame's composition time: the earliest of its monitors',
+    // so the frame follows the time on every monitor. A frame whose
+    // composition time was not recorded uses its event's time.
+    private const string FrameCompositionsSql = """
+        SELECT e.monotonic_nanoseconds,
+               coalesce(min(m.composited_at_nanoseconds), e.monotonic_nanoseconds)
+        FROM desktop_frames f
+        JOIN events e ON e.recording_id = f.recording_id AND e.event_key = f.event_key
+        LEFT JOIN desktop_frame_monitors m ON m.recording_id = f.recording_id AND m.owner_key = f.event_key
+        WHERE f.recording_id = $1
+        GROUP BY e.event_key, e.monotonic_nanoseconds
+        """;
+
+    private async Task<List<BrowserPresentedCheckpoint>> PresentedCheckpointsAsync(
+        Guid recordingId,
+        CancellationToken cancellationToken)
+    {
+        var checkpoints = new List<BrowserPresentedCheckpoint>();
+        await using var command = dataSource.CreateCommand(PresentedCheckpointsSql);
+        command.Parameters.AddWithValue(recordingId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            checkpoints.Add(new BrowserPresentedCheckpoint(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetInt64(2),
+                reader.GetInt64(3)));
+        }
+
+        return checkpoints;
+    }
+
+    // Only the frames playback can show: those whose image files exist.
+    private async Task<List<CapturedFrameComposition>> FrameCompositionsAsync(
+        Guid recordingId,
+        IReadOnlyList<SessionVideoFrame> frames,
+        CancellationToken cancellationToken)
+    {
+        var shown = frames.Select(frame => frame.MonotonicNanoseconds).ToHashSet();
+        var compositions = new List<CapturedFrameComposition>();
+        await using var command = dataSource.CreateCommand(FrameCompositionsSql);
+        command.Parameters.AddWithValue(recordingId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var frame = reader.GetInt64(0);
+            if (shown.Contains(frame))
+            {
+                compositions.Add(new CapturedFrameComposition(frame, reader.GetInt64(1)));
+            }
+        }
+
+        return compositions;
     }
 
     private async Task<Dictionary<TKey, string>> NamesAsync<TKey>(

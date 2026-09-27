@@ -25,6 +25,29 @@ public sealed record BrowserNavigationCorrelation(
     int ListenerInvocationCount,
     int RelatedEventCount)
 {
+    /// <summary>
+    /// The browser instance the navigation was recorded in.
+    /// </summary>
+    public string? BrowserInstanceId { get; init; }
+
+    /// <summary>
+    /// The time of the first captured desktop frame that can show the
+    /// navigation's page, by <see cref="FirstFrameBasis"/>. Null when no
+    /// captured frame qualifies or the frame was not determined.
+    /// </summary>
+    public long? FirstFrameNanoseconds { get; init; }
+
+    /// <summary>
+    /// The evidence <see cref="FirstFrameNanoseconds"/> was chosen from.
+    /// </summary>
+    public BrowserNavigationFrameBasis FirstFrameBasis { get; init; }
+
+    /// <summary>
+    /// Where playback goes to show the navigation: its first frame when one
+    /// was determined, and otherwise the time the navigation started.
+    /// </summary>
+    public long SeekNanoseconds => FirstFrameNanoseconds ?? StartNanoseconds;
+
     public bool IsBrowserInternal =>
         Url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase) ||
         Url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase) ||
@@ -34,7 +57,10 @@ public sealed record BrowserNavigationCorrelation(
     {
         get
         {
-            var prefix = IsBrowserInternal ? "[Browser UI] " : string.Empty;
+            var prefix = (IsBrowserInternal ? "[Browser UI] " : string.Empty) +
+                (FirstFrameBasis == BrowserNavigationFrameBasis.NavigationCompletion
+                    ? "[No render evidence] "
+                    : string.Empty);
             return $"{FormatTime(StartNanoseconds)} | {prefix}{Url}";
         }
     }
@@ -191,7 +217,10 @@ internal static class BrowserNavigationCorrelator
                     item.Event.EventType == "dispatch-started"),
                 related.Count(item =>
                     item.Event.EventType == "listener-invoked"),
-                related.Length));
+                related.Length)
+            {
+                BrowserInstanceId = identity.BrowserInstanceId
+            });
         }
 
         return results;
