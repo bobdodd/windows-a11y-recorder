@@ -374,6 +374,44 @@ only once the database version is tested in full. It adds the
   record before them; see the evidence queue section of
   `chromium/recorder_bridge/README.md`. These figures are from one run and
   are not a substitute for the system test.
+- **Reference check planning.** The first recording with the timed check
+  (53c43ba, 523,534 events) completed with no rejections, and the check
+  took 8.6 s. The slowest queries checked
+  `browser_layout_checkpoint_style_properties` (4.7 s),
+  `browser_dispatch_path_targets` (3.7 s), `browser_dispatch_path_scopes`
+  (3.65 s), and `browser_dom_checkpoint_nodes` (1.46 s). About a minute
+  later, after autovacuum had analyzed the tables, the same targets query
+  took 122 ms with a hash anti join and the style properties query 21 ms.
+  A measurement on the development sandbox, not the target machine,
+  isolated the cause. A base recording of the evidence samples was written
+  through the writer and copied into three earlier recordings, which were
+  vacuumed and analyzed, with autovacuum off; a fresh copy was then checked
+  with `EXPLAIN (ANALYZE, BUFFERS)` for each reference of an occupied table:
+  - with the statistics from before the copy, the planner estimated about
+    one row for the new `recording_id` and chose nested loop anti joins
+    that compared each referring row with every referenced row of the
+    recording; one query reported 3,441,650 rows removed by its join filter;
+  - checking the same copy a second time took as long, so the first read of
+    new rows was not the cause;
+  - analyzing the occupied tables first, or disabling nested loop joins,
+    led the planner to hash or merge anti joins.
+
+  | Base events | Stale statistics | Analyze, then check | Nested loops off |
+  |---|---|---|---|
+  | 7,300 | 5,504 ms | 241 ms + 717 ms | 253 ms |
+  | 21,900 | 47,640 ms | 303 ms + 524 ms | 514 ms |
+
+  With stale statistics the time grew about ninefold for three times the
+  rows, as a comparison of every row with every row does; both remedies grew
+  about in proportion to the rows. Disabling nested loops was the faster of
+  the two at both sizes and needs no statistics, so each check query now
+  runs in its own transaction after `SET LOCAL enable_nestloop = off`,
+  which ends with the transaction and leaves pooled connections unchanged.
+  The store's own check of a fresh copy at the larger size took 475 ms. A
+  test requires every pooled connection to plan with nested loops enabled
+  after a check. The measurement used the evidence samples, not a real
+  recording, on a two-processor Linux machine; the Windows timings file of
+  the next recording is the measure on the target.
 - **Parallel writing.** `PostgresEventWriter` writes up to
   `WriterConnections` batches at once, four by default; while the database
   is unavailable it retries one batch at a time. Each batch is written by

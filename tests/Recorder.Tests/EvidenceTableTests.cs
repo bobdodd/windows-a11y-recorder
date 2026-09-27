@@ -616,6 +616,42 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     }
 
     /// <summary>
+    /// The reference check disables nested loop joins for its own queries
+    /// only: every connection the pool hands out afterwards plans with the
+    /// default settings.
+    /// </summary>
+    [Fact]
+    public async Task CheckingReferencesLeavesPooledConnectionsWithTheDefaultPlanner()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var (sessionKey, recordingId) = await CreateRecordingAsync();
+        await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
+        var store = new RecordingStore(DataSource);
+        Assert.Empty(await store.CheckReferencesAsync(recordingId, cancellationToken: token));
+
+        // Holding every connection open at once makes the pool hand out each
+        // connection the check used, not one connection repeatedly.
+        var connections = new List<NpgsqlConnection>();
+        try
+        {
+            for (var index = 0; index < Math.Clamp(Environment.ProcessorCount / 2, 1, 8) + 1; index++)
+            {
+                var connection = await DataSource.OpenConnectionAsync(token);
+                connections.Add(connection);
+                await using var show = new NpgsqlCommand("SHOW enable_nestloop", connection);
+                Assert.Equal("on", (string?)await show.ExecuteScalarAsync(token));
+            }
+        }
+        finally
+        {
+            foreach (var connection in connections)
+            {
+                await connection.DisposeAsync();
+            }
+        }
+    }
+
+    /// <summary>
     /// Migration 0009 moves every per-recording table out of its partitions
     /// into an ordinary table, keeping each row and each constraint and
     /// index under its name.

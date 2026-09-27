@@ -4217,6 +4217,70 @@ class CookieIntegrationTests(unittest.TestCase):
             )
             subprocess.run([str(binary)], check=True)
 
+    def test_evidence_cost_passes_its_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "evidence_cost_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-pthread",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "evidence_cost.cc"),
+                    str(bridge / "evidence_cost_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_bridge_measures_the_cost_of_each_kind_of_evidence(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        bridge_source = (bridge / "browser_bridge.cc").read_text(
+            encoding="utf-8"
+        )
+        protocol_source = (bridge / "recorder_protocol.cc").read_text(
+            encoding="utf-8"
+        )
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        header = (bridge / "browser_bridge.h").read_text(encoding="utf-8")
+
+        self.assertIn('"evidence_cost.cc",', build)
+        self.assertIn(
+            "SetCostReporter(&WriteCostReport, kCostReportIntervalNanoseconds)",
+            bridge_source,
+        )
+        # Every entry point that records evidence is measured under its name.
+        for name in re.findall(r"^\w[\w:<>*& ]*?\b((?:Record|Begin|Complete|Note)\w+)\(",
+                               header, re.M):
+            with self.subTest(name=name):
+                self.assertIn(f'A11Y_RECORDER_COST("{name}");', bridge_source)
+        for span in (
+            "span:dispatch-path",
+            "span:dom-checkpoint",
+            "span:accessibility-checkpoint",
+            "span:interaction-checkpoint",
+            "span:layout-checkpoint",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual(
+                    bridge_source.count(f'CostSpanSlot("{span}")'),
+                    3 if span == "span:dispatch-path" else 2,
+                )
+        self.assertIn('RegisterCostKind("queue.push-waited")', protocol_source)
+        self.assertIn('A11Y_RECORDER_COST("writer.write");', protocol_source)
+
     def test_bridge_writes_evidence_from_its_writer_thread(self):
         protocol_source = (
             MODULE_PATH.parent / "recorder_bridge" / "recorder_protocol.cc"
@@ -4230,7 +4294,8 @@ class CookieIntegrationTests(unittest.TestCase):
             protocol_source,
         )
         self.assertIn(
-            "queue_.Push(std::move(evidence), &StampEvidence)", protocol_source
+            "queue_.Push(std::move(evidence), &StampEvidence, &waited)",
+            protocol_source,
         )
         # Records are timestamped by the queue, in queue order, never by the
         # observing thread before it reaches the queue.

@@ -17,6 +17,8 @@ component("recorder_bridge") {
   sources = [
     "browser_bridge.cc",
     "browser_bridge.h",
+    "evidence_cost.cc",
+    "evidence_cost.h",
     "evidence_queue.cc",
     "evidence_queue.h",
     "network_text.cc",

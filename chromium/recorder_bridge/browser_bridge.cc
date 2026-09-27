@@ -29,6 +29,7 @@
 #include "base/synchronization/lock.h"
 #include "base/win/windows_handle_util.h"
 #include "chromium/recorder_bridge/cookie_text.h"
+#include "chromium/recorder_bridge/evidence_cost.h"
 #include "chromium/recorder_bridge/network_text.h"
 #include "chromium/recorder_bridge/recorder_protocol.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
@@ -117,6 +118,18 @@ void WriteDiagnosticLine(std::string_view message) {
   if (close_file) {
     ::CloseHandle(file);
   }
+}
+
+constexpr int64_t kCostReportIntervalNanoseconds = 5'000'000'000;
+
+void WriteCostReport(const std::string& report) {
+  WriteDiagnosticLine(report);
+}
+
+// Spans cover the work Blink does for the recorder between two bridge calls on
+// one thread: the path walk of a dispatch and the traversal of a checkpoint.
+int CostSpanSlot(const char* name) {
+  return RegisterCostKind(name);
 }
 
 std::unique_ptr<RecorderPipeClient>& ProcessClientStorage() {
@@ -1690,6 +1703,10 @@ bool InitializeProcessBridge(std::string* error) {
   ProcessClientStorage() = std::move(client);
   WriteDiagnosticLine("Recorder process bridge initialized for " +
                       process_type + ".");
+  // The cost of each kind of evidence to the threads that observe it is
+  // written to the diagnostic log, which is not evidence, so the kinds that
+  // slow the page can be found by measurement.
+  SetCostReporter(&WriteCostReport, kCostReportIntervalNanoseconds);
   return true;
 }
 
@@ -1797,6 +1814,7 @@ void RecordBlinkListenerRegistered(uintptr_t listener_identity,
                                    std::string world_name,
                                    std::string world_stable_id,
                                    EventScope scope) {
+  A11Y_RECORDER_COST("RecordBlinkListenerRegistered");
   scope.context_kind = NormalizeEventScopeKind(std::move(scope.context_kind));
   const bool document_free_scope =
       IsDocumentFreeScopeKind(scope.context_kind);
@@ -1847,6 +1865,7 @@ void RecordBlinkListenerRemoved(uintptr_t listener_identity,
                                 std::string world_name,
                                 std::string world_stable_id,
                                 EventScope scope) {
+  A11Y_RECORDER_COST("RecordBlinkListenerRemoved");
   scope.context_kind = NormalizeEventScopeKind(std::move(scope.context_kind));
   const bool document_free_scope =
       IsDocumentFreeScopeKind(scope.context_kind);
@@ -1900,6 +1919,7 @@ void RecordBlinkListenerCallbackReplaced(uintptr_t listener_identity,
                                         std::string world_name,
                                         std::string world_stable_id,
                                          EventScope scope) {
+  A11Y_RECORDER_COST("RecordBlinkListenerCallbackReplaced");
   scope.context_kind = NormalizeEventScopeKind(std::move(scope.context_kind));
   const bool document_free_scope =
       IsDocumentFreeScopeKind(scope.context_kind);
@@ -1944,6 +1964,9 @@ void RecordBlinkDispatchStarted(uintptr_t event_identity,
                                 std::string target_element_id,
                                 bool trusted,
                                 EventScope scope) {
+  static const int recorder_span_slot = CostSpanSlot("span:dispatch-path");
+  BeginCostSpan(recorder_span_slot);
+  A11Y_RECORDER_COST("RecordBlinkDispatchStarted");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || target_node_id <= 0) {
     return;
@@ -1966,6 +1989,9 @@ bool BeginBlinkTargetDispatch(uintptr_t event_identity,
                               std::string event_name,
                               bool trusted,
                               EventScope scope) {
+  static const int recorder_span_slot = CostSpanSlot("span:dispatch-path");
+  BeginCostSpan(recorder_span_slot);
+  A11Y_RECORDER_COST("BeginBlinkTargetDispatch");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return false;
@@ -2042,6 +2068,7 @@ void RecordBlinkDispatchPathNode(uintptr_t event_identity,
                                  int target_node_id,
                                  int related_target_node_id,
                                  std::vector<int> visible_path_indexes) {
+  A11Y_RECORDER_COST("RecordBlinkDispatchPathNode");
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
   auto found = identities.dispatches.find(event_identity);
@@ -2067,6 +2094,7 @@ void RecordBlinkDispatchPathWindow(uintptr_t event_identity,
                                    int target_node_id,
                                    int related_target_node_id,
                                    std::vector<int> visible_path_indexes) {
+  A11Y_RECORDER_COST("RecordBlinkDispatchPathWindow");
   if (document_node_id <= 0) {
     return;
   }
@@ -2098,6 +2126,7 @@ void RecordBlinkDispatchPathTarget(uintptr_t event_identity,
                                    std::string target_element_id,
                                    int scope_target_node_id,
                                    bool visible_to_listener) {
+  A11Y_RECORDER_COST("RecordBlinkDispatchPathTarget");
   const bool node_target = target_kind == kEventTargetKindNode;
   std::string target_id =
       node_target ? std::string() : RegisterEventTargetIdentity(target_identity);
@@ -2131,6 +2160,12 @@ void RecordBlinkDispatchPathTarget(uintptr_t event_identity,
 }
 
 void CompleteBlinkDispatchStart(uintptr_t event_identity) {
+  static const int recorder_span_slot = CostSpanSlot("span:dispatch-path");
+  // The span ends when this function returns, so it includes the completion.
+  struct SpanEnd {
+    ~SpanEnd() { EndCostSpan(recorder_span_slot); }
+  } recorder_span_end;
+  A11Y_RECORDER_COST("CompleteBlinkDispatchStart");
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<EvidenceIdentityStorage::DispatchState> state =
       FindDispatchIdentity(event_identity);
@@ -2152,6 +2187,7 @@ void BeginBlinkListenerInvocation(uintptr_t event_identity,
                                   int current_target_node_id,
                                   std::string current_target_tag_name,
                                   std::string current_target_element_id) {
+  A11Y_RECORDER_COST("BeginBlinkListenerInvocation");
   std::optional<std::string> listener_id =
       FindListenerIdentity(listener_identity);
   if (!listener_id ||
@@ -2176,6 +2212,7 @@ void RecordBlinkListenerInvoked(uintptr_t event_identity,
                                 bool default_prevented,
                                 bool propagation_stopped,
                                 bool immediate_propagation_stopped) {
+  A11Y_RECORDER_COST("RecordBlinkListenerInvoked");
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<EvidenceIdentityStorage::DispatchState> state =
       ObserveDispatchState(event_identity, default_prevented,
@@ -2205,6 +2242,7 @@ void RecordBlinkDefaultAction(uintptr_t event_identity,
                               bool default_prevented,
                               bool propagation_stopped,
                               bool immediate_propagation_stopped) {
+  A11Y_RECORDER_COST("RecordBlinkDefaultAction");
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<EvidenceIdentityStorage::DispatchState> state =
       ObserveDispatchState(event_identity, default_prevented,
@@ -2237,6 +2275,7 @@ void RecordBlinkTimerScheduled(uintptr_t timer_identity,
                                double effective_delay_milliseconds,
                                int nesting_level,
                                int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkTimerScheduled");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || timer_identity == 0 || document_node_id <= 0 ||
       timeout_id <= 0 || requested_delay_milliseconds < 0 ||
@@ -2257,6 +2296,7 @@ void RecordBlinkTimerScheduled(uintptr_t timer_identity,
 void RecordBlinkTimerFired(uintptr_t timer_identity,
                            bool repeating,
                            int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkTimerFired");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || timer_identity == 0) {
     return;
@@ -2276,6 +2316,7 @@ void RecordBlinkTimerFired(uintptr_t timer_identity,
 
 void RecordBlinkTimerCancelled(uintptr_t timer_identity,
                                int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkTimerCancelled");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || timer_identity == 0) {
     return;
@@ -2296,6 +2337,7 @@ void RecordBlinkAnimationFrameScheduled(uintptr_t callback_identity,
                                         int document_node_id,
                                         int callback_id,
                                         int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkAnimationFrameScheduled");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0 || document_node_id <= 0 ||
       callback_id <= 0) {
@@ -2313,6 +2355,7 @@ void RecordBlinkAnimationFrameScheduled(uintptr_t callback_identity,
 
 void RecordBlinkAnimationFrameFired(uintptr_t callback_identity,
                                     int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkAnimationFrameFired");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0) {
     return;
@@ -2331,6 +2374,7 @@ void RecordBlinkAnimationFrameFired(uintptr_t callback_identity,
 
 void RecordBlinkAnimationFrameCancelled(uintptr_t callback_identity,
                                         int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkAnimationFrameCancelled");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0) {
     return;
@@ -2353,6 +2397,7 @@ void RecordBlinkIdleCallbackScheduled(uintptr_t callback_identity,
                                       bool has_timeout,
                                       double timeout_milliseconds,
                                       int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkIdleCallbackScheduled");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0 || document_node_id <= 0 ||
       callback_id <= 0 || timeout_milliseconds < 0) {
@@ -2373,6 +2418,7 @@ void RecordBlinkIdleCallbackScheduled(uintptr_t callback_identity,
 void RecordBlinkIdleCallbackFired(uintptr_t callback_identity,
                                   bool did_timeout,
                                   int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkIdleCallbackFired");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0) {
     return;
@@ -2391,6 +2437,7 @@ void RecordBlinkIdleCallbackFired(uintptr_t callback_identity,
 
 void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
                                       int page_lifecycle_state) {
+  A11Y_RECORDER_COST("RecordBlinkIdleCallbackCancelled");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || callback_identity == 0) {
     return;
@@ -2411,6 +2458,9 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string document_token,
                                  std::string reason,
                                  int maximum_nodes) {
+  static const int recorder_span_slot = CostSpanSlot("span:dom-checkpoint");
+  BeginCostSpan(recorder_span_slot);
+  A11Y_RECORDER_COST("BeginBlinkDomCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       reason.empty() ||
@@ -2436,6 +2486,7 @@ void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
                                   int parent_node_id,
                                   int node_type,
                                   std::string node_name) {
+  A11Y_RECORDER_COST("RecordBlinkDomCheckpointNode");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() ||
@@ -2469,6 +2520,7 @@ void RecordBlinkDomCheckpointNodeAttribute(uint64_t checkpoint_sequence,
                                            int attribute_value_length,
                                            bool attribute_value_truncated,
                                            int maximum_value_length) {
+  A11Y_RECORDER_COST("RecordBlinkDomCheckpointNodeAttribute");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || node_id <= 0 || attribute_index < 0 ||
@@ -2512,6 +2564,7 @@ void RecordBlinkDomCheckpointShadowRoot(uint64_t checkpoint_sequence,
                                         bool available_to_element_internals,
                                         bool reference_target_present,
                                         std::string reference_target) {
+  A11Y_RECORDER_COST("RecordBlinkDomCheckpointShadowRoot");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || node_id <= 0 || host_node_id <= 0 ||
@@ -2546,6 +2599,7 @@ void RecordBlinkDomCheckpointSlotAssignment(uint64_t checkpoint_sequence,
                                             int assigned_node_count,
                                             int maximum_assigned_nodes,
                                             bool assignment_current) {
+  A11Y_RECORDER_COST("RecordBlinkDomCheckpointSlotAssignment");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || node_id <= 0 || assigned_node_count < 0 ||
@@ -2590,6 +2644,12 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int maximum_value_length,
                                 int shadow_root_count,
                                 int slot_count) {
+  static const int recorder_span_slot = CostSpanSlot("span:dom-checkpoint");
+  // The span ends when this function returns, so it includes the completion.
+  struct SpanEnd {
+    ~SpanEnd() { EndCostSpan(recorder_span_slot); }
+  } recorder_span_end;
+  A11Y_RECORDER_COST("CompleteBlinkDomCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() ||
@@ -2634,6 +2694,9 @@ uint64_t BeginRendererAccessibilityCheckpoint(
     int maximum_nodes,
     int update_count,
     int event_count) {
+  static const int recorder_span_slot = CostSpanSlot("span:accessibility-checkpoint");
+  BeginCostSpan(recorder_span_slot);
+  A11Y_RECORDER_COST("BeginRendererAccessibilityCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_token.empty() || reason.empty() ||
       maximum_nodes <= 0 || update_count < 0 || event_count < 0) {
@@ -2666,6 +2729,7 @@ void RecordRendererAccessibilityCheckpointNode(
     std::string description,
     std::string serialized_properties,
     bool focused) {
+  A11Y_RECORDER_COST("RecordRendererAccessibilityCheckpointNode");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_token.empty() ||
       node_index < 0 || accessibility_node_id == 0 || role < 0 ||
@@ -2707,6 +2771,12 @@ void CompleteRendererAccessibilityCheckpoint(
     int maximum_nodes,
     int update_count,
     int event_count) {
+  static const int recorder_span_slot = CostSpanSlot("span:accessibility-checkpoint");
+  // The span ends when this function returns, so it includes the completion.
+  struct SpanEnd {
+    ~SpanEnd() { EndCostSpan(recorder_span_slot); }
+  } recorder_span_end;
+  A11Y_RECORDER_COST("CompleteRendererAccessibilityCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_token.empty() ||
       reason.empty() || node_count < 0 || maximum_nodes <= 0 ||
@@ -2740,6 +2810,7 @@ void RecordBlinkDomAttributeChanged(int document_node_id,
                                     int previous_attribute_value_length,
                                     bool previous_attribute_value_truncated,
                                     int maximum_value_length) {
+  A11Y_RECORDER_COST("RecordBlinkDomAttributeChanged");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       node_id <= 0 || node_name.empty() || attribute_name.empty() ||
@@ -2804,6 +2875,7 @@ void RecordBlinkDomCharacterDataChanged(int document_node_id,
                                         int previous_text_length,
                                         bool previous_text_truncated,
                                         int maximum_value_length) {
+  A11Y_RECORDER_COST("RecordBlinkDomCharacterDataChanged");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       node_id <= 0 || text_length < 0 || previous_text_length < 0 ||
@@ -2837,6 +2909,7 @@ void RecordBlinkSchedulerWakeUpDeferred(
     int64_t allowed_wake_up_microseconds,
     bool has_ready_task,
     int block_type) {
+  A11Y_RECORDER_COST("RecordBlinkSchedulerWakeUpDeferred");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || desired_wake_up_microseconds < 0 ||
       allowed_wake_up_microseconds <= desired_wake_up_microseconds ||
@@ -2877,6 +2950,7 @@ void RecordBrowserNavigationStarted(int64_t navigation_id,
                                     std::string url,
                                     bool renderer_initiated,
                                     bool same_document) {
+  A11Y_RECORDER_COST("RecordBrowserNavigationStarted");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || navigation_id <= 0 || page_frame_tree_node_id < 0 ||
       frame_tree_node_id < 0 || url.empty()) {
@@ -2913,6 +2987,7 @@ void RecordBrowserNavigationCompleted(int64_t navigation_id,
                                       bool committed,
                                       bool error_page,
                                       int net_error_code) {
+  A11Y_RECORDER_COST("RecordBrowserNavigationCompleted");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || navigation_id <= 0 || page_frame_tree_node_id < 0 ||
       frame_tree_node_id < 0 || url.empty()) {
@@ -2943,6 +3018,7 @@ void RecordBlinkDispatchCompleted(uintptr_t event_identity,
                                   bool default_prevented,
                                   bool propagation_stopped,
                                   bool immediate_propagation_stopped) {
+  A11Y_RECORDER_COST("RecordBlinkDispatchCompleted");
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<EvidenceIdentityStorage::DispatchState> state =
       TakeDispatchIdentity(event_identity);
@@ -2996,6 +3072,7 @@ void RecordBlinkDocumentCookieRead(int document_node_id,
                                    std::string served_from,
                                    std::vector<std::string> cookie_names,
                                    CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkDocumentCookieRead");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -3020,6 +3097,7 @@ void RecordBlinkDocumentCookieWrite(int document_node_id,
                                     std::string outcome,
                                     CookieWriteRequest request,
                                     CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkDocumentCookieWrite");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -3050,6 +3128,7 @@ void RecordBlinkCookieStoreRead(uintptr_t resolver_identity,
                                 std::string url,
                                 std::string outcome,
                                 CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkCookieStoreRead");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -3074,6 +3153,7 @@ void RecordBlinkCookieStoreRead(uintptr_t resolver_identity,
 }
 
 void NoteBlinkCookieStoreWriteResolver(uintptr_t resolver_identity) {
+  A11Y_RECORDER_COST("NoteBlinkCookieStoreWriteResolver");
   g_pending_cookie_store_write_resolver = resolver_identity;
 }
 
@@ -3084,6 +3164,7 @@ void RecordBlinkCookieStoreWrite(std::string method,
                                  bool threw,
                                  CookieWriteRequest request,
                                  CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkCookieStoreWrite");
   const uintptr_t resolver_identity = g_pending_cookie_store_write_resolver;
   g_pending_cookie_store_write_resolver = 0;
   RecorderPipeClient* client = GetProcessRecorderClient();
@@ -3116,6 +3197,7 @@ void RecordBlinkCookieStoreWrite(std::string method,
 void RecordBlinkCookieStoreReadResult(uintptr_t resolver_identity,
                                       bool context_valid,
                                       std::vector<std::string> cookie_names) {
+  A11Y_RECORDER_COST("RecordBlinkCookieStoreReadResult");
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<CookieStoreRequestState> request =
       TakeCookieStoreRequest(resolver_identity);
@@ -3135,6 +3217,7 @@ void RecordBlinkCookieStoreReadResult(uintptr_t resolver_identity,
 
 void RecordBlinkCookieStoreWriteResult(uintptr_t resolver_identity,
                                        bool success) {
+  A11Y_RECORDER_COST("RecordBlinkCookieStoreWriteResult");
   RecorderPipeClient* client = GetProcessRecorderClient();
   std::optional<CookieStoreRequestState> request =
       TakeCookieStoreRequest(resolver_identity);
@@ -3162,6 +3245,7 @@ void RecordBlinkCookieStoreChange(std::string context_kind,
                                   std::string path,
                                   std::string cause,
                                   bool dispatched) {
+  A11Y_RECORDER_COST("RecordBlinkCookieStoreChange");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -3191,6 +3275,7 @@ void RecordBrowserFrameCookieAccess(int page_frame_tree_node_id,
                                     std::string request_id,
                                     bool ad_tagged,
                                     std::vector<CookieAccessEntry> cookies) {
+  A11Y_RECORDER_COST("RecordBrowserFrameCookieAccess");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || page_frame_tree_node_id < 0 || frame_tree_node_id < 0) {
     return;
@@ -3223,6 +3308,7 @@ void RecordBrowserNavigationCookieAccess(
     std::string request_id,
     bool ad_tagged,
     std::vector<CookieAccessEntry> cookies) {
+  A11Y_RECORDER_COST("RecordBrowserNavigationCookieAccess");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || navigation_id <= 0 || page_frame_tree_node_id < 0 ||
       frame_tree_node_id < 0) {
@@ -3272,6 +3358,7 @@ void RecordBlinkFocusChanged(int document_node_id,
                              bool focus_visible_present,
                              bool focus_visible,
                              CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkFocusChanged");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       !IsOneOf(focus_type, {"none", "script", "forward", "backward",
@@ -3325,6 +3412,7 @@ void RecordBlinkSelectionChanged(int document_node_id,
                                  int text_control_selection_end,
                                  std::string text_control_selection_direction,
                                  CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkSelectionChanged");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       !IsOneOf(set_by, {"user", "system"}) ||
@@ -3390,6 +3478,7 @@ void RecordBlinkTextControlValueChanged(int document_node_id,
                                         int selection_end,
                                         std::string selection_direction,
                                         CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkTextControlValueChanged");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       node_id <= 0 || control_type.empty() ||
@@ -3422,6 +3511,7 @@ void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
                                              int node_id,
                                              int referenced_node_id,
                                              CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkActiveDescendantReferenceSet");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       node_id <= 0 || referenced_node_id <= 0) {
@@ -3490,6 +3580,9 @@ uint64_t BeginBlinkLayoutCheckpoint(
     LayoutCheckpointFrame frame,
     const std::vector<std::string>& style_properties,
     int maximum_nodes) {
+  static const int recorder_span_slot = CostSpanSlot("span:layout-checkpoint");
+  BeginCostSpan(recorder_span_slot);
+  A11Y_RECORDER_COST("BeginBlinkLayoutCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       maximum_nodes <= 0 || style_properties.empty() ||
@@ -3661,6 +3754,7 @@ void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
                                      int document_node_id,
                                      std::string document_token,
                                      LayoutCheckpointNode node) {
+  A11Y_RECORDER_COST("RecordBlinkLayoutCheckpointNode");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || node.node_index < 0 || node.node_id <= 0 ||
@@ -3711,6 +3805,12 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
                                    int maximum_nodes,
                                    int pseudo_element_count,
                                    int shadow_root_count) {
+  static const int recorder_span_slot = CostSpanSlot("span:layout-checkpoint");
+  // The span ends when this function returns, so it includes the completion.
+  struct SpanEnd {
+    ~SpanEnd() { EndCostSpan(recorder_span_slot); }
+  } recorder_span_end;
+  A11Y_RECORDER_COST("CompleteBlinkLayoutCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || node_count < 0 || maximum_nodes <= 0 ||
@@ -3814,6 +3914,7 @@ uint64_t BeginBlinkPresentationRequest(int document_node_id,
                                        int source_frame_number,
                                        bool is_main_frame_widget,
                                        bool high_resolution_ticks) {
+  A11Y_RECORDER_COST("BeginBlinkPresentationRequest");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       layout_checkpoint_sequence == 0 || !IsValidPresentationWidget(widget) ||
@@ -3862,6 +3963,7 @@ void RecordBlinkPresentationNotSwapped(uint64_t request_sequence,
                                        int not_swapped_index,
                                        int64_t timestamp_microseconds,
                                        bool high_resolution_ticks) {
+  A11Y_RECORDER_COST("RecordBlinkPresentationNotSwapped");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || request_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || !widget.present ||
@@ -3898,6 +4000,7 @@ void RecordBlinkPresentationSwapped(uint64_t request_sequence,
                                     PresentationWidgetIdentity widget,
                                     uint32_t frame_token,
                                     int not_swapped_count) {
+  A11Y_RECORDER_COST("RecordBlinkPresentationSwapped");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || request_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || !widget.present ||
@@ -3922,6 +4025,7 @@ void RecordBlinkPresentationFeedback(uint64_t request_sequence,
                                      PresentationFeedbackTiming timing,
                                      int not_swapped_count,
                                      bool high_resolution_ticks) {
+  A11Y_RECORDER_COST("RecordBlinkPresentationFeedback");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || request_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || !widget.present ||
@@ -3989,6 +4093,9 @@ uint64_t BeginBlinkInteractionCheckpoint(int document_node_id,
                                          InteractionCheckpointState state,
                                          int maximum_text_controls,
                                          int maximum_value_length) {
+  static const int recorder_span_slot = CostSpanSlot("span:interaction-checkpoint");
+  BeginCostSpan(recorder_span_slot);
+  A11Y_RECORDER_COST("BeginBlinkInteractionCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
       source_checkpoint_sequence == 0 || maximum_text_controls <= 0 ||
@@ -4063,6 +4170,7 @@ void RecordBlinkInteractionCheckpointTextControl(
     int selection_start,
     int selection_end,
     std::string selection_direction) {
+  A11Y_RECORDER_COST("RecordBlinkInteractionCheckpointTextControl");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || text_control_index < 0 || node_id <= 0 ||
@@ -4092,6 +4200,12 @@ void CompleteBlinkInteractionCheckpoint(uint64_t checkpoint_sequence,
                                         int text_control_count,
                                         bool truncated,
                                         int maximum_text_controls) {
+  static const int recorder_span_slot = CostSpanSlot("span:interaction-checkpoint");
+  // The span ends when this function returns, so it includes the completion.
+  struct SpanEnd {
+    ~SpanEnd() { EndCostSpan(recorder_span_slot); }
+  } recorder_span_end;
+  A11Y_RECORDER_COST("CompleteBlinkInteractionCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
       document_token.empty() || text_control_count < 0 ||
@@ -4412,6 +4526,7 @@ void RecordBlinkNetworkRequest(NetworkScope scope,
                                bool redirect,
                                NetworkResponseFacts redirect_response,
                                CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkNetworkRequest");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4435,6 +4550,7 @@ void RecordBlinkNetworkResponse(NetworkScope scope,
                                 std::string request_id,
                                 bool from_memory_cache,
                                 NetworkResponseFacts response) {
+  A11Y_RECORDER_COST("RecordBlinkNetworkResponse");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4456,6 +4572,7 @@ void RecordBlinkNetworkFinished(NetworkScope scope,
                                 int64_t encoded_data_length,
                                 int64_t decoded_body_length,
                                 int64_t finish_before_record) {
+  A11Y_RECORDER_COST("RecordBlinkNetworkFinished");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4475,6 +4592,7 @@ void RecordBlinkNetworkFinished(NetworkScope scope,
 void RecordBlinkNetworkFailed(NetworkScope scope,
                               uint64_t inspector_id,
                               NetworkFailureFacts failure) {
+  A11Y_RECORDER_COST("RecordBlinkNetworkFailed");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4511,6 +4629,7 @@ void RecordBlinkMemoryCacheUse(NetworkScope scope,
                                bool static_data,
                                NetworkRequestFacts request,
                                NetworkResponseFacts response) {
+  A11Y_RECORDER_COST("RecordBlinkMemoryCacheUse");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4531,6 +4650,7 @@ void RecordBrowserNetworkRequestHeaders(int page_frame_tree_node_id,
                                         int64_t sent_before_record,
                                         std::vector<NetworkHeader> headers,
                                         std::vector<CookieAccessEntry> cookies) {
+  A11Y_RECORDER_COST("RecordBrowserNetworkRequestHeaders");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || request_id.empty()) {
     return;
@@ -4559,6 +4679,7 @@ void RecordBrowserNetworkResponseHeaders(
     int status_code,
     std::vector<NetworkHeader> headers,
     std::vector<CookieAccessEntry> cookies) {
+  A11Y_RECORDER_COST("RecordBrowserNetworkResponseHeaders");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || request_id.empty()) {
     return;
@@ -4584,6 +4705,7 @@ void RecordBrowserNavigationResponse(int64_t navigation_id,
                                      int64_t document_navigation_id,
                                      std::string document_token,
                                      NavigationResponseFacts facts) {
+  A11Y_RECORDER_COST("RecordBrowserNavigationResponse");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || navigation_id <= 0 || page_frame_tree_node_id < 0 ||
       frame_tree_node_id < 0) {
@@ -4722,6 +4844,7 @@ void RecordBlinkWebSocketCreated(NetworkScope scope,
                                  std::string url,
                                  std::string requested_protocols,
                                  CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkWebSocketCreated");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4740,6 +4863,7 @@ void RecordBlinkWebSocketHandshakeRequest(NetworkScope scope,
                                           uint64_t inspector_id,
                                           std::string url,
                                           std::vector<NetworkHeader> headers) {
+  A11Y_RECORDER_COST("RecordBlinkWebSocketHandshakeRequest");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4759,6 +4883,7 @@ void RecordBlinkWebSocketHandshakeResponse(
     NetworkScope scope,
     uint64_t inspector_id,
     RealtimeHandshakeResponseFacts response) {
+  A11Y_RECORDER_COST("RecordBlinkWebSocketHandshakeResponse");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4779,6 +4904,7 @@ void RecordBlinkWebSocketMessage(NetworkScope scope,
                                  int64_t payload_length,
                                  std::string text,
                                  CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkWebSocketMessage");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4805,6 +4931,7 @@ void RecordBlinkWebSocketCloseRequested(NetworkScope scope,
                                         int code,
                                         std::string reason,
                                         CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkWebSocketCloseRequested");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4822,6 +4949,7 @@ void RecordBlinkWebSocketCloseRequested(NetworkScope scope,
 void RecordBlinkWebSocketError(NetworkScope scope,
                                uint64_t inspector_id,
                                std::string message) {
+  A11Y_RECORDER_COST("RecordBlinkWebSocketError");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4839,6 +4967,7 @@ void RecordBlinkWebSocketClosed(NetworkScope scope,
                                 bool was_clean,
                                 int code,
                                 std::string reason) {
+  A11Y_RECORDER_COST("RecordBlinkWebSocketClosed");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4861,6 +4990,7 @@ void RecordBlinkEventSourceMessage(NetworkScope scope,
                                    std::string event_type,
                                    std::string last_event_id,
                                    std::string data) {
+  A11Y_RECORDER_COST("RecordBlinkEventSourceMessage");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4881,6 +5011,7 @@ void RecordBlinkWebTransportCreated(NetworkScope scope,
                                     uint64_t transport_id,
                                     std::string url,
                                     CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkWebTransportCreated");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4898,6 +5029,7 @@ void RecordBlinkWebTransportEstablished(
     NetworkScope scope,
     uint64_t transport_id,
     RealtimeHandshakeResponseFacts response) {
+  A11Y_RECORDER_COST("RecordBlinkWebTransportEstablished");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4920,6 +5052,7 @@ void RecordBlinkWebTransportCloseRequested(NetworkScope scope,
                                            int64_t code,
                                            std::string reason,
                                            CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkWebTransportCloseRequested");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;
@@ -4942,6 +5075,7 @@ void RecordBlinkWebTransportClosed(NetworkScope scope,
                                    bool abrupt,
                                    int64_t code,
                                    std::string reason) {
+  A11Y_RECORDER_COST("RecordBlinkWebTransportClosed");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client) {
     return;

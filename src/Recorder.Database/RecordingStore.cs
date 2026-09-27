@@ -253,7 +253,8 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
     /// time; each reference is checked here with one set-based query, with
     /// up to half the processors, at most eight, checking at once. A
     /// reference with a null column is not checked, as a foreign key would
-    /// not check it. When <paramref name="timings"/> is given, the time of
+    /// not check it. Each query runs with nested loop joins disabled, since
+    /// the statistics of a recording just written describe none of its rows. When <paramref name="timings"/> is given, the time of
     /// each query is added to it under the referring table's name.
     /// </summary>
     public async Task<IReadOnlyList<string>> CheckReferencesAsync(
@@ -341,15 +342,32 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
                     columns.Select((column, position) =>
                         $"p.{Identifier(referencedColumns[position])} = c.{Identifier(column)}"));
                 await using var connection = await dataSource.OpenConnectionAsync(token).ConfigureAwait(false);
+                await using var transaction = await connection.BeginTransactionAsync(token).ConfigureAwait(false);
+                // The recording was written moments ago, so the planner's
+                // statistics do not yet include it and estimate about one
+                // row for its recording_id. From that estimate it chooses a
+                // nested loop that reads every referenced row of the
+                // recording once per referring row. Without nested loops it
+                // chooses a hash or merge anti join, which reads each side
+                // once. SET LOCAL ends with the transaction, so the pooled
+                // connection keeps the default. The measurements behind this
+                // are in docs/architecture/session-database.md.
+                await using (var plan = new NpgsqlCommand("SET LOCAL enable_nestloop = off", connection, transaction))
+                {
+                    await plan.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+
                 await using var command = new NpgsqlCommand(
                     $"SELECT count(*) FROM {Identifier(table)} c WHERE c.recording_id = $1 AND {present} " +
                     $"AND NOT EXISTS (SELECT 1 FROM {Identifier(referenced)} p WHERE {matches})",
-                    connection)
+                    connection,
+                    transaction)
                 {
                     CommandTimeout = 0
                 };
                 command.Parameters.AddWithValue(recordingId);
                 missing[index] = (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))!;
+                await transaction.CommitAsync(token).ConfigureAwait(false);
                 timings?.Since("check-references:" + table, started);
             }).ConfigureAwait(false);
 

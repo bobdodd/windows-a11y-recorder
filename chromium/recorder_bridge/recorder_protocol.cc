@@ -18,6 +18,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chromium/recorder_bridge/evidence_cost.h"
 
 namespace a11y_recorder {
 namespace {
@@ -421,8 +422,17 @@ bool RecorderPipeClient::QueueEvidence(
     message.Set("qualityFlags", base::ListValue());
     return WriteMessage(std::move(message), error);
   }
-  if (std::unique_ptr<QueuedEvidence> refused =
-          queue_.Push(std::move(evidence), &StampEvidence)) {
+  // A push that waited for the writer to free space is measured apart from
+  // one that did not, since only a wait means the queue held the page back.
+  static const int push_slot = RegisterCostKind("queue.push");
+  static const int waited_slot = RegisterCostKind("queue.push-waited");
+  const int64_t push_started = CostNowNanoseconds();
+  bool waited = false;
+  std::unique_ptr<QueuedEvidence> refused =
+      queue_.Push(std::move(evidence), &StampEvidence, &waited);
+  RecordCost(waited ? waited_slot : push_slot,
+             CostNowNanoseconds() - push_started);
+  if (refused) {
     *error = "Browser evidence queue was closed.";
     return false;
   }
@@ -440,6 +450,7 @@ void RecorderPipeClient::ThreadMain() {
 }
 
 void RecorderPipeClient::WriteQueuedEvidence(PendingEvidence& evidence) {
+  A11Y_RECORDER_COST("writer.write");
   base::DictValue message;
   message.Set("kind", "evidence");
   message.Set("protocolVersion", configuration_.protocol_version);

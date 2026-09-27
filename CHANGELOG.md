@@ -324,6 +324,17 @@ from the product version.
 - Skip, in the reference check, the tables with no rows in the recording,
   run more of its queries at once, and write each query's time to
   `database-writer-timings.json`.
+- Check references with nested loop joins disabled for the check's own
+  queries. Right after writing, the planner's statistics describe none of
+  the new recording's rows, and it chose nested loops that compared every
+  row with every row; measured on the development sandbox, a check that
+  took 47.6 s this way took 0.5 s without them.
+- Write each Chromium process's measured cost of each kind of browser
+  evidence to the diagnostic log every five seconds: calls, total time, and
+  longest call of each bridge entry point, the Blink work between the start
+  and completion of a dispatch path or checkpoint, queue pushes that waited,
+  and the writer thread's writes. The log is a diagnostic, not evidence, and
+  no evidence changes. Requires rebuilding Chromium.
 - Write browser evidence from a writer thread in each Chromium process instead
   of from the thread that observed it, on the `postgres-session-store` branch.
   A synchronous write to the recorder's unbuffered pipe waits until the

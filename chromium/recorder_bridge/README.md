@@ -313,6 +313,42 @@ that loss without a per-process sequence number on every record, which would
 be a protocol change and has not been made. If the writer thread cannot be
 started, the process writes each record from the observing thread as before.
 
+Each process that records evidence measures what the bridge costs the threads
+that observe it, and every five seconds writes the totals since its last
+report as one line of the diagnostic log, beginning `Recorder evidence cost`.
+In a renderer the diagnostic log is `diagnostics\chromium.log` in the session
+folder, since a sandboxed renderer writes through Chromium's log handle; in
+the browser process it is `diagnostics\browser-bridge.log`. The line names
+the interval in microseconds and then, for each kind with calls in the
+interval, `name=calls/total_us/longest_us`. A report is written only when a
+measurement ends after the interval has passed, so a process ended without
+shutdown, as renderers usually are, loses up to its last five seconds, and an
+idle process writes nothing. The kinds are:
+
+- each entry point in `browser_bridge.h` that records evidence, under its own
+  name, timed from entry to return, which includes building the payload and
+  queueing it;
+- `span:dispatch-path`, `span:dom-checkpoint`,
+  `span:accessibility-checkpoint`, `span:interaction-checkpoint`, and
+  `span:layout-checkpoint`, timed on one thread from the call that opens a
+  dispatch path or checkpoint to the return of the call that completes it.
+  These include the work Blink does between the calls for the recorder, such
+  as reading each node's computed style for a layout checkpoint, and the
+  entry points called within them, so a span and its entry points are not
+  added together;
+- `queue.push`, a push that found room, and `queue.push-waited`, a push that
+  waited for the writer thread to free space;
+- `writer.write`, the writer thread's serialization and pipe write of one
+  record, which is off the observing thread.
+
+The accounting is in `evidence_cost.cc`, which is standard C++ with no
+Chromium dependency, so `evidence_cost_test.cc` runs it on any compiler. Each
+measurement reads a monotonic clock twice and adds to shared counters. The
+report is a diagnostic, not evidence: no record is added, removed, or
+changed, and the protocol version is unchanged. The totals are the time spent
+in the bridge and in those spans, not a count of what the page would do
+without the recorder.
+
 Protocol 0.23 records cookie operations on the `browser.cookie` channel, with
 cookie names and never cookie values. `cookie_text.cc` holds the text readers:
 `ReadCookieNames` reads the names from a `document.cookie` string,
