@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -22,7 +23,10 @@ namespace Recorder.Database;
 /// when a transaction commits, so a batch can write its rows before the
 /// identities they refer to are committed.
 /// </remarks>
-public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid recordingId)
+public sealed class PostgresEventBatchTarget(
+    NpgsqlDataSource dataSource,
+    Guid recordingId,
+    WriterTimings? timings = null)
     : IEventBatchTarget
 {
     private readonly ReferenceKeys _keys = new(dataSource);
@@ -58,11 +62,15 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         var refusals = new List<StoreRefusal>();
         var rows = new List<(int Index, EventRow Row)>(batch.Events.Count);
         WriteAttempt attempt;
+        var batchStarted = Stopwatch.GetTimestamp();
         await _prepare.WaitAsync(cancellationToken).ConfigureAwait(false);
+        timings?.Since("batch.prepare-wait", batchStarted);
         attempt = new WriteAttempt(_nextAttempt++);
         try
         {
+            var preparing = Stopwatch.GetTimestamp();
             await PrepareAsync(batch, attempt, rows, refusals, cancellationToken).ConfigureAwait(false);
+            timings?.Since("batch.prepare", preparing, batch.Events.Count);
         }
         catch
         {
@@ -78,7 +86,11 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
 
         try
         {
-            return await WriteRowsAsync(batch, attempt, rows, refusals, cancellationToken).ConfigureAwait(false);
+            var writing = Stopwatch.GetTimestamp();
+            var result = await WriteRowsAsync(batch, attempt, rows, refusals, cancellationToken).ConfigureAwait(false);
+            timings?.Since("batch.write", writing, batch.Events.Count);
+            timings?.Since("batch.total", batchStarted, batch.Events.Count);
+            return result;
         }
         finally
         {
@@ -102,6 +114,7 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
                     .ConfigureAwait(false));
         }
 
+        var resolving = Stopwatch.GetTimestamp();
         for (var index = 0; index < batch.Events.Count; index++)
         {
             var (row, refusal) = await ResolveAsync(batch.Events[index], cancellationToken).ConfigureAwait(false);
@@ -114,9 +127,13 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
             rows.Add((index, row));
         }
 
+        timings?.Since("prepare.resolve-events", resolving, batch.Events.Count);
+
         // Claims the identities the batch will write, and names their rows.
+        var planning = Stopwatch.GetTimestamp();
         var plan = Plan(rows.Select(item => item.Row), attempt);
         await ResolveNamesAsync(plan.Fresh.Concat(plan.Shared), cancellationToken).ConfigureAwait(false);
+        timings?.Since("prepare.plan-identities", planning, plan.FreshRows.Count + plan.SharedRows.Count);
     }
 
     private async Task<IReadOnlyList<StoreRefusal>> WriteRowsAsync(
@@ -259,10 +276,12 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         EvidenceRows? evidence = null;
         if (EvidenceCatalog.ByEventType.TryGetValue((record.Channel, record.EventType), out var table))
         {
+            var mapping = Stopwatch.GetTimestamp();
             try
             {
                 using var payload = JsonDocument.Parse(buffered.PayloadJson);
                 evidence = _mapper!.Map(table, buffered.EventKey, payload.RootElement);
+                timings?.Since("prepare.parse-and-map:" + record.EventType, mapping);
             }
             catch (EvidenceMappingException exception)
             {
@@ -273,7 +292,9 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
                 return (null, "payload-not-json");
             }
 
+            var naming = Stopwatch.GetTimestamp();
             await ResolveNamesAsync(evidence.Rows, cancellationToken).ConfigureAwait(false);
+            timings?.Since("prepare.names", naming, evidence.Rows.Count);
         }
         else if (EventPayloadValidator.IsBuiltInChannel(record.Channel))
         {
@@ -352,6 +373,7 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
         int refusedCount,
         CancellationToken cancellationToken)
     {
+        var opening = Stopwatch.GetTimestamp();
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken)
             .ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
@@ -361,21 +383,30 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
             await defer.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        timings?.Since("write.open", opening);
+
         var stored = new List<IdentityRow>();
         if (rows.Count > 0)
         {
             var plan = Plan(rows, attempt);
+            var copying = Stopwatch.GetTimestamp();
             await CopyEventsAsync(connection, rows, cancellationToken).ConfigureAwait(false);
+            timings?.Since("copy.events", copying, rows.Count);
+            copying = Stopwatch.GetTimestamp();
             await CopyChildrenAsync(connection, rows, cancellationToken).ConfigureAwait(false);
+            timings?.Since("copy.event-children", copying, rows.Count);
             await EvidenceCopy.CopyAsync(
                 connection,
                 recordingId,
                 plan.FreshRows.Concat(rows.Where(row => row.Evidence is not null).SelectMany(row => row.Evidence!.Rows)),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                timings).ConfigureAwait(false);
 
             // The earlier writes this one waits for hold no lock it takes, so
             // they finish whether or not this one waits.
+            var waiting = Stopwatch.GetTimestamp();
             await Task.WhenAll(plan.Owners).WaitAsync(cancellationToken).ConfigureAwait(false);
+            timings?.Since("write.wait-identity-owners", waiting, plan.Owners.Count);
             EvidenceRow[] shared;
             lock (_gate)
             {
@@ -388,8 +419,10 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
 
             if (shared.Length > 0)
             {
+                var sharing = Stopwatch.GetTimestamp();
                 await EvidenceCopy.CopyIgnoringConflictsAsync(connection, recordingId, shared, cancellationToken)
                     .ConfigureAwait(false);
+                timings?.Since("write.copy-shared-identities", sharing, shared.Length);
             }
         }
 
@@ -441,7 +474,9 @@ public sealed class PostgresEventBatchTarget(NpgsqlDataSource dataSource, Guid r
 
         // Once started, a commit is not cancelled, so the writer knows
         // whether the batch was stored.
+        var committing = Stopwatch.GetTimestamp();
         await transaction.CommitAsync(CancellationToken.None).ConfigureAwait(false);
+        timings?.Since("write.commit", committing);
         lock (_gate)
         {
             foreach (var identity in stored)

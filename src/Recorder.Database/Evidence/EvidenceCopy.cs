@@ -103,15 +103,19 @@ internal static class EvidenceCopy
         NpgsqlConnection connection,
         Guid recordingId,
         IEnumerable<EvidenceRow> rows,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        WriterTimings? timings = null)
     {
         foreach (var group in rows.GroupBy(row => row.Table).OrderBy(group => TableOrder[group.Key]))
         {
+            var copying = System.Diagnostics.Stopwatch.GetTimestamp();
+            var count = 0;
             var (sql, types) = Statements.GetOrAdd(group.Key, Statement);
             await using var importer = await connection.BeginBinaryImportAsync(sql, cancellationToken)
                 .ConfigureAwait(false);
             foreach (var row in group)
             {
+                count++;
                 importer.StartRow();
                 importer.Write(recordingId, NpgsqlDbType.Uuid);
                 for (var index = 0; index < types.Length; index++)
@@ -121,6 +125,7 @@ internal static class EvidenceCopy
             }
 
             await importer.CompleteAsync(cancellationToken).ConfigureAwait(false);
+            timings?.Since("copy." + group.Key.Name, copying, count);
         }
     }
 

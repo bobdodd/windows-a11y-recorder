@@ -44,4 +44,10 @@ public sealed record PostgresEventWriterOptions
     /// written by then stay in the spill file and are reported as unwritten.
     /// </summary>
     public TimeSpan CompletionTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Where the writer records how long each step of writing takes, or null
+    /// to not measure it.
+    /// </summary>
+    public WriterTimings? Timings { get; init; }
 }

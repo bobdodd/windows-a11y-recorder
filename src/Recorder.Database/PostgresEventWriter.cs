@@ -75,6 +75,12 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     private string? _firstRejection;
     private bool _completed;
     private PostgresEventWriterResult? _result;
+    private readonly WriterTimings? _timings;
+
+    // Read by the timings sampler on another thread.
+    private long _memoryCount;
+    private long _spilledCount;
+    private int _inFlightCount;
 
     public PostgresEventWriter(
         IEventBatchTarget target,
@@ -101,6 +107,13 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
                 FullMode = BoundedChannelFullMode.Wait,
                 AllowSynchronousContinuations = false
             });
+        _timings = options.Timings;
+        _timings?.StartSampling(() => new WriterTimings.WriterState(
+            AcceptedCount,
+            WrittenCount,
+            Volatile.Read(ref _memoryCount),
+            Volatile.Read(ref _spilledCount),
+            Volatile.Read(ref _inFlightCount)));
         _loop = Task.Run(RunAsync);
     }
 
@@ -142,6 +155,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
 
         _completed = true;
         _channel.Writer.TryComplete();
+        var completing = System.Diagnostics.Stopwatch.GetTimestamp();
         var finished = await Task.WhenAny(_loop, Task.Delay(_options.CompletionTimeout))
             .ConfigureAwait(false);
         if (finished != _loop)
@@ -156,6 +170,8 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
         catch (OperationCanceledException)
         {
         }
+
+        _timings?.Since("complete.wait", completing);
 
         // Anything not written stays on disk, so it is not lost with the
         // process, and is reported: first the batches whose writes were
@@ -214,6 +230,9 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
                 token.ThrowIfCancellationRequested();
                 Drain();
                 Collect();
+                Volatile.Write(ref _memoryCount, _memory.Count);
+                Volatile.Write(ref _spilledCount, _spill.Count);
+                Volatile.Write(ref _inFlightCount, _inFlight.Count);
                 var inputDone = _channel.Reader.Completion.IsCompleted;
                 // Spilled events are read back once memory is empty, as many
                 // as fit in the memory bound. The events of batches being
@@ -224,14 +243,18 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
                 if (_memory.Count == 0 && _spill.HasEvents &&
                     (_inFlight.Count == 0 || !IsDatabaseUnavailable))
                 {
-                    foreach (var buffered in _spill.Read(
+                    var reading = System.Diagnostics.Stopwatch.GetTimestamp();
+                    var read = _spill.Read(
                         _options.BatchSize,
                         _options.MemoryBufferBytes - _memoryBytes,
-                        requireOne: _inFlight.Count == 0))
+                        requireOne: _inFlight.Count == 0);
+                    foreach (var buffered in read)
                     {
                         _memory.Enqueue(buffered);
                         _memoryBytes += buffered.EstimatedBytes;
                     }
+
+                    _timings?.Since("writer.spill-read", reading, read.Count);
                 }
 
                 if (inputDone)
@@ -407,9 +430,17 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
 
     private void Drain()
     {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var count = 0;
         while (_channel.Reader.TryRead(out var record))
         {
             Accept(record);
+            count++;
+        }
+
+        if (count > 0)
+        {
+            _timings?.Since("writer.accept", started, count);
         }
     }
 
@@ -425,7 +456,10 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
         var buffered = new BufferedEvent(_nextEventKey++, record, record.Payload.GetRawText());
         if (_spill.HasEvents || _memoryBytes + buffered.EstimatedBytes > _options.MemoryBufferBytes)
         {
-            if (!_spill.TryAppend(buffered, _options.SpillFileBytes))
+            var appending = System.Diagnostics.Stopwatch.GetTimestamp();
+            var appended = _spill.TryAppend(buffered, _options.SpillFileBytes);
+            _timings?.Since("writer.spill-append", appending);
+            if (!appended)
             {
                 Drop(record);
                 return;

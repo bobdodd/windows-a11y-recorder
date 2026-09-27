@@ -289,6 +289,17 @@ from the product version.
   process never gets to report, because it is shutting down or its pipe never
   recovers, still goes unstated in the archive, which no reporter inside that
   process can fix.
+- Measure the recorder's database writer, on the `postgres-session-store`
+  branch. `WriterTimings` totals the time and items of each step: checking and
+  buffering events, spilling, preparing a batch (reading and mapping payloads,
+  resolving names and identities), opening the transaction, each table's
+  binary `COPY`, waiting for identities another batch writes, and committing.
+  Once a second it samples the accepted and written counts, the events in
+  memory and in the spill file, the batches in flight, and the processor time
+  of the app and of the `postgres` processes. The coordinator writes the
+  result to `database-writer-timings.json` in the session folder when
+  writing finishes. The file describes the recorder, not the recording, and is
+  not stored in the database.
 
 ### Changed
 
@@ -299,8 +310,11 @@ from the product version.
   of its layout checkpoint. Records go through a bounded `EvidenceQueue` that
   applies backpressure rather than dropping records, and layout checkpoint
   node payloads are built on the writer thread. Records still queued when a
-  renderer is ended without shutdown are lost without an omission record. Not
-  yet built or measured on Windows.
+  renderer is ended without shutdown are lost without an omission record. In
+  one 94 s Windows recording, the median time from a layout checkpoint's start
+  to its completion fell from 250 ms to 55 ms against an earlier recording of
+  the same kind; the recorder's database writer then fell behind the higher
+  event rate.
 - Hash the event log and desktop frames while they are written instead of
   rereading them when recording stops. `NdjsonEventWriter` updates a SHA-256
   hash with each line it writes, and the desktop frame collector encodes each

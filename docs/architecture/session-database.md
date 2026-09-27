@@ -542,6 +542,17 @@ recording averaged about 3,600 events per second. These figures are from one
 run on a machine unlike the target and are not a substitute for the system
 test.
 
+A 94 s Windows recording on the same branch produced about 4,700 events per
+second, and the writer stored about 2,700 per second. When recording stopped,
+the writer used its 60 s completion timeout, 33,151 events stayed in the spill
+file, and the recording was stored as failed. To find where the time goes,
+each recording's folder gets `database-writer-timings.json`, written by
+`WriterTimings` when writing finishes: the total and longest time of each
+writing step, with the events or rows it handled, and a once-a-second sample
+of the writer's backlog and of the processor time of the app and of the
+`postgres` processes. The `postgres` total counts every process with that
+name, which on the recorder's machine are the app's own server.
+
 ## Open items
 
 - The size PostgreSQL 18 adds to the app installation. The extracted server

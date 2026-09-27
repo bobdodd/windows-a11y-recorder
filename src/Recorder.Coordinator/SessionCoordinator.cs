@@ -379,6 +379,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
             _clock?.GetElapsedNanoseconds() ?? 0,
             failure,
             CancellationToken.None).ConfigureAwait(false);
+        WriteWriterTimings();
         var writer = _databaseResult.Writer;
         if (writer.UnwrittenCount > 0)
         {
@@ -390,6 +391,27 @@ public sealed class SessionCoordinator : IAsyncDisposable
         if (_databaseResult.CompletionError is { } error)
         {
             AddDatabaseProblem($"The recording's final status was not stored: {error}");
+        }
+    }
+
+    // Measurements of the recorder's own event writing, kept beside the
+    // recording so a slow or incomplete write can be examined. They are not
+    // evidence and are not stored in the database.
+    private void WriteWriterTimings()
+    {
+        if (_databaseRecording?.Timings is not { } timings || _sessionDirectory is null)
+        {
+            return;
+        }
+
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(_sessionDirectory, "database-writer-timings.json"),
+                timings.ToJson());
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

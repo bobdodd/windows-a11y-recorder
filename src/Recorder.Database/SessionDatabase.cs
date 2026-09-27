@@ -154,15 +154,16 @@ public sealed class SessionDatabase : IAsyncDisposable
         writerOptions ??= new PostgresEventWriterOptions
         {
             SpillPath = SpillPathFor(definition.SessionKey),
-            CompletionTimeout = WriterCompletionTimeout
+            CompletionTimeout = WriterCompletionTimeout,
+            Timings = new WriterTimings()
         };
         var recordingId = await _store.CreateRecordingAsync(ProjectId, definition, cancellationToken)
             .ConfigureAwait(false);
         var writer = new PostgresEventWriter(
-            new PostgresEventBatchTarget(_server.DataSource, recordingId),
+            new PostgresEventBatchTarget(_server.DataSource, recordingId, writerOptions.Timings),
             definition.SessionKey,
             writerOptions);
-        return new DatabaseRecording(_store, recordingId, writer);
+        return new DatabaseRecording(_store, recordingId, writer, writerOptions.Timings);
     }
 
     public async ValueTask DisposeAsync()
@@ -199,14 +200,22 @@ public sealed class DatabaseRecording : IAsyncDisposable
     private readonly RecordingStore _store;
     private PostgresEventWriterResult? _written;
 
-    internal DatabaseRecording(RecordingStore store, Guid recordingId, PostgresEventWriter writer)
+    internal DatabaseRecording(
+        RecordingStore store,
+        Guid recordingId,
+        PostgresEventWriter writer,
+        WriterTimings? timings = null)
     {
         _store = store;
         RecordingId = recordingId;
         Writer = writer;
+        Timings = timings;
     }
 
     public Guid RecordingId { get; }
+
+    /// <summary>How long each step of writing took, when it was measured.</summary>
+    public WriterTimings? Timings { get; }
 
     /// <summary>The sink collectors' events are written to.</summary>
     public PostgresEventWriter Writer { get; }
@@ -297,5 +306,9 @@ public sealed class DatabaseRecording : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync() => await Writer.DisposeAsync().ConfigureAwait(false);
+    public async ValueTask DisposeAsync()
+    {
+        await Writer.DisposeAsync().ConfigureAwait(false);
+        Timings?.Dispose();
+    }
 }
