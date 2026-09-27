@@ -5,6 +5,7 @@
 #include "chromium/recorder_bridge/evidence_queue.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <chrono>
 #include <cstdio>
@@ -28,7 +29,15 @@ using a11y_recorder::QueuedEvidence;
 
 struct TestEvidence : QueuedEvidence {
   int index = 0;
+  uint64_t stamp = 0;
 };
+
+// A clock that only moves forward, read by the stamp.
+std::atomic<uint64_t> clock_value{0};
+
+void StampFromClock(QueuedEvidence& record) {
+  static_cast<TestEvidence&>(record).stamp = ++clock_value;
+}
 
 std::unique_ptr<QueuedEvidence> Record(const std::string& channel,
                                        size_t bytes,
@@ -54,7 +63,7 @@ void Settle() {
 void TestRecordsLeaveInTheOrderTheyArrived() {
   EvidenceQueue queue(1024);
   bool waited = true;
-  Expect(!queue.Push(Record("browser.dom", 10, 1), &waited),
+  Expect(!queue.Push(Record("browser.dom", 10, 1), nullptr, &waited),
          "first push accepted");
   Expect(!waited, "a push with room does not wait");
   Expect(!queue.Push(Record("browser.layout", 20, 2)), "second push accepted");
@@ -81,7 +90,7 @@ void TestAFullQueueDelaysThePushInsteadOfDroppingIt() {
   std::atomic<bool> pushed{false};
   bool waited = false;
   std::thread producer([&] {
-    queue.Push(Record("browser.layout", 40, 2), &waited);
+    queue.Push(Record("browser.layout", 40, 2), nullptr, &waited);
     pushed = true;
   });
   Settle();
@@ -103,7 +112,7 @@ void TestAFullQueueDelaysThePushInsteadOfDroppingIt() {
 void TestARecordLargerThanTheLimitIsAcceptedWhenTheQueueIsEmpty() {
   EvidenceQueue queue(16);
   bool waited = true;
-  Expect(!queue.Push(Record("browser.dom", 64, 1), &waited),
+  Expect(!queue.Push(Record("browser.dom", 64, 1), nullptr, &waited),
          "an oversized record enters an empty queue");
   Expect(!waited, "an oversized record does not wait on an empty queue");
   std::unique_ptr<QueuedEvidence> record = queue.Pop();
@@ -177,6 +186,44 @@ void TestManyProducersKeepEachProducersOrder() {
   Expect(queue.queued_bytes() == 0, "every record's space is returned");
 }
 
+// Several threads push into a queue small enough that most pushes wait for
+// space. Each record is stamped when its thread reaches the queue, and the
+// records must leave in stamp order, so a time taken by the stamp never goes
+// backward in what the writer sends.
+void TestRecordsLeaveInTheOrderTheyWereStamped() {
+  EvidenceQueue queue(32);
+  constexpr int kProducers = 6;
+  constexpr int kRecordsEach = 400;
+  std::vector<std::thread> producers;
+  for (int producer = 0; producer < kProducers; ++producer) {
+    producers.emplace_back([&queue, producer] {
+      for (int index = 0; index < kRecordsEach; ++index) {
+        queue.Push(Record(std::to_string(producer), 8, index), &StampFromClock);
+      }
+    });
+  }
+  uint64_t previous = 0;
+  bool ordered = true;
+  for (int received = 0; received < kProducers * kRecordsEach; ++received) {
+    std::unique_ptr<QueuedEvidence> record = queue.Pop();
+    if (!record) {
+      ordered = false;
+      break;
+    }
+    const uint64_t stamp = static_cast<const TestEvidence&>(*record).stamp;
+    if (stamp <= previous) {
+      ordered = false;
+    }
+    previous = stamp;
+    queue.Release(record->bytes);
+  }
+  for (std::thread& producer : producers) {
+    producer.join();
+  }
+  Expect(ordered, "records leave in the order they were stamped");
+  Expect(queue.queued_bytes() == 0, "every stamped record's space is returned");
+}
+
 }  // namespace
 
 int main() {
@@ -185,6 +232,7 @@ int main() {
   TestARecordLargerThanTheLimitIsAcceptedWhenTheQueueIsEmpty();
   TestCloseWakesTheWriterAndStillDeliversQueuedRecords();
   TestManyProducersKeepEachProducersOrder();
+  TestRecordsLeaveInTheOrderTheyWereStamped();
   if (failures != 0) {
     std::fprintf(stderr, "%d evidence queue check(s) failed\n", failures);
     return 1;

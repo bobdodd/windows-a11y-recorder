@@ -102,18 +102,19 @@ class RecorderPipeClient : public base::PlatformThread::Delegate {
                              const std::string& chromium_version,
                              std::string* error);
 
-  // Queues a record whose payload is already built. Returns false, with
-  // *error set, when the record cannot be queued; a write that fails later is
-  // reported to the write-failure handler instead.
-  bool SendEvidence(int64_t browser_timestamp_ticks,
-                    std::string channel,
+  // Queues a record whose payload is already built, timestamped when it
+  // reaches the queue. Returns false, with *error set, when the record cannot
+  // be queued; a write that fails later is reported to the write-failure
+  // handler instead.
+  bool SendEvidence(std::string channel,
                     std::string event_type,
                     base::DictValue payload,
                     std::string* error,
                     int lost_records_on_failure = 1);
 
   // Queues a record whose payload the writer thread builds. The caller sets
-  // the channel, event type, timestamp, and estimated size.
+  // the channel, event type, and estimated size; the timestamp is taken when
+  // the record reaches the queue, in the same order as the records.
   bool QueueEvidence(std::unique_ptr<PendingEvidence> evidence,
                      std::string* error);
 

@@ -323,7 +323,7 @@ only once the database version is tested in full. It adds the
   referenced table and columns, and drops those foreign keys; foreign keys to
   lookup tables and to `recordings` remain. When a recording is completed,
   `RecordingStore.CheckReferencesAsync` runs one query per listed reference,
-  up to four at once, counting the recording's rows whose referenced row is
+  several at once, counting the recording's rows whose referenced row is
   missing, and each reference with such rows makes the recording failed,
   with the table, columns, and count in the failure reason. A reference with
   a null column is not checked, as a foreign key would not check it. The
@@ -352,8 +352,28 @@ only once the database version is tested in full. It adds the
   set by the `ServerGarbageCollection` property
   ([Garbage collector config settings](https://learn.microsoft.com/en-us/dotnet/core/runtime-config/garbage-collector)).
   With the default workstation collection, the same recording paused the
-  app for 12.5 s in total over 131 s. Whether server collection shortens
-  those pauses is not yet measured.
+  app for 12.5 s in total over 131 s. The first Windows recording with
+  server collection paused it for 7.1 s over 132 s; that recording had
+  979,783 events against 442,588, so the two runs are not a like-for-like
+  comparison.
+- **Measured after migration 0011.** On that recording, the writer stored
+  every accepted event: no event was spilled, at most about 2,000 events
+  waited in memory, and the last event was written about one second after
+  the last was accepted. Summed over the four writing connections, commits
+  took 64.7 s and waits for another batch's commit 6.6 s. The reference
+  check found no missing rows and took 11.9 s when recording stopped, most
+  of the time between stopping and showing the recording. Run again later
+  on the same recording, one query at a time, the 455 reference queries
+  took 2.7 s in total, 350 of them under 2 ms each; the faster repeat is
+  not explained, and may come from the data then being in memory. The check
+  now skips the tables that have no rows in the recording, runs up to half
+  the processors' worth of queries at once, at most eight, and times each
+  query under `check-references:<table>` so the next recording shows where
+  the time goes. The recording was stored as failed because 24
+  `browser.dispatch` records were refused for a timestamp earlier than the
+  record before them; see the evidence queue section of
+  `chromium/recorder_bridge/README.md`. These figures are from one run and
+  are not a substitute for the system test.
 - **Parallel writing.** `PostgresEventWriter` writes up to
   `WriterConnections` batches at once, four by default; while the database
   is unavailable it retries one batch at a time. Each batch is written by

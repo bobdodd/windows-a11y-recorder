@@ -274,6 +274,19 @@ is still built by the observing thread. The timestamp is still taken on the
 observing thread, so queueing does not move it, and the wire format is
 unchanged, so the protocol version is unchanged.
 
+The timestamp is taken by the queue, with its lock held, when the observing
+thread reaches it, and records enter the queue in the order they were stamped,
+including when several threads are waiting for space. The recorder refuses a record
+whose time is earlier than that of the record it read before it from the same
+process on the same channel. When each
+thread took its own timestamp before reaching the queue, two threads recording
+at nearly the same moment could queue the later time first. One Windows
+recording of 979,783 events had 24 `browser.dispatch` records refused for that
+reason, all from one renderer. `evidence_queue_test.cc` checks the order with
+six threads pushing into a queue small enough that most pushes wait; the same
+check against the earlier queue, stamping before the push, found 137 of 2,400
+records out of order in one run on the development sandbox.
+
 The reason is that the pipe write blocks. The recorder creates the pipe with
 no output buffer, and a synchronous write to a named pipe that lacks buffer
 quota waits until the recorder reads the data ([Microsoft

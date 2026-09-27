@@ -316,6 +316,14 @@ from the product version.
   indexes already stored and drops the table that held one row per index.
 - Use .NET server garbage collection in the app, on the
   `postgres-session-store` branch.
+- Take each browser evidence record's timestamp inside the evidence queue,
+  with its lock held, so records enter the queue, and reach the recorder, in
+  timestamp order. Before, two threads of one renderer could queue the later
+  time first, and the recorder refused the second record for a time earlier
+  than the record before it. Requires rebuilding Chromium.
+- Skip, in the reference check, the tables with no rows in the recording,
+  run more of its queries at once, and write each query's time to
+  `database-writer-timings.json`.
 - Write browser evidence from a writer thread in each Chromium process instead
   of from the thread that observed it, on the `postgres-session-store` branch.
   A synchronous write to the recorder's unbuffered pipe waits until the

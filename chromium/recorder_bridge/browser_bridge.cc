@@ -217,12 +217,6 @@ EvidenceIdentityStorage& EvidenceIdentities() {
   return *identities;
 }
 
-int64_t QueryEvidenceTicks() {
-  LARGE_INTEGER value = {};
-  CHECK(::QueryPerformanceCounter(&value));
-  return value.QuadPart;
-}
-
 int64_t QueryEvidenceFrequency() {
   static const int64_t frequency = [] {
     LARGE_INTEGER value = {};
@@ -1236,8 +1230,7 @@ void ReportOmittedEvidence(RecorderPipeClient* client,
   payload.Set("reason", std::string(kEvidenceWriteFailedOmissionReason));
   payload.Set("count", count);
   std::string error;
-  if (!client->SendEvidence(QueryEvidenceTicks(), channel,
-                            std::string(kOmissionEventType),
+  if (!client->SendEvidence(channel, std::string(kOmissionEventType),
                             std::move(payload), &error,
                             /*lost_records_on_failure=*/count)) {
     HoldOmittedEvidence(channel, count);
@@ -1253,13 +1246,12 @@ void HoldFailedEvidenceWrite(const std::string& channel,
   WriteDiagnosticLine("Blink evidence write failed: " + error);
 }
 
-// Queues a record for the writer thread. The timestamp is taken here, on the
-// thread that observed the evidence, as SendBlinkEvidence takes it, so the
-// writer thread's delay does not move it.
+// Queues a record for the writer thread. The timestamp is taken when the
+// record reaches the queue, on the thread that observed the evidence, as for
+// SendBlinkEvidence, so the writer thread's delay does not move it.
 void QueueBlinkEvidence(RecorderPipeClient* client,
                         std::unique_ptr<PendingEvidence> evidence) {
   ReportOmittedEvidence(client, evidence->channel);
-  evidence->browser_timestamp_ticks = QueryEvidenceTicks();
   const std::string channel = evidence->channel;
   std::string error;
   if (!client->QueueEvidence(std::move(evidence), &error)) {
@@ -1278,9 +1270,8 @@ void SendBlinkEvidence(std::string channel,
   ReportOmittedEvidence(client, channel);
   const std::string reported_channel = channel;
   std::string error;
-  if (!client->SendEvidence(QueryEvidenceTicks(), std::move(channel),
-                            std::move(event_type), std::move(payload),
-                            &error)) {
+  if (!client->SendEvidence(std::move(channel), std::move(event_type),
+                            std::move(payload), &error)) {
     HoldOmittedEvidence(reported_channel, 1);
     WriteDiagnosticLine("Blink evidence write failed: " + error);
   }

@@ -377,10 +377,17 @@ struct BuiltEvidence : PendingEvidence {
   base::DictValue TakePayload() override { return std::move(payload); }
 };
 
+// Takes a record's timestamp. It is called with the lock that orders the
+// records held, so no record is written with an earlier time than the one
+// before it, even when several threads of the process record evidence at once.
+void StampEvidence(QueuedEvidence& evidence) {
+  static_cast<PendingEvidence&>(evidence).browser_timestamp_ticks =
+      QueryMonotonicTicks();
+}
+
 }  // namespace
 
-bool RecorderPipeClient::SendEvidence(int64_t browser_timestamp_ticks,
-                                      std::string channel,
+bool RecorderPipeClient::SendEvidence(std::string channel,
                                       std::string event_type,
                                       base::DictValue payload,
                                       std::string* error,
@@ -390,7 +397,6 @@ bool RecorderPipeClient::SendEvidence(int64_t browser_timestamp_ticks,
                     event_type.size();
   evidence->channel = std::move(channel);
   evidence->event_type = std::move(event_type);
-  evidence->browser_timestamp_ticks = browser_timestamp_ticks;
   evidence->lost_records_on_failure = lost_records_on_failure;
   evidence->payload = std::move(payload);
   return QueueEvidence(std::move(evidence), error);
@@ -403,6 +409,7 @@ bool RecorderPipeClient::QueueEvidence(
     // Without a writer thread the observing thread writes the record itself,
     // as every record was written before the queue existed.
     base::AutoLock lock(direct_write_lock_);
+    StampEvidence(*evidence);
     base::DictValue message;
     message.Set("kind", "evidence");
     message.Set("protocolVersion", configuration_.protocol_version);
@@ -415,7 +422,7 @@ bool RecorderPipeClient::QueueEvidence(
     return WriteMessage(std::move(message), error);
   }
   if (std::unique_ptr<QueuedEvidence> refused =
-          queue_.Push(std::move(evidence))) {
+          queue_.Push(std::move(evidence), &StampEvidence)) {
     *error = "Browser evidence queue was closed.";
     return false;
   }

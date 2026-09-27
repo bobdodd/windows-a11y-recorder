@@ -250,12 +250,15 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
     /// that refer to a missing row, or an empty list when every row's
     /// references are present. The writer's tables have no foreign keys
     /// between them, which PostgreSQL would check one inserted row at a
-    /// time; each reference is checked here with one set-based query, up to
-    /// four at once. A reference with a null column is not checked, as a
-    /// foreign key would not check it.
+    /// time; each reference is checked here with one set-based query, with
+    /// up to half the processors, at most eight, checking at once. A
+    /// reference with a null column is not checked, as a foreign key would
+    /// not check it. When <paramref name="timings"/> is given, the time of
+    /// each query is added to it under the referring table's name.
     /// </summary>
     public async Task<IReadOnlyList<string>> CheckReferencesAsync(
         Guid recordingId,
+        WriterTimings? timings = null,
         CancellationToken cancellationToken = default)
     {
         var references = new List<(string Table, string[] Columns, string Referenced, string[] ReferencedColumns)>();
@@ -277,23 +280,60 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
                 "SELECT table_name, columns, referenced_table, referenced_columns FROM recording_references " +
                 "ORDER BY table_name, columns, referenced_table",
                 connection);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
             {
-                references.Add((
-                    reader.GetString(0),
-                    reader.GetFieldValue<string[]>(1),
-                    reader.GetString(2),
-                    reader.GetFieldValue<string[]>(3)));
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    references.Add((
+                        reader.GetString(0),
+                        reader.GetFieldValue<string[]>(1),
+                        reader.GetString(2),
+                        reader.GetFieldValue<string[]>(3)));
+                }
+            }
+
+            // Most of the tables have no rows in a given recording, and their
+            // references need no query; one statement finds the tables that
+            // do.
+            var tables = references.Select(reference => reference.Table).Distinct(StringComparer.Ordinal).ToList();
+            if (tables.Count > 0)
+            {
+                var started = System.Diagnostics.Stopwatch.GetTimestamp();
+                await using var occupied = new NpgsqlCommand(
+                    string.Join(
+                        " UNION ALL ",
+                        tables.Select(table =>
+                            $"SELECT '{table}'::text WHERE EXISTS (SELECT 1 FROM {Identifier(table)} WHERE recording_id = $1)")),
+                    connection)
+                {
+                    CommandTimeout = 0
+                };
+                occupied.Parameters.AddWithValue(recordingId);
+                var withRows = new HashSet<string>(StringComparer.Ordinal);
+                await using (var reader = await occupied.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        withRows.Add(reader.GetString(0));
+                    }
+                }
+
+                references.RemoveAll(reference => !withRows.Contains(reference.Table));
+                timings?.Since("check-references.tables-with-rows", started, withRows.Count);
             }
         }
 
         var missing = new long[references.Count];
         await Parallel.ForEachAsync(
             Enumerable.Range(0, references.Count),
-            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 8),
+                CancellationToken = cancellationToken
+            },
             async (index, token) =>
             {
+                var started = System.Diagnostics.Stopwatch.GetTimestamp();
                 var (table, columns, referenced, referencedColumns) = references[index];
                 var present = string.Join(" AND ", columns.Select(column => $"c.{Identifier(column)} IS NOT NULL"));
                 var matches = string.Join(
@@ -310,6 +350,7 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
                 };
                 command.Parameters.AddWithValue(recordingId);
                 missing[index] = (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))!;
+                timings?.Since("check-references:" + table, started);
             }).ConfigureAwait(false);
 
         var failures = new List<string>();

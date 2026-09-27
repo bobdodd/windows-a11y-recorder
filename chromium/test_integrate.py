@@ -4229,7 +4229,12 @@ class CookieIntegrationTests(unittest.TestCase):
             "base::PlatformThread::Create(0, this, &writer_thread_)",
             protocol_source,
         )
-        self.assertIn("queue_.Push(std::move(evidence))", protocol_source)
+        self.assertIn(
+            "queue_.Push(std::move(evidence), &StampEvidence)", protocol_source
+        )
+        # Records are timestamped by the queue, in queue order, never by the
+        # observing thread before it reaches the queue.
+        self.assertNotIn("browser_timestamp_ticks =", bridge_source)
         self.assertIn(
             "client->SetWriteFailureHandler(&HoldFailedEvidenceWrite);",
             bridge_source,

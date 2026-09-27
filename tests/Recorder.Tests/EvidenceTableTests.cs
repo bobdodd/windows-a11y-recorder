@@ -594,7 +594,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         var (sessionKey, recordingId) = await CreateRecordingAsync();
         await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
         var store = new RecordingStore(DataSource);
-        Assert.Empty(await store.CheckReferencesAsync(recordingId, token));
+        Assert.Empty(await store.CheckReferencesAsync(recordingId, cancellationToken: token));
         Assert.NotEmpty(await RowsAsync(DataSource, "SELECT table_name FROM recording_references", token));
 
         await using (var orphan = DataSource.CreateCommand(
@@ -608,7 +608,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             await orphan.ExecuteNonQueryAsync(token);
         }
 
-        var failure = Assert.Single(await store.CheckReferencesAsync(recordingId, token));
+        var failure = Assert.Single(await store.CheckReferencesAsync(recordingId, cancellationToken: token));
         Assert.Equal(
             "1 rows of browser_dispatch_path_targets (recording_id, owner_key) refer to rows missing from " +
             "browser_dispatch_events (recording_id, event_key).",

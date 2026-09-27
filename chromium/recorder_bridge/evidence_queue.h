@@ -3,6 +3,7 @@
 
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -40,12 +41,20 @@ class EvidenceQueue {
   EvidenceQueue(const EvidenceQueue&) = delete;
   EvidenceQueue& operator=(const EvidenceQueue&) = delete;
 
-  // Adds a record. Waits while the queue holds anything and adding this record
-  // would exceed the byte limit, so a single record larger than the limit is
-  // still accepted once the queue is empty. Sets *waited, when given, to
-  // whether the call had to wait. Returns the record, instead of taking it,
-  // once the queue is closed.
+  // Called with the queue's lock held when a thread reaches the queue, so that
+  // a value it sets, such as a timestamp, is in the same order as the records.
+  using Stamp = void (*)(QueuedEvidence& record);
+
+  // Adds a record. Calls stamp for it first, when given, as soon as the call
+  // holds the queue's lock. Waits while the queue holds anything and adding
+  // this record would exceed the byte limit, so a single record larger than
+  // the limit is still accepted once the queue is empty. Records are added in
+  // the order they were stamped, including when several threads are waiting
+  // for space, so a stamp never goes backward from one record to the next.
+  // Sets *waited, when given, to whether the call had to wait. Returns the
+  // record, instead of taking it, once the queue is closed.
   std::unique_ptr<QueuedEvidence> Push(std::unique_ptr<QueuedEvidence> record,
+                                       Stamp stamp = nullptr,
                                        bool* waited = nullptr);
 
   // Takes the oldest record, waiting until one is available. Returns null once
@@ -72,6 +81,10 @@ class EvidenceQueue {
   std::deque<std::unique_ptr<QueuedEvidence>> records_;
   // Bytes of queued records plus records popped but not yet released.
   size_t held_bytes_ = 0;
+  // Each push takes the next ticket when it is stamped and is added only when
+  // its ticket is the one being served.
+  uint64_t next_ticket_ = 0;
+  uint64_t serving_ticket_ = 0;
   bool closed_ = false;
 };
 

@@ -15,12 +15,19 @@ EvidenceQueue::~EvidenceQueue() = default;
 
 std::unique_ptr<QueuedEvidence> EvidenceQueue::Push(
     std::unique_ptr<QueuedEvidence> record,
+    Stamp stamp,
     bool* waited) {
   const size_t size = record->bytes;
   std::unique_lock<std::mutex> lock(mutex_);
+  if (stamp) {
+    stamp(*record);
+  }
+  const uint64_t ticket = next_ticket_++;
   bool had_to_wait = false;
-  while (!closed_ && held_bytes_ > 0 &&
-         (size > maximum_bytes_ || held_bytes_ > maximum_bytes_ - size)) {
+  while (!closed_ &&
+         (ticket != serving_ticket_ ||
+          (held_bytes_ > 0 &&
+           (size > maximum_bytes_ || held_bytes_ > maximum_bytes_ - size)))) {
     had_to_wait = true;
     space_available_.wait(lock);
   }
@@ -32,8 +39,14 @@ std::unique_ptr<QueuedEvidence> EvidenceQueue::Push(
   }
   held_bytes_ += size;
   records_.push_back(std::move(record));
+  ++serving_ticket_;
+  const bool others_waiting = next_ticket_ != serving_ticket_;
   lock.unlock();
   record_available_.notify_one();
+  if (others_waiting) {
+    // The next ticket may be waiting only for its turn.
+    space_available_.notify_all();
+  }
   return nullptr;
 }
 

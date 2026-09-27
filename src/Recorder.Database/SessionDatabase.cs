@@ -288,7 +288,7 @@ public sealed class DatabaseRecording : IAsyncDisposable
         var checking = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
-            writing.AddRange(await _store.CheckReferencesAsync(RecordingId, cancellationToken).ConfigureAwait(false));
+            writing.AddRange(await _store.CheckReferencesAsync(RecordingId, Timings, cancellationToken).ConfigureAwait(false));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
