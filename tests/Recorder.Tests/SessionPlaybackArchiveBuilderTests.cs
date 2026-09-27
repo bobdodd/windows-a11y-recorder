@@ -374,6 +374,66 @@ public sealed class SessionPlaybackArchiveBuilderTests
         }
     }
 
+    [Fact]
+    public async Task OnlyThePrimaryMainFrameIsAPageNavigation()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            await WriteManifestAsync(directory, 1_000);
+            object Started(string navigationId, string frameId, string? frameType, string url) => new
+            {
+                context = new
+                {
+                    browserInstanceId = "browser-1",
+                    processId = 1,
+                    processType = "browser",
+                    frameId
+                },
+                frameType,
+                navigationId,
+                url,
+                primaryPage = true
+            };
+            await WriteEventsAsync(
+                directory,
+                [
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        100,
+                        Started("navigation-1", "frame-1", "primary-main-frame", "https://example.test/")),
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        200,
+                        Started("navigation-2", "frame-2", "subframe", "https://video.example.test/embed")),
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        300,
+                        Started("navigation-3", "frame-3", null, "https://legacy.example.test/"))
+                ]);
+
+            var archive = await LoadAsync(directory);
+
+            var page = Assert.Single(archive.BrowserNavigations, item => item.NavigationId == "navigation-1");
+            var iframe = Assert.Single(archive.BrowserNavigations, item => item.NavigationId == "navigation-2");
+            var legacy = Assert.Single(archive.BrowserNavigations, item => item.NavigationId == "navigation-3");
+            Assert.Equal("primary-main-frame", page.FrameType);
+            Assert.True(page.IsPageNavigation);
+            Assert.Equal("subframe", iframe.FrameType);
+            Assert.True(iframe.PrimaryPage);
+            Assert.False(iframe.IsPageNavigation);
+            Assert.Null(legacy.FrameType);
+            Assert.True(legacy.IsPageNavigation);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     // Adds the events written for the test to a builder, as the database
     // reader adds the events it reads, and builds the archive.
     private async Task<SessionPlaybackArchive> LoadAsync(string directory)

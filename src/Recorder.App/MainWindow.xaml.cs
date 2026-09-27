@@ -833,12 +833,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        // A page navigation is shown from its first frame until the next
-        // page navigation's first frame, so the correlation describes the
-        // page the frame shows.
+        // A navigation of the top-level page is shown from its first frame
+        // until the next one's first frame, so the correlation describes the
+        // page the frame shows. Iframe navigations are also in the primary
+        // page, so the frame type, not primaryPage, selects them.
         var navigation = _playbackArchive.BrowserNavigations
             .Where(item =>
-                item.PrimaryPage &&
+                item.IsPageNavigation &&
                 item.SeekNanoseconds <= positionNanoseconds)
             .OrderBy(item => item.SeekNanoseconds)
             .ThenBy(item => item.StartNanoseconds)

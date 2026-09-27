@@ -74,7 +74,9 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         Assert.Equal(inMemory.BrowserNavigations, fromDatabase.BrowserNavigations);
         Assert.Single(fromDatabase.Frames);
         Assert.Single(fromDatabase.AudioTracks);
-        Assert.Single(fromDatabase.BrowserNavigations);
+        var navigation = Assert.Single(fromDatabase.BrowserNavigations);
+        Assert.Equal("primary-main-frame", navigation.FrameType);
+        Assert.True(navigation.IsPageNavigation);
         Assert.Contains(databaseTimeline, item => item.Summary == "session-marker: In the database");
 
         // Every complete record reads back as the record written, with the

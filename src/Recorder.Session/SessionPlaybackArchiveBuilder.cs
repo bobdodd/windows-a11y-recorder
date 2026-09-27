@@ -46,6 +46,7 @@ public sealed class SessionPlaybackArchiveBuilder
         "controlType",
         "device",
         "eventName",
+        "frameType",
         "height",
         "name",
         "navigationId",

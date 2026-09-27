@@ -31,6 +31,22 @@ public sealed record BrowserNavigationCorrelation(
     public string? BrowserInstanceId { get; init; }
 
     /// <summary>
+    /// Chromium's frame type for the navigated frame, such as
+    /// <c>primary-main-frame</c> or <c>subframe</c>. Null when not recorded.
+    /// </summary>
+    public string? FrameType { get; init; }
+
+    /// <summary>
+    /// Whether the navigation is of the top-level page, the primary main
+    /// frame. <see cref="PrimaryPage"/> is also true for every iframe in that
+    /// page, so it does not identify page navigations. A navigation without
+    /// a recorded frame type falls back to <see cref="PrimaryPage"/>.
+    /// </summary>
+    public bool IsPageNavigation => FrameType is null
+        ? PrimaryPage
+        : FrameType == BrowserNavigationCorrelator.PrimaryMainFrame;
+
+    /// <summary>
     /// The time of the first captured desktop frame that can show the
     /// navigation's page, by <see cref="FirstFrameBasis"/>. Null when no
     /// captured frame qualifies or the frame was not determined.
@@ -79,6 +95,7 @@ internal sealed record BrowserEventProjection(
     string? DocumentId,
     string? DocumentToken,
     string? FrameId,
+    string? FrameType,
     string? NavigationId,
     string? Url,
     bool PrimaryPage,
@@ -89,6 +106,8 @@ internal sealed record BrowserEventProjection(
 
 internal static class BrowserNavigationCorrelator
 {
+    public const string PrimaryMainFrame = "primary-main-frame";
+
     public static BrowserEventProjection? Project(
         SessionTimelineEvent timelineEvent,
         JsonElement payload)
@@ -112,6 +131,7 @@ internal static class BrowserNavigationCorrelator
             ReadString(context, "documentId"),
             ReadString(context, "documentToken"),
             ReadString(context, "frameId"),
+            ReadString(payload, "frameType"),
             ReadString(payload, "navigationId"),
             ReadString(payload, "url"),
             ReadBoolean(payload, "primaryPage") ?? false,
@@ -219,7 +239,8 @@ internal static class BrowserNavigationCorrelator
                     item.Event.EventType == "listener-invoked"),
                 related.Length)
             {
-                BrowserInstanceId = identity.BrowserInstanceId
+                BrowserInstanceId = identity.BrowserInstanceId,
+                FrameType = identity.FrameType ?? pair.Started.FrameType
             });
         }
 
@@ -252,14 +273,14 @@ internal static class BrowserNavigationCorrelator
             }
 
             if (string.IsNullOrWhiteSpace(current.FrameId) &&
-                current.PrimaryPage &&
-                candidate.PrimaryPage)
+                IsPageNavigation(current) &&
+                IsPageNavigation(candidate))
             {
                 return candidatePair.Started.Event.MonotonicNanoseconds;
             }
 
             if (string.IsNullOrWhiteSpace(current.FrameId) &&
-                !current.PrimaryPage &&
+                !IsPageNavigation(current) &&
                 string.Equals(
                     candidate.DocumentId,
                     current.DocumentId,
@@ -273,6 +294,13 @@ internal static class BrowserNavigationCorrelator
             current.Event.MonotonicNanoseconds + 1,
             sessionDurationNanoseconds + 1);
     }
+
+    // A navigation of the top-level page. Every iframe in the page is also
+    // in the primary page, so primaryPage alone does not say this.
+    private static bool IsPageNavigation(BrowserEventProjection item) =>
+        item.FrameType is null
+            ? item.PrimaryPage
+            : item.FrameType == PrimaryMainFrame;
 
     private static bool IsIdentityMatch(
         BrowserEventProjection item,

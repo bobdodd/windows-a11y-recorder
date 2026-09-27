@@ -415,6 +415,22 @@ seek lands on. The navigation's end is the one the correlator already
 assigns: the next navigation's start in the same frame or, for a page
 navigation, the next page navigation's start.
 
+A page navigation is a navigation whose `frameType` is `primary-main-frame`,
+the top-level page. The recorded `primaryPage` flag does not identify it:
+Chromium sets it for every frame of the primary page, including its iframes.
+In session `20260927-140739-4a201ccaa3c142bab1a4874a289375b0`, all 12
+`subframe` navigations, to a YouTube embed, Pinterest, CNIB iframes, and
+`about:blank`, were recorded with `primaryPage` true. A navigation without a recorded
+frame type falls back to `primaryPage`. Selecting an iframe navigation in the
+list still seeks to its own first frame; only the panel's choice by playhead
+is limited to page navigations.
+
+The same recording also holds `primary-main-frame` navigations of the
+browser's own interface, `chrome://omnibox-popup.top-chrome` and
+`chrome://webui-toolbar.top-chrome`. They count as page navigations under
+this rule, so the panel can describe one of them instead of the tab's page.
+This is a limit of the rule, not yet addressed.
+
 This rule departs from the correlation rules above in two ways, both stated
 as limits:
 
