@@ -61,6 +61,8 @@ bool ReadBootstrapFromStandardInput(BootstrapConfiguration* configuration,
 // and must copy every observed value it needs, since the writer runs after the
 // observing thread has moved on.
 struct PendingEvidence : QueuedEvidence {
+  PendingEvidence();
+  ~PendingEvidence() override;
   int64_t browser_timestamp_ticks = 0;
   std::string event_type;
   // How many records a failed write of this one loses. An evidence record is

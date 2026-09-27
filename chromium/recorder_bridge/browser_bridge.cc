@@ -19,6 +19,7 @@
 #include "base/command_line.h"
 #include "base/containers/span.h"
 #include "base/environment.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/shared_memory_switch.h"
 #include "base/no_destructor.h"
@@ -3633,7 +3634,7 @@ base::DictValue CreateLayoutCheckpointNodePayload(
 
 struct LayoutCheckpointNodeEvidence : PendingEvidence {
   // The client that owns the writer thread, and so outlives this record.
-  const RecorderPipeClient* client = nullptr;
+  raw_ptr<const RecorderPipeClient> client = nullptr;
   uint64_t checkpoint_sequence = 0;
   int document_node_id = 0;
   std::string document_token;

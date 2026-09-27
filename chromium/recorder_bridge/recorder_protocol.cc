@@ -335,6 +335,10 @@ bool RecorderPipeClient::ConnectAndSynchronize(
   return true;
 }
 
+PendingEvidence::PendingEvidence() = default;
+
+PendingEvidence::~PendingEvidence() = default;
+
 size_t EstimateSerializedBytes(const base::Value& value) {
   // Quotes, separators, and the digits of a number fit in this allowance.
   constexpr size_t kValueOverhead = 24;

@@ -4,8 +4,14 @@
 
 namespace a11y_recorder {
 
+QueuedEvidence::QueuedEvidence() = default;
+
+QueuedEvidence::~QueuedEvidence() = default;
+
 EvidenceQueue::EvidenceQueue(size_t maximum_bytes)
     : maximum_bytes_(maximum_bytes) {}
+
+EvidenceQueue::~EvidenceQueue() = default;
 
 std::unique_ptr<QueuedEvidence> EvidenceQueue::Push(
     std::unique_ptr<QueuedEvidence> record,

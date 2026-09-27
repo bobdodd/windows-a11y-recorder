@@ -25,7 +25,8 @@ namespace a11y_recorder {
 // One record waiting to be formatted and written. The bridge derives a type
 // for each shape of observed values it queues.
 struct QueuedEvidence {
-  virtual ~QueuedEvidence() = default;
+  QueuedEvidence();
+  virtual ~QueuedEvidence();
   // The channel the record belongs to.
   std::string channel;
   // An estimate of the record's formatted size, charged against the limit.
@@ -35,6 +36,7 @@ struct QueuedEvidence {
 class EvidenceQueue {
  public:
   explicit EvidenceQueue(size_t maximum_bytes);
+  ~EvidenceQueue();
   EvidenceQueue(const EvidenceQueue&) = delete;
   EvidenceQueue& operator=(const EvidenceQueue&) = delete;
 
