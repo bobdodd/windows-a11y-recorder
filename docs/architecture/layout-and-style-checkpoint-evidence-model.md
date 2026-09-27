@@ -283,6 +283,11 @@ value, as `getComputedStyle()` does.
 - Computed-style values are recorded verbatim. `background-image`,
   `list-style-image`, `shape-outside`, and `content` can carry a URL, which
   follows the same policy as URLs in DOM attribute values.
+- The rendering update copies each node's values into a queue, and the
+  bridge's writer thread builds, serializes, and writes the record, so the
+  update does not wait for the recorder to read the checkpoint. A node queued
+  when its renderer is ended without shutdown is lost without an omission
+  record.
 - Each node is one record, and a record whose serialized form exceeds the 4 MiB
   protocol message limit is not sent. The bridge counts it and reports a
   `browser-evidence-write-failed` omission on the channel instead. Values such

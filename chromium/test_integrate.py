@@ -4189,6 +4189,55 @@ class CookieIntegrationTests(unittest.TestCase):
             )
             subprocess.run([str(binary)], check=True)
 
+    def test_evidence_queue_passes_its_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "evidence_queue_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-pthread",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "evidence_queue.cc"),
+                    str(bridge / "evidence_queue_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_bridge_writes_evidence_from_its_writer_thread(self):
+        protocol_source = (
+            MODULE_PATH.parent / "recorder_bridge" / "recorder_protocol.cc"
+        ).read_text(encoding="utf-8")
+        bridge_source = (
+            MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "base::PlatformThread::Create(0, this, &writer_thread_)",
+            protocol_source,
+        )
+        self.assertIn("queue_.Push(std::move(evidence))", protocol_source)
+        self.assertIn(
+            "client->SetWriteFailureHandler(&HoldFailedEvidenceWrite);",
+            bridge_source,
+        )
+        self.assertIn(
+            "QueueBlinkEvidence(client, std::move(evidence));", bridge_source
+        )
+
 
 class NetworkIntegrationTests(unittest.TestCase):
     """Proves the network hooks are written once and match the bridge."""

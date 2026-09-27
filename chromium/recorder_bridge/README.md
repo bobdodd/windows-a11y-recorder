@@ -36,9 +36,11 @@ when updating an existing checkout. The instrumented browser:
    identifier. The internal metadata environment marker is removed from each
    child environment.
 6. Authenticates and synchronizes each participating process independently.
-7. Must route browser and child-process evidence through bounded, non-blocking
-   queues to `RecorderPipeClient`.
-8. Must report queue overflow and disconnected intervals as omission records.
+7. Routes each process's evidence through a bounded queue to one writer thread
+   in that process, which serializes each record and writes it to the pipe, so
+   the thread that observed the evidence does not wait on the pipe.
+8. Applies backpressure rather than dropping evidence when the queue is full,
+   and reports records whose write failed as omission records.
 
 The current code implements and integrates the browser-process bootstrap,
 child-process capability distribution, per-process authentication and clock
@@ -258,6 +260,45 @@ line in the bridge log is kept, because a process that never writes again cannot
 report its own loss, and that log is then the only trace. A failure to write the
 omission record returns the held count unchanged, since the omission is not
 itself captured evidence.
+
+Evidence is written by a writer thread in each process rather than by the
+thread that observed it. `RecorderPipeClient` starts one thread, named
+`A11yRecorderEvidenceWriter`, when its handshake completes, and from then on
+`SendEvidence` and `QueueEvidence` place each record in an `EvidenceQueue` and
+return. The writer thread builds the protocol envelope, serializes it, writes
+it, and reports a failed write through the handler that `browser_bridge.cc`
+installs, which holds the count for the next omission record on that channel.
+A layout checkpoint node is queued as the values copied out of Blink, and its
+payload dictionary is built on the writer thread; every other record's payload
+is still built by the observing thread. The timestamp is still taken on the
+observing thread, so queueing does not move it, and the wire format is
+unchanged, so the protocol version is unchanged.
+
+The reason is that the pipe write blocks. The recorder creates the pipe with
+no output buffer, and a synchronous write to a named pipe that lacks buffer
+quota waits until the recorder reads the data ([Microsoft
+CreateNamedPipeW](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-createnamedpipew)).
+Before the writer thread, a renderer's rendering update waited for every node
+of a layout checkpoint to be read by the recorder, which on one 65 second
+recording took a median of 250 ms per checkpoint with the processor mostly
+idle.
+
+The queue holds at most 64 MiB, sixteen times the protocol's message limit,
+counted from an estimate of each record's serialized size. A thread that queues
+a record when the limit is reached waits until the writer thread has written
+enough, rather than the record being dropped, because the recorder must not
+reduce what the browser captures. A record larger than the limit is still
+accepted when nothing else is held. The queue is standard C++ with no Chromium
+dependency, so `evidence_queue_test.cc` runs it on any compiler, including with
+many producers.
+
+Moving the write off the observing thread has one cost. A record still in the
+queue when its renderer is ended without shutdown, as Chromium's fast shutdown
+and a crash both do, is lost without an omission record, where before a write
+that had returned was already in the pipe. The archive has no way to detect
+that loss without a per-process sequence number on every record, which would
+be a protocol change and has not been made. If the writer thread cannot be
+started, the process writes each record from the observing thread as before.
 
 Protocol 0.23 records cookie operations on the `browser.cookie` channel, with
 cookie names and never cookie values. `cookie_text.cc` holds the text readers:

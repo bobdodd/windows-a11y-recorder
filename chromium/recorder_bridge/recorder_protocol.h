@@ -3,13 +3,16 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 
 #include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 #include "base/values.h"
 #include "base/win/scoped_handle.h"
+#include "chromium/recorder_bridge/evidence_queue.h"
 
 namespace a11y_recorder {
 
@@ -20,6 +23,11 @@ inline constexpr uint32_t kDefaultMaximumMessageBytes = 4 * 1024 * 1024;
 // the pipe is not there at all.
 inline constexpr uint32_t kPipeConnectTimeoutMilliseconds = 15000;
 inline constexpr uint32_t kPipeConnectRetryMilliseconds = 25;
+// How much evidence one process may hold while its writer thread waits on the
+// recorder: sixteen times the largest message the protocol allows. A thread
+// that records evidence waits only once this much is already queued.
+inline constexpr size_t kMaximumQueuedEvidenceBytes =
+    16 * static_cast<size_t>(kDefaultMaximumMessageBytes);
 
 struct BootstrapConfiguration {
   std::string protocol_version;
@@ -46,23 +54,66 @@ bool SerializeBootstrapConfiguration(
 bool ReadBootstrapFromStandardInput(BootstrapConfiguration* configuration,
                                     std::string* error);
 
-class RecorderPipeClient {
+// One record queued for the writer thread. The thread that observed the
+// evidence fills in what it observed, including the timestamp of the
+// observation; the writer thread builds the payload, serializes the message,
+// and writes it. A type that defers building its payload overrides TakePayload
+// and must copy every observed value it needs, since the writer runs after the
+// observing thread has moved on.
+struct PendingEvidence : QueuedEvidence {
+  int64_t browser_timestamp_ticks = 0;
+  std::string event_type;
+  // How many records a failed write of this one loses. An evidence record is
+  // one; an omission record restates the count it carried.
+  int lost_records_on_failure = 1;
+  // Called once, on the writer thread.
+  virtual base::DictValue TakePayload() = 0;
+};
+
+// Reports, on the writer thread, a record that could not be written. It is
+// installed before the connection is made and never changes.
+using EvidenceWriteFailureHandler = void (*)(const std::string& channel,
+                                             int lost_records,
+                                             const std::string& error);
+
+// Estimates the serialized size of a value without serializing it, so a
+// payload built by the observing thread can be charged against the queue
+// limit. The estimate counts string contents and a fixed cost per value.
+size_t EstimateSerializedBytes(const base::Value& value);
+size_t EstimateSerializedBytes(const base::DictValue& value);
+
+class RecorderPipeClient : public base::PlatformThread::Delegate {
  public:
   explicit RecorderPipeClient(BootstrapConfiguration configuration);
   RecorderPipeClient(const RecorderPipeClient&) = delete;
   RecorderPipeClient& operator=(const RecorderPipeClient&) = delete;
-  ~RecorderPipeClient();
+  ~RecorderPipeClient() override;
 
+  // Must be called before ConnectAndSynchronize.
+  void SetWriteFailureHandler(EvidenceWriteFailureHandler handler) {
+    write_failure_handler_ = handler;
+  }
+
+  // Connects, authenticates, synchronizes clocks, and then starts the thread
+  // that writes queued evidence.
   bool ConnectAndSynchronize(const std::string& process_type,
                              const std::string& chromium_version,
                              std::string* error);
 
+  // Queues a record whose payload is already built. Returns false, with
+  // *error set, when the record cannot be queued; a write that fails later is
+  // reported to the write-failure handler instead.
   bool SendEvidence(int64_t browser_timestamp_ticks,
                     std::string channel,
                     std::string event_type,
                     base::DictValue payload,
-                    base::ListValue quality_flags,
-                    std::string* error);
+                    std::string* error,
+                    int lost_records_on_failure = 1);
+
+  // Queues a record whose payload the writer thread builds. The caller sets
+  // the channel, event type, timestamp, and estimated size.
+  bool QueueEvidence(std::unique_ptr<PendingEvidence> evidence,
+                     std::string* error);
 
   bool connected() const { return pipe_.is_valid(); }
   const std::string& browser_instance_id() const {
@@ -78,6 +129,10 @@ class RecorderPipeClient {
   uint32_t connect_wait_count() const { return connect_wait_count_; }
 
  private:
+  // Runs the writer thread.
+  void ThreadMain() override;
+  void WriteQueuedEvidence(PendingEvidence& evidence);
+
   bool WriteMessage(base::DictValue message, std::string* error);
   bool ReadMessage(base::DictValue* message, std::string* error);
 
@@ -86,7 +141,13 @@ class RecorderPipeClient {
   base::win::ScopedHandle pipe_;
   uint32_t connect_wait_milliseconds_ = 0;
   uint32_t connect_wait_count_ = 0;
-  base::Lock write_lock_;
+  EvidenceWriteFailureHandler write_failure_handler_ = nullptr;
+  EvidenceQueue queue_{kMaximumQueuedEvidenceBytes};
+  base::PlatformThreadHandle writer_thread_;
+  bool writer_started_ = false;
+  // Serializes writes made without the writer thread, when it could not be
+  // started.
+  base::Lock direct_write_lock_;
 };
 
 }  // namespace a11y_recorder

@@ -201,7 +201,13 @@ bool ReadBootstrapFromStandardInput(BootstrapConfiguration* configuration,
 RecorderPipeClient::RecorderPipeClient(BootstrapConfiguration configuration)
     : configuration_(std::move(configuration)) {}
 
-RecorderPipeClient::~RecorderPipeClient() = default;
+RecorderPipeClient::~RecorderPipeClient() {
+  // Records already queued are written before the writer thread ends.
+  queue_.Close();
+  if (writer_started_) {
+    base::PlatformThread::Join(writer_thread_);
+  }
+}
 
 bool RecorderPipeClient::ConnectAndSynchronize(
     const std::string& process_type,
@@ -321,26 +327,122 @@ bool RecorderPipeClient::ConnectAndSynchronize(
     *error = "Recorder did not complete clock synchronization.";
     return false;
   }
+  // The handshake above is the last exchange that reads from the pipe, so from
+  // here on the writer thread is the pipe's only user. A process whose writer
+  // thread cannot be started still records, writing each record from the
+  // thread that observed it.
+  writer_started_ = base::PlatformThread::Create(0, this, &writer_thread_);
   return true;
 }
+
+size_t EstimateSerializedBytes(const base::Value& value) {
+  // Quotes, separators, and the digits of a number fit in this allowance.
+  constexpr size_t kValueOverhead = 24;
+  switch (value.type()) {
+    case base::Value::Type::STRING:
+      return kValueOverhead + value.GetString().size();
+    case base::Value::Type::DICT:
+      return EstimateSerializedBytes(value.GetDict());
+    case base::Value::Type::LIST: {
+      size_t bytes = kValueOverhead;
+      for (const base::Value& item : value.GetList()) {
+        bytes += EstimateSerializedBytes(item);
+      }
+      return bytes;
+    }
+    case base::Value::Type::BINARY:
+      return kValueOverhead + value.GetBlob().size() * 2;
+    default:
+      return kValueOverhead;
+  }
+}
+
+size_t EstimateSerializedBytes(const base::DictValue& value) {
+  size_t bytes = 24;
+  for (const auto [key, item] : value) {
+    bytes += key.size() + EstimateSerializedBytes(item);
+  }
+  return bytes;
+}
+
+namespace {
+
+// A record whose payload the observing thread already built.
+struct BuiltEvidence : PendingEvidence {
+  base::DictValue payload;
+  base::DictValue TakePayload() override { return std::move(payload); }
+};
+
+}  // namespace
 
 bool RecorderPipeClient::SendEvidence(int64_t browser_timestamp_ticks,
                                       std::string channel,
                                       std::string event_type,
                                       base::DictValue payload,
-                                      base::ListValue quality_flags,
-                                      std::string* error) {
-  base::AutoLock lock(write_lock_);
+                                      std::string* error,
+                                      int lost_records_on_failure) {
+  auto evidence = std::make_unique<BuiltEvidence>();
+  evidence->bytes = EstimateSerializedBytes(payload) + channel.size() +
+                    event_type.size();
+  evidence->channel = std::move(channel);
+  evidence->event_type = std::move(event_type);
+  evidence->browser_timestamp_ticks = browser_timestamp_ticks;
+  evidence->lost_records_on_failure = lost_records_on_failure;
+  evidence->payload = std::move(payload);
+  return QueueEvidence(std::move(evidence), error);
+}
+
+bool RecorderPipeClient::QueueEvidence(
+    std::unique_ptr<PendingEvidence> evidence,
+    std::string* error) {
+  if (!writer_started_) {
+    // Without a writer thread the observing thread writes the record itself,
+    // as every record was written before the queue existed.
+    base::AutoLock lock(direct_write_lock_);
+    base::DictValue message;
+    message.Set("kind", "evidence");
+    message.Set("protocolVersion", configuration_.protocol_version);
+    message.Set("browserTimestampTicks",
+                base::NumberToString(evidence->browser_timestamp_ticks));
+    message.Set("channel", evidence->channel);
+    message.Set("eventType", evidence->event_type);
+    message.Set("payload", evidence->TakePayload());
+    message.Set("qualityFlags", base::ListValue());
+    return WriteMessage(std::move(message), error);
+  }
+  if (std::unique_ptr<QueuedEvidence> refused =
+          queue_.Push(std::move(evidence))) {
+    *error = "Browser evidence queue was closed.";
+    return false;
+  }
+  return true;
+}
+
+void RecorderPipeClient::ThreadMain() {
+  base::PlatformThread::SetName("A11yRecorderEvidenceWriter");
+  while (std::unique_ptr<QueuedEvidence> queued = queue_.Pop()) {
+    const size_t bytes = queued->bytes;
+    WriteQueuedEvidence(static_cast<PendingEvidence&>(*queued));
+    queued.reset();
+    queue_.Release(bytes);
+  }
+}
+
+void RecorderPipeClient::WriteQueuedEvidence(PendingEvidence& evidence) {
   base::DictValue message;
   message.Set("kind", "evidence");
   message.Set("protocolVersion", configuration_.protocol_version);
   message.Set("browserTimestampTicks",
-              base::NumberToString(browser_timestamp_ticks));
-  message.Set("channel", std::move(channel));
-  message.Set("eventType", std::move(event_type));
-  message.Set("payload", std::move(payload));
-  message.Set("qualityFlags", std::move(quality_flags));
-  return WriteMessage(std::move(message), error);
+              base::NumberToString(evidence.browser_timestamp_ticks));
+  message.Set("channel", evidence.channel);
+  message.Set("eventType", evidence.event_type);
+  message.Set("payload", evidence.TakePayload());
+  message.Set("qualityFlags", base::ListValue());
+  std::string error;
+  if (!WriteMessage(std::move(message), &error) && write_failure_handler_) {
+    write_failure_handler_(evidence.channel, evidence.lost_records_on_failure,
+                           error);
+  }
 }
 
 bool RecorderPipeClient::WriteMessage(base::DictValue message,

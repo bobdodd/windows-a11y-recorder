@@ -292,6 +292,15 @@ from the product version.
 
 ### Changed
 
+- Write browser evidence from a writer thread in each Chromium process instead
+  of from the thread that observed it, on the `postgres-session-store` branch.
+  A synchronous write to the recorder's unbuffered pipe waits until the
+  recorder reads it, which held each renderer's rendering update for the length
+  of its layout checkpoint. Records go through a bounded `EvidenceQueue` that
+  applies backpressure rather than dropping records, and layout checkpoint
+  node payloads are built on the writer thread. Records still queued when a
+  renderer is ended without shutdown are lost without an omission record. Not
+  yet built or measured on Windows.
 - Hash the event log and desktop frames while they are written instead of
   rereading them when recording stops. `NdjsonEventWriter` updates a SHA-256
   hash with each line it writes, and the desktop frame collector encodes each

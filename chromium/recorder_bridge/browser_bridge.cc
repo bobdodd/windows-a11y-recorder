@@ -1221,8 +1221,9 @@ int TakeOmittedEvidence(const std::string& channel) {
 }
 
 // The omission record is not itself captured evidence, so a failed omission
-// write returns the original count unchanged instead of counting the omission
-// as one more lost record.
+// write restates the original count instead of counting the omission as one
+// more lost record. The record is queued ahead of the record that follows it,
+// so it still precedes that record in the archive.
 void ReportOmittedEvidence(RecorderPipeClient* client,
                            const std::string& channel) {
   const int count = TakeOmittedEvidence(channel);
@@ -1236,8 +1237,33 @@ void ReportOmittedEvidence(RecorderPipeClient* client,
   std::string error;
   if (!client->SendEvidence(QueryEvidenceTicks(), channel,
                             std::string(kOmissionEventType),
-                            std::move(payload), base::ListValue(), &error)) {
+                            std::move(payload), &error,
+                            /*lost_records_on_failure=*/count)) {
     HoldOmittedEvidence(channel, count);
+  }
+}
+
+// Runs on the writer thread when a queued record could not be written. The
+// count is reported by the next record queued on the same channel.
+void HoldFailedEvidenceWrite(const std::string& channel,
+                             int lost_records,
+                             const std::string& error) {
+  HoldOmittedEvidence(channel, lost_records);
+  WriteDiagnosticLine("Blink evidence write failed: " + error);
+}
+
+// Queues a record for the writer thread. The timestamp is taken here, on the
+// thread that observed the evidence, as SendBlinkEvidence takes it, so the
+// writer thread's delay does not move it.
+void QueueBlinkEvidence(RecorderPipeClient* client,
+                        std::unique_ptr<PendingEvidence> evidence) {
+  ReportOmittedEvidence(client, evidence->channel);
+  evidence->browser_timestamp_ticks = QueryEvidenceTicks();
+  const std::string channel = evidence->channel;
+  std::string error;
+  if (!client->QueueEvidence(std::move(evidence), &error)) {
+    HoldOmittedEvidence(channel, 1);
+    WriteDiagnosticLine("Blink evidence write failed: " + error);
   }
 }
 
@@ -1249,11 +1275,12 @@ void SendBlinkEvidence(std::string channel,
     return;
   }
   ReportOmittedEvidence(client, channel);
+  const std::string reported_channel = channel;
   std::string error;
-  if (!client->SendEvidence(QueryEvidenceTicks(), channel,
+  if (!client->SendEvidence(QueryEvidenceTicks(), std::move(channel),
                             std::move(event_type), std::move(payload),
-                            base::ListValue(), &error)) {
-    HoldOmittedEvidence(channel, 1);
+                            &error)) {
+    HoldOmittedEvidence(reported_channel, 1);
     WriteDiagnosticLine("Blink evidence write failed: " + error);
   }
 }
@@ -1651,6 +1678,7 @@ bool InitializeProcessBridge(std::string* error) {
   }
 
   auto client = std::make_unique<RecorderPipeClient>(std::move(configuration));
+  client->SetWriteFailureHandler(&HoldFailedEvidenceWrite);
   WriteDiagnosticLine("Recorder process bridge is connecting to the pipe.");
   if (!client->ConnectAndSynchronize(
           process_type, std::string(version_info::GetVersionNumber()), error)) {
@@ -3534,36 +3562,19 @@ uint64_t BeginBlinkLayoutCheckpoint(
   return checkpoint_sequence;
 }
 
-void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
-                                     int document_node_id,
-                                     std::string document_token,
-                                     LayoutCheckpointNode node) {
-  RecorderPipeClient* client = GetProcessRecorderClient();
-  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
-      document_token.empty() || node.node_index < 0 || node.node_id <= 0 ||
-      node.node_name.empty() || (node.node_type != 1 && node.node_type != 3)) {
-    return;
-  }
-  if (node.pseudo_element_present &&
-      (node.node_type != 1 || node.pseudo_type.empty() ||
-       node.generated_text_length < 0)) {
-    return;
-  }
-  // Text nodes carry no style of their own, and a text node is only recorded
-  // when it has a layout object.
-  if (node.node_type == 3 &&
-      (!node.layout_object_present || node.computed_style_present)) {
-    return;
-  }
-  if (node.layout_object_present &&
-      (!IsFiniteNumber(node.x) || !IsFiniteNumber(node.y) ||
-       !IsFiniteNumber(node.width) || !IsFiniteNumber(node.height) ||
-       node.width < 0 || node.height < 0)) {
-    return;
-  }
+namespace {
+
+// Builds a layout checkpoint node record from the values the renderer copied
+// out of Blink, so the dictionary is built on the writer thread rather than
+// in the rendering update that observed the node.
+base::DictValue CreateLayoutCheckpointNodePayload(
+    const RecorderPipeClient& client,
+    uint64_t checkpoint_sequence,
+    int document_node_id,
+    std::string document_token,
+    LayoutCheckpointNode node) {
   base::DictValue payload = CreateLayoutCheckpointBasePayload(
-      *client, checkpoint_sequence, document_node_id,
-      std::move(document_token));
+      client, checkpoint_sequence, document_node_id, std::move(document_token));
   payload.Set("nodeIndex", node.node_index);
   payload.Set("nodeId", node.node_id);
   payload.Set("nodeType", node.pseudo_element_present
@@ -3609,9 +3620,6 @@ void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
   if (node.computed_style_present) {
     base::DictValue style;
     for (LayoutCheckpointStyleValue& entry : node.computed_style) {
-      if (entry.property_name.empty()) {
-        return;
-      }
       style.Set(entry.property_name,
                 entry.value_present ? base::Value(std::move(entry.value))
                                     : base::Value());
@@ -3620,8 +3628,87 @@ void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
   } else {
     payload.Set("computedStyle", base::Value());
   }
-  SendBlinkEvidence("browser.layout", "layout-checkpoint-node",
-                    std::move(payload));
+  return payload;
+}
+
+struct LayoutCheckpointNodeEvidence : PendingEvidence {
+  // The client that owns the writer thread, and so outlives this record.
+  const RecorderPipeClient* client = nullptr;
+  uint64_t checkpoint_sequence = 0;
+  int document_node_id = 0;
+  std::string document_token;
+  LayoutCheckpointNode node;
+
+  base::DictValue TakePayload() override {
+    return CreateLayoutCheckpointNodePayload(
+        *client, checkpoint_sequence, document_node_id,
+        std::move(document_token), std::move(node));
+  }
+};
+
+// Estimates the node record's serialized size from the copied values, which
+// make up nearly all of it.
+size_t EstimateLayoutCheckpointNodeBytes(const LayoutCheckpointNode& node,
+                                         const std::string& document_token) {
+  // The context, identities, flags, and rectangle, with their member names.
+  constexpr size_t kFixedBytes = 640;
+  // A property's quotes, colon, and separator.
+  constexpr size_t kStyleEntryBytes = 6;
+  size_t bytes = kFixedBytes + document_token.size() + node.node_name.size() +
+                 node.pseudo_type.size() + node.generated_text.size() +
+                 node.shadow_root_mode.size();
+  for (const LayoutCheckpointStyleValue& entry : node.computed_style) {
+    bytes += kStyleEntryBytes + entry.property_name.size() + entry.value.size();
+  }
+  return bytes;
+}
+
+}  // namespace
+
+void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
+                                     int document_node_id,
+                                     std::string document_token,
+                                     LayoutCheckpointNode node) {
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node.node_index < 0 || node.node_id <= 0 ||
+      node.node_name.empty() || (node.node_type != 1 && node.node_type != 3)) {
+    return;
+  }
+  if (node.pseudo_element_present &&
+      (node.node_type != 1 || node.pseudo_type.empty() ||
+       node.generated_text_length < 0)) {
+    return;
+  }
+  // Text nodes carry no style of their own, and a text node is only recorded
+  // when it has a layout object.
+  if (node.node_type == 3 &&
+      (!node.layout_object_present || node.computed_style_present)) {
+    return;
+  }
+  if (node.layout_object_present &&
+      (!IsFiniteNumber(node.x) || !IsFiniteNumber(node.y) ||
+       !IsFiniteNumber(node.width) || !IsFiniteNumber(node.height) ||
+       node.width < 0 || node.height < 0)) {
+    return;
+  }
+  if (node.computed_style_present) {
+    for (const LayoutCheckpointStyleValue& entry : node.computed_style) {
+      if (entry.property_name.empty()) {
+        return;
+      }
+    }
+  }
+  auto evidence = std::make_unique<LayoutCheckpointNodeEvidence>();
+  evidence->channel = "browser.layout";
+  evidence->event_type = "layout-checkpoint-node";
+  evidence->bytes = EstimateLayoutCheckpointNodeBytes(node, document_token);
+  evidence->client = client;
+  evidence->checkpoint_sequence = checkpoint_sequence;
+  evidence->document_node_id = document_node_id;
+  evidence->document_token = std::move(document_token);
+  evidence->node = std::move(node);
+  QueueBlinkEvidence(client, std::move(evidence));
 }
 
 void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,

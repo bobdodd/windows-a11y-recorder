@@ -152,8 +152,7 @@ The bridge is a private, versioned, local IPC protocol rather than a remote debu
 - Per-session authentication established by the recorder when launching the browser.
 - No listening network socket.
 - Strict message size and schema limits.
-- Bounded producer queues with explicit dropped-record summaries.
-- Browser-process batching so instrumentation does not block input dispatch.
+- A bounded queue and writer thread in each process, so instrumentation does not wait on the pipe, with backpressure rather than dropped records when the queue is full, and explicit omission records for writes that fail.
 - Source-side removal of cookie values, authorization values, and prohibited bodies.
 - Clock synchronization anchors from every Chromium process.
 - Process start, restart, crash, navigation, and shutdown records.
@@ -454,6 +453,17 @@ successful write on that channel, so the omission precedes the first record that
 survived. An omission record is not itself captured evidence, so a failure to
 write the omission returns the held count unchanged rather than counting the
 omission as one more lost record.
+
+Each process writes its evidence from one writer thread, fed by a queue of at
+most 64 MiB, instead of from the thread that observed it, because a synchronous
+write to the recorder's unbuffered pipe waits until the recorder reads it
+([Microsoft CreateNamedPipeW](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-createnamedpipew))
+and so held a renderer's rendering update for the length of every layout
+checkpoint. A full queue makes the observing thread wait rather than dropping
+the record. Records still queued when a renderer is ended without shutdown are
+lost without an omission record, and the archive cannot detect that loss; the
+[bridge README](../../chromium/recorder_bridge/README.md) states the design and
+its limits.
 
 This reporting is bounded by where it runs. A process that loses records and
 then exits, or whose pipe never recovers, never gets to report the loss, and no
