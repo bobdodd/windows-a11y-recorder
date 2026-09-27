@@ -375,7 +375,7 @@ public sealed class SessionPlaybackArchiveBuilderTests
     }
 
     [Fact]
-    public async Task OnlyThePrimaryMainFrameIsAPageNavigation()
+    public async Task ClassifiesNavigationsByFrameTypeAndBrowserInterface()
     {
         var directory = CreateDirectory();
         try
@@ -412,7 +412,22 @@ public sealed class SessionPlaybackArchiveBuilderTests
                         "browser.navigation",
                         "navigation-started",
                         300,
-                        Started("navigation-3", "frame-3", null, "https://legacy.example.test/"))
+                        Started("navigation-3", "frame-3", null, "https://legacy.example.test/")),
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        400,
+                        Started("navigation-4", "frame-4", "primary-main-frame", "chrome://omnibox-popup.top-chrome/omnibox_popup_aim.html")),
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        500,
+                        Started("navigation-5", "frame-5", "primary-main-frame", "chrome://settings/")),
+                    CreateEvent(
+                        "browser.navigation",
+                        "navigation-started",
+                        600,
+                        Started("navigation-6", "frame-6", "prerender-main-frame", "https://next.example.test/"))
                 ]);
 
             var archive = await LoadAsync(directory);
@@ -427,6 +442,14 @@ public sealed class SessionPlaybackArchiveBuilderTests
             Assert.False(iframe.IsPageNavigation);
             Assert.Null(legacy.FrameType);
             Assert.True(legacy.IsPageNavigation);
+            var kinds = archive.BrowserNavigations.ToDictionary(item => item.NavigationId, item => item.Kind);
+            Assert.Equal(BrowserNavigationKind.Page, kinds["navigation-1"]);
+            Assert.Equal(BrowserNavigationKind.Iframe, kinds["navigation-2"]);
+            Assert.Equal(BrowserNavigationKind.Page, kinds["navigation-3"]);
+            Assert.Equal(BrowserNavigationKind.BrowserUi, kinds["navigation-4"]);
+            Assert.Equal(BrowserNavigationKind.Page, kinds["navigation-5"]);
+            Assert.Equal(BrowserNavigationKind.OtherFrame, kinds["navigation-6"]);
+            Assert.Equal("00:00:00.000 | [Iframe] https://video.example.test/embed", iframe.Label);
         }
         finally
         {

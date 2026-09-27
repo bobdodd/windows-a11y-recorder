@@ -460,6 +460,51 @@ public partial class MainWindow : Window
             $"{FormatTime(e.TimelineEvent.MonotonicNanoseconds)}");
     }
 
+    private void BrowserNavigationFilter_Click(object sender, RoutedEventArgs e) =>
+        ApplyBrowserNavigationFilter();
+
+    // Lists the navigations of the kinds selected in the filter, and shows
+    // how many of each kind the recording holds. Every navigation stays in
+    // the recording; the filter only chooses which are listed.
+    private void ApplyBrowserNavigationFilter()
+    {
+        var navigations = _playbackArchive?.BrowserNavigations ?? [];
+        var boxes = new (BrowserNavigationKind Kind, System.Windows.Controls.CheckBox Box)[]
+        {
+            (BrowserNavigationKind.Page, ShowPageNavigationsCheckBox),
+            (BrowserNavigationKind.Iframe, ShowIframeNavigationsCheckBox),
+            (BrowserNavigationKind.BrowserUi, ShowBrowserUiNavigationsCheckBox),
+            (BrowserNavigationKind.OtherFrame, ShowOtherFrameNavigationsCheckBox)
+        };
+        var shown = new HashSet<BrowserNavigationKind>();
+        foreach (var (kind, box) in boxes)
+        {
+            var count = navigations.Count(item => item.Kind == kind);
+            box.Content = $"{BrowserNavigationKinds.DescribePlural(kind)} ({count:N0})";
+            if (box.IsChecked == true)
+            {
+                shown.Add(kind);
+            }
+        }
+
+        var selected = BrowserNavigationListBox.SelectedItem;
+        var listed = navigations.Where(item => shown.Contains(item.Kind)).ToArray();
+        _updatingBrowserNavigationSelection = true;
+        BrowserNavigationListBox.ItemsSource = _playbackArchive is null ? null : listed;
+        if (selected is BrowserNavigationCorrelation navigation &&
+            listed.Contains(navigation))
+        {
+            BrowserNavigationListBox.SelectedItem = navigation;
+            BrowserNavigationListBox.ScrollIntoView(navigation);
+        }
+
+        _updatingBrowserNavigationSelection = false;
+        AutomationProperties.SetHelpText(
+            BrowserNavigationListBox,
+            $"{listed.Length:N0} of {navigations.Count:N0} navigations listed. " +
+            "Select a navigation to seek to it and inspect its correlated browser evidence.");
+    }
+
     private void BrowserNavigationListBox_SelectionChanged(
         object sender,
         System.Windows.Controls.SelectionChangedEventArgs e)
@@ -618,8 +663,7 @@ public partial class MainWindow : Window
             TimelineControl.SetSession(
                 _playbackArchive.Timeline,
                 _playbackArchive.DurationNanoseconds);
-            BrowserNavigationListBox.ItemsSource =
-                _playbackArchive.BrowserNavigations;
+            ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 _playbackArchive.BrowserNavigations.Count == 0
                     ? "This recording contains no browser navigation evidence."
@@ -659,7 +703,7 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             _playbackArchive = null;
-            BrowserNavigationListBox.ItemsSource = null;
+            ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
                 "The recording could not be opened.";
             VideoImage.Source = null;
@@ -914,8 +958,11 @@ public partial class MainWindow : Window
                 "composed after Chromium presented the page's first rendering update.",
             BrowserNavigationFrameBasis.NavigationCompletion =>
                 $"First frame: {FormatTime(navigation.SeekNanoseconds)}, the first captured frame " +
-                "composed after the navigation completed. No rendering update of the page was " +
-                "recorded as presented, so this frame can still show the previous page.",
+                "composed after the navigation completed. No rendering update of its document was " +
+                (navigation.Kind == BrowserNavigationKind.Page
+                    ? "recorded as presented, so this frame can still show the previous page."
+                    : "recorded as presented. A frame of this kind is often not drawn, for " +
+                      "example when it is hidden or off screen."),
             _ => "No captured frame was matched to this navigation; playback goes to its start."
         };
 

@@ -489,10 +489,38 @@
           <Grid>
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
               <RowDefinition Height="*" />
             </Grid.RowDefinitions>
+            <WrapPanel x:Name="BrowserNavigationFilterPanel"
+                       Grid.Row="0"
+                       Margin="0,0,0,6"
+                       AutomationProperties.Name="Navigation kinds to list">
+              <TextBlock Margin="0,0,8,0"
+                         VerticalAlignment="Center"
+                         Text="Show:" />
+              <CheckBox x:Name="ShowPageNavigationsCheckBox"
+                        Margin="0,0,12,0"
+                        IsChecked="True"
+                        Content="Pages"
+                        Click="BrowserNavigationFilter_Click" />
+              <CheckBox x:Name="ShowIframeNavigationsCheckBox"
+                        Margin="0,0,12,0"
+                        IsChecked="True"
+                        Content="Iframes"
+                        Click="BrowserNavigationFilter_Click" />
+              <CheckBox x:Name="ShowBrowserUiNavigationsCheckBox"
+                        Margin="0,0,12,0"
+                        IsChecked="True"
+                        Content="Browser UI"
+                        Click="BrowserNavigationFilter_Click" />
+              <CheckBox x:Name="ShowOtherFrameNavigationsCheckBox"
+                        IsChecked="True"
+                        Content="Other frames"
+                        Click="BrowserNavigationFilter_Click" />
+            </WrapPanel>
             <ListBox x:Name="BrowserNavigationListBox"
-                     Grid.Row="0"
+                     Grid.Row="1"
                      MinHeight="70"
                      MaxHeight="100"
                      DisplayMemberPath="Label"
@@ -500,7 +528,7 @@
                      AutomationProperties.Name="Recorded browser navigations"
                      AutomationProperties.HelpText="Select a navigation to seek to it and inspect its correlated browser evidence." />
             <TextBox x:Name="BrowserCorrelationTextBox"
-                     Grid.Row="1"
+                     Grid.Row="2"
                      Margin="0,6,0,0"
                      MinHeight="70"
                      MaxHeight="100"

@@ -37,14 +37,20 @@ public sealed record BrowserNavigationCorrelation(
     public string? FrameType { get; init; }
 
     /// <summary>
-    /// Whether the navigation is of the top-level page, the primary main
-    /// frame. <see cref="PrimaryPage"/> is also true for every iframe in that
-    /// page, so it does not identify page navigations. A navigation without
-    /// a recorded frame type falls back to <see cref="PrimaryPage"/>.
+    /// What the navigated frame is: the tab's page, an iframe, the browser's
+    /// own interface, or another kind of main frame.
     /// </summary>
-    public bool IsPageNavigation => FrameType is null
-        ? PrimaryPage
-        : FrameType == BrowserNavigationCorrelator.PrimaryMainFrame;
+    public BrowserNavigationKind Kind => BrowserNavigationKinds.Classify(
+        FrameType,
+        PrimaryPage,
+        Url);
+
+    /// <summary>
+    /// Whether the navigation is of the tab's top-level page, the primary
+    /// main frame. <see cref="PrimaryPage"/> is also true for every iframe in
+    /// that page, so it does not identify page navigations.
+    /// </summary>
+    public bool IsPageNavigation => Kind == BrowserNavigationKind.Page;
 
     /// <summary>
     /// The time of the first captured desktop frame that can show the
@@ -64,20 +70,18 @@ public sealed record BrowserNavigationCorrelation(
     /// </summary>
     public long SeekNanoseconds => FirstFrameNanoseconds ?? StartNanoseconds;
 
-    public bool IsBrowserInternal =>
-        Url.StartsWith("chrome://", StringComparison.OrdinalIgnoreCase) ||
-        Url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase) ||
-        Url.StartsWith("devtools://", StringComparison.OrdinalIgnoreCase);
-
     public string Label
     {
         get
         {
-            var prefix = (IsBrowserInternal ? "[Browser UI] " : string.Empty) +
-                (FirstFrameBasis == BrowserNavigationFrameBasis.NavigationCompletion
+            // Only a page is expected to be drawn, so only a page is marked
+            // when no presented rendering update was recorded for it.
+            var marker = Kind == BrowserNavigationKind.Page &&
+                FirstFrameBasis == BrowserNavigationFrameBasis.NavigationCompletion
                     ? "[No render evidence] "
-                    : string.Empty);
-            return $"{FormatTime(StartNanoseconds)} | {prefix}{Url}";
+                    : string.Empty;
+            return $"{FormatTime(StartNanoseconds)} | " +
+                $"[{BrowserNavigationKinds.Describe(Kind)}] {marker}{Url}";
         }
     }
 
@@ -106,7 +110,6 @@ internal sealed record BrowserEventProjection(
 
 internal static class BrowserNavigationCorrelator
 {
-    public const string PrimaryMainFrame = "primary-main-frame";
 
     public static BrowserEventProjection? Project(
         SessionTimelineEvent timelineEvent,
@@ -295,12 +298,11 @@ internal static class BrowserNavigationCorrelator
             sessionDurationNanoseconds + 1);
     }
 
-    // A navigation of the top-level page. Every iframe in the page is also
-    // in the primary page, so primaryPage alone does not say this.
+    // A navigation of the tab's top-level page. Every iframe in the page is
+    // also in the primary page, so primaryPage alone does not say this.
     private static bool IsPageNavigation(BrowserEventProjection item) =>
-        item.FrameType is null
-            ? item.PrimaryPage
-            : item.FrameType == PrimaryMainFrame;
+        BrowserNavigationKinds.Classify(item.FrameType, item.PrimaryPage, item.Url) ==
+            BrowserNavigationKind.Page;
 
     private static bool IsIdentityMatch(
         BrowserEventProjection item,

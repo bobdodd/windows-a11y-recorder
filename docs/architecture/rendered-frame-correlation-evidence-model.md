@@ -404,8 +404,9 @@ each navigation's first frame from the database, by
    monitors, or its record's time when none was recorded.
 3. When no checkpoint qualifies, the first frame is the first captured frame
    composed at or after the navigation completed. The navigation list marks
-   such an entry `[No render evidence]`, and the correlation panel states that
-   the frame can still show the previous page.
+   such a page entry `[No render evidence]`, and the correlation panel states
+   that the frame can still show the previous page. Other kinds of entry are
+   not marked, because many are not drawn; see the navigation list below.
 4. When neither applies, or no captured frame is composed late enough, the
    player seeks to the navigation's start.
 
@@ -415,21 +416,45 @@ seek lands on. The navigation's end is the one the correlator already
 assigns: the next navigation's start in the same frame or, for a page
 navigation, the next page navigation's start.
 
-A page navigation is a navigation whose `frameType` is `primary-main-frame`,
-the top-level page. The recorded `primaryPage` flag does not identify it:
-Chromium sets it for every frame of the primary page, including its iframes.
-In session `20260927-140739-4a201ccaa3c142bab1a4874a289375b0`, all 12
-`subframe` navigations, to a YouTube embed, Pinterest, CNIB iframes, and
-`about:blank`, were recorded with `primaryPage` true. A navigation without a recorded
-frame type falls back to `primaryPage`. Selecting an iframe navigation in the
-list still seeks to its own first frame; only the panel's choice by playhead
-is limited to page navigations.
+### Navigation kinds and the navigation list
 
-The same recording also holds `primary-main-frame` navigations of the
-browser's own interface, `chrome://omnibox-popup.top-chrome` and
-`chrome://webui-toolbar.top-chrome`. They count as page navigations under
-this rule, so the panel can describe one of them instead of the tab's page.
-This is a limit of the rule, not yet addressed.
+Each navigation has a kind, shown at the start of its list entry:
+
+| Kind | Rule |
+| --- | --- |
+| Page | `frameType` `primary-main-frame`, and not the browser's interface |
+| Iframe | `frameType` `subframe`, and not the browser's interface |
+| Browser UI | A `chrome://` URL whose host is in Chromium's `top-chrome` domain, or a `devtools://` URL |
+| Other frame | Any other `frameType`: `prerender-main-frame`, `fenced-frame-root`, or `guest-main-frame` |
+
+A navigation without a recorded frame type is a page when `primaryPage` is
+true, and otherwise another frame. `top-chrome` is the domain Chromium
+defines for the WebUI of its own interface, `kChromeUITopChromeDomain` in
+[`chrome/common/webui_url_constants.h`](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/chrome/common/webui_url_constants.h).
+Other `chrome://` pages, such as settings opened in a tab, are pages.
+
+The recorded `primaryPage` flag does not identify a page: Chromium sets it
+for every frame of the primary page, including its iframes. In session
+`20260927-140739-4a201ccaa3c142bab1a4874a289375b0`, all 12 `subframe`
+navigations, to a YouTube embed, Pinterest, CNIB iframes, and `about:blank`,
+were recorded with `primaryPage` true. The same recording holds
+`primary-main-frame` navigations of `chrome://omnibox-popup.top-chrome` and
+`chrome://webui-toolbar.top-chrome`, which are Browser UI by the rule above.
+
+The correlation panel's choice by playhead is limited to pages. Selecting
+an entry of any kind still seeks to that navigation's own first frame.
+
+Only a page entry is marked `[No render evidence]`. In session
+`20260927-140739`, 11 entries that were not pages had no presented rendering update: 2
+Browser UI, 3 Pinterest iframes, 4 CNIB iframes with one unpresented layout
+checkpoint each, a YouTube embed reload, and an `about:blank` iframe. An
+undrawn iframe or interface surface is expected, so a marker on it does not
+indicate missing evidence. The kind of entry does not change what the
+recorder captures.
+
+The player's filter chooses which kinds are listed, shows how many of each
+kind the recording holds, and lists all kinds when a recording opens. The
+filter changes only the list; the recording keeps every navigation.
 
 This rule departs from the correlation rules above in two ways, both stated
 as limits:
@@ -502,3 +527,8 @@ presentation feedback and were skipped by the rule.
 - Playback seeks a navigation to its first frame by presentation feedback,
   with the navigation's completion as a marked fallback; see the playback
   section. The rule is validated on one recording only.
+- Navigations are listed with a kind, and the list can be filtered by kind.
+  Only pages are marked `[No render evidence]`, and only pages are chosen by
+  the correlation panel, because iframes and the browser's interface are
+  often not drawn and are all flagged `primaryPage`. See the navigation
+  kinds section.

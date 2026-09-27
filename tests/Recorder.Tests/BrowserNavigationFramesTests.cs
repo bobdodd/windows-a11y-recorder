@@ -54,7 +54,15 @@ public sealed class BrowserNavigationFramesTests
 
         Assert.Equal(6_000, result.FirstFrameNanoseconds);
         Assert.Equal(BrowserNavigationFrameBasis.NavigationCompletion, result.FirstFrameBasis);
-        Assert.StartsWith("00:00:00.000 | [No render evidence] https://example.test/", result.Label, StringComparison.Ordinal);
+        Assert.StartsWith("00:00:00.000 | [Page] [No render evidence] https://example.test/", result.Label, StringComparison.Ordinal);
+
+        // An iframe without a presented update is expected, so it is not marked.
+        var iframe = Assert.Single(BrowserNavigationFrames.Apply(
+            [navigation with { FrameType = BrowserNavigationKinds.Subframe }],
+            [],
+            [new CapturedFrameComposition(6_000, 5_990)]));
+        Assert.Equal(BrowserNavigationFrameBasis.NavigationCompletion, iframe.FirstFrameBasis);
+        Assert.Equal("00:00:00.000 | [Iframe] https://example.test/", iframe.Label);
     }
 
     [Fact]
