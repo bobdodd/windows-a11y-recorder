@@ -303,6 +303,19 @@ from the product version.
 
 ### Changed
 
+- Check the references between a recording's stored rows once, when the
+  recording is completed, on the `postgres-session-store` branch. Migration
+  0011 lists in `recording_references` each foreign key from a per-recording
+  table to another per-recording table or to `names`, and drops it;
+  `RecordingStore.CheckReferencesAsync` checks each listed reference with one
+  query, and a recording with rows that refer to missing rows is stored as
+  failed, with each reference and count in the reason. The time taken is
+  written to `database-writer-timings.json` as `complete.check-references`.
+- Store each dispatch path scope's visible path indexes as one `integer[]`
+  column, on the `postgres-session-store` branch. Migration 0011 moves the
+  indexes already stored and drops the table that held one row per index.
+- Use .NET server garbage collection in the app, on the
+  `postgres-session-store` branch.
 - Write browser evidence from a writer thread in each Chromium process instead
   of from the thread that observed it, on the `postgres-session-store` branch.
   A synchronous write to the recorder's unbuffered pipe waits until the

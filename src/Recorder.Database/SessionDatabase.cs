@@ -260,10 +260,12 @@ public sealed class DatabaseRecording : IAsyncDisposable
     }
 
     /// <summary>
-    /// Finishes writing, if that has not been done, and stores the
-    /// recording's final status and counts. Events that failed their checks,
-    /// and events the writer could not write, make a completed recording
-    /// failed, with the reasons stated after <paramref name="failure"/>.
+    /// Finishes writing, if that has not been done, checks the references
+    /// between the rows written, and stores the recording's final status and
+    /// counts. Events that failed their checks, events the writer could not
+    /// write, and stored rows that refer to missing rows make a completed
+    /// recording failed, with the reasons stated after
+    /// <paramref name="failure"/>.
     /// </summary>
     public async Task<DatabaseRecordingResult> CompleteAsync(
         RecordingStatus status,
@@ -279,7 +281,21 @@ public sealed class DatabaseRecording : IAsyncDisposable
             reasons.Add(failure);
         }
 
-        var writing = WritingFailures(written);
+        var writing = new List<string>(WritingFailures(written));
+
+        // The writer's tables have no foreign keys between them, so the
+        // references of the rows it stored are checked once, here.
+        var checking = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            writing.AddRange(await _store.CheckReferencesAsync(RecordingId, cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            writing.Add($"The references between the stored rows could not be checked: {exception.Message}");
+        }
+
+        Timings?.Since("complete.check-references", checking);
         reasons.AddRange(writing);
         if (writing.Count > 0 && status == RecordingStatus.Completed)
         {

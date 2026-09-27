@@ -217,6 +217,9 @@ internal sealed class EvidenceMapper
             case NameField:
                 values[index++] = present ? new PendingName(ReadText(value, path)) : null;
                 break;
+            case ArrayField array:
+                values[index++] = present ? ReadArray(array.Element, value, path) : null;
+                break;
             case IdentityField identity:
                 values[index++] = present
                     ? Identity(identity.Identity, value, path, context, group: false).Key
@@ -431,6 +434,41 @@ internal sealed class EvidenceMapper
             default:
                 throw new EvidenceMappingException($"payload-member-type:{path}");
         }
+    }
+
+    private static object ReadArray(ScalarType element, JsonElement value, string path)
+    {
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            throw new EvidenceMappingException($"payload-member-type:{path}");
+        }
+
+        var length = value.GetArrayLength();
+        var integers = element == ScalarType.Integer ? new int[length] : null;
+        var bigints = element == ScalarType.BigInt ? new long[length] : null;
+        var ordinal = 0;
+        foreach (var item in value.EnumerateArray())
+        {
+            var itemPath = $"{path}/{ordinal.ToString(CultureInfo.InvariantCulture)}";
+            if (item.ValueKind == JsonValueKind.Null)
+            {
+                throw new EvidenceMappingException($"payload-member-null:{itemPath}");
+            }
+
+            var read = ReadScalar(element, item, itemPath);
+            if (integers is not null)
+            {
+                integers[ordinal] = (int)read;
+            }
+            else
+            {
+                bigints![ordinal] = (long)read;
+            }
+
+            ordinal++;
+        }
+
+        return (object?)integers ?? bigints!;
     }
 
     private static string ReadText(JsonElement value, string path)

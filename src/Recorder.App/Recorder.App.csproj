@@ -2,6 +2,12 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
+    <!-- Server garbage collection collects on one thread per processor, so
+         the pauses that stop every thread of the app, including the threads
+         receiving evidence, are shorter. With workstation collection, one
+         browser recording and its writing paused the app for 12.5 seconds
+         in total over 131 seconds. See docs/architecture/session-database.md. -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Recorder.Coordinator/Recorder.Coordinator.csproj" />

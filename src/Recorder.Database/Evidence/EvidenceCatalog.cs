@@ -316,10 +316,7 @@ internal static class EvidenceCatalog
                     Name("shadowRootMode", N),
                     BigInt("targetNodeId", N),
                     BigInt("relatedTargetNodeId", N),
-                    new ListField(
-                        "visiblePathIndexes",
-                        R,
-                        ScalarList("browser_dispatch_path_scope_visible_indexes", ScalarType.Integer)),
+                    new ArrayField("visiblePathIndexes", R, ScalarType.Integer),
                     Int("unmatchedVisibleTargetCount")
                 ])),
         new IdentityField("scope", O, ExecutionScopes));

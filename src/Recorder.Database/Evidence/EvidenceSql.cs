@@ -125,6 +125,8 @@ internal static class EvidenceSql
                         "'0'), '.') || '+00:00')";
                 case ScalarField:
                     return column;
+                case ArrayField:
+                    return $"to_jsonb({column})";
                 case NameField:
                     var name = NextAlias();
                     return $"(SELECT {name}.name FROM names {name} WHERE {name}.name_id = {column})";

@@ -196,6 +196,8 @@ internal static class EvidenceCopy
                 "boolean" => NpgsqlDbType.Boolean,
                 "timestamptz" => NpgsqlDbType.TimestampTz,
                 "smallint" => NpgsqlDbType.Smallint,
+                "integer[]" => NpgsqlDbType.Array | NpgsqlDbType.Integer,
+                "bigint[]" => NpgsqlDbType.Array | NpgsqlDbType.Bigint,
                 _ => throw new InvalidOperationException($"Unknown column type {column.SqlType}.")
             });
         }
@@ -233,6 +235,12 @@ internal static class EvidenceCopy
                 break;
             case DateTime instant:
                 importer.Write(instant, type);
+                break;
+            case int[] integers:
+                importer.Write(integers, type);
+                break;
+            case long[] bigints:
+                importer.Write(bigints, type);
                 break;
             default:
                 throw new InvalidOperationException($"Cannot write a {value.GetType().Name} evidence value.");

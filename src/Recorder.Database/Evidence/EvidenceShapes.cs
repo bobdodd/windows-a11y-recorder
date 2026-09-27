@@ -125,6 +125,21 @@ internal sealed class ListField(string json, Presence presence, EvidenceTable ch
 }
 
 /// <summary>
+/// An array of numbers stored as one array column of the owning row, in
+/// array order. Used where a list has many short items that are only read
+/// as a whole, so one row per item would cost more to write than it gives.
+/// </summary>
+internal sealed class ArrayField(string json, Presence presence, ScalarType element, string? column = null)
+    : Field(json, presence)
+{
+    public ScalarType Element { get; } = element is ScalarType.Integer or ScalarType.BigInt
+        ? element
+        : throw new ArgumentOutOfRangeException(nameof(element), "An array column holds integers.");
+
+    public override string Column { get; } = column ?? EvidenceNaming.Snake(json);
+}
+
+/// <summary>
 /// An object whose property names are data, stored as rows of a child table
 /// with the property name in the names table.
 /// </summary>
@@ -352,6 +367,9 @@ internal static class EvidenceLayout
                     Add(member, prefix + inline.Column + "_", required, columns);
                 }
 
+                break;
+            case ArrayField array:
+                columns.Add(new EvidenceColumn(prefix + array.Column, SqlType(array.Element) + "[]", notNull));
                 break;
             case ListField or MapField:
                 if (HasPresenceColumn(field))

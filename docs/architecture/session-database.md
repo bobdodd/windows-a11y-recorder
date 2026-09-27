@@ -316,11 +316,49 @@ only once the database version is tested in full. It adds the
   browser recording on the target Windows machine before this migration,
   114,740 events were recorded and 10,875 were not written within the
   completion timeout, because each node's style became about 340 rows.
+- **Migration 0011.** Checks the references between a recording's rows
+  once, when the recording is completed, instead of at each row. It lists in
+  `recording_references` every foreign key from a per-recording table to
+  another per-recording table or to `names`, with its columns and the
+  referenced table and columns, and drops those foreign keys; foreign keys to
+  lookup tables and to `recordings` remain. When a recording is completed,
+  `RecordingStore.CheckReferencesAsync` runs one query per listed reference,
+  up to four at once, counting the recording's rows whose referenced row is
+  missing, and each reference with such rows makes the recording failed,
+  with the table, columns, and count in the failure reason. A reference with
+  a null column is not checked, as a foreign key would not check it. The
+  migration also stores each dispatch path scope's visible path indexes as
+  an `integer[]` column, `visible_path_indexes`, on
+  `browser_dispatch_path_scopes`, in their original order, and drops the
+  table that held one row per index. A test writes the evidence samples at
+  version 11, returns the scopes to their version 10 form, applies 0011
+  again, and requires every payload to read back unchanged; another inserts
+  a row whose owner is missing and requires the check to report it.
+  PostgreSQL's guidance on bulk loading states that checking foreign keys
+  for many rows at once is more efficient than checking them row by row
+  ([Populating a Database](https://www.postgresql.org/docs/current/populate.html)).
+  In the Windows recording that led to this migration, 442,588 events were
+  accepted and 83,993 were left in the spill file when the completion
+  timeout ended writing. Summed over the four writing connections, commits
+  took 178 s and waits for another batch's commit 252 s, against about 45 s
+  for all `COPY` steps. The statistics of the recorder's server showed about
+  20.5 million index scans of `browser_dispatch_path_scopes` and 19.9 million
+  of `names`, and the table of visible indexes held about 6.7 million of the
+  8.9 million rows stored. These figures are from one run and are not a
+  substitute for the system test.
+- **Server garbage collection.** The app uses .NET server garbage
+  collection, which collects with one thread and heap per logical processor
+  ([Workstation and server garbage collection](https://learn.microsoft.com/en-us/dotnet/standard/garbage-collection/workstation-server-gc)),
+  set by the `ServerGarbageCollection` property
+  ([Garbage collector config settings](https://learn.microsoft.com/en-us/dotnet/core/runtime-config/garbage-collector)).
+  With the default workstation collection, the same recording paused the
+  app for 12.5 s in total over 131 s. Whether server collection shortens
+  those pauses is not yet measured.
 - **Parallel writing.** `PostgresEventWriter` writes up to
   `WriterConnections` batches at once, four by default; while the database
   is unavailable it retries one batch at a time. Each batch is written by
-  `PostgresEventBatchTarget` in one transaction that defers its foreign key
-  checks to commit, so a batch is stored completely or not at all and a
+  `PostgresEventBatchTarget` in one transaction that defers its remaining
+  foreign key checks to commit, so a batch is stored completely or not at all and a
   failure leaves no partial rows. Batches are prepared one at a time, in
   order, and each identity a batch needs, such as a computed style, is
   claimed by the first batch that needs it:
@@ -349,8 +387,10 @@ only once the database version is tested in full. It adds the
 - **Schema checks.** A test holds the SHA-256 of each applied migration file,
   so a migration a database may already have applied is not changed, and
   compares the live schema of a migrated database with the evidence
-  catalog: each table's columns, primary key, foreign keys, and position in
-  `recording_tables`, and that every foreign key is deferrable.
+  catalog: each table's columns, primary key, references listed in
+  `recording_references`, and position in `recording_tables` after the
+  tables it refers to; that no foreign key refers to another per-recording
+  table or to `names`; and that every remaining foreign key is deferrable.
 - **Writing.** `PostgresEventWriter` checks each record with
   `EventRecordValidator`, which checks the envelope and passes the payload to
   `EventPayloadValidator`, and rejects a record that fails into
@@ -390,7 +430,8 @@ only once the database version is tested in full. It adds the
   - other nested objects are flattened into the owning row, with a
     `has_<member>` column when the object may be null;
   - arrays and maps are child tables keyed by their owner and position or
-    entry name.
+    entry name, except a dispatch path scope's visible path indexes, which
+    are an `integer[]` column of the scope since migration 0011.
   The first slice covers collector lifecycle, session markers, raw keyboard
   and mouse input, the foreground window, UI Automation events, desktop
   frames, microphone and system audio, browser lifecycle, and the collector

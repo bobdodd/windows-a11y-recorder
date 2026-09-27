@@ -28,7 +28,8 @@ public sealed class EvidenceMigrationTests
         ("0007_browser_network_evidence.sql", "9424060a3d3d608bed9310c537a24fe71f8cdb23fdc8d34e8aad9bc272cecc14"),
         ("0008_other_channel_payloads.sql", "84fd19e366fc452632943b1fc728c400de0d1c164132efd153b7ef1e51ddd7ec"),
         ("0009_unpartitioned_recording_tables.sql", "1bae83d161af368b5d74a35314051e0392a46a01db37c613b30b1f0f1ccb762a"),
-        ("0010_shared_computed_styles.sql", "c02a433d2c631188d087edcca5caaa6819793149083bd7c9263799c46e5e936e")
+        ("0010_shared_computed_styles.sql", "c02a433d2c631188d087edcca5caaa6819793149083bd7c9263799c46e5e936e"),
+        ("0011_bulk_reference_checks.sql", "c99eea0f8615e7137f6b80574d3036f798e66c3391ae0d5b1dfcfeb5362162ae")
     ];
 
     [Fact]
@@ -306,9 +307,11 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
 
     /// <summary>
     /// The tables the migrations leave are the tables the catalog describes:
-    /// the same columns, types, nullability, primary keys, and foreign keys.
-    /// Every foreign key of a per-recording table is deferrable, and every
-    /// table is listed in recording_tables after the tables it refers to.
+    /// the same columns, types, nullability, primary keys, and references.
+    /// A reference to another per-recording table or to names is listed in
+    /// recording_references and is not a foreign key; every remaining
+    /// foreign key of a per-recording table is deferrable; and every table
+    /// is listed in recording_tables after the tables it refers to.
     /// </summary>
     [Fact]
     public async Task TheMigratedTablesMatchTheCatalog()
@@ -376,27 +379,42 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
                     : $"(recording_id, {column.Name}) {column.References} (recording_id, identity_key)");
             }
 
+            // Each is checked by RecordingStore.CheckReferencesAsync, not by
+            // a foreign key.
             references.Sort(StringComparer.Ordinal);
             Assert.Equal(references, Sorted(await RowsAsync(
                 DataSource,
-                "SELECT '(' || (SELECT string_agg(a.attname, ', ' ORDER BY k.ordinality) FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ordinality) " +
-                "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum) || ') ' || c.confrelid::regclass::text || ' (' || " +
-                "(SELECT string_agg(a.attname, ', ' ORDER BY k.ordinality) FROM unnest(c.confkey) WITH ORDINALITY k(attnum, ordinality) " +
-                "JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.attnum) || ')' " +
-                $"FROM pg_constraint c WHERE c.conrelid = '{table.Name}'::regclass AND c.contype = 'f'",
+                "SELECT '(' || array_to_string(columns, ', ') || ') ' || referenced_table || ' (' || " +
+                "array_to_string(referenced_columns, ', ') || ')' " +
+                $"FROM recording_references WHERE table_name = '{table.Name}'",
                 token)));
+            Assert.Empty(await RowsAsync(
+                DataSource,
+                "SELECT c.conname::text FROM pg_constraint c " +
+                $"WHERE c.conrelid = '{table.Name}'::regclass AND c.contype = 'f'",
+                token));
 
             Assert.True(orders.ContainsKey(table.Name), $"{table.Name} is not in recording_tables.");
         }
 
-        // Each per-recording table comes after the tables it refers to, and
-        // each of its foreign keys can be deferred by the writer.
+        // Each per-recording table comes after the tables it refers to; each
+        // of its remaining foreign keys, to lookup tables and recordings, can
+        // be deferred by the writer; and none refers to another per-recording
+        // table or to names.
         Assert.Empty(await RowsAsync(
             DataSource,
             "SELECT c.conrelid::regclass::text || ' ' || c.conname FROM pg_constraint c " +
             "JOIN recording_tables r ON r.table_name = c.conrelid::regclass::text " +
             "LEFT JOIN recording_tables f ON f.table_name = c.confrelid::regclass::text " +
-            "WHERE c.contype = 'f' AND (NOT c.condeferrable OR c.condeferred OR f.table_order >= r.table_order)",
+            "WHERE c.contype = 'f' AND (NOT c.condeferrable OR c.condeferred OR f.table_name IS NOT NULL " +
+            "OR c.confrelid = 'names'::regclass)",
+            token));
+        Assert.Empty(await RowsAsync(
+            DataSource,
+            "SELECT x.table_name || ' ' || x.referenced_table FROM recording_references x " +
+            "JOIN recording_tables r ON r.table_name = x.table_name " +
+            "LEFT JOIN recording_tables f ON f.table_name = x.referenced_table " +
+            "WHERE f.table_order >= r.table_order OR (f.table_name IS NULL AND x.referenced_table <> 'names')",
             token));
     }
 
@@ -494,6 +512,110 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     }
 
     /// <summary>
+    /// Migration 0011 moves the visible path indexes already stored into the
+    /// array column of their scope, and every payload reads back as it was
+    /// stored.
+    /// </summary>
+    [Fact]
+    public async Task Migration0011StoresVisiblePathIndexesAsArraysAndKeepsEveryPayload()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var database = "upgrade_" + Guid.NewGuid().ToString("N");
+        await using (var create = DataSource.CreateCommand($"CREATE DATABASE {database}"))
+        {
+            await create.ExecuteNonQueryAsync(token);
+        }
+
+        var builder = new NpgsqlConnectionStringBuilder(fixture.Server.ConnectionString) { Database = database };
+        await using var dataSource = NpgsqlDataSource.Create(builder.ConnectionString);
+        await DatabaseMigrator.ApplyAsync(dataSource, token);
+
+        var (sessionKey, recordingId) = await CreateRecordingAsync(dataSource);
+        var events = SampleEvents(sessionKey);
+        await WriteAsync(sessionKey, recordingId, events, dataSource: dataSource);
+        var scopes = await RowsAsync(
+            dataSource,
+            "SELECT count(*)::text FROM browser_dispatch_path_scopes WHERE cardinality(visible_path_indexes) > 0",
+            token);
+        Assert.NotEqual(["0"], scopes);
+
+        // Returns the scopes to the tables of version 10, which held one row
+        // per visible index, and applies 0011 again.
+        await using (var downgrade = dataSource.CreateCommand(
+            "CREATE TABLE browser_dispatch_path_scope_visible_indexes (" +
+            "recording_id uuid NOT NULL, owner_key bigint NOT NULL, ordinal_1 integer NOT NULL, " +
+            "ordinal_2 integer NOT NULL, value integer NOT NULL, " +
+            "PRIMARY KEY (recording_id, owner_key, ordinal_1, ordinal_2));" +
+            "INSERT INTO browser_dispatch_path_scope_visible_indexes " +
+            "SELECT s.recording_id, s.owner_key, s.ordinal_1, i.ordinality - 1, i.value " +
+            "FROM browser_dispatch_path_scopes s, unnest(s.visible_path_indexes) WITH ORDINALITY i(value, ordinality);" +
+            "ALTER TABLE browser_dispatch_path_scopes DROP COLUMN visible_path_indexes;" +
+            "INSERT INTO recording_tables SELECT 'browser_dispatch_path_scope_visible_indexes', max(table_order) + 1 FROM recording_tables;" +
+            "DROP TABLE recording_references;" +
+            "DELETE FROM schema_migrations WHERE version = 11;"))
+        {
+            await downgrade.ExecuteNonQueryAsync(token);
+        }
+
+        Assert.NotEmpty(await RowsAsync(dataSource, "SELECT owner_key::text FROM browser_dispatch_path_scope_visible_indexes", token));
+        await DatabaseMigrator.ApplyAsync(dataSource, token);
+
+        Assert.Equal(scopes, await RowsAsync(
+            dataSource,
+            "SELECT count(*)::text FROM browser_dispatch_path_scopes WHERE cardinality(visible_path_indexes) > 0",
+            token));
+        var keys = await EventKeysAsync(recordingId, dataSource);
+        var source = new DatabaseEventRecordSource(dataSource, recordingId, sessionKey);
+        for (var index = 0; index < events.Count; index++)
+        {
+            var record = events[index];
+            var item = new SessionTimelineEvent(
+                keys[index], record.EventId, record.EvidenceClass, record.Channel, record.EventType,
+                record.MonotonicNanoseconds, record.EventType);
+            using var read = JsonDocument.Parse(source.ReadEventJson(item));
+            Assert.Equal(Canonical(record.Payload), Canonical(read.RootElement.GetProperty("payload")));
+        }
+
+        Assert.Equal(
+            ["t"],
+            await RowsAsync(dataSource, "SELECT CASE WHEN to_regclass('browser_dispatch_path_scope_visible_indexes') IS NULL THEN 't' ELSE 'f' END", token));
+    }
+
+    /// <summary>
+    /// The references between a recording's rows are checked when the
+    /// recording is completed: none is missing after the writer stores
+    /// every sample, and a row that refers to a missing row is reported by
+    /// table and columns.
+    /// </summary>
+    [Fact]
+    public async Task CheckingReferencesFindsARowThatRefersToAMissingRow()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var (sessionKey, recordingId) = await CreateRecordingAsync();
+        await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
+        var store = new RecordingStore(DataSource);
+        Assert.Empty(await store.CheckReferencesAsync(recordingId, token));
+        Assert.NotEmpty(await RowsAsync(DataSource, "SELECT table_name FROM recording_references", token));
+
+        await using (var orphan = DataSource.CreateCommand(
+            "INSERT INTO browser_dispatch_path_targets (recording_id, owner_key, ordinal_1, target_key) " +
+            "(SELECT recording_id, owner_key, 99, target_key FROM browser_dispatch_path_targets " +
+            "WHERE recording_id = $1 LIMIT 1) UNION ALL " +
+            "(SELECT recording_id, -1, 0, target_key FROM browser_dispatch_path_targets " +
+            "WHERE recording_id = $1 LIMIT 1)"))
+        {
+            orphan.Parameters.AddWithValue(recordingId);
+            await orphan.ExecuteNonQueryAsync(token);
+        }
+
+        var failure = Assert.Single(await store.CheckReferencesAsync(recordingId, token));
+        Assert.Equal(
+            "1 rows of browser_dispatch_path_targets (recording_id, owner_key) refer to rows missing from " +
+            "browser_dispatch_events (recording_id, event_key).",
+            failure);
+    }
+
+    /// <summary>
     /// Migration 0009 moves every per-recording table out of its partitions
     /// into an ordinary table, keeping each row and each constraint and
     /// index under its name.
@@ -518,12 +640,13 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             var (sessionKey, recordingId) = await CreateRecordingAsync(dataSource);
             await CreateLegacyPartitionsAsync(dataSource, recordingId, token);
 
-            // Migration 0010 changed how layout nodes are stored, so the
-            // writer cannot store them in the tables of version 8.
+            // Migrations 0010 and 0011 changed how layout nodes and dispatch
+            // path scopes are stored, so the writer cannot store them in the
+            // tables of version 8.
             await WriteAsync(
                 sessionKey,
                 recordingId,
-                [.. SampleEvents(sessionKey).Where(record => record.EventType != "layout-checkpoint-node")],
+                [.. SampleEvents(sessionKey).Where(WritableAtVersion8)],
                 dataSource: dataSource);
             recordings.Add(recordingId);
         }
@@ -539,7 +662,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         var contents = await ContentsAsync(dataSource, tables, token);
         var constraints = await RowsAsync(dataSource, string.Format(CultureInfo.InvariantCulture, Constraints, "recording_partitioned_tables"), token);
         var indexes = await RowsAsync(dataSource, string.Format(CultureInfo.InvariantCulture, Indexes, "recording_partitioned_tables"), token);
-        Assert.StartsWith("events " + (3 * SampleEvents("count").Count(record => record.EventType != "layout-checkpoint-node")).ToString(CultureInfo.InvariantCulture) + " ", contents.Single(row => row.StartsWith("events ", StringComparison.Ordinal)));
+        Assert.StartsWith("events " + (3 * SampleEvents("count").Count(WritableAtVersion8)).ToString(CultureInfo.InvariantCulture) + " ", contents.Single(row => row.StartsWith("events ", StringComparison.Ordinal)));
 
         await DatabaseMigrator.ApplyAsync(dataSource, 9, token);
 
@@ -576,6 +699,15 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
 
         return contents;
     }
+
+    // The tables of version 8 have no computed style key on layout nodes and
+    // hold a dispatch path scope's visible indexes as rows, so a sample with
+    // either cannot be written into them.
+    private static bool WritableAtVersion8(RecorderEvent record) =>
+        record.EventType != "layout-checkpoint-node" &&
+        !(record.Payload.TryGetProperty("pathScopes", out var scopes) &&
+          scopes.ValueKind == JsonValueKind.Array &&
+          scopes.GetArrayLength() > 0);
 
     private static List<string> Sorted(List<string> rows)
     {

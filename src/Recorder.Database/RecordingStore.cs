@@ -245,6 +245,96 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
     }
 
     /// <summary>
+    /// Checks every reference listed in recording_references for one
+    /// recording, and returns a description of each reference with rows
+    /// that refer to a missing row, or an empty list when every row's
+    /// references are present. The writer's tables have no foreign keys
+    /// between them, which PostgreSQL would check one inserted row at a
+    /// time; each reference is checked here with one set-based query, up to
+    /// four at once. A reference with a null column is not checked, as a
+    /// foreign key would not check it.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> CheckReferencesAsync(
+        Guid recordingId,
+        CancellationToken cancellationToken = default)
+    {
+        var references = new List<(string Table, string[] Columns, string Referenced, string[] ReferencedColumns)>();
+        await using (var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false))
+        {
+            // The upgrade tests write recordings into the schema an earlier
+            // release left, which checked references with foreign keys.
+            await using (var present = new NpgsqlCommand(
+                "SELECT to_regclass('recording_references') IS NOT NULL",
+                connection))
+            {
+                if (!(bool)(await present.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!)
+                {
+                    return [];
+                }
+            }
+
+            await using var command = new NpgsqlCommand(
+                "SELECT table_name, columns, referenced_table, referenced_columns FROM recording_references " +
+                "ORDER BY table_name, columns, referenced_table",
+                connection);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                references.Add((
+                    reader.GetString(0),
+                    reader.GetFieldValue<string[]>(1),
+                    reader.GetString(2),
+                    reader.GetFieldValue<string[]>(3)));
+            }
+        }
+
+        var missing = new long[references.Count];
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, references.Count),
+            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
+            async (index, token) =>
+            {
+                var (table, columns, referenced, referencedColumns) = references[index];
+                var present = string.Join(" AND ", columns.Select(column => $"c.{Identifier(column)} IS NOT NULL"));
+                var matches = string.Join(
+                    " AND ",
+                    columns.Select((column, position) =>
+                        $"p.{Identifier(referencedColumns[position])} = c.{Identifier(column)}"));
+                await using var connection = await dataSource.OpenConnectionAsync(token).ConfigureAwait(false);
+                await using var command = new NpgsqlCommand(
+                    $"SELECT count(*) FROM {Identifier(table)} c WHERE c.recording_id = $1 AND {present} " +
+                    $"AND NOT EXISTS (SELECT 1 FROM {Identifier(referenced)} p WHERE {matches})",
+                    connection)
+                {
+                    CommandTimeout = 0
+                };
+                command.Parameters.AddWithValue(recordingId);
+                missing[index] = (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))!;
+            }).ConfigureAwait(false);
+
+        var failures = new List<string>();
+        for (var index = 0; index < references.Count; index++)
+        {
+            if (missing[index] > 0)
+            {
+                var (table, columns, referenced, referencedColumns) = references[index];
+                failures.Add(
+                    $"{missing[index]} rows of {table} ({string.Join(", ", columns)}) refer to rows " +
+                    $"missing from {referenced} ({string.Join(", ", referencedColumns)}).");
+            }
+        }
+
+        return failures;
+    }
+
+    // Table and column names come from the database, not from user input,
+    // and are checked to be plain names before they are quoted.
+    private static string Identifier(string name) =>
+        name.Length > 0 && name.All(character => character is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_')
+            ? "\"" + name + "\""
+            : throw new InvalidOperationException($"{name} is not a table or column name the recorder uses.");
+
+    /// <summary>
     /// Marks every recording still in the recording state as interrupted. The
     /// app calls this when it starts, before it begins a new recording, so a
     /// recording left open by an app that ended without stopping it is not
