@@ -215,9 +215,19 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
                 Drain();
                 Collect();
                 var inputDone = _channel.Reader.Completion.IsCompleted;
-                if (_memory.Count == 0 && _spill.HasEvents)
+                // Spilled events are read back once memory is empty, as many
+                // as fit in the memory bound. The events of batches being
+                // written still count against the bound, so while the store
+                // refuses writes the spilled events stay on disk. With no
+                // write in flight, at least one event is read, so an event
+                // larger than the bound is still written.
+                if (_memory.Count == 0 && _spill.HasEvents &&
+                    (_inFlight.Count == 0 || !IsDatabaseUnavailable))
                 {
-                    foreach (var buffered in _spill.Read(_options.BatchSize))
+                    foreach (var buffered in _spill.Read(
+                        _options.BatchSize,
+                        _options.MemoryBufferBytes - _memoryBytes,
+                        requireOne: _inFlight.Count == 0))
                     {
                         _memory.Enqueue(buffered);
                         _memoryBytes += buffered.EstimatedBytes;

@@ -434,7 +434,7 @@ public sealed class PostgresServerLifecycleTests : IAsyncLifetime
         deadline = DateTime.UtcNow.AddSeconds(10);
         while (!writer.IsDatabaseUnavailable || !File.Exists(Path.Combine(_dataDirectory, "spill.ndjson")))
         {
-            Assert.True(DateTime.UtcNow < deadline, "The writer did not spill while the server was stopped.");
+            Assert.True(DateTime.UtcNow < deadline, $"The writer did not spill while the server was stopped. unavailable={writer.IsDatabaseUnavailable} spill={File.Exists(Path.Combine(_dataDirectory, "spill.ndjson"))} written={writer.WrittenCount}");
             await Task.Delay(10, TestContext.Current.CancellationToken);
         }
 

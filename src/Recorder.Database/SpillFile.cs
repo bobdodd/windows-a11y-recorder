@@ -62,7 +62,15 @@ internal sealed class SpillFile(string path) : IDisposable
     }
 
     /// <summary>Reads up to <paramref name="maximum"/> of the oldest unread events.</summary>
-    public List<BufferedEvent> Read(int maximum)
+    public List<BufferedEvent> Read(int maximum) => Read(maximum, long.MaxValue, requireOne: true);
+
+    /// <summary>
+    /// Reads up to <paramref name="maximum"/> of the oldest unread events
+    /// whose estimated sizes together fit in <paramref name="maximumBytes"/>.
+    /// When <paramref name="requireOne"/> is true the oldest event is read
+    /// even if it alone does not fit.
+    /// </summary>
+    public List<BufferedEvent> Read(int maximum, long maximumBytes, bool requireOne)
     {
         var events = new List<BufferedEvent>();
         if (_writer is null || Count == 0)
@@ -71,7 +79,7 @@ internal sealed class SpillFile(string path) : IDisposable
         }
 
         _writer.Flush();
-        ReadInto(events, maximum);
+        ReadInto(events, maximum, maximumBytes, requireOne);
 
         Count -= events.Count;
         if (Count == 0)
@@ -84,8 +92,10 @@ internal sealed class SpillFile(string path) : IDisposable
         return events;
     }
 
-    private void ReadInto(List<BufferedEvent> events, int maximum)
+    private void ReadInto(List<BufferedEvent> events, int maximum, long maximumBytes, bool requireOne)
     {
+        long bytes = 0;
+        var full = false;
         using var reader = new FileStream(
             Path,
             FileMode.Open,
@@ -95,7 +105,7 @@ internal sealed class SpillFile(string path) : IDisposable
         reader.Position = _readOffset;
         using var line = new MemoryStream();
         var chunk = new byte[64 * 1024];
-        while (events.Count < maximum)
+        while (events.Count < maximum && !full)
         {
             var read = reader.Read(chunk, 0, chunk.Length);
             if (read == 0)
@@ -115,8 +125,18 @@ internal sealed class SpillFile(string path) : IDisposable
                 }
 
                 line.Write(chunk, start, end - start);
+                var buffered = Deserialize(line.GetBuffer().AsSpan(0, (int)line.Length));
+                var fits = bytes + buffered.EstimatedBytes <= maximumBytes ||
+                    (requireOne && events.Count == 0);
+                if (!fits)
+                {
+                    full = true;
+                    break;
+                }
+
                 _readOffset += line.Length + 1;
-                events.Add(Deserialize(line.GetBuffer().AsSpan(0, (int)line.Length)));
+                bytes += buffered.EstimatedBytes;
+                events.Add(buffered);
                 line.SetLength(0);
                 start = end + 1;
             }

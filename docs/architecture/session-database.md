@@ -332,8 +332,11 @@ only once the database version is tested in full. It adds the
     claimed. Those writes go through a temporary table and insert only the
     rows not yet present, so an identity is stored once whichever batch
     commits first.
-  Events are ordered by their event key, not by commit order. At stop, the
-  events of batches not yet committed are spilled with the rest. Tests
+  Events are ordered by their event key, not by commit order. The events of
+  batches being written count against the memory bound until they are
+  committed, so spilled events are read back only as far as they fit in the
+  bound, and not at all while a write is being retried. At stop, the events
+  of batches not yet committed are spilled with the rest. Tests
   require a writer never to exceed its configured number of batches at
   once, and require parallel writing with small batches to store every
   payload and the same number of identity rows as one writer. In throughput

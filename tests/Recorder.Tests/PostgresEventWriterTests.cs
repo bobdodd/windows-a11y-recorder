@@ -122,7 +122,7 @@ public sealed class PostgresEventWriterTests : IDisposable
     {
         var target = new RecordingTarget { FailUntilReleased = true };
         var collector = Collector();
-        var options = Options(batchSize: 4) with { MemoryBufferBytes = 3_000 };
+        var options = Options(batchSize: 50) with { MemoryBufferBytes = 3_000 };
         var writer = new PostgresEventWriter(target, SessionId, options);
 
         for (ulong sequence = 1; sequence <= 20; sequence++)
@@ -131,6 +131,11 @@ public sealed class PostgresEventWriterTests : IDisposable
         }
 
         await WaitUntil(() => File.Exists(options.SpillPath));
+
+        // The spilled events stay on disk while the store refuses writes,
+        // rather than being read back beyond the memory bound.
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.True(File.Exists(options.SpillPath), "The spill file was read back while the store was unavailable.");
         target.FailUntilReleased = false;
         var result = await writer.CompleteAsync();
 
