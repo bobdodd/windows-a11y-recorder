@@ -296,7 +296,7 @@ machine.
 - The app writes every accepted event to the recording file. PostgreSQL
   holds the recording, its collectors and channels, the file's location in
   `recording_files`, and its chunk index in `recording_file_chunks`
-  (migration `0012_recording_files.sql`). No event is written to the
+  (migration `0013_recording_files.sql`; version 12 was used by the unmerged `layout-keyframes` branch). No event is written to the
   evidence tables.
 - The writer keeps its checks, queue, spill file, retries, rejections, and
   omissions, and writes one batch at a time so the file is in the order the
