@@ -6770,8 +6770,8 @@ void RecorderRequestLayoutPresentation(
 // while it is compared.
 struct RecorderStyleReading {
   Persistent<const ComputedStyle> style;
-  std::vector<size_t> value_hashes;
-  std::vector<bool> layout_dependent;
+  Vector<size_t> value_hashes;
+  Vector<bool> layout_dependent;
 };
 using RecorderStyleReadings =
     std::unordered_map<int64_t, RecorderStyleReading>;
@@ -6950,10 +6950,12 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_phase_started = base::TimeTicks::Now();
       RecorderStyleReading recorder_reading;
       recorder_reading.style = recorder_style;
-      recorder_reading.value_hashes.reserve(
-          recorder_record.computed_style.size());
-      recorder_reading.layout_dependent.reserve(
-          recorder_record.computed_style.size());
+      const wtf_size_t recorder_value_count =
+          static_cast<wtf_size_t>(recorder_record.computed_style.size());
+      recorder_reading.value_hashes.ReserveInitialCapacity(
+          recorder_value_count);
+      recorder_reading.layout_dependent.ReserveInitialCapacity(
+          recorder_value_count);
       size_t recorder_hash_index = 0;
       for (CSSPropertyID recorder_property_id :
            kRecorderLayoutStyleProperties) {
@@ -6982,7 +6984,7 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
           ++recorder_cost.same_style_objects;
         }
         bool recorder_all_equal = true;
-        for (size_t recorder_value_index = 0;
+        for (wtf_size_t recorder_value_index = 0;
              recorder_value_index < recorder_reading.value_hashes.size();
              ++recorder_value_index) {
           if (recorder_reading.layout_dependent[recorder_value_index] ||
