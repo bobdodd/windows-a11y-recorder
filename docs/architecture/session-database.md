@@ -484,6 +484,23 @@ only once the database version is tested in full. It adds the
   Windows timings of the next recording decide whether this is enough;
   the fetches of new rows from the table remain, and only vacuuming, which
   marks pages all-visible, avoids them.
+- **Reference check after analyzing, on Windows.** In the first Windows
+  recording with this change (f416755, 83.8 s), the check took 3.75 s,
+  against 6.7 s and 8.6 s in the two recordings before it, which were not
+  the same capture. Finding the tables with rows took 0.32 s, analyzing 94
+  tables 1.72 s, of which `browser_layout_checkpoint_nodes` took the longest
+  at 1.36 s, and the 334 queries summed to 13.2 s over up to eight
+  connections. The planner's estimates now matched the rows: for
+  `browser_dispatch_path_scopes`, 214,583 rows per worker estimated against
+  259,805 read. Ten queries took 250 ms or more, the longest 1.42 s. Their
+  plans spent most of their time on rows fetched from the table because
+  they were new: the check of `browser_dispatch_events` against `events`
+  fetched 607,854 rows and spent 507 ms reading and 408 ms writing buffers
+  of its 1.32 s. The server was configured with 128 MB of shared buffers
+  for a 5.3 GB database, and its statistics since it started showed client
+  connections evicting 2,545,846 buffers and writing 944,081 themselves.
+  These figures are from one run and are not a substitute for the system
+  test.
 - **Parallel writing.** `PostgresEventWriter` writes up to
   `WriterConnections` batches at once, four by default; while the database
   is unavailable it retries one batch at a time. Each batch is written by
