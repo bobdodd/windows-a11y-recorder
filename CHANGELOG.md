@@ -330,6 +330,9 @@ from the product version.
   chose nested loops that compared every row with every row, or, with
   nested loops disabled as an earlier revision on this branch did, merge
   joins that read every event of the recording to check a few rows.
+- Start the database server with shared buffers of one eighth of the
+  machine's memory, from 128 MB to 4 GB, instead of the 128 MB `initdb`
+  chooses.
 - Note, in `database-writer-timings.json`, what the database server was doing
   when the reference check started, the planner statistics of the tables it
   reads, and the plan of each check query that took 250 ms or more, with the

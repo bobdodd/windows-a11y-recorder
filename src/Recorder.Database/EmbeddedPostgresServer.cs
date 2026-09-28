@@ -29,6 +29,13 @@ public sealed record EmbeddedPostgresOptions(
     /// time the server starts.
     /// </summary>
     public int? Port { get; init; }
+
+    /// <summary>
+    /// The server's shared buffers, in megabytes, set each time the server
+    /// starts. When null, <see cref="EmbeddedPostgresServer.DefaultSharedBuffersMegabytes"/>
+    /// chooses them from the machine's memory.
+    /// </summary>
+    public int? SharedBuffersMegabytes { get; init; }
 }
 
 /// <summary>
@@ -269,12 +276,25 @@ public sealed class EmbeddedPostgresServer : IAsyncDisposable
             : null;
     }
 
+    /// <summary>
+    /// Chooses the server's shared buffers from the machine's memory: one
+    /// eighth of it, at least the 128 MB PostgreSQL's own setup chooses and at
+    /// most 4 GB. PostgreSQL suggests a quarter of memory as a starting point
+    /// for a server that has a machine to itself; the recorder's server
+    /// shares its machine with the app, the browser under test, and the
+    /// other programs of a test session, so it takes half of that.
+    /// </summary>
+    public static int DefaultSharedBuffersMegabytes(long memoryBytes) =>
+        (int)Math.Clamp(memoryBytes / 8 / (1024 * 1024), 128, 4096);
+
     private static async Task<int> StartClusterAsync(
         EmbeddedPostgresOptions options,
         string cluster,
         CancellationToken cancellationToken)
     {
         var log = Path.Combine(options.DataDirectory, LogFileName);
+        var sharedBuffers = options.SharedBuffersMegabytes ??
+            DefaultSharedBuffersMegabytes(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes);
         string? lastFailure = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -292,7 +312,7 @@ public sealed class EmbeddedPostgresServer : IAsyncDisposable
                     "-w",
                     "-t", ((int)options.StartTimeout.TotalSeconds).ToString(
                         System.Globalization.CultureInfo.InvariantCulture),
-                    "-o", $"-p {port}"
+                    "-o", $"-p {port} -c shared_buffers={sharedBuffers}MB"
                 ],
                 cancellationToken).ConfigureAwait(false);
             if (exitCode == 0)

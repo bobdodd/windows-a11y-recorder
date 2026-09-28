@@ -373,6 +373,41 @@ public sealed class PostgresServerLifecycleTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// The shared buffers are set each time the server starts, so a cluster
+    /// created by an earlier release takes the current value when the app
+    /// next starts it.
+    /// </summary>
+    [Fact]
+    public async Task SetsTheSharedBuffersEachTimeTheServerStarts()
+    {
+        var options = new EmbeddedPostgresOptions(BinaryDirectory(), _dataDirectory, new PassThroughSecretProtector())
+        {
+            SharedBuffersMegabytes = 160
+        };
+        await using (var first = await EmbeddedPostgresServer.StartAsync(options, TestContext.Current.CancellationToken))
+        {
+            await using var show = first.DataSource.CreateCommand("SHOW shared_buffers");
+            Assert.Equal("160MB", (string?)await show.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        }
+
+        await using var second = await EmbeddedPostgresServer.StartAsync(
+            options with { SharedBuffersMegabytes = 192 },
+            TestContext.Current.CancellationToken);
+        await using var again = second.DataSource.CreateCommand("SHOW shared_buffers");
+        Assert.Equal("192MB", (string?)await again.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(512L * 1024 * 1024, 128)]
+    [InlineData(4L * 1024 * 1024 * 1024, 512)]
+    [InlineData(32L * 1024 * 1024 * 1024, 4096)]
+    [InlineData(128L * 1024 * 1024 * 1024, 4096)]
+    public void ChoosesAnEighthOfMemoryForSharedBuffersWithinBounds(long memoryBytes, int megabytes)
+    {
+        Assert.Equal(megabytes, EmbeddedPostgresServer.DefaultSharedBuffersMegabytes(memoryBytes));
+    }
+
     [Fact]
     public async Task RestartsWithTheSameClusterAndPassword()
     {

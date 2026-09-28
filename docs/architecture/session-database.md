@@ -100,6 +100,21 @@ proceedings.
 - A server that is already running from an earlier app instance that exited
   abnormally is detected and reused or restarted. PostgreSQL's own crash
   recovery handles an unclean shutdown.
+- Each start sets the server's shared buffers to one eighth of the
+  machine's memory, at least 128 MB, the value `initdb` chose, and at most
+  4 GB: 4 GB on a 32 GB machine. PostgreSQL suggests a quarter of memory as
+  a starting point for a server with a machine to itself, and states that
+  more than 40% is unlikely to help
+  ([Resource Consumption](https://www.postgresql.org/docs/current/runtime-config-resource.html));
+  the recorder's server shares its machine with the app and the browser
+  under test, so it takes half of that starting point. The setting is given
+  on the server's command line, not written to its configuration file, so
+  a cluster created by an earlier release takes it at its next start. A
+  server reused from an earlier app instance keeps the value it was started
+  with. With 128 MB, one Windows recording's check spent up to 408 ms of a
+  1.32 s query writing buffers, and client connections had written 944,081
+  evicted buffers themselves since the server started; see the implementation
+  status below.
 
 ### Schema outline
 
