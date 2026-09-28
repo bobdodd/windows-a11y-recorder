@@ -28,7 +28,15 @@ public sealed record RecordingFileChunk(
     long Length,
     long? MessageCount,
     long CompressedSize,
-    long UncompressedSize);
+    long UncompressedSize)
+{
+    /// <summary>
+    /// The byte offset, from the start of the file, of the message index of
+    /// each channel the chunk holds. Empty when the reader has not read them.
+    /// </summary>
+    public IReadOnlyDictionary<ushort, long> MessageIndexOffsets { get; init; } =
+        new Dictionary<ushort, long>();
+}
 
 public sealed record RecordingFileWriterOptions
 {
@@ -72,6 +80,7 @@ public sealed class RecordingFileWriter : IDisposable
     private readonly Dictionary<ushort, long> _channelCounts = [];
     private readonly List<RecordingFileChunk> _chunks = [];
     private readonly List<(long Offset, long Length, string Name)> _metadata = [];
+    private readonly List<(long Offset, long Length, ulong LogTime, long DataSize, string Name, string MediaType)> _attachments = [];
     private readonly List<OpenChunk> _closed = [];
     private readonly List<byte[]> _chunkIndexes = [];
     private readonly McapBuffer _scratch = new(64 * 1024);
@@ -127,6 +136,35 @@ public sealed class RecordingFileWriter : IDisposable
         _scratch.EndRecord(record);
         _metadata.Add((_position, _scratch.Length, name));
         WriteData(_scratch.WrittenSpan);
+    }
+
+    /// <summary>
+    /// Writes an attachment record, outside any chunk, at the current end of
+    /// the data section. Chunks already closed or due are written first, so
+    /// the attachment follows them.
+    /// </summary>
+    public void AddAttachment(string name, string mediaType, long logTime, ReadOnlySpan<byte> data)
+    {
+        ThrowIfFinished();
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(mediaType);
+        ArgumentOutOfRangeException.ThrowIfNegative(logTime);
+        var buffer = new McapBuffer(data.Length + 256);
+        var record = buffer.BeginRecord(Mcap.Attachment);
+        var fieldsStart = buffer.Length;
+        buffer.UInt64((ulong)logTime);
+        buffer.UInt64((ulong)logTime);
+        buffer.String(name);
+        buffer.String(mediaType);
+        buffer.UInt64((ulong)data.Length);
+        buffer.Bytes(data);
+
+        // The CRC-32 covers every field before it.
+        buffer.UInt32(Crc32.HashToUInt32(buffer.WrittenSpan[fieldsStart..]));
+        buffer.EndRecord(record);
+        var offset = _position;
+        WriteData(buffer.WrittenSpan);
+        _attachments.Add((offset, buffer.Length, (ulong)logTime, data.Length, name, mediaType));
     }
 
     /// <summary>
@@ -265,10 +303,10 @@ public sealed class RecordingFileWriter : IDisposable
     }
 
     /// <summary>
-    /// Writes the open chunks, the end of the data section, the summary, and
-    /// the footer, and flushes the file to disk.
+    /// Writes every chunk that holds a record, closed or open, so that what
+    /// is written next follows every message added so far.
     /// </summary>
-    public void Finish()
+    public void WriteAll()
     {
         ThrowIfFinished();
         foreach (var chunk in _open.Values.Where(chunk => chunk.Records.Length > 0).ToArray())
@@ -278,6 +316,15 @@ public sealed class RecordingFileWriter : IDisposable
         }
 
         WritePending();
+    }
+
+    /// <summary>
+    /// Writes the open chunks, the end of the data section, the summary, and
+    /// the footer, and flushes the file to disk.
+    /// </summary>
+    public void Finish()
+    {
+        WriteAll();
         _scratch.Clear();
         var dataEnd = _scratch.BeginRecord(Mcap.DataEnd);
         _scratch.UInt32(_dataCrc.GetCurrentHashAsUInt32());
@@ -313,7 +360,7 @@ public sealed class RecordingFileWriter : IDisposable
             summary.UInt64((ulong)_messageCount);
             summary.UInt16(0);
             summary.UInt32((uint)_channels.Count);
-            summary.UInt32(0);
+            summary.UInt32((uint)_attachments.Count);
             summary.UInt32((uint)_metadata.Count);
             summary.UInt32((uint)_chunks.Count);
             summary.UInt64(_startTime ?? 0);
@@ -334,6 +381,21 @@ public sealed class RecordingFileWriter : IDisposable
             foreach (var chunk in _chunkIndexes)
             {
                 summary.Bytes(chunk);
+            }
+        });
+        Group(Mcap.AttachmentIndex, () =>
+        {
+            foreach (var (offset, length, logTime, dataSize, name, mediaType) in _attachments)
+            {
+                var record = summary.BeginRecord(Mcap.AttachmentIndex);
+                summary.UInt64((ulong)offset);
+                summary.UInt64((ulong)length);
+                summary.UInt64(logTime);
+                summary.UInt64(logTime);
+                summary.UInt64((ulong)dataSize);
+                summary.String(name);
+                summary.String(mediaType);
+                summary.EndRecord(record);
             }
         });
         Group(Mcap.MetadataIndex, () =>

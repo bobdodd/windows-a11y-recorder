@@ -1,3 +1,4 @@
+using Recorder.Contracts;
 using System.Text.Json;
 
 namespace Recorder.Session;
@@ -145,6 +146,64 @@ public sealed class SessionPlaybackArchiveBuilder
                 monotonicNanoseconds,
                 CreateSummary(channel, eventType, payload)),
             payload);
+    }
+
+    /// <summary>
+    /// Adds what a playback index holds: its events, its counts of the other
+    /// browser events, and its latest time. Its occupancy, presented
+    /// checkpoints, and frame compositions are applied by the reader.
+    /// </summary>
+    public void AddIndex(PlaybackIndex index)
+    {
+        ArgumentNullException.ThrowIfNull(index);
+        ThrowIfBuilt();
+        IncludeTimestamp(index.LatestTime);
+        // In the order the events were stored, as a database reader adds them.
+        foreach (var item in index.Events.OrderBy(item => item.EventKey))
+        {
+            AddEvent(
+                item.EventKey,
+                item.EventId,
+                item.EvidenceClass,
+                item.Channel,
+                item.EventType,
+                item.MonotonicNanoseconds,
+                item.Payload);
+        }
+
+        // Each count stands for its events at the start of their segment:
+        // navigation correlation compares their times only with navigation
+        // starts.
+        foreach (var count in index.BrowserCounts)
+        {
+            _browserProjections.Add(new BrowserEventProjection(
+                new SessionTimelineEvent(
+                    -1,
+                    string.Empty,
+                    EvidenceClasses.Observed,
+                    "browser",
+                    count.EventType,
+                    count.SegmentStart,
+                    count.EventType),
+                count.BrowserInstanceId,
+                count.ProcessId,
+                null,
+                null,
+                count.DocumentId,
+                count.DocumentToken,
+                null,
+                null,
+                null,
+                null,
+                false,
+                false,
+                null,
+                null,
+                count.Truncated)
+            {
+                Weight = count.Count
+            });
+        }
     }
 
     private void AddCore(SessionTimelineEvent timelineEvent, JsonElement payload)

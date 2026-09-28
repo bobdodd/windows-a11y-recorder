@@ -14,7 +14,20 @@ namespace Recorder.Database;
 public sealed record DatabasePlaybackResult(
     SessionPlaybackArchive? Archive,
     RecordingStatus? Status,
-    string? Reason);
+    string? Reason)
+{
+    /// <summary>
+    /// The recording file the archive was read from, relative to the session
+    /// folder, or null when it was read from the evidence tables.
+    /// </summary>
+    public string? RecordingFile { get; init; }
+
+    /// <summary>
+    /// What was not read as written: the file read without its summary, or
+    /// its playback index derived from its chunks. Null when neither.
+    /// </summary>
+    public string? FileNote { get; init; }
+}
 
 /// <summary>
 /// Opens a recording for playback from the database. The timeline is not
@@ -68,17 +81,32 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
         }
 
         // A recording whose events are in a recording file has no rows in
-        // the evidence tables this reader reads.
+        // the evidence tables; it is read from the file.
         await using (var file = dataSource.CreateCommand(
             "SELECT path FROM recording_files WHERE recording_id = $1"))
         {
             file.Parameters.AddWithValue(recordingId);
             if (await file.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is string path)
             {
-                return new DatabasePlaybackResult(
-                    null,
-                    status,
-                    $"This recording's events are in its recording file, {path}, which the player does not read yet.");
+                var filePath = Path.GetFullPath(Path.Combine(root, path));
+                if (!File.Exists(filePath))
+                {
+                    return new DatabasePlaybackResult(
+                        null,
+                        status,
+                        $"This recording's events are in its recording file, {path}, which is not in the session folder.");
+                }
+
+                var opened = await RecordingFiles.RecordingFilePlayback.OpenAsync(root, filePath, cancellationToken)
+                    .ConfigureAwait(false);
+                var notes = new[] { opened.Incomplete, opened.IndexDerived }
+                    .Where(note => note is not null)
+                    .ToArray();
+                return new DatabasePlaybackResult(opened.Archive, status, null)
+                {
+                    RecordingFile = path,
+                    FileNote = notes.Length == 0 ? null : string.Join(" ", notes)
+                };
             }
         }
 

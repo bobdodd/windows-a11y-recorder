@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Recorder.Contracts;
 using Recorder.Database;
+using Recorder.Database.RecordingFiles;
 using Recorder.Session;
 using static Recorder.Tests.DatabaseTestSupport;
 
@@ -314,6 +315,480 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         Assert.Equal(BrowserNavigationFrameBasis.PresentationFeedback, navigation.FirstFrameBasis);
         Assert.Equal(3_600_000, navigation.FirstFrameNanoseconds);
         Assert.Equal(3_600_000, navigation.SeekNanoseconds);
+    }
+
+    [Fact]
+    public async Task LoadsTheSamePlaybackFromARecordingFileAsFromTheDatabase()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var sessionKey = "file-" + Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(_root, sessionKey);
+        var events = VariedEvents(sessionKey).Concat(RenderedEvents(sessionKey)).ToList();
+        await WriteSessionFilesAsync(directory, sessionKey, events, token);
+        WriteRenderedFrames(directory);
+        await WriteRecordingAsync(sessionKey, events, RecordingStatus.Completed, token);
+        var path = WriteRecordingFile(directory, events, chunkBytes: 1_024);
+
+        var inMemory = await LoadInMemoryAsync(directory, events, token);
+        var fromDatabase = Assert.IsType<SessionPlaybackArchive>(
+            (await new DatabasePlaybackReader(fixture.Server.DataSource).OpenAsync(directory, token)).Archive);
+        var opened = await RecordingFilePlayback.OpenAsync(directory, path, token);
+        Assert.Null(opened.Incomplete);
+        Assert.Null(opened.IndexDerived);
+        var fromFile = opened.Archive;
+        using var file = (IDisposable)fromFile.Timeline;
+
+        Assert.Equal(fromDatabase.DurationNanoseconds, fromFile.DurationNanoseconds);
+        Assert.Empty(fromFile.Events);
+        Assert.Equal(
+            (await WalkAsync(inMemory.Timeline, token)).Select(Shape),
+            (await WalkAsync(fromFile.Timeline, token)).Select(Shape));
+        Assert.Equal(inMemory.Timeline.Count, fromFile.Timeline.Count);
+        Assert.Equal(
+            inMemory.Timeline.ChannelCounts.OrderBy(pair => pair.Key, StringComparer.Ordinal),
+            fromFile.Timeline.ChannelCounts.OrderBy(pair => pair.Key, StringComparer.Ordinal));
+        Assert.Equal(fromDatabase.Frames, fromFile.Frames);
+        Assert.Equal(fromDatabase.AudioTracks, fromFile.AudioTracks);
+        Assert.Equal(fromDatabase.BrowserNavigations, fromFile.BrowserNavigations);
+        Assert.Contains(fromFile.BrowserNavigations,
+            item => item.FirstFrameBasis == BrowserNavigationFrameBasis.PresentationFeedback);
+        var channels = fromFile.Timeline.ChannelCounts.Keys.ToArray();
+        Assert.Equal(
+            inMemory.Timeline.Occupancy.OccupiedColumns(channels, 0, fromFile.DurationNanoseconds, 997),
+            fromFile.Timeline.Occupancy.OccupiedColumns(channels, 0, fromFile.DurationNanoseconds, 997));
+
+        // Every complete record reads back as the event written, with its
+        // payload text unchanged.
+        var written = events.ToDictionary(item => item.EventId);
+        foreach (var item in await WalkAsync(fromFile.Timeline, token))
+        {
+            var expected = written[item.EventId];
+            using var record = JsonDocument.Parse(fromFile.ReadEventJson(item));
+            Assert.Equal(expected.Payload.GetRawText(), record.RootElement.GetProperty("payload").GetRawText());
+            Assert.Equal(
+                Canonical(JsonSerializer.Serialize(expected, JsonOptions)),
+                Canonical(record.RootElement.GetRawText()));
+        }
+    }
+
+    [Fact]
+    public async Task AnswersTimelineLookupsFromARecordingFileAsTheInMemoryTimelineDoes()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var sessionKey = "file-lookups-" + Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(_root, sessionKey);
+
+        // Channels in each of the three streams, so that equal times fall in
+        // chunks of different streams as well as within one chunk.
+        string[] channels = ["test.pointer", "accessibility.uia.events", "browser.dispatch", "graphics.test", "test.notes"];
+        var collector = Collector("test.lookups", channels);
+        var random = new Random(4321);
+        var time = 1_000_000L;
+        var sequences = new ulong[channels.Length];
+        var events = new List<RecorderEvent>();
+        for (var index = 0; index < 4_000; index++)
+        {
+            // Many events share a time, and some arrive earlier in time than
+            // events before them, as batches from collectors do.
+            time += random.Next(0, 3) == 0 ? 0 : random.Next(1, 5_000);
+            var at = random.Next(20) == 0 ? time - random.Next(0, 200_000) : time;
+            var lane = random.Next(12) == 0 ? 4 : random.Next(4);
+            events.Add(Event(sessionKey, collector, sequences[lane]++, at, channels[lane],
+                lane == 1 ? "focus-changed" : "marker",
+                lane == 1
+                    ? Json(EvidenceSamples.Focus($"Control {index}"))
+                    : new { name = $"Control {index}", eventName = "click", note = $"Note {index}" }));
+        }
+
+        await WriteSessionFilesAsync(directory, sessionKey, events, token);
+        var path = WriteRecordingFile(directory, events, chunkBytes: 4_096);
+        var inMemory = (await LoadInMemoryAsync(directory, events, token)).Timeline;
+        var opened = await RecordingFilePlayback.OpenAsync(directory, path, token);
+        var fromFile = opened.Archive.Timeline;
+        using var file = (IDisposable)fromFile;
+        Assert.IsType<RecordingFileTimeline>(fromFile);
+
+        var memoryOrder = await WalkAsync(inMemory, token);
+        var fileOrder = await WalkAsync(fromFile, token);
+        Assert.Equal(events.Count, fileOrder.Count);
+        Assert.Equal(memoryOrder.Select(Shape), fileOrder.Select(Shape));
+
+        IReadOnlySet<string>[] subsets =
+        [
+            channels.ToHashSet(),
+            new HashSet<string> { channels[0] },
+            new HashSet<string> { channels[1], channels[2] },
+            new HashSet<string> { channels[3], channels[4] },
+            new HashSet<string> { channels[4] },
+            new HashSet<string>()
+        ];
+        var duration = opened.Archive.DurationNanoseconds;
+        for (var trial = 0; trial < 300; trial++)
+        {
+            var subset = subsets[trial % subsets.Length];
+
+            // Targets often land on the time of an event.
+            var target = random.Next(3) == 0
+                ? memoryOrder[random.Next(memoryOrder.Count)].MonotonicNanoseconds
+                : random.NextInt64(-10, duration + 10);
+            var start = random.NextInt64(0, duration);
+            var end = start + random.NextInt64(0, duration / 4);
+            var from = random.Next(memoryOrder.Count);
+            var forward = random.Next(2) == 0;
+
+            Assert.Equal(
+                Shape(await inMemory.AtOrBeforeAsync(target, subset, token)),
+                Shape(await fromFile.AtOrBeforeAsync(target, subset, token)));
+            Assert.Equal(
+                Shape(await inMemory.NearestAsync(target, start, end, subset, token)),
+                Shape(await fromFile.NearestAsync(target, start, end, subset, token)));
+            Assert.Equal(
+                Shape(await inMemory.AdjacentAsync(memoryOrder[from], forward, subset, token)),
+                Shape(await fromFile.AdjacentAsync(fileOrder[from], forward, subset, token)));
+            Assert.Equal(
+                Shape(await inMemory.EndAsync(forward, subset, token)),
+                Shape(await fromFile.EndAsync(forward, subset, token)));
+            Assert.Equal(
+                inMemory.Occupancy.OccupiedColumns(subset, start, end - start + 1, 500),
+                fromFile.Occupancy.OccupiedColumns(subset, start, end - start + 1, 500));
+        }
+    }
+
+    [Fact]
+    public async Task DerivesFromTheChunksTheIndexWrittenWithTheFile()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var sessionKey = "derived-" + Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(_root, sessionKey);
+
+        // Browser events of two documents arrive up to 5 s out of time order
+        // around several navigations: within the holdback.
+        var events = NavigatingEvents(sessionKey, lateNavigation: false);
+        await WriteSessionFilesAsync(directory, sessionKey, events, token);
+        var path = WriteRecordingFile(directory, events, chunkBytes: 2_048);
+
+        using var reader = RecordingFileReader.Open(path);
+        var stored = JsonSerializer.Deserialize<PlaybackIndex>(
+            reader.ReadAttachment(RecordingFilePlayback.IndexAttachment)!, JsonOptions)!;
+        Assert.True(stored.BrowserCountsExact);
+        var derived = RecordingFilePlayback.DeriveIndex(reader, token);
+        Assert.Equal(Normalized(derived), Normalized(stored));
+        Assert.NotEmpty(stored.BrowserCounts);
+
+        var inMemory = await LoadInMemoryAsync(directory, events, token);
+        var opened = await RecordingFilePlayback.OpenAsync(directory, path, token);
+        using var file = (IDisposable)opened.Archive.Timeline;
+        Assert.Null(opened.IndexDerived);
+        Assert.Equal(inMemory.BrowserNavigations, opened.Archive.BrowserNavigations);
+        Assert.Contains(opened.Archive.BrowserNavigations, item => item.CheckpointCount > 0 && item.DomNodeCount > 0);
+    }
+
+    [Fact]
+    public async Task DerivesTheIndexWhenANavigationStartArrivesTooLateToCount()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var sessionKey = "late-" + Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(_root, sessionKey);
+        var events = NavigatingEvents(sessionKey, lateNavigation: true);
+        await WriteSessionFilesAsync(directory, sessionKey, events, token);
+        var path = WriteRecordingFile(directory, events, chunkBytes: 2_048);
+
+        using (var reader = RecordingFileReader.Open(path))
+        {
+            var stored = JsonSerializer.Deserialize<PlaybackIndex>(
+                reader.ReadAttachment(RecordingFilePlayback.IndexAttachment)!, JsonOptions)!;
+            Assert.False(stored.BrowserCountsExact);
+        }
+
+        var inMemory = await LoadInMemoryAsync(directory, events, token);
+        var opened = await RecordingFilePlayback.OpenAsync(directory, path, token);
+        using var file = (IDisposable)opened.Archive.Timeline;
+        Assert.Equal("The recording file's browser counts are not exact.", opened.IndexDerived);
+        Assert.Equal(inMemory.BrowserNavigations, opened.Archive.BrowserNavigations);
+    }
+
+    [Fact]
+    public async Task OpensAFileCutShortInsideItsLastChunk()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var sessionKey = "cut-" + Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(_root, sessionKey);
+        var events = VariedEvents(sessionKey).Concat(NavigatingEvents(sessionKey, lateNavigation: false)).ToList();
+        await WriteSessionFilesAsync(directory, sessionKey, events, token);
+        var path = WriteRecordingFile(directory, events, chunkBytes: 2_048);
+
+        long cut;
+        using (var whole = RecordingFileReader.Open(path))
+        {
+            var last = whole.Chunks[^1];
+            cut = last.Offset + last.Length / 2;
+        }
+
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Write))
+        {
+            stream.SetLength(cut);
+        }
+
+        HashSet<string> kept;
+        using (var reader = RecordingFileReader.Open(path))
+        {
+            kept = reader.ReadAll()
+                .Where(message => message.Channel.Topic != RecordingFileBatchTarget.WriterTopic)
+                .Select(message => RecordingEventCodec.Decode(message.Data.Span).Event.EventId)
+                .ToHashSet();
+        }
+
+        Assert.InRange(kept.Count, 1, events.Count - 1);
+        var survivors = events.Where(item => kept.Contains(item.EventId)).ToList();
+        var inMemory = await LoadInMemoryAsync(directory, survivors, token);
+        var opened = await RecordingFilePlayback.OpenAsync(directory, path, token);
+        using var file = (IDisposable)opened.Archive.Timeline;
+        Assert.NotNull(opened.Incomplete);
+        Assert.Equal("The recording file holds no playback index.", opened.IndexDerived);
+        Assert.Equal(
+            (await WalkAsync(inMemory.Timeline, token)).Select(Shape),
+            (await WalkAsync(opened.Archive.Timeline, token)).Select(Shape));
+        Assert.Equal(inMemory.BrowserNavigations, opened.Archive.BrowserNavigations);
+        Assert.Equal(inMemory.Frames, opened.Archive.Frames);
+    }
+
+    // A diagnostic, run only when RECORDER_PLAYBACK_FILE names a recording
+    // file, with the session's manifest.json beside it: how long the file
+    // takes to open with its index derived from its
+    // chunks, then rewritten with a playback index, and how long lookups
+    // take. The results are written to RECORDER_PLAYBACK_REPORT, and the
+    // file with its index beside it.
+    [Fact]
+    public async Task MeasuresOpeningALargeRecordingFile()
+    {
+        if (Environment.GetEnvironmentVariable("RECORDER_PLAYBACK_FILE") is not { } source)
+        {
+            return;
+        }
+
+        var token = TestContext.Current.CancellationToken;
+        var report = new List<string>();
+        var directory = Path.Combine(_root, "large-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var derivedPath = Path.Combine(directory, "derived.mcap");
+        File.Copy(source, derivedPath);
+        File.Copy(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(source))!, "manifest.json"), Path.Combine(directory, "manifest.json"));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var derived = await RecordingFilePlayback.OpenAsync(directory, derivedPath, token);
+        report.Add($"derived open: {clock.Elapsed.TotalMilliseconds:F0} ms, {derived.Archive.Timeline.Count} events, {derived.IndexDerived}");
+        await MeasureLookupsAsync(derived.Archive, report, token);
+
+        // The same events written again, with the playback index.
+        var indexedPath = Path.Combine(directory, "indexed.mcap");
+        using (var reader = RecordingFileReader.Open(derivedPath))
+        {
+            var messages = reader.ReadAll()
+                .Where(message => message.Channel.Topic != RecordingFileBatchTarget.WriterTopic)
+                .Select(message => RecordingEventCodec.Decode(message.Data.Span))
+                .OrderBy(item => item.EventKey)
+                .ToList();
+            var timings = new WriterTimings();
+            using var target = new RecordingFileBatchTarget(indexedPath, reader.Metadata["recording"], timings: timings);
+            for (var start = 0; start < messages.Count; start += 1_000)
+            {
+                var batch = messages.Skip(start).Take(1_000)
+                    .Select(item => new BufferedEvent(item.EventKey, item.Event, item.Event.Payload.GetRawText()))
+                    .ToArray();
+                Assert.Empty(await target.WriteAsync(new EventBatch(batch, [], []), token));
+            }
+
+            clock.Restart();
+            target.Finish();
+            report.Add($"finish with index: {clock.Elapsed.TotalMilliseconds:F0} ms");
+            report.Add(timings.ToJson());
+        }
+
+        using (var reader = RecordingFileReader.Open(indexedPath))
+        {
+            report.Add($"index attachment: {reader.ReadAttachment(RecordingFilePlayback.IndexAttachment)!.Length} bytes");
+        }
+
+        clock.Restart();
+        var indexed = await RecordingFilePlayback.OpenAsync(directory, indexedPath, token);
+        report.Add($"indexed open: {clock.Elapsed.TotalMilliseconds:F0} ms, {indexed.Archive.Timeline.Count} events, {indexed.IndexDerived ?? "index read"}");
+        await MeasureLookupsAsync(indexed.Archive, report, token);
+        Assert.Equal(derived.Archive.BrowserNavigations, indexed.Archive.BrowserNavigations);
+        Assert.Equal(derived.Archive.Frames, indexed.Archive.Frames);
+        ((IDisposable)derived.Archive.Timeline).Dispose();
+        ((IDisposable)indexed.Archive.Timeline).Dispose();
+        var reportPath = Environment.GetEnvironmentVariable("RECORDER_PLAYBACK_REPORT") ??
+            Path.Combine(Path.GetTempPath(), "playback-report.txt");
+        await File.WriteAllLinesAsync(reportPath, report, token);
+
+        // The file with its index is kept beside the report, for checking
+        // with other readers.
+        File.Copy(indexedPath, Path.ChangeExtension(reportPath, ".mcap"), overwrite: true);
+    }
+
+    private static async Task MeasureLookupsAsync(SessionPlaybackArchive archive, List<string> report, CancellationToken token)
+    {
+        var timeline = archive.Timeline;
+        var channels = timeline.ChannelCounts.Keys.ToHashSet();
+        var random = new Random(5);
+        var times = new List<double>();
+        for (var trial = 0; trial < 200; trial++)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var target = random.NextInt64(0, archive.DurationNanoseconds);
+            var found = await timeline.NearestAsync(target, 0, archive.DurationNanoseconds, channels, token);
+            if (found is not null)
+            {
+                _ = await timeline.AdjacentAsync(found, forward: true, channels, token);
+                _ = archive.ReadEventJson(found);
+            }
+
+            times.Add(clock.Elapsed.TotalMilliseconds);
+        }
+
+        times.Sort();
+        report.Add($"  nearest + adjacent + record: median {times[times.Count / 2]:F2} ms, 95th {times[times.Count * 95 / 100]:F2} ms, max {times[^1]:F2} ms");
+    }
+
+    // Writes the events to a recording file in the session folder, with
+    // event keys from one, in order, as the in-memory reference numbers them.
+    private static string WriteRecordingFile(string directory, IReadOnlyList<RecorderEvent> events, int chunkBytes)
+    {
+        var path = Path.Combine(directory, SessionDatabase.RecordingFileName);
+        using var target = new RecordingFileBatchTarget(
+            path,
+            new Dictionary<string, string> { ["sessionKey"] = Path.GetFileName(directory), ["clockFrequency"] = "10000000" },
+            new RecordingFileWriterOptions { ChunkBytes = chunkBytes });
+        for (var start = 0; start < events.Count; start += 50)
+        {
+            var batch = events.Skip(start).Take(50)
+                .Select((record, index) => new BufferedEvent(start + index + 1, record, record.Payload.GetRawText()))
+                .ToArray();
+            Assert.Empty(target.WriteAsync(new EventBatch(batch, [], []), CancellationToken.None).GetAwaiter().GetResult());
+        }
+
+        target.Finish();
+        return path;
+    }
+
+    // The index with its lists in one order, for comparison.
+    private static string Normalized(PlaybackIndex index) =>
+        JsonSerializer.Serialize(index with
+        {
+            ChannelCounts = new SortedDictionary<string, long>(index.ChannelCounts.ToDictionary(), StringComparer.Ordinal),
+            Occupancy = index.Occupancy with
+            {
+                Channels = new SortedDictionary<string, string>(index.Occupancy.Channels.ToDictionary(), StringComparer.Ordinal)
+            },
+            Events = [.. index.Events.OrderBy(item => item.EventKey)],
+            BrowserCounts = [.. index.BrowserCounts.Select(item => JsonSerializer.Serialize(item)).Order(StringComparer.Ordinal)
+                .Select(item => JsonSerializer.Deserialize<BrowserEventCount>(item)!)],
+            PresentedCheckpoints = [.. index.PresentedCheckpoints.OrderBy(item => item.CheckpointNanoseconds).ThenBy(item => item.PresentedNanoseconds)],
+            FrameCompositions = [.. index.FrameCompositions.OrderBy(item => item.FrameNanoseconds)]
+        }, JsonOptions);
+
+    // Navigations of two documents with DOM checkpoints and nodes around
+    // them, delivered up to 5 s out of time order. With lateNavigation, the
+    // second navigation's start is delivered 59 s late, after browser events
+    // 58 s later than it, beyond the holdback.
+    private static List<RecorderEvent> NavigatingEvents(string sessionKey, bool lateNavigation)
+    {
+        var collector = Collector("test.navigating", "browser.navigation", "browser.dom", "graphics.desktop.frames");
+        var sequences = new Dictionary<string, ulong>();
+        var events = new List<(long Order, RecorderEvent Event)>();
+        const long second = 1_000_000_000;
+        void Add(long order, long time, string channel, string eventType, string payload)
+        {
+            sequences.TryGetValue(channel, out var sequence);
+            sequences[channel] = sequence + 1;
+            events.Add((order, Event(sessionKey, collector, sequence, time, channel, eventType, Json(payload))));
+        }
+
+        // The samples' navigations and DOM events are of different
+        // documents; here each navigation's events are of its document.
+        static string Document(string payload, int document) =>
+            payload.Replace("\"TOKEN-1\"", $"\"TOKEN-{document}\"")
+                .Replace("\"TOKEN-40\"", $"\"TOKEN-{document}\"")
+                .Replace("\"document-1\"", $"\"document-{document}\"")
+                .Replace("\"document-40\"", $"\"document-{document}\"")
+                .Replace("\"navigationId\":\"", $"\"navigationId\":\"{document}-");
+
+        var started = EvidenceSamples.Sample("browser.navigation", "navigation-started");
+        var completed = EvidenceSamples.Sample("browser.navigation", "navigation-completed");
+        var checkpoint = EvidenceSamples.Sample("browser.dom", "dom-checkpoint-completed");
+        var node = EvidenceSamples.Sample("browser.dom", "dom-checkpoint-node");
+        for (var document = 1; document <= 3; document++)
+        {
+            var at = document * 60 * second;
+            var order = lateNavigation && document == 2 ? at + 59 * second : at;
+            Add(order, at, "browser.navigation", "navigation-started", Document(started, document));
+            Add(at + second, at + second, "browser.navigation", "navigation-completed", Document(completed, document));
+            for (var index = 0; index < 20; index++)
+            {
+                var time = at + 2 * second + index * second;
+
+                // Delivered up to 5 s after later events.
+                var delivered = time + (index % 3 == 0 ? 5 * second : 0);
+                Add(delivered, time, "browser.dom", "dom-checkpoint-completed", Document(checkpoint, document));
+                Add(delivered, time + 1, "browser.dom", "dom-checkpoint-node", Document(node, document));
+            }
+
+            // Events of the document before it navigates, in the previous
+            // navigation's window.
+            Add(at - 2 * second, at - 2 * second, "browser.dom", "dom-checkpoint-node", Document(node, document));
+        }
+
+        return events.OrderBy(item => item.Order).Select(item => item.Event).ToList();
+    }
+
+    private static List<RecorderEvent> RenderedEvents(string sessionKey)
+    {
+        var collector = Collector(
+            "test.rendered",
+            "browser.navigation",
+            "browser.layout",
+            "browser.presentation",
+            "graphics.desktop.frames");
+        var sequences = new Dictionary<string, ulong>();
+        var events = new List<RecorderEvent>();
+        void Add(long time, string channel, string eventType, string payload, long? ticks = null)
+        {
+            sequences.TryGetValue(channel, out var sequence);
+            sequences[channel] = sequence + 1;
+            var item = Event(sessionKey, collector, sequence, time, channel, eventType, Json(payload));
+            events.Add(ticks is { } value
+                ? item with { NativeTimestamp = new NativeTimestamp("chromium-monotonic", value, "ticks") }
+                : item);
+        }
+
+        static string InDocument(string payload) =>
+            payload.Replace("\"documentToken\":\"TOKEN-1\"", "\"documentToken\":\"TOKEN-40\"")
+                .Replace("\"navigationId\":\"", "\"navigationId\":\"rendered-");
+
+        Add(1_000_000, "browser.navigation", "navigation-started",
+            InDocument(EvidenceSamples.Sample("browser.navigation", "navigation-started")));
+        Add(1_100_000, "browser.navigation", "navigation-completed",
+            InDocument(EvidenceSamples.Sample("browser.navigation", "navigation-completed")));
+        Add(1_500_000, "graphics.desktop.frames", "desktop-frame", Frame(10, 1_400_000));
+        Add(2_000_000, "browser.layout", "layout-checkpoint-completed",
+            InDocument(EvidenceSamples.Sample("browser.layout", "layout-checkpoint-completed")), 50_000);
+        Add(2_000_100, "browser.presentation", "presentation-requested",
+            InDocument(EvidenceSamples.Sample("browser.presentation", "presentation-requested")), 50_001);
+        Add(2_100_000, "browser.presentation", "presentation-feedback",
+            InDocument(EvidenceSamples.Sample("browser.presentation", "presentation-feedback"))
+                .Replace("\"presentedTicks\":\"98765432109\"", "\"presentedTicks\":\"1014000\""),
+            1_000_000);
+        Add(3_000_000, "graphics.desktop.frames", "desktop-frame", Frame(11, 2_900_000));
+        Add(3_600_000, "graphics.desktop.frames", "desktop-frame", Frame(12, 3_500_000));
+        Add(4_000_000, "graphics.desktop.frames", "desktop-frame", Frame(13, 3_900_000));
+        return events;
+    }
+
+    private static void WriteRenderedFrames(string directory)
+    {
+        for (var index = 10; index <= 13; index++)
+        {
+            File.WriteAllBytes(Path.Combine(directory, "frames", "desktop", $"{index:D10}.png"), [1, 2, 3]);
+        }
     }
 
     // A desktop frame on one monitor, composed at the time given.

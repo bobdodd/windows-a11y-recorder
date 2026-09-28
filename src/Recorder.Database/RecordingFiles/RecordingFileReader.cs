@@ -24,6 +24,8 @@ public sealed class RecordingFileReader : IDisposable
     private readonly List<RecordingFileChunk> _chunks = [];
     private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _metadata =
         new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (long Offset, long Length)> _attachments =
+        new(StringComparer.Ordinal);
 
     private RecordingFileReader(FileStream file) => _file = file;
 
@@ -68,6 +70,127 @@ public sealed class RecordingFileReader : IDisposable
         return Messages(ReadChunkRecords(chunk.Offset, chunk.Length).Records);
     }
 
+    /// <summary>The names of the file's attachments.</summary>
+    public IReadOnlyCollection<string> AttachmentNames => _attachments.Keys;
+
+    /// <summary>
+    /// Reads an attachment's data, or returns null when the file has no
+    /// attachment of that name.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The attachment does not pass its CRC-32 check.</exception>
+    public byte[]? ReadAttachment(string name)
+    {
+        if (!_attachments.TryGetValue(name, out var location))
+        {
+            return null;
+        }
+
+        var record = ReadAt(location.Offset, checked((int)location.Length));
+        if (record.Length != location.Length || record[0] != Mcap.Attachment)
+        {
+            throw new InvalidDataException($"The attachment index does not lead to attachment {name}.");
+        }
+
+        var content = record.AsSpan(Mcap.RecordPrefixLength);
+        var reader = new McapSpanReader(content);
+        reader.UInt64();
+        reader.UInt64();
+        reader.String();
+        reader.String();
+        var data = reader.Bytes(checked((int)reader.UInt64())).ToArray();
+        var fieldsLength = reader.Position;
+        var crc = reader.UInt32();
+        if (crc != 0 && Crc32.HashToUInt32(content[..fieldsLength]) != crc)
+        {
+            throw new InvalidDataException($"Attachment {name} does not match its CRC-32.");
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Reads a chunk's records, decompressed and checked against their
+    /// CRC-32. Safe to call from more than one thread at a time.
+    /// </summary>
+    public byte[] ReadChunkRecords(RecordingFileChunk chunk)
+    {
+        ArgumentNullException.ThrowIfNull(chunk);
+        return ReadChunkRecords(chunk.Offset, chunk.Length).Records;
+    }
+
+    /// <summary>
+    /// Reads the message index of one channel of a chunk: each message's log
+    /// time and the offset of its record in the chunk's records, in the
+    /// order the messages were written. Empty when the chunk holds no
+    /// message of the channel.
+    /// </summary>
+    public (long LogTime, int Offset)[] ReadMessageIndex(RecordingFileChunk chunk, ushort channelId)
+    {
+        ArgumentNullException.ThrowIfNull(chunk);
+        if (!chunk.MessageIndexOffsets.TryGetValue(channelId, out var offset))
+        {
+            return [];
+        }
+
+        var prefix = ReadAt(offset, Mcap.RecordPrefixLength);
+        if (prefix.Length != Mcap.RecordPrefixLength || prefix[0] != Mcap.MessageIndex)
+        {
+            throw new InvalidDataException("The chunk index does not lead to a message index.");
+        }
+
+        var length = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(prefix.AsSpan(1)));
+        var reader = new McapSpanReader(ReadAt(offset + Mcap.RecordPrefixLength, length));
+        if (reader.UInt16() != channelId)
+        {
+            throw new InvalidDataException("A message index is not for the channel the chunk index names.");
+        }
+
+        var entries = new (long, int)[checked((int)reader.UInt32() / 16)];
+        for (var index = 0; index < entries.Length; index++)
+        {
+            entries[index] = (checked((long)reader.UInt64()), checked((int)reader.UInt64()));
+        }
+
+        return entries;
+    }
+
+    /// <summary>Reads the message whose record begins at an offset of a chunk's records.</summary>
+    public RecordingFileMessage ReadMessageAt(byte[] records, int offset)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        var (opcode, _, _) = RecordAt(records, offset);
+        if (opcode != Mcap.Message)
+        {
+            throw new InvalidDataException("A message index does not lead to a message.");
+        }
+
+        return Messages(records, offset).First();
+    }
+
+    /// <summary>
+    /// Reads the messages of a chunk's records with the offset of each
+    /// message's record.
+    /// </summary>
+    public IEnumerable<(RecordingFileMessage Message, int Offset)> ReadMessagesWithOffsets(byte[] records)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        var position = 0;
+        while (position < records.Length)
+        {
+            var (opcode, _, next) = RecordAt(records, position);
+            if (opcode == Mcap.Message)
+            {
+                yield return (Messages(records, position).First(), position);
+            }
+            else if (opcode == Mcap.Channel)
+            {
+                Messages(records, position).FirstOrDefault();
+            }
+
+            position = next;
+        }
+    }
+
     /// <summary>Reads every message, chunk by chunk, in the order the chunks are in the file.</summary>
     public IEnumerable<RecordingFileMessage> ReadAll()
     {
@@ -82,16 +205,24 @@ public sealed class RecordingFileReader : IDisposable
 
     public void Dispose() => _file.Dispose();
 
-    private IEnumerable<RecordingFileMessage> Messages(byte[] records)
+    private IEnumerable<RecordingFileMessage> Messages(byte[] records, int position = 0)
     {
-        var position = 0;
         while (position < records.Length)
         {
             var (opcode, content, next) = RecordAt(records, position);
             position = next;
             if (opcode == Mcap.Channel)
             {
-                AddChannel(records.AsSpan(content.Start, content.Length));
+                // Every channel of a whole chunk is known once the file is
+                // opened, so a chunk read later only finds its channels.
+                var id = BinaryPrimitives.ReadUInt16LittleEndian(records.AsSpan(content.Start, 2));
+                lock (_channels)
+                {
+                    if (!_channels.ContainsKey(id))
+                    {
+                        AddChannel(records.AsSpan(content.Start, content.Length));
+                    }
+                }
             }
             else if (opcode == Mcap.Message)
             {
@@ -101,7 +232,13 @@ public sealed class RecordingFileReader : IDisposable
                 var logTime = reader.UInt64();
                 reader.UInt64();
                 var dataStart = content.Start + reader.Position;
-                if (!_channels.TryGetValue(channelId, out var channel))
+                RecordingFileChannel? channel;
+                lock (_channels)
+                {
+                    _channels.TryGetValue(channelId, out channel);
+                }
+
+                if (channel is null)
                 {
                     throw new InvalidDataException($"A message refers to channel {channelId}, which is not defined before it.");
                 }
@@ -160,6 +297,7 @@ public sealed class RecordingFileReader : IDisposable
             _channels.Clear();
             _chunks.Clear();
             _metadata.Clear();
+            _attachments.Clear();
             Scan();
         }
     }
@@ -200,7 +338,7 @@ public sealed class RecordingFileReader : IDisposable
         }
 
         var position = 0;
-        var pendingChunks = new List<(long Start, long End, long Offset, long Length, ushort[] Channels, long Compressed, long Uncompressed)>();
+        var pendingChunks = new List<(long Start, long End, long Offset, long Length, Dictionary<ushort, long> Channels, long Compressed, long Uncompressed)>();
         while (position < summary.Length)
         {
             var (opcode, content, next) = RecordAt(summary, position);
@@ -220,18 +358,30 @@ public sealed class RecordingFileReader : IDisposable
                     var chunkLength = reader.UInt64();
                     var mapLength = (int)reader.UInt32();
                     var map = new McapSpanReader(reader.Bytes(mapLength));
-                    var channels = new List<ushort>();
+                    var channels = new Dictionary<ushort, long>();
                     while (map.Remaining > 0)
                     {
-                        channels.Add(map.UInt16());
-                        map.UInt64();
+                        var channelId = map.UInt16();
+                        channels[channelId] = checked((long)map.UInt64());
                     }
 
                     reader.UInt64();
                     reader.String();
                     var compressed = reader.UInt64();
                     var uncompressed = reader.UInt64();
-                    pendingChunks.Add(((long)start, (long)end, (long)offset, (long)chunkLength, [.. channels], (long)compressed, (long)uncompressed));
+                    pendingChunks.Add(((long)start, (long)end, (long)offset, (long)chunkLength, channels, (long)compressed, (long)uncompressed));
+                    break;
+                }
+
+                case Mcap.AttachmentIndex:
+                {
+                    var reader = new McapSpanReader(span);
+                    var offset = checked((long)reader.UInt64());
+                    var recordLength = checked((long)reader.UInt64());
+                    reader.UInt64();
+                    reader.UInt64();
+                    reader.UInt64();
+                    _attachments[reader.String()] = (offset, recordLength);
                     break;
                 }
 
@@ -248,12 +398,15 @@ public sealed class RecordingFileReader : IDisposable
 
         foreach (var chunk in pendingChunks.OrderBy(chunk => chunk.Offset))
         {
-            var stream = chunk.Channels.Length > 0 && _channels.TryGetValue(chunk.Channels[0], out var channel)
+            var stream = chunk.Channels.Count > 0 && _channels.TryGetValue(chunk.Channels.Keys.Min(), out var channel)
                 ? channel.Stream
                 : string.Empty;
             _chunks.Add(new RecordingFileChunk(
                 _chunks.Count, stream, chunk.Start, chunk.End, chunk.Offset, chunk.Length,
-                null, chunk.Compressed, chunk.Uncompressed));
+                null, chunk.Compressed, chunk.Uncompressed)
+            {
+                MessageIndexOffsets = chunk.Channels
+            });
         }
 
         HasSummary = true;
@@ -314,7 +467,23 @@ public sealed class RecordingFileReader : IDisposable
 
                 _chunks.Add(new RecordingFileChunk(
                     _chunks.Count, stream ?? string.Empty, read.Start, read.End, position, recordLength,
-                    count, read.Compressed, read.Records.Length));
+                    count, read.Compressed, read.Records.Length)
+                {
+                    MessageIndexOffsets = new Dictionary<ushort, long>()
+                });
+            }
+            else if (opcode == Mcap.MessageIndex && _chunks.Count > 0 && contentLength >= 2)
+            {
+                // Message indexes follow the chunk they index.
+                var channelId = BinaryPrimitives.ReadUInt16LittleEndian(ReadAt(position + Mcap.RecordPrefixLength, 2));
+                ((Dictionary<ushort, long>)_chunks[^1].MessageIndexOffsets)[channelId] = position;
+            }
+            else if (opcode == Mcap.Attachment)
+            {
+                var head = new McapSpanReader(ReadAt(position + Mcap.RecordPrefixLength, (int)Math.Min(contentLength, 64 * 1024)));
+                head.UInt64();
+                head.UInt64();
+                _attachments[head.String()] = (position, recordLength);
             }
             else if (opcode == Mcap.Metadata)
             {
@@ -409,14 +578,15 @@ public sealed class RecordingFileReader : IDisposable
             metadata);
     }
 
+    // Positional reads do not move a shared file position, so chunks can be
+    // read from more than one thread at a time.
     private byte[] ReadAt(long offset, int count)
     {
         var bytes = new byte[count];
-        _file.Position = offset;
         var read = 0;
         while (read < count)
         {
-            var n = _file.Read(bytes, read, count - read);
+            var n = RandomAccess.Read(_file.SafeFileHandle, bytes.AsSpan(read), offset + read);
             if (n == 0)
             {
                 return bytes[..read];

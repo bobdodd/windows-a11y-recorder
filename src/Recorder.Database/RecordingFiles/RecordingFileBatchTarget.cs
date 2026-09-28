@@ -1,7 +1,9 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Globalization;
 using Recorder.Contracts;
+using Recorder.Session;
 
 namespace Recorder.Database.RecordingFiles;
 
@@ -39,6 +41,7 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
     public const string WriterTopic = "recorder.writer";
 
     private readonly RecordingFileWriter _file;
+    private readonly PlaybackIndexBuilder _index;
     private readonly WriterTimings? _timings;
     private readonly Dictionary<(string Channel, string Instance, string Type, string Version, string Method), ushort> _channels = [];
     private readonly ArrayBufferWriter<byte> _encoded = new(64 * 1024);
@@ -54,6 +57,12 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
         RecordingFileWriterOptions? options = null,
         WriterTimings? timings = null)
     {
+        ArgumentNullException.ThrowIfNull(recording);
+        var frequency = recording.TryGetValue("clockFrequency", out var text) &&
+            long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && value > 0
+                ? value
+                : throw new ArgumentException("The recording's metadata must state its clock frequency.", nameof(recording));
+        _index = new PlaybackIndexBuilder(frequency, PlaybackIndexBuilder.RecordingHoldback);
         _file = new RecordingFileWriter(path, options);
         _timings = timings;
         _file.AddMetadata("recording", recording);
@@ -152,6 +161,7 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
                     unchecked((uint)record.Sequence),
                     record.MonotonicNanoseconds,
                     _encoded.WrittenSpan);
+                _index.Add(buffered.EventKey, record);
             }
 
             _timings?.Since("file.add", adding, batch.Events.Count);
@@ -177,12 +187,25 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
         }
     }
 
-    /// <summary>Writes the rest of the file, its summary, and its footer.</summary>
+    /// <summary>
+    /// Writes the rest of the chunks, the playback index as an attachment
+    /// after them, the summary, and the footer.
+    /// </summary>
     public void Finish()
     {
         lock (_gate)
         {
             var finishing = Stopwatch.GetTimestamp();
+            _file.WriteAll();
+            var indexing = Stopwatch.GetTimestamp();
+            var index = _index.Build();
+            var bytes = RecordingFilePlayback.SerializeIndex(index);
+            _file.AddAttachment(
+                RecordingFilePlayback.IndexAttachment,
+                RecordingFilePlayback.IndexMediaType,
+                Math.Max(0, index.LatestTime),
+                bytes);
+            _timings?.Since("complete.playback-index", indexing, bytes.Length);
             _file.Finish();
             _timings?.Since("complete.finish-file", finishing);
         }

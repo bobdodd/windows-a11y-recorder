@@ -17,6 +17,8 @@ internal static class Mcap
     public const byte Chunk = 0x06;
     public const byte MessageIndex = 0x07;
     public const byte ChunkIndex = 0x08;
+    public const byte Attachment = 0x09;
+    public const byte AttachmentIndex = 0x0A;
     public const byte Statistics = 0x0B;
     public const byte Metadata = 0x0C;
     public const byte MetadataIndex = 0x0D;

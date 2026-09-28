@@ -106,7 +106,15 @@ internal sealed record BrowserEventProjection(
     bool SameDocument,
     bool? Committed,
     string? Outcome,
-    bool Truncated);
+    bool Truncated)
+{
+    /// <summary>
+    /// How many events this projection stands for: one, or the number of
+    /// events with the same identity, type, and truncation that a playback
+    /// index counted together.
+    /// </summary>
+    public int Weight { get; init; } = 1;
+}
 
 internal static class BrowserNavigationCorrelator
 {
@@ -219,28 +227,28 @@ internal static class BrowserNavigationCorrelator
                 token,
                 identity.RendererProcessId,
                 basis,
-                related.Count(item =>
-                    item.Event.EventType == "dom-checkpoint-completed"),
-                related.Count(item =>
-                    item.Event.EventType == "dom-checkpoint-node"),
-                related.Count(item =>
+                related.Where(item =>
+                    item.Event.EventType == "dom-checkpoint-completed").Sum(item => item.Weight),
+                related.Where(item =>
+                    item.Event.EventType == "dom-checkpoint-node").Sum(item => item.Weight),
+                related.Where(item =>
                     item.Event.EventType == "dom-checkpoint-completed" &&
-                    item.Truncated),
-                related.Count(item =>
+                    item.Truncated).Sum(item => item.Weight),
+                related.Where(item =>
                     item.Event.EventType ==
-                    "accessibility-checkpoint-completed"),
-                related.Count(item =>
+                    "accessibility-checkpoint-completed").Sum(item => item.Weight),
+                related.Where(item =>
                     item.Event.EventType ==
-                    "accessibility-checkpoint-node"),
-                related.Count(item =>
+                    "accessibility-checkpoint-node").Sum(item => item.Weight),
+                related.Where(item =>
                     item.Event.EventType ==
                     "accessibility-checkpoint-completed" &&
-                    item.Truncated),
-                related.Count(item =>
-                    item.Event.EventType == "dispatch-started"),
-                related.Count(item =>
-                    item.Event.EventType == "listener-invoked"),
-                related.Length)
+                    item.Truncated).Sum(item => item.Weight),
+                related.Where(item =>
+                    item.Event.EventType == "dispatch-started").Sum(item => item.Weight),
+                related.Where(item =>
+                    item.Event.EventType == "listener-invoked").Sum(item => item.Weight),
+                related.Sum(item => item.Weight))
             {
                 BrowserInstanceId = identity.BrowserInstanceId,
                 FrameType = identity.FrameType ?? pair.Started.FrameType

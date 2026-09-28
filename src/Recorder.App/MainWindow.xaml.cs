@@ -652,11 +652,17 @@ public partial class MainWindow : Window
             var opened = await OpenFromDatabaseAsync(sessionDirectory);
             var archive = opened.Archive ?? throw new InvalidDataException(
                 opened.Reason ?? "The database could not open this recording.");
+            var place = opened.RecordingFile is null ? "from the database" : "from its recording file";
             var source = opened.Status is null or RecordingStatus.Completed
-                ? "from the database"
-                : $"from the database. Stored as {opened.Status.Value.ToString().ToLowerInvariant()}";
+                ? place
+                : $"{place}. Stored as {opened.Status.Value.ToString().ToLowerInvariant()}";
+            if (opened.FileNote is { } note)
+            {
+                source += $". {note.TrimEnd('.')}";
+            }
 
             CloseAudio();
+            CloseRecordingFile();
             _playbackArchive = archive;
             _playbackPositionNanoseconds = 0;
             _displayedFrameIndex = -1;
@@ -702,6 +708,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
+            CloseRecordingFile();
             _playbackArchive = null;
             ApplyBrowserNavigationFilter();
             BrowserCorrelationTextBox.Text =
@@ -724,6 +731,13 @@ public partial class MainWindow : Window
             OpenRecordingButton.IsEnabled =
                 _coordinator?.State != RecordingSessionState.Recording;
         }
+    }
+
+    // A recording read from its recording file keeps the file open until
+    // another recording is opened.
+    private void CloseRecordingFile()
+    {
+        (_playbackArchive?.Timeline as IDisposable)?.Dispose();
     }
 
     private async Task<DatabasePlaybackResult> OpenFromDatabaseAsync(

@@ -57,8 +57,10 @@ public interface ISessionTimeline
 /// <remarks>
 /// A column is marked from the bucket that holds an event, not from the
 /// event's own time, so an event can be drawn up to one bucket earlier than
-/// its time. At the player's greatest zoom, 32 times, a bucket is no wider
-/// than one pixel column on a timeline up to 4,096 pixels wide.
+/// its time. The width is a power of two, so more than half of the buckets
+/// cover the recording, and at the player's greatest zoom, 32 times, a
+/// bucket is no wider than one pixel column on a timeline up to 4,096 pixels
+/// wide.
 /// </remarks>
 public sealed class TimelineOccupancy
 {
@@ -83,9 +85,23 @@ public sealed class TimelineOccupancy
 
     public long BucketWidth { get; }
 
-    /// <summary>The bucket width for a recording of this duration.</summary>
-    public static long WidthFor(long durationNanoseconds) =>
-        Math.Max(1, (Math.Max(0, durationNanoseconds) + BucketCount) / BucketCount);
+    /// <summary>
+    /// The bucket width for a recording of this duration: the smallest power
+    /// of two, in nanoseconds, for which <see cref="BucketCount"/> buckets
+    /// cover every time from zero to the duration. A grid can be kept at a
+    /// finer power of two while the duration grows and merged into this one,
+    /// as <see cref="OccupancyBitmap"/> does.
+    /// </summary>
+    public static long WidthFor(long durationNanoseconds)
+    {
+        var width = 1L;
+        while (Math.Max(0, durationNanoseconds) / width >= BucketCount)
+        {
+            width *= 2;
+        }
+
+        return width;
+    }
 
     /// <summary>
     /// Builds the grid from events in any order.

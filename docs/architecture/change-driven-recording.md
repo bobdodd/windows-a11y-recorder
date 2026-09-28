@@ -2,10 +2,11 @@
 
 ## Status
 
-Slice 1 (the recording file) is implemented on branch
-`recording-object-store` and awaits its test on the target Windows machine;
-see "Slice 1 status". The browser capture below is proposed and not
-implemented. The Blink locations below
+Slices 1 (the recording file) and 2 (playback from the file) are
+implemented on branch `recording-object-store`. Slice 1 was tested in one
+recording on the target Windows machine; slice 2 awaits its test there. See
+"Slice 1 status" and "Slice 2 status". The browser capture below is
+proposed and not implemented. The Blink locations below
 were read from the Chromium checkout on the target Windows machine, version
 156.0.8065.0 (`chrome/VERSION`), and must be read again if the checkout
 changes.
@@ -288,6 +289,147 @@ not note. The form is off in normal recording.
    offsets.
 5. The full walk kept only for a document's first update and after a loss.
 
+## Slice 2 design: playback from the file
+
+Opening a recording reads what the player shows when it opens, not every
+event: the file's summary, and one attachment the recorder writes when it
+finishes the file. A timeline lookup reads the chunks that can hold its
+answer.
+
+### What is read when a recording opens
+
+- The summary: channels and the chunk index. For each chunk, the chunk
+  index gives its time range and the position of its message index for
+  each channel it holds.
+- The attachment `playback-index` (media type `application/json`), written
+  after the last chunk and listed in the summary's attachment index. It
+  holds what the recorder derives from the events as it writes them:
+  - each channel's event count;
+  - which time buckets of each channel hold an event, as a bitmap;
+  - each desktop frame event: its time, image path, size, and the earliest
+    composition time of its monitors;
+  - each audio stream start: its time, stream, and path;
+  - the browser navigation events, with the properties navigation
+    correlation reads;
+  - the counts navigation correlation needs from every other browser event,
+    described below;
+  - the presented layout checkpoints, computed with the joins and
+    arithmetic of the database reader's query.
+
+The attachment is derived data. When it is missing, because the recording
+was not finished, or when its counts are not exact, the reader derives the
+same data by reading every chunk, which takes time proportional to the
+recording. It first reads the browser chunks for the navigation starts,
+then every chunk, so each browser event is counted in its segment as it is
+read and no event is held. The same code derives the index in both cases,
+and the tests compare the two.
+
+The writer's rejection and omission records are not timeline events, as in
+the database.
+
+### Occupancy buckets
+
+The occupancy grid's bucket width becomes the smallest power of two, in
+nanoseconds, for which 262,144 buckets cover the recording. The recorder
+does not know the duration until it stops, so it keeps each channel's
+bitmap at the smallest power-of-two width that covers the latest time seen,
+and merges pairs of buckets when time passes the end. A grid kept this way
+equals the grid built at the end. A recording uses more than 131,072
+buckets, so at the player's greatest zoom, 32 times on a timeline up to
+4,096 pixels wide, a bucket is still no wider than one pixel column. The
+same width is used for recordings read from the database.
+
+### Navigation counts
+
+Navigation correlation counts, for each navigation, the DOM and
+accessibility checkpoints and nodes, dispatches, listener invocations, and
+related records of the navigation's document, from its start until the next
+navigation of the same frame or page. Every such window starts at the start
+of a navigation and ends at the start of another, or after the last event.
+The recorder therefore keeps, for the other browser events, only a count per
+segment between navigation starts, for each browser instance, process,
+document, document token, event type counted, and truncation. Correlation
+reads each count as that many events at the segment's start.
+
+Events arrive nearly in time order, but not exactly: collectors deliver in
+batches. The recorder holds each browser event's time for 30 s of recording
+time before counting it into its segment. A navigation start that arrives
+inside a segment after an event of that segment later than it was counted
+makes the counts inexact. The attachment says so, and the reader derives
+the counts by reading the chunks instead.
+
+### Timeline lookups
+
+A lookup for the event at or before a time, the next or previous event,
+the first or last event, or the nearest event, for a set of channels:
+
+1. Takes the chunks that hold one of the channels, from the chunk index.
+2. Visits them from the one whose time range is closest to the answer,
+   reads each visited chunk's message index for those channels, and stops
+   when no remaining chunk can hold a better answer.
+3. Decompresses the chunk that holds the answer and reads that message.
+
+Events with the same time are ordered by event key, as in the database. The
+chunks and message indexes most recently read are kept, so stepping through
+nearby events reads the file once. At the rate of the recording measured
+below, an hour holds about 24,000 chunks, and a lookup walks that list in
+memory.
+
+An event's complete record is the message's `event` object as written, with
+its payload text unchanged.
+
+### Tests required
+
+- Unit: the index derived while writing equals the index derived by reading
+  the file, for events delivered out of time order, and a navigation start
+  delivered late enough to make the counts inexact is detected; the
+  occupancy bitmap kept at a growing width equals the one built at the end.
+- Integration: playback of a recording file matches playback of the same
+  events built in memory: every timeline lookup, channel counts, occupancy,
+  frames, audio tracks, navigations with their first frames, and every
+  complete record. The same for a file cut short inside its last chunk.
+- System, on the target Windows machine: time to open, and to reach an
+  arbitrary moment, for the recording measured below and for a recording of
+  at least an hour.
+
+## Slice 2 status
+
+Implemented. Tested in the sandbox; not yet tested on the target Windows
+machine.
+
+- The recorder writes the `playback-index` attachment when it finishes the
+  file. The player opens a recording file from its summary and the
+  attachment, and says in its status when the file was read without its
+  summary or its index was derived from the chunks.
+- A recording made at revision ae28866 or d063eaa has no attachment, so its
+  index is derived when it opens.
+- The recording file is kept open while its recording is shown, and closed
+  when another recording is opened.
+
+Sandbox evidence, 2026-09-28:
+
+- Tests: playback from a recording file equals playback of the same events
+  from the database for frames, audio tracks, and navigations with their
+  first frames, and equals playback built in memory for the timeline order,
+  channel counts, occupancy, and every complete record; 300 random timeline
+  lookups over 4,000 events in three streams, with equal times and events
+  out of time order, give the answers of the in-memory timeline; the index
+  written with the file equals the index derived from its chunks; a
+  navigation start delivered 59 s late makes the counts inexact and the
+  derived counts equal those built in memory; a file cut short inside its
+  last chunk opens with its surviving events; the occupancy bitmap equals
+  the grid built from the events at every duration it grows to.
+- The Windows recording described under "Windows evidence" below, copied to
+  the sandbox, read in a Debug build on the sandbox's two processors: opening
+  with its index derived took 8.6 s. The same events written again with the
+  index: finishing the file took 97 ms, of which building and writing the
+  1.2 MB attachment took 58 ms, and opening took 17 ms. 200 lookups of the
+  nearest event, the next event, and its complete record took a median of
+  7.9 ms and at most 25.7 ms. `mcap doctor` of MCAP CLI v0.3.0 passed the
+  file with its attachment, with the time-order warnings described above,
+  and `mcap list attachments` listed the attachment. These are figures from
+  one run in the sandbox, not a measurement on the target machine.
+
 ## Slice 1 status
 
 Implemented. Tested in the sandbox, and in one recording on the target
@@ -304,8 +446,8 @@ Windows machine (see "Windows evidence" below).
 - A database outage during recording no longer loses or delays events: the
   file does not depend on the database. What the database could not store
   is reported with the recording's database status.
-- The player cannot open a recording made this way until slice 2, and says
-  so.
+- The player could not open a recording made this way until slice 2, and
+  said so.
 
 Sandbox evidence, 2026-09-28:
 

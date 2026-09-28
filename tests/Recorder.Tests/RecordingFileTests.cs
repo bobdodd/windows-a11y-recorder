@@ -31,7 +31,7 @@ public sealed class RecordingFileTests : IDisposable
     }
 
     private static readonly IReadOnlyDictionary<string, string> Recording =
-        new Dictionary<string, string> { ["sessionKey"] = SessionId };
+        new Dictionary<string, string> { ["sessionKey"] = SessionId, ["clockFrequency"] = "10000000" };
 
     [Fact]
     public async Task ReadsBackEveryEventWithItsPayloadTextUnchanged()

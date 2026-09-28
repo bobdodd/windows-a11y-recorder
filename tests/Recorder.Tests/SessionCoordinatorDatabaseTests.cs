@@ -261,12 +261,25 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
             root.GetProperty("artifacts").EnumerateArray(),
             item => item.GetProperty("path").GetString() == "events.ndjson");
 
-        // Playback from the recording file is not implemented yet; the
-        // player is told why the recording does not open.
+        // The player opens the recording from its file, with its playback
+        // index read from the file.
         var opened = await database.OpenRecordingAsync(stopped.SessionDirectory!, token);
-        Assert.Null(opened.Archive);
+        Assert.Null(opened.Reason);
         Assert.Equal(RecordingStatus.Completed, opened.Status);
-        Assert.Contains("recording file", opened.Reason);
+        Assert.Equal(SessionDatabase.RecordingFileName, opened.RecordingFile);
+        Assert.Null(opened.FileNote);
+        var archive = Assert.IsType<Recorder.Session.SessionPlaybackArchive>(opened.Archive);
+        using (archive.Timeline as IDisposable)
+        {
+            Assert.Equal(stopped.AcceptedEvents, archive.Timeline.Count);
+            var marker = await archive.Timeline.EndAsync(
+                last: false,
+                new HashSet<string> { "session.annotations" },
+                token);
+            Assert.Equal("session-marker: Reached search results", marker?.Summary);
+            using var record = System.Text.Json.JsonDocument.Parse(archive.ReadEventJson(marker!));
+            Assert.Equal(marker!.EventId, record.RootElement.GetProperty("eventId").GetString());
+        }
     }
 
     [Fact]
