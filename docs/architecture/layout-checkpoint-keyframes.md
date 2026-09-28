@@ -21,6 +21,38 @@ The recorder must stay responsive with many long recordings. Any design that
 reduces the volume must keep every moment of a recording quick to open, so a
 one-hour recording cannot depend on a single baseline at its start.
 
+## Use: recreating the page at any frame
+
+The layout evidence will be used to recreate the web page as it was at any
+frame of the recording. That use sets requirements the design must meet,
+beyond reducing volume:
+
+1. Exact state. The layout state rebuilt for any checkpoint is exactly the
+   state a full checkpoint would have recorded: the same nodes, in the same
+   order, with the same values. Order matters, since it is the composed-tree
+   order a recreation lays out and paints in.
+2. Any moment, quickly. The state at a checkpoint in the middle or at the end
+   of a long recording is rebuilt with bounded work, and stepping forward
+   frame by frame costs only the changes between frames.
+3. Addressed by frame. Every checkpoint, keyframe or change, keeps its start,
+   completion, interaction snapshot, and presentation request records, so the
+   rendered-frame correlation still leads from a captured desktop frame to the
+   checkpoint whose state it could show. Only node rows are left out.
+4. Every document. A page is a main document and the documents of its frames,
+   each with its own checkpoints. A recreation at a frame needs, for each
+   document shown, its latest checkpoint at or before that frame, so each
+   document's chain must be rebuildable on its own.
+5. Honest gaps. A checkpoint whose chain is broken by a loss is reported as
+   not rebuildable, and the next keyframe restores it. No state is guessed.
+6. One reading of state. Consumers such as the player, a recreation tool, and
+   analysis read rebuilt checkpoints through one interface in the app, and do
+   not handle chains themselves.
+
+The layout evidence is only part of what a recreation needs. It joins DOM
+structure, attributes, and text from the DOM evidence by node identity, and it
+does not carry resources such as images, fonts, or canvas content. Whether the
+recorded evidence is enough to recreate a page is not assessed here.
+
 ## Measurement
 
 The recording is the Windows run of revision edf2d45 (84.7 s). The query ran
@@ -73,8 +105,12 @@ records a keyframe for a document:
 - for the first checkpoint after a navigation or a change of document;
 - when the interval since the document's last keyframe has passed;
 - after any checkpoint that was truncated at the node limit; and
-- after any loss that breaks the chain: a record the bridge could not queue
-  or write, or a checkpoint the recorder did not receive in full.
+- after any loss that breaks the chain that the renderer knows of: a record
+  the bridge could not queue or write.
+
+A loss after the renderer, such as a record the app could not store, is known
+only to the app, which marks the document's chain broken until its next
+keyframe.
 
 The interval is a setting in time, not in checkpoints, so the work to open any
 moment is bounded however often the page renders. A starting value of 5 s is
@@ -86,10 +122,21 @@ Every other checkpoint is a change checkpoint. It is compared, node by node,
 with the previous checkpoint of the same document, and records:
 
 - every node that is new, as a full node row;
-- every node in which any recorded field differs, as a full node row, not only
-  the fields that differ; and
+- every node in which any recorded field other than its position differs, as
+  a full node row, not only the fields that differ;
 - the identifier and pseudo-element type of every node that is no longer
-  present.
+  present; and
+- when the nodes' order differs from the previous checkpoint's, or nodes were
+  added or removed, the order of every node, as one record listing each
+  node's identifier and pseudo-element type in composed-tree order.
+
+A node's position, `nodeIndex`, is not compared node by node. One node added
+near the start of a document moves every later node's position, and comparing
+positions would record all of those nodes again. The order record states the
+positions instead: a rebuilt node's `nodeIndex` is its place in the latest
+order record, or in the keyframe's own order when no order record has
+followed it. The order record lists about 546 keys for the measured
+checkpoints, against 546 full rows in a keyframe.
 
 A change checkpoint's start record names its keyframe and the checkpoint it
 was compared with. Its completion record states the number of nodes the
@@ -114,18 +161,41 @@ instead would reduce only what is stored, and would still carry every node
 through the pipe.
 
 The comparison does not reduce the traversal: to know that a node is
-unchanged, the renderer must still read its geometry and style. The cost of
-the traversal is a separate slice.
+unchanged, the renderer must still read its geometry and style. The style
+reuse, below and in the layout and computed-style evidence model, already
+reduced the style reading.
 
 ### Rebuilding a checkpoint
 
-To open a checkpoint, the player reads the document's latest keyframe at or
+To open a checkpoint, the app reads the document's latest keyframe at or
 before it and applies each change checkpoint after that keyframe up to the one
 requested: new and changed rows replace rows with the same identifier and
-pseudo-element type, and removed identifiers delete rows. The work is bounded
-by the keyframe interval, not by the recording's length. An index on the
-document and checkpoint order lets the player find the keyframe with one
-lookup.
+pseudo-element type, removed identifiers delete rows, and the latest order
+record gives every row its position. The work is bounded by the keyframe
+interval, not by the recording's length. An index on the document and
+checkpoint order finds the keyframe with one lookup.
+
+The rebuild is one operation of the app's database layer, which returns the
+full rows of a checkpoint, the same columns a full checkpoint's rows hold, so
+the player, a recreation, and analysis read the same state. Stepping forward
+applies the next change checkpoint to the state already rebuilt. A checkpoint
+after a broken chain returns no rows and says why.
+
+### Why a change is a whole row
+
+A changed node is recorded with all of its values, not only those that
+changed. A rebuilt row is then one row from one checkpoint, so its provenance
+is a single record, and a reader never merges values from different times.
+The measured change rows are 10% of the nodes, so recording whole rows costs
+little over recording only the changed values.
+
+### Comparing in the renderer with the style reuse
+
+The renderer already keeps each element's previous style reading for the
+style reuse. The comparison uses the same readings: an element that kept its
+style object has equal values that do not depend on layout by construction, so
+only its values that depend on layout, its rectangle, and its other fields are
+compared. An element with a new style object is compared value by value.
 
 ## Expected volume
 
@@ -154,13 +224,37 @@ design.
   cost, against the current full checkpoints.
 - The keyframe interval, set from that recording.
 
+## Implementation slices
+
+Each slice is tested on Windows before the next.
+
+1. Browser: record keyframes and change checkpoints, the removal and order
+   records, and a protocol version for them, with a setting that records
+   every checkpoint in full as now. Integration-level test that rebuilding
+   every checkpoint from the records gives exactly the rows the full
+   checkpoints give for the same pages.
+2. App: store keyframe and change checkpoints, removals, and order records
+   in normalized tables, and rebuild any checkpoint through the database
+   layer. Unit-level test of the rebuild, including additions, removals,
+   reordering, pseudo-elements, shadow trees, truncation, and loss.
+3. Player: open layout state through the rebuild. System-level Windows
+   recording that measures the volume, the time to open checkpoints at the
+   middle and end, the renderer's cost, and that rebuilt checkpoints equal
+   full checkpoints recorded alongside them; the keyframe interval set from
+   it.
+
 ## Open questions
 
-- The measurement compared styles by the stored shared style, which is equal
-  exactly when every value is equal; the renderer has no such key and compares
-  the values. Whether a cheaper test in the renderer, such as Blink's own
-  style object being unchanged, is exact enough is not known.
+- Rectangles are relative to the viewport, so a scroll that coincides with
+  style or layout work changes every rectangle, and 7.5% of the measured
+  nodes changed their rectangle. Whether most of that was scrolling was not
+  measured. Recording rectangles relative to the document would change what
+  is recorded and is not part of this design.
+- A rendering update that only scrolls produces no layout checkpoint, so the
+  recorded rectangles do not follow a scroll the compositor handled alone. A
+  recreation of a frame during such a scroll needs the scroll offset of that
+  frame, which the layout evidence does not record. This is independent of
+  keyframes.
+
 - Whether the interval should also bound the number of change checkpoints, for
   a page that renders very often.
-- How the player shows a checkpoint whose chain is broken by loss before the
-  next keyframe.
