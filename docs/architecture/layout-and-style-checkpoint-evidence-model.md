@@ -296,6 +296,29 @@ value, as `getComputedStyle()` does.
 - Most nodes are the same in consecutive checkpoints. A proposal to record
   periodic full keyframes and the changes between them, with a measurement,
   is in [layout checkpoint keyframes](layout-checkpoint-keyframes.md).
+- The traversal's cost was measured in one Windows recording of revision
+  d6b179a, in the renderer that recorded most checkpoints: 216 checkpoints
+  over 69 s took 17.6 s on the rendering thread, 82 ms each on average and
+  289 ms at most. Of that time:
+
+  | Part | Time | Share |
+  |---|---|---|
+  | Reading and serializing computed-style values | 13.52 s | 77% |
+  | of which values that depend on layout | 0.73 s | 4% |
+  | Handing node records to the bridge | 3.05 s | 17% |
+  | Rectangles | 0.82 s | 5% |
+  | Node fields, pseudo-element search, generated text | 0.15 s | 1% |
+  | Tree walk, start, and completion | 0.11 s | 1% |
+
+  86,113 elements had their styles read, 24,369,979 values at about 0.55 µs
+  each; 792,268 of the values, about 3%, were reported by Blink as depending
+  on layout. Within each checkpoint every element had its own style object:
+  the distinct style objects equalled the styled elements in every
+  checkpoint, so sharing readings between elements of one checkpoint would
+  save nothing. Whether an element keeps the same style object from one
+  checkpoint to the next was not measured. The measurement adds clock reads
+  and a layout-dependence test to every value, so the unmeasured traversal
+  is somewhat faster.
 - An element's record holds 283 values rather than the first list's 75. The
   volume with the full list is measured in the validation plan.
 
