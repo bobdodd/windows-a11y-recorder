@@ -360,6 +360,18 @@ value, as `getComputedStyle()` does.
   all, and the writer thread was busy for 102.3 s of the 121 s. The
   recordings were not the same browsing, so the comparison is approximate;
   the checkpoints came 3.8 per second against 3.0.
+- The writer thread's parts, in a Windows recording at revision 3658747, in
+  the renderer that recorded most checkpoints: 325 checkpoints and 574,171
+  records over 85 s. The writer thread was busy for 82.7 s. Building the
+  payloads took 19.2 s, serializing them 22.1 s, and writing them to the
+  pipe 24.2 s; the remaining 17.1 s is not attributed by the clocks, and is
+  inferred to be mostly the destruction of each message and its text, which
+  happens inside the measured block after the pipe write. The records came
+  to 1,675,374,390 bytes, 2,918 bytes each on average: 19.7 MB per second
+  over the interval, and 69 MB per second while the pipe was being written.
+  Pushes waited for queue space 67,794 times, for 17.3 s. No reused style
+  value differed. The database writer kept up, holding at most 2,886 events
+  in memory and spilling none.
 - An element's record holds 283 values rather than the first list's 75. The
   volume with the full list is measured in the validation plan.
 
