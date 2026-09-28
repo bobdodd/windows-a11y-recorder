@@ -9,7 +9,10 @@ public sealed record BrowserEvidenceReceiverOptions
         Convert.ToHexString(
             System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
 
-    public int MaximumMessageBytes { get; init; } = 4 * 1024 * 1024;
+    // The largest frame read from the browser. Values are recorded whole, so
+    // a record is as large as what it records; the bound is the largest
+    // array the runtime allocates, which a frame is read into.
+    public int MaximumMessageBytes { get; init; } = Array.MaxLength;
     public string BrowserInstanceId { get; init; } = Guid.NewGuid().ToString("N");
     public string? ChromiumExecutablePath { get; init; }
     public string? StartUrl { get; init; }

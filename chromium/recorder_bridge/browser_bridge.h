@@ -1211,9 +1211,10 @@ struct NetworkHeader {
   std::string value;
 };
 
-// The most headers one list in a record carries. A longer list is cut and
-// marked, with its full length recorded.
-inline constexpr size_t kMaximumNetworkHeadersPerRecord = 256;
+// Every header is recorded. The bound is the largest count the protocol's
+// 32-bit counts hold; a list is cut and marked, with its full length
+// recorded, only where the length cannot be stated.
+inline constexpr size_t kMaximumNetworkHeadersPerRecord = 2147483647;
 
 // Marks a time Chromium did not record.
 inline constexpr int64_t kNetworkTimeUnobserved =

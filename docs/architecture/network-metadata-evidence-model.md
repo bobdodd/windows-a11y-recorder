@@ -165,7 +165,7 @@ starts). Times are given in the same way as the load timing.
 
 Every header list carries each header's name, its value or null, whether the
 value was withheld, the reason, the full header count, and whether the list
-was cut. A list holds at most 256 headers. Values are not otherwise bounded.
+was cut. A list holds every header, and values are not bounded.
 
 The bridge withholds a value in three cases, recorded as the reason:
 

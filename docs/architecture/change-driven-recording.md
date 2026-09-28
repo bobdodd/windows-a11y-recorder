@@ -3,13 +3,13 @@
 ## Status
 
 Slices 1 (the recording file) and 2 (playback from the file) are
-implemented on branch `recording-object-store`. Slice 1 was tested in one
-recording on the target Windows machine; slice 2 awaits its test there. See
-"Slice 1 status" and "Slice 2 status". The browser capture below is
-proposed and not implemented. The Blink locations below
-were read from the Chromium checkout on the target Windows machine, version
-156.0.8065.0 (`chrome/VERSION`), and must be read again if the checkout
-changes.
+implemented on branch `recording-object-store` and were each tested in one
+recording on the target Windows machine; see "Slice 1 status" and "Slice 2
+status". The content limits are removed and await their test there; see "No
+limit to content". The browser capture below is proposed and not
+implemented. The Blink locations below were read from the Chromium checkout
+on the target Windows machine, version 156.0.8065.0 (`chrome/VERSION`), and
+must be read again if the checkout changes.
 
 ## Problem
 
@@ -134,10 +134,50 @@ layout checkpoint walks the whole document, so recording a large page costs
 more than it did with the limits. That cost is what the change-driven design
 removes, and it is to be measured on the target machine.
 
-Bounds on the content of a node are not node limits and are unchanged:
-attribute values, text-control values, and generated text are cut at 4096
-UTF-16 code units, an element's attributes at 64, network headers and
-cookies at 256 per record. Each cut is reported in the record.
+## No limit to content
+
+Requirement: the recorder records every value whole and every attribute,
+header, and cookie. A value cut part way records part of what the page held.
+
+The recording measured under "Slice 2 status" (57.2 s, revision 82036fc)
+held 807 `dom-checkpoint-node-attribute` records whose value was cut at 4096
+UTF-16 code units, and no other cut, from its recording file read with the
+Python `mcap` library.
+
+The content limits were removed:
+
+- DOM attribute values in checkpoints and attribute and character-data
+  changes (`kRecorderMaximumDomValueLength`), an element's attributes in a
+  checkpoint (`kRecorderMaximumDomAttributesPerNode`), text-control values
+  in change records and interaction checkpoints
+  (`kRecorderMaximumTextControlValueLength` and
+  `kRecorderMaximumInteractionValueLength`), and pseudo-element generated text
+  (`kRecorderMaximumGeneratedTextLength`), were cut at 4096 code units or 64
+  attributes. Each bound is now 2147483647, the largest value the protocol's
+  32-bit counts and lengths hold. The `maximum...` and `...Truncated` fields
+  are unchanged. A checkout patched with the earlier limits has them replaced
+  when `integrate.py` runs.
+- Network header lists (`kMaximumNetworkHeadersPerRecord`) and cookie lists
+  (`kMaximumCookiesPerRecord`) were cut at 256 entries per record. Each bound
+  is now 2147483647.
+- WebSocket and EventSource message text, event data, and close reasons were
+  kept up to 4096 code units from the first 65536 bytes. The whole message is
+  now read and kept, with credentials withheld as before. The payload
+  validator no longer rejects a text over 4096 code units.
+- A frame on the recorder pipe was at most 4 MiB, and a larger record was not
+  sent. The recorder now states a maximum of 2,147,483,591 bytes, the largest
+  array .NET allocates, which a frame is read into. The queue of evidence waiting to be written stays at
+  64 MiB; it accepts a single larger record once it is empty.
+
+What remains bounded: a record whose serialized form exceeds that maximum is
+not sent and is reported lost, as a record over 4 MiB was before. A kept-active
+presentation request records at most 16 `DidNotSwap` calls
+(`kMaximumPresentationNotSwappedRecords`), with the full count in its
+terminal record; this is a limit on records, not on content, and is
+unchanged.
+
+Recording values whole makes records larger. What that costs on a large page
+is to be measured on the target machine.
 
 ## How capture works
 
@@ -394,8 +434,8 @@ its payload text unchanged.
 
 ## Slice 2 status
 
-Implemented. Tested in the sandbox; not yet tested on the target Windows
-machine.
+Implemented. Tested in the sandbox, and in one recording on the target
+Windows machine (see "Windows evidence" in this section).
 
 - The recorder writes the `playback-index` attachment when it finishes the
   file. The player opens a recording file from its summary and the
@@ -429,6 +469,22 @@ Sandbox evidence, 2026-09-28:
   file with its attachment, with the time-order warnings described above,
   and `mcap list attachments` listed the attachment. These are figures from
   one run in the sandbox, not a measurement on the target machine.
+
+Windows evidence, 2026-09-28, revision 82036fc, one recording of 57.2 s with
+instrumented Chromium and every collector on:
+
+- 556,276 events accepted and written, none dropped, from `manifest.json`.
+- Stopping: finishing the file took 81.1 ms, of which building and writing
+  the 1.4 MB playback index took 62.7 ms, and storing the chunk index took
+  52.3 ms, from `database-writer-timings.json`.
+- `recording.mcap` is 59.8 MB, holding 1.39 GB of records in 417 chunks.
+  `mcap doctor` passed it, and `mcap list attachments` lists the playback
+  index. The index states exact browser counts.
+- The user reported that opening this recording was near instantaneous, and
+  that earlier recordings, whose index is derived when they open, took from
+  3 to 4 s up to 30 s. Neither was timed by the app.
+- The user reported: "What is currently sluggish is the browser changes, as
+  expected".
 
 ## Slice 1 status
 

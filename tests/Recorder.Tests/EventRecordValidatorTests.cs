@@ -3007,14 +3007,14 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
-    public void RejectsARecordedTextOverTheLimit()
+    public void AcceptsARecordedTextOfAnyLength()
     {
         var payload = JsonNode.Parse(BrowserNetworkPayloads.EventSourceMessage)!;
-        payload["data"]!["text"] = new string('a', 4097);
+        payload["data"]!["text"] = new string('a', 1_000_000);
 
         var issues = ValidateNetworkRecord("event-source-message", payload);
 
-        Assert.Contains(issues, issue => issue.Code == "browser-network-text-too-long");
+        Assert.Empty(issues);
     }
 
     [Fact]

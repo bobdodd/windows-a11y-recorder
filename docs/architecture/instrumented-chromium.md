@@ -537,8 +537,9 @@ The recorded facts are bounded as follows:
 - A nameless cookie whose value contains `=` cannot be told apart from a named
   cookie, so the name reported for it is the text before the first `=`.
 - `navigator.cookieEnabled` is not recorded.
-- Name and cookie lists are capped at 256 entries. The record reports the full
-  count and whether the list was truncated.
+- Name and cookie lists hold every entry. The record reports the full count
+  and whether the list was truncated, which it is only where the count cannot
+  be stated.
 - A `cookie-store-result` record has no document context. It is correlated with
   its request by `requestId`.
 - A `document-cookie-write` outcome of `sent-to-cookie-manager` states that the
@@ -623,8 +624,8 @@ The recorded facts are bounded as follows:
 
 - Text-control values are recorded verbatim, including the values of password
   fields, under the policy that already applies to DOM attribute values and
-  character data. A value is bounded to 4096 UTF-16 code units. The record
-  reports the full length and whether the value was truncated.
+  character data. A value is recorded whole. The record reports the full
+  length and whether the value was truncated.
 - Focus cleared while a document shuts down is not recorded.
 - A focus request for the element that already holds focus, for an element in
   another document, or for an element being removed returns before the hook
@@ -739,7 +740,7 @@ The recorded facts are bounded as follows:
   name holds a credential word or whose value begins with an HTTP
   authentication scheme or contains a JSON Web Token. The name and the reason
   are recorded.
-- A header list holds at most 256 headers.
+- A header list holds every header.
 - URLs are recorded in full, including query strings.
 - Requests the browser makes for itself are not recorded.
 - Wire headers are not recorded for worker loads made through a factory that
@@ -779,7 +780,7 @@ The recorded facts are bounded as follows:
 - Handshake headers follow the protocol 0.26 header value rules, and the
   handshake records list the cookies sent and set by name.
 - Message text, event data, last event identifiers, and close reasons are kept
-  up to 4096 UTF-16 code units from the first 65536 bytes. A part that looks
+  whole, and the whole message is read. A part that looks
   like a credential, such as a JSON Web Token, an HTTP authentication
   credential, or the value of a field whose name holds a credential word, is
   replaced by `[withheld]` and its offset and reason are recorded.
@@ -815,7 +816,7 @@ Protocol version 0.28 extends three record families to the composed tree:
 - Layout checkpoints record elements and laid-out text inside shadow trees,
   with the host and mode of their tree, and every pseudo-element Blink has
   created, as a `pseudo-element` node with its originating node, type, and
-  generated text up to 4096 characters. The completion adds pseudo-element and
+  its whole generated text. The completion adds pseudo-element and
   shadow root counts.
 - `dispatch-started` adds `pathScopes`, one per composed path entry, with the
   entry's tree scope root and mode, its retargeted target and related target,
@@ -847,9 +848,10 @@ with a snapshot of the document's interaction state on the
   selection's type, positions, and directionality.
 - `interaction-checkpoint-text-control` records each text control in
   composed-tree order, including controls in shadow trees of any mode, with
-  its type, its value up to 4096 UTF-16 code units, and its selection.
+  its type, its whole value, and its selection.
 - `interaction-checkpoint-completed` records the number of text controls and
-  whether the traversal stopped at its limit of 512.
+  whether the traversal stopped at its bound, the largest value a 32-bit
+  count holds.
 
 Every record carries the renderer document context with no execution world.
 Accessibility checkpoints carry no snapshot. The snapshot reads only state

@@ -1365,11 +1365,10 @@ bool ReadChildBootstrap(const base::CommandLine& command_line,
 }
 
 
-// Cookie records name at most this many cookies. Chromium allows far more
-// cookies per profile than one record can hold within the message limit, so a
-// record states its full count and whether its list was cut rather than
-// dropping the record or the excess silently.
-constexpr size_t kMaximumCookiesPerRecord = 256;
+// Every cookie is recorded. The bound is the largest count the protocol's
+// 32-bit counts hold; a record states its full count and whether its list was
+// cut, which happens only where the count cannot be stated.
+constexpr size_t kMaximumCookiesPerRecord = 2147483647;
 
 struct CookieStoreRequestState {
   std::string request_id;

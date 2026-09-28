@@ -123,9 +123,9 @@ Message text, event data, last event identifiers, and close reasons are
 recorded as a text object holding the text, whether it was cut, and the parts
 that were withheld.
 
-- The text is kept up to 4096 UTF-16 code units. Invalid UTF-8 is replaced by
-  U+FFFD. Only the first 65536 bytes are read, and `truncated` is true when the
-  text is shorter than the message.
+- The whole message is read and its text is kept whole. Invalid UTF-8 is
+  replaced by U+FFFD. `truncated` is kept in the protocol and is false, since
+  no text is cut.
 - A part that looks like a credential is replaced by `[withheld]`, and its
   offset in the recorded text, in UTF-16 code units, is recorded with a reason:
   `credential-value` for a JSON Web Token or an HTTP authentication credential
@@ -137,12 +137,12 @@ that were withheld.
 Handshake and response headers follow the header value rules of the
 [network metadata evidence model](network-metadata-evidence-model.md#header-values).
 
-The payload validator rejects text longer than 4096 UTF-16 code units, a
-withheld offset that does not mark a `[withheld]` marker in order, a text
-message without text or a binary message with text, a `dropped` closure without
-its clean flag or a `disconnected` closure with one, a WebTransport close
-request with only one of code and reason, and an abrupt WebTransport closure
-with a code or reason.
+The payload validator rejects a withheld offset that does not mark a
+`[withheld]` marker in order, a text message without text or a binary message
+with text, a `dropped` closure without its clean flag or a `disconnected`
+closure with one, a WebTransport close request with only one of code and
+reason, and an abrupt WebTransport closure with a code or reason. It sets no
+limit on the length of a text.
 
 ## Limits
 
@@ -150,9 +150,6 @@ with a code or reason.
   or `monkey` has its value withheld too. Over-withholding is preferred to
   recording a credential.
 - A credential in a field or format none of the rules describe is recorded.
-- Text past the first 65536 bytes of a message is not read, so a credential
-  that begins within the recorded text and ends past that window is cut at the
-  window rather than recognized.
 - WebTransport stream and datagram data is not observed.
 - `web-transport-closed` is not recorded when the session's context is
   destroyed, because Blink disposes of the session without running its cleanup.

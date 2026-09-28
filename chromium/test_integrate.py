@@ -2719,10 +2719,10 @@ class IntegrateTests(unittest.TestCase):
                 document_first.count("RecordBlinkDomCheckpointNodeAttribute("),
             )
             self.assertIn(
-                "kRecorderMaximumDomAttributesPerNode = 64", document_first
+                "kRecorderMaximumDomAttributesPerNode = 2147483647", document_first
             )
             self.assertIn(
-                "kRecorderMaximumDomValueLength = 4096", document_first
+                "kRecorderMaximumDomValueLength = 2147483647", document_first
             )
             self.assertIn("recorder_attributes_truncated", document_first)
             for patched in (document_first, mutation_first):
@@ -2846,6 +2846,62 @@ class IntegrateTests(unittest.TestCase):
             INTEGRATE.patch_blink_document(path)
             self.assertEqual(patched, path.read_text(encoding="utf-8"))
 
+    def test_no_current_hook_limits_the_content_it_records(self):
+        hooks = {
+            "dom": INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER,
+            "interaction": INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER,
+            "attribute": INTEGRATE.BLINK_ELEMENT_ATTRIBUTE_MUTATION_HELPER,
+            "character data": INTEGRATE.BLINK_CHARACTER_DATA_MUTATION_HOOK,
+            "text control": INTEGRATE.BLINK_TEXT_CONTROL_VALUE_HELPER,
+            "layout": INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER,
+            "realtime": INTEGRATE.BLINK_REALTIME_HELPER,
+        }
+        for indent, kind, name, value in INTEGRATE.EARLIER_CONTENT_LIMITS:
+            limited = f"{indent}constexpr {kind} {name} = {value};\n"
+            unbounded = (
+                INTEGRATE.unbounded_content_comment(name, indent)
+                + f"{indent}constexpr {kind} {name} = 2147483647;\n"
+            )
+            owners = [hook for hook, text in hooks.items() if unbounded in text]
+            with self.subTest(name=name, indent=len(indent)):
+                self.assertGreaterEqual(len(owners), 1)
+                for text in hooks.values():
+                    self.assertNotIn(limited, text)
+        self.assertNotIn("kScanLimit", INTEGRATE.BLINK_REALTIME_HELPER)
+
+    def test_removes_the_content_limits_of_an_earlier_revision(self):
+        def earlier(text):
+            for indent, kind, name, value in INTEGRATE.EARLIER_CONTENT_LIMITS:
+                text = text.replace(
+                    INTEGRATE.unbounded_content_comment(name, indent)
+                    + f"{indent}constexpr {kind} {name} = 2147483647;\n",
+                    f"{indent}constexpr {kind} {name} = {value};\n",
+                )
+            return text
+
+        for hook in (
+            INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER,
+            INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER,
+            INTEGRATE.BLINK_ELEMENT_ATTRIBUTE_MUTATION_HELPER,
+            INTEGRATE.BLINK_CHARACTER_DATA_MUTATION_HOOK,
+            INTEGRATE.BLINK_TEXT_CONTROL_VALUE_HELPER,
+        ):
+            with self.subTest(hook=hook[:60]):
+                limited = earlier(hook)
+                self.assertNotEqual(hook, limited)
+                self.assertEqual(
+                    hook, INTEGRATE.remove_earlier_content_limits(limited)
+                )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(self.document_source(), encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            patched = path.read_text(encoding="utf-8")
+            path.write_text(earlier(patched), encoding="utf-8")
+            self.assertNotEqual(patched, earlier(patched))
+            INTEGRATE.patch_blink_document(path)
+            self.assertEqual(patched, path.read_text(encoding="utf-8"))
+
     def test_the_interaction_checkpoint_never_forces_work(self):
         helper = INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER
         for forcing_call in (
@@ -2866,7 +2922,9 @@ class IntegrateTests(unittest.TestCase):
         self.assertIn(
             "kRecorderMaximumInteractionTextControls = 2147483647", helper
         )
-        self.assertIn("kRecorderMaximumInteractionValueLength = 4096", helper)
+        self.assertIn(
+            "kRecorderMaximumInteractionValueLength = 2147483647", helper
+        )
 
     def test_migrates_light_tree_dom_checkpoint_hooks(self):
         """A checkpoint that recorded the light tree only must be replaced."""
@@ -3038,7 +3096,7 @@ class IntegrateTests(unittest.TestCase):
                 1, first.count("RecordBlinkDomCharacterDataChanged(")
             )
             self.assertIn("if (source != kUpdateFromParser) {", first)
-            self.assertIn("kRecorderMaximumDomValueLength = 4096", first)
+            self.assertIn("kRecorderMaximumDomValueLength = 2147483647", first)
             self.assertIn(
                 "MutationObserver::EnqueueRecorderDomCheckpoint("
                 "recorder_document);",
@@ -5368,6 +5426,29 @@ class RealtimeIntegrationTests(unittest.TestCase):
                     patched.index(helper_anchor),
                 )
                 self.assert_bridge_calls_match(patched)
+
+    def test_replaces_the_chunk_join_of_an_earlier_revision(self):
+        # A source patched before the message text limits were removed joins
+        # only the first 64 KiB of a text message.
+        self.assertIn(
+            "kScanLimit = 65536", INTEGRATE.EARLIER_REALTIME_CHUNKS_TEXT
+        )
+        for name, include, helper_anchor, hooks, patch, _ in self.cases():
+            with self.subTest(source=name):
+                patched = self.patch_twice(
+                    name, self.module_source(include, helper_anchor, hooks), patch
+                )
+                self.assertNotIn("kScanLimit", patched)
+                earlier = patched.replace(
+                    INTEGRATE.BLINK_REALTIME_CHUNKS_TEXT,
+                    INTEGRATE.EARLIER_REALTIME_CHUNKS_TEXT,
+                )
+                self.assertNotEqual(patched, earlier)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / name
+                    path.write_text(earlier, encoding="utf-8")
+                    patch(path)
+                    self.assertEqual(patched, path.read_text(encoding="utf-8"))
 
     def test_a_realtime_hook_fails_when_its_anchor_is_absent(self):
         for name, include, helper_anchor, hooks, patch, _ in self.cases():

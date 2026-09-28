@@ -233,7 +233,7 @@ selection a frame commits, with text-control selection offsets; text-control
 values after a value set or a user edit; and elements assigned as an active
 descendant through element reflection. Changes made by script report the
 script's source location and JavaScript world. Text-control values are recorded
-verbatim, bounded to 4096 UTF-16 code units. Checkpoint-time snapshots of this
+verbatim and whole. Checkpoint-time snapshots of this
 state are not recorded; the full list of limits is in
 [the instrumented Chromium architecture](docs/architecture/instrumented-chromium.md).
 
@@ -262,8 +262,8 @@ Protocol 0.27 adds realtime channels to the `browser.network` channel: each
 WebSocket's creation, handshake, messages, close request, failure, and closure;
 each EventSource event; and each WebTransport session's creation,
 establishment, close request, and closure. Handshake cookies are listed by
-name. Message text, event data, and close reasons are kept up to 4096 UTF-16
-code units with any part that looks like a credential withheld, and binary
+name. Message text, event data, and close reasons are kept whole, with any
+part that looks like a credential withheld, and binary
 message content is never recorded. In a recording browser the network service
 reports WebSocket handshake cookie headers to the renderer with their values
 replaced, so no cookie value leaves the network service. The record types and
@@ -283,7 +283,7 @@ Protocol 0.29 records the interaction state a document holds after each DOM
 checkpoint and each layout checkpoint: whether the document has focus, the
 focused element, whether it matches `:focus-visible`, its active descendant,
 how focus last moved, the frame selection, and the value and selection of each
-text control, up to 512 controls and 4096 UTF-16 code units per value. The
+text control, with every control and every value recorded whole. The
 snapshot reads only state Blink already holds and never forces style or
 layout. The record types and limits are in
 [the interaction-state checkpoint evidence model](docs/architecture/interaction-state-checkpoint-evidence-model.md).

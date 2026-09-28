@@ -24,8 +24,8 @@ before the text inside it changed: none of these are observable from structure.
 A structural checkpoint can show that a subtree changed, but not whether a
 screen reader had anything to announce.
 
-This slice adds bounded attribute and character-data evidence. Values are
-recorded verbatim, bounded only by record-size limits, so that observed DOM
+This slice adds attribute and character-data evidence. Values are recorded
+verbatim and whole, so that observed DOM
 state can be compared directly against what assistive technology exposed.
 
 ## Value policy
@@ -110,8 +110,9 @@ hooks are the project's most expensive failure mode.
 Per-node and per-checkpoint attribute limits apply, with truncation state
 reported on the checkpoint completion record in the same way as node limits.
 `dom-checkpoint-completed` gains `attributeCount`, `attributesTruncated`,
-`maximumAttributesPerNode`, and `maximumValueLength`. The in-force limits are 64
-attributes per node and 4096 UTF-16 code units per value. It also reports the
+`maximumAttributesPerNode`, and `maximumValueLength`. Both bounds are
+2147483647, the largest value the protocol's 32-bit counts and lengths hold,
+so every attribute and every value is recorded whole. It also reports the
 transitions it covers, described under the trigger integration below.
 
 ### Attribute transitions
@@ -300,9 +301,11 @@ greater than the recorded value without truncation state.
    choice and was withdrawn in 0.16 on validation evidence.
 4. Parser-driven character-data updates are excluded.
 
-The per-record length limit is 4096 UTF-16 code units. It is large enough that
-ordinary names, labels, and live-region text are never truncated, because
-routine truncation would lose exactly the evidence this slice exists to capture.
+Values are not cut. The earlier limit of 4096 UTF-16 code units was removed
+after a recording on the target Windows machine held 807 DOM attribute values
+cut at it in 57 s (see
+[change-driven recording](change-driven-recording.md#no-limit-to-content)).
+A cut value would lose exactly the evidence this slice exists to capture.
 
 ## Next dependent slices
 

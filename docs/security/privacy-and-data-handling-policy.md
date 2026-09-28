@@ -112,8 +112,6 @@ reach a stored recording through realtime records in:
 
 - WebSocket and WebTransport URLs, which are recorded in full.
 - Message text in a field or format none of those rules describe.
-- A credential that begins within the recorded text and continues past the
-  first 65536 bytes of a message.
 
 ## Diagnostic logs
 

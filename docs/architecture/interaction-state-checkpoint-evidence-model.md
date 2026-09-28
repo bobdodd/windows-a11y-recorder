@@ -89,7 +89,8 @@ snapshot is taken. Every record also carries the snapshot identity,
   user-agent shadow tree.
 - `directional`: whether the selection is directional.
 - `maximumTextControls`: 2147483647, the largest value a 32-bit count holds.
-- `maximumValueLength`: 4096.
+- `maximumValueLength`: 2147483647, the largest length a 32-bit count
+  holds, so every value is recorded whole.
 
 ### Snapshot text control
 
@@ -103,8 +104,8 @@ mode. A text control is an `input` whose type presents a text field, or a
 - `controlType`: the form control type, such as `text`, `password`, `search`,
   or `textarea`.
 - `value`, `valueLength`, and `valueTruncated`: the control's current value,
-  bounded to 4096 UTF-16 code units, with its full length and whether it was
-  cut. Values are recorded verbatim, including the values of password fields,
+  recorded whole, with its full length and whether it was cut, which it is
+  only where its length cannot be stated. Values are recorded verbatim, including the values of password fields,
   under the policy that already applies to text-control change records, DOM
   attribute values, and character data.
 - `selectionStart`, `selectionEnd`, and `selectionDirection`: the control's own
@@ -164,7 +165,7 @@ The evidence does not by itself establish:
 
 One snapshot is recorded for each DOM and layout checkpoint. The text-control
 traversal records every text control; its bound is the largest value a
-32-bit count holds. Each value is bounded at 4096 UTF-16 code units.
+32-bit count holds. Each value is recorded whole.
 No deduplication is performed: consecutive snapshots with identical state are
 all recorded, because the snapshot's value is that it states the state at its
 checkpoint.

@@ -17,17 +17,18 @@
 namespace a11y_recorder {
 
 inline constexpr char kProtocolVersion[] = "0.31";
-inline constexpr uint32_t kDefaultMaximumMessageBytes = 4 * 1024 * 1024;
+// The largest frame the recorder reads: its length is a 32-bit signed count.
+// Values are recorded whole, so a record is as large as what it records.
+inline constexpr uint32_t kDefaultMaximumMessageBytes = 2147483647;
 // How long a process waits for a free recorder pipe instance before it reports
 // that it could not connect, and how long it backs off between attempts while
 // the pipe is not there at all.
 inline constexpr uint32_t kPipeConnectTimeoutMilliseconds = 15000;
 inline constexpr uint32_t kPipeConnectRetryMilliseconds = 25;
 // How much evidence one process may hold while its writer thread waits on the
-// recorder: sixteen times the largest message the protocol allows. A thread
-// that records evidence waits only once this much is already queued.
-inline constexpr size_t kMaximumQueuedEvidenceBytes =
-    16 * static_cast<size_t>(kDefaultMaximumMessageBytes);
+// recorder. A thread that records evidence waits only once this much is
+// already queued; a single larger record is accepted once the queue is empty.
+inline constexpr size_t kMaximumQueuedEvidenceBytes = 64 * 1024 * 1024;
 
 struct BootstrapConfiguration {
   std::string protocol_version;

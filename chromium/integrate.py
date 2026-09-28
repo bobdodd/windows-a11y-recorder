@@ -831,8 +831,13 @@ void RecorderRecordDomCheckpoint(Document& recorder_document,
   // Every node is recorded. The bound is the largest value the protocol's
   // 32-bit counts hold, so the walk stops only where a count cannot grow.
   constexpr int kRecorderMaximumDomCheckpointNodes = 2147483647;
-  constexpr int kRecorderMaximumDomAttributesPerNode = 64;
-  constexpr int kRecorderMaximumDomValueLength = 4096;
+  // Every attribute is recorded. The bound is the largest value the
+  // protocol's 32-bit counts hold.
+  constexpr int kRecorderMaximumDomAttributesPerNode = 2147483647;
+  // Every value is recorded whole. The bound is the largest length the
+  // protocol's 32-bit lengths hold, so a value is cut only where its length
+  // cannot be stated.
+  constexpr int kRecorderMaximumDomValueLength = 2147483647;
   const int recorder_document_node_id = recorder_document.GetDomNodeId();
   const std::string recorder_document_token =
       recorder_document.Token().ToString();
@@ -1001,7 +1006,10 @@ void RecorderRecordInteractionCheckpoint(Document& recorder_document,
   // Every node is recorded. The bound is the largest value the protocol's
   // 32-bit counts hold, so the walk stops only where a count cannot grow.
   constexpr int kRecorderMaximumInteractionTextControls = 2147483647;
-  constexpr int kRecorderMaximumInteractionValueLength = 4096;
+  // Every value is recorded whole. The bound is the largest length the
+  // protocol's 32-bit lengths hold, so a value is cut only where its length
+  // cannot be stated.
+  constexpr int kRecorderMaximumInteractionValueLength = 2147483647;
   const int recorder_document_node_id = recorder_document.GetDomNodeId();
   if (recorder_document_node_id <= 0 || !recorder_document.IsActive()) {
     return;
@@ -1524,7 +1532,10 @@ static void RecordRecorderElementAttributeMutation(
     const QualifiedName& recorder_name,
     const AtomicString& recorder_old_value,
     const AtomicString& recorder_new_value) {
-  constexpr int kRecorderMaximumDomValueLength = 4096;
+  // Every value is recorded whole. The bound is the largest length the
+  // protocol's 32-bit lengths hold, so a value is cut only where its length
+  // cannot be stated.
+  constexpr int kRecorderMaximumDomValueLength = 2147483647;
   const bool recorder_has_value = !recorder_new_value.IsNull();
   const bool recorder_has_previous_value = !recorder_old_value.IsNull();
   if (!recorder_has_value && !recorder_has_previous_value) {
@@ -1637,7 +1648,10 @@ BLINK_CHARACTER_DATA_MUTATION_HOOK = """\
   // with is already reported by the finished-parsing checkpoint, and recording
   // every parse-time chunk would queue a checkpoint per chunk during load.
   if (source != kUpdateFromParser) {
-    constexpr int kRecorderMaximumDomValueLength = 4096;
+    // Every value is recorded whole. The bound is the largest length the
+    // protocol's 32-bit lengths hold, so a value is cut only where its length
+    // cannot be stated.
+    constexpr int kRecorderMaximumDomValueLength = 2147483647;
     Document& recorder_document = GetDocument();
     const int recorder_document_node_id = recorder_document.GetDomNodeId();
     if (recorder_document_node_id > 0) {
@@ -3281,7 +3295,53 @@ EARLIER_NODE_LIMITS = (
 )
 
 
+# Content limits of earlier revisions, with the indentation and type of the
+# declaration in its hook. They are replaced in place for the same reason as
+# the node limits. Every value and every attribute is recorded; see
+# docs/architecture/change-driven-recording.md.
+UNBOUNDED_VALUE_LENGTH_COMMENT = (
+    "// Every value is recorded whole. The bound is the largest length the\n"
+    "// protocol's 32-bit lengths hold, so a value is cut only where its length\n"
+    "// cannot be stated.\n"
+)
+UNBOUNDED_ATTRIBUTE_COUNT_COMMENT = (
+    "// Every attribute is recorded. The bound is the largest value the\n"
+    "// protocol's 32-bit counts hold.\n"
+)
+EARLIER_CONTENT_LIMITS = (
+    ("  ", "int", "kRecorderMaximumDomAttributesPerNode", "64"),
+    ("  ", "int", "kRecorderMaximumDomValueLength", "4096"),
+    ("    ", "int", "kRecorderMaximumDomValueLength", "4096"),
+    ("  ", "int", "kRecorderMaximumInteractionValueLength", "4096"),
+    ("  ", "int", "kRecorderMaximumTextControlValueLength", "4096"),
+    ("  ", "unsigned", "kRecorderMaximumGeneratedTextLength", "4096"),
+)
+
+
+def unbounded_content_comment(name: str, indent: str) -> str:
+    comment = (
+        UNBOUNDED_ATTRIBUTE_COUNT_COMMENT
+        if "Attributes" in name
+        else UNBOUNDED_VALUE_LENGTH_COMMENT
+    )
+    return "".join(indent + line + "\n" for line in comment.splitlines())
+
+
+def remove_earlier_content_limits(text: str) -> str:
+    # Matched as whole lines, since a declaration indented by two spaces is
+    # contained in the same declaration indented by four.
+    for indent, kind, name, value in EARLIER_CONTENT_LIMITS:
+        text = re.sub(
+            rf"(?m)^{indent}constexpr {kind} {name} = {value};\n",
+            lambda _: unbounded_content_comment(name, indent)
+            + f"{indent}constexpr {kind} {name} = 2147483647;\n",
+            text,
+        )
+    return text
+
+
 def remove_earlier_node_limits(text: str) -> str:
+    text = remove_earlier_content_limits(text)
     for name, value in EARLIER_NODE_LIMITS:
         text = text.replace(
             f"  constexpr int {name} = {value};\n",
@@ -3552,6 +3612,7 @@ def patch_blink_element(path: Path) -> None:
             removed_anchor + BLINK_ELEMENT_ATTRIBUTE_REMOVED_HOOK,
             path,
         )
+    text = remove_earlier_content_limits(text)
     write_patched(path, text)
 
 
@@ -3592,6 +3653,7 @@ def patch_blink_character_data(path: Path) -> None:
             anchor + BLINK_CHARACTER_DATA_MUTATION_HOOK,
             path,
         )
+    text = remove_earlier_content_limits(text)
     write_patched(path, text)
 
 
@@ -6104,7 +6166,10 @@ namespace {
 // recorded.
 void RecorderRecordTextControlValue(TextControlElement& control,
                                     const char* source) {
-  constexpr int kRecorderMaximumTextControlValueLength = 4096;
+  // Every value is recorded whole. The bound is the largest length the
+  // protocol's 32-bit lengths hold, so a value is cut only where its length
+  // cannot be stated.
+  constexpr int kRecorderMaximumTextControlValueLength = 2147483647;
   if (!control.IsTextControl()) {
     return;
   }
@@ -6253,6 +6318,7 @@ def patch_blink_interaction_source(
         text = insert_before_once(text, anchor, helper, marker, path)
     for anchor, hook in hooks:
         text = apply_cookie_hook(text, anchor, hook, path)
+    text = remove_earlier_content_limits(text)
     write_patched(path, text)
 
 
@@ -6777,7 +6843,10 @@ void RecorderAppendPseudoElements(
 void RecorderReadGeneratedText(
     const LayoutObject* recorder_layout_object,
     a11y_recorder::LayoutCheckpointNode& recorder_record) {
-  constexpr unsigned kRecorderMaximumGeneratedTextLength = 4096;
+  // Every value is recorded whole. The bound is the largest length the
+  // protocol's 32-bit lengths hold, so a value is cut only where its length
+  // cannot be stated.
+  constexpr unsigned kRecorderMaximumGeneratedTextLength = 2147483647;
   StringBuilder recorder_text;
   for (const LayoutObject* recorder_descendant = recorder_layout_object;
        recorder_descendant;
@@ -8916,18 +8985,13 @@ RecorderRealtimeMojoHeaders(const Headers& headers) {
   return copied;
 }
 
-// Joins the chunks of a received text message, reading no further than the
-// bridge scans for credentials.
+// Joins the chunks of a received text message. The whole message is joined;
+// the bridge withholds credentials in it and records the rest.
 [[maybe_unused]] std::string RecorderRealtimeChunksText(
     const Vector<base::span<const uint8_t>>& chunks) {
-  constexpr size_t kScanLimit = 65536;
   std::string text;
   for (const base::span<const uint8_t>& chunk : chunks) {
-    if (text.size() >= kScanLimit) {
-      break;
-    }
-    const size_t take = std::min(chunk.size(), kScanLimit - text.size());
-    text.append(reinterpret_cast<const char*>(chunk.data()), take);
+    text.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
   }
   return text;
 }
@@ -9259,6 +9323,43 @@ BLINK_MODULE_BRIDGE_DEPS = """\
 """
 
 
+# The chunk join of earlier revisions read only the first 64 KiB of a text
+# message. The helper is inserted once, so it is replaced in place.
+EARLIER_REALTIME_CHUNKS_TEXT = """\
+// Joins the chunks of a received text message, reading no further than the
+// bridge scans for credentials.
+[[maybe_unused]] std::string RecorderRealtimeChunksText(
+    const Vector<base::span<const uint8_t>>& chunks) {
+  constexpr size_t kScanLimit = 65536;
+  std::string text;
+  for (const base::span<const uint8_t>& chunk : chunks) {
+    if (text.size() >= kScanLimit) {
+      break;
+    }
+    const size_t take = std::min(chunk.size(), kScanLimit - text.size());
+    text.append(reinterpret_cast<const char*>(chunk.data()), take);
+  }
+  return text;
+}
+"""
+
+
+BLINK_REALTIME_CHUNKS_TEXT = """\
+// Joins the chunks of a received text message. The whole message is joined;
+// the bridge withholds credentials in it and records the rest.
+[[maybe_unused]] std::string RecorderRealtimeChunksText(
+    const Vector<base::span<const uint8_t>>& chunks) {
+  std::string text;
+  for (const base::span<const uint8_t>& chunk : chunks) {
+    text.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+  }
+  return text;
+}
+"""
+if BLINK_REALTIME_CHUNKS_TEXT not in BLINK_REALTIME_HELPER:
+    raise RuntimeError("the realtime helper does not hold its chunk join")
+
+
 def patch_blink_realtime_source(
     path: Path,
     own_include: str,
@@ -9274,6 +9375,13 @@ def patch_blink_realtime_source(
     if reads_script_origin:
         helpers.insert(
             0, (BLINK_COOKIE_ORIGIN_HELPER, BLINK_COOKIE_ORIGIN_HELPER_MARKER)
+        )
+    if EARLIER_REALTIME_CHUNKS_TEXT in text:
+        text = replace_once(
+            text,
+            EARLIER_REALTIME_CHUNKS_TEXT,
+            BLINK_REALTIME_CHUNKS_TEXT,
+            path,
         )
     for helper, marker in helpers:
         text = insert_before_once(text, helper_anchor, helper, marker, path)

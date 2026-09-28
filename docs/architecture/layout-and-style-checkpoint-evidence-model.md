@@ -288,11 +288,11 @@ value, as `getComputedStyle()` does.
   update does not wait for the recorder to read the checkpoint. A node queued
   when its renderer is ended without shutdown is lost without an omission
   record.
-- Each node is one record, and a record whose serialized form exceeds the 4 MiB
-  protocol message limit is not sent. The bridge counts it and reports a
-  `browser-evidence-write-failed` omission on the channel instead. Values such
-  as a long SVG path in `d` or a data URL in `background-image` make this
-  possible; it has not been observed.
+- Each node is one record, and a record whose serialized form exceeds the
+  protocol message limit, 2,147,483,591 bytes, is not sent. The bridge counts
+  it and reports a `browser-evidence-write-failed` omission on the channel
+  instead. The limit was 4 MiB before the content limits were removed; a
+  record that large has not been observed.
 - Most nodes are the same in consecutive checkpoints. A proposal to record
   periodic full keyframes and the changes between them, with a measurement,
   is in [layout checkpoint keyframes](layout-checkpoint-keyframes.md).

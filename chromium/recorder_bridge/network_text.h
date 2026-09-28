@@ -2,6 +2,7 @@
 #define WINDOWS_A11Y_RECORDER_CHROMIUM_RECORDER_BRIDGE_NETWORK_TEXT_H_
 
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,12 +37,11 @@ const char* HeaderRedactionName(HeaderRedaction redaction);
 
 // The text recorded for a WebSocket message, an EventSource event, or a close
 // reason. Parts that look like a credential are replaced by kWithheldMarker
-// and the rest is kept, up to kMessageTextLimit UTF-16 code units.
+// and the rest is kept whole: kMessageTextLimit, the default, does not cut.
 inline constexpr std::string_view kWithheldMarker = "[withheld]";
-inline constexpr size_t kMessageTextLimit = 4096;
-// Only this many leading bytes are read. A credential that begins within the
-// recorded text and ends within the scan is withheld whole.
-inline constexpr size_t kMessageScanLimit = 65536;
+inline constexpr size_t kMessageTextLimit = std::numeric_limits<size_t>::max();
+// The whole message is read, so a credential anywhere in it is withheld.
+inline constexpr size_t kMessageScanLimit = std::numeric_limits<size_t>::max();
 
 // One withheld part. The offset is where its marker begins in the recorded
 // text, in UTF-16 code units. The reason is kCredentialValue for a JSON Web

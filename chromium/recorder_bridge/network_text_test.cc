@@ -160,12 +160,14 @@ void TestMessageTextLimits() {
          "offsets count UTF-16 code units");
   const MessageText invalid = ReadMessageText("a\xFFz");
   Expect(invalid.text == "a\xEF\xBF\xBDz", "invalid UTF-8 is replaced");
-  const std::string long_message(
-      a11y_recorder::network_text::kMessageScanLimit + 10, 'b');
-  const MessageText scan = ReadMessageText(long_message, 1u << 20);
-  Expect(scan.truncated &&
-             scan.text.size() == a11y_recorder::network_text::kMessageScanLimit,
-         "a message longer than the scan is truncated at the scan");
+  // A long message is read and recorded whole, and a credential near its
+  // end is withheld.
+  const std::string long_message =
+      std::string(1u << 20, 'b') + " token=secretvalue";
+  const MessageText whole = ReadMessageText(long_message);
+  Expect(!whole.truncated && whole.withheld.size() == 1 &&
+             whole.text == std::string(1u << 20, 'b') + " token=[withheld]",
+         "a long message is recorded whole");
   Expect(kWithheldMarker == "[withheld]", "marker text");
 }
 

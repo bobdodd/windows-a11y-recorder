@@ -1831,9 +1831,8 @@ internal static class EventPayloadValidator
             issues);
     }
 
-    // The most UTF-16 code units a recorded message, event field, or close
-    // reason holds, and the marker written where a credential was withheld.
-    private const int RealtimeTextLimit = 4096;
+    // The marker written where a credential was withheld. A recorded message,
+    // event field, or close reason is otherwise recorded whole.
     private const string RealtimeWithheldMarker = "[withheld]";
 
     private static readonly string[] RealtimeWithheldReasons =
@@ -2016,15 +2015,6 @@ internal static class EventPayloadValidator
         if (text is null)
         {
             return;
-        }
-
-        if (text.Length > RealtimeTextLimit)
-        {
-            AddError(
-                issues,
-                "browser-network-text-too-long",
-                $"{path}/text",
-                $"A recorded text holds at most {RealtimeTextLimit} UTF-16 code units.");
         }
 
         if (!value.TryGetProperty("withheld", out var withheld) ||

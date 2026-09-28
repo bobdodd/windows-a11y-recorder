@@ -67,11 +67,11 @@ navigations and renderer DOM checkpoints, together with the renderer process
 ID on committed navigation records. Consumers join the two document identity
 namespaces only when browser instance, token, and renderer process all match.
 
-Protocol 0.15 adds bounded attribute and character-data evidence. Checkpoints
-emit the attribute state of every element node they record, and accepted
-attribute and character-data mutations are recorded as transitions. Values are
-recorded verbatim up to 4096 UTF-16 code units, with the full length and an
-explicit truncation flag on every value, and at most 64 attributes per node.
+Protocol 0.15 adds attribute and character-data evidence. Checkpoints emit
+the attribute state of every element node they record, and accepted attribute
+and character-data mutations are recorded as transitions. Values are recorded
+verbatim and whole, with the full length and an explicit truncation flag on
+every value, and every attribute of a node is recorded.
 An attribute or text mutation queues its document for a checkpoint.
 
 Protocol 0.16 changes how a transition and a checkpoint are related. A
@@ -296,9 +296,8 @@ of a layout checkpoint to be read by the recorder, which on one 65 second
 recording took a median of 250 ms per checkpoint with the processor mostly
 idle.
 
-The queue holds at most 64 MiB, sixteen times the protocol's message limit,
-counted from an estimate of each record's serialized size. A thread that queues
-a record when the limit is reached waits until the writer thread has written
+The queue holds at most 64 MiB, counted from an estimate of each record's
+serialized size. A thread that queues a record when the limit is reached waits until the writer thread has written
 enough, rather than the record being dropped, because the recorder must not
 reduce what the browser captures. A record larger than the limit is still
 accepted when nothing else is held. The queue is standard C++ with no Chromium
@@ -455,8 +454,7 @@ Protocol 0.27 records WebSocket, EventSource, and WebTransport channels on the
 `RecordBlinkWebTransportCreated`, `RecordBlinkWebTransportEstablished`,
 `RecordBlinkWebTransportCloseRequested`, and `RecordBlinkWebTransportClosed`.
 Message text, event data, and close reasons pass through
-`network_text::ReadMessageText`, which keeps up to 4096 UTF-16 code units and
-replaces any part that looks like a credential with `[withheld]`. A hook in
+`network_text::ReadMessageText`, which keeps the whole text and replaces any part that looks like a credential with `[withheld]`. A hook in
 `services/network/websocket.cc` makes the network service of a recording
 browser report the WebSocket handshake `Cookie` and `Set-Cookie` headers to
 the renderer with every value replaced, using the `cookie_names` source set,
