@@ -2,7 +2,10 @@
 
 ## Status
 
-Proposed. Nothing in this document is implemented. The Blink locations below
+Slice 1 (the recording file) is implemented on branch
+`recording-object-store` and awaits its test on the target Windows machine;
+see "Slice 1 status". The browser capture below is proposed and not
+implemented. The Blink locations below
 were read from the Chromium checkout on the target Windows machine, version
 156.0.8065.0 (`chrome/VERSION`), and must be read again if the checkout
 changes.
@@ -108,6 +111,17 @@ logger and records everything it finds.
   recorded on the current protocol. Recording insertions and removals lets the DOM be recorded
   in full, as a first walk and then its changes, without the 512-node limit.
 
+## No limit to nodes
+
+Requirement: the recorder records every node of every document, with no
+limit to the number of nodes. The current DOM checkpoint stops at 512 nodes
+(`kRecorderMaximumDomCheckpointNodes` in `chromium/integrate.py`) and the
+layout checkpoint at 100,000 (`kRecorderMaximumLayoutCheckpointNodes`). Both
+limits are removed in slices 3 and 4, when the full walk is needed only for a
+document's first rendering update and after a loss. Removing them before then
+would make every rendering update walk the whole document, which is the cost
+this design removes.
+
 ## How capture works
 
 1. During style recalculation, layout, and scrolling, the hooks only add the
@@ -133,12 +147,50 @@ logger and records everything it finds.
 
 ## Recording file
 
-The layout follows the MCAP container specification
-([MCAP](https://mcap.dev/spec)): records are written in batches called
-chunks, each compressed, with its start and end time and a checksum; a
-message index after each chunk locates each record by time; and a summary at
-the end locates every chunk. Whether to adopt MCAP itself or a format of the
-recorder's own with the same structure is decided in the first slice.
+The recording file is an MCAP file ([MCAP specification](https://mcap.dev/spec)):
+records are written in batches called chunks, each compressed, with its start
+and end time and a checksum; a message index after each chunk locates each
+record by time; and a summary at the end locates every chunk.
+
+MCAP was adopted, rather than a format of the recorder's own with the same
+structure, so that a recording can be read and checked with tools the
+recorder does not provide. The MCAP project publishes readers for C++, Go,
+Python, TypeScript, Swift, and Rust under the MIT license
+([foxglove/mcap](https://github.com/foxglove/mcap)), and a command-line tool
+that summarizes a file and checks it against the specification
+([MCAP CLI](https://mcap.dev/guides/cli)). No .NET library is published by
+the project, so the recorder's writer and reader
+(`src/Recorder.Database/RecordingFiles`) are written from the specification.
+Chunks are compressed with zstd, one of the compressions the specification
+names.
+
+How the recorder uses MCAP:
+
+- One file per recording, `recording.mcap`, in the session folder.
+- A metadata record named `recording` holds the recording identifier,
+  session key, start time, and the clock frequency and origin needed to
+  align timestamps.
+- One MCAP channel for each recorder channel and collector instance, with
+  the collector type, instance, producer version, and capture method as the
+  channel's metadata. The MCAP topic is the recorder channel. Messages have
+  no MCAP schema; the registry's `json` message encoding
+  ([MCAP registry](https://mcap.dev/spec/registry)) is used.
+- Each message is the recorder event's whole envelope as JSON, with the
+  payload kept as the text the collector sent, and the event key the writer
+  gave it. The MCAP log time is the event's session nanoseconds and the MCAP
+  sequence is the low 32 bits of the event's sequence.
+- A chunk holds the messages of one stream. Within a stream, messages are in
+  the order they were accepted; chunks of different streams overlap in time.
+  The MCAP CLI's check reports this overlap as warnings, one per message
+  whose time is earlier than a message of an earlier chunk, and passes the
+  file.
+- A chunk is written when it reaches 4 MiB of records, or when 1 s has
+  passed since its first record, whichever comes first, so a quiet stream is
+  on disk within about a second.
+- The writer's rejections and omissions are messages on the topic
+  `recorder.writer` in a fourth stream, `recorder`.
+
+The design this section proposed before slice 1:
 
 - Header: format version, recording identifier, and the clock information
   needed to align timestamps.
@@ -219,3 +271,43 @@ not note. The form is off in normal recording.
 4. Snapshots from the cache, DOM insertions and removals, and scroll
    offsets.
 5. The full walk kept only for a document's first update and after a loss.
+
+## Slice 1 status
+
+Implemented, and tested in the sandbox; not yet tested on the target Windows
+machine.
+
+- The app writes every accepted event to the recording file. PostgreSQL
+  holds the recording, its collectors and channels, the file's location in
+  `recording_files`, and its chunk index in `recording_file_chunks`
+  (migration `0012_recording_files.sql`). No event is written to the
+  evidence tables.
+- The writer keeps its checks, queue, spill file, retries, rejections, and
+  omissions, and writes one batch at a time so the file is in the order the
+  events were accepted.
+- A database outage during recording no longer loses or delays events: the
+  file does not depend on the database. What the database could not store
+  is reported with the recording's database status.
+- The player cannot open a recording made this way until slice 2, and says
+  so.
+
+Sandbox evidence, 2026-09-28:
+
+- Unit tests of the writer and reader: every event read back with its
+  envelope and payload text unchanged, including escapes, a NUL character,
+  a duplicate key, and exponent notation; chunks grouped by stream; a file
+  cut short at every byte from the start of its last chunk read up to its
+  last whole chunk; a chunk or summary whose bytes changed detected; a
+  batch written again adding nothing twice; a quiet stream written within
+  the chunk interval.
+- App tests with a real PostgreSQL server: a recording written to its file
+  with its chunk index in the database, and a recording during a server
+  outage completing with every event in its file.
+- A file of 1,000,000 generated events (788 MB of records, 82 MB on disk)
+  passed `mcap doctor` of MCAP CLI v0.3.0 and was summarized by `mcap info`,
+  and was read in full by the Python `mcap` library, version 1.5.0. Writing
+  it, with encoding and compression, took 17.7 s on the sandbox's two
+  processors, about 56,000 events per second. The recordings measured in
+  `session-database.md` averaged about 3,600 events per second. These are
+  figures from one run of generated events, not a measurement on the target
+  machine.

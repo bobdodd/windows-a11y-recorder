@@ -338,7 +338,7 @@ public sealed class PostgresEventBatchTarget(
                 .ConfigureAwait(false),
             await _keys.GetAsync(ReferenceKeys.EventTypes, record.EventType, cancellationToken)
                 .ConfigureAwait(false),
-            PostgresEventWriter.EvidenceClassId(record.EvidenceClass),
+            RecordingEventWriter.EvidenceClassId(record.EvidenceClass),
             (short)await _keys.GetAsync(ReferenceKeys.EventSchemaVersions, record.SchemaVersion, cancellationToken)
                 .ConfigureAwait(false),
             clockMapping,

@@ -3,14 +3,16 @@ using Npgsql;
 using Recorder.Contracts;
 using Recorder.Coordinator;
 using Recorder.Database;
+using Recorder.Database.RecordingFiles;
 using Recorder.Session;
 using static Recorder.Tests.DatabaseTestSupport;
 
 namespace Recorder.Tests;
 
 /// <summary>
-/// The coordinator writing recordings to a real PostgreSQL server. The session
-/// folder holds only the manifest and media files.
+/// The coordinator writing recordings with a real PostgreSQL server. The
+/// events are in the session folder's recording file; the database holds
+/// the recording, its collectors, and the file's chunk index.
 /// </summary>
 public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
 {
@@ -45,7 +47,7 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WritesTheRecordingToTheDatabase()
+    public async Task WritesTheRecordingToItsFileAndTheIndexToTheDatabase()
     {
         var token = TestContext.Current.CancellationToken;
         await using var database = await SessionDatabase.StartAsync(Options, token);
@@ -74,25 +76,53 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
         var recordingId = await RecordingIdAsync(database, sessionKey, token);
         Assert.Equal(RecordingStatus.Completed, await database.Store.GetStatusAsync(recordingId, token));
 
-        await using (var events = database.Server.DataSource.CreateCommand(
-            "SELECT c.name, e.sequence FROM events e JOIN channels c USING (channel_id) " +
-            "WHERE e.recording_id = $1 ORDER BY e.event_key"))
+        // No event is stored in the evidence tables.
+        await using (var rows = database.Server.DataSource.CreateCommand(
+            "SELECT count(*) FROM events WHERE recording_id = $1"))
         {
-            events.Parameters.AddWithValue(recordingId);
-            var stored = new List<(string Channel, long Sequence)>();
-            await using var reader = await events.ExecuteReaderAsync(token);
-            while (await reader.ReadAsync(token))
-            {
-                stored.Add((reader.GetString(0), reader.GetInt64(1)));
-            }
+            rows.Parameters.AddWithValue(recordingId);
+            Assert.Equal(0L, await rows.ExecuteScalarAsync(token));
+        }
 
-            Assert.Equal(stopped.AcceptedEvents, stored.Count);
+        var filePath = Path.Combine(stopped.SessionDirectory!, SessionDatabase.RecordingFileName);
+        IReadOnlyList<RecordingFileChunk> fileChunks;
+        using (var file = RecordingFileReader.Open(filePath))
+        {
+            Assert.True(file.HasSummary);
+            Assert.Equal(recordingId.ToString(), file.Metadata["recording"]["recordingId"]);
+            Assert.Equal(sessionKey, file.Metadata["recording"]["sessionKey"]);
+            var stored = file.ReadAll()
+                .Select(message => RecordingEventCodec.Decode(message.Data.Span))
+                .OrderBy(item => item.EventKey)
+                .Select(item => (item.Event.Channel, (long)item.Event.Sequence))
+                .ToArray();
+            Assert.Equal(stopped.AcceptedEvents, stored.Length);
             Assert.Contains(("session.annotations", 0L), stored);
             Assert.Equal(
                 [0L, 1L],
                 stored.Where(item => item.Channel == "test.database.events")
-                    .Select(item => item.Sequence)
+                    .Select(item => item.Item2)
                     .Order());
+            fileChunks = file.Chunks;
+        }
+
+        await using (var index = database.Server.DataSource.CreateCommand(
+            "SELECT f.path, f.finished, f.byte_length, f.message_count, f.chunk_count, " +
+            "(SELECT array_agg(c.chunk_offset ORDER BY c.chunk_ordinal) FROM recording_file_chunks c " +
+            "WHERE c.recording_id = f.recording_id), " +
+            "(SELECT sum(c.message_count) FROM recording_file_chunks c WHERE c.recording_id = f.recording_id) " +
+            "FROM recording_files f WHERE f.recording_id = $1"))
+        {
+            index.Parameters.AddWithValue(recordingId);
+            await using var reader = await index.ExecuteReaderAsync(token);
+            Assert.True(await reader.ReadAsync(token));
+            Assert.Equal(SessionDatabase.RecordingFileName, reader.GetString(0));
+            Assert.True(reader.GetBoolean(1));
+            Assert.Equal(new FileInfo(filePath).Length, reader.GetInt64(2));
+            Assert.Equal(stopped.AcceptedEvents, reader.GetInt64(3));
+            Assert.Equal(fileChunks.Count, reader.GetInt32(4));
+            Assert.Equal(fileChunks.Select(chunk => chunk.Offset), reader.GetFieldValue<long[]>(5));
+            Assert.Equal(stopped.AcceptedEvents, reader.GetDecimal(6));
         }
 
         await using (var recording = database.Server.DataSource.CreateCommand(
@@ -154,7 +184,7 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ReportsEventsTheDatabaseDidNotTakeAndMarksTheRecordingInterruptedAtNextStart()
+    public async Task ADatabaseOutageLosesNoEventsAndMarksTheRecordingInterruptedAtNextStart()
     {
         var token = TestContext.Current.CancellationToken;
         RecordingSessionStatus stopped;
@@ -173,15 +203,26 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
             stopped = await coordinator.StopAsync(token);
         }
 
-        // Events the database did not take fail the recording.
-        Assert.Equal(RecordingSessionState.Failed, stopped.State);
-        Assert.Contains("were not written to the database", stopped.Message);
+        // Events are written to the recording file, which does not depend on
+        // the database; what the database could not store is reported.
+        Assert.Equal(RecordingSessionState.Completed, stopped.State);
         var status = Assert.IsType<RecordingDatabaseStatus>(stopped.Database);
-        Assert.True(status.Unwritten > 0);
+        Assert.Equal(0, status.Unwritten);
+        Assert.Equal(stopped.AcceptedEvents, status.Written);
         Assert.NotNull(status.Problem);
-        Assert.Contains("were not written to the database", status.Problem);
+        Assert.Contains("index was not stored", status.Problem);
         Assert.Contains("final status was not stored", status.Problem);
-        Assert.True(File.Exists(spillPath));
+        Assert.False(File.Exists(spillPath));
+        using (var file = RecordingFileReader.Open(
+                   Path.Combine(stopped.SessionDirectory!, SessionDatabase.RecordingFileName)))
+        {
+            Assert.True(file.HasSummary);
+            var annotations = file.ReadAll()
+                .Select(message => RecordingEventCodec.Decode(message.Data.Span).Event)
+                .Where(record => record.Channel == "session.annotations")
+                .ToArray();
+            Assert.Contains(annotations, record => record.Payload.GetRawText().Contains("While the database is down", StringComparison.Ordinal));
+        }
 
         await using var restarted = await SessionDatabase.StartAsync(Options, token);
         Assert.Equal(1, restarted.InterruptedRecordingsAtStart);
@@ -220,10 +261,12 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
             root.GetProperty("artifacts").EnumerateArray(),
             item => item.GetProperty("path").GetString() == "events.ndjson");
 
+        // Playback from the recording file is not implemented yet; the
+        // player is told why the recording does not open.
         var opened = await database.OpenRecordingAsync(stopped.SessionDirectory!, token);
-        var archive = Assert.IsType<SessionPlaybackArchive>(opened.Archive);
+        Assert.Null(opened.Archive);
         Assert.Equal(RecordingStatus.Completed, opened.Status);
-        Assert.Equal(3, archive.Timeline.Count);
+        Assert.Contains("recording file", opened.Reason);
     }
 
     [Fact]
@@ -278,8 +321,15 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
             token);
         Assert.Equal(RecordingStatus.Failed, await database.Store.GetStatusAsync(recordingId, token));
         var opened = await database.OpenRecordingAsync(stopped.SessionDirectory!, token);
-        Assert.NotNull(opened.Archive);
         Assert.Equal(RecordingStatus.Failed, opened.Status);
+
+        // The rejection is in the recording file with the events.
+        using var file = RecordingFileReader.Open(
+            Path.Combine(stopped.SessionDirectory!, SessionDatabase.RecordingFileName));
+        var rejection = Assert.Single(
+            file.ReadAll(),
+            message => message.Channel.Topic == RecordingFileBatchTarget.WriterTopic);
+        Assert.Contains("sequence-not-increasing", System.Text.Encoding.UTF8.GetString(rejection.Data.Span));
     }
 
     [Fact]

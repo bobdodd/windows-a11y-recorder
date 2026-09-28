@@ -29,7 +29,8 @@ public sealed class EvidenceMigrationTests
         ("0008_other_channel_payloads.sql", "84fd19e366fc452632943b1fc728c400de0d1c164132efd153b7ef1e51ddd7ec"),
         ("0009_unpartitioned_recording_tables.sql", "1bae83d161af368b5d74a35314051e0392a46a01db37c613b30b1f0f1ccb762a"),
         ("0010_shared_computed_styles.sql", "c02a433d2c631188d087edcca5caaa6819793149083bd7c9263799c46e5e936e"),
-        ("0011_bulk_reference_checks.sql", "c99eea0f8615e7137f6b80574d3036f798e66c3391ae0d5b1dfcfeb5362162ae")
+        ("0011_bulk_reference_checks.sql", "c99eea0f8615e7137f6b80574d3036f798e66c3391ae0d5b1dfcfeb5362162ae"),
+        ("0012_recording_files.sql", "556d44ce5bc725b84670bf4ec4f7902b8cad43c82ba83166d0ad8d6a37a9b09f")
     ];
 
     [Fact]
@@ -271,12 +272,12 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
 
         var serial = Rounds(serialKey);
         var parallel = Rounds(parallelKey);
-        await WriteAsync(serialKey, serialId, serial, options: new PostgresEventWriterOptions
+        await WriteAsync(serialKey, serialId, serial, options: new RecordingEventWriterOptions
         {
             SpillPath = string.Empty,
             WriterConnections = 1
         });
-        var result = await WriteAsync(parallelKey, parallelId, parallel, options: new PostgresEventWriterOptions
+        var result = await WriteAsync(parallelKey, parallelId, parallel, options: new RecordingEventWriterOptions
         {
             SpillPath = string.Empty,
             BatchSize = 7,
@@ -824,19 +825,19 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         return (sessionKey, recordingId);
     }
 
-    private async Task<PostgresEventWriterResult> WriteAsync(
+    private async Task<RecordingEventWriterResult> WriteAsync(
         string sessionKey,
         Guid recordingId,
         IReadOnlyList<RecorderEvent> events,
         bool expectRejections = false,
         NpgsqlDataSource? dataSource = null,
-        PostgresEventWriterOptions? options = null)
+        RecordingEventWriterOptions? options = null)
     {
         dataSource ??= DataSource;
-        var writer = new PostgresEventWriter(
+        var writer = new RecordingEventWriter(
             new PostgresEventBatchTarget(dataSource, recordingId),
             sessionKey,
-            (options ?? new PostgresEventWriterOptions { SpillPath = string.Empty }) with
+            (options ?? new RecordingEventWriterOptions { SpillPath = string.Empty }) with
             {
                 SpillPath = Path.Combine(fixture.DataDirectory, "spill", Guid.NewGuid().ToString("N") + ".ndjson"),
                 ChannelCapacity = events.Count

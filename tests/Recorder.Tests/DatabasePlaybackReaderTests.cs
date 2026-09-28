@@ -454,10 +454,10 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         var store = new RecordingStore(dataSource);
         var projectId = await store.EnsureProjectAsync("Playback", token);
         var recordingId = await store.CreateRecordingAsync(projectId, Definition(sessionKey), token);
-        var writer = new PostgresEventWriter(
+        var writer = new RecordingEventWriter(
             new PostgresEventBatchTarget(dataSource, recordingId),
             sessionKey,
-            new PostgresEventWriterOptions
+            new RecordingEventWriterOptions
             {
                 SpillPath = Path.Combine(_root, sessionKey + ".spill.ndjson"),
                 ChannelCapacity = events.Count

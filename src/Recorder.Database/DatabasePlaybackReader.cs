@@ -67,6 +67,21 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
                 "The recording is still being recorded.");
         }
 
+        // A recording whose events are in a recording file has no rows in
+        // the evidence tables this reader reads.
+        await using (var file = dataSource.CreateCommand(
+            "SELECT path FROM recording_files WHERE recording_id = $1"))
+        {
+            file.Parameters.AddWithValue(recordingId);
+            if (await file.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is string path)
+            {
+                return new DatabasePlaybackResult(
+                    null,
+                    status,
+                    $"This recording's events are in its recording file, {path}, which the player does not read yet.");
+            }
+        }
+
         var archive = await LoadAsync(recordingId, sessionKey, root, cancellationToken)
             .ConfigureAwait(false);
         return new DatabasePlaybackResult(archive, status, null);

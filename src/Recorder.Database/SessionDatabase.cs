@@ -1,4 +1,5 @@
 using Recorder.Contracts;
+using Recorder.Database.RecordingFiles;
 
 namespace Recorder.Database;
 
@@ -139,31 +140,52 @@ public sealed class SessionDatabase : IAsyncDisposable
     public string SpillPathFor(string sessionKey) =>
         Path.Combine(_server.DataDirectory, "spill", sessionKey + ".ndjson");
 
+    /// <summary>The name of a recording's recording file in its session folder.</summary>
+    public const string RecordingFileName = "recording.mcap";
+
     /// <summary>
-    /// Creates a recording in the recording state and a writer for its
-    /// events. Without writer options, the writer uses its defaults and
-    /// <see cref="SpillPathFor"/>.
+    /// Creates a recording in the recording state, its recording file in
+    /// the session folder, and a writer for its events. Without writer
+    /// options, the writer uses its defaults and <see cref="SpillPathFor"/>.
+    /// The writer writes one batch at a time, so the file's records are in
+    /// the order the events were accepted.
     /// </summary>
     public async Task<DatabaseRecording> BeginRecordingAsync(
         RecordingDefinition definition,
-        PostgresEventWriterOptions? writerOptions = null,
+        string sessionDirectory,
+        RecordingEventWriterOptions? writerOptions = null,
+        RecordingFileWriterOptions? fileOptions = null,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(definition);
-        writerOptions ??= new PostgresEventWriterOptions
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionDirectory);
+        writerOptions ??= new RecordingEventWriterOptions
         {
             SpillPath = SpillPathFor(definition.SessionKey),
             CompletionTimeout = WriterCompletionTimeout,
             Timings = new WriterTimings()
         };
+        writerOptions = writerOptions with { WriterConnections = 1 };
         var recordingId = await _store.CreateRecordingAsync(ProjectId, definition, cancellationToken)
             .ConfigureAwait(false);
-        var writer = new PostgresEventWriter(
-            new PostgresEventBatchTarget(_server.DataSource, recordingId, writerOptions.Timings),
-            definition.SessionKey,
-            writerOptions);
-        return new DatabaseRecording(_store, recordingId, writer, writerOptions.Timings);
+        await _store.AddRecordingFileAsync(recordingId, RecordingFileName, cancellationToken)
+            .ConfigureAwait(false);
+        var target = new RecordingFileBatchTarget(
+            Path.Combine(sessionDirectory, RecordingFileName),
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["recordingId"] = recordingId.ToString(),
+                ["sessionKey"] = definition.SessionKey,
+                ["startedUtc"] = definition.StartedUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                ["clockFrequency"] = definition.ClockFrequency.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["clockOriginTimestamp"] = definition.ClockOriginTimestamp.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["timeUnit"] = "session nanoseconds"
+            },
+            fileOptions,
+            writerOptions.Timings);
+        var writer = new RecordingEventWriter(target, definition.SessionKey, writerOptions);
+        return new DatabaseRecording(_store, recordingId, writer, target, writerOptions.Timings);
     }
 
     public async ValueTask DisposeAsync()
@@ -189,7 +211,7 @@ public sealed class SessionDatabase : IAsyncDisposable
 /// is marked interrupted when the app next starts.
 /// </param>
 public sealed record DatabaseRecordingResult(
-    PostgresEventWriterResult Writer,
+    RecordingEventWriterResult Writer,
     string? CompletionError);
 
 /// <summary>
@@ -198,19 +220,26 @@ public sealed record DatabaseRecordingResult(
 public sealed class DatabaseRecording : IAsyncDisposable
 {
     private readonly RecordingStore _store;
-    private PostgresEventWriterResult? _written;
+    private readonly RecordingFileBatchTarget _file;
+    private RecordingEventWriterResult? _written;
+    private string? _fileProblem;
 
     internal DatabaseRecording(
         RecordingStore store,
         Guid recordingId,
-        PostgresEventWriter writer,
+        RecordingEventWriter writer,
+        RecordingFileBatchTarget file,
         WriterTimings? timings = null)
     {
         _store = store;
         RecordingId = recordingId;
         Writer = writer;
+        _file = file;
         Timings = timings;
     }
+
+    /// <summary>The recording file the events are written to.</summary>
+    public string RecordingFilePath => _file.Path;
 
     public Guid RecordingId { get; }
 
@@ -218,7 +247,7 @@ public sealed class DatabaseRecording : IAsyncDisposable
     public WriterTimings? Timings { get; }
 
     /// <summary>The sink collectors' events are written to.</summary>
-    public PostgresEventWriter Writer { get; }
+    public RecordingEventWriter Writer { get; }
 
     public Task RegisterCollectorsAsync(
         IEnumerable<CollectorRegistration> collectors,
@@ -226,18 +255,41 @@ public sealed class DatabaseRecording : IAsyncDisposable
         _store.RegisterCollectorsAsync(RecordingId, collectors, cancellationToken);
 
     /// <summary>
-    /// Stops accepting events and waits, up to the writer's completion
-    /// timeout, for the accepted events to be written.
+    /// Stops accepting events, waits, up to the writer's completion timeout,
+    /// for the accepted events to be written, and then writes the recording
+    /// file's summary and footer. A file that could not be finished is
+    /// reported, and the chunks written before remain readable.
     /// </summary>
-    public async Task<PostgresEventWriterResult> FinishWritingAsync() =>
-        _written ??= await Writer.CompleteAsync().ConfigureAwait(false);
+    public async Task<RecordingEventWriterResult> FinishWritingAsync()
+    {
+        if (_written is not null)
+        {
+            return _written;
+        }
+
+        var written = await Writer.CompleteAsync().ConfigureAwait(false);
+        try
+        {
+            _file.Finish();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        {
+            _fileProblem = $"The recording file could not be finished: {exception.Message}";
+        }
+
+        _written = written;
+        return written;
+    }
+
+    /// <summary>Why the recording file could not be finished, or null.</summary>
+    public string? FileProblem => _fileProblem;
 
     /// <summary>
     /// Why writing made a recording failed: events that failed their checks
     /// and were not stored, and accepted events the database did not take
     /// in time. Empty when every accepted event was stored.
     /// </summary>
-    public static IReadOnlyList<string> WritingFailures(PostgresEventWriterResult written)
+    public static IReadOnlyList<string> WritingFailures(RecordingEventWriterResult written)
     {
         ArgumentNullException.ThrowIfNull(written);
         var reasons = new List<string>();
@@ -251,7 +303,7 @@ public sealed class DatabaseRecording : IAsyncDisposable
         if (written.UnwrittenCount > 0)
         {
             reasons.Add(
-                $"{written.UnwrittenCount} accepted events were not written to the database " +
+                $"{written.UnwrittenCount} accepted events were not written to the recording file " +
                 $"and remain in {written.SpillPath}." +
                 (written.LastError is null ? string.Empty : $" Last error: {written.LastError}"));
         }
@@ -260,12 +312,12 @@ public sealed class DatabaseRecording : IAsyncDisposable
     }
 
     /// <summary>
-    /// Finishes writing, if that has not been done, checks the references
-    /// between the rows written, and stores the recording's final status and
-    /// counts. Events that failed their checks, events the writer could not
-    /// write, and stored rows that refer to missing rows make a completed
-    /// recording failed, with the reasons stated after
-    /// <paramref name="failure"/>.
+    /// Finishes writing, if that has not been done, stores the recording
+    /// file's chunk index and the collectors whose events it holds, and
+    /// stores the recording's final status and counts. Events that failed
+    /// their checks, events the writer could not write, and a recording file
+    /// that could not be finished make a completed recording failed, with
+    /// the reasons stated after <paramref name="failure"/>.
     /// </summary>
     public async Task<DatabaseRecordingResult> CompleteAsync(
         RecordingStatus status,
@@ -282,20 +334,33 @@ public sealed class DatabaseRecording : IAsyncDisposable
         }
 
         var writing = new List<string>(WritingFailures(written));
+        if (_fileProblem is not null)
+        {
+            writing.Add(_fileProblem);
+        }
 
-        // The writer's tables have no foreign keys between them, so the
-        // references of the rows it stored are checked once, here.
-        var checking = System.Diagnostics.Stopwatch.GetTimestamp();
+        // The index can be rebuilt from the file, so a failure to store it
+        // is reported with the database status and does not fail the
+        // recording.
+        var indexing = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
-            writing.AddRange(await _store.CheckReferencesAsync(RecordingId, Timings, cancellationToken).ConfigureAwait(false));
+            await _store.StoreRecordingFileIndexAsync(
+                RecordingId,
+                _fileProblem is null,
+                _file.ByteLength,
+                _file.MessageCount,
+                _file.Chunks,
+                cancellationToken).ConfigureAwait(false);
+            await _store.AddEventCollectorsAsync(RecordingId, _file.Collectors, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            writing.Add($"The references between the stored rows could not be checked: {exception.Message}");
+            IndexProblem = $"The recording file's index was not stored: {exception.Message}";
         }
 
-        Timings?.Since("complete.check-references", checking);
+        Timings?.Since("complete.store-index", indexing);
         reasons.AddRange(writing);
         if (writing.Count > 0 && status == RecordingStatus.Completed)
         {
@@ -322,9 +387,13 @@ public sealed class DatabaseRecording : IAsyncDisposable
         }
     }
 
+    /// <summary>Why the recording file's index could not be stored, or null.</summary>
+    public string? IndexProblem { get; private set; }
+
     public async ValueTask DisposeAsync()
     {
         await Writer.DisposeAsync().ConfigureAwait(false);
+        _file.Dispose();
         Timings?.Dispose();
     }
 }

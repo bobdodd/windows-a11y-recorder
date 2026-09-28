@@ -68,10 +68,10 @@ public sealed class OtherChannelPayloadMigrationTests(EmbeddedPostgresFixture fi
         var recordingId = await store.CreateRecordingAsync(project, Definition(sessionKey), token);
         await CreateLegacyPartitionsAsync(dataSource, recordingId, token);
         var collector = Collector("test.upgrade", "session.annotations");
-        var writer = new PostgresEventWriter(
+        var writer = new RecordingEventWriter(
             new PostgresEventBatchTarget(dataSource, recordingId),
             sessionKey,
-            new PostgresEventWriterOptions
+            new RecordingEventWriterOptions
             {
                 SpillPath = Path.Combine(fixture.DataDirectory, "spill", Guid.NewGuid().ToString("N") + ".ndjson"),
                 ChannelCapacity = 2

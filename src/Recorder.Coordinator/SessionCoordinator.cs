@@ -16,7 +16,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
     private IRecorderEventSink? _sink;
     private DatabaseRecording? _databaseRecording;
     private DatabaseRecordingResult? _databaseResult;
-    private PostgresEventWriterResult? _written;
+    private RecordingEventWriterResult? _written;
     private string? _databaseProblem;
     private ArtifactHashRegistry _artifactHashes = new();
     private RecordingOptions? _options;
@@ -144,6 +144,7 @@ public sealed class SessionCoordinator : IAsyncDisposable
                     RuntimeInformation.FrameworkDescription,
                     RuntimeInformation.ProcessArchitecture.ToString(),
                     CaptureSettings(options)),
+                _sessionDirectory,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             _sink = _databaseRecording.Writer;
 
@@ -270,13 +271,18 @@ public sealed class SessionCoordinator : IAsyncDisposable
             await DisposeCollectorsAsync().ConfigureAwait(false);
             var endedUtc = DateTimeOffset.UtcNow;
 
-            // Every event is in the database, or reported as not written,
-            // before the manifest states the recording's outcome and counts.
+            // Every event is in the recording file, or reported as not
+            // written, before the manifest states the recording's outcome
+            // and counts.
             _written = await _databaseRecording!.FinishWritingAsync().ConfigureAwait(false);
             var collectorFailure = failures.Count == 0
                 ? null
                 : string.Join(Environment.NewLine, failures);
             failures.AddRange(DatabaseRecording.WritingFailures(_written));
+            if (_databaseRecording.FileProblem is { } fileProblem)
+            {
+                failures.Add(fileProblem);
+            }
             State = failures.Count == 0
                 ? RecordingSessionState.Completed
                 : RecordingSessionState.Failed;
@@ -384,8 +390,13 @@ public sealed class SessionCoordinator : IAsyncDisposable
         if (writer.UnwrittenCount > 0)
         {
             AddDatabaseProblem(
-                $"{writer.UnwrittenCount:N0} events were not written to the database " +
+                $"{writer.UnwrittenCount:N0} events were not written to the recording file " +
                 $"and remain in {writer.SpillPath}.");
+        }
+
+        if (_databaseRecording.IndexProblem is { } indexProblem)
+        {
+            AddDatabaseProblem(indexProblem);
         }
 
         if (_databaseResult.CompletionError is { } error)

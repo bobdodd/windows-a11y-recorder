@@ -47,7 +47,8 @@ public sealed record RecordingCompletion(
 
 /// <summary>
 /// Creates and updates projects, recordings, and the collectors of a
-/// recording. A recording's events are written by <see cref="PostgresEventWriter"/>.
+/// recording. A recording's events are written by <see cref="RecordingEventWriter"/>
+/// to its recording file, whose chunk index is stored here.
 /// </summary>
 public sealed class RecordingStore(NpgsqlDataSource dataSource)
 {
@@ -215,6 +216,155 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Adds each collector whose events a recording file holds, with the
+    /// channels it wrote, when it is not already registered, as the earlier
+    /// writer did when it first saw one of a collector's events.
+    /// </summary>
+    public async Task AddEventCollectorsAsync(
+        Guid recordingId,
+        IEnumerable<RecordingFiles.EventCollector> collectors,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(collectors);
+        foreach (var collector in collectors)
+        {
+            var kind = await _keys.GetCollectorKindAsync(
+                collector.CollectorType,
+                collector.ProducerVersion,
+                collector.CaptureMethod,
+                cancellationToken).ConfigureAwait(false);
+            var (recordingCollectorId, _) = await ReferenceKeys.GetRecordingCollectorAsync(
+                dataSource,
+                recordingId,
+                collector.InstanceId,
+                kind,
+                cancellationToken).ConfigureAwait(false);
+            foreach (var channel in collector.Channels)
+            {
+                var channelId = await _keys.GetAsync(ReferenceKeys.Channels, channel, cancellationToken)
+                    .ConfigureAwait(false);
+                await using var connection = await dataSource.OpenConnectionAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                await using var command = new NpgsqlCommand(
+                    "INSERT INTO recording_collector_channels (recording_collector_id, channel_id) " +
+                    "VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                    connection);
+                command.Parameters.AddWithValue(recordingCollectorId);
+                command.Parameters.AddWithValue((short)channelId);
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records where a recording's events are stored: its recording file,
+    /// as a path relative to the session folder, not yet finished.
+    /// </summary>
+    public async Task AddRecordingFileAsync(
+        Guid recordingId,
+        string relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "INSERT INTO recording_files (recording_id, path, format) VALUES ($1, $2, 'mcap')",
+            connection);
+        command.Parameters.AddWithValue(recordingId);
+        command.Parameters.AddWithValue(relativePath);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stores the index of a recording file's chunks and what the file
+    /// holds, replacing any index stored before, in one transaction.
+    /// </summary>
+    public async Task StoreRecordingFileIndexAsync(
+        Guid recordingId,
+        bool finished,
+        long byteLength,
+        long messageCount,
+        IReadOnlyList<RecordingFiles.RecordingFileChunk> chunks,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(chunks);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await using (var clear = new NpgsqlCommand(
+            "DELETE FROM recording_file_chunks WHERE recording_id = $1",
+            connection,
+            transaction))
+        {
+            clear.Parameters.AddWithValue(recordingId);
+            await clear.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using (var importer = await connection.BeginBinaryImportAsync(
+            "COPY recording_file_chunks (recording_id, chunk_ordinal, stream, message_start_time, " +
+            "message_end_time, message_count, chunk_offset, chunk_length, compressed_size, " +
+            "uncompressed_size) FROM STDIN (FORMAT BINARY)",
+            cancellationToken).ConfigureAwait(false))
+        {
+            foreach (var chunk in chunks)
+            {
+                await importer.StartRowAsync(cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(recordingId, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.Ordinal, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.Stream, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.StartTime, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.EndTime, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.MessageCount ?? 0, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.Offset, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.Length, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.CompressedSize, cancellationToken).ConfigureAwait(false);
+                await importer.WriteAsync(chunk.UncompressedSize, cancellationToken).ConfigureAwait(false);
+            }
+
+            await importer.CompleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using (var update = new NpgsqlCommand(
+            "UPDATE recording_files SET finished = $2, byte_length = $3, message_count = $4, " +
+            "chunk_count = $5, message_start_time = $6, message_end_time = $7 WHERE recording_id = $1",
+            connection,
+            transaction))
+        {
+            update.Parameters.AddWithValue(recordingId);
+            update.Parameters.AddWithValue(finished);
+            update.Parameters.AddWithValue(byteLength);
+            update.Parameters.AddWithValue(messageCount);
+            update.Parameters.AddWithValue(chunks.Count);
+            update.Parameters.AddWithValue(
+                chunks.Count == 0 ? DBNull.Value : chunks.Min(chunk => chunk.StartTime));
+            update.Parameters.AddWithValue(
+                chunks.Count == 0 ? DBNull.Value : chunks.Max(chunk => chunk.EndTime));
+            if (await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new InvalidOperationException($"Recording {recordingId} has no recording file.");
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The recording file of a recording, relative to its session folder, or null.</summary>
+    public async Task<string?> GetRecordingFileAsync(
+        Guid recordingId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "SELECT path FROM recording_files WHERE recording_id = $1",
+            connection);
+        command.Parameters.AddWithValue(recordingId);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
     }
 
     public async Task CompleteRecordingAsync(

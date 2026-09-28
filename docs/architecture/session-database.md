@@ -4,6 +4,20 @@ Status: decided, implemented on the `postgres-session-store` branch and not
 yet merged. This record states the decision and the design it implies. It
 replaced the file-based event log and the checks built around it.
 
+## Reversal of decisions 3 and 5
+
+Decisions 3 (a normalized schema) and 5 (events go straight into the
+database) are reversed by
+[Change-Driven Browser Capture and Recording Files](change-driven-recording.md).
+A recording's events are written to a recording file of its own, an MCAP
+file in the session folder, and PostgreSQL keeps the projects, recordings,
+their collectors and channels, the file's location, and its chunk index. The
+evidence tables of migrations 0001 to 0011 remain in the schema and are not
+written for a recording that has a recording file. Decisions 1, 2, 4, 6,
+and 7 stand. The reasons and the measurements that led to the reversal are
+in that document. The rest of this record describes the design as it was
+decided and implemented before the reversal.
+
 ## Context
 
 Before this decision, the recorder wrote every event to one append-only file,
@@ -532,7 +546,7 @@ only once the database version is tested in full. It adds the
   both, so the larger buffers did not change the time spent committing.
   These figures are from one run and are not a substitute for the system
   test.
-- **Parallel writing.** `PostgresEventWriter` writes up to
+- **Parallel writing.** `RecordingEventWriter` writes up to
   `WriterConnections` batches at once, four by default; while the database
   is unavailable it retries one batch at a time. Each batch is written by
   `PostgresEventBatchTarget` in one transaction that defers its remaining
@@ -569,7 +583,7 @@ only once the database version is tested in full. It adds the
   `recording_references`, and position in `recording_tables` after the
   tables it refers to; that no foreign key refers to another per-recording
   table or to `names`; and that every remaining foreign key is deferrable.
-- **Writing.** `PostgresEventWriter` checks each record with
+- **Writing.** `RecordingEventWriter` checks each record with
   `EventRecordValidator`, which checks the envelope and passes the payload to
   `EventPayloadValidator`, and rejects a record that fails into
   `event_rejections` with the first issue's code, such as

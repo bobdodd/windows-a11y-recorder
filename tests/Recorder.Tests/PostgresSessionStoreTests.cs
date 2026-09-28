@@ -318,15 +318,15 @@ public sealed class PostgresSessionStoreTests(EmbeddedPostgresFixture fixture)
         return (sessionKey, recordingId, projectId);
     }
 
-    private async Task<PostgresEventWriterResult> WriteAsync(
+    private async Task<RecordingEventWriterResult> WriteAsync(
         string sessionKey,
         Guid recordingId,
         params RecorderEvent[] events)
     {
-        var writer = new PostgresEventWriter(
+        var writer = new RecordingEventWriter(
             new PostgresEventBatchTarget(DataSource, recordingId),
             sessionKey,
-            new PostgresEventWriterOptions
+            new RecordingEventWriterOptions
             {
                 SpillPath = Path.Combine(fixture.DataDirectory, "spill", recordingId + ".ndjson"),
                 BatchInterval = TimeSpan.FromMilliseconds(10)
@@ -440,10 +440,10 @@ public sealed class PostgresServerLifecycleTests : IAsyncLifetime
 
         // The writer's own data source outlives the server it was opened on.
         await using var writerSource = NpgsqlDataSource.Create(server.ConnectionString);
-        var writer = new PostgresEventWriter(
+        var writer = new RecordingEventWriter(
             new PostgresEventBatchTarget(writerSource, recordingId),
             sessionKey,
-            new PostgresEventWriterOptions
+            new RecordingEventWriterOptions
             {
                 SpillPath = Path.Combine(_dataDirectory, "spill.ndjson"),
                 BatchInterval = TimeSpan.FromMilliseconds(10),

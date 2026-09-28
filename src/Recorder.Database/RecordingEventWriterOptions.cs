@@ -1,6 +1,6 @@
 namespace Recorder.Database;
 
-public sealed record PostgresEventWriterOptions
+public sealed record RecordingEventWriterOptions
 {
     /// <summary>Events accepted but not yet taken by the writer loop.</summary>
     public int ChannelCapacity { get; init; } = 65_536;

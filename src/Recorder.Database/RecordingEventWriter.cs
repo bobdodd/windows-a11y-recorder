@@ -1,27 +1,28 @@
 using System.Threading.Channels;
 using Recorder.Contracts;
+using Recorder.Database.RecordingFiles;
 using Recorder.Session;
 
 namespace Recorder.Database;
 
 /// <summary>What the writer did with the events it was given.</summary>
-/// <param name="AcceptedCount">Events taken by <see cref="PostgresEventWriter.TryWrite"/>.</param>
+/// <param name="AcceptedCount">Events taken by <see cref="RecordingEventWriter.TryWrite"/>.</param>
 /// <param name="DroppedCount">
 /// Events refused because the writer's queue was full, and events dropped
-/// because the memory buffer and spill file were full while the database was
+/// because the memory buffer and spill file were full while the store was
 /// not accepting writes.
 /// </param>
 /// <param name="RejectedCount">Events refused because they failed a check.</param>
-/// <param name="WrittenCount">Events stored in the database.</param>
+/// <param name="WrittenCount">Events stored.</param>
 /// <param name="FirstRejection">
 /// The channel, event type, and check code of the first rejected event, or
 /// null when no event was rejected.
 /// </param>
 /// <param name="UnwrittenCount">
-/// Accepted events not stored when the writer finished, because the database
+/// Accepted events not stored when the writer finished, because the store
 /// did not accept them in time. They remain in <paramref name="SpillPath"/>.
 /// </param>
-public sealed record PostgresEventWriterResult(
+public sealed record RecordingEventWriterResult(
     long AcceptedCount,
     long DroppedCount,
     long RejectedCount,
@@ -32,14 +33,14 @@ public sealed record PostgresEventWriterResult(
     string? FirstRejection = null);
 
 /// <summary>
-/// Writes a recording's events to the database during capture. Events are
-/// checked, queued, and written in batches, several at once, each in a
-/// transaction of its own. While the database is not
-/// accepting writes, events are held in memory, then in a spill file, both
-/// bounded; beyond the bound, events are dropped and the run of dropped
-/// events is recorded.
+/// Writes a recording's events to its store during capture: the recording
+/// file, or for tests of the earlier evidence tables, the database. Events
+/// are checked, queued, and written in batches, up to the configured number
+/// at once. While the store is not accepting writes, events are held in
+/// memory, then in a spill file, both bounded; beyond the bound, events are
+/// dropped and the run of dropped events is recorded.
 /// </summary>
-public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
+public sealed class RecordingEventWriter : IRecorderEventSink, IAsyncDisposable
 {
     private static readonly Dictionary<string, short> EvidenceClassIds = new(StringComparer.Ordinal)
     {
@@ -50,7 +51,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     };
 
     private readonly IEventBatchTarget _target;
-    private readonly PostgresEventWriterOptions _options;
+    private readonly RecordingEventWriterOptions _options;
     private readonly Channel<RecorderEvent> _channel;
     private readonly Queue<BufferedEvent> _memory = new();
     private readonly SpillFile _spill;
@@ -74,7 +75,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     private volatile bool _databaseUnavailable;
     private string? _firstRejection;
     private bool _completed;
-    private PostgresEventWriterResult? _result;
+    private RecordingEventWriterResult? _result;
     private readonly WriterTimings? _timings;
 
     // Read by the timings sampler on another thread.
@@ -82,10 +83,10 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     private long _spilledCount;
     private int _inFlightCount;
 
-    public PostgresEventWriter(
+    public RecordingEventWriter(
         IEventBatchTarget target,
         string sessionKey,
-        PostgresEventWriterOptions options,
+        RecordingEventWriterOptions options,
         long firstEventKey = 0)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -146,7 +147,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
     /// Stops accepting events and waits, up to the completion timeout, for
     /// every accepted event to be written.
     /// </summary>
-    public async Task<PostgresEventWriterResult> CompleteAsync()
+    public async Task<RecordingEventWriterResult> CompleteAsync()
     {
         if (_result is not null)
         {
@@ -201,7 +202,7 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
         _spill.Flush();
         var unwritten = _spill.Count;
         _spill.Dispose();
-        _result = new PostgresEventWriterResult(
+        _result = new RecordingEventWriterResult(
             AcceptedCount,
             DroppedCount,
             RejectedCount,
@@ -268,6 +269,22 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
                     if (inputDone)
                     {
                         return;
+                    }
+
+                    // A target that holds written data stores it when it is
+                    // due, so the data does not wait for the next event.
+                    if (_target is IPeriodicBatchTarget periodic && periodic.TimeUntilDue() is { } due)
+                    {
+                        if (due <= TimeSpan.Zero && WriteDue(periodic))
+                        {
+                            continue;
+                        }
+
+                        await WaitAsync(
+                            due > TimeSpan.Zero ? due : _options.RetryInitialDelay,
+                            token).ConfigureAwait(false);
+                        batchOpened = DateTime.UtcNow;
+                        continue;
                     }
 
                     if (await _channel.Reader.WaitToReadAsync(token).ConfigureAwait(false))
@@ -348,6 +365,25 @@ public sealed class PostgresEventWriter : IRecorderEventSink, IAsyncDisposable
         _rejections.Clear();
         _omissions.Clear();
         _inFlight.Add(new InFlightBatch(events, batch.Rejections, batch.Omissions, Task.Run(() => WriteUntilStoredAsync(batch, token), CancellationToken.None)));
+    }
+
+    // Stores what a periodic target holds that is due, and returns false
+    // when the store did not accept it; the loop then waits before trying
+    // again.
+    private bool WriteDue(IPeriodicBatchTarget periodic)
+    {
+        try
+        {
+            periodic.WriteDue();
+            IsDatabaseUnavailable = false;
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _lastError = exception.Message;
+            IsDatabaseUnavailable = true;
+            return false;
+        }
     }
 
     // Retries until the batch is stored or the writer is stopped.

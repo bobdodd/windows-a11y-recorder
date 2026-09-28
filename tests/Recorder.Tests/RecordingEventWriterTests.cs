@@ -4,7 +4,7 @@ using static Recorder.Tests.DatabaseTestSupport;
 
 namespace Recorder.Tests;
 
-public sealed class PostgresEventWriterTests : IDisposable
+public sealed class RecordingEventWriterTests : IDisposable
 {
     private const string SessionId = "session-a";
     private readonly string _directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -22,7 +22,7 @@ public sealed class PostgresEventWriterTests : IDisposable
     {
         var target = new RecordingTarget();
         var collector = Collector();
-        var writer = new PostgresEventWriter(target, SessionId, Options(batchSize: 3));
+        var writer = new RecordingEventWriter(target, SessionId, Options(batchSize: 3));
 
         for (ulong sequence = 1; sequence <= 7; sequence++)
         {
@@ -48,7 +48,7 @@ public sealed class PostgresEventWriterTests : IDisposable
     {
         var target = new RecordingTarget { Hold = new TaskCompletionSource() };
         var collector = Collector();
-        var writer = new PostgresEventWriter(target, SessionId, Options(batchSize: 1) with { WriterConnections = 3 });
+        var writer = new RecordingEventWriter(target, SessionId, Options(batchSize: 1) with { WriterConnections = 3 });
 
         for (ulong sequence = 1; sequence <= 5; sequence++)
         {
@@ -70,7 +70,7 @@ public sealed class PostgresEventWriterTests : IDisposable
     {
         var target = new RecordingTarget();
         var collector = Collector();
-        var writer = new PostgresEventWriter(target, SessionId, Options());
+        var writer = new RecordingEventWriter(target, SessionId, Options());
 
         writer.TryWrite(Event(SessionId, collector, 1, 100));
         writer.TryWrite(Event("other-session", collector, 2, 200));
@@ -102,7 +102,7 @@ public sealed class PostgresEventWriterTests : IDisposable
     {
         var target = new RecordingTarget { FailuresRemaining = 3 };
         var collector = Collector();
-        var writer = new PostgresEventWriter(target, SessionId, Options(batchSize: 2));
+        var writer = new RecordingEventWriter(target, SessionId, Options(batchSize: 2));
 
         for (ulong sequence = 1; sequence <= 5; sequence++)
         {
@@ -123,7 +123,7 @@ public sealed class PostgresEventWriterTests : IDisposable
         var target = new RecordingTarget { FailUntilReleased = true };
         var collector = Collector();
         var options = Options(batchSize: 50) with { MemoryBufferBytes = 3_000 };
-        var writer = new PostgresEventWriter(target, SessionId, options);
+        var writer = new RecordingEventWriter(target, SessionId, options);
 
         for (ulong sequence = 1; sequence <= 20; sequence++)
         {
@@ -157,7 +157,7 @@ public sealed class PostgresEventWriterTests : IDisposable
             MemoryBufferBytes = 2_500,
             SpillFileBytes = 1_000
         };
-        var writer = new PostgresEventWriter(target, SessionId, options);
+        var writer = new RecordingEventWriter(target, SessionId, options);
 
         for (ulong sequence = 1; sequence <= 30; sequence++)
         {
@@ -184,7 +184,7 @@ public sealed class PostgresEventWriterTests : IDisposable
         var target = new RecordingTarget { FailUntilReleased = true };
         var collector = Collector();
         var options = Options() with { CompletionTimeout = TimeSpan.FromMilliseconds(300) };
-        var writer = new PostgresEventWriter(target, SessionId, options);
+        var writer = new RecordingEventWriter(target, SessionId, options);
 
         for (ulong sequence = 1; sequence <= 4; sequence++)
         {
@@ -204,7 +204,7 @@ public sealed class PostgresEventWriterTests : IDisposable
     {
         var target = new RecordingTarget { RefuseSequence = 2 };
         var collector = Collector();
-        var writer = new PostgresEventWriter(target, SessionId, Options());
+        var writer = new RecordingEventWriter(target, SessionId, Options());
 
         for (ulong sequence = 1; sequence <= 3; sequence++)
         {
@@ -223,14 +223,14 @@ public sealed class PostgresEventWriterTests : IDisposable
     [Fact]
     public async Task RefusesEventsAfterCompletion()
     {
-        var writer = new PostgresEventWriter(new RecordingTarget(), SessionId, Options());
+        var writer = new RecordingEventWriter(new RecordingTarget(), SessionId, Options());
         await writer.CompleteAsync();
 
         Assert.False(writer.TryWrite(Event(SessionId, Collector(), 1, 1)));
         Assert.Equal(1, writer.DroppedCount);
     }
 
-    private PostgresEventWriterOptions Options(int batchSize = 1_000) => new()
+    private RecordingEventWriterOptions Options(int batchSize = 1_000) => new()
     {
         SpillPath = Path.Combine(_directory, "spill.ndjson"),
         BatchSize = batchSize,
