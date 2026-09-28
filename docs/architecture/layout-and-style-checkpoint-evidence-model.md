@@ -315,10 +315,23 @@ value, as `getComputedStyle()` does.
   on layout. Within each checkpoint every element had its own style object:
   the distinct style objects equalled the styled elements in every
   checkpoint, so sharing readings between elements of one checkpoint would
-  save nothing. Whether an element keeps the same style object from one
-  checkpoint to the next was not measured. The measurement adds clock reads
+  save nothing. The measurement adds clock reads
   and a layout-dependence test to every value, so the unmeasured traversal
   is somewhat faster.
+- Reuse of style objects between checkpoints was measured in one Windows
+  recording of revision bf57c2d, in the renderer that recorded most
+  checkpoints: 287 checkpoints over 96 s, 21.8 s of traversal, of which
+  16.96 s was reading computed-style values. Of 109,983 styled elements,
+  102,003 had been styled in the document's previous checkpoint, and 95,831,
+  87% of all styled elements, kept the same style object. For those, the
+  26,222,753 values that did not depend on layout in either checkpoint were
+  compared with the previous checkpoint's by 64-bit hash, and none differed.
+  Of the 6,172 elements that had a new style object, 6,013 had equal values.
+  The two other renderers with checkpoints showed the same: no differing
+  value. Values Blink reports as depending on layout were not compared.
+  One recording of ordinary browsing does not show that a style object's
+  other values never change; it is evidence that reading them again for an
+  unchanged style object repeated the same result in this recording.
 - An element's record holds 283 values rather than the first list's 75. The
   volume with the full list is measured in the validation plan.
 
