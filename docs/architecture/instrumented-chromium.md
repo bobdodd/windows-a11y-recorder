@@ -917,7 +917,17 @@ occur there. Web Serial's dispatch path is not recorded, and worklet records
 are produced but not validated. The full model is in
 [the worker and non-Node dispatch evidence model](worker-and-non-node-dispatch-evidence-model.md).
 
-Live 0.31 connections require an exact protocol-version match.
+Protocol version 0.32 adds layout change records beside the layout
+checkpoints: for each document at the end of a rendering update, the nodes
+whose computed style, layout, or paint properties Blink changed and whose
+record differs from the last one sent, with geometry relative to a paint
+property tree transform node, and the transform nodes whose state differs.
+It also removes the bound of 16 not-swapped presentation records per request.
+The records are described in
+[the layout and computed-style checkpoint evidence model](layout-and-style-checkpoint-evidence-model.md)
+and the design in [change-driven recording](change-driven-recording.md).
+
+Live 0.32 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

@@ -1,6 +1,6 @@
 namespace Recorder.Tests;
 
-// The JSON the bridge writes for each browser.layout record in protocol 0.28,
+// The JSON the bridge writes for each browser.layout record in protocol 0.32,
 // shared by the ingest and archive tests so both check the same shapes.
 internal static class BrowserLayoutPayloads
 {
@@ -189,6 +189,137 @@ internal static class BrowserLayoutPayloads
         }
         """;
 
+    public static readonly string ChangesStarted = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "layoutCheckpointId": "layout-checkpoint-1",
+          "viewTransformNodeId": "layout-transform-1",
+          "viewPaintOffset": { "x": 0, "y": 0 },
+          "layoutZoomFactor": 1.25
+        }
+        """;
+
+    public static readonly string ChangesStartedWithoutCheckpoint = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-2",
+          "layoutCheckpointId": null,
+          "viewTransformNodeId": "layout-transform-1",
+          "viewPaintOffset": { "x": 2, "y": 2 },
+          "layoutZoomFactor": 1.25
+        }
+        """;
+
+    public static readonly string ViewTransformNode = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "transformNodeId": "layout-transform-1",
+          "parentTransformNodeId": null,
+          "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          "flattensInheritedTransform": true,
+          "scrollTranslation": false,
+          "sticky": false
+        }
+        """;
+
+    public static readonly string ScrollTransformNode = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "transformNodeId": "layout-transform-2",
+          "parentTransformNodeId": "layout-transform-1",
+          "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -300.625, 0, 1],
+          "flattensInheritedTransform": false,
+          "scrollTranslation": true,
+          "sticky": false
+        }
+        """;
+
+    public static readonly string ChangedElementNode = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "reasons": ["style", "layout"],
+          "nodeId": 42,
+          "nodeType": "element",
+          "nodeName": "DIV",
+          "layoutObjectPresent": true,
+          "displayLocked": false,
+          "geometry": {
+            "transformNodeId": "layout-transform-2",
+            "localRect": { "x": 10, "y": 338.75, "width": 150, "height": 25 },
+            "clientRectEmpty": false,
+            "localRectMapped": true,
+            "clientRectScale": 0.8
+          },
+          "computedStyle": { "display": "block", "width": "120px", "color": null },
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null
+        }
+        """;
+
+    public static readonly string ChangedEmptyTextNode = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "reasons": ["layout"],
+          "nodeId": 43,
+          "nodeType": "text",
+          "nodeName": "#text",
+          "layoutObjectPresent": true,
+          "displayLocked": false,
+          "geometry": {
+            "transformNodeId": "layout-transform-2",
+            "localRect": null,
+            "clientRectEmpty": true,
+            "localRectMapped": false,
+            "clientRectScale": 0.8
+          },
+          "computedStyle": null,
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null
+        }
+        """;
+
+    public static readonly string ChangedUnrenderedPseudoElement = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "reasons": ["style"],
+          "nodeId": 44,
+          "nodeType": "pseudo-element",
+          "nodeName": "::before",
+          "layoutObjectPresent": false,
+          "displayLocked": false,
+          "geometry": null,
+          "computedStyle": { "display": "none", "width": "auto", "color": "rgb(0, 0, 0)" },
+          "pseudoElement": {
+            "originatingNodeId": 42,
+            "pseudoType": "::before",
+            "generatedText": "",
+            "generatedTextLength": 0,
+            "generatedTextTruncated": false
+          },
+          "shadowHostNodeId": 40,
+          "shadowRootMode": "open"
+        }
+        """;
+
+    public static readonly string ChangesCompleted = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "notedNodeCount": 5,
+          "recordedNodeCount": 3,
+          "unchangedNodeCount": 1,
+          "transformNodeCount": 2
+        }
+        """;
+
     public static IEnumerable<(string EventType, string Json)> All()
     {
         yield return ("layout-checkpoint-started", FirstCheckpointStarted);
@@ -200,5 +331,13 @@ internal static class BrowserLayoutPayloads
         yield return ("layout-checkpoint-node", ShadowTreeElementNode);
         yield return ("layout-checkpoint-node", PseudoElementNode);
         yield return ("layout-checkpoint-completed", CheckpointCompleted);
+        yield return ("layout-changes-started", ChangesStarted);
+        yield return ("layout-changes-started", ChangesStartedWithoutCheckpoint);
+        yield return ("layout-transform-node", ViewTransformNode);
+        yield return ("layout-transform-node", ScrollTransformNode);
+        yield return ("layout-node-changed", ChangedElementNode);
+        yield return ("layout-node-changed", ChangedEmptyTextNode);
+        yield return ("layout-node-changed", ChangedUnrenderedPseudoElement);
+        yield return ("layout-changes-completed", ChangesCompleted);
     }
 }

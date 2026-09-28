@@ -3649,18 +3649,10 @@ uint64_t BeginBlinkLayoutCheckpoint(
 
 namespace {
 
-// Builds a layout checkpoint node record from the values the renderer copied
-// out of Blink, so the dictionary is built on the writer thread rather than
-// in the rendering update that observed the node.
-base::DictValue CreateLayoutCheckpointNodePayload(
-    const RecorderPipeClient& client,
-    uint64_t checkpoint_sequence,
-    int document_node_id,
-    std::string document_token,
-    LayoutCheckpointNode node) {
-  base::DictValue payload = CreateLayoutCheckpointBasePayload(
-      client, checkpoint_sequence, document_node_id, std::move(document_token));
-  payload.Set("nodeIndex", node.node_index);
+// Sets the fields a checkpoint record and a change record of a node share:
+// its identity, type, and name, its pseudo-element and shadow fields, whether
+// it has a layout object and is display locked, and its computed style.
+void SetLayoutNodeFields(base::DictValue& payload, LayoutCheckpointNode& node) {
   payload.Set("nodeId", node.node_id);
   payload.Set("nodeType", node.pseudo_element_present
                               ? std::string("pseudo-element")
@@ -3692,16 +3684,6 @@ base::DictValue CreateLayoutCheckpointNodePayload(
   }
   payload.Set("layoutObjectPresent", node.layout_object_present);
   payload.Set("displayLocked", node.display_locked);
-  if (node.layout_object_present) {
-    base::DictValue rect;
-    rect.Set("x", node.x);
-    rect.Set("y", node.y);
-    rect.Set("width", node.width);
-    rect.Set("height", node.height);
-    payload.Set("boundingClientRect", std::move(rect));
-  } else {
-    payload.Set("boundingClientRect", base::Value());
-  }
   if (node.computed_style_present) {
     base::DictValue style;
     for (LayoutCheckpointStyleValue& entry : node.computed_style) {
@@ -3713,6 +3695,31 @@ base::DictValue CreateLayoutCheckpointNodePayload(
   } else {
     payload.Set("computedStyle", base::Value());
   }
+}
+
+// Builds a layout checkpoint node record from the values the renderer copied
+// out of Blink, so the dictionary is built on the writer thread rather than
+// in the rendering update that observed the node.
+base::DictValue CreateLayoutCheckpointNodePayload(
+    const RecorderPipeClient& client,
+    uint64_t checkpoint_sequence,
+    int document_node_id,
+    std::string document_token,
+    LayoutCheckpointNode node) {
+  base::DictValue payload = CreateLayoutCheckpointBasePayload(
+      client, checkpoint_sequence, document_node_id, std::move(document_token));
+  payload.Set("nodeIndex", node.node_index);
+  if (node.layout_object_present) {
+    base::DictValue rect;
+    rect.Set("x", node.x);
+    rect.Set("y", node.y);
+    rect.Set("width", node.width);
+    rect.Set("height", node.height);
+    payload.Set("boundingClientRect", std::move(rect));
+  } else {
+    payload.Set("boundingClientRect", base::Value());
+  }
+  SetLayoutNodeFields(payload, node);
   return payload;
 }
 
@@ -3889,13 +3896,312 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
                     std::move(payload));
 }
 
+namespace {
+
+// The layout change filter of each document, by the document's DOM node
+// identifier, with the last layout checkpoint a change set of the document
+// has seen. The filters of the least recently recorded documents are dropped
+// beyond kMaximumLayoutChangeDocuments, so their nodes' next records are sent
+// again whole.
+struct LayoutChangeStorage {
+  base::Lock lock;
+  uint64_t next_change_set_id = 1;
+  uint64_t use_clock = 0;
+  struct Document {
+    LayoutChangeFilter filter;
+    uint64_t checkpoint_sequence_seen = 0;
+    uint64_t last_use = 0;
+  };
+  std::unordered_map<int, Document> documents;
+};
+
+constexpr size_t kMaximumLayoutChangeDocuments = 64;
+
+LayoutChangeStorage& LayoutChanges() {
+  static base::NoDestructor<LayoutChangeStorage> storage;
+  return *storage;
+}
+
+std::string LayoutChangeSetId(uint64_t change_set_sequence) {
+  return "layout-changes-" + base::NumberToString(change_set_sequence);
+}
+
+std::string LayoutTransformNodeId(uint64_t transform_node_id) {
+  return "layout-transform-" + base::NumberToString(transform_node_id);
+}
+
+base::DictValue CreateLayoutChangesBasePayload(const RecorderPipeClient& client,
+                                               uint64_t change_set_sequence,
+                                               int document_node_id,
+                                               std::string document_token) {
+  base::DictValue payload;
+  payload.Set("context", CreateContext(client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("changeSetId", LayoutChangeSetId(change_set_sequence));
+  return payload;
+}
+
+bool IsValidLayoutNode(const LayoutCheckpointNode& node) {
+  if (node.node_id <= 0 || node.node_name.empty() ||
+      (node.node_type != 1 && node.node_type != 3)) {
+    return false;
+  }
+  if (node.pseudo_element_present &&
+      (node.node_type != 1 || node.pseudo_type.empty() ||
+       node.generated_text_length < 0)) {
+    return false;
+  }
+  if (node.node_type == 3 &&
+      (!node.layout_object_present || node.computed_style_present)) {
+    return false;
+  }
+  if (node.computed_style_present) {
+    for (const LayoutCheckpointStyleValue& entry : node.computed_style) {
+      if (entry.property_name.empty()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool IsValidLayoutChangedNode(const LayoutChangedNode& changed) {
+  if (!IsValidLayoutNode(changed.node) || changed.reasons == 0 ||
+      (changed.reasons & ~(kLayoutChangeStyle | kLayoutChangeLayout |
+                           kLayoutChangePaintProperties)) != 0) {
+    return false;
+  }
+  if (changed.geometry_present &&
+      (!changed.node.layout_object_present || changed.transform_node_id == 0 ||
+       !IsFiniteNumber(changed.client_rect_scale) ||
+       changed.client_rect_scale <= 0)) {
+    return false;
+  }
+  if (changed.client_rect_empty && changed.local_rect_mapped) {
+    return false;
+  }
+  if (changed.geometry_present && changed.local_rect_mapped &&
+      (!IsFiniteNumber(changed.local_x) || !IsFiniteNumber(changed.local_y) ||
+       !IsFiniteNumber(changed.local_width) ||
+       !IsFiniteNumber(changed.local_height) || changed.local_width < 0 ||
+       changed.local_height < 0)) {
+    return false;
+  }
+  return true;
+}
+
+bool IsValidLayoutTransformNode(const LayoutTransformNode& node) {
+  if (node.id == 0 || node.parent_id == node.id) {
+    return false;
+  }
+  for (double value : node.matrix) {
+    if (!IsFiniteNumber(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+base::ListValue LayoutChangeReasonList(unsigned reasons) {
+  base::ListValue list;
+  if (reasons & kLayoutChangeStyle) {
+    list.Append("style");
+  }
+  if (reasons & kLayoutChangeLayout) {
+    list.Append("layout");
+  }
+  if (reasons & kLayoutChangePaintProperties) {
+    list.Append("paint-properties");
+  }
+  return list;
+}
+
+struct LayoutChangedNodeEvidence : PendingEvidence {
+  // The client that owns the writer thread, and so outlives this record.
+  raw_ptr<const RecorderPipeClient> client = nullptr;
+  uint64_t change_set_sequence = 0;
+  int document_node_id = 0;
+  std::string document_token;
+  LayoutChangedNode changed;
+
+  base::DictValue TakePayload() override {
+    base::DictValue payload = CreateLayoutChangesBasePayload(
+        *client, change_set_sequence, document_node_id,
+        std::move(document_token));
+    payload.Set("reasons", LayoutChangeReasonList(changed.reasons));
+    SetLayoutNodeFields(payload, changed.node);
+    if (changed.geometry_present) {
+      base::DictValue geometry;
+      geometry.Set("transformNodeId",
+                   LayoutTransformNodeId(changed.transform_node_id));
+      if (changed.local_rect_mapped) {
+        base::DictValue rect;
+        rect.Set("x", changed.local_x);
+        rect.Set("y", changed.local_y);
+        rect.Set("width", changed.local_width);
+        rect.Set("height", changed.local_height);
+        geometry.Set("localRect", std::move(rect));
+      } else {
+        geometry.Set("localRect", base::Value());
+      }
+      geometry.Set("clientRectEmpty", changed.client_rect_empty);
+      geometry.Set("localRectMapped", changed.local_rect_mapped);
+      geometry.Set("clientRectScale", changed.client_rect_scale);
+      payload.Set("geometry", std::move(geometry));
+    } else {
+      payload.Set("geometry", base::Value());
+    }
+    return payload;
+  }
+};
+
+}  // namespace
+
+void RecordBlinkLayoutChanges(int document_node_id,
+                              std::string document_token,
+                              LayoutChangesFrame frame,
+                              int noted_node_count,
+                              std::vector<LayoutTransformNode> transform_nodes,
+                              std::vector<LayoutChangedNode> nodes) {
+  A11Y_RECORDER_COST("RecordBlinkLayoutChanges");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      noted_node_count < 0 || frame.view_transform_node_id == 0 ||
+      !IsFiniteNumber(frame.view_paint_offset_x) ||
+      !IsFiniteNumber(frame.view_paint_offset_y) ||
+      !IsFiniteNumber(frame.layout_zoom_factor) ||
+      frame.layout_zoom_factor <= 0) {
+    return;
+  }
+  uint64_t checkpoint_sequence = 0;
+  {
+    LayoutCheckpointStorage& checkpoints = LayoutCheckpoints();
+    base::AutoLock lock(checkpoints.lock);
+    auto found = checkpoints.documents.find(document_node_id);
+    if (found != checkpoints.documents.end()) {
+      checkpoint_sequence = found->second.checkpoint_sequence;
+    }
+  }
+  std::vector<size_t> changed_transforms;
+  std::vector<size_t> changed_nodes;
+  int unchanged_node_count = 0;
+  uint64_t change_set_sequence = 0;
+  uint64_t named_checkpoint_sequence = 0;
+  {
+    LayoutChangeStorage& storage = LayoutChanges();
+    base::AutoLock lock(storage.lock);
+    if (!storage.documents.contains(document_node_id) &&
+        storage.documents.size() >= kMaximumLayoutChangeDocuments) {
+      auto oldest = storage.documents.begin();
+      for (auto entry = storage.documents.begin();
+           entry != storage.documents.end(); ++entry) {
+        if (entry->second.last_use < oldest->second.last_use) {
+          oldest = entry;
+        }
+      }
+      storage.documents.erase(oldest);
+    }
+    LayoutChangeStorage::Document& document =
+        storage.documents[document_node_id];
+    document.last_use = ++storage.use_clock;
+    if (checkpoint_sequence != document.checkpoint_sequence_seen) {
+      named_checkpoint_sequence = checkpoint_sequence;
+      document.checkpoint_sequence_seen = checkpoint_sequence;
+    }
+    for (size_t index = 0; index < transform_nodes.size(); ++index) {
+      const LayoutTransformNode& node = transform_nodes[index];
+      if (IsValidLayoutTransformNode(node) &&
+          document.filter.TransformNodeChanged(
+              node.id, HashLayoutTransformNode(node))) {
+        changed_transforms.push_back(index);
+      }
+    }
+    for (size_t index = 0; index < nodes.size(); ++index) {
+      const LayoutChangedNode& node = nodes[index];
+      if (!IsValidLayoutChangedNode(node)) {
+        continue;
+      }
+      if (document.filter.NodeChanged(node.node.node_id,
+                                      HashLayoutChangedNode(node))) {
+        changed_nodes.push_back(index);
+      } else {
+        ++unchanged_node_count;
+      }
+    }
+    if (changed_transforms.empty() && changed_nodes.empty()) {
+      return;
+    }
+    change_set_sequence = storage.next_change_set_id++;
+  }
+  base::DictValue started = CreateLayoutChangesBasePayload(
+      *client, change_set_sequence, document_node_id, document_token);
+  started.Set("layoutCheckpointId",
+              named_checkpoint_sequence == 0
+                  ? base::Value()
+                  : base::Value(LayoutCheckpointId(named_checkpoint_sequence)));
+  started.Set("viewTransformNodeId",
+              LayoutTransformNodeId(frame.view_transform_node_id));
+  base::DictValue offset;
+  offset.Set("x", frame.view_paint_offset_x);
+  offset.Set("y", frame.view_paint_offset_y);
+  started.Set("viewPaintOffset", std::move(offset));
+  started.Set("layoutZoomFactor", frame.layout_zoom_factor);
+  SendBlinkEvidence("browser.layout", "layout-changes-started",
+                    std::move(started));
+  for (size_t index : changed_transforms) {
+    const LayoutTransformNode& node = transform_nodes[index];
+    base::DictValue payload = CreateLayoutChangesBasePayload(
+        *client, change_set_sequence, document_node_id, document_token);
+    payload.Set("transformNodeId", LayoutTransformNodeId(node.id));
+    payload.Set("parentTransformNodeId",
+                node.parent_id == 0
+                    ? base::Value()
+                    : base::Value(LayoutTransformNodeId(node.parent_id)));
+    base::ListValue matrix;
+    for (double value : node.matrix) {
+      matrix.Append(value);
+    }
+    payload.Set("matrix", std::move(matrix));
+    payload.Set("flattensInheritedTransform",
+                node.flattens_inherited_transform);
+    payload.Set("scrollTranslation", node.scroll_translation);
+    payload.Set("sticky", node.sticky);
+    SendBlinkEvidence("browser.layout", "layout-transform-node",
+                      std::move(payload));
+  }
+  for (size_t index : changed_nodes) {
+    auto evidence = std::make_unique<LayoutChangedNodeEvidence>();
+    evidence->channel = "browser.layout";
+    evidence->event_type = "layout-node-changed";
+    // The geometry and reasons add a fixed amount to the checkpoint form.
+    evidence->bytes =
+        EstimateLayoutCheckpointNodeBytes(nodes[index].node, document_token) +
+        256;
+    evidence->client = client;
+    evidence->change_set_sequence = change_set_sequence;
+    evidence->document_node_id = document_node_id;
+    evidence->document_token = document_token;
+    evidence->changed = std::move(nodes[index]);
+    QueueBlinkEvidence(client, std::move(evidence));
+  }
+  base::DictValue completed = CreateLayoutChangesBasePayload(
+      *client, change_set_sequence, document_node_id, std::move(document_token));
+  completed.Set("notedNodeCount", noted_node_count);
+  completed.Set("recordedNodeCount",
+                base::saturated_cast<int>(changed_nodes.size()));
+  completed.Set("unchangedNodeCount", unchanged_node_count);
+  completed.Set("transformNodeCount",
+                base::saturated_cast<int>(changed_transforms.size()));
+  SendBlinkEvidence("browser.layout", "layout-changes-completed",
+                    std::move(completed));
+}
+
 
 namespace {
 
-// Each presentation request may record at most this many kept-active
-// DidNotSwap calls. The terminal records state the full count, so a reader
-// sees how many were not recorded.
-constexpr int kMaximumPresentationNotSwappedRecords = 16;
+// Every kept-active DidNotSwap call of a presentation request is recorded.
+// The bound is the largest value the protocol's 32-bit counts hold.
+constexpr int kMaximumPresentationNotSwappedRecords = 2147483647;
 
 std::string PresentationRequestId(uint64_t request_sequence) {
   return "presentation-request-" + base::NumberToString(request_sequence);
@@ -4031,7 +4337,7 @@ void RecordBlinkPresentationNotSwapped(uint64_t request_sequence,
     return;
   }
   // A broken promise ends the request, so its record is always sent; a
-  // kept-active one is sent only within the per-request limit.
+  // kept-active one is sent while its index can be stated.
   if (kept_active &&
       not_swapped_index >= kMaximumPresentationNotSwappedRecords) {
     return;

@@ -193,8 +193,9 @@ browser frame and widget identities without changing these records.
 - `queued`: true, or false with `notQueuedReason` of `no-widget` or
   `not-compositing`.
 - `highResolutionTicks`: `TimeTicks::IsHighResolution()`.
-- `maximumNotSwappedRecords`: the per-request cap on `kept-active` records,
-  16.
+- `maximumNotSwappedRecords`: the per-request bound on `kept-active`
+  records, 2147483647, the largest value a 32-bit count holds, so every
+  `DidNotSwap` call is recorded. It was 16 before the slice 3 change.
 
 The queue time is the record's envelope timestamp.
 

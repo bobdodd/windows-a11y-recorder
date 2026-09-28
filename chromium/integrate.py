@@ -7421,8 +7421,603 @@ def patch_blink_local_frame_view(path: Path) -> None:
         text, BLINK_LAYOUT_CHECKPOINT_ANCHOR, BLINK_LAYOUT_CHECKPOINT_HOOK, path
     )
     text = remove_earlier_node_limits(text)
+    text = add_layout_changes_to_local_frame_view(text, path)
     write_patched(path, text)
 
+
+# Change-driven layout capture (protocol 0.32). Blink's style, layout, and
+# pre-paint code note each node whose computed style, layout result, or paint
+# properties changed; the end of each rendering update records a change set
+# for every paint-clean document from its noted nodes and the transform nodes
+# their geometry is relative to. The checkpoint walk is unchanged, and is the
+# reference the change records are checked against.
+BLINK_LAYOUT_CHANGE_NOTE_DECLARATION = """\
+// Defined in local_frame_view.cc; notes a node for the recorder's next layout
+// change set. The reasons are bits: 1 style, 2 layout, 4 paint properties.
+void RecorderNoteLayoutChange(const Node* recorder_node,
+                              unsigned recorder_reasons);
+
+"""
+BLINK_LAYOUT_OBJECT_CHANGE_NOTE_DECLARATION = """\
+// Defined in local_frame_view.cc; notes a layout object's node for the
+// recorder's next layout change set. The reasons are bits: 1 style, 2 layout,
+// 4 paint properties.
+void RecorderNoteLayoutObjectChange(const LayoutObject& recorder_object,
+                                    unsigned recorder_reasons);
+
+"""
+BLINK_LAYOUT_RESULT_NOTE_DECLARATION = """\
+// Defined in local_frame_view.cc; notes a box that received a layout result,
+// and every object its fragment items name, for the recorder's next layout
+// change set.
+void RecorderNoteLayoutResult(const LayoutBox& recorder_box,
+                              const PhysicalBoxFragment& recorder_fragment);
+
+"""
+BLINK_LAYOUT_CHANGES_DECLARATION = (
+    BLINK_LAYOUT_CHANGE_NOTE_DECLARATION.replace(
+        "// Defined in local_frame_view.cc; notes", "// Notes"
+    )
+    + BLINK_LAYOUT_OBJECT_CHANGE_NOTE_DECLARATION.replace(
+        "// Defined in local_frame_view.cc; notes", "// Notes"
+    )
+    + BLINK_LAYOUT_RESULT_NOTE_DECLARATION.replace(
+        "// Defined in local_frame_view.cc; notes", "// Notes"
+    )
+    + """\
+// Records the layout change set of one frame view's document after a
+// rendering update reached the paint-clean state.
+void RecorderRecordLayoutChanges(LocalFrameView& recorder_frame_view);
+
+"""
+)
+BLINK_LAYOUT_CHANGES_DEFINITION_MARKER = (
+    "void RecorderRecordLayoutChanges(LocalFrameView& recorder_frame_view) {"
+)
+BLINK_LAYOUT_CHANGES_DEFINITION = """\
+namespace {
+
+// A transform node the recorder has named, with the document whose records
+// named it.
+struct RecorderTransformEntry {
+  uint64_t id = 0;
+  int document_node_id = 0;
+};
+
+// The nodes noted since their document's last change set, with the reasons,
+// and every transform node a change record has named. Both are held weakly,
+// so a node Blink discards is dropped. Only the rendering thread uses them.
+class RecorderLayoutChangeNotes final
+    : public GarbageCollected<RecorderLayoutChangeNotes> {
+ public:
+  void Trace(Visitor* recorder_visitor) const {
+    recorder_visitor->Trace(nodes);
+    recorder_visitor->Trace(transforms);
+  }
+
+  HeapHashMap<WeakMember<const Node>, unsigned> nodes;
+  HeapHashMap<WeakMember<const TransformPaintPropertyNode>,
+              RecorderTransformEntry>
+      transforms;
+  uint64_t next_transform_id = 1;
+};
+
+RecorderLayoutChangeNotes& RecorderLayoutNotes() {
+  DEFINE_STATIC_LOCAL(Persistent<RecorderLayoutChangeNotes>, recorder_notes,
+                      (MakeGarbageCollected<RecorderLayoutChangeNotes>()));
+  return *recorder_notes;
+}
+
+// Returns the recorder's identity for a transform node, naming it for the
+// document when it has none. Sets recorder_added when it was named now.
+uint64_t RecorderTransformNodeId(
+    const TransformPaintPropertyNode& recorder_node,
+    int recorder_document_node_id,
+    bool* recorder_added = nullptr) {
+  RecorderLayoutChangeNotes& recorder_notes = RecorderLayoutNotes();
+  auto recorder_found = recorder_notes.transforms.find(&recorder_node);
+  if (recorder_found != recorder_notes.transforms.end()) {
+    return recorder_found->value.id;
+  }
+  const uint64_t recorder_id = recorder_notes.next_transform_id++;
+  recorder_notes.transforms.Set(
+      &recorder_node,
+      RecorderTransformEntry{recorder_id, recorder_document_node_id});
+  if (recorder_added) {
+    *recorder_added = true;
+  }
+  return recorder_id;
+}
+
+// Names a transform node and each of its ancestors up to the view's node, so
+// every chain a change record states can be followed to the view.
+uint64_t RecorderTransformChainId(
+    const TransformPaintPropertyNode& recorder_node,
+    const TransformPaintPropertyNode& recorder_view_node,
+    int recorder_document_node_id) {
+  const uint64_t recorder_id =
+      RecorderTransformNodeId(recorder_node, recorder_document_node_id);
+  for (const TransformPaintPropertyNode* recorder_ancestor = &recorder_node;
+       recorder_ancestor && recorder_ancestor != &recorder_view_node;
+       recorder_ancestor = recorder_ancestor->UnaliasedParent()) {
+    RecorderTransformNodeId(*recorder_ancestor, recorder_document_node_id);
+  }
+  return recorder_id;
+}
+
+// Reads a noted node the way the layout checkpoint reads it, with the
+// geometry of its layout object relative to its transform node.
+a11y_recorder::LayoutChangedNode RecorderReadLayoutChangedNode(
+    Document& recorder_document,
+    Node& recorder_node,
+    unsigned recorder_reasons,
+    const TransformPaintPropertyNode& recorder_view_node,
+    const gfx::Vector2dF& recorder_view_paint_offset) {
+  a11y_recorder::LayoutChangedNode recorder_changed;
+  recorder_changed.reasons = recorder_reasons;
+  a11y_recorder::LayoutCheckpointNode& recorder_record = recorder_changed.node;
+  Element* recorder_element = DynamicTo<Element>(recorder_node);
+  PseudoElement* recorder_pseudo = DynamicTo<PseudoElement>(recorder_node);
+  LayoutObject* recorder_layout_object = recorder_node.GetLayoutObject();
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  recorder_record.node_id = recorder_node.GetDomNodeId();
+  recorder_record.node_type = static_cast<int>(recorder_node.getNodeType());
+  recorder_record.node_name = recorder_node.nodeName().Utf8();
+  recorder_record.layout_object_present = recorder_layout_object != nullptr;
+  recorder_record.display_locked =
+      DisplayLockUtilities::LockedAncestorPreventingLayout(recorder_node) !=
+      nullptr;
+  if (recorder_layout_object) {
+    PropertyTreeStateOrAlias recorder_container_properties(
+        PropertyTreeState::kUninitialized);
+    if (recorder_layout_object->GetPropertyContainer(
+            nullptr, &recorder_container_properties)) {
+      const TransformPaintPropertyNode& recorder_local_node =
+          recorder_container_properties.Transform().Unalias();
+      recorder_changed.geometry_present = true;
+      recorder_changed.transform_node_id = RecorderTransformChainId(
+          recorder_local_node, recorder_view_node, recorder_document_node_id);
+      gfx::RectF recorder_rect;
+      if (recorder_element) {
+        recorder_rect =
+            recorder_element->GetBoundingClientRectNoLifecycleUpdateNoAdjustment();
+      } else {
+        Vector<gfx::QuadF> recorder_quads;
+        recorder_layout_object->AbsoluteQuads(recorder_quads);
+        for (const gfx::QuadF& recorder_quad : recorder_quads) {
+          recorder_rect.Union(recorder_quad.BoundingBox());
+        }
+      }
+      if (recorder_rect == gfx::RectF()) {
+        // getBoundingClientRect returns an empty rectangle unadjusted.
+        recorder_changed.client_rect_empty = true;
+      } else {
+        gfx::Transform recorder_projection;
+        if (GeometryMapper::SourceToDestinationProjection(
+                recorder_view_node, recorder_local_node,
+                recorder_projection)) {
+          recorder_rect.Offset(recorder_view_paint_offset);
+          gfx::RectF recorder_local_rect =
+              recorder_projection.MapRect(recorder_rect);
+          // A projection that rotates or skews is applied to each quad, so
+          // the rectangle mapped back to the viewport is the one Blink
+          // united rather than the bounds of its bounds.
+          if (!recorder_projection.Preserves2dAxisAlignment() &&
+              (!recorder_element ||
+               recorder_layout_object->IsBoxModelObject())) {
+            Vector<gfx::QuadF> recorder_quads;
+            recorder_layout_object->AbsoluteQuads(recorder_quads);
+            gfx::RectF recorder_united;
+            for (gfx::QuadF recorder_quad : recorder_quads) {
+              recorder_quad += recorder_view_paint_offset;
+              recorder_united.Union(
+                  recorder_projection.MapQuad(recorder_quad).BoundingBox());
+            }
+            if (!recorder_quads.empty()) {
+              recorder_local_rect = recorder_united;
+            }
+          }
+          recorder_changed.local_rect_mapped = true;
+          recorder_changed.local_x = recorder_local_rect.x();
+          recorder_changed.local_y = recorder_local_rect.y();
+          recorder_changed.local_width = recorder_local_rect.width();
+          recorder_changed.local_height = recorder_local_rect.height();
+        }
+      }
+      // The zoom adjustment getBoundingClientRect applies is a scale, read by
+      // adjusting a rectangle whose width is a power of two.
+      constexpr float kRecorderScaleProbe = 1024;
+      gfx::RectF recorder_probe(0, 0, kRecorderScaleProbe, kRecorderScaleProbe);
+      recorder_document.AdjustRectForScrollAndAbsoluteZoom(
+          recorder_probe, *recorder_layout_object);
+      recorder_changed.client_rect_scale =
+          recorder_probe.width() / kRecorderScaleProbe;
+    }
+  }
+  const ComputedStyle* recorder_style =
+      recorder_element ? recorder_element->GetComputedStyle() : nullptr;
+  if (recorder_style && !recorder_style->IsEnsuredInDisplayNone()) {
+    const std::vector<std::string>& recorder_property_names =
+        RecorderLayoutStylePropertyNames();
+    recorder_record.computed_style_present = true;
+    recorder_record.computed_style.reserve(
+        std::size(kRecorderLayoutStyleProperties));
+    size_t recorder_index = 0;
+    for (CSSPropertyID recorder_property_id : kRecorderLayoutStyleProperties) {
+      const CSSValue* recorder_value =
+          CSSProperty::Get(recorder_property_id)
+              .CSSValueFromComputedStyle(*recorder_style,
+                                         recorder_layout_object,
+                                         /*allow_visited_style=*/false,
+                                         CSSValuePhase::kResolvedValue);
+      a11y_recorder::LayoutCheckpointStyleValue recorder_entry;
+      recorder_entry.property_name = recorder_property_names[recorder_index];
+      recorder_entry.value_present = recorder_value != nullptr;
+      if (recorder_value) {
+        recorder_entry.value = recorder_value->CssText().Utf8();
+      }
+      recorder_record.computed_style.push_back(std::move(recorder_entry));
+      ++recorder_index;
+    }
+  }
+  if (recorder_pseudo) {
+    recorder_record.pseudo_element_present = true;
+    Element* recorder_originating =
+        recorder_pseudo->ParentOrShadowHostElement();
+    recorder_record.originating_node_id =
+        recorder_originating ? recorder_originating->GetDomNodeId() : 0;
+    recorder_record.pseudo_type =
+        PseudoElement::PseudoElementNameForEvents(recorder_pseudo).Utf8();
+    RecorderReadGeneratedText(recorder_layout_object, recorder_record);
+  }
+  if (ShadowRoot* recorder_containing_root =
+          recorder_node.ContainingShadowRoot()) {
+    recorder_record.shadow_host_node_id =
+        recorder_containing_root->host().GetDomNodeId();
+    recorder_record.shadow_root_mode =
+        RecorderShadowRootModeName(recorder_containing_root->GetMode());
+  }
+  return recorder_changed;
+}
+
+}  // namespace
+
+void RecorderNoteLayoutChange(const Node* recorder_node,
+                              unsigned recorder_reasons) {
+  if (!recorder_node || !a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  if (!recorder_node->IsElementNode() && !recorder_node->IsTextNode()) {
+    return;
+  }
+  auto recorder_added =
+      RecorderLayoutNotes().nodes.insert(recorder_node, recorder_reasons);
+  if (!recorder_added.is_new_entry) {
+    recorder_added.stored_value->value |= recorder_reasons;
+  }
+}
+
+void RecorderNoteLayoutObjectChange(const LayoutObject& recorder_object,
+                                    unsigned recorder_reasons) {
+  RecorderNoteLayoutChange(recorder_object.GetNode(), recorder_reasons);
+}
+
+void RecorderNoteLayoutResult(const LayoutBox& recorder_box,
+                              const PhysicalBoxFragment& recorder_fragment) {
+  if (!a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  RecorderNoteLayoutChange(recorder_box.GetNode(), 2);
+  // Text and inline boxes are positioned by the fragment items of the block
+  // that contains them, so each object an item names has changed layout.
+  if (const FragmentItems* recorder_items = recorder_fragment.Items()) {
+    for (const FragmentItem& recorder_item : recorder_items->Items()) {
+      if (const LayoutObject* recorder_object =
+              recorder_item.GetLayoutObject()) {
+        RecorderNoteLayoutChange(recorder_object->GetNode(), 2);
+      }
+    }
+  }
+}
+
+void RecorderRecordLayoutChanges(LocalFrameView& recorder_frame_view) {
+  RecorderLayoutChangeNotes& recorder_notes = RecorderLayoutNotes();
+  if (!a11y_recorder::IsRecorderActive()) {
+    recorder_notes.nodes.clear();
+    recorder_notes.transforms.clear();
+    return;
+  }
+  LocalFrame& recorder_frame = recorder_frame_view.GetFrame();
+  Document* recorder_document = recorder_frame.GetDocument();
+  LayoutView* recorder_view = recorder_frame_view.GetLayoutView();
+  if (!recorder_document || !recorder_document->IsActive() || !recorder_view ||
+      recorder_document->Lifecycle().GetState() !=
+          DocumentLifecycle::kPaintClean ||
+      !recorder_view->FirstFragment().HasLocalBorderBoxProperties()) {
+    return;
+  }
+  const float recorder_zoom = recorder_frame.LayoutZoomFactor();
+  if (recorder_zoom <= 0) {
+    return;
+  }
+  const int recorder_document_node_id = recorder_document->GetDomNodeId();
+  const TransformPaintPropertyNode& recorder_view_node =
+      recorder_view->FirstFragment()
+          .LocalBorderBoxProperties()
+          .Transform()
+          .Unalias();
+  const PhysicalOffset recorder_view_offset =
+      recorder_view->FirstFragment().PaintOffset();
+  const gfx::Vector2dF recorder_view_paint_offset(
+      recorder_view_offset.left.ToFloat(), recorder_view_offset.top.ToFloat());
+  a11y_recorder::LayoutChangesFrame recorder_changes_frame;
+  recorder_changes_frame.view_transform_node_id = RecorderTransformChainId(
+      recorder_view_node, recorder_view_node, recorder_document_node_id);
+  recorder_changes_frame.view_paint_offset_x = recorder_view_paint_offset.x();
+  recorder_changes_frame.view_paint_offset_y = recorder_view_paint_offset.y();
+  recorder_changes_frame.layout_zoom_factor = recorder_zoom;
+
+  // The document's noted nodes are taken from the notes; other documents'
+  // stay until their own change sets.
+  HeapVector<Member<Node>> recorder_noted;
+  Vector<unsigned> recorder_noted_reasons;
+  for (const auto& recorder_entry : recorder_notes.nodes) {
+    const Node* recorder_node = recorder_entry.key.Get();
+    if (recorder_node && &recorder_node->GetDocument() == recorder_document) {
+      recorder_noted.push_back(const_cast<Node*>(recorder_node));
+      recorder_noted_reasons.push_back(recorder_entry.value);
+    }
+  }
+  for (const Member<Node>& recorder_node : recorder_noted) {
+    recorder_notes.nodes.erase(recorder_node.Get());
+  }
+  std::vector<a11y_recorder::LayoutChangedNode> recorder_changed_nodes;
+  recorder_changed_nodes.reserve(recorder_noted.size());
+  for (wtf_size_t recorder_index = 0; recorder_index < recorder_noted.size();
+       ++recorder_index) {
+    Node& recorder_node = *recorder_noted[recorder_index];
+    // A removed node is recorded by slice 4, and a text node without a layout
+    // object is not recorded, as in the checkpoint.
+    if (!recorder_node.isConnected() ||
+        (recorder_node.IsTextNode() && !recorder_node.GetLayoutObject())) {
+      continue;
+    }
+    recorder_changed_nodes.push_back(RecorderReadLayoutChangedNode(
+        *recorder_document, recorder_node,
+        recorder_noted_reasons[recorder_index], recorder_view_node,
+        recorder_view_paint_offset));
+  }
+
+  // Every transform node named for the document is read again, since a
+  // compositor scroll changes a scroll translation with no node noted. A
+  // parent not yet named is named and read in the same pass.
+  HeapVector<Member<const TransformPaintPropertyNode>> recorder_transforms;
+  for (const auto& recorder_entry : recorder_notes.transforms) {
+    if (recorder_entry.key && recorder_entry.value.document_node_id ==
+                                  recorder_document_node_id) {
+      recorder_transforms.push_back(recorder_entry.key.Get());
+    }
+  }
+  std::vector<a11y_recorder::LayoutTransformNode> recorder_transform_records;
+  for (wtf_size_t recorder_index = 0;
+       recorder_index < recorder_transforms.size(); ++recorder_index) {
+    const TransformPaintPropertyNode& recorder_node =
+        *recorder_transforms[recorder_index];
+    a11y_recorder::LayoutTransformNode recorder_record;
+    recorder_record.id =
+        RecorderTransformNodeId(recorder_node, recorder_document_node_id);
+    if (&recorder_node != &recorder_view_node) {
+      if (const TransformPaintPropertyNode* recorder_parent =
+              recorder_node.UnaliasedParent()) {
+        bool recorder_added = false;
+        recorder_record.parent_id = RecorderTransformNodeId(
+            *recorder_parent, recorder_document_node_id, &recorder_added);
+        if (recorder_added) {
+          recorder_transforms.push_back(recorder_parent);
+        }
+      }
+    }
+    const gfx::Transform recorder_matrix =
+        recorder_node.MatrixWithOriginApplied();
+    for (int recorder_column = 0; recorder_column < 4; ++recorder_column) {
+      for (int recorder_row = 0; recorder_row < 4; ++recorder_row) {
+        recorder_record.matrix[recorder_column * 4 + recorder_row] =
+            recorder_matrix.rc(recorder_row, recorder_column);
+      }
+    }
+    recorder_record.flattens_inherited_transform =
+        recorder_node.FlattensInheritedTransform();
+    recorder_record.scroll_translation = recorder_node.ScrollNode() != nullptr;
+    recorder_record.sticky = recorder_node.GetStickyConstraint() != nullptr;
+    recorder_transform_records.push_back(std::move(recorder_record));
+  }
+  a11y_recorder::RecordBlinkLayoutChanges(
+      recorder_document_node_id, recorder_document->Token().ToString(),
+      recorder_changes_frame, base::saturated_cast<int>(recorder_noted.size()),
+      std::move(recorder_transform_records),
+      std::move(recorder_changed_nodes));
+}
+
+"""
+BLINK_LAYOUT_CHANGES_INCLUDES = (
+    "#include <array>",
+    '#include "base/numerics/safe_conversions.h"',
+    '#include "third_party/blink/renderer/core/layout/inline/fragment_item.h"',
+    '#include "third_party/blink/renderer/core/layout/inline/fragment_items.h"',
+    '#include "third_party/blink/renderer/core/layout/layout_box.h"',
+    '#include "third_party/blink/renderer/core/layout/layout_view.h"',
+    '#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"',
+    '#include "third_party/blink/renderer/core/paint/fragment_data.h"',
+    '#include "third_party/blink/renderer/platform/graphics/paint/'
+    'geometry_mapper.h"',
+    '#include "third_party/blink/renderer/platform/graphics/paint/'
+    'property_tree_state.h"',
+    '#include "third_party/blink/renderer/platform/graphics/paint/'
+    'transform_paint_property_node.h"',
+    '#include "third_party/blink/renderer/platform/heap/collection_support/'
+    'heap_hash_map.h"',
+    '#include "third_party/blink/renderer/platform/heap/collection_support/'
+    'heap_vector.h"',
+    '#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"',
+    '#include "ui/gfx/geometry/quad_f.h"',
+    '#include "ui/gfx/geometry/rect_f.h"',
+    '#include "ui/gfx/geometry/transform.h"',
+    '#include "ui/gfx/geometry/vector2d_f.h"',
+)
+BLINK_LAYOUT_CHANGES_HOOK = BLINK_LAYOUT_CHECKPOINT_HOOK + """\
+    ForAllNonThrottledLocalFrameViews([](LocalFrameView& frame_view) {
+      RecorderRecordLayoutChanges(frame_view);
+    });
+"""
+
+
+def insert_after_first_once(
+    text: str, anchor: str, block: str, marker: str, path: Path
+) -> str:
+    """Inserts a block after the first occurrence of an anchor, once."""
+    if marker in text:
+        return text
+    index = text.find(anchor)
+    if index < 0:
+        raise RuntimeError(f"{path}: expected anchor {anchor!r}")
+    index += len(anchor)
+    return text[:index] + block + text[index:]
+
+
+def add_layout_changes_to_local_frame_view(text: str, path: Path) -> str:
+    """Adds the layout change notes, the change set, and its hook.
+
+    The declarations precede the layout checkpoint helper, outside the region
+    an upgrade of that helper replaces, and the definitions follow every
+    helper at the end of the blink namespace, since they use the helper's
+    property list and readers.
+    """
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/frame/local_frame_view.h"',
+        BLINK_LAYOUT_CHANGES_INCLUDES,
+        path,
+    )
+    if BLINK_LAYOUT_CHANGES_DECLARATION not in text:
+        text = replace_once(
+            text,
+            BLINK_LAYOUT_CHECKPOINT_HELPER,
+            BLINK_LAYOUT_CHANGES_DECLARATION + BLINK_LAYOUT_CHECKPOINT_HELPER,
+            path,
+        )
+    if BLINK_LAYOUT_CHANGES_DEFINITION_MARKER not in text:
+        end = text.rfind("}  // namespace blink\n")
+        if end < 0:
+            raise RuntimeError(f"{path}: expected the end of namespace blink")
+        text = text[:end] + BLINK_LAYOUT_CHANGES_DEFINITION + text[end:]
+    return apply_cookie_hook(
+        text, BLINK_LAYOUT_CHECKPOINT_HOOK, BLINK_LAYOUT_CHANGES_HOOK, path
+    )
+
+
+# Each noting hook follows the Blink statement it observes. The anchor is the
+# statement with enough of its context to occur once.
+BLINK_ELEMENT_LAYOUT_CHANGE_HOOKS = (
+    (
+        "  SetComputedStyle(new_style);\n\n"
+        "  if ((!old_style && new_style && new_style->GetCounterDirectives()) ||\n",
+        "  SetComputedStyle(new_style);\n"
+        "  RecorderNoteLayoutChange(this, 1);\n\n"
+        "  if ((!old_style && new_style && new_style->GetCounterDirectives()) ||\n",
+    ),
+    (
+        "    column_pseudo_element->SetComputedStyle(style);\n",
+        "    column_pseudo_element->SetComputedStyle(style);\n"
+        "    RecorderNoteLayoutChange(column_pseudo_element, 1);\n",
+    ),
+    (
+        "    scroll_marker->SetComputedStyle(scroll_marker_style);\n",
+        "    scroll_marker->SetComputedStyle(scroll_marker_style);\n"
+        "    RecorderNoteLayoutChange(scroll_marker, 1);\n",
+    ),
+    (
+        "    element_style = new_style;\n    SetComputedStyle(new_style);\n",
+        "    element_style = new_style;\n    SetComputedStyle(new_style);\n"
+        "    RecorderNoteLayoutChange(this, 1);\n",
+    ),
+    (
+        "      element->SetComputedStyle(pseudo_style);\n",
+        "      element->SetComputedStyle(pseudo_style);\n"
+        "      RecorderNoteLayoutChange(element, 1);\n",
+    ),
+    (
+        "  pseudo_element->SetComputedStyle(pseudo_style);\n",
+        "  pseudo_element->SetComputedStyle(pseudo_style);\n"
+        "  RecorderNoteLayoutChange(pseudo_element, 1);\n",
+    ),
+)
+BLINK_STYLE_ENGINE_LAYOUT_CHANGE_HOOKS = (
+    (
+        "    container.SetComputedStyle(new_style);\n",
+        "    container.SetComputedStyle(new_style);\n"
+        "    RecorderNoteLayoutChange(&container, 1);\n",
+    ),
+)
+BLINK_TEXT_LAYOUT_CHANGE_HOOKS = (
+    (
+        "      layout_text->SetStyle(*new_style);\n"
+        "      if (NeedsStyleRecalc())\n"
+        "        layout_text->SetTextIfNeeded(data());\n",
+        "      layout_text->SetStyle(*new_style);\n"
+        "      if (NeedsStyleRecalc())\n"
+        "        layout_text->SetTextIfNeeded(data());\n"
+        "      RecorderNoteLayoutChange(this, 1);\n",
+    ),
+)
+BLINK_LAYOUT_OBJECT_LAYOUT_CHANGE_HOOKS = (
+    (
+        "    element->SetComputedStyle(&style);\n",
+        "    element->SetComputedStyle(&style);\n"
+        "    RecorderNoteLayoutChange(element, 1);\n",
+    ),
+)
+BLINK_LAYOUT_BOX_LAYOUT_CHANGE_HOOKS = (
+    (
+        "  layout_results_.push_back(std::move(result));\n"
+        "  InvalidateCachedGeometry();\n"
+        "  CheckDidAddFragment(*this, fragment);\n",
+        "  layout_results_.push_back(std::move(result));\n"
+        "  InvalidateCachedGeometry();\n"
+        "  CheckDidAddFragment(*this, fragment);\n"
+        "  RecorderNoteLayoutResult(*this, fragment);\n",
+    ),
+    (
+        "  layout_results_[index] = std::move(result);\n"
+        "  InvalidateCachedGeometry();\n"
+        "  CheckDidAddFragment(*this, fragment, index);\n",
+        "  layout_results_[index] = std::move(result);\n"
+        "  InvalidateCachedGeometry();\n"
+        "  CheckDidAddFragment(*this, fragment, index);\n"
+        "  RecorderNoteLayoutResult(*this, fragment);\n",
+    ),
+)
+BLINK_PRE_PAINT_LAYOUT_CHANGE_HOOKS = (
+    (
+        "    property_tree_builder->UpdateForSelf();\n  }\n",
+        "    property_tree_builder->UpdateForSelf();\n"
+        "    RecorderNoteLayoutObjectChange(object, 4);\n  }\n",
+    ),
+)
+
+
+def patch_blink_layout_change_notes(
+    path: Path,
+    declaration: str,
+    hooks: tuple[tuple[str, str], ...],
+) -> None:
+    """Declares a noting function and adds its hooks to one Blink file."""
+    text = read_source(path)
+    text = insert_after_first_once(
+        text, "namespace blink {\n\n", declaration, declaration, path
+    )
+    for anchor, hook in hooks:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
 
 
 # Rendered-frame correlation. Each layout checkpoint asks its local-root
@@ -9708,6 +10303,41 @@ def main() -> int:
     patch_blink_text_field_input_type(forms / "text_field_input_type.cc")
     patch_blink_text_area_element(forms / "html_text_area_element.cc")
     patch_blink_local_frame_view(blink_core / "frame" / "local_frame_view.cc")
+    for recorder_path, recorder_declaration, recorder_hooks in (
+        (
+            blink_core / "dom" / "element.cc",
+            BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+            BLINK_ELEMENT_LAYOUT_CHANGE_HOOKS,
+        ),
+        (
+            blink_core / "dom" / "text.cc",
+            BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+            BLINK_TEXT_LAYOUT_CHANGE_HOOKS,
+        ),
+        (
+            blink_core / "css" / "style_engine.cc",
+            BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+            BLINK_STYLE_ENGINE_LAYOUT_CHANGE_HOOKS,
+        ),
+        (
+            blink_core / "layout" / "layout_object.cc",
+            BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+            BLINK_LAYOUT_OBJECT_LAYOUT_CHANGE_HOOKS,
+        ),
+        (
+            blink_core / "layout" / "layout_box.cc",
+            BLINK_LAYOUT_RESULT_NOTE_DECLARATION,
+            BLINK_LAYOUT_BOX_LAYOUT_CHANGE_HOOKS,
+        ),
+        (
+            blink_core / "paint" / "pre_paint_tree_walk.cc",
+            BLINK_LAYOUT_OBJECT_CHANGE_NOTE_DECLARATION,
+            BLINK_PRE_PAINT_LAYOUT_CHANGE_HOOKS,
+        ),
+    ):
+        patch_blink_layout_change_notes(
+            recorder_path, recorder_declaration, recorder_hooks
+        )
     patch_blink_web_frame_widget_header(
         blink_core / "frame" / "web_frame_widget_impl.h"
     )

@@ -194,6 +194,22 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.LayoutCheckpointCompleted) =>
                 payload.Deserialize<BrowserLayoutCheckpointCompletedPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Layout,
+                BrowserEvidenceEventTypes.LayoutChangesStarted) =>
+                payload.Deserialize<BrowserLayoutChangesStartedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Layout,
+                BrowserEvidenceEventTypes.LayoutTransformNode) =>
+                payload.Deserialize<BrowserLayoutTransformNodePayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Layout,
+                BrowserEvidenceEventTypes.LayoutNodeChanged) =>
+                payload.Deserialize<BrowserLayoutNodeChangedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Layout,
+                BrowserEvidenceEventTypes.LayoutChangesCompleted) =>
+                payload.Deserialize<BrowserLayoutChangesCompletedPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Network,
                 BrowserEvidenceEventTypes.NetworkRequestWillBeSent) =>
                 payload.Deserialize<BrowserNetworkRequestWillBeSentPayload>(

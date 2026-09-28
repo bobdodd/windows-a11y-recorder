@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/component_export.h"
+#include "chromium/recorder_bridge/layout_changes.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
 
 namespace base {
@@ -990,48 +991,8 @@ struct LayoutCheckpointFrame {
   double layout_zoom_factor = 0;
 };
 
-// One computed-style value of an element. An absent value means Blink
-// produced no serialization for the property from the element's style.
-struct LayoutCheckpointStyleValue {
-  std::string property_name;
-  bool value_present = false;
-  std::string value;
-};
-
-// One element or text node at a layout checkpoint. The rectangle is the value
-// getBoundingClientRect would return at the checkpoint, in CSS pixels relative
-// to the frame's viewport, and is only meaningful when a layout object exists.
-// A display-locked node sits under a content-visibility ancestor that skipped
-// its layout, so its rectangle may be stale. The computed style is the style
-// Blink already held for the element; the checkpoint never computes one.
-struct LayoutCheckpointNode {
-  int node_index = -1;
-  int node_id = 0;
-  int node_type = 0;
-  std::string node_name;
-  bool layout_object_present = false;
-  bool display_locked = false;
-  double x = 0;
-  double y = 0;
-  double width = 0;
-  double height = 0;
-  bool computed_style_present = false;
-  std::vector<LayoutCheckpointStyleValue> computed_style;
-  // Set for a pseudo-element. The originating node is the element or
-  // pseudo-element that holds it. The generated text is the text laid out in
-  // the pseudo-element's layout subtree, truncated by the caller, with its
-  // full length in UTF-16 code units.
-  bool pseudo_element_present = false;
-  int originating_node_id = 0;
-  std::string pseudo_type;
-  std::string generated_text;
-  int generated_text_length = 0;
-  bool generated_text_truncated = false;
-  // Set for a node inside a shadow tree: the host of the containing shadow
-  // root and that root's mode.
-  int shadow_host_node_id = 0;
-  std::string shadow_root_mode;
-};
+// LayoutCheckpointStyleValue and LayoutCheckpointNode are declared in
+// layout_changes.h.
 
 // Starts one layout and computed-style checkpoint for a document whose
 // rendering update reached the paint-clean state. The two counters are Blink's
@@ -1119,6 +1080,20 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
                                    int maximum_nodes,
                                    int pseudo_element_count,
                                    int shadow_root_count);
+
+// Records one layout change set of a document whose rendering update reached
+// the paint-clean state: the transform nodes and the noted nodes whose record
+// differs from the last one recorded for them in this renderer process, and
+// the counts. The set names the layout checkpoint recorded for the document
+// since the previous call for it, if any. Nothing is recorded when no record
+// differs, and nothing when the recorder is not connected.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkLayoutChanges(int document_node_id,
+                              std::string document_token,
+                              LayoutChangesFrame frame,
+                              int noted_node_count,
+                              std::vector<LayoutTransformNode> transform_nodes,
+                              std::vector<LayoutChangedNode> nodes);
 
 // The local-root widget a presentation request was queued on. The frame sink
 // is the viz::FrameSinkId whose compositor frames the frame tokens number, and

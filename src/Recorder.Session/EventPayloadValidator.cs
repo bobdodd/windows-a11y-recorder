@@ -239,6 +239,18 @@ internal static class EventPayloadValidator
             case ("browser.layout", "layout-checkpoint-completed"):
                 ValidateBrowserLayoutCheckpointCompleted(payload, issues);
                 break;
+            case ("browser.layout", "layout-changes-started"):
+                ValidateBrowserLayoutChangesStarted(payload, issues);
+                break;
+            case ("browser.layout", "layout-transform-node"):
+                ValidateBrowserLayoutTransformNode(payload, issues);
+                break;
+            case ("browser.layout", "layout-node-changed"):
+                ValidateBrowserLayoutNodeChanged(payload, issues);
+                break;
+            case ("browser.layout", "layout-changes-completed"):
+                ValidateBrowserLayoutChangesCompleted(payload, issues);
+                break;
             case ("browser.presentation", "presentation-requested"):
                 ValidateBrowserPresentationRequested(payload, issues);
                 break;
@@ -2647,6 +2659,302 @@ internal static class EventPayloadValidator
                 "#/payload/pseudoElementCount",
                 $"The checkpoint reports {pseudoCount} pseudo-elements among " +
                     $"{count} nodes.");
+        }
+    }
+
+    // Layout change records (protocol 0.32). Change sets are named
+    // "layout-changes-N" and transform nodes "layout-transform-N".
+    private static readonly string[] LayoutChangeReasons =
+        ["style", "layout", "paint-properties"];
+
+    private static PropertyRule ComputedStyleRule() =>
+        new(
+            "computedStyle",
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.Object &&
+                value.EnumerateObject().All(entry =>
+                    entry.Name.Length > 0 &&
+                    entry.Value.ValueKind is
+                        JsonValueKind.String or JsonValueKind.Null),
+            "must be an object of string or null values, or null");
+
+    private static void ValidateLayoutIdentity(
+        JsonElement payload,
+        string property,
+        string prefix,
+        string code,
+        ICollection<EventValidationIssue> issues,
+        string path = "#/payload")
+    {
+        var value = ReadString(payload, property);
+        if (value is not null && !IsCheckpointIdentity(value, prefix))
+        {
+            AddError(
+                issues,
+                code,
+                $"{path}/{property}",
+                $"'{value}' is not a '{prefix}N' identity.");
+        }
+    }
+
+    private static void ValidateLayoutChangeSetIdentity(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateLayoutIdentity(
+            payload,
+            "changeSetId",
+            "layout-changes-",
+            "browser-layout-change-set-id-invalid",
+            issues);
+    }
+
+    private static void ValidateBrowserLayoutChangesStarted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("changeSetId"),
+                NullableString("layoutCheckpointId"),
+                RequiredString("viewTransformNodeId"),
+                RequiredObject("viewPaintOffset"),
+                RequiredNumber("layoutZoomFactor", positive: true)
+            ],
+            issues);
+        ValidateLayoutChangeSetIdentity(payload, issues);
+        ValidateLayoutIdentity(
+            payload,
+            "layoutCheckpointId",
+            "layout-checkpoint-",
+            "browser-layout-change-checkpoint-id-invalid",
+            issues);
+        ValidateLayoutIdentity(
+            payload,
+            "viewTransformNodeId",
+            "layout-transform-",
+            "browser-layout-transform-node-id-invalid",
+            issues);
+        if (payload.TryGetProperty("viewPaintOffset", out var offset) &&
+            offset.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                offset,
+                [RequiredNumber("x"), RequiredNumber("y")],
+                issues,
+                "#/payload/viewPaintOffset");
+        }
+    }
+
+    private static void ValidateBrowserLayoutTransformNode(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("changeSetId"),
+                RequiredString("transformNodeId"),
+                NullableString("parentTransformNodeId"),
+                new PropertyRule(
+                    "matrix",
+                    true,
+                    false,
+                    value => value.ValueKind == JsonValueKind.Array &&
+                        value.GetArrayLength() == 16 &&
+                        value.EnumerateArray().All(item =>
+                            item.ValueKind == JsonValueKind.Number &&
+                            double.IsFinite(item.GetDouble())),
+                    "must be an array of 16 finite numbers"),
+                RequiredBoolean("flattensInheritedTransform"),
+                RequiredBoolean("scrollTranslation"),
+                RequiredBoolean("sticky")
+            ],
+            issues);
+        ValidateLayoutChangeSetIdentity(payload, issues);
+        ValidateLayoutIdentity(
+            payload,
+            "transformNodeId",
+            "layout-transform-",
+            "browser-layout-transform-node-id-invalid",
+            issues);
+        ValidateLayoutIdentity(
+            payload,
+            "parentTransformNodeId",
+            "layout-transform-",
+            "browser-layout-transform-node-id-invalid",
+            issues);
+        var id = ReadString(payload, "transformNodeId");
+        if (id is not null && id == ReadString(payload, "parentTransformNodeId"))
+        {
+            AddError(
+                issues,
+                "browser-layout-transform-node-parent-self",
+                "#/payload/parentTransformNodeId",
+                "A transform node names itself as its parent.");
+        }
+    }
+
+    private static void ValidateBrowserLayoutNodeChanged(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("changeSetId"),
+                new PropertyRule(
+                    "reasons",
+                    true,
+                    false,
+                    value => value.ValueKind == JsonValueKind.Array &&
+                        value.GetArrayLength() > 0 &&
+                        value.EnumerateArray().All(item =>
+                            item.ValueKind == JsonValueKind.String &&
+                            LayoutChangeReasons.Contains(item.GetString())) &&
+                        value.EnumerateArray().Select(item => item.GetString())
+                            .Distinct(StringComparer.Ordinal).Count() ==
+                            value.GetArrayLength(),
+                    "must be a nonempty array of distinct change reasons"),
+                RequiredInteger("nodeId", positive: true),
+                RequiredEnum("nodeType", "element", "text", "pseudo-element"),
+                RequiredString("nodeName"),
+                RequiredBoolean("layoutObjectPresent"),
+                RequiredBoolean("displayLocked"),
+                NullableObject("geometry"),
+                ComputedStyleRule(),
+                NullableObject("pseudoElement"),
+                NullableInteger("shadowHostNodeId", positive: true),
+                NullableEnum("shadowRootMode", "open", "closed", "user-agent")
+            ],
+            issues);
+        ValidateLayoutChangeSetIdentity(payload, issues);
+        ValidateBrowserLayoutPseudoElement(payload, issues);
+        if (HasNonnullProperty(payload, "shadowHostNodeId") !=
+            HasNonnullProperty(payload, "shadowRootMode"))
+        {
+            AddError(
+                issues,
+                "browser-layout-shadow-scope-inconsistent",
+                "#/payload/shadowHostNodeId",
+                "A shadow host and a shadow root mode must be recorded together.");
+        }
+        var hasGeometry = payload.TryGetProperty("geometry", out var geometry) &&
+            geometry.ValueKind == JsonValueKind.Object;
+        if (hasGeometry)
+        {
+            const string pointer = "#/payload/geometry";
+            ValidateShape(
+                geometry,
+                [
+                    RequiredString("transformNodeId"),
+                    NullableObject("localRect"),
+                    RequiredBoolean("clientRectEmpty"),
+                    RequiredBoolean("localRectMapped"),
+                    RequiredNumber("clientRectScale", positive: true)
+                ],
+                issues,
+                pointer);
+            ValidateLayoutIdentity(
+                geometry,
+                "transformNodeId",
+                "layout-transform-",
+                "browser-layout-transform-node-id-invalid",
+                issues,
+                pointer);
+            var hasLocalRect = geometry.TryGetProperty("localRect", out var rect) &&
+                rect.ValueKind == JsonValueKind.Object;
+            if (hasLocalRect)
+            {
+                ValidateShape(
+                    rect,
+                    [
+                        RequiredNumber("x"),
+                        RequiredNumber("y"),
+                        RequiredNumber("width", nonnegative: true),
+                        RequiredNumber("height", nonnegative: true)
+                    ],
+                    issues,
+                    pointer + "/localRect");
+            }
+            var mapped = geometry.TryGetProperty("localRectMapped", out var mappedValue) &&
+                IsBoolean(mappedValue) && mappedValue.GetBoolean();
+            var empty = geometry.TryGetProperty("clientRectEmpty", out var emptyValue) &&
+                IsBoolean(emptyValue) && emptyValue.GetBoolean();
+            if (mapped != hasLocalRect || (empty && mapped))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-local-rect-inconsistent",
+                    pointer + "/localRect",
+                    "A local rectangle must be present exactly when it was mapped, " +
+                        "and an empty client rectangle is not mapped.");
+            }
+        }
+        if (hasGeometry &&
+            payload.TryGetProperty("layoutObjectPresent", out var layoutObject) &&
+            IsBoolean(layoutObject) && !layoutObject.GetBoolean())
+        {
+            AddError(
+                issues,
+                "browser-layout-geometry-inconsistent",
+                "#/payload/geometry",
+                "Geometry is recorded only for a node with a layout object.");
+        }
+        if (ReadString(payload, "nodeType") == "text")
+        {
+            var hasStyle = payload.TryGetProperty("computedStyle", out var style) &&
+                style.ValueKind != JsonValueKind.Null;
+            var hasLayoutObject =
+                payload.TryGetProperty("layoutObjectPresent", out var textLayout) &&
+                IsBoolean(textLayout) && textLayout.GetBoolean();
+            if (hasStyle || !hasLayoutObject)
+            {
+                AddError(
+                    issues,
+                    "browser-layout-text-node-inconsistent",
+                    "#/payload/nodeType",
+                    "A text node record must have a layout object and no " +
+                        "computed style.");
+            }
+        }
+    }
+
+    private static void ValidateBrowserLayoutChangesCompleted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("changeSetId"),
+                RequiredInteger("notedNodeCount", nonnegative: true),
+                RequiredInteger("recordedNodeCount", nonnegative: true),
+                RequiredInteger("unchangedNodeCount", nonnegative: true),
+                RequiredInteger("transformNodeCount", nonnegative: true)
+            ],
+            issues);
+        ValidateLayoutChangeSetIdentity(payload, issues);
+        var noted = ReadNullableInteger(payload, "notedNodeCount");
+        var recorded = ReadNullableInteger(payload, "recordedNodeCount");
+        var unchanged = ReadNullableInteger(payload, "unchangedNodeCount");
+        if (noted is not null && recorded is not null && unchanged is not null &&
+            (long)recorded + unchanged > noted)
+        {
+            AddError(
+                issues,
+                "browser-layout-change-counts-inconsistent",
+                "#/payload/recordedNodeCount",
+                $"{recorded} recorded and {unchanged} unchanged nodes exceed " +
+                    $"the {noted} nodes noted.");
         }
     }
 

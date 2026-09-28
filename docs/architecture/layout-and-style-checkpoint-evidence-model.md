@@ -425,6 +425,40 @@ The required test levels are:
 The fixture shows that the logger emits records; it does not evaluate the
 page's layout or styling.
 
+## Layout change records
+
+Protocol 0.32 adds four `browser.layout` records beside the checkpoints,
+which are unchanged. At the end of each rendering update, for each document
+that reached paint clean, the bridge records the nodes Blink noted since the
+document's previous change set and whose record differs from the last one
+sent, and the transform nodes of the paint property tree whose state
+differs:
+
+- `layout-changes-started`: `changeSetId` (`layout-changes-N`),
+  `layoutCheckpointId` (the checkpoint recorded for the document since its
+  previous change set, or null), `viewTransformNodeId`, `viewPaintOffset`,
+  and `layoutZoomFactor`.
+- `layout-transform-node`: `transformNodeId` (`layout-transform-N`),
+  `parentTransformNodeId` (null at the view's node and at the tree's root),
+  `matrix` (16 values, column-major, with the transform origin applied),
+  `flattensInheritedTransform`, `scrollTranslation`, and `sticky`.
+- `layout-node-changed`: `reasons` (`style`, `layout`, `paint-properties`),
+  the node fields of a checkpoint node record, and `geometry` in place of
+  `boundingClientRect`: `transformNodeId`, `localRect` (or null),
+  `clientRectEmpty`, `localRectMapped`, and `clientRectScale`. `geometry` is
+  null when the node has no layout object or no property container.
+- `layout-changes-completed`: `notedNodeCount`, `recordedNodeCount`,
+  `unchangedNodeCount`, and `transformNodeCount`.
+
+A change record holds geometry relative to a transform node, not a viewport
+rectangle, so a scroll or a transform change records the transform node and
+not every node under it. The viewport rectangle is derived at playback and is
+labelled as derived. Removals are not recorded yet. How the nodes are noted,
+how the rectangle is derived, and how the records are checked against the
+checkpoints are in `change-driven-recording.md`, "Slice 3 design". Whether
+the change records reproduce the checkpoints on real pages has not been
+measured.
+
 ## Next dependent slices
 
 - Per-fragment and per-line geometry.

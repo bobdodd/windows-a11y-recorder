@@ -49,6 +49,42 @@ public sealed class BrowserLayoutPayloadIngestTests
     }
 
     [Fact]
+    public void ReadsLayoutChangesAsWritten()
+    {
+        using var started = JsonDocument.Parse(BrowserLayoutPayloads.ChangesStartedWithoutCheckpoint);
+        var startedPayload = BrowserProtocol.Deserialize<BrowserLayoutChangesStartedPayload>(
+            started.RootElement);
+        Assert.Null(startedPayload.LayoutCheckpointId);
+        Assert.Equal("layout-transform-1", startedPayload.ViewTransformNodeId);
+        Assert.Equal(2, startedPayload.ViewPaintOffset.Y);
+
+        using var transform = JsonDocument.Parse(BrowserLayoutPayloads.ScrollTransformNode);
+        var transformPayload = BrowserProtocol.Deserialize<BrowserLayoutTransformNodePayload>(
+            transform.RootElement);
+        Assert.Equal(16, transformPayload.Matrix.Count);
+        Assert.Equal(-300.625, transformPayload.Matrix[13]);
+        Assert.True(transformPayload.ScrollTranslation);
+
+        using var node = JsonDocument.Parse(BrowserLayoutPayloads.ChangedElementNode);
+        var nodePayload = BrowserProtocol.Deserialize<BrowserLayoutNodeChangedPayload>(
+            node.RootElement);
+        Assert.Equal(["style", "layout"], nodePayload.Reasons);
+        Assert.Equal(338.75, nodePayload.Geometry!.LocalRect!.Y);
+        Assert.Equal(0.8, nodePayload.Geometry.ClientRectScale);
+
+        using var text = JsonDocument.Parse(BrowserLayoutPayloads.ChangedEmptyTextNode);
+        var textPayload = BrowserProtocol.Deserialize<BrowserLayoutNodeChangedPayload>(
+            text.RootElement);
+        Assert.True(textPayload.Geometry!.ClientRectEmpty);
+        Assert.Null(textPayload.Geometry.LocalRect);
+
+        using var completed = JsonDocument.Parse(BrowserLayoutPayloads.ChangesCompleted);
+        var completedPayload = BrowserProtocol.Deserialize<BrowserLayoutChangesCompletedPayload>(
+            completed.RootElement);
+        Assert.Equal(5, completedPayload.NotedNodeCount);
+    }
+
+    [Fact]
     public void ReadsLayoutStateAsWritten()
     {
         using var started = JsonDocument.Parse(BrowserLayoutPayloads.LaterCheckpointStarted);

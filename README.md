@@ -306,6 +306,15 @@ records carry. Web Serial's dispatch path is not recorded. The record types
 and limits are in
 [the worker and non-Node dispatch evidence model](docs/architecture/worker-and-non-node-dispatch-evidence-model.md).
 
+Protocol 0.32 adds layout change records beside the layout checkpoints, which
+are unchanged: at the end of each rendering update, the nodes whose style,
+layout, or paint properties Blink changed, with geometry relative to a paint
+property tree transform node, and the transform nodes whose state changed. A
+check rebuilds the state from the change records and compares it with every
+checkpoint of the same recording; it has not yet been run on a real
+recording. The design is in
+[change-driven recording](docs/architecture/change-driven-recording.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

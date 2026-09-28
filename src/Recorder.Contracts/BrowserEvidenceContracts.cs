@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.31";
+    public const string CurrentVersion = "0.32";
 }
 
 public static class BrowserEvidenceChannels
@@ -74,6 +74,10 @@ public static class BrowserEvidenceEventTypes
     public const string LayoutCheckpointStarted = "layout-checkpoint-started";
     public const string LayoutCheckpointNode = "layout-checkpoint-node";
     public const string LayoutCheckpointCompleted = "layout-checkpoint-completed";
+    public const string LayoutChangesStarted = "layout-changes-started";
+    public const string LayoutTransformNode = "layout-transform-node";
+    public const string LayoutNodeChanged = "layout-node-changed";
+    public const string LayoutChangesCompleted = "layout-changes-completed";
     public const string PresentationRequested = "presentation-requested";
     public const string PresentationNotSwapped = "presentation-not-swapped";
     public const string PresentationSwapped = "presentation-swapped";
@@ -758,6 +762,73 @@ public sealed record BrowserLayoutCheckpointCompletedPayload(
     int MaximumNodes,
     int PseudoElementCount = 0,
     int ShadowRootCount = 0);
+
+// Layout change records (protocol 0.32). A change set records, for one
+// document at the end of a rendering update, the transform nodes and noted
+// nodes whose record differs from the last one recorded for them.
+// LayoutCheckpointId names the checkpoint recorded for the document since its
+// previous change set, if any. ViewTransformNodeId is the transform node of
+// the layout view's local border box, and ViewPaintOffset the view's paint
+// offset in it, in physical pixels.
+public sealed record BrowserLayoutChangesStartedPayload(
+    BrowserContext Context,
+    string ChangeSetId,
+    string? LayoutCheckpointId,
+    string ViewTransformNodeId,
+    BrowserLayoutPoint ViewPaintOffset,
+    double LayoutZoomFactor);
+
+// One transform node of the paint property tree. Matrix is the node's matrix
+// with its transform origin applied, 16 values in column-major order.
+// ParentTransformNodeId is null at the view's node and at the tree's root.
+public sealed record BrowserLayoutTransformNodePayload(
+    BrowserContext Context,
+    string ChangeSetId,
+    string TransformNodeId,
+    string? ParentTransformNodeId,
+    IReadOnlyList<double> Matrix,
+    bool FlattensInheritedTransform,
+    bool ScrollTranslation,
+    bool Sticky);
+
+// The geometry of a changed node. LocalRect is the rectangle
+// getBoundingClientRect is built from, before its zoom adjustment, mapped into
+// the transform node's space; it is null when that rectangle is empty
+// (ClientRectEmpty) or could not be mapped (LocalRectMapped false).
+// ClientRectScale converts the rectangle derived in viewport space to CSS
+// pixels.
+public sealed record BrowserLayoutNodeGeometry(
+    string TransformNodeId,
+    BrowserLayoutRect? LocalRect,
+    bool ClientRectEmpty,
+    bool LocalRectMapped,
+    double ClientRectScale);
+
+// One noted node whose record changed. Reasons lists why it was noted:
+// "style", "layout", or "paint-properties". The node fields are those of a
+// checkpoint node record, and Geometry replaces its viewport rectangle.
+public sealed record BrowserLayoutNodeChangedPayload(
+    BrowserContext Context,
+    string ChangeSetId,
+    IReadOnlyList<string> Reasons,
+    long NodeId,
+    string NodeType,
+    string NodeName,
+    bool LayoutObjectPresent,
+    bool DisplayLocked,
+    BrowserLayoutNodeGeometry? Geometry,
+    IReadOnlyDictionary<string, string?>? ComputedStyle,
+    BrowserLayoutPseudoElement? PseudoElement = null,
+    long? ShadowHostNodeId = null,
+    string? ShadowRootMode = null);
+
+public sealed record BrowserLayoutChangesCompletedPayload(
+    BrowserContext Context,
+    string ChangeSetId,
+    int NotedNodeCount,
+    int RecordedNodeCount,
+    int UnchangedNodeCount,
+    int TransformNodeCount);
 
 // Presentation records follow the compositor frame that carries one layout
 // checkpoint's rendering update. A request names the checkpoint and the

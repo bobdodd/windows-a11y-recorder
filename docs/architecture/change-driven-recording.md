@@ -170,11 +170,13 @@ The content limits were removed:
   64 MiB; it accepts a single larger record once it is empty.
 
 What remains bounded: a record whose serialized form exceeds that maximum is
-not sent and is reported lost, as a record over 4 MiB was before. A kept-active
-presentation request records at most 16 `DidNotSwap` calls
+not sent and is reported lost, as a record over 4 MiB was before.
+
+A kept-active presentation request recorded at most 16 `DidNotSwap` calls
 (`kMaximumPresentationNotSwappedRecords`), with the full count in its
-terminal record; this is a limit on records, not on content, and is
-unchanged.
+terminal record. With slice 3 the bound is 2147483647, so every call is
+recorded. The recorder's own diagnostic limits, which bound its cost report
+and log and not the evidence, are unchanged.
 
 Recording values whole makes records larger. What that costs on a large page
 is to be measured on the target machine.
@@ -277,7 +279,7 @@ recording file is the evidence; the index can be rebuilt from it.
 
 ## Questions to settle before the browser slices
 
-- Geometry. The current layout records hold viewport rectangles, which
+- Geometry (settled for slice 3; see "Slice 3 design"). The current layout records hold viewport rectangles, which
   change for every node when the page scrolls. Recording positions as Blink
   holds them, relative to the parent fragment, with scroll offsets, keeps
   the recorded evidence proportional to the change, but deriving the
@@ -328,6 +330,188 @@ not note. The form is off in normal recording.
 4. Snapshots from the cache, DOM insertions and removals, and scroll
    offsets.
 5. The full walk kept only for a document's first update and after a loss.
+
+## Slice 3 design: change-driven style and layout capture
+
+Decided 2026-09-28 from the Blink source of the Chromium checkout on the
+target Windows machine, version 156.0.8065.0. Line numbers below are from that
+checkout. Protocol 0.32.
+
+### What slice 3 adds, and what it does not change
+
+Slice 3 adds change records to `browser.layout` beside the full layout
+checkpoints. The checkpoints are unchanged and are still recorded at every
+rendering update whose style or layout counters changed. They are the
+reference the change records are checked against: a recording made with
+slice 3 holds both, so the state rebuilt from the change records can be
+compared with every checkpoint of the same recording.
+
+Recording therefore costs more with slice 3 than before it, not less. The
+gain comes when slices 4 and 5 remove the walk from ordinary updates, and
+only once the comparison shows the change records complete.
+
+### Geometry
+
+A change record holds the geometry Blink holds, not the rectangle
+`getBoundingClientRect` returns. That rectangle is relative to the viewport,
+so it changes for every node under a scroller whenever the scroller scrolls,
+and for every descendant of an element whose transform changes, although
+Blink recalculated neither the node's style nor its layout. Keeping it
+current would mean reading every such node again, which is the cost this
+design removes.
+
+Blink positions each object relative to a transform node of the paint
+property tree: `FragmentData::PaintOffset()` is the offset "from the origin
+of the transform node of the fragment's property tree state"
+(`core/paint/fragment_data.h`, lines 31 to 35). Scrolling, CSS transforms,
+sticky positioning, and fixed positioning are transform nodes
+(`platform/graphics/paint/transform_paint_property_node.h`). A scroll
+changes one scroll translation node, not the objects under it.
+
+A `layout-node-changed` record states:
+
+- `transformNodeId`: the transform node of the object's local border box
+  properties (`FirstFragment().LocalBorderBoxProperties().Transform()`), or,
+  for an object without them, of the nearest container that has them, as
+  `LayoutObject::GetPropertyContainer` finds it (`core/layout/layout_object.cc`,
+  line 2705).
+- `localRect`: the rectangle `getBoundingClientRect` is built from, before
+  its zoom adjustment (`Element::GetBoundingClientRectNoLifecycleUpdateNoAdjustment`,
+  `core/dom/element.cc`, line 3579, and the union of `AbsoluteQuads` for a
+  text node, as the checkpoint reads it), mapped from the viewport's
+  transform node into the record's transform node with
+  `GeometryMapper::SourceToDestinationProjection`
+  (`platform/graphics/paint/geometry_mapper.h`, line 43). The bounding box of
+  the mapped corners is recorded. When the projection rotates or skews
+  (`gfx::Transform::Preserves2dAxisAlignment` is false), each of the object's
+  `AbsoluteQuads` is mapped instead and their bounding boxes are united, so
+  the rectangle derived back in viewport space is the one Blink united and
+  not the bounds of its bounds. `localRectMapped` is false, and the rect is
+  null, when the projection is not invertible.
+- `clientRectEmpty`: true, with the rect null, when the rectangle is empty,
+  which `getBoundingClientRect` returns without adjusting it.
+- `clientRectScale`: the factor `getBoundingClientRect` multiplies by to
+  convert to CSS pixels for this object.
+
+A `layout-transform-node` record states one transform node: its identity,
+its parent (null at the viewport's node, where every chain the records name
+stops), its matrix with its origin applied (`MatrixWithOriginApplied()`, 16 values
+in column-major order),
+whether it flattens the transform it inherits, whether it is a scroll
+translation, and whether it is sticky. A transform node is recorded when a
+node record refers to it or to a node below it, and again whenever its state
+differs from its last record. Every transform node a document's records have
+named is read again at every update of the document, because a compositor
+scroll updates a scroll translation without any object being noted.
+
+The viewport's transform node is the transform of the `LayoutView`'s local
+border box properties. The `layout-changes-started` record names it, with the
+`LayoutView`'s paint offset in it.
+
+The rectangle `getBoundingClientRect` would return is derived at playback:
+the local rectangle's corners are mapped up the chain by each node's
+`MatrixWithOriginApplied` (`transform_paint_property_node.h`, line 202) to
+the viewport's node, the paint offset of the view is subtracted, the
+bounding box is taken, and it is multiplied by `clientRectScale`. A derived
+rectangle is labelled as derived.
+
+### Noting what changed
+
+Each hook adds a node to a set of noted nodes and computes nothing else, and
+only while the recorder is connected (`IsRecorderActive`). A node is noted
+when:
+
+- an element's computed style is set: after the calls of
+  `SetComputedStyle` in `core/dom/element.cc`, in `RecalcOwnStyle`
+  (line 5854), `EnsureComputedStyle` (line 10512), the first-letter and other
+  pseudo-element styles (lines 10962 and 11190), and the column and scroll
+  marker pseudo-elements (lines 9491 and 9516); and in
+  `StyleEngine`'s highlight recalculation for size containers
+  (`core/css/style_engine.cc`, line 3737);
+- a text node's style is recalculated: `Text::RecalcTextStyle`
+  (`core/dom/text.cc`, line 429);
+- a box receives a new layout result: `LayoutBox::AppendLayoutResult` and
+  `LayoutBox::ReplaceLayoutResult` (`core/layout/layout_box.cc`); with the
+  box, every object its fragment items name, since the positions of text and
+  inline boxes are held in the fragment items of the block that contains
+  them;
+- the pre-paint walk builds an object's paint properties:
+  `PrePaintTreeWalk::WalkInternal`, after `UpdateForSelf`
+  (`core/paint/pre_paint_tree_walk.cc`, line 685). The walk visits objects
+  whose paint properties or paint offset need updating
+  (`NeedsTreeBuilderContextUpdate`, line 411), and a change of paint offset
+  forces an update of the object's subtree (`paint_property_tree_builder.cc`,
+  around line 4190).
+
+The setter in `core/dom/element.h` is not patched, because a change to that
+header rebuilds most of Blink. Noting too much costs only a record that is
+then found unchanged.
+
+Anonymous layout objects have no node and are not recorded, as in the
+checkpoint.
+
+### Recording the changes
+
+The changes are recorded in the existing hook at the end of a rendering
+update (`LocalFrameView::UpdateLifecyclePhases`), for every document whose
+lifecycle reached paint clean, after its checkpoint. For each document:
+
+- `layout-changes-started`: the change set's identity (`layout-changes-N`),
+  the identity of the checkpoint recorded in the same update, or null, the
+  viewport's transform node, the view's paint offset, and the frame's layout
+  zoom factor. Each node record maps property names to values, so the
+  property list is not repeated.
+- A `layout-transform-node` record for each new or changed transform node.
+- A `layout-node-changed` record for each noted node still connected to the
+  document whose record differs from the node's last record: its identity,
+  type, and name, its pseudo-element and shadow fields, whether it has a
+  layout object and is display locked, its geometry, and its computed style,
+  read the same way as the checkpoint reads them.
+- `layout-changes-completed`: the counts of nodes noted, nodes recorded,
+  noted nodes whose record was unchanged, and transform nodes recorded.
+
+Nothing is recorded for a document with no noted node and no changed
+transform node. The bridge keeps a 64-bit hash of each node's and each
+transform node's last record, per renderer process, to find unchanged
+records. It keeps them for the 64 most recently recorded documents; the next
+record of a node of a document it has dropped is sent in full again, so
+dropping costs a repeated record and never a lost one.
+
+### Checking the change records
+
+An app test reads a recording file and rebuilds each document's state from
+its change records in record order. At each layout checkpoint it compares,
+for every node in the checkpoint, the rebuilt computed style with the
+checkpoint's, and the derived rectangle with the checkpoint's
+`boundingClientRect`, and reports every node that differs or was never
+recorded, with the field. The checkpoint of an update is compared with the
+state after that update's change set, and a checkpoint whose update recorded
+no change set with the state before the document's next record. Rectangle
+edges that differ by at most 0.05 CSS pixels are counted as equal, and the
+largest difference is reported.
+
+The check is `LayoutChangeCheck` (`src/Recorder.Session/LayoutChangeCheck.cs`),
+with the rebuilt state in `LayoutChangeState`. It runs on a recording file as
+the test `ChecksTheLayoutChangesOfARecordingFile` when
+`RECORDER_LAYOUT_CHANGES_FILE` names the file, and writes its report to
+`RECORDER_LAYOUT_CHANGES_REPORT`, or to `layout-changes-report.txt` in the
+temporary directory. The derivation composes each chain from the view's node
+down, flattening the accumulated transform where a node flattens the
+transform it inherits, as `GeometryMapper` does. Its correctness on real
+pages is what the check measures; it has not been measured yet.
+
+### Limits
+
+- A transform or opacity animation running on the compositor changes what is
+  drawn without a main-thread update, so its frames are recorded by neither
+  the checkpoint nor the change records.
+- A fragmented object (in columns or pages) records the transform node of
+  its first fragment, as `getBoundingClientRect` unites the quads of all
+  fragments.
+- DOM removals are not recorded until slice 4; a removed node keeps its last
+  record.
+- A change record lost after the bridge has hashed it is not sent again
+  until the node changes. Slice 5 handles loss.
 
 ## Slice 2 design: playback from the file
 

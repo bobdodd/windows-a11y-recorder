@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.31"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.31"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.32"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.32"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -4044,6 +4044,10 @@ class IntegrateTests(unittest.TestCase):
                     self.assertIn(current, first)
 
 
+# The end of namespace blink, which the layout change definition precedes.
+BLINK_NAMESPACE_END = "}  // namespace blink\n"
+
+
 def cookie_source(*parts: str) -> str:
     """Joins anchor text into a small source that holds each part once."""
     return "\n// separator\n".join(parts)
@@ -4348,6 +4352,33 @@ class CookieIntegrationTests(unittest.TestCase):
                     f"-I{MODULE_PATH.parent.parent}",
                     str(bridge / "evidence_cost.cc"),
                     str(bridge / "evidence_cost_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_layout_changes_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "layout_changes_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "layout_changes.cc"),
+                    str(bridge / "layout_changes_test.cc"),
                     "-o",
                     str(binary),
                 ],
@@ -4886,6 +4917,7 @@ class LayoutIntegrationTests(unittest.TestCase):
                 self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
                 INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
                 INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+                BLINK_NAMESPACE_END,
             )
         )
         self.assertEqual(
@@ -4912,12 +4944,117 @@ class LayoutIntegrationTests(unittest.TestCase):
             ),
         )
 
+    def test_adds_the_layout_change_set_to_the_local_frame_view(self):
+        patched = self.patch_twice(
+            cookie_source(
+                self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+                INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+                INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+                BLINK_NAMESPACE_END,
+            )
+        )
+        # The change set follows the checkpoint of the same update, in the
+        # hook that replaces the checkpoint-only hook.
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_LAYOUT_CHANGES_HOOK))
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_LAYOUT_CHANGES_DECLARATION)
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION)
+        )
+        self.assertLess(
+            patched.index(INTEGRATE.BLINK_LAYOUT_CHANGES_DECLARATION),
+            patched.index(INTEGRATE.BLINK_LAYOUT_CHANGES_HOOK),
+        )
+        self.assertLess(
+            patched.index(INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION),
+            patched.index(BLINK_NAMESPACE_END),
+        )
+        hook = INTEGRATE.BLINK_LAYOUT_CHANGES_HOOK
+        self.assertLess(
+            hook.index("RecorderRecordLayoutCheckpoint("),
+            hook.index("RecorderRecordLayoutChanges("),
+        )
+        for include_line in INTEGRATE.BLINK_LAYOUT_CHANGES_INCLUDES:
+            with self.subTest(include=include_line):
+                self.assertEqual(1, patched.count(include_line + "\n"))
+
+    def test_the_change_set_reads_held_geometry_without_forcing_work(self):
+        definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertIn("GetBoundingClientRectNoLifecycleUpdateNoAdjustment", definition)
+        self.assertIn("GeometryMapper::SourceToDestinationProjection(", definition)
+        self.assertIn("MatrixWithOriginApplied()", definition)
+        self.assertIn("a11y_recorder::RecordBlinkLayoutChanges(", definition)
+        # Noted nodes are held weakly, so a noted node that is collected is
+        # never kept alive by the recorder.
+        self.assertIn("WeakMember<const Node>", definition)
+        for forcing in ("UpdateStyleAndLayout", "UpdateAllLifecyclePhases",
+                        "EnsureComputedStyle", "getBoundingClientRect("):
+            with self.subTest(forcing=forcing):
+                self.assertNotIn(forcing, definition)
+
+    def test_adds_each_layout_change_note_once(self):
+        for name, declaration, hooks in (
+            (
+                "element.cc",
+                INTEGRATE.BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+                INTEGRATE.BLINK_ELEMENT_LAYOUT_CHANGE_HOOKS,
+            ),
+            (
+                "text.cc",
+                INTEGRATE.BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+                INTEGRATE.BLINK_TEXT_LAYOUT_CHANGE_HOOKS,
+            ),
+            (
+                "style_engine.cc",
+                INTEGRATE.BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+                INTEGRATE.BLINK_STYLE_ENGINE_LAYOUT_CHANGE_HOOKS,
+            ),
+            (
+                "layout_object.cc",
+                INTEGRATE.BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+                INTEGRATE.BLINK_LAYOUT_OBJECT_LAYOUT_CHANGE_HOOKS,
+            ),
+            (
+                "layout_box.cc",
+                INTEGRATE.BLINK_LAYOUT_RESULT_NOTE_DECLARATION,
+                INTEGRATE.BLINK_LAYOUT_BOX_LAYOUT_CHANGE_HOOKS,
+            ),
+            (
+                "pre_paint_tree_walk.cc",
+                INTEGRATE.BLINK_LAYOUT_OBJECT_CHANGE_NOTE_DECLARATION,
+                INTEGRATE.BLINK_PRE_PAINT_LAYOUT_CHANGE_HOOKS,
+            ),
+        ):
+            with self.subTest(file=name):
+                source = cookie_source(
+                    "namespace blink {\n", *(anchor for anchor, _ in hooks)
+                )
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / name
+                    path.write_text(source, encoding="utf-8")
+                    INTEGRATE.patch_blink_layout_change_notes(
+                        path, declaration, hooks
+                    )
+                    first = path.read_text(encoding="utf-8")
+                    INTEGRATE.patch_blink_layout_change_notes(
+                        path, declaration, hooks
+                    )
+                    self.assertEqual(first, path.read_text(encoding="utf-8"))
+                self.assertEqual(1, first.count(declaration))
+                self.assertLess(
+                    first.index(declaration), first.index(hooks[0][1])
+                )
+                for _, hook in hooks:
+                    self.assertEqual(1, first.count(hook))
+
     def test_upgrades_a_light_tree_helper_in_place(self):
         """A helper written before the composed traversal is rewritten."""
         source = cookie_source(
             self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+                BLINK_NAMESPACE_END,
         )
         current = self.patch_twice(source)
         earlier_helper = (
@@ -5002,6 +5139,7 @@ class LayoutIntegrationTests(unittest.TestCase):
             self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+                BLINK_NAMESPACE_END,
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "local_frame_view.cc"
@@ -5039,6 +5177,7 @@ class LayoutIntegrationTests(unittest.TestCase):
             self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+                BLINK_NAMESPACE_END,
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "local_frame_view.cc"
@@ -5059,6 +5198,7 @@ class LayoutIntegrationTests(unittest.TestCase):
             self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+                BLINK_NAMESPACE_END,
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "local_frame_view.cc"
@@ -5084,6 +5224,7 @@ class LayoutIntegrationTests(unittest.TestCase):
                 self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
                 INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
                 INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+                BLINK_NAMESPACE_END,
             )
         )
         declaration = INTEGRATE.BLINK_LAYOUT_INTERACTION_CHECKPOINT_DECLARATION
@@ -5117,6 +5258,7 @@ class LayoutIntegrationTests(unittest.TestCase):
             self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
             INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+                BLINK_NAMESPACE_END,
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "local_frame_view.cc"

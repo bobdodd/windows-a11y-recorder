@@ -2807,6 +2807,121 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void RejectsALayoutTransformMatrixOfTheWrongLength()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ScrollTransformNode)!;
+        payload["matrix"] = new JsonArray(1, 0, 0, 1);
+
+        var issues = ValidateLayoutRecord("layout-transform-node", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/matrix", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RejectsALayoutTransformNodeThatIsItsOwnParent()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ScrollTransformNode)!;
+        payload["parentTransformNodeId"] = "layout-transform-2";
+
+        var issues = ValidateLayoutRecord("layout-transform-node", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-transform-node-parent-self");
+    }
+
+    [Theory]
+    [InlineData("changeSetId", "layout-checkpoint-1", "browser-layout-change-set-id-invalid")]
+    [InlineData("changeSetId", "layout-changes-0", "browser-layout-change-set-id-invalid")]
+    [InlineData("viewTransformNodeId", "transform-1", "browser-layout-transform-node-id-invalid")]
+    [InlineData("layoutCheckpointId", "layout-changes-1", "browser-layout-change-checkpoint-id-invalid")]
+    public void RejectsALayoutChangeIdentityOfTheWrongForm(string property, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!;
+        payload[property] = value;
+
+        var issues = ValidateLayoutRecord("layout-changes-started", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("[\"style\", \"style\"]")]
+    [InlineData("[\"scroll\"]")]
+    public void RejectsInvalidLayoutChangeReasons(string reasons)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        payload["reasons"] = JsonNode.Parse(reasons);
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "payload-property-invalid" &&
+                issue.Path.EndsWith("/reasons", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RejectsALocalRectThatWasNotMapped()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        payload["geometry"]!["localRectMapped"] = false;
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-local-rect-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsAnEmptyClientRectWithALocalRect()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        payload["geometry"]!["clientRectEmpty"] = true;
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-local-rect-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsGeometryForANodeWithoutALayoutObject()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        payload["layoutObjectPresent"] = false;
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-geometry-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsLayoutChangeCountsThatExceedTheNotedNodes()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesCompleted)!;
+        payload["unchangedNodeCount"] = 3;
+
+        var issues = ValidateLayoutRecord("layout-changes-completed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-change-counts-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsAnUndeclaredLayoutGeometryProperty()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        payload["geometry"]!["boundingClientRect"] = 1;
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Code == "payload-property-unexpected" &&
+                issue.Path.EndsWith("/geometry/boundingClientRect", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void RejectsAnUndeclaredViewportProperty()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.FirstCheckpointStarted)!;
