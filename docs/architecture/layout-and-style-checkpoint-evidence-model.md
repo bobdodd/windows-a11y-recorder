@@ -348,6 +348,18 @@ value, as `getComputedStyle()` does.
   would be recorded stale by up to nine checkpoints, and the verifying
   checkpoints are how that would be found. The measurement that supports
   the reuse is above; it is one recording.
+- The first Windows recording with reuse (revision 6ce73b6), in the renderer
+  that recorded most checkpoints: 465 checkpoints over 121 s. Of 48,923,059
+  values recorded, 39,353,437, 80%, were copied. The 75 verifying
+  checkpoints compared 4,067,607 values that would have been copied, and none
+  differed. Style values took 8.88 s, 19.1 ms per checkpoint against 59.1 ms
+  in the recording before, and 0.18 µs per value against 0.55 µs. The whole
+  traversal took 54.9 ms per checkpoint against 75.9 ms, because handing
+  nodes to the bridge rose from 8.3 ms to 30.5 ms per checkpoint: 70,346
+  pushes waited for the writer thread to free queue space, for 22.1 s in
+  all, and the writer thread was busy for 102.3 s of the 121 s. The
+  recordings were not the same browsing, so the comparison is approximate;
+  the checkpoints came 3.8 per second against 3.0.
 - An element's record holds 283 values rather than the first list's 75. The
   volume with the full list is measured in the validation plan.
 
