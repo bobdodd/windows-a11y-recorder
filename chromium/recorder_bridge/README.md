@@ -339,7 +339,12 @@ idle process writes nothing. The kinds are:
 - `queue.push`, a push that found room, and `queue.push-waited`, a push that
   waited for the writer thread to free space;
 - `writer.write`, the writer thread's serialization and pipe write of one
-  record, which is off the observing thread.
+  record, which is off the observing thread, and its parts:
+  `writer.payload` (building the message and its payload, which for a
+  layout node is where its values become a dictionary), `writer.serialize`
+  (writing the message as JSON), and `writer.pipe-write` (writing the frame
+  to the pipe, including any time the pipe was full), with
+  `count:writer.bytes`, the bytes written.
 - the parts of each layout checkpoint's traversal, which Blink measures and
   hands to `RecordBlinkLayoutCheckpointCost` once per checkpoint, each summed
   over the checkpoint's nodes: `layout.node-fields` (identity, type, name,

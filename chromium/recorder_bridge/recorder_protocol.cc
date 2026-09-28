@@ -451,6 +451,15 @@ void RecorderPipeClient::ThreadMain() {
 
 void RecorderPipeClient::WriteQueuedEvidence(PendingEvidence& evidence) {
   A11Y_RECORDER_COST("writer.write");
+  // The parts of writer.write: building the payload, which for a deferred
+  // record is where its values become a dictionary; serializing the message
+  // to JSON; and writing the frame to the pipe, which includes any time the
+  // pipe was full. The bytes written are counted.
+  static const int payload_slot = RegisterCostKind("writer.payload");
+  static const int serialize_slot = RegisterCostKind("writer.serialize");
+  static const int pipe_slot = RegisterCostKind("writer.pipe-write");
+  static const int bytes_slot = RegisterCountKind("count:writer.bytes");
+  int64_t part_started = CostNowNanoseconds();
   base::DictValue message;
   message.Set("kind", "evidence");
   message.Set("protocolVersion", configuration_.protocol_version);
@@ -460,8 +469,21 @@ void RecorderPipeClient::WriteQueuedEvidence(PendingEvidence& evidence) {
   message.Set("eventType", evidence.event_type);
   message.Set("payload", evidence.TakePayload());
   message.Set("qualityFlags", base::ListValue());
+  int64_t part_ended = CostNowNanoseconds();
+  RecordCost(payload_slot, part_ended - part_started);
+  part_started = part_ended;
+  std::string json;
   std::string error;
-  if (!WriteMessage(std::move(message), &error) && write_failure_handler_) {
+  bool written = SerializeMessage(message, &json, &error);
+  part_ended = CostNowNanoseconds();
+  RecordCost(serialize_slot, part_ended - part_started);
+  if (written) {
+    part_started = part_ended;
+    written = WriteFrame(json, &error);
+    RecordCost(pipe_slot, CostNowNanoseconds() - part_started);
+    RecordCost(bytes_slot, static_cast<int64_t>(json.size()) + 4);
+  }
+  if (!written && write_failure_handler_) {
     write_failure_handler_(evidence.channel, evidence.lost_records_on_failure,
                            error);
   }
@@ -470,13 +492,23 @@ void RecorderPipeClient::WriteQueuedEvidence(PendingEvidence& evidence) {
 bool RecorderPipeClient::WriteMessage(base::DictValue message,
                                       std::string* error) {
   std::string json;
-  if (!base::JSONWriter::Write(message, &json) ||
-      json.size() > configuration_.maximum_message_bytes ||
-      json.size() > std::numeric_limits<uint32_t>::max()) {
+  return SerializeMessage(message, &json, error) && WriteFrame(json, error);
+}
+
+bool RecorderPipeClient::SerializeMessage(const base::DictValue& message,
+                                          std::string* json,
+                                          std::string* error) const {
+  if (!base::JSONWriter::Write(message, json) ||
+      json->size() > configuration_.maximum_message_bytes ||
+      json->size() > std::numeric_limits<uint32_t>::max()) {
     *error = "Browser evidence message could not be serialized safely.";
     return false;
   }
+  return true;
+}
 
+bool RecorderPipeClient::WriteFrame(const std::string& json,
+                                    std::string* error) {
   const uint32_t length = static_cast<uint32_t>(json.size());
   std::array<uint8_t, 4> header = {
       static_cast<uint8_t>(length), static_cast<uint8_t>(length >> 8),

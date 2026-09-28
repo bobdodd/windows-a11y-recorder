@@ -348,6 +348,9 @@ from the product version.
   text, finding pseudo-elements, and handing nodes to the bridge, with counts
   of styled elements, distinct style objects, and values, and write them with
   the other cost totals. No evidence changes. Requires rebuilding Chromium.
+- Split the browser evidence writer thread's cost into building the payload,
+  serializing it as JSON, and writing it to the pipe, and count the bytes
+  written. No evidence changes. Requires rebuilding Chromium.
 - Reuse, in each layout checkpoint, an element's computed-style values from
   its document's previous checkpoint when the element still has the same
   style object, reading again only the values Blink reports as depending on

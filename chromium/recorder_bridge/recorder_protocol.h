@@ -137,6 +137,11 @@ class RecorderPipeClient : public base::PlatformThread::Delegate {
   void WriteQueuedEvidence(PendingEvidence& evidence);
 
   bool WriteMessage(base::DictValue message, std::string* error);
+  // The two halves of WriteMessage, apart so the writer thread can time them.
+  bool SerializeMessage(const base::DictValue& message,
+                        std::string* json,
+                        std::string* error) const;
+  bool WriteFrame(const std::string& json, std::string* error);
   bool ReadMessage(base::DictValue* message, std::string* error);
 
   BootstrapConfiguration configuration_;

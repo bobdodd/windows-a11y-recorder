@@ -4280,6 +4280,10 @@ class CookieIntegrationTests(unittest.TestCase):
                 )
         self.assertIn('RegisterCostKind("queue.push-waited")', protocol_source)
         self.assertIn('A11Y_RECORDER_COST("writer.write");', protocol_source)
+        for part in ("writer.payload", "writer.serialize", "writer.pipe-write"):
+            with self.subTest(part=part):
+                self.assertIn(f'RegisterCostKind("{part}")', protocol_source)
+        self.assertIn('RegisterCountKind("count:writer.bytes")', protocol_source)
 
     def test_bridge_writes_evidence_from_its_writer_thread(self):
         protocol_source = (
