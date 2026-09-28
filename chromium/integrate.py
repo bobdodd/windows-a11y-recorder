@@ -6763,14 +6763,15 @@ void RecorderRequestLayoutPresentation(
       recorder_document_token);
 }
 
-// Measures whether an element keeps its style object from one checkpoint of
-// its document to the next, and whether its values that do not depend on
-// layout stay equal when it does. Only counts leave this measurement. The
-// style object is held, so its address cannot be reused by another style
-// while it is compared.
+// An element's computed-style reading from its document's previous
+// checkpoint. A style object is not changed once Blink has computed it, so
+// when an element still has the same style object, the values that do not
+// depend on layout are those read before, and only the values that do are
+// read again. The style object is held, so its address cannot be reused by
+// another style while the reading is kept.
 struct RecorderStyleReading {
   Persistent<const ComputedStyle> style;
-  Vector<size_t> value_hashes;
+  Vector<a11y_recorder::LayoutCheckpointStyleValue> values;
   Vector<bool> layout_dependent;
 };
 using RecorderStyleReadings =
@@ -6778,13 +6779,22 @@ using RecorderStyleReadings =
 
 // The readings of each document's previous checkpoint, by document token, on
 // the rendering thread. At most kRecorderMaximumStyleReadingDocuments
-// documents are held; another document's readings are dropped to make room.
+// documents are held; another document's readings are dropped to make room,
+// and its next checkpoint reads every value.
 std::unordered_map<std::string, RecorderStyleReadings>&
 RecorderPreviousStyleReadings() {
   static base::NoDestructor<
       std::unordered_map<std::string, RecorderStyleReadings>>
       recorder_readings;
   return *recorder_readings;
+}
+
+// The number of checkpoints recorded for each document, by document token,
+// which decides the checkpoints that read every value to verify the reuse.
+std::unordered_map<std::string, int64_t>& RecorderStyleCheckpointCounts() {
+  static base::NoDestructor<std::unordered_map<std::string, int64_t>>
+      recorder_counts;
+  return *recorder_counts;
 }
 
 // Records the layout geometry and computed styles of one frame view's document
@@ -6836,9 +6846,25 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
   // Measures where the traversal's time goes, so its cost can be reduced by
   // evidence. Only clocks and counts are added; what is recorded is unchanged.
   a11y_recorder::LayoutCheckpointCost recorder_cost;
-  // Addresses only, compared and never followed.
-  std::vector<uintptr_t> recorder_styles_read;
-  constexpr size_t kRecorderMaximumStyleReadingDocuments = 16;
+  constexpr size_t kRecorderMaximumStyleReadingDocuments = 8;
+  // Every tenth checkpoint of a document reads every value, reusing none,
+  // and compares each value that would have been reused with the reading it
+  // would have come from.
+  constexpr int64_t kRecorderStyleVerificationInterval = 10;
+  std::unordered_map<std::string, int64_t>& recorder_checkpoint_counts =
+      RecorderStyleCheckpointCounts();
+  if (recorder_checkpoint_counts.size() >=
+          kRecorderMaximumStyleReadingDocuments * 4 &&
+      !recorder_checkpoint_counts.contains(recorder_document_token)) {
+    recorder_checkpoint_counts.clear();
+  }
+  const bool recorder_verify_styles =
+      recorder_checkpoint_counts[recorder_document_token]++ %
+          kRecorderStyleVerificationInterval ==
+      0;
+  if (recorder_verify_styles) {
+    ++recorder_cost.verification_checkpoints;
+  }
   std::unordered_map<std::string, RecorderStyleReadings>&
       recorder_all_previous = RecorderPreviousStyleReadings();
   RecorderStyleReadings recorder_previous_readings;
@@ -6907,8 +6933,31 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
     const ComputedStyle* recorder_style =
         recorder_element ? recorder_element->GetComputedStyle() : nullptr;
     if (recorder_style && !recorder_style->IsEnsuredInDisplayNone()) {
-      recorder_styles_read.push_back(
-          reinterpret_cast<uintptr_t>(recorder_style));
+      ++recorder_cost.styled_nodes;
+      recorder_phase_started = base::TimeTicks::Now();
+      const int64_t recorder_reading_key = recorder_record.node_id;
+      RecorderStyleReading recorder_reading;
+      auto recorder_previous =
+          recorder_previous_readings.find(recorder_reading_key);
+      if (recorder_previous != recorder_previous_readings.end()) {
+        ++recorder_cost.previously_styled_nodes;
+        if (recorder_previous->second.style.Get() == recorder_style &&
+            recorder_previous->second.values.size() ==
+                std::size(kRecorderLayoutStyleProperties)) {
+          ++recorder_cost.same_style_objects;
+          recorder_reading = std::move(recorder_previous->second);
+        }
+      }
+      const bool recorder_reuse = !recorder_reading.values.empty();
+      if (!recorder_reuse) {
+        recorder_reading.style = recorder_style;
+        recorder_reading.values.resize(
+            static_cast<wtf_size_t>(std::size(kRecorderLayoutStyleProperties)));
+        recorder_reading.layout_dependent.resize(
+            static_cast<wtf_size_t>(std::size(kRecorderLayoutStyleProperties)));
+      }
+      recorder_cost.style_cache_nanoseconds +=
+          recorder_elapsed(recorder_phase_started);
       recorder_phase_started = base::TimeTicks::Now();
       recorder_record.computed_style_present = true;
       recorder_record.computed_style.reserve(
@@ -6918,11 +6967,24 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
            kRecorderLayoutStyleProperties) {
         const CSSProperty& recorder_property =
             CSSProperty::Get(recorder_property_id);
-        // Values that depend on layout are timed apart from the rest, since
-        // only the rest are fixed by the style object alone.
+        const wtf_size_t recorder_slot =
+            static_cast<wtf_size_t>(recorder_index);
+        // Values that depend on layout are always read again and are timed
+        // apart from the rest, since only the rest are fixed by the style
+        // object alone.
         const bool recorder_layout_dependent =
             recorder_property.IsLayoutDependent(recorder_style,
                                                 recorder_layout_object);
+        const bool recorder_reusable =
+            recorder_reuse && !recorder_layout_dependent &&
+            !recorder_reading.layout_dependent[recorder_slot];
+        if (recorder_reusable && !recorder_verify_styles) {
+          ++recorder_cost.reused_style_values;
+          recorder_record.computed_style.push_back(
+              recorder_reading.values[recorder_slot]);
+          ++recorder_index;
+          continue;
+        }
         const base::TimeTicks recorder_value_started =
             recorder_layout_dependent ? base::TimeTicks::Now()
                                       : base::TimeTicks();
@@ -6941,6 +7003,21 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
           recorder_cost.layout_dependent_values_nanoseconds +=
               recorder_elapsed(recorder_value_started);
         }
+        if (recorder_reusable) {
+          // A verifying checkpoint compares what reuse would have recorded.
+          const a11y_recorder::LayoutCheckpointStyleValue& recorder_kept =
+              recorder_reading.values[recorder_slot];
+          ++recorder_cost.verified_style_values;
+          if (recorder_kept.value_present != recorder_entry.value_present ||
+              recorder_kept.value != recorder_entry.value) {
+            ++recorder_cost.verified_style_values_differed;
+            a11y_recorder::RecordBlinkLayoutStyleReuseDifference(
+                recorder_entry.property_name);
+          }
+        }
+        recorder_reading.values[recorder_slot] = recorder_entry;
+        recorder_reading.layout_dependent[recorder_slot] =
+            recorder_layout_dependent;
         recorder_record.computed_style.push_back(std::move(recorder_entry));
         ++recorder_index;
       }
@@ -6948,70 +7025,9 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_cost.style_values_nanoseconds +=
           recorder_elapsed(recorder_phase_started);
       recorder_phase_started = base::TimeTicks::Now();
-      RecorderStyleReading recorder_reading;
-      recorder_reading.style = recorder_style;
-      const wtf_size_t recorder_value_count =
-          static_cast<wtf_size_t>(recorder_record.computed_style.size());
-      recorder_reading.value_hashes.ReserveInitialCapacity(
-          recorder_value_count);
-      recorder_reading.layout_dependent.ReserveInitialCapacity(
-          recorder_value_count);
-      size_t recorder_hash_index = 0;
-      for (CSSPropertyID recorder_property_id :
-           kRecorderLayoutStyleProperties) {
-        const a11y_recorder::LayoutCheckpointStyleValue& recorder_read =
-            recorder_record.computed_style[recorder_hash_index];
-        recorder_reading.value_hashes.push_back(
-            std::hash<std::string>()(recorder_read.value) * 2 +
-            (recorder_read.value_present ? 1 : 0));
-        recorder_reading.layout_dependent.push_back(
-            CSSProperty::Get(recorder_property_id)
-                .IsLayoutDependent(recorder_style, recorder_layout_object));
-        ++recorder_hash_index;
-      }
-      const int64_t recorder_reading_key = recorder_record.node_id;
-      if (auto recorder_previous =
-              recorder_previous_readings.find(recorder_reading_key);
-          recorder_previous != recorder_previous_readings.end() &&
-          recorder_previous->second.value_hashes.size() ==
-              recorder_reading.value_hashes.size()) {
-        const RecorderStyleReading& recorder_before =
-            recorder_previous->second;
-        const bool recorder_same_object =
-            recorder_before.style.Get() == recorder_style;
-        ++recorder_cost.previously_styled_nodes;
-        if (recorder_same_object) {
-          ++recorder_cost.same_style_objects;
-        }
-        bool recorder_all_equal = true;
-        for (wtf_size_t recorder_value_index = 0;
-             recorder_value_index < recorder_reading.value_hashes.size();
-             ++recorder_value_index) {
-          if (recorder_reading.layout_dependent[recorder_value_index] ||
-              recorder_before.layout_dependent[recorder_value_index]) {
-            continue;
-          }
-          if (recorder_same_object) {
-            ++recorder_cost.same_object_values_compared;
-          }
-          if (recorder_reading.value_hashes[recorder_value_index] ==
-              recorder_before.value_hashes[recorder_value_index]) {
-            continue;
-          }
-          recorder_all_equal = false;
-          if (recorder_same_object) {
-            ++recorder_cost.same_object_values_differed;
-            a11y_recorder::RecordBlinkLayoutStyleReuseDifference(
-                recorder_property_names[recorder_value_index]);
-          }
-        }
-        if (!recorder_same_object && recorder_all_equal) {
-          ++recorder_cost.new_style_objects_with_equal_values;
-        }
-      }
       recorder_current_readings[recorder_reading_key] =
           std::move(recorder_reading);
-      recorder_cost.style_reuse_measurement_nanoseconds +=
+      recorder_cost.style_cache_nanoseconds +=
           recorder_elapsed(recorder_phase_started);
     }
     if (recorder_pseudo) {
@@ -7095,12 +7111,6 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       break;
     }
   }
-  // Distinct style objects bound how many elements could share one reading.
-  recorder_cost.styled_nodes = static_cast<int64_t>(recorder_styles_read.size());
-  std::ranges::sort(recorder_styles_read);
-  recorder_cost.distinct_styles = static_cast<int64_t>(
-      recorder_styles_read.size() -
-      std::ranges::unique(recorder_styles_read).size());
   a11y_recorder::RecordBlinkLayoutCheckpointCost(recorder_cost);
   while (recorder_all_previous.size() >=
          kRecorderMaximumStyleReadingDocuments) {

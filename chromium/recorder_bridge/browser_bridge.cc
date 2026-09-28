@@ -3805,45 +3805,43 @@ void RecordBlinkLayoutCheckpointCost(const LayoutCheckpointCost& cost) {
   static const int style_values = RegisterCostKind("layout.style-values");
   static const int layout_dependent =
       RegisterCostKind("layout.style-values-layout-dependent");
+  static const int style_cache = RegisterCostKind("layout.style-cache");
   static const int generated_text = RegisterCostKind("layout.generated-text");
   static const int pseudo_search =
       RegisterCostKind("layout.pseudo-element-search");
   static const int record = RegisterCostKind("layout.record-node");
   static const int styled_nodes = RegisterCountKind("count:layout.styled-nodes");
-  static const int distinct_styles =
-      RegisterCountKind("count:layout.distinct-styles");
   static const int value_count = RegisterCountKind("count:layout.style-values");
   static const int dependent_count =
       RegisterCountKind("count:layout.style-values-layout-dependent");
-  RecordCost(node_fields, cost.node_fields_nanoseconds);
-  RecordCost(geometry, cost.geometry_nanoseconds);
-  RecordCost(style_values, cost.style_values_nanoseconds);
-  RecordCost(layout_dependent, cost.layout_dependent_values_nanoseconds);
-  RecordCost(generated_text, cost.generated_text_nanoseconds);
-  RecordCost(pseudo_search, cost.pseudo_element_search_nanoseconds);
-  RecordCost(record, cost.record_nanoseconds);
-  RecordCost(styled_nodes, cost.styled_nodes);
-  RecordCost(distinct_styles, cost.distinct_styles);
-  RecordCost(value_count, cost.style_values);
-  RecordCost(dependent_count, cost.layout_dependent_values);
-  static const int reuse_measurement =
-      RegisterCostKind("layout.style-reuse-measurement");
   static const int previously_styled =
       RegisterCountKind("count:layout.previously-styled-nodes");
   static const int same_objects =
       RegisterCountKind("count:layout.same-style-objects");
-  static const int compared =
-      RegisterCountKind("count:layout.same-object-values-compared");
-  static const int differed =
-      RegisterCountKind("count:layout.same-object-values-differed");
-  static const int new_equal =
-      RegisterCountKind("count:layout.new-style-objects-with-equal-values");
-  RecordCost(reuse_measurement, cost.style_reuse_measurement_nanoseconds);
+  static const int reused = RegisterCountKind("count:layout.reused-style-values");
+  static const int verification_checkpoints =
+      RegisterCountKind("count:layout.style-verification-checkpoints");
+  static const int verified =
+      RegisterCountKind("count:layout.verified-style-values");
+  static const int verified_differed =
+      RegisterCountKind("count:layout.verified-style-values-differed");
+  RecordCost(node_fields, cost.node_fields_nanoseconds);
+  RecordCost(geometry, cost.geometry_nanoseconds);
+  RecordCost(style_values, cost.style_values_nanoseconds);
+  RecordCost(layout_dependent, cost.layout_dependent_values_nanoseconds);
+  RecordCost(style_cache, cost.style_cache_nanoseconds);
+  RecordCost(generated_text, cost.generated_text_nanoseconds);
+  RecordCost(pseudo_search, cost.pseudo_element_search_nanoseconds);
+  RecordCost(record, cost.record_nanoseconds);
+  RecordCost(styled_nodes, cost.styled_nodes);
+  RecordCost(value_count, cost.style_values);
+  RecordCost(dependent_count, cost.layout_dependent_values);
   RecordCost(previously_styled, cost.previously_styled_nodes);
   RecordCost(same_objects, cost.same_style_objects);
-  RecordCost(compared, cost.same_object_values_compared);
-  RecordCost(differed, cost.same_object_values_differed);
-  RecordCost(new_equal, cost.new_style_objects_with_equal_values);
+  RecordCost(reused, cost.reused_style_values);
+  RecordCost(verification_checkpoints, cost.verification_checkpoints);
+  RecordCost(verified, cost.verified_style_values);
+  RecordCost(verified_differed, cost.verified_style_values_differed);
 }
 
 void RecordBlinkLayoutStyleReuseDifference(const std::string& property_name) {

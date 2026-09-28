@@ -332,6 +332,22 @@ value, as `getComputedStyle()` does.
   One recording of ordinary browsing does not show that a style object's
   other values never change; it is evidence that reading them again for an
   unchanged style object repeated the same result in this recording.
+- An element's computed-style values are reused from its document's
+  previous checkpoint when the element still has the same style object, a
+  Blink object that is not changed once computed. Only the values that
+  Blink's `CSSProperty::IsLayoutDependent` reports as depending on layout,
+  in either checkpoint, are read again. The previous style object is held,
+  so its address cannot be taken by another style while its reading is
+  kept. Readings are kept for at most eight documents per renderer; a
+  document whose readings were dropped reads every value at its next
+  checkpoint. Every tenth checkpoint of a document reads every value,
+  records what it read, and compares each value that would have been reused
+  with the reading it would have come from; a difference is counted and its
+  property named in the diagnostic log. A value that depends on anything
+  other than its style object and is not reported as depending on layout
+  would be recorded stale by up to nine checkpoints, and the verifying
+  checkpoints are how that would be found. The measurement that supports
+  the reuse is above; it is one recording.
 - An element's record holds 283 values rather than the first list's 75. The
   volume with the full list is measured in the validation plan.
 

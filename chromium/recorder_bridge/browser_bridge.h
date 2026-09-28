@@ -1074,24 +1074,25 @@ struct LayoutCheckpointCost {
   int64_t pseudo_element_search_nanoseconds = 0;
   // Handing node records to the bridge.
   int64_t record_nanoseconds = 0;
-  // Elements whose styles were read, the distinct style objects among them,
-  // the values read, and how many of those depend on layout.
+  // Elements whose styles were read, the values recorded, and how many of
+  // those depend on layout.
   int64_t styled_nodes = 0;
-  int64_t distinct_styles = 0;
   int64_t style_values = 0;
   int64_t layout_dependent_values = 0;
-  // The measurement of style reuse between checkpoints: its time; the
-  // styled elements that were also styled in the document's previous
-  // checkpoint; those that kept the same style object; the values not
-  // depending on layout that were compared for those, and how many differed;
-  // and the elements with a new style object whose compared values were all
-  // equal.
-  int64_t style_reuse_measurement_nanoseconds = 0;
+  // Reuse of computed-style readings between checkpoints: the time spent
+  // finding and keeping readings; the styled elements also styled in the
+  // document's previous checkpoint; those that kept the same style object;
+  // the values copied from the previous reading instead of being read; and,
+  // in checkpoints that read every value to verify the reuse, those
+  // checkpoints, the values that would have been copied, and how many of
+  // those differed from the value read.
+  int64_t style_cache_nanoseconds = 0;
   int64_t previously_styled_nodes = 0;
   int64_t same_style_objects = 0;
-  int64_t same_object_values_compared = 0;
-  int64_t same_object_values_differed = 0;
-  int64_t new_style_objects_with_equal_values = 0;
+  int64_t reused_style_values = 0;
+  int64_t verification_checkpoints = 0;
+  int64_t verified_style_values = 0;
+  int64_t verified_style_values_differed = 0;
 };
 
 // Adds one layout checkpoint's measured traversal cost to the bridge's cost
@@ -1099,10 +1100,11 @@ struct LayoutCheckpointCost {
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkLayoutCheckpointCost(const LayoutCheckpointCost& cost);
 
-// Notes, in the diagnostic log, a computed-style value that differed between
-// two checkpoints although the element kept the same style object and the
-// value does not depend on layout. Only the property name is written, and at
-// most a fixed number of lines per process. Nothing is recorded as evidence.
+// Notes, in the diagnostic log, a computed-style value that a verifying
+// checkpoint read differently from the reading reuse would have copied,
+// although the element kept the same style object and the value does not
+// depend on layout. Only the property name is written, and at most a fixed
+// number of lines per process. Nothing is recorded as evidence.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkLayoutStyleReuseDifference(const std::string& property_name);
 

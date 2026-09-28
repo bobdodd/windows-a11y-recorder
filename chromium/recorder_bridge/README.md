@@ -344,30 +344,25 @@ idle process writes nothing. The kinds are:
   hands to `RecordBlinkLayoutCheckpointCost` once per checkpoint, each summed
   over the checkpoint's nodes: `layout.node-fields` (identity, type, name,
   display lock, and containing shadow root), `layout.geometry` (the
-  rectangle), `layout.style-values` (reading and serializing every listed
-  computed-style value), `layout.style-values-layout-dependent` (the part of
+  rectangle), `layout.style-values` (reading and serializing, or copying,
+  every listed computed-style value), `layout.style-values-layout-dependent` (the part of
   the style values that Blink's `CSSProperty::IsLayoutDependent` reports as
   depending on layout for that element), `layout.generated-text`,
   `layout.pseudo-element-search`, and `layout.record-node` (handing each node
   to the bridge). The rest of `span:layout-checkpoint` is the tree walk and
-  the start and completion calls. Four count kinds give, per checkpoint, the
-  elements whose styles were read, the distinct style objects among them,
-  the values read, and the values that depend on layout; a count kind's
-  totals are counts, not microseconds. These show how much of the style
-  reading a cache per style object could avoid. A second measurement keeps,
-  for each document's previous checkpoint, each element's style object and a
-  hash of each value it recorded, and counts, for the next checkpoint: the
-  elements styled in both, those that kept the same style object, the values
-  not depending on layout that were compared for those, the values among them
-  that differed, and the elements with a new style object whose compared
-  values were all equal. Each differing value writes a line naming only its
-  property, `Recorder style reuse difference property=<name>`, up to 200 per
-  process. The measurement holds each compared style object, so its address
-  cannot be reused by another style, and holds at most 16 documents' readings
-  per renderer; its time is `layout.style-reuse-measurement`. Values are
-  compared by 64-bit hash, so a collision could hide a difference. The added clocks and the
-  layout-dependence test run for every node and every listed value, so the
-  measured traversal is slightly slower than an unmeasured one.
+  the start and completion calls. Count kinds give, per checkpoint, the
+  elements whose styles were recorded, the values recorded, and the values
+  that depend on layout; a count kind's totals are counts, not
+  microseconds. The reuse of readings
+  between checkpoints, described in the layout and computed-style evidence
+  model, adds `layout.style-cache` (finding and keeping readings) and counts
+  of the elements styled in the document's previous checkpoint, those that
+  kept the same style object, the values copied instead of read, the
+  verifying checkpoints, the values they compared, and the values that
+  differed. Each differing value writes a line naming only its property,
+  `Recorder style reuse difference property=<name>`, up to 200 per process.
+  The added clocks run for every node, so the measured traversal is slightly
+  slower than an unmeasured one.
 
 The accounting is in `evidence_cost.cc`, which is standard C++ with no
 Chromium dependency, so `evidence_cost_test.cc` runs it on any compiler. Each

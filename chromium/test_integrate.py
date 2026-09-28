@@ -4834,7 +4834,7 @@ class LayoutIntegrationTests(unittest.TestCase):
         self.assertNotIn("EnsurePseudoElement", helper)
         self.assertNotIn("CreatePseudoElementIfNeeded", helper)
 
-    def test_the_helper_measures_its_traversal_without_changing_records(self):
+    def test_the_helper_measures_its_traversal_and_reuses_style_readings(self):
         helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
         self.assertIn(
             "a11y_recorder::RecordBlinkLayoutCheckpointCost(recorder_cost);",
@@ -4845,7 +4845,8 @@ class LayoutIntegrationTests(unittest.TestCase):
             helper.index("a11y_recorder::CompleteBlinkLayoutCheckpoint("),
         )
         self.assertIn(".IsLayoutDependent(recorder_style,", helper)
-        # Every listed value is still read and recorded for every element.
+        # One place reads a value; every listed value is recorded for every
+        # element, whether read or copied from the previous reading.
         self.assertEqual(
             1, helper.count(".CSSValueFromComputedStyle(")
         )
@@ -4853,12 +4854,23 @@ class LayoutIntegrationTests(unittest.TestCase):
             "recorder_record.computed_style.push_back(std::move(recorder_entry));",
             helper,
         )
-        # Style reuse is compared by the held style object and value hashes,
-        # and only counts and property names leave the measurement.
+        # A reading is reused only for the same held style object, never for
+        # a value that depends on layout in either reading, and never in a
+        # verifying checkpoint, which reads every value and compares.
         self.assertIn("Persistent<const ComputedStyle> style;", helper)
         self.assertIn(
+            "recorder_previous->second.style.Get() == recorder_style", helper
+        )
+        self.assertIn(
+            "recorder_reuse && !recorder_layout_dependent &&\n"
+            "            !recorder_reading.layout_dependent[recorder_slot];",
+            helper,
+        )
+        self.assertIn("if (recorder_reusable && !recorder_verify_styles) {", helper)
+        self.assertIn("kRecorderStyleVerificationInterval = 10;", helper)
+        self.assertIn(
             "RecordBlinkLayoutStyleReuseDifference(\n"
-            "                recorder_property_names[recorder_value_index]);",
+            "                recorder_entry.property_name);",
             helper,
         )
         # The measurement reads clocks and counts; it never forces work.

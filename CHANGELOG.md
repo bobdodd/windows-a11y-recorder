@@ -348,11 +348,14 @@ from the product version.
   text, finding pseudo-elements, and handing nodes to the bridge, with counts
   of styled elements, distinct style objects, and values, and write them with
   the other cost totals. No evidence changes. Requires rebuilding Chromium.
-- Measure, between consecutive layout checkpoints of a document, how many
-  elements keep the same style object and whether their values that do not
-  depend on layout stay equal, naming the property of any value that does
-  not in the diagnostic log. No evidence changes. Requires rebuilding
-  Chromium.
+- Reuse, in each layout checkpoint, an element's computed-style values from
+  its document's previous checkpoint when the element still has the same
+  style object, reading again only the values Blink reports as depending on
+  layout. Every tenth checkpoint of a document reads every value and writes
+  the name of any property whose value differs from the reused one to the
+  diagnostic log. The records are meant to be identical to reading every
+  value; one Windows recording found no value that differed. Requires
+  rebuilding Chromium.
 - Write browser evidence from a writer thread in each Chromium process instead
   of from the thread that observed it, on the `postgres-session-store` branch.
   A synchronous write to the recorder's unbuffered pipe waits until the
