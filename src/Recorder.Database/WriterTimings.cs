@@ -16,6 +16,7 @@ public sealed class WriterTimings : IDisposable
     private static readonly double MillisecondsPerTick = 1000.0 / Stopwatch.Frequency;
     private readonly ConcurrentDictionary<string, Stage> _stages = new(StringComparer.Ordinal);
     private readonly List<Sample> _samples = [];
+    private readonly ConcurrentQueue<Note> _notes = new();
     private readonly long _started = Stopwatch.GetTimestamp();
     private readonly TimeSpan _appProcessorAtStart;
     private readonly TimeSpan _serverProcessorAtStart;
@@ -61,6 +62,12 @@ public sealed class WriterTimings : IDisposable
     public void Since(string stage, long startTimestamp, long items = 1) =>
         Add(stage, Stopwatch.GetTimestamp() - startTimestamp, items);
 
+    /// <summary>
+    /// Adds a text the measurements alone cannot carry, such as the plan a
+    /// slow query ran with. Notes are written in the order they were added.
+    /// </summary>
+    public void AddNote(string name, string text) => _notes.Enqueue(new Note(name, text));
+
     public void Dispose()
     {
         _timer?.Dispose();
@@ -95,7 +102,8 @@ public sealed class WriterTimings : IDisposable
                     totalMilliseconds = Math.Round(pair.Value.Ticks * MillisecondsPerTick, 1),
                     maximumMilliseconds = Math.Round(pair.Value.MaximumTicks * MillisecondsPerTick, 1)
                 }),
-            samples
+            samples,
+            notes = _notes.Select(note => new { name = note.Name, text = note.Text })
         };
         return JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
     }
@@ -160,6 +168,8 @@ public sealed class WriterTimings : IDisposable
         public long Items;
         public long MaximumTicks;
     }
+
+    private sealed record Note(string Name, string Text);
 
     private sealed record Sample(
         double AtMilliseconds,

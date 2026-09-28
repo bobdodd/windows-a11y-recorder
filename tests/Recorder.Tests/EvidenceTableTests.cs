@@ -616,6 +616,59 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     }
 
     /// <summary>
+    /// Given writer timings, the reference check notes the server's other
+    /// activity and the tables' statistics when it starts, and the plan of
+    /// each query that took at least the threshold, with each step's actual
+    /// rows and buffers but not its time. The plans reach the timings, not the server log.
+    /// </summary>
+    [Fact]
+    public async Task CheckingReferencesNotesThePlansOfSlowQueries()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var (sessionKey, recordingId) = await CreateRecordingAsync();
+        await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
+        var store = new RecordingStore(DataSource) { ExplainedCheckMilliseconds = 0 };
+        using var timings = new WriterTimings();
+        Assert.Empty(await store.CheckReferencesAsync(recordingId, timings, token));
+
+        using var report = System.Text.Json.JsonDocument.Parse(timings.ToJson());
+        var notes = report.RootElement.GetProperty("notes").EnumerateArray()
+            .Select(note => (Name: note.GetProperty("name").GetString()!, Text: note.GetProperty("text").GetString()!))
+            .ToList();
+        Assert.Contains(notes, note => note.Name == "check-references-activity:start");
+        Assert.Contains(
+            notes,
+            note => note.Name == "check-references-statistics:start" &&
+                note.Text.Contains("browser_dispatch_path_targets | live ", StringComparison.Ordinal));
+        var plan = Assert.Single(
+            notes,
+            note => note.Name == "check-references-plan:browser_dispatch_path_targets(recording_id,owner_key)->browser_dispatch_events");
+        Assert.Contains("actual rows=", plan.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("actual time=", plan.Text, StringComparison.Ordinal);
+        Assert.Contains("Buffers: shared", plan.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Nested Loop", plan.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// With the default threshold, the quick queries of a small recording
+    /// note no plans.
+    /// </summary>
+    [Fact]
+    public async Task CheckingReferencesNotesNoPlanForAQuickQuery()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var (sessionKey, recordingId) = await CreateRecordingAsync();
+        await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
+        using var timings = new WriterTimings();
+        Assert.Empty(await new RecordingStore(DataSource).CheckReferencesAsync(recordingId, timings, token));
+
+        using var report = System.Text.Json.JsonDocument.Parse(timings.ToJson());
+        Assert.DoesNotContain(
+            report.RootElement.GetProperty("notes").EnumerateArray(),
+            note => note.GetProperty("name").GetString()!.StartsWith("check-references-plan:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// The reference check disables nested loop joins for its own queries
     /// only: every connection the pool hands out afterwards plans with the
     /// default settings.

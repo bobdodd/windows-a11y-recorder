@@ -329,6 +329,10 @@ from the product version.
   the new recording's rows, and it chose nested loops that compared every
   row with every row; measured on the development sandbox, a check that
   took 47.6 s this way took 0.5 s without them.
+- Note, in `database-writer-timings.json`, what the database server was doing
+  when the reference check started, the planner statistics of the tables it
+  reads, and the plan of each check query that took 250 ms or more, with the
+  actual rows and buffers of each step.
 - Write each Chromium process's measured cost of each kind of browser
   evidence to the diagnostic log every five seconds: calls, total time, and
   longest call of each bridge entry point, the Blink work between the start

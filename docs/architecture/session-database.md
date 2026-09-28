@@ -410,8 +410,43 @@ only once the database version is tested in full. It adds the
   The store's own check of a fresh copy at the larger size took 475 ms. A
   test requires every pooled connection to plan with nested loops enabled
   after a check. The measurement used the evidence samples, not a real
-  recording, on a two-processor Linux machine; the Windows timings file of
-  the next recording is the measure on the target.
+  recording, on a two-processor Linux machine.
+- **Reference check on Windows with nested loops off.** In the first
+  Windows recording with this change (2bba098, 93.6 s), the check took
+  5.2 s against 8.6 s in the recording before it, which was not the same
+  capture. The 334 queries summed to 33.1 s over up to eight connections;
+  the slowest checked `browser_dispatch_path_scopes` (3.7 s),
+  `browser_dispatch_path_targets` (2.6 s), and
+  `browser_dom_checkpoint_attributes` (2.3 s). About half an hour later,
+  with the same setting, the scopes query took 84 ms with a merge anti join
+  and the attributes query 144 ms with a hash anti join, reading between
+  3,000 and 7,600 buffers each. The sandbox result therefore did not carry
+  over: the check at stop is still 25 to 45 times slower than the same
+  queries run later, and the measurements do not show why. To find out,
+  the check now notes in `database-writer-timings.json`, under `notes`:
+  - `check-references-activity:start`, the server's other active client
+    connections, autovacuum workers, and parallel workers, each with its
+    state, wait event, and the start of its query;
+  - `check-references-statistics:start`, for each table the queries read,
+    its live rows, the rows changed since its statistics were last
+    gathered, and how long ago that was;
+  - `check-references-plan:<table>(<columns>)-><referenced table>`, for
+    each query that took at least 250 ms, its plan with each step's actual
+    rows and buffers, and the time the query spent reading and writing
+    buffers. The plan comes from `auto_explain`, a module PostgreSQL ships
+    ([auto_explain](https://www.postgresql.org/docs/current/auto-explain.html)),
+    which the check loads into its own connections and sets, for its own
+    transactions only, to send each plan to the connection as a notice
+    rather than to the server log. If the module cannot be loaded, the check
+    runs without noting plans. Steps are not timed one by one: the module's
+    documentation states that per-step timing applies to every statement,
+    noted or not, and can have an extremely negative effect on performance.
+    Counting rows and buffers still adds some cost, not measured here.
+  Tests require a check with a zero threshold to note the plan of a known
+  query, with actual rows and buffers, no per-step times, and no nested
+  loop, and a check with
+  the default threshold to note no plan for the quick queries of a small
+  recording.
 - **Parallel writing.** `PostgresEventWriter` writes up to
   `WriterConnections` batches at once, four by default; while the database
   is unavailable it retries one batch at a time. Each batch is written by

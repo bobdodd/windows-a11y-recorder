@@ -324,6 +324,15 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
             }
         }
 
+        if (timings is not null)
+        {
+            await NoteServerActivityAsync(timings, "check-references-activity:start", cancellationToken).ConfigureAwait(false);
+            await NoteStatisticsAsync(
+                timings,
+                [.. references.Select(reference => reference.Table).Concat(references.Select(reference => reference.Referenced)).Distinct(StringComparer.Ordinal)],
+                cancellationToken).ConfigureAwait(false);
+        }
+
         var missing = new long[references.Count];
         await Parallel.ForEachAsync(
             Enumerable.Range(0, references.Count),
@@ -342,6 +351,22 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
                     columns.Select((column, position) =>
                         $"p.{Identifier(referencedColumns[position])} = c.{Identifier(column)}"));
                 await using var connection = await dataSource.OpenConnectionAsync(token).ConfigureAwait(false);
+                var explaining = timings is not null && await LoadAutoExplainAsync(connection, token).ConfigureAwait(false);
+                var plans = new List<string>();
+                NoticeEventHandler? collect = explaining
+                    ? (_, notice) =>
+                    {
+                        lock (plans)
+                        {
+                            plans.Add(notice.Notice.MessageText);
+                        }
+                    }
+                    : null;
+                if (collect is not null)
+                {
+                    connection.Notice += collect;
+                }
+
                 await using var transaction = await connection.BeginTransactionAsync(token).ConfigureAwait(false);
                 // The recording was written moments ago, so the planner's
                 // statistics do not yet include it and estimate about one
@@ -357,6 +382,26 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
                     await plan.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 }
 
+                if (explaining)
+                {
+                    // A query that takes longer than the threshold sends its
+                    // plan, with the actual rows and buffers of each step and
+                    // the time spent reading them, to this connection as a
+                    // notice, and not to the server log. Steps are not timed
+                    // one by one, which PostgreSQL documents as costly for
+                    // every statement, noted or not.
+                    await using var explain = new NpgsqlCommand(
+                        "SET LOCAL auto_explain.log_min_duration = " + ExplainedCheckMilliseconds + "; " +
+                        "SET LOCAL auto_explain.log_analyze = on; " +
+                        "SET LOCAL auto_explain.log_timing = off; " +
+                        "SET LOCAL auto_explain.log_buffers = on; " +
+                        "SET LOCAL auto_explain.log_level = notice; " +
+                        "SET LOCAL track_io_timing = on",
+                        connection,
+                        transaction);
+                    await explain.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                }
+
                 await using var command = new NpgsqlCommand(
                     $"SELECT count(*) FROM {Identifier(table)} c WHERE c.recording_id = $1 AND {present} " +
                     $"AND NOT EXISTS (SELECT 1 FROM {Identifier(referenced)} p WHERE {matches})",
@@ -369,6 +414,19 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
                 missing[index] = (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))!;
                 await transaction.CommitAsync(token).ConfigureAwait(false);
                 timings?.Since("check-references:" + table, started);
+                if (collect is not null)
+                {
+                    connection.Notice -= collect;
+                    lock (plans)
+                    {
+                        foreach (var text in plans)
+                        {
+                            timings!.AddNote(
+                                $"check-references-plan:{table}({string.Join(",", columns)})->{referenced}",
+                                text);
+                        }
+                    }
+                }
             }).ConfigureAwait(false);
 
         var failures = new List<string>();
@@ -384,6 +442,82 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
         }
 
         return failures;
+    }
+
+    /// <summary>
+    /// The time in milliseconds a reference check query must take for its
+    /// plan to be noted in the writer timings. Tests lower it.
+    /// </summary>
+    internal int ExplainedCheckMilliseconds { get; init; } = 250;
+
+    // Loads the auto_explain module PostgreSQL ships with into this
+    // connection's server process, so a slow check query's plan can be
+    // noted. A server without the module, or a user who may not load it,
+    // checks the references without noting plans.
+    private static async Task<bool> LoadAutoExplainAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var load = new NpgsqlCommand("LOAD 'auto_explain'", connection);
+            await load.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (PostgresException)
+        {
+            return false;
+        }
+    }
+
+    // Notes what else the server was doing: each other server process that
+    // is not idle, with its kind, state, wait, and the start of its query.
+    // Autovacuum workers show here with the table they are processing.
+    private async Task NoteServerActivityAsync(WriterTimings timings, string name, CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "SELECT backend_type, coalesce(state, ''), coalesce(wait_event_type || ':' || wait_event, ''), " +
+            "coalesce(round(extract(epoch FROM clock_timestamp() - query_start) * 1000)::bigint, -1), " +
+            "left(coalesce(query, ''), 200) FROM pg_stat_activity " +
+            "WHERE pid <> pg_backend_pid() AND coalesce(state, 'active') <> 'idle' " +
+            "AND backend_type IN ('client backend', 'autovacuum worker', 'parallel worker') ORDER BY backend_type, pid",
+            connection);
+        var lines = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                lines.Add(
+                    $"{reader.GetString(0)} | {reader.GetString(1)} | {reader.GetString(2)} | " +
+                    $"{reader.GetInt64(3)} ms | {reader.GetString(4)}");
+            }
+        }
+
+        timings.AddNote(name, lines.Count == 0 ? "no other active server process" : string.Join("\n", lines));
+    }
+
+    // Notes, for each table a check query reads, how many rows changed since
+    // the planner's statistics were last gathered, and when that was.
+    private async Task NoteStatisticsAsync(WriterTimings timings, string[] tables, CancellationToken cancellationToken)
+    {
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand(
+            "SELECT relname, n_live_tup, n_mod_since_analyze, " +
+            "coalesce(round(extract(epoch FROM clock_timestamp() - greatest(last_analyze, last_autoanalyze)))::bigint, -1) " +
+            "FROM pg_stat_user_tables WHERE relname = ANY($1) ORDER BY n_mod_since_analyze DESC",
+            connection);
+        command.Parameters.AddWithValue(tables);
+        var lines = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                lines.Add(
+                    $"{reader.GetString(0)} | live {reader.GetInt64(1)} | changed since analyze {reader.GetInt64(2)} | " +
+                    $"analyzed {reader.GetInt64(3)} s ago");
+            }
+        }
+
+        timings.AddNote("check-references-statistics:start", string.Join("\n", lines));
     }
 
     // Table and column names come from the database, not from user input,
