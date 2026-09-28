@@ -4853,6 +4853,14 @@ class LayoutIntegrationTests(unittest.TestCase):
             "recorder_record.computed_style.push_back(std::move(recorder_entry));",
             helper,
         )
+        # Style reuse is compared by the held style object and value hashes,
+        # and only counts and property names leave the measurement.
+        self.assertIn("Persistent<const ComputedStyle> style;", helper)
+        self.assertIn(
+            "RecordBlinkLayoutStyleReuseDifference(\n"
+            "                recorder_property_names[recorder_value_index]);",
+            helper,
+        )
         # The measurement reads clocks and counts; it never forces work.
         for forcing in ("UpdateStyleAndLayout", "UpdateAllLifecyclePhases",
                         "EnsureComputedStyle"):

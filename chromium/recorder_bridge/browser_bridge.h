@@ -1080,12 +1080,31 @@ struct LayoutCheckpointCost {
   int64_t distinct_styles = 0;
   int64_t style_values = 0;
   int64_t layout_dependent_values = 0;
+  // The measurement of style reuse between checkpoints: its time; the
+  // styled elements that were also styled in the document's previous
+  // checkpoint; those that kept the same style object; the values not
+  // depending on layout that were compared for those, and how many differed;
+  // and the elements with a new style object whose compared values were all
+  // equal.
+  int64_t style_reuse_measurement_nanoseconds = 0;
+  int64_t previously_styled_nodes = 0;
+  int64_t same_style_objects = 0;
+  int64_t same_object_values_compared = 0;
+  int64_t same_object_values_differed = 0;
+  int64_t new_style_objects_with_equal_values = 0;
 };
 
 // Adds one layout checkpoint's measured traversal cost to the bridge's cost
 // report. Nothing is recorded as evidence.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkLayoutCheckpointCost(const LayoutCheckpointCost& cost);
+
+// Notes, in the diagnostic log, a computed-style value that differed between
+// two checkpoints although the element kept the same style object and the
+// value does not depend on layout. Only the property name is written, and at
+// most a fixed number of lines per process. Nothing is recorded as evidence.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkLayoutStyleReuseDifference(const std::string& property_name);
 
 // Completes the layout checkpoint and reports whether the node limit was
 // reached before every element and laid-out text node was recorded.

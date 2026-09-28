@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <initializer_list>
 #include <map>
@@ -3825,6 +3826,36 @@ void RecordBlinkLayoutCheckpointCost(const LayoutCheckpointCost& cost) {
   RecordCost(distinct_styles, cost.distinct_styles);
   RecordCost(value_count, cost.style_values);
   RecordCost(dependent_count, cost.layout_dependent_values);
+  static const int reuse_measurement =
+      RegisterCostKind("layout.style-reuse-measurement");
+  static const int previously_styled =
+      RegisterCountKind("count:layout.previously-styled-nodes");
+  static const int same_objects =
+      RegisterCountKind("count:layout.same-style-objects");
+  static const int compared =
+      RegisterCountKind("count:layout.same-object-values-compared");
+  static const int differed =
+      RegisterCountKind("count:layout.same-object-values-differed");
+  static const int new_equal =
+      RegisterCountKind("count:layout.new-style-objects-with-equal-values");
+  RecordCost(reuse_measurement, cost.style_reuse_measurement_nanoseconds);
+  RecordCost(previously_styled, cost.previously_styled_nodes);
+  RecordCost(same_objects, cost.same_style_objects);
+  RecordCost(compared, cost.same_object_values_compared);
+  RecordCost(differed, cost.same_object_values_differed);
+  RecordCost(new_equal, cost.new_style_objects_with_equal_values);
+}
+
+void RecordBlinkLayoutStyleReuseDifference(const std::string& property_name) {
+  A11Y_RECORDER_COST("RecordBlinkLayoutStyleReuseDifference");
+  constexpr int kMaximumStyleReuseDifferenceLines = 200;
+  static std::atomic<int> written{0};
+  if (written.fetch_add(1, std::memory_order_relaxed) >=
+      kMaximumStyleReuseDifferenceLines) {
+    return;
+  }
+  WriteDiagnosticLine("Recorder style reuse difference property=" +
+                      property_name);
 }
 
 void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,

@@ -354,7 +354,18 @@ idle process writes nothing. The kinds are:
   elements whose styles were read, the distinct style objects among them,
   the values read, and the values that depend on layout; a count kind's
   totals are counts, not microseconds. These show how much of the style
-  reading a cache per style object could avoid. The added clocks and the
+  reading a cache per style object could avoid. A second measurement keeps,
+  for each document's previous checkpoint, each element's style object and a
+  hash of each value it recorded, and counts, for the next checkpoint: the
+  elements styled in both, those that kept the same style object, the values
+  not depending on layout that were compared for those, the values among them
+  that differed, and the elements with a new style object whose compared
+  values were all equal. Each differing value writes a line naming only its
+  property, `Recorder style reuse difference property=<name>`, up to 200 per
+  process. The measurement holds each compared style object, so its address
+  cannot be reused by another style, and holds at most 16 documents' readings
+  per renderer; its time is `layout.style-reuse-measurement`. Values are
+  compared by 64-bit hash, so a collision could hide a difference. The added clocks and the
   layout-dependence test run for every node and every listed value, so the
   measured traversal is slightly slower than an unmeasured one.
 

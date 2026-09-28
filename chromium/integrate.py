@@ -6597,9 +6597,12 @@ BLINK_LAYOUT_CHECKPOINT_INCLUDES = (
     BLINK_BRIDGE_INCLUDE,
     "#include <algorithm>",
     "#include <cstdint>",
+    "#include <functional>",
     "#include <string>",
+    "#include <unordered_map>",
     "#include <vector>",
     '#include "base/no_destructor.h"',
+    '#include "third_party/blink/renderer/platform/heap/persistent.h"',
     '#include "third_party/blink/renderer/core/css/css_value.h"',
     '#include "third_party/blink/renderer/core/css/properties/css_property.h"',
     '#include "third_party/blink/renderer/core/css/style_engine.h"',
@@ -6760,6 +6763,30 @@ void RecorderRequestLayoutPresentation(
       recorder_document_token);
 }
 
+// Measures whether an element keeps its style object from one checkpoint of
+// its document to the next, and whether its values that do not depend on
+// layout stay equal when it does. Only counts leave this measurement. The
+// style object is held, so its address cannot be reused by another style
+// while it is compared.
+struct RecorderStyleReading {
+  Persistent<const ComputedStyle> style;
+  std::vector<size_t> value_hashes;
+  std::vector<bool> layout_dependent;
+};
+using RecorderStyleReadings =
+    std::unordered_map<int64_t, RecorderStyleReading>;
+
+// The readings of each document's previous checkpoint, by document token, on
+// the rendering thread. At most kRecorderMaximumStyleReadingDocuments
+// documents are held; another document's readings are dropped to make room.
+std::unordered_map<std::string, RecorderStyleReadings>&
+RecorderPreviousStyleReadings() {
+  static base::NoDestructor<
+      std::unordered_map<std::string, RecorderStyleReadings>>
+      recorder_readings;
+  return *recorder_readings;
+}
+
 // Records the layout geometry and computed styles of one frame view's document
 // after a rendering update reached the paint-clean state. Everything is read
 // from the style and layout Blink already produced; nothing here requests a
@@ -6811,6 +6838,16 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
   a11y_recorder::LayoutCheckpointCost recorder_cost;
   // Addresses only, compared and never followed.
   std::vector<uintptr_t> recorder_styles_read;
+  constexpr size_t kRecorderMaximumStyleReadingDocuments = 16;
+  std::unordered_map<std::string, RecorderStyleReadings>&
+      recorder_all_previous = RecorderPreviousStyleReadings();
+  RecorderStyleReadings recorder_previous_readings;
+  if (auto recorder_found = recorder_all_previous.find(recorder_document_token);
+      recorder_found != recorder_all_previous.end()) {
+    recorder_previous_readings = std::move(recorder_found->second);
+    recorder_all_previous.erase(recorder_found);
+  }
+  RecorderStyleReadings recorder_current_readings;
   auto recorder_elapsed = [](base::TimeTicks recorder_started) {
     return (base::TimeTicks::Now() - recorder_started).InNanoseconds();
   };
@@ -6910,6 +6947,70 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_cost.style_values += static_cast<int64_t>(recorder_index);
       recorder_cost.style_values_nanoseconds +=
           recorder_elapsed(recorder_phase_started);
+      recorder_phase_started = base::TimeTicks::Now();
+      RecorderStyleReading recorder_reading;
+      recorder_reading.style = recorder_style;
+      recorder_reading.value_hashes.reserve(
+          recorder_record.computed_style.size());
+      recorder_reading.layout_dependent.reserve(
+          recorder_record.computed_style.size());
+      size_t recorder_hash_index = 0;
+      for (CSSPropertyID recorder_property_id :
+           kRecorderLayoutStyleProperties) {
+        const a11y_recorder::LayoutCheckpointStyleValue& recorder_read =
+            recorder_record.computed_style[recorder_hash_index];
+        recorder_reading.value_hashes.push_back(
+            std::hash<std::string>()(recorder_read.value) * 2 +
+            (recorder_read.value_present ? 1 : 0));
+        recorder_reading.layout_dependent.push_back(
+            CSSProperty::Get(recorder_property_id)
+                .IsLayoutDependent(recorder_style, recorder_layout_object));
+        ++recorder_hash_index;
+      }
+      const int64_t recorder_reading_key = recorder_record.node_id;
+      if (auto recorder_previous =
+              recorder_previous_readings.find(recorder_reading_key);
+          recorder_previous != recorder_previous_readings.end() &&
+          recorder_previous->second.value_hashes.size() ==
+              recorder_reading.value_hashes.size()) {
+        const RecorderStyleReading& recorder_before =
+            recorder_previous->second;
+        const bool recorder_same_object =
+            recorder_before.style.Get() == recorder_style;
+        ++recorder_cost.previously_styled_nodes;
+        if (recorder_same_object) {
+          ++recorder_cost.same_style_objects;
+        }
+        bool recorder_all_equal = true;
+        for (size_t recorder_value_index = 0;
+             recorder_value_index < recorder_reading.value_hashes.size();
+             ++recorder_value_index) {
+          if (recorder_reading.layout_dependent[recorder_value_index] ||
+              recorder_before.layout_dependent[recorder_value_index]) {
+            continue;
+          }
+          if (recorder_same_object) {
+            ++recorder_cost.same_object_values_compared;
+          }
+          if (recorder_reading.value_hashes[recorder_value_index] ==
+              recorder_before.value_hashes[recorder_value_index]) {
+            continue;
+          }
+          recorder_all_equal = false;
+          if (recorder_same_object) {
+            ++recorder_cost.same_object_values_differed;
+            a11y_recorder::RecordBlinkLayoutStyleReuseDifference(
+                recorder_property_names[recorder_value_index]);
+          }
+        }
+        if (!recorder_same_object && recorder_all_equal) {
+          ++recorder_cost.new_style_objects_with_equal_values;
+        }
+      }
+      recorder_current_readings[recorder_reading_key] =
+          std::move(recorder_reading);
+      recorder_cost.style_reuse_measurement_nanoseconds +=
+          recorder_elapsed(recorder_phase_started);
     }
     if (recorder_pseudo) {
       recorder_phase_started = base::TimeTicks::Now();
@@ -6999,6 +7100,12 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_styles_read.size() -
       std::ranges::unique(recorder_styles_read).size());
   a11y_recorder::RecordBlinkLayoutCheckpointCost(recorder_cost);
+  while (recorder_all_previous.size() >=
+         kRecorderMaximumStyleReadingDocuments) {
+    recorder_all_previous.erase(recorder_all_previous.begin());
+  }
+  recorder_all_previous[recorder_document_token] =
+      std::move(recorder_current_readings);
   a11y_recorder::CompleteBlinkLayoutCheckpoint(
       recorder_checkpoint_sequence, recorder_document_node_id,
       recorder_document_token, recorder_node_count, recorder_truncated,

@@ -348,6 +348,11 @@ from the product version.
   text, finding pseudo-elements, and handing nodes to the bridge, with counts
   of styled elements, distinct style objects, and values, and write them with
   the other cost totals. No evidence changes. Requires rebuilding Chromium.
+- Measure, between consecutive layout checkpoints of a document, how many
+  elements keep the same style object and whether their values that do not
+  depend on layout stay equal, naming the property of any value that does
+  not in the diagnostic log. No evidence changes. Requires rebuilding
+  Chromium.
 - Write browser evidence from a writer thread in each Chromium process instead
   of from the thread that observed it, on the `postgres-session-store` branch.
   A synchronous write to the recorder's unbuffered pipe waits until the
