@@ -275,6 +275,10 @@ public sealed class DatabaseRecording : IAsyncDisposable
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException)
         {
             _fileProblem = $"The recording file could not be finished: {exception.Message}";
+
+            // The chunks written before remain readable once the file is
+            // closed.
+            _file.Dispose();
         }
 
         _written = written;

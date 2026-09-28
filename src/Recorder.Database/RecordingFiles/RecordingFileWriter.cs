@@ -82,6 +82,7 @@ public sealed class RecordingFileWriter : IDisposable
     private ulong? _startTime;
     private ulong _endTime;
     private bool _finished;
+    private bool _disposed;
 
     /// <summary>Creates the file, which must not exist, and writes its magic and header.</summary>
     public RecordingFileWriter(string path, RecordingFileWriterOptions? options = null)
@@ -371,10 +372,25 @@ public sealed class RecordingFileWriter : IDisposable
         Write(summary.WrittenSpan);
         _file.Flush(flushToDisk: true);
         _finished = true;
+
+        // The file is closed as soon as it is whole, so the app can read and
+        // hash it while it finishes the session. Windows refuses to open a
+        // file for reading while another handle may write to it.
+        Dispose();
     }
 
+    /// <summary>
+    /// Closes the file. A file closed before <see cref="Finish"/> keeps the
+    /// chunks already written, which a reader reads without a summary.
+    /// </summary>
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _file.Dispose();
         _compressor.Dispose();
     }

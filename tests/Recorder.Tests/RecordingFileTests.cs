@@ -295,6 +295,32 @@ public sealed class RecordingFileTests : IDisposable
     }
 
     [Fact]
+    public async Task AFinishedFileIsClosedSoItCanBeOpenedAlone()
+    {
+        var path = Path.Combine(_directory, "recording.mcap");
+        var collector = Collector();
+        using var target = new RecordingFileBatchTarget(path, Recording);
+        var record = Event(SessionId, collector, 1, 10);
+        await target.WriteAsync(
+            new EventBatch([new BufferedEvent(0, record, record.Payload.GetRawText())], [], []),
+            TestContext.Current.CancellationToken);
+
+        // While the file is being written, it cannot be opened without
+        // sharing, as on Windows the app's hash of the session files could not.
+        Assert.Throws<IOException>(() =>
+            new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None).Dispose());
+
+        target.Finish();
+        using (var alone = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.True(alone.Length > 0);
+        }
+
+        using var reader = RecordingFileReader.Open(path);
+        Assert.True(reader.HasSummary);
+    }
+
+    [Fact]
     public void StreamsFollowTheChannelNames()
     {
         Assert.Equal("browser", RecordingFileBatchTarget.StreamOf("browser.layout"));
