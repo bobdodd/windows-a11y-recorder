@@ -340,6 +340,23 @@ idle process writes nothing. The kinds are:
   waited for the writer thread to free space;
 - `writer.write`, the writer thread's serialization and pipe write of one
   record, which is off the observing thread.
+- the parts of each layout checkpoint's traversal, which Blink measures and
+  hands to `RecordBlinkLayoutCheckpointCost` once per checkpoint, each summed
+  over the checkpoint's nodes: `layout.node-fields` (identity, type, name,
+  display lock, and containing shadow root), `layout.geometry` (the
+  rectangle), `layout.style-values` (reading and serializing every listed
+  computed-style value), `layout.style-values-layout-dependent` (the part of
+  the style values that Blink's `CSSProperty::IsLayoutDependent` reports as
+  depending on layout for that element), `layout.generated-text`,
+  `layout.pseudo-element-search`, and `layout.record-node` (handing each node
+  to the bridge). The rest of `span:layout-checkpoint` is the tree walk and
+  the start and completion calls. Four count kinds give, per checkpoint, the
+  elements whose styles were read, the distinct style objects among them,
+  the values read, and the values that depend on layout; a count kind's
+  totals are counts, not microseconds. These show how much of the style
+  reading a cache per style object could avoid. The added clocks and the
+  layout-dependence test run for every node and every listed value, so the
+  measured traversal is slightly slower than an unmeasured one.
 
 The accounting is in `evidence_cost.cc`, which is standard C++ with no
 Chromium dependency, so `evidence_cost_test.cc` runs it on any compiler. Each

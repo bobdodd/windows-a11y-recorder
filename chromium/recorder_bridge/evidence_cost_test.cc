@@ -126,6 +126,16 @@ void TestConcurrentCallsAreAllCounted() {
 
 }  // namespace
 
+void TestACountKindReportsCountsAsTheyAre() {
+  const int slot = a11y_recorder::RegisterCountKind("counted");
+  a11y_recorder::RecordCost(slot, 1500);
+  a11y_recorder::RecordCost(slot, 2500);
+  const std::string report =
+      a11y_recorder::TakeCostReport(a11y_recorder::CostNowNanoseconds());
+  Expect(Contains(report, " counted=2/4000/2500"),
+         "a count kind states its total and largest count unscaled");
+}
+
 int main() {
   TestNothingIsMeasuredBeforeAReporterIsInstalled();
   TestAKindIsRegisteredOnce();
@@ -134,6 +144,7 @@ int main() {
   TestASpanBelongsToTheThreadThatStartedIt();
   TestTheReporterIsCalledOnceTheIntervalHasPassed();
   TestConcurrentCallsAreAllCounted();
+  TestACountKindReportsCountsAsTheyAre();
   if (failures != 0) {
     std::fprintf(stderr, "%d evidence cost checks failed\n", failures);
     return 1;

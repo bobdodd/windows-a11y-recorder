@@ -15,6 +15,7 @@ constexpr int kMaximumCostKinds = 128;
 
 struct CostSlot {
   std::atomic<const char*> name{nullptr};
+  std::atomic<bool> counts{false};
   std::atomic<uint64_t> calls{0};
   std::atomic<uint64_t> total_nanoseconds{0};
   std::atomic<uint64_t> maximum_nanoseconds{0};
@@ -79,7 +80,9 @@ int64_t CostNowNanoseconds() {
       .count();
 }
 
-int RegisterCostKind(const char* name) {
+namespace {
+
+int Register(const char* name, bool counts) {
   std::lock_guard<std::mutex> lock(RegistrationMutex());
   const int count = registered_kinds.load(std::memory_order_relaxed);
   for (int slot = 0; slot < count; ++slot) {
@@ -91,9 +94,20 @@ int RegisterCostKind(const char* name) {
   if (count >= kMaximumCostKinds) {
     return -1;
   }
+  Slots()[static_cast<size_t>(count)].counts.store(counts);
   Slots()[static_cast<size_t>(count)].name.store(name);
   registered_kinds.store(count + 1, std::memory_order_release);
   return count;
+}
+
+}  // namespace
+
+int RegisterCostKind(const char* name) {
+  return Register(name, false);
+}
+
+int RegisterCountKind(const char* name) {
+  return Register(name, true);
 }
 
 CostScope::CostScope(int slot)
@@ -164,8 +178,11 @@ std::string TakeCostReport(int64_t now_nanoseconds) {
     }
     report += " ";
     report += source.name.load();
-    report += "=" + std::to_string(calls) + "/" + std::to_string(total / 1000) +
-              "/" + std::to_string(maximum / 1000);
+    // Times are stated in microseconds and counts as they are.
+    const uint64_t divisor = source.counts.load() ? 1 : 1000;
+    report += "=" + std::to_string(calls) + "/" +
+              std::to_string(total / divisor) + "/" +
+              std::to_string(maximum / divisor);
   }
   return report;
 }

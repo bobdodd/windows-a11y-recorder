@@ -343,6 +343,11 @@ from the product version.
   and completion of a dispatch path or checkpoint, queue pushes that waited,
   and the writer thread's writes. The log is a diagnostic, not evidence, and
   no evidence changes. Requires rebuilding Chromium.
+- Measure, in each layout checkpoint, the time spent on node fields,
+  rectangles, computed-style values, values that depend on layout, generated
+  text, finding pseudo-elements, and handing nodes to the bridge, with counts
+  of styled elements, distinct style objects, and values, and write them with
+  the other cost totals. No evidence changes. Requires rebuilding Chromium.
 - Write browser evidence from a writer thread in each Chromium process instead
   of from the thread that observed it, on the `postgres-session-store` branch.
   A synchronous write to the recorder's unbuffered pipe waits until the

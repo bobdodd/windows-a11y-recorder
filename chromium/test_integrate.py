@@ -4834,6 +4834,31 @@ class LayoutIntegrationTests(unittest.TestCase):
         self.assertNotIn("EnsurePseudoElement", helper)
         self.assertNotIn("CreatePseudoElementIfNeeded", helper)
 
+    def test_the_helper_measures_its_traversal_without_changing_records(self):
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertIn(
+            "a11y_recorder::RecordBlinkLayoutCheckpointCost(recorder_cost);",
+            helper,
+        )
+        self.assertLess(
+            helper.index("RecordBlinkLayoutCheckpointCost(recorder_cost)"),
+            helper.index("a11y_recorder::CompleteBlinkLayoutCheckpoint("),
+        )
+        self.assertIn(".IsLayoutDependent(recorder_style,", helper)
+        # Every listed value is still read and recorded for every element.
+        self.assertEqual(
+            1, helper.count(".CSSValueFromComputedStyle(")
+        )
+        self.assertIn(
+            "recorder_record.computed_style.push_back(std::move(recorder_entry));",
+            helper,
+        )
+        # The measurement reads clocks and counts; it never forces work.
+        for forcing in ("UpdateStyleAndLayout", "UpdateAllLifecyclePhases",
+                        "EnsureComputedStyle"):
+            with self.subTest(forcing=forcing):
+                self.assertNotIn(forcing, helper)
+
     def test_upgrades_a_helper_that_indexes_the_property_array(self):
         legacy_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
         for legacy, current in INTEGRATE.BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS:

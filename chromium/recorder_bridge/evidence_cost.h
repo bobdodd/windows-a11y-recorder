@@ -21,6 +21,11 @@ namespace a11y_recorder {
 // every slot is taken, and a scope or span with that slot records nothing.
 int RegisterCostKind(const char* name);
 
+// Returns the slot for a kind that counts rather than times, registering it on
+// first use. RecordCost adds a count to it, and the report states its totals
+// as counts rather than microseconds.
+int RegisterCountKind(const char* name);
+
 // Times the enclosing block into a kind's slot.
 class CostScope {
  public:
@@ -34,7 +39,8 @@ class CostScope {
   const int64_t started_;
 };
 
-// Adds one measured call to a kind's slot.
+// Adds one measured call to a kind's slot: a time in nanoseconds, or a count
+// for a kind registered with RegisterCountKind.
 void RecordCost(int slot, int64_t elapsed_nanoseconds);
 
 // Starts and ends a span on the calling thread. An end without a start on the

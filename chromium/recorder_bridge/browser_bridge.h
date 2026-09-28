@@ -1056,6 +1056,37 @@ void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
                                      std::string document_token,
                                      LayoutCheckpointNode node);
 
+// Where a layout checkpoint's traversal spent its time, measured by the
+// traversal itself. Each time is a sum over the checkpoint's nodes.
+struct LayoutCheckpointCost {
+  // Node identity, type and name, display lock, and containing shadow root.
+  int64_t node_fields_nanoseconds = 0;
+  // The rectangle.
+  int64_t geometry_nanoseconds = 0;
+  // Reading and serializing every listed computed-style value.
+  int64_t style_values_nanoseconds = 0;
+  // The part of style_values_nanoseconds spent on values Blink reports as
+  // depending on layout for that element.
+  int64_t layout_dependent_values_nanoseconds = 0;
+  // Reading the text laid out inside pseudo-elements.
+  int64_t generated_text_nanoseconds = 0;
+  // Finding each element's pseudo-elements.
+  int64_t pseudo_element_search_nanoseconds = 0;
+  // Handing node records to the bridge.
+  int64_t record_nanoseconds = 0;
+  // Elements whose styles were read, the distinct style objects among them,
+  // the values read, and how many of those depend on layout.
+  int64_t styled_nodes = 0;
+  int64_t distinct_styles = 0;
+  int64_t style_values = 0;
+  int64_t layout_dependent_values = 0;
+};
+
+// Adds one layout checkpoint's measured traversal cost to the bridge's cost
+// report. Nothing is recorded as evidence.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkLayoutCheckpointCost(const LayoutCheckpointCost& cost);
+
 // Completes the layout checkpoint and reports whether the node limit was
 // reached before every element and laid-out text node was recorded.
 COMPONENT_EXPORT(RECORDER_BRIDGE)

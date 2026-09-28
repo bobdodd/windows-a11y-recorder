@@ -6595,6 +6595,8 @@ LAYOUT_STYLE_PROPERTIES = (
 
 BLINK_LAYOUT_CHECKPOINT_INCLUDES = (
     BLINK_BRIDGE_INCLUDE,
+    "#include <algorithm>",
+    "#include <cstdint>",
     "#include <string>",
     "#include <vector>",
     '#include "base/no_destructor.h"',
@@ -6804,6 +6806,14 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
   }
   const std::vector<std::string>& recorder_property_names =
       RecorderLayoutStylePropertyNames();
+  // Measures where the traversal's time goes, so its cost can be reduced by
+  // evidence. Only clocks and counts are added; what is recorded is unchanged.
+  a11y_recorder::LayoutCheckpointCost recorder_cost;
+  // Addresses only, compared and never followed.
+  std::vector<uintptr_t> recorder_styles_read;
+  auto recorder_elapsed = [](base::TimeTicks recorder_started) {
+    return (base::TimeTicks::Now() - recorder_started).InNanoseconds();
+  };
   int recorder_node_count = 0;
   bool recorder_truncated = false;
   int recorder_pseudo_element_count = 0;
@@ -6822,6 +6832,7 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       return false;
     }
     a11y_recorder::LayoutCheckpointNode recorder_record;
+    base::TimeTicks recorder_phase_started = base::TimeTicks::Now();
     recorder_record.node_index = recorder_node_count;
     recorder_record.node_id = recorder_node.GetDomNodeId();
     recorder_record.node_type = static_cast<int>(recorder_node.getNodeType());
@@ -6830,6 +6841,9 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
     recorder_record.display_locked =
         DisplayLockUtilities::LockedAncestorPreventingLayout(recorder_node) !=
         nullptr;
+    recorder_cost.node_fields_nanoseconds +=
+        recorder_elapsed(recorder_phase_started);
+    recorder_phase_started = base::TimeTicks::Now();
     if (recorder_layout_object) {
       gfx::RectF recorder_rect;
       if (recorder_element) {
@@ -6851,32 +6865,54 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_record.width = recorder_rect.width();
       recorder_record.height = recorder_rect.height();
     }
+    recorder_cost.geometry_nanoseconds +=
+        recorder_elapsed(recorder_phase_started);
     const ComputedStyle* recorder_style =
         recorder_element ? recorder_element->GetComputedStyle() : nullptr;
     if (recorder_style && !recorder_style->IsEnsuredInDisplayNone()) {
+      recorder_styles_read.push_back(
+          reinterpret_cast<uintptr_t>(recorder_style));
+      recorder_phase_started = base::TimeTicks::Now();
       recorder_record.computed_style_present = true;
       recorder_record.computed_style.reserve(
           std::size(kRecorderLayoutStyleProperties));
       size_t recorder_index = 0;
       for (CSSPropertyID recorder_property_id :
            kRecorderLayoutStyleProperties) {
+        const CSSProperty& recorder_property =
+            CSSProperty::Get(recorder_property_id);
+        // Values that depend on layout are timed apart from the rest, since
+        // only the rest are fixed by the style object alone.
+        const bool recorder_layout_dependent =
+            recorder_property.IsLayoutDependent(recorder_style,
+                                                recorder_layout_object);
+        const base::TimeTicks recorder_value_started =
+            recorder_layout_dependent ? base::TimeTicks::Now()
+                                      : base::TimeTicks();
         const CSSValue* recorder_value =
-            CSSProperty::Get(recorder_property_id)
-                .CSSValueFromComputedStyle(*recorder_style,
-                                           recorder_layout_object,
-                                           /*allow_visited_style=*/false,
-                                           CSSValuePhase::kResolvedValue);
+            recorder_property.CSSValueFromComputedStyle(
+                *recorder_style, recorder_layout_object,
+                /*allow_visited_style=*/false, CSSValuePhase::kResolvedValue);
         a11y_recorder::LayoutCheckpointStyleValue recorder_entry;
         recorder_entry.property_name = recorder_property_names[recorder_index];
         recorder_entry.value_present = recorder_value != nullptr;
         if (recorder_value) {
           recorder_entry.value = recorder_value->CssText().Utf8();
         }
+        if (recorder_layout_dependent) {
+          ++recorder_cost.layout_dependent_values;
+          recorder_cost.layout_dependent_values_nanoseconds +=
+              recorder_elapsed(recorder_value_started);
+        }
         recorder_record.computed_style.push_back(std::move(recorder_entry));
         ++recorder_index;
       }
+      recorder_cost.style_values += static_cast<int64_t>(recorder_index);
+      recorder_cost.style_values_nanoseconds +=
+          recorder_elapsed(recorder_phase_started);
     }
     if (recorder_pseudo) {
+      recorder_phase_started = base::TimeTicks::Now();
       recorder_record.pseudo_element_present = true;
       Element* recorder_originating =
           recorder_pseudo->ParentOrShadowHostElement();
@@ -6885,7 +6921,10 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_record.pseudo_type =
           PseudoElement::PseudoElementNameForEvents(recorder_pseudo).Utf8();
       RecorderReadGeneratedText(recorder_layout_object, recorder_record);
+      recorder_cost.generated_text_nanoseconds +=
+          recorder_elapsed(recorder_phase_started);
     }
+    recorder_phase_started = base::TimeTicks::Now();
     if (ShadowRoot* recorder_containing_root =
             recorder_node.ContainingShadowRoot()) {
       recorder_record.shadow_host_node_id =
@@ -6893,9 +6932,14 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       recorder_record.shadow_root_mode =
           RecorderShadowRootModeName(recorder_containing_root->GetMode());
     }
+    recorder_cost.node_fields_nanoseconds +=
+        recorder_elapsed(recorder_phase_started);
+    recorder_phase_started = base::TimeTicks::Now();
     a11y_recorder::RecordBlinkLayoutCheckpointNode(
         recorder_checkpoint_sequence, recorder_document_node_id,
         recorder_document_token, std::move(recorder_record));
+    recorder_cost.record_nanoseconds +=
+        recorder_elapsed(recorder_phase_started);
     ++recorder_node_count;
     return true;
   };
@@ -6929,8 +6973,12 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
     if (!recorder_element) {
       continue;
     }
+    const base::TimeTicks recorder_pseudo_search_started =
+        base::TimeTicks::Now();
     HeapVector<Member<PseudoElement>> recorder_pseudo_elements;
     RecorderAppendPseudoElements(*recorder_element, recorder_pseudo_elements);
+    recorder_cost.pseudo_element_search_nanoseconds +=
+        recorder_elapsed(recorder_pseudo_search_started);
     bool recorder_limit_reached = false;
     for (const Member<PseudoElement>& recorder_pseudo :
          recorder_pseudo_elements) {
@@ -6944,6 +6992,13 @@ void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
       break;
     }
   }
+  // Distinct style objects bound how many elements could share one reading.
+  recorder_cost.styled_nodes = static_cast<int64_t>(recorder_styles_read.size());
+  std::ranges::sort(recorder_styles_read);
+  recorder_cost.distinct_styles = static_cast<int64_t>(
+      recorder_styles_read.size() -
+      std::ranges::unique(recorder_styles_read).size());
+  a11y_recorder::RecordBlinkLayoutCheckpointCost(recorder_cost);
   a11y_recorder::CompleteBlinkLayoutCheckpoint(
       recorder_checkpoint_sequence, recorder_document_node_id,
       recorder_document_token, recorder_node_count, recorder_truncated,
@@ -7021,9 +7076,8 @@ BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS = (
       size_t recorder_index = 0;
       for (CSSPropertyID recorder_property_id :
            kRecorderLayoutStyleProperties) {
-        const CSSValue* recorder_value =
-            CSSProperty::Get(recorder_property_id)
-                .CSSValueFromComputedStyle(""",
+        const CSSProperty& recorder_property =
+            CSSProperty::Get(recorder_property_id);""",
     ),
     (
         """\

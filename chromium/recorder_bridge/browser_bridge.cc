@@ -3797,6 +3797,36 @@ void RecordBlinkLayoutCheckpointNode(uint64_t checkpoint_sequence,
   QueueBlinkEvidence(client, std::move(evidence));
 }
 
+void RecordBlinkLayoutCheckpointCost(const LayoutCheckpointCost& cost) {
+  A11Y_RECORDER_COST("RecordBlinkLayoutCheckpointCost");
+  static const int node_fields = RegisterCostKind("layout.node-fields");
+  static const int geometry = RegisterCostKind("layout.geometry");
+  static const int style_values = RegisterCostKind("layout.style-values");
+  static const int layout_dependent =
+      RegisterCostKind("layout.style-values-layout-dependent");
+  static const int generated_text = RegisterCostKind("layout.generated-text");
+  static const int pseudo_search =
+      RegisterCostKind("layout.pseudo-element-search");
+  static const int record = RegisterCostKind("layout.record-node");
+  static const int styled_nodes = RegisterCountKind("count:layout.styled-nodes");
+  static const int distinct_styles =
+      RegisterCountKind("count:layout.distinct-styles");
+  static const int value_count = RegisterCountKind("count:layout.style-values");
+  static const int dependent_count =
+      RegisterCountKind("count:layout.style-values-layout-dependent");
+  RecordCost(node_fields, cost.node_fields_nanoseconds);
+  RecordCost(geometry, cost.geometry_nanoseconds);
+  RecordCost(style_values, cost.style_values_nanoseconds);
+  RecordCost(layout_dependent, cost.layout_dependent_values_nanoseconds);
+  RecordCost(generated_text, cost.generated_text_nanoseconds);
+  RecordCost(pseudo_search, cost.pseudo_element_search_nanoseconds);
+  RecordCost(record, cost.record_nanoseconds);
+  RecordCost(styled_nodes, cost.styled_nodes);
+  RecordCost(distinct_styles, cost.distinct_styles);
+  RecordCost(value_count, cost.style_values);
+  RecordCost(dependent_count, cost.layout_dependent_values);
+}
+
 void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
                                    int document_node_id,
                                    std::string document_token,
