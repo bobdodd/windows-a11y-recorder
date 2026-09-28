@@ -293,6 +293,9 @@ value, as `getComputedStyle()` does.
   `browser-evidence-write-failed` omission on the channel instead. Values such
   as a long SVG path in `d` or a data URL in `background-image` make this
   possible; it has not been observed.
+- Most nodes are the same in consecutive checkpoints. A proposal to record
+  periodic full keyframes and the changes between them, with a measurement,
+  is in [layout checkpoint keyframes](layout-checkpoint-keyframes.md).
 - An element's record holds 283 values rather than the first list's 75. The
   volume with the full list is measured in the validation plan.
 
