@@ -290,8 +290,8 @@ not note. The form is off in normal recording.
 
 ## Slice 1 status
 
-Implemented, and tested in the sandbox; not yet tested on the target Windows
-machine.
+Implemented. Tested in the sandbox, and in one recording on the target
+Windows machine (see "Windows evidence" below).
 
 - The app writes every accepted event to the recording file. PostgreSQL
   holds the recording, its collectors and channels, the file's location in
@@ -327,3 +327,28 @@ Sandbox evidence, 2026-09-28:
   `session-database.md` averaged about 3,600 events per second. These are
   figures from one run of generated events, not a measurement on the target
   machine.
+
+Windows evidence, 2026-09-28, revision ae28866, one recording of 50.5 s with
+instrumented Chromium and every collector on, including the node limits
+removed:
+
+- 480,867 events accepted and written, none dropped, spilled, or rejected.
+- Stopping: finishing the file took 12.7 ms and storing its chunk index
+  48.9 ms, from `database-writer-timings.json`. The reference check that took
+  12 to 17 s in the measured database recordings is no longer run.
+- The writer spent 3.4 s adding events to chunks and 2.2 s compressing and
+  writing them, summed over the recording.
+- `recording.mcap` is 44.6 MB, holding 1.08 GB of records in 333 chunks.
+  `mcap doctor` of MCAP CLI v0.3.0 passed it, with one warning for each of
+  471,161 messages whose time is earlier than a message of an earlier chunk
+  of another stream, as described above.
+- Read with the Python `mcap` library: 191 DOM checkpoints of up to 1,784
+  nodes, 118 layout checkpoints of up to 863 nodes, 57 accessibility
+  checkpoints of up to 617 nodes, and 309 interaction checkpoints, none
+  truncated, each stating the bound 2147483647. 157 of the 191 DOM
+  checkpoints hold more than 512 nodes, so under the earlier limit they
+  would have been cut.
+- The player reports that it does not read recording files yet, as intended
+  for this slice.
+
+This is one recording; hover responsiveness was not measured.
