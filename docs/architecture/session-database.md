@@ -516,6 +516,22 @@ only once the database version is tested in full. It adds the
   connections evicting 2,545,846 buffers and writing 944,081 themselves.
   These figures are from one run and are not a substitute for the system
   test.
+- **Reference check with larger shared buffers, on Windows.** In the first
+  Windows recording with shared buffers set from memory (edf2d45, 84.7 s,
+  445,875 events), the server reported `shared_buffers` of 4089MB on a
+  32 GB machine. The check took 1.93 s, against 3.75 s in the recording
+  before it, which had 618,140 events, so the two are not a like-for-like
+  comparison. Analyzing took 1.20 s against 1.72 s, the 334 queries summed
+  to 4.3 s against 13.2 s, and the longest query took 419 ms against
+  1.43 s; two queries took 250 ms or more, against ten. Between readings of
+  the server's I/O statistics taken after each of the two recordings,
+  client connections evicted 59 buffers and wrote none themselves; before
+  the change, they had written 944,081 since the statistics were reset.
+  Commits took 31.1 s summed over the writing connections for 445,875
+  events, against 43.9 s for 618,140, about 70 ms per thousand events in
+  both, so the larger buffers did not change the time spent committing.
+  These figures are from one run and are not a substitute for the system
+  test.
 - **Parallel writing.** `PostgresEventWriter` writes up to
   `WriterConnections` batches at once, four by default; while the database
   is unavailable it retries one batch at a time. Each batch is written by
