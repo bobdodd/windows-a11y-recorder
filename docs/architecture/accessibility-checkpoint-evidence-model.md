@@ -127,9 +127,11 @@ ordered-state reconstruction slice.
 
 ## Volume and limits
 
-The proof of concept permits up to 100,000 node records for each serialization
-operation. This is an explicit safety boundary, not a storage optimization. The
-completion record reports the limit and whether the recorder reached it.
+Every node record of each serialization operation is recorded. The bound the
+completion record reports is 2147483647, the largest value a 32-bit count
+holds, with whether the recorder reached it. The earlier limit of 100,000
+nodes was removed (see
+[No limit to nodes](change-driven-recording.md#no-limit-to-nodes)).
 
 No deduplication, compression, state coalescing, or archive compaction is
 performed by this slice. Demonstrable capture fidelity takes priority over

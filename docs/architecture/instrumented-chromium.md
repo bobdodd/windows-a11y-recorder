@@ -674,7 +674,7 @@ produced and never forces either. Three record types are emitted:
 - `layout-checkpoint-started`: the checkpoint identity, the document's previous
   checkpoint, Blink's style-resolution and layout counters, the viewport size
   and scroll offset in CSS pixels, the device pixel ratio, the layout zoom
-  factor, the node limit of 100000, and the list of recorded computed-style
+  factor, the node bound of 2147483647, the largest value a 32-bit count holds, and the list of recorded computed-style
   properties.
 - `layout-checkpoint-node`: one element, or one text node that has a layout
   object, in light-DOM tree order, with its Blink DOM node identity, whether it

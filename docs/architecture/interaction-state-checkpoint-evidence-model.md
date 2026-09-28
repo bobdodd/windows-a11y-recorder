@@ -88,7 +88,7 @@ snapshot is taken. Every record also carries the snapshot identity,
   type is `none`. Inside a text control they are nodes of the control's
   user-agent shadow tree.
 - `directional`: whether the selection is directional.
-- `maximumTextControls`: 512.
+- `maximumTextControls`: 2147483647, the largest value a 32-bit count holds.
 - `maximumValueLength`: 4096.
 
 ### Snapshot text control
@@ -116,7 +116,7 @@ mode. A text control is an `input` whose type presents a text field, or a
 
 - `textControlCount`: the number of text-control records emitted.
 - `truncated`: whether the traversal stopped at `maximumTextControls`.
-- `maximumTextControls`: 512.
+- `maximumTextControls`: 2147483647.
 
 ## Correlation rules
 
@@ -163,7 +163,8 @@ The evidence does not by itself establish:
 ## Volume and limits
 
 One snapshot is recorded for each DOM and layout checkpoint. The text-control
-traversal is bounded at 512 controls and each value at 4096 UTF-16 code units.
+traversal records every text control; its bound is the largest value a
+32-bit count holds. Each value is bounded at 4096 UTF-16 code units.
 No deduplication is performed: consecutive snapshots with identical state are
 all recorded, because the snapshot's value is that it states the state at its
 checkpoint.

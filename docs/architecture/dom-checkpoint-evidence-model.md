@@ -87,8 +87,10 @@ pixels.
 - from protocol 0.28, `shadowRootCount` and `slotCount`, the numbers of shadow
   root and slot assignment records the checkpoint emitted.
 
-The current implementation uses a 512-node limit, which from protocol 0.28
-covers shadow-tree nodes as well. A truncated checkpoint is
+The implementation records every node, shadow-tree nodes included. Its
+`maximumNodes` is 2147483647, the largest value a 32-bit count holds; the
+earlier limit of 512 nodes was removed (see
+[No limit to nodes](change-driven-recording.md#no-limit-to-nodes)). A truncated checkpoint is
 valid evidence of a partial preorder prefix. It must not be interpreted as the
 complete document tree.
 

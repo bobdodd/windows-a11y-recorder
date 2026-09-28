@@ -151,8 +151,8 @@ Protocol 0.17 has been validated on the reference Windows platform, at
 revision `eebbc7f` and in every reference run since. It records the AX update batches Chromium
 renderers serialize for the browser process and correlates them to committed
 navigations by browser instance, document token, and renderer process. Each
-batch reports its update count, event count, node count, 100,000-node limit, and
-truncation state. Node records include AX and DOM identities, role, accessible
+batch reports its update count, event count, node count, node bound, and
+truncation state; every node is recorded. Node records include AX and DOM identities, role, accessible
 name and description, focused state, and Chromium's readable serialized
 properties. The launcher forces renderer accessibility for deterministic
 fixture capture, strict managed ingest covers all three payload shapes, and
@@ -241,7 +241,7 @@ Protocol 0.25 records layout geometry and computed styles on the
 `browser.layout` channel. After every rendering update in which Blink resolved
 element style or performed layout, a checkpoint records the viewport size,
 scroll offset, device pixel ratio, and zoom, and, for each element and laid-out
-text node up to 100000 nodes, its viewport-relative bounding rectangle and, for
+text node, with no limit to the number of nodes, its viewport-relative bounding rectangle and, for
 elements, the resolved values of a defined list of 283 computed-style
 properties. The hook reads only what Blink has already computed and never
 forces style or layout. Per-line geometry is not recorded, and shadow-tree

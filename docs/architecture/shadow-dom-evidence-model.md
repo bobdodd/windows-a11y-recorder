@@ -131,8 +131,10 @@ shadow trees that no page listener outside them can see.
 
 ## Limits
 
-- The DOM checkpoint's 512-node limit now covers shadow-tree nodes, so a page
-  whose controls have large user-agent shadow trees reaches the limit sooner.
+- The DOM checkpoint records every node, shadow-tree nodes included. The
+  earlier 512-node limit, which a page whose controls have large user-agent
+  shadow trees reached sooner, was removed; see
+  [No limit to nodes](change-driven-recording.md#no-limit-to-nodes).
 - A pseudo-element has a DOM node identity in layout records but does not
   appear in DOM checkpoints, since it is not a DOM node.
 - Slot assignment is not recalculated for recording, so an assignment can be

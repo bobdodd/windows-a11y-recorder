@@ -362,7 +362,9 @@ CONTENT_NAVIGATION_COMPLETED_HOOK = """\
       navigation_handle->GetNetErrorCode());
 """
 CONTENT_RENDERER_ACCESSIBILITY_HOOK = """\
-  constexpr int kRecorderMaximumAccessibilityCheckpointNodes = 100000;
+  // Every node is recorded. The bound is the largest value the protocol's
+  // 32-bit counts hold, so the walk stops only where a count cannot grow.
+  constexpr int kRecorderMaximumAccessibilityCheckpointNodes = 2147483647;
   const std::string recorder_document_token =
       document.Token().ToString();
   const int recorder_update_count =
@@ -818,7 +820,7 @@ void RecorderRecordInteractionCheckpoint(Document& recorder_document,
                                          const char* recorder_source_channel,
                                          const char* recorder_reason);
 
-// Records one bounded structural checkpoint of the composed tree. Each node is
+// Records a structural checkpoint of the whole composed tree. Each node is
 // followed by the shadow root it hosts, of any mode, and that shadow tree, and
 // then by its own children, so a shadow root is recorded with its host as its
 // parent. Slot assignments are read as Blink currently holds them; the
@@ -826,7 +828,9 @@ void RecorderRecordInteractionCheckpoint(Document& recorder_document,
 // change the state it records.
 void RecorderRecordDomCheckpoint(Document& recorder_document,
                                  const char* recorder_reason) {
-  constexpr int kRecorderMaximumDomCheckpointNodes = 512;
+  // Every node is recorded. The bound is the largest value the protocol's
+  // 32-bit counts hold, so the walk stops only where a count cannot grow.
+  constexpr int kRecorderMaximumDomCheckpointNodes = 2147483647;
   constexpr int kRecorderMaximumDomAttributesPerNode = 64;
   constexpr int kRecorderMaximumDomValueLength = 4096;
   const int recorder_document_node_id = recorder_document.GetDomNodeId();
@@ -994,7 +998,9 @@ void RecorderRecordInteractionCheckpoint(Document& recorder_document,
                                          uint64_t recorder_source_sequence,
                                          const char* recorder_source_channel,
                                          const char* recorder_reason) {
-  constexpr int kRecorderMaximumInteractionTextControls = 512;
+  // Every node is recorded. The bound is the largest value the protocol's
+  // 32-bit counts hold, so the walk stops only where a count cannot grow.
+  constexpr int kRecorderMaximumInteractionTextControls = 2147483647;
   constexpr int kRecorderMaximumInteractionValueLength = 4096;
   const int recorder_document_node_id = recorder_document.GetDomNodeId();
   if (recorder_document_node_id <= 0 || !recorder_document.IsActive()) {
@@ -3259,6 +3265,61 @@ def patch_content_browser_build(path: Path) -> None:
     write_patched(path, text)
 
 
+# Node limits of earlier revisions. A checkout patched by one of them keeps
+# its hook bodies, since each hook is inserted once, so the limit is replaced
+# in place after the earlier hook texts have been upgraded. Every node is
+# recorded; see docs/architecture/change-driven-recording.md.
+UNBOUNDED_NODE_COUNT_COMMENT = (
+    "  // Every node is recorded. The bound is the largest value the protocol's\n"
+    "  // 32-bit counts hold, so the walk stops only where a count cannot grow.\n"
+)
+EARLIER_NODE_LIMITS = (
+    ("kRecorderMaximumDomCheckpointNodes", "512"),
+    ("kRecorderMaximumInteractionTextControls", "512"),
+    ("kRecorderMaximumLayoutCheckpointNodes", "100000"),
+    ("kRecorderMaximumAccessibilityCheckpointNodes", "100000"),
+)
+
+
+def remove_earlier_node_limits(text: str) -> str:
+    for name, value in EARLIER_NODE_LIMITS:
+        text = text.replace(
+            f"  constexpr int {name} = {value};\n",
+            UNBOUNDED_NODE_COUNT_COMMENT
+            + f"  constexpr int {name} = 2147483647;\n",
+        )
+    return text.replace(
+        "// Records one bounded structural checkpoint of the composed tree. "
+        "Each node is\n"
+        "// followed by the shadow root it hosts, of any mode, and that shadow "
+        "tree, and\n"
+        "// then by its own children, so a shadow root is recorded with its "
+        "host as its\n"
+        "// parent. Slot assignments are read as Blink currently holds them; "
+        "the\n"
+        "// traversal never requests an assignment recalculation, so recording "
+        "does not\n"
+        "// change the state it records.\n"
+        "void RecorderRecordDomCheckpoint(Document& recorder_document,\n"
+        "                                 const char* recorder_reason) {\n"
+        + UNBOUNDED_NODE_COUNT_COMMENT,
+        "// Records a structural checkpoint of the whole composed tree. "
+        "Each node is\n"
+        "// followed by the shadow root it hosts, of any mode, and that shadow "
+        "tree, and\n"
+        "// then by its own children, so a shadow root is recorded with its "
+        "host as its\n"
+        "// parent. Slot assignments are read as Blink currently holds them; "
+        "the\n"
+        "// traversal never requests an assignment recalculation, so recording "
+        "does not\n"
+        "// change the state it records.\n"
+        "void RecorderRecordDomCheckpoint(Document& recorder_document,\n"
+        "                                 const char* recorder_reason) {\n"
+        + UNBOUNDED_NODE_COUNT_COMMENT,
+    )
+
+
 def patch_content_renderer_accessibility(path: Path) -> None:
     text = read_source(path)
     if LEGACY_CONTENT_RENDERER_FOCUSED_EXPRESSION in text:
@@ -3318,6 +3379,7 @@ def patch_content_renderer_accessibility(path: Path) -> None:
             anchor + CONTENT_RENDERER_ACCESSIBILITY_HOOK,
             path,
         )
+    text = remove_earlier_node_limits(text)
     write_patched(path, text)
 
 
@@ -4151,6 +4213,7 @@ def patch_blink_document(path: Path) -> None:
             anchor + BLINK_DOCUMENT_MUTATION_HOOK,
             path,
         )
+    text = remove_earlier_node_limits(text)
     write_patched(path, text)
 
 
@@ -6802,7 +6865,9 @@ std::unordered_map<std::string, int64_t>& RecorderStyleCheckpointCounts() {
 // from the style and layout Blink already produced; nothing here requests a
 // style recalculation or a layout.
 void RecorderRecordLayoutCheckpoint(LocalFrameView& frame_view) {
-  constexpr int kRecorderMaximumLayoutCheckpointNodes = 100000;
+  // Every node is recorded. The bound is the largest value the protocol's
+  // 32-bit counts hold, so the walk stops only where a count cannot grow.
+  constexpr int kRecorderMaximumLayoutCheckpointNodes = 2147483647;
   LocalFrame& recorder_frame = frame_view.GetFrame();
   Document* recorder_document = recorder_frame.GetDocument();
   if (!recorder_document || !recorder_document->IsActive() ||
@@ -7286,6 +7351,7 @@ def patch_blink_local_frame_view(path: Path) -> None:
     text = apply_cookie_hook(
         text, BLINK_LAYOUT_CHECKPOINT_ANCHOR, BLINK_LAYOUT_CHECKPOINT_HOOK, path
     )
+    text = remove_earlier_node_limits(text)
     write_patched(path, text)
 
 

@@ -2159,7 +2159,7 @@ class IntegrateTests(unittest.TestCase):
             self.assertEqual(1, first.count("BeginBlinkDomCheckpoint"))
             self.assertEqual(1, first.count("RecordBlinkDomCheckpointNode("))
             self.assertEqual(1, first.count("CompleteBlinkDomCheckpoint"))
-            self.assertIn("kRecorderMaximumDomCheckpointNodes = 512", first)
+            self.assertIn("kRecorderMaximumDomCheckpointNodes = 2147483647", first)
             self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HOOK))
             self.assertEqual(
                 1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER)
@@ -2796,6 +2796,56 @@ class IntegrateTests(unittest.TestCase):
             1, first.count(INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER)
         )
 
+    def test_no_current_hook_limits_the_number_of_nodes(self):
+        hooks = {
+            "accessibility": INTEGRATE.CONTENT_RENDERER_ACCESSIBILITY_HOOK,
+            "dom": INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER,
+            "interaction": INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER,
+            "layout": INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER,
+        }
+        for name, value in INTEGRATE.EARLIER_NODE_LIMITS:
+            limited = f"  constexpr int {name} = {value};\n"
+            unbounded = f"  constexpr int {name} = 2147483647;\n"
+            owners = [hook for hook, text in hooks.items() if unbounded in text]
+            with self.subTest(name=name):
+                self.assertEqual(1, len(owners))
+                for text in hooks.values():
+                    self.assertNotIn(limited, text)
+
+    def test_removes_the_node_limits_of_an_earlier_revision(self):
+        current = INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER
+        interaction = INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER
+        earlier = current.replace(
+            INTEGRATE.UNBOUNDED_NODE_COUNT_COMMENT
+            + "  constexpr int kRecorderMaximumDomCheckpointNodes = 2147483647;\n",
+            "  constexpr int kRecorderMaximumDomCheckpointNodes = 512;\n",
+        ).replace(
+            "// Records a structural checkpoint of the whole composed tree.",
+            "// Records one bounded structural checkpoint of the composed tree.",
+        )
+        earlier_interaction = interaction.replace(
+            INTEGRATE.UNBOUNDED_NODE_COUNT_COMMENT
+            + "  constexpr int kRecorderMaximumInteractionTextControls = "
+            "2147483647;\n",
+            "  constexpr int kRecorderMaximumInteractionTextControls = 512;\n",
+        )
+        self.assertNotEqual(current, earlier)
+        self.assertIn("one bounded structural checkpoint", earlier)
+        self.assertNotEqual(interaction, earlier_interaction)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(self.document_source(), encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            patched = path.read_text(encoding="utf-8")
+            path.write_text(
+                patched.replace(current, earlier).replace(
+                    interaction, earlier_interaction
+                ),
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_document(path)
+            self.assertEqual(patched, path.read_text(encoding="utf-8"))
+
     def test_the_interaction_checkpoint_never_forces_work(self):
         helper = INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER
         for forcing_call in (
@@ -2813,7 +2863,9 @@ class IntegrateTests(unittest.TestCase):
             with self.subTest(call=forcing_call):
                 self.assertNotIn(forcing_call, helper)
         # Only the helper-owned constants bound the snapshot.
-        self.assertIn("kRecorderMaximumInteractionTextControls = 512", helper)
+        self.assertIn(
+            "kRecorderMaximumInteractionTextControls = 2147483647", helper
+        )
         self.assertIn("kRecorderMaximumInteractionValueLength = 4096", helper)
 
     def test_migrates_light_tree_dom_checkpoint_hooks(self):

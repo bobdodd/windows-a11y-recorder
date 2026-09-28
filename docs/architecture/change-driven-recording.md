@@ -109,18 +109,34 @@ logger and records everything it finds.
   is called with a `ChildrenChange` (line 275) for each insertion and
   removal of children. Attribute and character data changes are already
   recorded on the current protocol. Recording insertions and removals lets the DOM be recorded
-  in full, as a first walk and then its changes, without the 512-node limit.
+  in full, as a first walk and then its changes.
 
 ## No limit to nodes
 
 Requirement: the recorder records every node of every document, with no
-limit to the number of nodes. The current DOM checkpoint stops at 512 nodes
-(`kRecorderMaximumDomCheckpointNodes` in `chromium/integrate.py`) and the
-layout checkpoint at 100,000 (`kRecorderMaximumLayoutCheckpointNodes`). Both
-limits are removed in slices 3 and 4, when the full walk is needed only for a
-document's first rendering update and after a loss. Removing them before then
-would make every rendering update walk the whole document, which is the cost
-this design removes.
+limit to the number of nodes. A checkpoint that stops part way records part
+of a page, which is not evidence of the page.
+
+The limits were removed ahead of the browser slices. The DOM checkpoint
+stopped at 512 nodes (`kRecorderMaximumDomCheckpointNodes` in
+`chromium/integrate.py`), the interaction checkpoint at 512 text controls
+(`kRecorderMaximumInteractionTextControls`), and the layout and accessibility
+checkpoints at 100,000 nodes (`kRecorderMaximumLayoutCheckpointNodes` and
+`kRecorderMaximumAccessibilityCheckpointNodes`). Each bound is now
+2147483647, the largest value the protocol's 32-bit counts hold, so a walk
+stops only where its count cannot grow. The protocol's `maximumNodes`,
+`maximumTextControls`, and `truncated` fields are unchanged. A checkout
+patched with the earlier limits has them replaced when `integrate.py` runs.
+
+Until slices 3 to 5, every DOM checkpoint after a mutation delivery and every
+layout checkpoint walks the whole document, so recording a large page costs
+more than it did with the limits. That cost is what the change-driven design
+removes, and it is to be measured on the target machine.
+
+Bounds on the content of a node are not node limits and are unchanged:
+attribute values, text-control values, and generated text are cut at 4096
+UTF-16 code units, an element's attributes at 64, network headers and
+cookies at 256 per record. Each cut is reported in the record.
 
 ## How capture works
 

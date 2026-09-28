@@ -77,7 +77,7 @@ within one renderer process.
 - `devicePixelRatio` and `layoutZoomFactor`: the frame's device pixel ratio
   and the zoom factor Blink applies to layout, which together relate CSS
   pixels to device pixels.
-- `maximumNodes`: 100000.
+- `maximumNodes`: 2147483647, the largest value a 32-bit count holds.
 - `styleProperties`: the computed-style properties every element record
   reports, in recorded order.
 
@@ -124,7 +124,7 @@ and the document node are not recorded.
 
 - `nodeCount`: the number of node records emitted.
 - `truncated`: whether the traversal stopped at `maximumNodes`.
-- `maximumNodes`: 100000.
+- `maximumNodes`: 2147483647.
 - `pseudoElementCount` and `shadowRootCount`: from protocol 0.28, the numbers of
   pseudo-element records emitted and shadow roots traversed.
 
@@ -244,8 +244,8 @@ value, as `getComputedStyle()` does.
 
 ## Volume and limits
 
-- Each checkpoint records every element and laid-out text node, up to 100000
-  nodes, with all listed properties for each element. A checkpoint is recorded
+- Each checkpoint records every element and laid-out text node, with no
+  limit to the number of nodes, with all listed properties for each element. A checkpoint is recorded
   for every rendering update in which style or layout work happened, so a page
   that animates a property through style or layout produces a full checkpoint
   on every such frame. Archive size grows with document size multiplied by the
