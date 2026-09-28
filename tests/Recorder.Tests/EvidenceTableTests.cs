@@ -646,7 +646,6 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         Assert.Contains("actual rows=", plan.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("actual time=", plan.Text, StringComparison.Ordinal);
         Assert.Contains("Buffers: shared", plan.Text, StringComparison.Ordinal);
-        Assert.DoesNotContain("Nested Loop", plan.Text, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -669,39 +668,34 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     }
 
     /// <summary>
-    /// The reference check disables nested loop joins for its own queries
-    /// only: every connection the pool hands out afterwards plans with the
-    /// default settings.
+    /// The reference check gathers the planner statistics of each table its
+    /// queries read before it runs them, and times each table's analysis.
     /// </summary>
     [Fact]
-    public async Task CheckingReferencesLeavesPooledConnectionsWithTheDefaultPlanner()
+    public async Task CheckingReferencesGathersStatisticsForTheTablesItReads()
     {
         var token = TestContext.Current.CancellationToken;
         var (sessionKey, recordingId) = await CreateRecordingAsync();
         await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
-        var store = new RecordingStore(DataSource);
-        Assert.Empty(await store.CheckReferencesAsync(recordingId, cancellationToken: token));
+        var before = DateTime.UtcNow;
+        using var timings = new WriterTimings();
+        Assert.Empty(await new RecordingStore(DataSource).CheckReferencesAsync(recordingId, timings, token));
 
-        // Holding every connection open at once makes the pool hand out each
-        // connection the check used, not one connection repeatedly.
-        var connections = new List<NpgsqlConnection>();
-        try
+        foreach (var table in new[] { "browser_dispatch_path_targets", "browser_dispatch_events", "events", "names" })
         {
-            for (var index = 0; index < Math.Clamp(Environment.ProcessorCount / 2, 1, 8) + 1; index++)
-            {
-                var connection = await DataSource.OpenConnectionAsync(token);
-                connections.Add(connection);
-                await using var show = new NpgsqlCommand("SHOW enable_nestloop", connection);
-                Assert.Equal("on", (string?)await show.ExecuteScalarAsync(token));
-            }
+            await using var analyzed = DataSource.CreateCommand(
+                "SELECT last_analyze FROM pg_stat_user_tables WHERE relname = $1");
+            analyzed.Parameters.AddWithValue(table);
+            var at = await analyzed.ExecuteScalarAsync(token);
+            Assert.True(at is DateTime time && time.ToUniversalTime() >= before.AddSeconds(-1), table);
         }
-        finally
-        {
-            foreach (var connection in connections)
-            {
-                await connection.DisposeAsync();
-            }
-        }
+
+        using var report = System.Text.Json.JsonDocument.Parse(timings.ToJson());
+        var stages = report.RootElement.GetProperty("stages").EnumerateArray()
+            .Select(stage => stage.GetProperty("stage").GetString()!)
+            .ToList();
+        Assert.Contains("check-references.analyze", stages);
+        Assert.Contains("check-references-analyze:browser_dispatch_path_targets", stages);
     }
 
     /// <summary>

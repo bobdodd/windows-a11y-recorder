@@ -404,12 +404,11 @@ only once the database version is tested in full. It adds the
   With stale statistics the time grew about ninefold for three times the
   rows, as a comparison of every row with every row does; both remedies grew
   about in proportion to the rows. Disabling nested loops was the faster of
-  the two at both sizes and needs no statistics, so each check query now
-  runs in its own transaction after `SET LOCAL enable_nestloop = off`,
-  which ends with the transaction and leaves pooled connections unchanged.
-  The store's own check of a fresh copy at the larger size took 475 ms. A
-  test requires every pooled connection to plan with nested loops enabled
-  after a check. The measurement used the evidence samples, not a real
+  the two at both sizes and needs no statistics, so revision 2bba098 ran
+  each check query in its own transaction after
+  `SET LOCAL enable_nestloop = off`. The store's own check of a fresh copy
+  at the larger size then took 475 ms. The Windows results below replaced
+  that setting with gathering statistics first. The measurement used the evidence samples, not a real
   recording, on a two-processor Linux machine.
 - **Reference check on Windows with nested loops off.** In the first
   Windows recording with this change (2bba098, 93.6 s), the check took
@@ -447,6 +446,44 @@ only once the database version is tested in full. It adds the
   loop, and a check with
   the default threshold to note no plan for the quick queries of a small
   recording.
+- **Reference check plans at stop.** The first Windows recording that noted
+  plans (6983d97, 89.2 s) took 6.7 s to check. Its notes showed:
+  - the planner estimated one row for the recording in every table read,
+    and the statistics of the largest tables were about 57 minutes old, with
+    577,115 rows of `browser_dispatch_path_scopes` changed since;
+  - with nested loops disabled, the planner chose merge anti joins for small
+    tables: checking 1,308 rows of `audio_buffers` read all 518,984 rows of
+    the recording in `events`, and took 2.1 s. Seven queries of this kind
+    each took about 2.1 s;
+  - the time was not spent reading from disk: the scopes query took 3.5 s,
+    of which 65 ms was reading and 115 ms writing buffers, while fetching
+    each of its 577,115 rows from the table rather than from the index
+    alone, because the rows were new;
+  - one autovacuum worker was running `VACUUM ANALYZE` on `events`.
+
+  On the development sandbox, with the same method as the planning
+  measurement above at the larger size, the 428 queries took, on fresh
+  copies:
+
+  | Before the queries | That step | Queries | Planner setting |
+  |---|---|---|---|
+  | nothing | none | 366 ms | nested loops off |
+  | `ANALYZE` of the tables read | 399 ms | 210 ms | default |
+  | `VACUUM (ANALYZE)` of the tables read | 4,330 ms | 224 ms | default |
+
+  Disabling nested loops was the fastest in total on the sandbox, but it
+  is what produced the full reads of `events` on Windows, and it does not
+  let the planner use the number of rows there are. Vacuuming made the
+  queries no faster than analyzing did and cost ten times as long. The
+  check therefore no longer disables nested loops: it first runs `ANALYZE`
+  on each table its queries read, up to eight at once, and times each
+  under `check-references-analyze:<table>` and all of them under
+  `check-references.analyze`. The store's check of a fresh copy then took
+  615 ms on the sandbox, against 489 ms with nested loops disabled. A test
+  requires the check to analyze the tables it reads and to time them. The
+  Windows timings of the next recording decide whether this is enough;
+  the fetches of new rows from the table remain, and only vacuuming, which
+  marks pages all-visible, avoids them.
 - **Parallel writing.** `PostgresEventWriter` writes up to
   `WriterConnections` batches at once, four by default; while the database
   is unavailable it retries one batch at a time. Each batch is written by

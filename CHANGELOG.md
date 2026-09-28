@@ -324,11 +324,12 @@ from the product version.
 - Skip, in the reference check, the tables with no rows in the recording,
   run more of its queries at once, and write each query's time to
   `database-writer-timings.json`.
-- Check references with nested loop joins disabled for the check's own
-  queries. Right after writing, the planner's statistics describe none of
-  the new recording's rows, and it chose nested loops that compared every
-  row with every row; measured on the development sandbox, a check that
-  took 47.6 s this way took 0.5 s without them.
+- Gather planner statistics, with `ANALYZE`, for the tables the reference
+  check reads before it runs its queries. Right after writing, the
+  statistics describe none of the new recording's rows. The planner then
+  chose nested loops that compared every row with every row, or, with
+  nested loops disabled as an earlier revision on this branch did, merge
+  joins that read every event of the recording to check a few rows.
 - Note, in `database-writer-timings.json`, what the database server was doing
   when the reference check started, the planner statistics of the tables it
   reads, and the plan of each check query that took 250 ms or more, with the

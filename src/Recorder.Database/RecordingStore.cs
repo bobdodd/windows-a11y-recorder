@@ -253,8 +253,9 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
     /// time; each reference is checked here with one set-based query, with
     /// up to half the processors, at most eight, checking at once. A
     /// reference with a null column is not checked, as a foreign key would
-    /// not check it. Each query runs with nested loop joins disabled, since
-    /// the statistics of a recording just written describe none of its rows. When <paramref name="timings"/> is given, the time of
+    /// not check it. The statistics of the tables the queries read are
+    /// gathered first, since those of a recording just written describe
+    /// none of its rows. When <paramref name="timings"/> is given, the time of
     /// each query is added to it under the referring table's name.
     /// </summary>
     public async Task<IReadOnlyList<string>> CheckReferencesAsync(
@@ -324,6 +325,41 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
             }
         }
 
+        // The recording was written moments ago, so the planner's statistics
+        // describe none of its rows and estimate about one row for its
+        // recording_id in every table. From that estimate the planner chose
+        // plans suited to one row: nested loops that compared every row with
+        // every row, or, with nested loops disabled, merge joins that read
+        // every referenced row of the recording to check a few referring
+        // rows. Gathering statistics for the tables the queries read first
+        // lets it choose a plan for the rows there are. The measurements
+        // behind this are in docs/architecture/session-database.md.
+        var analyzed = references
+            .Select(reference => reference.Table)
+            .Concat(references.Select(reference => reference.Referenced))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var analyzing = System.Diagnostics.Stopwatch.GetTimestamp();
+        await Parallel.ForEachAsync(
+            analyzed,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 8),
+                CancellationToken = cancellationToken
+            },
+            async (table, token) =>
+            {
+                var started = System.Diagnostics.Stopwatch.GetTimestamp();
+                await using var connection = await dataSource.OpenConnectionAsync(token).ConfigureAwait(false);
+                await using var analyze = new NpgsqlCommand($"ANALYZE {Identifier(table)}", connection)
+                {
+                    CommandTimeout = 0
+                };
+                await analyze.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                timings?.Since("check-references-analyze:" + table, started);
+            }).ConfigureAwait(false);
+        timings?.Since("check-references.analyze", analyzing, analyzed.Count);
+
         if (timings is not null)
         {
             await NoteServerActivityAsync(timings, "check-references-activity:start", cancellationToken).ConfigureAwait(false);
@@ -368,20 +404,6 @@ public sealed class RecordingStore(NpgsqlDataSource dataSource)
                 }
 
                 await using var transaction = await connection.BeginTransactionAsync(token).ConfigureAwait(false);
-                // The recording was written moments ago, so the planner's
-                // statistics do not yet include it and estimate about one
-                // row for its recording_id. From that estimate it chooses a
-                // nested loop that reads every referenced row of the
-                // recording once per referring row. Without nested loops it
-                // chooses a hash or merge anti join, which reads each side
-                // once. SET LOCAL ends with the transaction, so the pooled
-                // connection keeps the default. The measurements behind this
-                // are in docs/architecture/session-database.md.
-                await using (var plan = new NpgsqlCommand("SET LOCAL enable_nestloop = off", connection, transaction))
-                {
-                    await plan.ExecuteNonQueryAsync(token).ConfigureAwait(false);
-                }
-
                 if (explaining)
                 {
                     // A query that takes longer than the threshold sends its
