@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Threading.Channels;
 using Recorder.Session;
+using ZstdSharp;
 
 namespace Recorder.Database.RecordingFiles;
 
@@ -17,7 +18,20 @@ public sealed record RecordingFileStateSummary(
     double ApplyMilliseconds,
     double SnapshotMilliseconds,
     int Documents,
-    string? Stopped);
+    string? Stopped)
+{
+    /// <summary>How many times a document left the thread after a time without records.</summary>
+    public long Departures { get; init; }
+
+    /// <summary>How many times a document that had left was read back from its snapshot.</summary>
+    public long Returns { get; init; }
+
+    /// <summary>The most documents the thread held whole at once.</summary>
+    public int LargestHeldDocuments { get; init; }
+
+    /// <summary>The most bytes of compressed snapshots of departed documents held at once.</summary>
+    public long LargestDepartedBytes { get; init; }
+}
 
 /// <summary>
 /// Makes snapshots of the recorded state of each browser document while a
@@ -27,9 +41,16 @@ public sealed record RecordingFileStateSummary(
 /// them with a <see cref="BrowserStateBuilder"/>, and at most once a second of
 /// recording time it writes a snapshot of each document that has changed and
 /// whose last snapshot is at least <see cref="SnapshotInterval"/> of recording
-/// time old, followed by a state index record that lists every document, its
+/// time old, followed by a state index record that lists each document whose
+/// entry changed since the previous index record: its last record time, its
 /// latest snapshot, and the time of its first record after it. A snapshot is
 /// not written while a document is between two records of one change.
+///
+/// A document with no record for <see cref="IdleInterval"/> of recording time
+/// is given a final snapshot, if it changed, and leaves the thread, which
+/// keeps only that snapshot, compressed. A later record of the document, or a
+/// lost-record notice for its process, reads it back. When the recording
+/// stops, the thread releases every document.
 ///
 /// When the queue holds more than <see cref="QueueLimitBytes"/>, the thread
 /// stops for the rest of the recording and a record states when and why. No
@@ -46,6 +67,9 @@ public sealed class RecordingFileStateRecorder
 
     /// <summary>The recording time between two snapshots of a document that changes.</summary>
     public static readonly long SnapshotInterval = 10_000_000_000;
+
+    /// <summary>The recording time without a record after which a document leaves the thread.</summary>
+    public static readonly long IdleInterval = 30_000_000_000;
 
     /// <summary>The recording time between two checks for snapshots that are due.</summary>
     public static readonly long SweepInterval = 1_000_000_000;
@@ -75,6 +99,13 @@ public sealed class RecordingFileStateRecorder
     private long _indexBytes;
     private long _applyTicks;
     private long _snapshotTicks;
+    private readonly Compressor _compressor = new(3);
+    private readonly Decompressor _decompressor = new();
+    private long _departures;
+    private long _returns;
+    private int _largestHeld;
+    private long _departedBytes;
+    private long _largestDepartedBytes;
 
     private sealed class Tracked
     {
@@ -83,6 +114,11 @@ public sealed class RecordingFileStateRecorder
         public long SnapshotLogTime;
         public long? LastSnapshotAt;
         public long? FirstUnsnapshottedTime;
+        public long LastTime;
+        public string? Instance;
+        public long? Process;
+        public bool Listed;
+        public byte[]? Departed;
     }
 
     /// <param name="write">
@@ -162,12 +198,23 @@ public sealed class RecordingFileStateRecorder
             _largestQueuedBytes,
             _applyTicks * 1000.0 / Stopwatch.Frequency,
             _snapshotTicks * 1000.0 / Stopwatch.Frequency,
-            _builder.Documents.Count,
-            _stopped);
-        if (_builder.Documents.Count > 0 || _stopped is not null)
+            _tracked.Count,
+            _stopped)
+        {
+            Departures = _departures,
+            Returns = _returns,
+            LargestHeldDocuments = _largestHeld,
+            LargestDepartedBytes = _largestDepartedBytes,
+        };
+        if (_tracked.Count > 0 || _stopped is not null)
         {
             WriteSummary(summary);
         }
+
+        // The documents are released once the recording has stopped.
+        _builder.Clear();
+        _tracked.Clear();
+        _departedBytes = 0;
         return summary;
     }
 
@@ -202,6 +249,10 @@ public sealed class RecordingFileStateRecorder
             writer.WriteNumber("applyMilliseconds", Math.Round(summary.ApplyMilliseconds, 3));
             writer.WriteNumber("snapshotMilliseconds", Math.Round(summary.SnapshotMilliseconds, 3));
             writer.WriteNumber("documents", summary.Documents);
+            writer.WriteNumber("departures", summary.Departures);
+            writer.WriteNumber("returns", summary.Returns);
+            writer.WriteNumber("largestHeldDocuments", summary.LargestHeldDocuments);
+            writer.WriteNumber("largestDepartedBytes", summary.LargestDepartedBytes);
             if (summary.Stopped is { } stopped)
             {
                 writer.WriteString("stopped", stopped);
@@ -262,6 +313,7 @@ public sealed class RecordingFileStateRecorder
         var record = item.Event;
         var time = record.MonotonicNanoseconds;
         var applying = Stopwatch.GetTimestamp();
+        ReturnDeparted(item);
         var document = _builder.Apply(item.EventKey, time, record.Channel, record.EventType, record.Payload);
         _applyTicks += Stopwatch.GetTimestamp() - applying;
         foreach (var affected in _builder.LastOmissionAffected)
@@ -286,19 +338,65 @@ public sealed class RecordingFileStateRecorder
         }
     }
 
+    // A record of a departed document, or a lost-record notice for the
+    // process of one, reads the document back from its snapshot first.
+    private void ReturnDeparted(BufferedEvent item)
+    {
+        var record = item.Event;
+        if (_departedBytes == 0 || !BrowserStateBuilder.IsStateChannel(record.Channel) ||
+            record.Payload.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        if (record.EventType == "collector-omission")
+        {
+            var (instance, process) = BrowserStateBuilder.ProcessOf(record.Payload);
+            foreach (var (key, tracked) in _tracked)
+            {
+                if (tracked.Departed is not null && tracked.Instance == instance && tracked.Process == process)
+                {
+                    Return(key, tracked);
+                }
+            }
+            return;
+        }
+        if (DomTreeRebuilder.DocumentKey(record.Payload) is { } documentKey &&
+            _tracked.TryGetValue(documentKey, out var departed) &&
+            departed.Departed is not null)
+        {
+            Return(documentKey, departed);
+        }
+    }
+
+    private void Return(string key, Tracked tracked)
+    {
+        var data = _decompressor.Unwrap(tracked.Departed!).ToArray();
+        _departedBytes -= tracked.Departed!.Length;
+        tracked.Departed = null;
+        _builder.Load(BrowserStateSnapshot.Read(data));
+        _returns++;
+        _largestHeld = Math.Max(_largestHeld, _builder.Documents.Count);
+    }
+
     private void Changed(BrowserDocumentState document, long time)
     {
         if (!_tracked.TryGetValue(document.Key, out var tracked))
         {
-            tracked = new Tracked();
+            tracked = new Tracked
+            {
+                Instance = document.BrowserInstanceId,
+                Process = document.ProcessId,
+            };
             _tracked.Add(document.Key, tracked);
-            _indexDue = true;
+            _largestHeld = Math.Max(_largestHeld, _builder.Documents.Count);
         }
         if (tracked.FirstUnsnapshottedTime is null)
         {
             tracked.FirstUnsnapshottedTime = time;
-            _indexDue = true;
         }
+        tracked.LastTime = document.LastTime;
+        tracked.Listed = false;
+        _indexDue = true;
     }
 
     private void Sweep(long now, bool final)
@@ -306,26 +404,43 @@ public sealed class RecordingFileStateRecorder
         var sweeping = Stopwatch.GetTimestamp();
         foreach (var (key, tracked) in _tracked)
         {
-            if (tracked.FirstUnsnapshottedTime is not { } first)
+            if (tracked.Departed is not null)
             {
                 continue;
             }
-            var since = tracked.LastSnapshotAt ?? first;
             var document = _builder.Documents[key];
-            if ((!final && now - since < SnapshotInterval) || _builder.IsOpen(document))
+            if (_builder.IsOpen(document))
             {
                 continue;
             }
-            var data = BrowserStateSnapshot.Serialize(document);
-            _write(SnapshotTopic, now, data);
-            _snapshots++;
-            _snapshotBytes += data.Length;
-            tracked.SnapshotEventKey = document.LastEventKey;
-            tracked.SnapshotTime = document.LastTime;
-            tracked.SnapshotLogTime = now;
-            tracked.LastSnapshotAt = now;
-            tracked.FirstUnsnapshottedTime = null;
-            _indexDue = true;
+            var idle = !final && now - tracked.LastTime >= IdleInterval;
+            byte[]? data = null;
+            if (tracked.FirstUnsnapshottedTime is { } first &&
+                (final || idle || now - (tracked.LastSnapshotAt ?? first) >= SnapshotInterval))
+            {
+                data = BrowserStateSnapshot.Serialize(document);
+                _write(SnapshotTopic, now, data);
+                _snapshots++;
+                _snapshotBytes += data.Length;
+                tracked.SnapshotEventKey = document.LastEventKey;
+                tracked.SnapshotTime = document.LastTime;
+                tracked.SnapshotLogTime = now;
+                tracked.LastSnapshotAt = now;
+                tracked.FirstUnsnapshottedTime = null;
+                tracked.Listed = false;
+                _indexDue = true;
+            }
+            if (idle)
+            {
+                // The document leaves the thread, which keeps its state as
+                // it was last written, compressed.
+                data ??= BrowserStateSnapshot.Serialize(document);
+                tracked.Departed = _compressor.Wrap(data).ToArray();
+                _departedBytes += tracked.Departed.Length;
+                _largestDepartedBytes = Math.Max(_largestDepartedBytes, _departedBytes);
+                _builder.Remove(key);
+                _departures++;
+            }
         }
         if (_indexDue)
         {
@@ -347,12 +462,18 @@ public sealed class RecordingFileStateRecorder
             writer.WriteNumber("eventTime", _lastKeyTime);
             writer.WriteNumber("time", now);
             writer.WriteNumber("snapshotInterval", SnapshotInterval);
+            writer.WriteString("listing", "changed");
             writer.WriteStartArray("documents");
             foreach (var (key, tracked) in _tracked)
             {
+                if (tracked.Listed)
+                {
+                    continue;
+                }
+                tracked.Listed = true;
                 writer.WriteStartObject();
                 writer.WriteString("documentKey", key);
-                writer.WriteNumber("lastTime", _builder.Documents[key].LastTime);
+                writer.WriteNumber("lastTime", tracked.LastTime);
                 if (tracked.SnapshotEventKey >= 0)
                 {
                     writer.WriteNumber("snapshotEventKey", tracked.SnapshotEventKey);

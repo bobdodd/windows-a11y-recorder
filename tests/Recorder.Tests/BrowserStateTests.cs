@@ -446,12 +446,12 @@ public sealed class BrowserStateTests : IDisposable
         {
             return false;
         }
-        var left = first.Documents.OrderBy(item => item.State.Key, StringComparer.Ordinal).ToArray();
-        var right = second.Documents.OrderBy(item => item.State.Key, StringComparer.Ordinal).ToArray();
+        var left = first.Documents.OrderBy(item => item.Key, StringComparer.Ordinal).ToArray();
+        var right = second.Documents.OrderBy(item => item.Key, StringComparer.Ordinal).ToArray();
         for (var position = 0; position < left.Length; position++)
         {
-            if (!BrowserStateSnapshot.Serialize(left[position].State).AsSpan()
-                    .SequenceEqual(BrowserStateSnapshot.Serialize(right[position].State)))
+            if (!BrowserStateSnapshot.Serialize(left[position].State!).AsSpan()
+                    .SequenceEqual(BrowserStateSnapshot.Serialize(right[position].State!)))
             {
                 return false;
             }
@@ -461,8 +461,148 @@ public sealed class BrowserStateTests : IDisposable
 
     private static string Describe(BrowserStateAt state) =>
         string.Join("\n", state.Documents
-            .OrderBy(item => item.State.Key, StringComparer.Ordinal)
-            .Select(item => Encoding.UTF8.GetString(BrowserStateSnapshot.Serialize(item.State))));
+            .OrderBy(item => item.Key, StringComparer.Ordinal)
+            .Select(item => Encoding.UTF8.GetString(BrowserStateSnapshot.Serialize(item.State!))));
+
+    // Document a changes every 50 ms for 120 s. Document b, in another
+    // process, changes for its first 20 s, has a lost-record notice for its
+    // process at 60 s, and changes again from 90 s to 100 s.
+    private static List<((string Channel, string EventType, JsonElement Payload) Item, long Time)> IdleSession()
+    {
+        var a = new Records("token-a", "doc-1", 3440);
+        var b = new Records("token-b", "doc-9", 5120);
+        var all = new List<((string, string, JsonElement), long)>();
+        void Take(Records records, long time)
+        {
+            all.AddRange(records.Items.Select(item => (item, time)));
+            records.Items.Clear();
+        }
+        Take(a.Walk("finished-parsing", "first", false, Page).Layout((3, 0)).Interaction(null), 0);
+        Take(b.Walk("finished-parsing", "first", false, Page).Layout((3, 0)).Interaction(null), 1_000_000);
+        for (var step = 1; step <= 2400; step++)
+        {
+            var time = step * 50_000_000L;
+            Take(a.Insert(3, null, 1000 + step, "P").Layout((1000 + step, step)), time);
+            if (time <= 20_000_000_000 || (time >= 90_000_000_000 && time <= 100_000_000_000))
+            {
+                if (step % 4 == 0)
+                {
+                    Take(b.Insert(3, null, 5000 + step, "LI").Text(4, $"b {step}"), time + 1_000_000);
+                }
+            }
+            if (time == 60_000_000_000)
+            {
+                Take(b.Omission("browser.layout"), time + 2_000_000);
+            }
+        }
+        return all;
+    }
+
+    private async Task<(string Path, RecordingFileStateSummary Summary)> WriteTimedAsync(
+        string name,
+        List<((string Channel, string EventType, JsonElement Payload) Item, long Time)> records)
+    {
+        var path = Path.Combine(_directory, name);
+        var collector = Collector("test.browser", "browser.dom", "browser.layout", "browser.interaction");
+        using var target = new RecordingFileBatchTarget(path, Recording, new RecordingFileWriterOptions { ChunkBytes = 32 * 1024, ChunkInterval = TimeSpan.Zero });
+        for (var start = 0; start < records.Count; start += 200)
+        {
+            var batch = records.Skip(start).Take(200).Select((entry, index) =>
+            {
+                var key = start + index;
+                var record = Event(SessionId, collector, (ulong)key + 1, entry.Time, entry.Item.Channel, entry.Item.EventType) with
+                {
+                    Payload = entry.Item.Payload
+                };
+                return new BufferedEvent(key, record, entry.Item.Payload.GetRawText());
+            }).ToArray();
+            Assert.Empty(await target.WriteAsync(new EventBatch(batch, [], []), TestContext.Current.CancellationToken));
+        }
+        target.Finish();
+        Assert.NotNull(target.StateSummary);
+        Assert.Null(target.StateSummary!.Stopped);
+        return (path, target.StateSummary);
+    }
+
+    [Fact]
+    public async Task ADocumentWithoutRecordsLeavesTheStateThreadAndReturns()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var (path, summary) = await WriteTimedAsync("idle.mcap", IdleSession());
+
+        // b left after 30 s without records, returned for the notice at 60 s,
+        // left again, and returned at 90 s.
+        Assert.Equal(2, summary.Documents);
+        Assert.True(summary.Departures >= 2, $"{summary.Departures} departures");
+        Assert.True(summary.Returns >= 2, $"{summary.Returns} returns");
+        Assert.True(summary.LargestDepartedBytes > 0);
+
+        using var reader = RecordingFileReader.Open(path);
+        var state = new RecordingFileBrowserState(reader, null);
+        for (var time = 5_000_000_000L; time <= 125_000_000_000; time += 5_000_000_000)
+        {
+            var fast = state.At(time, cancellationToken: token);
+            var full = state.At(time, useSnapshots: false, cancellationToken: token);
+            Assert.Equal(Describe(full), Describe(fast));
+            var b = Assert.Single(fast.Documents, item => item.Key.StartsWith("token-b", StringComparison.Ordinal)).State!;
+            Assert.Equal(
+                time > 60_000_000_000 ? BrowserStateCompleteness.AfterLoss : BrowserStateCompleteness.Complete,
+                b.LayoutCompleteness);
+        }
+    }
+
+    [Fact]
+    public async Task IndexRecordsListOnlyTheDocumentsThatChanged()
+    {
+        var (path, _) = await WriteTimedAsync("listing.mcap", IdleSession());
+        using var reader = RecordingFileReader.Open(path);
+        var listings = new List<(long Time, string[] Keys)>();
+        foreach (var message in reader.ReadAll().Where(message => message.Channel.Topic == RecordingFileStateRecorder.IndexTopic))
+        {
+            using var json = JsonDocument.Parse(message.Data);
+            if (json.RootElement.GetProperty("kind").GetString() == "state-index")
+            {
+                Assert.Equal("changed", json.RootElement.GetProperty("listing").GetString());
+                listings.Add((
+                    json.RootElement.GetProperty("time").GetInt64(),
+                    [.. json.RootElement.GetProperty("documents").EnumerateArray().Select(item => item.GetProperty("documentKey").GetString()!)]));
+            }
+        }
+        Assert.True(listings.Count > 50);
+        // Between b's departure after 50 s and the notice at 60 s, and from
+        // its second departure until 90 s, only a is listed.
+        var quiet = listings.Where(item => item.Time is > 52_000_000_000 and < 59_000_000_000 or > 62_000_000_000 and < 89_000_000_000).ToArray();
+        Assert.NotEmpty(quiet);
+        Assert.All(quiet, item => Assert.DoesNotContain(item.Keys, key => key.StartsWith("token-b", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task OnlyTheDocumentsAskedForAreRead()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var (path, _) = await WriteTimedAsync("asked.mcap", IdleSession());
+        using var reader = RecordingFileReader.Open(path);
+        var state = new RecordingFileBrowserState(reader, null);
+        foreach (var time in new[] { 10_000_000_000L, 70_000_000_000, 95_000_000_000, 125_000_000_000 })
+        {
+            var full = state.At(time, useSnapshots: false, cancellationToken: token);
+            var keys = full.Documents.Select(item => item.Key).ToArray();
+
+            var named = state.At(time, load: new HashSet<string>(), cancellationToken: token);
+            Assert.Equal(keys, named.Documents.Select(item => item.Key));
+            Assert.All(named.Documents, item => Assert.Null(item.State));
+            Assert.Equal(0, named.Cost.SnapshotsRead);
+
+            var b = keys.Single(key => key.StartsWith("token-b", StringComparison.Ordinal));
+            var one = state.At(time, load: new HashSet<string> { b }, cancellationToken: token);
+            Assert.Equal(keys, one.Documents.Select(item => item.Key));
+            var read = Assert.Single(one.Documents, item => item.State is not null);
+            Assert.Equal(b, read.Key);
+            Assert.Equal(
+                BrowserStateSnapshot.Serialize(full.Documents.Single(item => item.Key == b).State!),
+                BrowserStateSnapshot.Serialize(read.State!));
+        }
+    }
 
     [Fact]
     public async Task TheStateReadWithSnapshotsEqualsTheStateReadFromEveryRecord()
@@ -481,7 +621,7 @@ public sealed class BrowserStateTests : IDisposable
         for (var time = 0L; time <= end + 1; time += end / 23)
         {
             var fast = state.At(time, cancellationToken: TestContext.Current.CancellationToken);
-            var full = state.At(time, useSnapshots: false, TestContext.Current.CancellationToken);
+            var full = state.At(time, useSnapshots: false, cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal("records", full.Cost.Source);
             Assert.Equal(Describe(full), Describe(fast));
             if (time > 30_000_000_000)
@@ -514,7 +654,7 @@ public sealed class BrowserStateTests : IDisposable
         foreach (var time in new[] { end / 3, end / 2, end })
         {
             var token = TestContext.Current.CancellationToken;
-            Assert.Equal(Describe(state.At(time, useSnapshots: false, token)), Describe(state.At(time, cancellationToken: token)));
+            Assert.Equal(Describe(state.At(time, useSnapshots: false, cancellationToken: token)), Describe(state.At(time, cancellationToken: token)));
         }
     }
 
@@ -649,29 +789,54 @@ public sealed class BrowserStateTests : IDisposable
             }
             var bases = string.Join(", ", fast.Documents.GroupBy(item => item.Basis.Basis).Select(group => $"{group.Key} {group.Count()}"));
             var parts = string.Join(", ", fast.Documents
-                .GroupBy(item => $"{BrowserStateSnapshot.Name(item.State.DomCompleteness)}/{BrowserStateSnapshot.Name(item.State.LayoutCompleteness)}/{BrowserStateSnapshot.Name(item.State.InteractionCompleteness)}")
+                .GroupBy(item => $"{BrowserStateSnapshot.Name(item.State!.DomCompleteness)}/{BrowserStateSnapshot.Name(item.State!.LayoutCompleteness)}/{BrowserStateSnapshot.Name(item.State!.InteractionCompleteness)}")
                 .Select(group => $"{group.Key} {group.Count()}"));
             report.AppendLine(
-                $"{what}: {(equal ? "equal" : "DIFFERENT")}; {fast.Documents.Count} documents, {fast.Documents.Sum(item => item.State.Dom?.Nodes.Count ?? 0)} DOM nodes, {fast.Documents.Sum(item => item.State.Layout.Nodes.Count)} layout nodes; basis {bases}; dom/layout/interaction {parts}");
+                $"{what}: {(equal ? "equal" : "DIFFERENT")}; {fast.Documents.Count} documents, {fast.Documents.Sum(item => item.State!.Dom?.Nodes.Count ?? 0)} DOM nodes, {fast.Documents.Sum(item => item.State!.Layout.Nodes.Count)} layout nodes; basis {bases}; dom/layout/interaction {parts}");
             report.AppendLine(
                 $"  with snapshots {fast.Cost.Milliseconds:F0} ms ({fast.Cost.Source}, {fast.Cost.SnapshotsRead} snapshots, {fast.Cost.HeldStatesRead} held, {fast.Cost.ChunksRead} chunks, {fast.Cost.RecordsRead} records read, {fast.Cost.RecordsApplied} applied, scan from {fast.Cost.ScanStartTime}); from every record {full.Cost.Milliseconds:F0} ms ({full.Cost.ChunksRead} chunks, {full.Cost.RecordsRead} records)");
             // Written after each sample, so that a check that fails part way
             // leaves what it found.
             File.WriteAllText(reportPath, report.ToString());
         }
+        var none = new HashSet<string>();
         for (var sample = 0; sample <= samples; sample++)
         {
             var time = start + (end - start) * sample / samples;
-            Compare($"time {time}", state.At(time, cancellationToken: token), state.At(time, useSnapshots: false, token));
+            Compare($"time {time}", state.At(time, cancellationToken: token), state.At(time, useSnapshots: false, cancellationToken: token));
+            var named = state.At(time, load: none, cancellationToken: token);
+            report.AppendLine($"  documents named without their state: {named.Documents.Count} in {named.Cost.Milliseconds:F0} ms");
+            File.WriteAllText(reportPath, report.ToString());
         }
         var frames = index.FrameCompositions;
         for (var sample = 0; sample < Math.Min(samples, frames.Count); sample++)
         {
             var frame = frames[(int)((long)(frames.Count - 1) * sample / Math.Max(1, samples - 1))];
+            var full = state.AtFrame(frame.FrameNanoseconds, useSnapshots: false, cancellationToken: token);
             Compare(
                 $"frame {frame.FrameNanoseconds} composed {frame.CompositedNanoseconds}",
                 state.AtFrame(frame.FrameNanoseconds, cancellationToken: token),
-                state.AtFrame(frame.FrameNanoseconds, useSnapshots: false, token));
+                full);
+
+            // The documents presented in the second before the composition
+            // stand in for those the frame shows, which slice 3 chooses.
+            var named = state.AtFrame(frame.FrameNanoseconds, load: none, cancellationToken: token);
+            var shown = named.Documents
+                .Where(item => item.Basis.PresentedTime >= frame.CompositedNanoseconds - 1_000_000_000)
+                .Select(item => item.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            var asked = state.AtFrame(frame.FrameNanoseconds, load: shown, cancellationToken: token);
+            var same = asked.Documents.Where(item => item.State is not null).All(item =>
+                full.Documents.SingleOrDefault(other => other.Key == item.Key)?.State is { } other &&
+                BrowserStateSnapshot.Serialize(item.State!).AsSpan().SequenceEqual(BrowserStateSnapshot.Serialize(other)));
+            if (!same)
+            {
+                differing++;
+            }
+            report.AppendLine(
+                $"  documents named without their state: {named.Documents.Count} in {named.Cost.Milliseconds:F0} ms; " +
+                $"{shown.Count} presented in the second before, read in {asked.Cost.Milliseconds:F0} ms ({asked.Cost.SnapshotsRead} snapshots, {asked.Cost.HeldStatesRead} held, {asked.Cost.ChunksRead} chunks, {asked.Cost.RecordsApplied} applied): {(same ? "equal" : "DIFFERENT")}");
+            File.WriteAllText(reportPath, report.ToString());
         }
         report.AppendLine($"samples with a different state: {differing}");
 
@@ -692,7 +857,7 @@ public sealed class BrowserStateTests : IDisposable
         {
             var cutState = new RecordingFileBrowserState(cutReader, null);
             var cutEnd = cutReader.Chunks.Where(chunk => chunk.Stream == "browser-state").Max(chunk => chunk.EndTime);
-            Compare($"cut short at half, time {cutEnd}", cutState.At(cutEnd, cancellationToken: token), cutState.At(cutEnd, useSnapshots: false, token));
+            Compare($"cut short at half, time {cutEnd}", cutState.At(cutEnd, cancellationToken: token), cutState.At(cutEnd, useSnapshots: false, cancellationToken: token));
         }
         File.Delete(cutPath);
 

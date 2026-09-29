@@ -146,6 +146,48 @@ public sealed class BrowserStateBuilder
         }
     }
 
+    /// <summary>
+    /// Forgets a document that is not open, as when its state is kept only as
+    /// a snapshot. <see cref="Load"/> adds it again.
+    /// </summary>
+    public void Remove(string key)
+    {
+        if (_documents.TryGetValue(key, out var document) && IsOpen(document))
+        {
+            throw new InvalidOperationException($"Document {key} is part way through a change.");
+        }
+        _dom.Remove(key);
+        _documents.Remove(key);
+    }
+
+    /// <summary>Forgets every document.</summary>
+    public void Clear()
+    {
+        foreach (var key in _documents.Keys.ToArray())
+        {
+            _documents.Remove(key);
+        }
+        _dom.Clear();
+    }
+
+    /// <summary>
+    /// The process a record names, as its browser instance and process
+    /// identifier, for finding the documents a lost-record notice concerns.
+    /// </summary>
+    public static (string? Instance, long? Process) ProcessOf(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object ||
+            !payload.TryGetProperty("context", out var context) ||
+            context.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null);
+        }
+        long? process = context.TryGetProperty("processId", out var id) && id.ValueKind == JsonValueKind.Number
+            ? id.GetInt64()
+            : null;
+        return (Text(context, "browserInstanceId"), process);
+    }
+
     private static void SetIdentity(BrowserDocumentState document, JsonElement payload)
     {
         var context = payload.GetProperty("context");

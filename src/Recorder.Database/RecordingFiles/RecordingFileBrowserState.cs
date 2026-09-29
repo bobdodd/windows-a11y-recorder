@@ -31,10 +31,14 @@ public sealed record BrowserStateCost(
     long? ScanStartTime,
     double Milliseconds);
 
-/// <summary>A document's rebuilt state and how it was matched.</summary>
-public sealed record BrowserDocumentAt(BrowserDocumentState State, BrowserStateBasis Basis);
+/// <summary>A document at a time or frame, how it was matched, and its state when it was asked for.</summary>
+/// <param name="State">The rebuilt state, or null when the document's state was not asked for.</param>
+public sealed record BrowserDocumentAt(string Key, BrowserDocumentState? State, BrowserStateBasis Basis);
 
-/// <summary>The recorded state of every browser document at a time or a captured frame.</summary>
+/// <summary>
+/// The browser documents at a time or a captured frame, with the recorded
+/// state of those asked for.
+/// </summary>
 /// <param name="WriterLosses">
 /// The app writer's omissions at or before the time: records it could not
 /// write, of any channel, which the state may lack.
@@ -53,7 +57,9 @@ public sealed record BrowserStateAt(
 /// snapshots, and the records after the snapshot are applied up to the time.
 /// A file without snapshots, or a time before the first, is rebuilt from the
 /// first record. The result is the same either way; snapshots only make it
-/// faster. The state of a document whose cut is before the latest index
+/// faster. Every document is named, from the index and the records read, and
+/// only the documents asked for are rebuilt. The state of a document whose
+/// cut is before the latest index
 /// record, such as one not drawn since, is held between calls, up to
 /// <see cref="HeldStateLimitBytes"/>. One call is made at a time.
 /// </summary>
@@ -79,7 +85,11 @@ public sealed class RecordingFileBrowserState
         long? FirstUnsnapshottedTime,
         long LastTime);
 
-    private sealed record IndexRecord(long EventKey, long EventTime, long Time, Dictionary<string, IndexEntry> Documents);
+    private sealed record IndexRecord(long EventKey, long EventTime, long Time);
+
+    // Each document's entries, in index record order, each with the ordinal
+    // of the index record from which it holds, until the next.
+    private readonly Dictionary<string, List<(int Record, IndexEntry Entry)>> _history = new(StringComparer.Ordinal);
 
     /// <param name="reader">The open file. It is not disposed.</param>
     /// <param name="index">The file's playback index, for matching frames, or null.</param>
@@ -90,6 +100,9 @@ public sealed class RecordingFileBrowserState
         var hasStateStream = reader.Chunks.Any(chunk => chunk.Stream == "browser-state");
         _stateChunks = [.. reader.Chunks.Where(chunk => chunk.Stream == (hasStateStream ? "browser-state" : "browser"))];
 
+        // Index records are in the order the state thread wrote them. Each
+        // lists the documents whose entry changed; a record that lists every
+        // document adds only the entries that differ from the last.
         foreach (var chunk in reader.Chunks.Where(chunk => chunk.Stream == RecordingFileStateRecorder.IndexStream))
         {
             foreach (var message in reader.ReadChunk(chunk))
@@ -99,7 +112,7 @@ public sealed class RecordingFileBrowserState
                 switch (root.GetProperty("kind").GetString())
                 {
                     case "state-index" when root.GetProperty("formatVersion").GetInt32() == BrowserStateSnapshot.FormatVersion:
-                        _records.Add(ReadIndexRecord(root));
+                        ReadIndexRecord(root);
                         break;
                     case "state-stopped":
                         _stopped ??= root.GetProperty("reason").GetString();
@@ -110,7 +123,6 @@ public sealed class RecordingFileBrowserState
                 }
             }
         }
-        _records.Sort((left, right) => left.EventKey.CompareTo(right.EventKey));
 
         var snapshotChannels = reader.Channels.Values
             .Where(channel => channel.Topic == RecordingFileStateRecorder.SnapshotTopic)
@@ -171,9 +183,17 @@ public sealed class RecordingFileBrowserState
     /// <summary>Why the app's state thread stopped while recording, or null.</summary>
     public string? StateStopped => _stopped;
 
-    /// <summary>The state of every document with a record at or before the time.</summary>
-    public BrowserStateAt At(long time, bool useSnapshots = true, CancellationToken cancellationToken = default) =>
-        Rebuild(time, _ => (time, new BrowserStateBasis("time", time, null)), useSnapshots, cancellationToken);
+    /// <summary>
+    /// The documents with a record at or before the time, and the state of
+    /// those asked for.
+    /// </summary>
+    /// <param name="load">The keys of the documents whose state is read, or null for every document.</param>
+    public BrowserStateAt At(
+        long time,
+        IReadOnlySet<string>? load = null,
+        bool useSnapshots = true,
+        CancellationToken cancellationToken = default) =>
+        Rebuild(time, _ => (time, new BrowserStateBasis("time", time, null)), load, useSnapshots, cancellationToken);
 
     /// <summary>
     /// The state each document had in the captured frame at the frame time:
@@ -181,13 +201,18 @@ public sealed class RecordingFileBrowserState
     /// at or before the frame's composition, or, when none was, the state at
     /// the composition time.
     /// </summary>
-    public BrowserStateAt AtFrame(long frameNanoseconds, bool useSnapshots = true, CancellationToken cancellationToken = default)
+    /// <param name="load">The keys of the documents whose state is read, or null for every document.</param>
+    public BrowserStateAt AtFrame(
+        long frameNanoseconds,
+        IReadOnlySet<string>? load = null,
+        bool useSnapshots = true,
+        CancellationToken cancellationToken = default)
     {
         var composed = _index?.FrameCompositions
             .Where(item => item.FrameNanoseconds == frameNanoseconds)
             .Select(item => (long?)item.CompositedNanoseconds)
             .FirstOrDefault() ?? frameNanoseconds;
-        return Rebuild(composed, key => Cut(key, composed), useSnapshots, cancellationToken);
+        return Rebuild(composed, key => Cut(key, composed), load, useSnapshots, cancellationToken);
     }
 
     private (long Cut, BrowserStateBasis Basis) Cut(string key, long composed)
@@ -222,9 +247,12 @@ public sealed class RecordingFileBrowserState
     private BrowserStateAt Rebuild(
         long time,
         Func<string, (long Cut, BrowserStateBasis Basis)> cutFor,
+        IReadOnlySet<string>? load,
         bool useSnapshots,
         CancellationToken cancellationToken)
     {
+        bool Wanted(string key) => load is null || load.Contains(key);
+        var named = new HashSet<string>(StringComparer.Ordinal);
         var started = Stopwatch.GetTimestamp();
         var builder = new BrowserStateBuilder();
         var cuts = new Dictionary<string, (long Cut, BrowserStateBasis Basis)>(StringComparer.Ordinal);
@@ -254,11 +282,20 @@ public sealed class RecordingFileBrowserState
         {
             var latest = _records[latestIndex];
             mainStart = latest.EventTime;
-            foreach (var key in latest.Documents.Keys)
+            foreach (var (key, history) in _history)
             {
+                if (history[0].Record > latestIndex)
+                {
+                    continue;
+                }
+                named.Add(key);
+                if (!Wanted(key))
+                {
+                    continue;
+                }
                 // The document's state is read from the latest index record
-                // whose state of it is not after its cut. A record that does
-                // not list it was made before its first record.
+                // whose state of it is not after its cut. Before its first
+                // entry, the document had no record.
                 var cut = CutOf(key).Cut;
                 // A document whose cut is before the latest index record,
                 // such as one not drawn since, keeps its state at that cut
@@ -270,17 +307,19 @@ public sealed class RecordingFileBrowserState
                     heldRead++;
                     continue;
                 }
-                IndexEntry? entry = null;
-                var position = latestIndex;
-                for (; position >= 0; position--)
+                var current = history.Count - 1;
+                while (history[current].Record > latestIndex)
                 {
-                    if (!_records[position].Documents.TryGetValue(key, out var listed))
+                    current--;
+                }
+                IndexEntry? entry = null;
+                var position = history[0].Record - 1;
+                for (var slot = current; slot >= 0; slot--)
+                {
+                    if (history[slot].Entry.LastTime <= cut)
                     {
-                        break;
-                    }
-                    if (listed.LastTime <= cut)
-                    {
-                        entry = listed;
+                        entry = history[slot].Entry;
+                        position = slot == current ? latestIndex : history[slot + 1].Record - 1;
                         break;
                     }
                 }
@@ -381,11 +420,15 @@ public sealed class RecordingFileBrowserState
                 var stored = RecordingEventCodec.Decode(message.Data.Span);
                 var record = stored.Event;
                 if (record.EventType != "collector-omission" &&
-                    DomTreeRebuilder.DocumentKey(record.Payload) is { } key &&
-                    (record.MonotonicNanoseconds > CutOf(key).Cut ||
-                        (firstChunks.TryGetValue(key, out var first) ? position < first : !forMain)))
+                    DomTreeRebuilder.DocumentKey(record.Payload) is { } key)
                 {
-                    continue;
+                    named.Add(key);
+                    if (!Wanted(key) ||
+                        record.MonotonicNanoseconds > CutOf(key).Cut ||
+                        (firstChunks.TryGetValue(key, out var first) ? position < first : !forMain))
+                    {
+                        continue;
+                    }
                 }
                 // An omission marks only the documents whose cut is not before it.
                 var omissionTime = record.MonotonicNanoseconds;
@@ -420,9 +463,13 @@ public sealed class RecordingFileBrowserState
             }
         }
 
-        var documents = builder.Documents.Values
-            .OrderBy(document => document.FirstEventKey)
-            .Select(document => new BrowserDocumentAt(document, CutOf(document.Key).Basis))
+        // A document asked for is named when it has a state at its cut; one
+        // not asked for, when the index or a record read names it.
+        var documents = named
+            .Where(key => !Wanted(key) || builder.Documents.ContainsKey(key))
+            .Concat(builder.Documents.Keys.Where(key => !named.Contains(key)))
+            .Order(StringComparer.Ordinal)
+            .Select(key => new BrowserDocumentAt(key, builder.Documents.GetValueOrDefault(key), CutOf(key).Basis))
             .ToArray();
         return new BrowserStateAt(
             time,
@@ -494,22 +541,31 @@ public sealed class RecordingFileBrowserState
         return false;
     }
 
-    private static IndexRecord ReadIndexRecord(JsonElement root)
+    private void ReadIndexRecord(JsonElement root)
     {
-        var documents = new Dictionary<string, IndexEntry>(StringComparer.Ordinal);
+        var ordinal = _records.Count;
+        _records.Add(new IndexRecord(
+            root.GetProperty("eventKey").GetInt64(),
+            root.GetProperty("eventTime").GetInt64(),
+            root.GetProperty("time").GetInt64()));
         foreach (var item in root.GetProperty("documents").EnumerateArray())
         {
-            documents[item.GetProperty("documentKey").GetString()!] = new IndexEntry(
+            var key = item.GetProperty("documentKey").GetString()!;
+            var entry = new IndexEntry(
                 Number(item, "snapshotEventKey"),
                 Number(item, "snapshotLogTime"),
                 Number(item, "firstUnsnapshottedTime"),
                 item.GetProperty("lastTime").GetInt64());
+            if (!_history.TryGetValue(key, out var history))
+            {
+                history = [];
+                _history.Add(key, history);
+            }
+            if (history.Count == 0 || history[^1].Entry != entry)
+            {
+                history.Add((ordinal, entry));
+            }
         }
-        return new IndexRecord(
-            root.GetProperty("eventKey").GetInt64(),
-            root.GetProperty("eventTime").GetInt64(),
-            root.GetProperty("time").GetInt64(),
-            documents);
     }
 
     private static long? Number(JsonElement element, string name) =>

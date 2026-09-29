@@ -149,6 +149,26 @@ public sealed class DomTreeRebuilder
     /// <summary>Sets a document's tree, as read from a snapshot.</summary>
     public void SetDocument(string key, DomDocumentTree tree) => _documents[key] = tree;
 
+    /// <summary>Forgets every document and every open change.</summary>
+    public void Clear()
+    {
+        _documents.Clear();
+        _open.Clear();
+        _insertions.Clear();
+        _openInsertions.Clear();
+    }
+
+    /// <summary>Forgets a document that is not open, as when its state is kept only as a snapshot.</summary>
+    public void Remove(string key)
+    {
+        if (IsOpen(key))
+        {
+            throw new InvalidOperationException($"Document {key} is part way through a change.");
+        }
+        _documents.Remove(key);
+        _openInsertions.Remove(key);
+    }
+
     /// <summary>
     /// Applies one browser.dom record. Records of other types are ignored.
     /// Returns the record's document key, or null when it has none.

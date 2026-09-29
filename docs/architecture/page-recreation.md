@@ -8,8 +8,10 @@ on the target Windows machine; see "Slice 5 status" in
 [change-driven recording](change-driven-recording.md). Slice 2 (rebuilding
 the recorded state at any captured frame) is implemented on the
 `frame-state` branch as designed in "Slice 2 design", with the differences
-listed in "Slice 2 implementation", and is not yet tested on the target
-Windows machine. Slice 3 is proposed and not implemented.
+listed in "Slice 2 implementation". Its hour recording on the target
+machine did not meet the design's limits, and the revision in "Revision
+after the hour recording" is implemented and waits for a second hour
+recording. Slice 3 is proposed and not implemented.
 Recording text by content hash is agreed and deferred; see "Text by content
 hash".
 
@@ -315,7 +317,8 @@ machine, and say nothing about the target machine's times.
   thread instead writes a state index record on the topic
   `recorder.state-index`, in a stream of its own, `state-index`, at each
   sweep in which it wrote a snapshot or a document changed. Each lists, for
-  every document, its last record time, its latest snapshot's event key,
+  every document (since the revision below, for every document whose entry
+  changed), its last record time, its latest snapshot's event key,
   time, and position, and the time of its first record not in that
   snapshot. The reader reads only these records when it opens a file, so a
   file cut short is read from the snapshots before the cut.
@@ -452,6 +455,66 @@ Not acceptable:
   from 5.6 s into the recording.
 
 The proposed limit of 1 s at any frame of a one-hour recording is not met.
+
+### Revision after the hour recording
+
+Proposed and agreed 2026-09-29, after the hour recording above:
+
+1. A document with no record for 30 s of recording time is given a final
+   snapshot, if it changed since its last, and leaves the state thread,
+   which keeps only that snapshot, compressed. A record of the document
+   after that reloads it from the snapshot. A lost-record notice for its
+   process reloads it too, so that it is marked. When recording stops, the
+   state thread releases every document.
+2. A state index record lists only the documents whose entry changed since
+   the previous index record: a new document, a new last record time, a new
+   snapshot, or a new first record after the snapshot. The reader builds
+   each document's history of entries when it opens the file. A file whose
+   index records list every document is read the same way.
+3. The reader returns, for a time or a frame, every document's key and
+   basis without reading its state, and reads the state only of the
+   documents asked for. Choosing the documents a frame shows is left to
+   slice 3.
+4. Required tests: unit tests of a document leaving and returning to the
+   state thread, including a lost-record notice while it is out, and of
+   index records that list only changes; the comparison of the state with
+   and without snapshots, for the documents asked for; system test on the
+   target machine, a recording of about an hour, with the app's memory
+   bounded through the hour and after stopping, the file opened in under
+   1 s, and the documents of a frame read in under 1 s. The system test
+   waits until further work is done.
+
+Implemented 2026-09-29 on the `frame-state` branch:
+
+- `RecordingFileStateRecorder` sends a document away after
+  `IdleInterval`, 30 s of recording time without a record, keeping its
+  snapshot compressed with Zstandard, and reads it back before applying a
+  record of it or a lost-record notice for its process. Its summary adds
+  the departures, returns, the most documents held whole at once, and the
+  most compressed bytes of departed documents held at once. `Complete`
+  releases every document.
+- Index records carry `"listing": "changed"`.
+- `RecordingFileBrowserState.At` and `AtFrame` take the set of document
+  keys to read, or null for every document. A document not asked for is
+  returned with its key and basis and a null state. A document asked for
+  is returned when it has a state at its cut.
+- Unit tests: a document leaving and returning, including for a
+  lost-record notice while it is away, with the state equal with and
+  without snapshots at every 5 s; index records that do not list a
+  document while it is away; documents named without their state, and one
+  document read alone, equal to the same document read with every other.
+  The state check reports the time to name the documents at each sample,
+  and at each frame the time to read the documents presented in the
+  second before the composition, which stand in for the documents the
+  frame shows until slice 3 chooses them.
+
+On the development machine, with a debug build, recording
+20260929-172645-baa5818d82194001acf0edaa560b335c written again: 86
+departures and 2 returns; at most 64 of the 125 documents held whole at
+once; at most 1.2 MB of compressed departed documents; index records
+90 KB against 883 KB before the revision; every sample equal with and
+without snapshots. These are not the target machine's figures, and a
+92.6 s recording says nothing about an hour.
 
 ## Text by content hash (agreed, deferred)
 
