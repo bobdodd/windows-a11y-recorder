@@ -4,7 +4,9 @@
 
 Slice 1 (character data in DOM checkpoints, protocol 0.33) is implemented on
 branch `recording-object-store` and awaits its test on the target Windows
-machine. Slices 2 and 3 are proposed and not implemented.
+machine. Slices 2 and 3 are proposed and not implemented. Recording text by
+content hash is agreed and deferred until slice 4 of change-driven recording;
+see "Text by content hash".
 
 ## Purpose
 
@@ -92,6 +94,39 @@ Each slice is tested on the target Windows machine before the next.
    writer, including escaping of recorded text and attribute values, and of
    disabled scripts and blocked network access; system test on the target
    machine: open a frame of a recording and inspect it in DevTools.
+
+## Text by content hash (agreed, deferred)
+
+Slice 1 records each character data node's data in every checkpoint. Script
+and style text can be long and rarely changes between checkpoints, and page
+text is repeated in every checkpoint of its document, so the same strings
+are recorded many times. The agreed design, to be implemented after slice 4
+of [change-driven recording](change-driven-recording.md), which removes the
+repeated walks of unchanged nodes:
+
+1. A text is identified by the SHA-256 digest of its UTF-8 bytes. The
+   renderer records a text record, holding the digest, the text, and its
+   length, the first time it meets the text, and the checkpoint and change
+   records refer to the digest. A digest needs no identity assigned across
+   renderer processes, is the same for the same text in any tab, document,
+   or recording, and lets the app check each text record by computing the
+   digest again.
+2. The renderer keeps, for each node, the string object whose digest it
+   computed. Blink replaces a node's string object when its data changes,
+   and a kept reference prevents the object's memory from being reused, so
+   an unchanged object means unchanged data, and the digest is computed
+   again only for new data.
+3. The app writes each text once per recording, rejects a text record whose
+   digest does not match its text, and ignores the repeated records of
+   other renderers. The playback index maps each digest to the position of
+   its text record.
+4. After any loss between the renderer and the file, the renderer forgets
+   which texts it has recorded and records them again. A reference whose
+   text the file does not hold is reported as missing text, not guessed.
+
+To be settled: whether attribute values, which also repeat (SVG path data,
+`data:` URLs, inline styles, class lists), use the same records, and whether
+short texts, whose digest is longer than the text, are recorded inline.
 
 ## Slice 1
 
