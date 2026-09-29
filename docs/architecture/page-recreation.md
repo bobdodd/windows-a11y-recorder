@@ -413,6 +413,46 @@ Release build:
 A recording of 70.5 s says nothing about the state thread's memory or the
 rebuild time in a recording of an hour.
 
+### Hour recording on the target machine
+
+Recording 20260929-204938-6b2c1ec82ed94783950f60a7939184a7 (60.6 min,
+938 MB), made at 8e2c539 and checked at 693ea98 with a Release build. The
+check at 8e2c539 failed with an out-of-memory error in the check's own
+comparison, which joined the whole state into one string; at 693ea98 it
+compares document by document.
+
+Correct:
+
+- At 9 times, 8 frames, and in a copy cut short at half, the state rebuilt
+  with snapshots equals the state rebuilt from every record.
+- The state thread never stopped. It applied 4,646,791 records in 7.5 s
+  and wrote 7,666 snapshots in 26.4 s of processor time; its largest queue
+  was 30 MB, and stopping it took 131 ms.
+
+Not acceptable:
+
+- The recording has 6,719 documents, and the state thread holds every one
+  of them to the end. After stopping, the app, still open, used 20.1 GB of
+  memory, with 38.2 GB committed and a peak working set of 25.7 GB. The
+  batch target keeps the state thread's documents after `Complete`, which
+  may explain why the memory was still held after stopping; this is not
+  measured. Garbage collection paused the app for 45 s in total. Closing
+  the app did not return control to the shell, and Ctrl+C did not end it;
+  the cause is not known.
+- Each state index record lists every document seen so far, so the index
+  records grow with documents times sweeps: 830 MB uncompressed, 120 MB
+  compressed, and opening the file takes 4.0 s to read them.
+- Snapshots are 6.3 GB uncompressed and 114 MB compressed.
+- A rebuild at a time loads a snapshot of every document with a record
+  before it: 3.6 s at the end, with 6,719 documents, against 48 s from
+  every record.
+- A rebuild at a frame took 2.3 s to 25 s. Documents whose last presented
+  update is long before the frame are each read from the records before
+  their cut, and these are spread over the whole hour, so the reader reads
+  from 5.6 s into the recording.
+
+The proposed limit of 1 s at any frame of a one-hour recording is not met.
+
 ## Text by content hash (agreed, deferred)
 
 Slice 1 records each character data node's data in every checkpoint. Script
