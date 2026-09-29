@@ -4,9 +4,9 @@
 -- the index can be rebuilt from it. See
 -- docs/architecture/change-driven-recording.md.
 --
--- Version 12 is not used on this branch: the unmerged layout-keyframes
--- branch applied a migration of that number to databases it ran on, and a
--- database records each version once.
+-- Version 12 is not used: the layout-keyframes branch, never merged and
+-- deleted on 2026-09-29, applied a migration of that number to databases it
+-- ran on, and a database records each version once.
 --
 -- The evidence tables of the earlier migrations are left in place and are
 -- not written for a recording that has a recording file.

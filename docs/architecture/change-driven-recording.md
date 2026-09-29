@@ -29,10 +29,13 @@ again if the checkout changes.
 The recorder is slow in use: hovering over a button is sluggish while a page
 is recorded, stopping a recording takes noticeable time, and opening one can
 take over 10 seconds. Measurements from Windows recordings made on the
-unmerged `layout-keyframes` branch (revisions 6e24c8b and 77adcbd; see
+`layout-keyframes` branch (revisions 6e24c8b and 77adcbd; see
 `docs/architecture/layout-checkpoint-keyframes.md` and
 `docs/architecture/session-database.md` on that branch) show two separate
-causes.
+causes. That branch was never merged and was deleted on 2026-09-29, when
+this design was merged, so those revisions and that branch's versions of
+the two documents may no longer be reachable in the repository; the
+measurements this document relies on are restated below.
 
 1. The browser finds changes by recording everything and comparing. After
    every rendering update in which style or layout work happened, the layout
@@ -1326,8 +1329,9 @@ Windows machine (see "Windows evidence" below).
 - The app writes every accepted event to the recording file. PostgreSQL
   holds the recording, its collectors and channels, the file's location in
   `recording_files`, and its chunk index in `recording_file_chunks`
-  (migration `0013_recording_files.sql`; version 12 was used by the unmerged `layout-keyframes` branch). No event is written to the
-  evidence tables.
+  (migration `0013_recording_files.sql`; version 12 was used by the
+  `layout-keyframes` branch, never merged and since deleted). No event is
+  written to the evidence tables.
 - The writer keeps its checks, queue, spill file, retries, rejections, and
   omissions, and writes one batch at a time so the file is in the order the
   events were accepted.

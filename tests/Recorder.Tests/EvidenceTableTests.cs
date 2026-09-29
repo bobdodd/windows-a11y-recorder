@@ -518,8 +518,8 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     /// stored.
     /// </summary>
     /// <summary>
-    /// A database that the unmerged layout-keyframes branch upgraded holds a
-    /// version 12 of its own. The recording files migration is version 13 so
+    /// A database that the layout-keyframes branch (never merged, since
+    /// deleted) upgraded holds a version 12 of its own. The recording files migration is version 13 so
     /// that such a database still receives it.
     /// </summary>
     [Fact]
