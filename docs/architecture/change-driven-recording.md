@@ -17,8 +17,9 @@ needed, protocol 0.35) is implemented and was measured in two recordings on
 the target Windows machine, one with the check setting off and one with it
 on. The one rectangle difference that recording found is explained: a
 record held one rectangle for a node united from several quads. From
-protocol 0.36 the record also holds the bounds of each quad; that change is
-not yet tested there. See "Slice 5 status". The
+protocol 0.36 the record also holds the bounds of each quad, and one
+recording at 0.36 with the check setting on found no difference. See "Slice
+5 status". The
 Blink locations below were read from the Chromium checkout on the target
 Windows machine, version 156.0.8065.0 (`chrome/VERSION`), and must be read
 again if the checkout changes.
@@ -1045,11 +1046,39 @@ No record was lost, and no push to the queue waited.
     a transform above the node changes, so any text or inline box of more
     than one line under a later rotation or skew was affected. Protocol 0.36
     records the bounds of each quad (`localQuadRects`, under "Geometry")
-    and the check derives the rectangle from them; this is not yet
-    tested in a recording.
+    and the check derives the rectangle from them; see "At protocol
+    0.36".
   With the display lock correction, 10,469 of 10,470 compared nodes are
   equal, and the largest rectangle edge difference is 0.2147 CSS px, from
   that node.
+
+### At protocol 0.36
+
+Recording 20260929-172645-baa5818d82194001acf0edaa560b335c, at revision
+66030a7 with `browserFullWalkInterval` 100 and protocol 0.36 in every
+connection. It is a different session from the one above, so its counts are
+not a comparison of the same activity. No record was lost, and no push to
+the queue waited.
+
+- Every one of the 19,097 `layout-node-changed` records with geometry states
+  `localQuadRects`; 682 state the bounds of more than one quad.
+- DOM: 4 checkpoints compared with the rebuilt tree, 7,751 of 7,751 nodes
+  equal; scroll offsets 396 of 396 equal.
+- Character data: 118 checkpoints, 17,548 data records, none cut; 40 of 40
+  transitions and 3,852 of 3,852 checkpoints equal to the rebuilt data.
+- Layout: 1,506 change sets and 56 checkpoints (50 first walks, 6 `check`
+  walks). 8,975 of 8,975 compared nodes are equal; 30 display locked nodes
+  without a record were not compared. The largest rectangle edge difference
+  is 0.0011 CSS px.
+- The `check` walks observed 6 text nodes of two quads under a transform
+  chain that rotates or skews. Derived from the bounds of each quad, their
+  largest edge difference is 0.0011 CSS px; derived from the union alone,
+  as before protocol 0.36, it would have been up to 1.03 CSS px.
+
+The cost log measures the bridge's part of recording a change set
+(`RecordBlinkLayoutChanges`: 2,968 calls, 0.675 s in total, at most
+16.4 ms), not Blink's reading of each node's quads, so the cost of reading
+the quads is not measured.
 
 ## Slice 4 status
 

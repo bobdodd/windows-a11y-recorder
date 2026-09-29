@@ -344,8 +344,9 @@ See [change-driven recording](docs/architecture/change-driven-recording.md).
 
 Protocol 0.36 records the bounds of each line of a text node, and of each
 fragment of an inline box, in a layout change record, so the node's
-rectangle is derived correctly under a later rotation or skew. It is not yet
-tested on the target Windows machine. See
+rectangle is derived correctly under a later rotation or skew. In one
+recording on the target Windows machine, every compared node equalled its
+full walk, including text of two lines under a rotation. See
 [change-driven recording](docs/architecture/change-driven-recording.md).
 
 Each captured monitor image is the newest frame that reached the Windows
