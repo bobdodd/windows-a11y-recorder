@@ -233,6 +233,27 @@ public sealed class LayoutChangeCheckTests
     }
 
     [Fact]
+    public void CountsAnUnstyledDisplayLockedNodeWithoutRecordApart()
+    {
+        var check = new LayoutChangeCheck();
+        var locked = Json($$"""
+            {"context":{{Context}},"checkpointId":"layout-checkpoint-1","nodeIndex":0,"nodeId":7,
+             "nodeType":"element","nodeName":"DIV","layoutObjectPresent":false,"displayLocked":true,
+             "boundingClientRect":null,"computedStyle":null}
+            """);
+        Checkpoint(check, 1, locked, CheckpointNode(1, 42, 0, 0, 1, 1));
+        check.Finish();
+
+        Assert.Equal(1, check.NodesLockedWithoutRecord);
+        Assert.Equal(1, check.NodesCompared);
+        Assert.Equal(0, check.NodesMatched);
+        Assert.Equal(1, check.Differences["node-not-recorded"]);
+        Assert.Contains(
+            "checkpoint nodes under a display lock, without a change record, layout object, or style, not compared: 1",
+            check.Report());
+    }
+
+    [Fact]
     public void DoesNotCompareACheckpointWhoseChangeSetNeverCompleted()
     {
         var check = new LayoutChangeCheck();

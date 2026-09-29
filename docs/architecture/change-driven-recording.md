@@ -13,9 +13,10 @@ removals, and scroll offsets, protocol 0.34) is implemented and was checked
 in one recording on the target Windows machine, which found two kinds of
 change it did not record; their hooks are implemented and not yet tested
 there. See "Slice 4 status". Slice 5 (full walks only where they are
-needed, protocol 0.35) is implemented and was measured in one recording on
-the target Windows machine with the check setting off; the recording with it
-on is still to be made. See "Slice 5 status". The
+needed, protocol 0.35) is implemented and was measured in two recordings on
+the target Windows machine, one with the check setting off and one with it
+on; one rectangle difference under an animated 3D transform is not yet
+explained. See "Slice 5 status". The
 Blink locations below were read from the Chromium checkout on the target
 Windows machine, version 156.0.8065.0 (`chrome/VERSION`), and must be read
 again if the checkout changes.
@@ -986,6 +987,47 @@ The checks of the recording file:
 
 With the setting off, the DOM check has nothing to compare, as designed; the
 recording with the setting on is the check of the change records.
+
+### With the check setting on
+
+Recording 20260929-162727-a2048fd871de4516905fe46510212bd8, at revision
+70d22d4 with `browserFullWalkInterval` 100 in the manifest. The walks, by
+the reasons recorded:
+
+| Channel | first | finished-parsing | check | after-loss |
+| --- | --- | --- | --- | --- |
+| DOM, `finished-parsing` requests | 149 | 1 | 0 | 0 |
+| DOM, `post-mutation` requests | 19 | 0 | 2 | 0 |
+| Layout, `rendering-update` requests | 71 | 0 | 5 | 0 |
+
+No record was lost, and no push to the queue waited.
+
+- DOM: 2 checkpoints compared with the rebuilt tree, 3,956 of 3,956 nodes
+  equal; 150 checkpoints at a finished parse; scroll offsets 113 of 113
+  equal.
+- Character data: 171 checkpoints, 19,732 data records, none cut; 121 of
+  121 transitions and 2,017 of 2,017 checkpoints equal to the rebuilt data.
+- Layout: 1,250 change sets and 76 checkpoints. The first run reported 39
+  differences:
+  - 38 were nodes in closed `details` elements, for example a `DIV` under a
+    `DETAILS` in a `DETAILS-MODAL` element. Each had no layout object and no
+    computed style, and its checkpoint record stated `displayLocked` true.
+    Blink never styled them, so no change record noted them until the
+    element was opened. The check counted a node without a change record as
+    matching only when it was not display locked. It now counts a display
+    locked node with no layout object, no style, and no change record apart,
+    as not compared (38 in this recording, none in the recordings at
+    70d22d4 with the setting off and at f409513). A display locked node with
+    a change record is still compared.
+  - 1 is a rectangle difference that is not explained: a text node under a
+    transform node whose matrix changed at every rendering update, a 3D
+    rotation with a perspective term. The checkpoint at a `check` walk
+    observed a height of 78.4004 CSS px and the change records derive
+    78.6151; the position and width agree. Until it is explained, the
+    derivation of a rectangle under an animated 3D transform is not known to
+    match the checkpoint.
+  With the correction, 10,469 of 10,470 compared nodes are equal, and the
+  largest rectangle edge difference is 0.2147 CSS px, from that node.
 
 ## Slice 4 status
 

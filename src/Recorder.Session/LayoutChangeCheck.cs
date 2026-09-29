@@ -49,6 +49,7 @@ public sealed class LayoutChangeCheck
     /// <summary>Checkpoint nodes with no change record, no layout object, and
     /// no computed style: the state a node without a change record has.</summary>
     public int NodesMatchingWithoutRecord { get; private set; }
+    public int NodesLockedWithoutRecord { get; private set; }
     public int NodesCompared { get; private set; }
     public int NodesMatched { get; private set; }
     public int RectsCompared { get; private set; }
@@ -157,6 +158,8 @@ public sealed class LayoutChangeCheck
         report.AppendLine($"checkpoint nodes matching in every field: {NodesMatched}");
         report.AppendLine(
             $"  of which without a change record, layout object, or style: {NodesMatchingWithoutRecord}");
+        report.AppendLine(
+            $"checkpoint nodes under a display lock, without a change record, layout object, or style, not compared: {NodesLockedWithoutRecord}");
         report.AppendLine($"rectangles compared: {RectsCompared}");
         report.AppendLine($"largest rectangle edge difference: {LargestRectDifference:G6} CSS px");
         foreach (var (kind, count) in _differences.OrderBy(entry => entry.Key, StringComparer.Ordinal))
@@ -185,6 +188,20 @@ public sealed class LayoutChangeCheck
         _state.Documents.TryGetValue(token, out var document);
         foreach (var node in checkpoint.Nodes)
         {
+            // A node under a display lock that Blink never styled, such as
+            // the content of a closed details element, is never noted. Its
+            // checkpoint record states the lock, which only a change record
+            // of a styled node states, so it is counted apart and not
+            // compared.
+            if (node.GetProperty("displayLocked").GetBoolean() &&
+                !node.GetProperty("layoutObjectPresent").GetBoolean() &&
+                node.GetProperty("computedStyle").ValueKind == JsonValueKind.Null &&
+                (!_state.Documents.TryGetValue(token, out var locked) ||
+                    !locked.Nodes.ContainsKey(node.GetProperty("nodeId").GetInt64())))
+            {
+                NodesLockedWithoutRecord++;
+                continue;
+            }
             NodesCompared++;
             if (CompareNode(checkpoint.Id, document, node))
             {
@@ -210,6 +227,7 @@ public sealed class LayoutChangeCheck
                 NodesMatchingWithoutRecord++;
                 return true;
             }
+
             Note("node-not-recorded", where);
             return false;
         }
