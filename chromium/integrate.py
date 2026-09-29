@@ -7617,11 +7617,21 @@ a11y_recorder::LayoutChangedNode RecorderReadLayoutChangedNode(
           // A projection that rotates or skews is applied to each quad, so
           // the rectangle mapped back to the viewport is the one Blink
           // united rather than the bounds of its bounds.
-          if (!recorder_projection.Preserves2dAxisAlignment() &&
-              (!recorder_element ||
-               recorder_layout_object->IsBoxModelObject())) {
+          if (!recorder_projection.Preserves2dAxisAlignment()) {
+            // The quads Element::ClientQuads unites: an SVG element's object
+            // bounding box, or a box's or text's absolute quads.
             Vector<gfx::QuadF> recorder_quads;
-            recorder_layout_object->AbsoluteQuads(recorder_quads);
+            if (recorder_element && recorder_element->IsSVGElement() &&
+                !recorder_layout_object->IsSVGRoot() &&
+                !recorder_layout_object->IsSVGForeignObject()) {
+              recorder_quads.push_back(
+                  recorder_layout_object->LocalToAbsoluteQuad(
+                      gfx::QuadF(recorder_layout_object->ObjectBoundingBox())));
+            } else if (!recorder_element ||
+                       recorder_layout_object->IsBoxModelObject() ||
+                       recorder_layout_object->IsBR()) {
+              recorder_layout_object->AbsoluteQuads(recorder_quads);
+            }
             gfx::RectF recorder_united;
             for (gfx::QuadF recorder_quad : recorder_quads) {
               recorder_quad += recorder_view_paint_offset;
@@ -7906,10 +7916,45 @@ def insert_after_first_once(
 # Definitions an earlier integration wrote, replaced by the current one. A
 # checkout keeps its patched sources between builds, so a definition that
 # changes must be recognised in its earlier form.
+BLINK_LAYOUT_CHANGES_ROTATED_QUADS = """\
+          if (!recorder_projection.Preserves2dAxisAlignment()) {
+            // The quads Element::ClientQuads unites: an SVG element's object
+            // bounding box, or a box's or text's absolute quads.
+            Vector<gfx::QuadF> recorder_quads;
+            if (recorder_element && recorder_element->IsSVGElement() &&
+                !recorder_layout_object->IsSVGRoot() &&
+                !recorder_layout_object->IsSVGForeignObject()) {
+              recorder_quads.push_back(
+                  recorder_layout_object->LocalToAbsoluteQuad(
+                      gfx::QuadF(recorder_layout_object->ObjectBoundingBox())));
+            } else if (!recorder_element ||
+                       recorder_layout_object->IsBoxModelObject() ||
+                       recorder_layout_object->IsBR()) {
+              recorder_layout_object->AbsoluteQuads(recorder_quads);
+            }
+"""
+# Before an SVG element's rotated rectangle was mapped from its object
+# bounding box.
+BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS = """\
+          if (!recorder_projection.Preserves2dAxisAlignment() &&
+              (!recorder_element ||
+               recorder_layout_object->IsBoxModelObject())) {
+            Vector<gfx::QuadF> recorder_quads;
+            recorder_layout_object->AbsoluteQuads(recorder_quads);
+"""
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
     # Before a new layout result noted the objects of its child fragments.
     BLINK_LAYOUT_CHANGES_DEFINITION.replace(
         BLINK_LAYOUT_CHANGES_CHILD_FRAGMENT_NOTES, "", 1
+    ).replace(
+        BLINK_LAYOUT_CHANGES_ROTATED_QUADS,
+        BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS,
+        1,
+    ),
+    BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+        BLINK_LAYOUT_CHANGES_ROTATED_QUADS,
+        BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS,
+        1,
     ),
 )
 

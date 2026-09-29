@@ -383,8 +383,11 @@ A `layout-node-changed` record states:
   `GeometryMapper::SourceToDestinationProjection`
   (`platform/graphics/paint/geometry_mapper.h`, line 43). The bounding box of
   the mapped corners is recorded. When the projection rotates or skews
-  (`gfx::Transform::Preserves2dAxisAlignment` is false), each of the object's
-  `AbsoluteQuads` is mapped instead and their bounding boxes are united, so
+  (`gfx::Transform::Preserves2dAxisAlignment` is false), each quad
+  `Element::ClientQuads` unites is mapped instead and their bounding boxes
+  are united: for an SVG element other than the root and a foreign object,
+  its object bounding box mapped with `LocalToAbsoluteQuad`, and otherwise
+  the object's `AbsoluteQuads`. So
   the rectangle derived back in viewport space is the one Blink united and
   not the bounds of its bounds. `localRectMapped` is false, and the rect is
   null, when the projection is not invertible.
@@ -535,8 +538,19 @@ compared, every one of 166,904 rectangles matching (largest edge difference
 the change-set definition into `local_frame_view.cc` only when the file holds
 none, and the checkout keeps its patched sources between builds, so the
 definition from commit e09625a stayed in place. The integration now replaces
-an earlier definition it recognises, as it does for its other helpers. The
-fix has not been measured. Two recordings of a few pages are not evidence of
+an earlier definition it recognises, as it does for its other helpers.
+
+A third recording, made with the package of commit 484e1c8, which did
+contain the fix, had no computed-style differences: 337 checkpoints and
+225,675 node records compared, 225,643 matching in every field. The 32 that
+differed were two SVG elements (a `g` and its `path`) whose rectangle is
+rotated in the view by a running animation. The derived rectangle was about
+twice the observed one: the recorder had mapped the bounds of their
+viewport rectangle into the rotated space, and the check mapped the bounds
+of that back. For an SVG element the quad-by-quad mapping had not applied,
+because it was limited to box and text objects. It now maps an SVG
+element's object bounding box, as `Element::ClientQuads` does. That change
+has not been measured. Three recordings of a few pages are not evidence of
 completeness on other pages.
 
 ### Limits

@@ -311,10 +311,10 @@ are unchanged: at the end of each rendering update, the nodes whose style,
 layout, or paint properties Blink changed, with geometry relative to a paint
 property tree transform node, and the transform nodes whose state changed. A
 check rebuilds the state from the change records and compares it with every
-checkpoint of the same recording. On the first recording checked, every
-rectangle matched and 61 of 105,189 node records differed, each in a
-resolved value that depends on the containing box's size; the fix for those
-has not been measured. The design and measurement are in
+checkpoint of the same recording. On the third recording checked, 32 of
+225,675 node records differed, all the rectangles of two rotating SVG
+elements; the fix for those has not been measured. The design and
+measurements are in
 [change-driven recording](docs/architecture/change-driven-recording.md).
 
 Each captured monitor image is the newest frame that reached the Windows
