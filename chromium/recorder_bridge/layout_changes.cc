@@ -1,32 +1,33 @@
 #include "chromium/recorder_bridge/layout_changes.h"
 
-#include <cstring>
+#include <bit>
 
 namespace a11y_recorder {
 
 namespace {
 
 // FNV-1a over each field's bytes. Every variable-length field is preceded by
-// its length, so no two different records hash the same bytes.
+// its length, so no two different records hash the same bytes. Bytes are
+// taken by value, never through a pointer and length, so the hashing holds
+// no buffer access.
 class Hasher {
  public:
-  void Bytes(const void* data, size_t size) {
-    const unsigned char* bytes = static_cast<const unsigned char*>(data);
-    for (size_t index = 0; index < size; ++index) {
-      hash_ ^= bytes[index];
-      hash_ *= 1099511628211ull;
+  void Byte(unsigned char byte) {
+    hash_ ^= byte;
+    hash_ *= 1099511628211ull;
+  }
+  void Integer(uint64_t value) {
+    for (int shift = 0; shift < 64; shift += 8) {
+      Byte(static_cast<unsigned char>(value >> shift));
     }
   }
-  void Integer(uint64_t value) { Bytes(&value, sizeof(value)); }
   void Boolean(bool value) { Integer(value ? 1 : 0); }
-  void Number(double value) {
-    uint64_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    Integer(bits);
-  }
+  void Number(double value) { Integer(std::bit_cast<uint64_t>(value)); }
   void Text(const std::string& value) {
     Integer(value.size());
-    Bytes(value.data(), value.size());
+    for (char character : value) {
+      Byte(static_cast<unsigned char>(character));
+    }
   }
   uint64_t Value() const { return hash_; }
 
@@ -83,6 +84,9 @@ uint64_t HashLayoutTransformNode(const LayoutTransformNode& node) {
   hasher.Boolean(node.sticky);
   return hasher.Value();
 }
+
+LayoutChangeFilter::LayoutChangeFilter() = default;
+LayoutChangeFilter::~LayoutChangeFilter() = default;
 
 bool LayoutChangeFilter::NodeChanged(int node_id, uint64_t hash) {
   auto [found, inserted] = nodes_.try_emplace(node_id, hash);

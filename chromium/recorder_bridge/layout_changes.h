@@ -120,6 +120,9 @@ uint64_t HashLayoutTransformNode(const LayoutTransformNode& node);
 // kept; the new hash is then kept.
 class LayoutChangeFilter {
  public:
+  LayoutChangeFilter();
+  ~LayoutChangeFilter();
+
   bool NodeChanged(int node_id, uint64_t hash);
   bool TransformNodeChanged(uint64_t transform_node_id, uint64_t hash);
 
