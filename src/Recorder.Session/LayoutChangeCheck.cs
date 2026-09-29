@@ -36,6 +36,15 @@ public sealed class LayoutChangeCheck
     }
 
     public int CheckpointsCompared { get; private set; }
+
+    /// <summary>Checkpoints whose change set had not completed when the
+    /// records ended, so the state after it is unknown and they are not
+    /// compared.</summary>
+    public int CheckpointsWithIncompleteChangeSets { get; private set; }
+
+    /// <summary>Checkpoint nodes with no change record, no layout object, and
+    /// no computed style: the state a node without a change record has.</summary>
+    public int NodesMatchingWithoutRecord { get; private set; }
     public int NodesCompared { get; private set; }
     public int NodesMatched { get; private set; }
     public int RectsCompared { get; private set; }
@@ -113,6 +122,12 @@ public sealed class LayoutChangeCheck
     {
         foreach (var token in _pending.Keys.ToList())
         {
+            if (_openChangeSets.TryGetValue(token, out var named) && _pending[token].Id == named)
+            {
+                _pending.Remove(token);
+                CheckpointsWithIncompleteChangeSets++;
+                continue;
+            }
             ComparePending(token);
         }
     }
@@ -125,8 +140,12 @@ public sealed class LayoutChangeCheck
         report.AppendLine($"changed node records: {ChangedNodeRecords}");
         report.AppendLine($"transform node records: {TransformNodeRecords}");
         report.AppendLine($"checkpoints compared: {CheckpointsCompared}");
+        report.AppendLine(
+            $"checkpoints not compared, their change set incomplete at the end: {CheckpointsWithIncompleteChangeSets}");
         report.AppendLine($"checkpoint nodes compared: {NodesCompared}");
         report.AppendLine($"checkpoint nodes matching in every field: {NodesMatched}");
+        report.AppendLine(
+            $"  of which without a change record, layout object, or style: {NodesMatchingWithoutRecord}");
         report.AppendLine($"rectangles compared: {RectsCompared}");
         report.AppendLine($"largest rectangle edge difference: {LargestRectDifference:G6} CSS px");
         foreach (var (kind, count) in _differences.OrderBy(entry => entry.Key, StringComparer.Ordinal))
@@ -164,6 +183,17 @@ public sealed class LayoutChangeCheck
         var where = $"{checkpointId} node {nodeId} {node.GetProperty("nodeName").GetString()}";
         if (document is null || !document.Nodes.TryGetValue(nodeId, out var changed))
         {
+            // A node Blink never styled, such as one in a display: none
+            // subtree, is never noted; its checkpoint record states no layout
+            // object and no computed style, which is what no change record
+            // states.
+            if (!node.GetProperty("layoutObjectPresent").GetBoolean() &&
+                node.GetProperty("computedStyle").ValueKind == JsonValueKind.Null &&
+                !node.GetProperty("displayLocked").GetBoolean())
+            {
+                NodesMatchingWithoutRecord++;
+                return true;
+            }
             Note("node-not-recorded", where);
             return false;
         }

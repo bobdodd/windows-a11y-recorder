@@ -4985,6 +4985,9 @@ class LayoutIntegrationTests(unittest.TestCase):
         self.assertIn("GeometryMapper::SourceToDestinationProjection(", definition)
         self.assertIn("MatrixWithOriginApplied()", definition)
         self.assertIn("a11y_recorder::RecordBlinkLayoutChanges(", definition)
+        # A child whose layout result is reused is noted with its parent's
+        # new result, since its resolved insets and margins can change.
+        self.assertIn("recorder_fragment.Children()", definition)
         # Noted nodes are held weakly, so a noted node that is collected is
         # never kept alive by the recorder.
         self.assertIn("WeakMember<const Node>", definition)

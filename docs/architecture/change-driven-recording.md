@@ -434,7 +434,10 @@ when:
   `LayoutBox::ReplaceLayoutResult` (`core/layout/layout_box.cc`); with the
   box, every object its fragment items name, since the positions of text and
   inline boxes are held in the fragment items of the block that contains
-  them;
+  them, and every object of the new fragment's child fragments. A child whose
+  own layout result is reused can still change: the resolved values of
+  `right`, `bottom`, and the margins depend on the size of the box it is
+  placed in;
 - the pre-paint walk builds an object's paint properties:
   `PrePaintTreeWalk::WalkInternal`, after `UpdateForSelf`
   (`core/paint/pre_paint_tree_walk.cc`, line 685). The walk visits objects
@@ -498,7 +501,33 @@ the test `ChecksTheLayoutChangesOfARecordingFile` when
 temporary directory. The derivation composes each chain from the view's node
 down, flattening the accumulated transform where a node flattens the
 transform it inherits, as `GeometryMapper` does. Its correctness on real
-pages is what the check measures; it has not been measured yet.
+pages is what the check measures.
+
+A node with no change record whose checkpoint record states no layout object,
+no computed style, and no display lock is counted as matching: Blink never
+styled it (an element in a `display: none` subtree, for example), so it was
+never noted, and that is the state no record states. A checkpoint whose
+change set had not completed when the records end is not compared, and is
+counted.
+
+### First measurement
+
+One recording made on the target Windows machine on September 28, 2026 with
+commit e09625a, of pages scrolled and navigated by hand. It had 184 layout
+checkpoints and 177 change sets; the last change set was cut off when the
+recording stopped, so its checkpoint was not compared. Of 105,189 checkpoint
+node records compared, 105,128 matched in every field, 17,348 of them nodes
+with no change record, layout object, or style. All 80,868 rectangles
+matched; the largest edge difference was 0.000245 CSS pixels.
+
+The 61 nodes that differed all differed in a resolved value that depends on
+the containing box's size: `right` (11 of the 20 examples listed), `bottom`
+(4), and `margin-right` (5). The nodes had kept their own layout results
+while the box they are placed in was laid out again, so no hook noted them.
+Commit e09625a noted only the box whose layout result was set; the following
+commit also notes the objects of its child fragments. That change has not
+been measured. One recording of a few pages is not evidence of completeness
+on other pages.
 
 ### Limits
 

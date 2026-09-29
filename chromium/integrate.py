@@ -7708,6 +7708,17 @@ void RecorderNoteLayoutResult(const LayoutBox& recorder_box,
     return;
   }
   RecorderNoteLayoutChange(recorder_box.GetNode(), 2);
+  // A child whose own layout result is reused can still change: the
+  // resolved values of its right, bottom, and margins depend on the size of
+  // the box it is placed in. Its fragment is a child of the new fragment,
+  // including an out-of-flow child this box contains.
+  for (const PhysicalFragmentLink& recorder_child :
+       recorder_fragment.Children()) {
+    if (const LayoutObject* recorder_object =
+            recorder_child.fragment->GetLayoutObject()) {
+      RecorderNoteLayoutChange(recorder_object->GetNode(), 2);
+    }
+  }
   // Text and inline boxes are positioned by the fragment items of the block
   // that contains them, so each object an item names has changed layout.
   if (const FragmentItems* recorder_items = recorder_fragment.Items()) {

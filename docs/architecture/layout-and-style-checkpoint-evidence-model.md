@@ -455,9 +455,8 @@ rectangle, so a scroll or a transform change records the transform node and
 not every node under it. The viewport rectangle is derived at playback and is
 labelled as derived. Removals are not recorded yet. How the nodes are noted,
 how the rectangle is derived, and how the records are checked against the
-checkpoints are in `change-driven-recording.md`, "Slice 3 design". Whether
-the change records reproduce the checkpoints on real pages has not been
-measured.
+checkpoints are in `change-driven-recording.md`, "Slice 3 design", with the
+first measurement on one recording.
 
 ## Next dependent slices
 

@@ -190,6 +190,36 @@ public sealed class LayoutChangeCheckTests
     }
 
     [Fact]
+    public void MatchesANodeWithoutRecordOrLayoutObjectOrStyle()
+    {
+        var check = new LayoutChangeCheck();
+        var unstyled = Json($$"""
+            {"context":{{Context}},"checkpointId":"layout-checkpoint-1","nodeIndex":0,"nodeId":7,
+             "nodeType":"element","nodeName":"META","layoutObjectPresent":false,"displayLocked":false,
+             "boundingClientRect":null,"computedStyle":null}
+            """);
+        Checkpoint(check, 1, unstyled, CheckpointNode(1, 42, 0, 0, 1, 1));
+        check.Finish();
+
+        Assert.Equal(1, check.NodesMatched);
+        Assert.Equal(1, check.NodesMatchingWithoutRecord);
+        Assert.Equal(1, check.Differences["node-not-recorded"]);
+    }
+
+    [Fact]
+    public void DoesNotCompareACheckpointWhoseChangeSetNeverCompleted()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointNode(1, 42, 8, 80, 120, 20));
+        check.Add("layout-changes-started", ChangesStarted(1, "layout-checkpoint-1"));
+        check.Finish();
+
+        Assert.Equal(0, check.CheckpointsCompared);
+        Assert.Equal(1, check.CheckpointsWithIncompleteChangeSets);
+        Assert.Empty(check.Differences);
+    }
+
+    [Fact]
     public void AcceptsTheSamplePayloads()
     {
         var check = new LayoutChangeCheck();
