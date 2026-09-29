@@ -787,10 +787,10 @@ the next whole one. The scroll comparison above is reported with it.
 
 ## Slice 4 status
 
-Implemented. Checked in one recording on the target Windows machine at
-revision 90b3b95 (see "Windows evidence" in this section). The hooks for
-style attributes changed through the CSSOM and for shadow root flags,
-added after that recording, are tested in the sandbox only. The record
+Implemented. Checked in two recordings on the target Windows machine, at
+revisions 90b3b95 and f409513 (see "Windows evidence" in this section). The
+hooks for style attributes changed through the CSSOM and for shadow root
+flags were added in f409513 after the first found them missing. The record
 shapes are unchanged, so the protocol stays 0.34.
 
 Sandbox evidence, 2026-09-29:
@@ -842,6 +842,29 @@ instrumented Chromium and every collector on:
   The slice 3 and 4 change records took 0.58 s. The evidence writer thread
   was busy for 57.6 s of the 60.0 s. Slices 3 and 4 add records beside the
   full checkpoints and remove none; slice 5 is the slice that stops them.
+
+Windows evidence, 2026-09-29, revision f409513, one recording of 66.0 s with
+instrumented Chromium and every collector on:
+
+- `DomChangeCheck`: 140 DOM checkpoints compared; 167,005 of 167,005 nodes
+  equal in every field. The recording holds 21 style attribute changes and
+  15 shadow root changes; the recording at 90b3b95 held no style attribute
+  changes. 81 scroll offsets, each equal to the negated translation of its
+  scroll translation node. 817 change records named a node outside the
+  document's tree and were counted without comparison.
+- `LayoutChangeCheck`: 200 layout checkpoints, 103,432 nodes, all equal, the
+  largest rectangle edge difference 0.000489 CSS px.
+- `DomCharacterDataCheck`: 98,705 of 98,705 character data comparisons
+  equal.
+- The busiest renderer's cost log, over 63.2 s: 123 full layout checkpoints
+  took 13.3 s of its main thread, at most 355.7 ms; 102 full DOM checkpoints
+  took 9.8 s, at most 305.9 ms; and 131,226 waits for space in the evidence
+  queue took 18.6 s. The change records took 0.50 s.
+- This is one recording of the pages the user visited. Kinds of change those
+  pages did not make are not tested by it. One candidate not yet read: SVG
+  attributes changed through their DOM properties, which Blink also marks
+  dirty and writes when read (`Element::SynchronizeAttribute`,
+  `core/dom/element.cc`, line 2291); no hook covers that write.
 
 ## Slice 2 design: playback from the file
 
