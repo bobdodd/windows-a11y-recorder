@@ -68,6 +68,13 @@ uint64_t HashLayoutChangedNode(const LayoutChangedNode& changed) {
   hasher.Number(changed.local_y);
   hasher.Number(changed.local_width);
   hasher.Number(changed.local_height);
+  hasher.Integer(changed.local_quad_rects.size());
+  for (const LayoutLocalRect& rect : changed.local_quad_rects) {
+    hasher.Number(rect.x);
+    hasher.Number(rect.y);
+    hasher.Number(rect.width);
+    hasher.Number(rect.height);
+  }
   hasher.Number(changed.client_rect_scale);
   return hasher.Value();
 }

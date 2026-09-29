@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.35";
+    public const string CurrentVersion = "0.36";
 }
 
 public static class BrowserEvidenceChannels
@@ -951,11 +951,16 @@ public sealed record BrowserLayoutTransformNodePayload(
 // getBoundingClientRect is built from, before its zoom adjustment, mapped into
 // the transform node's space; it is null when that rectangle is empty
 // (ClientRectEmpty) or could not be mapped (LocalRectMapped false).
-// ClientRectScale converts the rectangle derived in viewport space to CSS
-// pixels.
+// LocalQuadRects (protocol 0.36) holds, when getBoundingClientRect unites more
+// than one quad, such as the lines of a text node, the bounds of each quad in
+// the transform node's space, and is null otherwise; under a transform that
+// rotates or skews, the viewport rectangle is the union of the bounds of each
+// mapped quad. ClientRectScale converts the rectangle derived in viewport
+// space to CSS pixels.
 public sealed record BrowserLayoutNodeGeometry(
     string TransformNodeId,
     BrowserLayoutRect? LocalRect,
+    IReadOnlyList<BrowserLayoutRect>? LocalQuadRects,
     bool ClientRectEmpty,
     bool LocalRectMapped,
     double ClientRectScale);

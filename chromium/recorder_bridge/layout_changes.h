@@ -63,6 +63,14 @@ enum LayoutChangeReason : unsigned {
   kLayoutChangePaintProperties = 1u << 2,
 };
 
+// A rectangle in a transform node's space.
+struct LayoutLocalRect {
+  double x = 0;
+  double y = 0;
+  double width = 0;
+  double height = 0;
+};
+
 // One node of a layout change set. The node's fields are those of a
 // checkpoint record, without its index or rectangle. The geometry is the
 // rectangle getBoundingClientRect is built from, before its zoom
@@ -85,6 +93,12 @@ struct LayoutChangedNode {
   double local_y = 0;
   double local_width = 0;
   double local_height = 0;
+  // When getBoundingClientRect unites more than one quad, such as the lines
+  // of a text node, the bounds of each quad in the transform node's space,
+  // in Blink's order (protocol 0.36). Under a transform that rotates or
+  // skews, the rectangle is the union of the bounds of each mapped quad,
+  // which the local rectangle alone does not determine. Empty otherwise.
+  std::vector<LayoutLocalRect> local_quad_rects;
   double client_rect_scale = 1;
 };
 

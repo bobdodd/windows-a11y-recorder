@@ -15,8 +15,10 @@ change it did not record; their hooks are implemented and not yet tested
 there. See "Slice 4 status". Slice 5 (full walks only where they are
 needed, protocol 0.35) is implemented and was measured in two recordings on
 the target Windows machine, one with the check setting off and one with it
-on; one rectangle difference under an animated 3D transform is not yet
-explained. See "Slice 5 status". The
+on. The one rectangle difference that recording found is explained: a
+record held one rectangle for a node united from several quads. From
+protocol 0.36 the record also holds the bounds of each quad; that change is
+not yet tested there. See "Slice 5 status". The
 Blink locations below were read from the Chromium checkout on the target
 Windows machine, version 156.0.8065.0 (`chrome/VERSION`), and must be read
 again if the checkout changes.
@@ -402,6 +404,16 @@ A `layout-node-changed` record states:
   the rectangle derived back in viewport space is the one Blink united and
   not the bounds of its bounds. `localRectMapped` is false, and the rect is
   null, when the projection is not invertible.
+- `localQuadRects` (protocol 0.36): when `Element::ClientQuads` unites more
+  than one quad, such as the lines of a text node or the fragments of an
+  inline box, the bounding box of each quad mapped into the record's
+  transform node, in Blink's order; null otherwise. The quads are read
+  whatever the projection, because the record is not repeated when only a
+  transform node above the object changes, and a later rotation or skew
+  makes the viewport rectangle the union of the bounds of each mapped quad,
+  which `localRect` alone does not determine. The union follows
+  `gfx::RectF::Union`, which skips an empty rectangle unless the union so
+  far is empty.
 - `clientRectEmpty`: true, with the rect null, when the rectangle is empty,
   which `getBoundingClientRect` returns without adjusting it.
 - `clientRectScale`: the factor `getBoundingClientRect` multiplies by to
@@ -1019,15 +1031,25 @@ No record was lost, and no push to the queue waited.
     as not compared (38 in this recording, none in the recordings at
     70d22d4 with the setting off and at f409513). A display locked node with
     a change record is still compared.
-  - 1 is a rectangle difference that is not explained: a text node under a
-    transform node whose matrix changed at every rendering update, a 3D
-    rotation with a perspective term. The checkpoint at a `check` walk
-    observed a height of 78.4004 CSS px and the change records derive
-    78.6151; the position and width agree. Until it is explained, the
-    derivation of a rectangle under an animated 3D transform is not known to
-    match the checkpoint.
-  With the correction, 10,469 of 10,470 compared nodes are equal, and the
-  largest rectangle edge difference is 0.2147 CSS px, from that node.
+  - 1 was a rectangle difference: the text node "Regular price", 119.516 by
+    78 px in its transform node's space, under a transform node whose
+    matrix changed at every rendering update. The matrix has 3D terms, but
+    maps a point of the plane as a rotation by about 0.3 degrees. The
+    checkpoint at a `check` walk observed a height of 78.4004 CSS px and the
+    change records derive 78.6151; the position and width agree. Blink
+    unites the bounds of each line's rotated quad, whose bottom depends on
+    where the last line ends; the record held only the union of the lines,
+    whose rotated bottom corner is that of a full-width line. The observed
+    height corresponds to a last line about 77.9 px wide; the recording
+    holds no line widths to confirm it. The record is not repeated when only
+    a transform above the node changes, so any text or inline box of more
+    than one line under a later rotation or skew was affected. Protocol 0.36
+    records the bounds of each quad (`localQuadRects`, under "Geometry")
+    and the check derives the rectangle from them; this is not yet
+    tested in a recording.
+  With the display lock correction, 10,469 of 10,470 compared nodes are
+  equal, and the largest rectangle edge difference is 0.2147 CSS px, from
+  that node.
 
 ## Slice 4 status
 

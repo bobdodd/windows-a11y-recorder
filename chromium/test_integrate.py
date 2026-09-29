@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.35"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.35"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.36"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.36"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -4622,6 +4622,49 @@ class CookieIntegrationTests(unittest.TestCase):
         self.assertIn(
             INTEGRATE.LEGACY_UNSOURCED_BLINK_LAYOUT_CHANGES_DEFINITION,
             INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS,
+        )
+
+    def test_a_change_record_states_the_bounds_of_each_quad(self):
+        definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        geometry = INTEGRATE.BLINK_LAYOUT_CHANGES_QUAD_RECT_GEOMETRY
+        self.assertIn(geometry, definition)
+        self.assertNotIn(
+            INTEGRATE.BLINK_LAYOUT_CHANGES_SINGLE_RECT_GEOMETRY, definition
+        )
+        # The quads are read whatever the projection, since a later
+        # transform can rotate a node whose record is not repeated.
+        self.assertLess(
+            geometry.index("Vector<gfx::QuadF> recorder_quads;"),
+            geometry.index("Preserves2dAxisAlignment()"),
+        )
+        self.assertIn("if (recorder_quads.size() > 1) {", geometry)
+        self.assertIn("recorder_changed.local_quad_rects.push_back(", geometry)
+        self.assertIn(
+            INTEGRATE.LEGACY_SINGLE_RECT_BLINK_LAYOUT_CHANGES_DEFINITION,
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS,
+        )
+
+    def test_a_single_rect_definition_is_upgraded(self):
+        path = Path("local_frame_view.cc")
+        text = (
+            '#include "third_party/blink/renderer/core/frame/local_frame_view.h"\n'
+            + INTEGRATE.BLINK_LAYOUT_CHANGES_DECLARATION
+            + INTEGRATE.BLINK_LAYOUT_CHANGES_SCROLL_DECLARATION
+            + INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+            + INTEGRATE.BLINK_LAYOUT_CHANGES_HOOK
+            + INTEGRATE.LEGACY_SINGLE_RECT_BLINK_LAYOUT_CHANGES_DEFINITION
+            + "}  // namespace blink\n"
+        )
+        upgraded = INTEGRATE.add_layout_changes_to_local_frame_view(text, path)
+        self.assertEqual(
+            upgraded.count(INTEGRATE.BLINK_LAYOUT_CHANGES_QUAD_RECT_GEOMETRY), 1
+        )
+        self.assertNotIn(
+            INTEGRATE.BLINK_LAYOUT_CHANGES_SINGLE_RECT_GEOMETRY, upgraded
+        )
+        self.assertEqual(
+            INTEGRATE.add_layout_changes_to_local_frame_view(upgraded, path),
+            upgraded,
         )
 
     def test_dom_helper_records_the_interaction_state_of_an_unwalked_delivery(

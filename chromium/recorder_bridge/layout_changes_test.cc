@@ -56,6 +56,19 @@ void TestEveryStatedFieldChangesTheNodeHash() {
   Expect(differs([](auto& n) { n.client_rect_scale = 2; }), "scale");
   Expect(differs([](auto& n) { n.client_rect_empty = true; }), "empty");
   Expect(differs([](auto& n) { n.local_rect_mapped = false; }), "mapped");
+  Expect(differs([](auto& n) {
+           n.local_quad_rects = {{0, 0, 10, 5}, {0, 5, 6, 5}};
+         }),
+         "quad rectangles");
+  {
+    a11y_recorder::LayoutChangedNode one = SampleNode();
+    one.local_quad_rects = {{0, 0, 10, 5}, {0, 5, 6, 5}};
+    a11y_recorder::LayoutChangedNode other = one;
+    other.local_quad_rects[1].width = 7;
+    Expect(a11y_recorder::HashLayoutChangedNode(one) !=
+               a11y_recorder::HashLayoutChangedNode(other),
+           "quad rectangle width");
+  }
   Expect(differs([](auto& n) { n.node.shadow_root_mode = "open"; }), "shadow");
   Expect(differs([](auto& n) { n.node.generated_text = "x"; }), "generated");
   // The field boundaries are part of the hash.

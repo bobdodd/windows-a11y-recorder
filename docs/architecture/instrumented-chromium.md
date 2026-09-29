@@ -958,7 +958,14 @@ interaction checkpoint follows it, naming `sourceChangeSetId`, and follows a
 mutation delivery that is not walked with no source record. The design is
 in [change-driven recording](change-driven-recording.md).
 
-Live 0.35 connections require an exact protocol-version match.
+Protocol version 0.36 adds `localQuadRects` to the geometry of a
+`layout-node-changed` record: when `getBoundingClientRect` unites more than
+one quad, such as the lines of a text node, the bounds of each quad in the
+record's transform node space, and null otherwise. A rectangle derived under
+a transform that rotates or skews is the union of the bounds of each mapped
+quad. The design is in [change-driven recording](change-driven-recording.md).
+
+Live 0.36 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

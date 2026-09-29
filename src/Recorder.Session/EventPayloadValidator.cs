@@ -2969,6 +2969,7 @@ internal static class EventPayloadValidator
                 [
                     RequiredString("transformNodeId"),
                     NullableObject("localRect"),
+                    NullableObjectArray("localQuadRects"),
                     RequiredBoolean("clientRectEmpty"),
                     RequiredBoolean("localRectMapped"),
                     RequiredNumber("clientRectScale", positive: true)
@@ -3009,6 +3010,39 @@ internal static class EventPayloadValidator
                     pointer + "/localRect",
                     "A local rectangle must be present exactly when it was mapped, " +
                         "and an empty client rectangle is not mapped.");
+            }
+            // From protocol 0.36 a node with more than one quad states the
+            // bounds of each in the transform node's space.
+            if (geometry.TryGetProperty("localQuadRects", out var quadRects) &&
+                quadRects.ValueKind == JsonValueKind.Array)
+            {
+                if (!mapped || quadRects.GetArrayLength() < 2)
+                {
+                    AddError(
+                        issues,
+                        "browser-layout-local-quad-rects-inconsistent",
+                        pointer + "/localQuadRects",
+                        "Quad rectangles are recorded only for a mapped rectangle " +
+                            "united from more than one quad.");
+                }
+                var index = 0;
+                foreach (var quadRect in quadRects.EnumerateArray())
+                {
+                    if (quadRect.ValueKind == JsonValueKind.Object)
+                    {
+                        ValidateShape(
+                            quadRect,
+                            [
+                                RequiredNumber("x"),
+                                RequiredNumber("y"),
+                                RequiredNumber("width", nonnegative: true),
+                                RequiredNumber("height", nonnegative: true)
+                            ],
+                            issues,
+                            $"{pointer}/localQuadRects/{index}");
+                    }
+                    index++;
+                }
             }
         }
         if (hasGeometry &&
@@ -5243,6 +5277,16 @@ internal static class EventPayloadValidator
                 value.EnumerateArray().All(
                     item => item.ValueKind == JsonValueKind.Object),
             "must be an array of objects");
+
+    private static PropertyRule NullableObjectArray(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(
+                    item => item.ValueKind == JsonValueKind.Object),
+            "must be an array of objects or null");
 
     private static PropertyRule OptionalObjectArray(string name) =>
         new(

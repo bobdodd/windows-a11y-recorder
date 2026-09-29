@@ -4468,6 +4468,18 @@ bool IsValidLayoutChangedNode(const LayoutChangedNode& changed) {
        changed.local_height < 0)) {
     return false;
   }
+  if (!changed.local_quad_rects.empty() &&
+      (!changed.geometry_present || !changed.local_rect_mapped ||
+       changed.local_quad_rects.size() < 2)) {
+    return false;
+  }
+  for (const LayoutLocalRect& rect : changed.local_quad_rects) {
+    if (!IsFiniteNumber(rect.x) || !IsFiniteNumber(rect.y) ||
+        !IsFiniteNumber(rect.width) || !IsFiniteNumber(rect.height) ||
+        rect.width < 0 || rect.height < 0) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -4532,6 +4544,20 @@ struct LayoutChangedNodeEvidence : PendingEvidence {
         geometry.Set("localRect", std::move(rect));
       } else {
         geometry.Set("localRect", base::Value());
+      }
+      if (changed.local_quad_rects.empty()) {
+        geometry.Set("localQuadRects", base::Value());
+      } else {
+        base::ListValue quad_rects;
+        for (const LayoutLocalRect& quad_rect : changed.local_quad_rects) {
+          base::DictValue value;
+          value.Set("x", quad_rect.x);
+          value.Set("y", quad_rect.y);
+          value.Set("width", quad_rect.width);
+          value.Set("height", quad_rect.height);
+          quad_rects.Append(std::move(value));
+        }
+        geometry.Set("localQuadRects", std::move(quad_rects));
       }
       geometry.Set("clientRectEmpty", changed.client_rect_empty);
       geometry.Set("localRectMapped", changed.local_rect_mapped);

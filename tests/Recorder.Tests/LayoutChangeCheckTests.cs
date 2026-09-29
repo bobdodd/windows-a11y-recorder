@@ -41,11 +41,12 @@ public sealed class LayoutChangeCheckTests
         [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, 0, 1];
 
     private static JsonElement Changed(long node, int transform, double x, double y, double width, double height,
-        string color = "red", double scale = 0.8) => Json($$"""
+        string color = "red", double scale = 0.8, string quadRects = "null") => Json($$"""
         {"context":{{Context}},"changeSetId":"layout-changes-1","reasons":["layout"],"nodeId":{{node}},
          "nodeType":"element","nodeName":"DIV","layoutObjectPresent":true,"displayLocked":false,
          "geometry":{"transformNodeId":"layout-transform-{{transform}}",
            "localRect":{"x":{{x}},"y":{{y}},"width":{{width}},"height":{{height}}},
+           "localQuadRects":{{quadRects}},
            "clientRectEmpty":false,"localRectMapped":true,"clientRectScale":{{scale}}},
          "computedStyle":{"color":"{{color}}"},"pseudoElement":null,"shadowHostNodeId":null,"shadowRootMode":null}
         """);
@@ -111,6 +112,52 @@ public sealed class LayoutChangeCheckTests
         var rect = state.Documents[Token].DeriveClientRect(42, out _);
 
         Assert.Equal(new LayoutDerivedRect(80, 0, 20, 10), rect);
+    }
+
+    [Fact]
+    public void DerivesARotatedRectFromTheBoundsOfEachQuad()
+    {
+        // Two lines, 10 by 5 and 4 by 5, under a rotation by 90 degrees: the
+        // bounds of the rotated lines, not of their rotated union.
+        var state = new LayoutChangeState();
+        state.Apply("layout-changes-started", ChangesStarted(1, null));
+        state.Apply("layout-transform-node", Transform(1, null, Translation(0, 0)));
+        state.Apply("layout-transform-node", Transform(2, 1, [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1]));
+        state.Apply(
+            "layout-node-changed",
+            Changed(
+                42, 2, 0, 0, 10, 10, scale: 1,
+                quadRects: """[{"x":0,"y":0,"width":10,"height":5},{"x":0,"y":5,"width":4,"height":5}]"""));
+
+        var rect = state.Documents[Token].DeriveClientRect(42, out var failure);
+
+        Assert.Equal(LayoutDerivationFailure.None, failure);
+        Assert.Equal(new LayoutDerivedRect(90, 0, 10, 10), rect);
+
+        // The same quads under a skew: the second line's corner is not the
+        // corner of the union.
+        state.Apply("layout-transform-node", Transform(2, 1, [1, 0.5, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]));
+        rect = state.Documents[Token].DeriveClientRect(42, out _);
+        Assert.Equal(new LayoutDerivedRect(0, 0, 10, 12), rect);
+    }
+
+    [Fact]
+    public void UnitesQuadRectsAsBlinkUnitesThem()
+    {
+        // An empty quad does not widen the union.
+        var state = new LayoutChangeState();
+        state.Apply("layout-changes-started", ChangesStarted(1, null));
+        state.Apply("layout-transform-node", Transform(1, null, Translation(0, 0)));
+        state.Apply("layout-transform-node", Transform(2, 1, Translation(0, 0)));
+        state.Apply(
+            "layout-node-changed",
+            Changed(
+                42, 2, 10, 10, 20, 5, scale: 1,
+                quadRects: """[{"x":0,"y":0,"width":0,"height":5},{"x":10,"y":10,"width":20,"height":5}]"""));
+
+        var rect = state.Documents[Token].DeriveClientRect(42, out _);
+
+        Assert.Equal(new LayoutDerivedRect(10, 10, 20, 5), rect);
     }
 
     [Fact]

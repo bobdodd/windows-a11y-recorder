@@ -3064,6 +3064,53 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void AcceptsTheBoundsOfEachQuad()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        payload["geometry"]!["localQuadRects"] = JsonNode.Parse(
+            """[{"x":10,"y":338.75,"width":150,"height":12},{"x":10,"y":350.75,"width":90,"height":13}]""");
+
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", payload));
+    }
+
+    [Theory]
+    [InlineData("""[{"x":10,"y":338.75,"width":150,"height":25}]""", "browser-layout-local-quad-rects-inconsistent")]
+    [InlineData("""[{"x":0,"y":0,"width":-1,"height":1},{"x":0,"y":1,"width":1,"height":1}]""", "payload-property-invalid")]
+    [InlineData("""[1,2]""", "payload-property-invalid")]
+    public void RejectsInvalidQuadRects(string quadRects, string code)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        payload["geometry"]!["localQuadRects"] = JsonNode.Parse(quadRects);
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void RejectsQuadRectsWithoutAMappedRect()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedEmptyTextNode)!;
+        payload["geometry"]!["localQuadRects"] = JsonNode.Parse(
+            """[{"x":0,"y":0,"width":1,"height":1},{"x":0,"y":1,"width":1,"height":1}]""");
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-local-quad-rects-inconsistent");
+    }
+
+    [Fact]
+    public void RequiresTheQuadRectsProperty()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        payload["geometry"]!.AsObject().Remove("localQuadRects");
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Path.EndsWith("/localQuadRects", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void RejectsAnEmptyClientRectWithALocalRect()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;

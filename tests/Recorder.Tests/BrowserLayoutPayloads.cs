@@ -253,6 +253,7 @@ internal static class BrowserLayoutPayloads
           "geometry": {
             "transformNodeId": "layout-transform-2",
             "localRect": { "x": 10, "y": 338.75, "width": 150, "height": 25 },
+            "localQuadRects": null,
             "clientRectEmpty": false,
             "localRectMapped": true,
             "clientRectScale": 0.8
@@ -277,6 +278,7 @@ internal static class BrowserLayoutPayloads
           "geometry": {
             "transformNodeId": "layout-transform-2",
             "localRect": null,
+            "localQuadRects": null,
             "clientRectEmpty": true,
             "localRectMapped": false,
             "clientRectScale": 0.8

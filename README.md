@@ -339,7 +339,13 @@ finishes parsing, and after a record of the channel was lost. A setting in
 the app, off by default, also walks each document every N updates so the
 change records can be checked against the walk. Presentation timing and
 interaction state are recorded after each rendering update that is not
-walked. It is not yet tested on the target Windows machine. See
+walked. It was measured in two recordings on the target Windows machine.
+See [change-driven recording](docs/architecture/change-driven-recording.md).
+
+Protocol 0.36 records the bounds of each line of a text node, and of each
+fragment of an inline box, in a layout change record, so the node's
+rectangle is derived correctly under a later rotation or skew. It is not yet
+tested on the target Windows machine. See
 [change-driven recording](docs/architecture/change-driven-recording.md).
 
 Each captured monitor image is the newest frame that reached the Windows

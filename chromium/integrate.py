@@ -8867,6 +8867,93 @@ LEGACY_UNSOURCED_BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITI
 BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
     BLINK_LAYOUT_CHANGES_SOURCE_CALL, BLINK_LAYOUT_CHANGES_SOURCE_HOOK, 1
 )
+# Protocol 0.36 records the bounds of each quad of a node with more than
+# one, such as the lines of a text node, in the transform node's space.
+BLINK_LAYOUT_CHANGES_SINGLE_RECT_GEOMETRY = """\
+          recorder_rect.Offset(recorder_view_paint_offset);
+          gfx::RectF recorder_local_rect =
+              recorder_projection.MapRect(recorder_rect);
+          // A projection that rotates or skews is applied to each quad, so
+          // the rectangle mapped back to the viewport is the one Blink
+          // united rather than the bounds of its bounds.
+          if (!recorder_projection.Preserves2dAxisAlignment()) {
+            // The quads Element::ClientQuads unites: an SVG element's object
+            // bounding box, or a box's or text's absolute quads.
+            Vector<gfx::QuadF> recorder_quads;
+            if (recorder_element && recorder_element->IsSVGElement() &&
+                !recorder_layout_object->IsSVGRoot() &&
+                !recorder_layout_object->IsSVGForeignObject()) {
+              recorder_quads.push_back(
+                  recorder_layout_object->LocalToAbsoluteQuad(
+                      gfx::QuadF(recorder_layout_object->ObjectBoundingBox())));
+            } else if (!recorder_element ||
+                       recorder_layout_object->IsBoxModelObject() ||
+                       recorder_layout_object->IsBR()) {
+              recorder_layout_object->AbsoluteQuads(recorder_quads);
+            }
+            gfx::RectF recorder_united;
+            for (gfx::QuadF recorder_quad : recorder_quads) {
+              recorder_quad += recorder_view_paint_offset;
+              recorder_united.Union(
+                  recorder_projection.MapQuad(recorder_quad).BoundingBox());
+            }
+            if (!recorder_quads.empty()) {
+              recorder_local_rect = recorder_united;
+            }
+          }
+"""
+BLINK_LAYOUT_CHANGES_QUAD_RECT_GEOMETRY = """\
+          recorder_rect.Offset(recorder_view_paint_offset);
+          gfx::RectF recorder_local_rect =
+              recorder_projection.MapRect(recorder_rect);
+          // The quads Element::ClientQuads unites: an SVG element's object
+          // bounding box, or a box's or text's absolute quads. Each is
+          // mapped into the transform node's space on its own.
+          Vector<gfx::QuadF> recorder_quads;
+          if (recorder_element && recorder_element->IsSVGElement() &&
+              !recorder_layout_object->IsSVGRoot() &&
+              !recorder_layout_object->IsSVGForeignObject()) {
+            recorder_quads.push_back(
+                recorder_layout_object->LocalToAbsoluteQuad(
+                    gfx::QuadF(recorder_layout_object->ObjectBoundingBox())));
+          } else if (!recorder_element ||
+                     recorder_layout_object->IsBoxModelObject() ||
+                     recorder_layout_object->IsBR()) {
+            recorder_layout_object->AbsoluteQuads(recorder_quads);
+          }
+          // With more than one quad, such as the lines of a text node, the
+          // bounds of each are recorded, so the rectangle under any later
+          // transform is derived as Blink unites it: from the bounds of each
+          // mapped quad, not the bounds of their union (protocol 0.36).
+          gfx::RectF recorder_united;
+          for (gfx::QuadF recorder_quad : recorder_quads) {
+            recorder_quad += recorder_view_paint_offset;
+            const gfx::RectF recorder_quad_rect =
+                recorder_projection.MapQuad(recorder_quad).BoundingBox();
+            recorder_united.Union(recorder_quad_rect);
+            if (recorder_quads.size() > 1) {
+              recorder_changed.local_quad_rects.push_back(
+                  a11y_recorder::LayoutLocalRect{
+                      recorder_quad_rect.x(), recorder_quad_rect.y(),
+                      recorder_quad_rect.width(), recorder_quad_rect.height()});
+            }
+          }
+          // A projection that rotates or skews is applied to each quad, so
+          // the rectangle mapped back to the viewport is the one Blink
+          // united rather than the bounds of its bounds.
+          if (!recorder_projection.Preserves2dAxisAlignment() &&
+              !recorder_quads.empty()) {
+            recorder_local_rect = recorder_united;
+          }
+"""
+LEGACY_SINGLE_RECT_BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION
+if BLINK_LAYOUT_CHANGES_SINGLE_RECT_GEOMETRY not in BLINK_LAYOUT_CHANGES_DEFINITION:
+    raise RuntimeError("the layout change geometry block was not found")
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_SINGLE_RECT_GEOMETRY,
+    BLINK_LAYOUT_CHANGES_QUAD_RECT_GEOMETRY,
+    1,
+)
 BLINK_LAYOUT_CHANGES_INCLUDES = (
     "#include <array>",
     '#include "base/numerics/safe_conversions.h"',
@@ -8947,6 +9034,8 @@ BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS = """\
             recorder_layout_object->AbsoluteQuads(recorder_quads);
 """
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.36 recorded the bounds of each quad.
+    LEGACY_SINGLE_RECT_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.35 requested presentation from change sets.
     LEGACY_UNSOURCED_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.34 recorded scroll offsets.

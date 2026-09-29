@@ -162,28 +162,58 @@ public sealed class LayoutDocumentChangeState
         {
             return null;
         }
-        var rect = geometry.GetProperty("localRect");
-        var x = rect.GetProperty("x").GetDouble();
-        var y = rect.GetProperty("y").GetDouble();
-        var width = rect.GetProperty("width").GetDouble();
-        var height = rect.GetProperty("height").GetDouble();
-        var scale = geometry.GetProperty("clientRectScale").GetDouble();
-        double left = double.PositiveInfinity, top = double.PositiveInfinity;
-        double right = double.NegativeInfinity, bottom = double.NegativeInfinity;
-        foreach (var (cornerX, cornerY) in new[]
-                 {
-                     (x, y), (x + width, y), (x, y + height), (x + width, y + height)
-                 })
+        // Blink unites the bounds of each quad mapped to the viewport. A node
+        // with more than one quad states the bounds of each (protocol 0.36);
+        // otherwise the local rectangle is the one quad's bounds.
+        var rects = new List<JsonElement>();
+        if (geometry.TryGetProperty("localQuadRects", out var quadRects) &&
+            quadRects.ValueKind == JsonValueKind.Array)
         {
-            if (!MapPoint(toView, cornerX, cornerY, out var mappedX, out var mappedY))
+            rects.AddRange(quadRects.EnumerateArray());
+        }
+        else
+        {
+            rects.Add(geometry.GetProperty("localRect"));
+        }
+        var scale = geometry.GetProperty("clientRectScale").GetDouble();
+        // United as gfx::RectF::Union unites: an empty rectangle is taken only
+        // while the union is empty, and is otherwise skipped.
+        double left = 0, top = 0, right = 0, bottom = 0;
+        foreach (var rect in rects)
+        {
+            var x = rect.GetProperty("x").GetDouble();
+            var y = rect.GetProperty("y").GetDouble();
+            var width = rect.GetProperty("width").GetDouble();
+            var height = rect.GetProperty("height").GetDouble();
+            double rectLeft = double.PositiveInfinity, rectTop = double.PositiveInfinity;
+            double rectRight = double.NegativeInfinity, rectBottom = double.NegativeInfinity;
+            foreach (var (cornerX, cornerY) in new[]
+                     {
+                         (x, y), (x + width, y), (x, y + height), (x + width, y + height)
+                     })
             {
-                failure = LayoutDerivationFailure.ProjectionNotInvertible;
-                return null;
+                if (!MapPoint(toView, cornerX, cornerY, out var mappedX, out var mappedY))
+                {
+                    failure = LayoutDerivationFailure.ProjectionNotInvertible;
+                    return null;
+                }
+                rectLeft = Math.Min(rectLeft, mappedX);
+                rectTop = Math.Min(rectTop, mappedY);
+                rectRight = Math.Max(rectRight, mappedX);
+                rectBottom = Math.Max(rectBottom, mappedY);
             }
-            left = Math.Min(left, mappedX);
-            top = Math.Min(top, mappedY);
-            right = Math.Max(right, mappedX);
-            bottom = Math.Max(bottom, mappedY);
+            var unionEmpty = right <= left || bottom <= top;
+            if (unionEmpty)
+            {
+                (left, top, right, bottom) = (rectLeft, rectTop, rectRight, rectBottom);
+            }
+            else if (rectRight > rectLeft && rectBottom > rectTop)
+            {
+                left = Math.Min(left, rectLeft);
+                top = Math.Min(top, rectTop);
+                right = Math.Max(right, rectRight);
+                bottom = Math.Max(bottom, rectBottom);
+            }
         }
         failure = LayoutDerivationFailure.None;
         return new LayoutDerivedRect(
