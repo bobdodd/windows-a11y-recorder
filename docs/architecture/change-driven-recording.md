@@ -785,6 +785,102 @@ the next whole one. The scroll comparison above is reported with it.
   move, and remove content and scroll elements, checked with no
   differences, and the renderer's longest recorder work per update.
 
+## Slice 5 design: full walks only where they are needed
+
+Proposed 2026-09-29, and not yet agreed. Two points were decided by the user
+the same day: a renderer that connects again walks each of its documents
+in full, and the full walks that check the change records are a setting in
+the app. The Blink and bridge locations are from the integration script and
+the bridge in this repository at revision 66ad1c8.
+
+### What slice 5 changes, and what it does not change
+
+Slices 3 and 4 record every change beside the full walks they were checked
+against. The recording at revision f409513 showed that, on the pages visited,
+the change records hold what the walks hold, and that the walks, not the
+change records, take the renderer's time: 23.1 s of 63.2 s on the busiest
+renderer's main thread for the walks, 0.50 s for the change records. Slice 5
+stops the walks that the change records make redundant. Every change record
+is kept. The evidence recorded that is not a checkpoint (interaction state,
+presentation timing, accessibility checkpoints, events, and navigation) is
+recorded at least as often as before.
+
+### When a document is walked in full
+
+- DOM: the `finished-parsing` checkpoint is kept, since it is the state the
+  DOM change records of a document apply to. The `post-mutation` checkpoint,
+  now taken at every mutation delivery, is taken only when the check setting
+  asks for it. A document whose changes would be recorded before it has a
+  DOM checkpoint is walked first, with the reason `first-change`, so no
+  change is recorded without a state it applies to.
+- Layout: the first rendering update of a document at which its layout
+  checkpoint's conditions hold records the checkpoint as now. Later updates
+  record change sets only, unless the check setting asks for a checkpoint.
+- After a loss: when a record on `browser.dom` or `browser.layout` could not
+  be written, the bridge holds the count for an omission record
+  (`HoldOmittedEvidence`). From then, the next update of each document of
+  that renderer on that channel is walked in full, with the reason
+  `after-loss`, and the change records continue from that walk.
+- A renderer that connects again is a new process with new documents, so
+  each of its documents is walked at its first update under the rules above.
+
+### The check setting
+
+The app gains a setting, "Check change records against a full walk every N
+updates", off by default. When it is on, every Nth mutation delivery of a
+document records a `post-mutation` DOM checkpoint, and every Nth rendering
+update with layout changes records a layout checkpoint, as the validation
+form above describes. N defaults to 100 when the setting is turned on. The
+value reaches the bridge in the bootstrap message, as `fullWalkInterval`
+(0 when off), and each child process reads it from the child bootstrap. The
+recording's capture settings hold it, so a reader of the recording knows
+which checkpoints to expect. `DomChangeCheck` and `LayoutChangeCheck`
+compare only where a recording has a checkpoint after the first; with the
+setting off they report that there was nothing to compare.
+
+### Presentation timing and interaction state
+
+Both are now tied to checkpoints, and would stop with them:
+
+- A `presentation-requested` record is made for each completed layout
+  checkpoint (`RecorderRequestLayoutPresentation`), and the playback index
+  joins presentation feedback to layout checkpoints to place each rendering
+  update on the recording's timeline. From protocol 0.35 a request is also
+  made for each completed layout change set, and the record names either
+  `layoutCheckpointId` or `layoutChangeSetId`. The playback index joins
+  both.
+- An interaction checkpoint follows each DOM and layout checkpoint. From
+  protocol 0.35 one also follows each layout change set, naming it as
+  `sourceChangeSetId`, and each mutation delivery that no longer records a
+  DOM checkpoint, with no source record and the reason `post-mutation`.
+
+### Snapshots
+
+The agreed design (decision 2 above) has the bridge write a snapshot of its
+cache at a fixed interval. The bridge's cache holds a hash of each node's
+last record, not the record, so a snapshot from it would need every record
+held in each renderer, and would add the snapshot's bytes to the pipe, which
+the recording at f409513 showed is already the busiest part of the path: the
+writer thread wrote for 44.0 s of 63.2 s. The app receives every record, and
+the checks already rebuild a document's state from them. This design
+proposes that snapshots are made by the app, from the records it writes, in
+the slice that plays back the page at a frame, and that slice 5 makes no
+snapshots.
+
+### Required tests
+
+- Unit: the integration script's tests of each changed hook; the bridge's
+  choice of when to walk (first update, check interval, after a loss, first
+  change) from generated sequences; payload validation of the new fields;
+  the playback index joining presentation feedback to change sets; the
+  checks with the setting off and on.
+- Integration: an app test that records with the setting on and reads back
+  the checkpoints at the interval.
+- System, on the target Windows machine: a recording with the setting off,
+  with the renderer's walk time and queue waits compared with the recording
+  at f409513, and hover responsiveness reported by the user; and a
+  recording with the setting on, checked with no differences.
+
 ## Slice 4 status
 
 Implemented. Checked in two recordings on the target Windows machine, at
