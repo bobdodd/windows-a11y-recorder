@@ -438,6 +438,27 @@ public sealed class BrowserStateTests : IDisposable
         return path;
     }
 
+    // Compares two states document by document, so that no one value holds
+    // the whole state of a long recording.
+    private static bool SameState(BrowserStateAt first, BrowserStateAt second)
+    {
+        if (first.Documents.Count != second.Documents.Count)
+        {
+            return false;
+        }
+        var left = first.Documents.OrderBy(item => item.State.Key, StringComparer.Ordinal).ToArray();
+        var right = second.Documents.OrderBy(item => item.State.Key, StringComparer.Ordinal).ToArray();
+        for (var position = 0; position < left.Length; position++)
+        {
+            if (!BrowserStateSnapshot.Serialize(left[position].State).AsSpan()
+                    .SequenceEqual(BrowserStateSnapshot.Serialize(right[position].State)))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static string Describe(BrowserStateAt state) =>
         string.Join("\n", state.Documents
             .OrderBy(item => item.State.Key, StringComparer.Ordinal)
@@ -616,10 +637,12 @@ public sealed class BrowserStateTests : IDisposable
         var start = browserChunks.Min(chunk => chunk.StartTime);
         var end = browserChunks.Max(chunk => chunk.EndTime);
         var samples = int.TryParse(Environment.GetEnvironmentVariable("RECORDER_STATE_SAMPLES"), out var count) ? count : 8;
+        var reportPath = Environment.GetEnvironmentVariable("RECORDER_STATE_REPORT") ??
+            Path.Combine(Path.GetTempPath(), "browser-state-report.txt");
         var differing = 0;
         void Compare(string what, BrowserStateAt fast, BrowserStateAt full)
         {
-            var equal = Describe(fast) == Describe(full);
+            var equal = SameState(fast, full);
             if (!equal)
             {
                 differing++;
@@ -632,6 +655,9 @@ public sealed class BrowserStateTests : IDisposable
                 $"{what}: {(equal ? "equal" : "DIFFERENT")}; {fast.Documents.Count} documents, {fast.Documents.Sum(item => item.State.Dom?.Nodes.Count ?? 0)} DOM nodes, {fast.Documents.Sum(item => item.State.Layout.Nodes.Count)} layout nodes; basis {bases}; dom/layout/interaction {parts}");
             report.AppendLine(
                 $"  with snapshots {fast.Cost.Milliseconds:F0} ms ({fast.Cost.Source}, {fast.Cost.SnapshotsRead} snapshots, {fast.Cost.HeldStatesRead} held, {fast.Cost.ChunksRead} chunks, {fast.Cost.RecordsRead} records read, {fast.Cost.RecordsApplied} applied, scan from {fast.Cost.ScanStartTime}); from every record {full.Cost.Milliseconds:F0} ms ({full.Cost.ChunksRead} chunks, {full.Cost.RecordsRead} records)");
+            // Written after each sample, so that a check that fails part way
+            // leaves what it found.
+            File.WriteAllText(reportPath, report.ToString());
         }
         for (var sample = 0; sample <= samples; sample++)
         {
@@ -670,8 +696,6 @@ public sealed class BrowserStateTests : IDisposable
         }
         File.Delete(cutPath);
 
-        var reportPath = Environment.GetEnvironmentVariable("RECORDER_STATE_REPORT") ??
-            Path.Combine(Path.GetTempPath(), "browser-state-report.txt");
         await File.WriteAllTextAsync(reportPath, report.ToString(), token);
         Assert.Equal(0, differing);
     }
