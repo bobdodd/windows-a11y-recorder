@@ -218,6 +218,49 @@ public sealed class DomChangeCheckTests
         Assert.Equal(5, check.NodesMatched);
     }
 
+    // A checkpoint's records with another reason, or of another document
+    // under the same token.
+    private static IEnumerable<(string, JsonElement)> Rewritten(
+        IEnumerable<(string, JsonElement)> records, string from, string to) =>
+        records.Select(item => (item.Item1, Json(item.Item2.GetRawText().Replace(from, to))));
+
+    [Fact]
+    public void TakesAFinishedParseAfterDocumentOpenAsANewBase()
+    {
+        var html = new TreeNode(6, 1, "element", "HTML");
+        var head = new TreeNode(7, 6, "element", "HEAD");
+        var body = new TreeNode(8, 6, "element", "BODY");
+        // document.open() removed the document's children, and the parser's
+        // insertions while it parsed again are not recorded; the second
+        // finished-parsing checkpoint is the document's state.
+        var check = Check(
+            Rewritten(Checkpoint(1, "first", Document, Html, Head, Body), "\"post-mutation\"", "\"finished-parsing\""),
+            One(RemoveChildren(1)),
+            Rewritten(Checkpoint(2, "finished-parsing", Document, html, head, body), "\"post-mutation\"", "\"finished-parsing\""),
+            Checkpoint(3, Document, html, head, body));
+
+        Assert.Empty(check.Differences);
+        Assert.Equal(2, check.CheckpointsAtFinishedParse);
+        Assert.Equal(1, check.CheckpointsCompared);
+        Assert.Equal(4, check.NodesMatched);
+    }
+
+    [Fact]
+    public void KeepsTwoDocumentsOfOneTokenApart()
+    {
+        var other = new TreeNode(30, null, "document", "#document");
+        var otherHtml = new TreeNode(31, 30, "element", "HTML");
+        var check = Check(
+            Checkpoint(1, "first", Document, Html, Head, Body),
+            Rewritten(Checkpoint(2, "first", other, otherHtml), "dom-document-19", "dom-document-30"),
+            Checkpoint(3, Document, Html, Head, Body),
+            Rewritten(Checkpoint(4, other, otherHtml), "dom-document-19", "dom-document-30"));
+
+        Assert.Empty(check.Differences);
+        Assert.Equal(2, check.CheckpointsCompared);
+        Assert.Equal(6, check.NodesMatched);
+    }
+
     [Fact]
     public void RemovesEveryChildOfAContainer()
     {

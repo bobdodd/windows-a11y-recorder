@@ -17,7 +17,10 @@ namespace Recorder.Session;
 /// interval between the two checkpoints where it arose. A checkpoint walked
 /// after a lost DOM record (protocol 0.35, walk reason "after-loss") is not
 /// compared, since the rebuilt tree lacks the lost change; the tree is taken
-/// from it.
+/// from it. A checkpoint at a finished parse is not compared either: the
+/// parser's insertions while a document parses are not recorded, and a
+/// document parsed again after <c>document.open()</c> removed its children
+/// has only its finished-parsing checkpoint as its state.
 ///
 /// Each scroll offset record is compared with the last record of its scroll
 /// translation node at the end of its change set, whose translation is the
@@ -58,10 +61,11 @@ public sealed class DomChangeCheck
         public Dictionary<long, DomNode> Nodes { get; } = [];
     }
 
-    private sealed class CheckpointTree(string id, bool afterLoss)
+    private sealed class CheckpointTree(string id, bool afterLoss, bool finishedParsing)
     {
         public string Id { get; } = id;
         public bool AfterLoss { get; } = afterLoss;
+        public bool FinishedParsing { get; } = finishedParsing;
         public DocumentTree Tree { get; } = new();
     }
 
@@ -79,6 +83,7 @@ public sealed class DomChangeCheck
     public int CheckpointsCompared { get; private set; }
     public int CheckpointsTruncated { get; private set; }
     public int CheckpointsAfterLoss { get; private set; }
+    public int CheckpointsAtFinishedParse { get; private set; }
     public int NodesCompared { get; private set; }
     public int NodesMatched { get; private set; }
     public int Insertions { get; private set; }
@@ -94,6 +99,23 @@ public sealed class DomChangeCheck
     public int ScrollOffsetsCompared { get; private set; }
     public int ScrollOffsetsMatched { get; private set; }
 
+    // A document is keyed by its token and its document identity: in the
+    // recording at revision 70d22d4, two documents of one process, with
+    // different document identities, were recorded under one token 3 ms
+    // apart.
+    private static string? DocumentKey(JsonElement payload)
+    {
+        var token = LayoutChangeState.DocumentToken(payload);
+        if (token is null)
+        {
+            return null;
+        }
+        return payload.GetProperty("context").TryGetProperty("documentId", out var id) &&
+            id.ValueKind == JsonValueKind.String
+                ? token + " " + id.GetString()
+                : token;
+    }
+
     /// <summary>The number of differences of each kind.</summary>
     public IReadOnlyDictionary<string, int> Differences => _differences;
 
@@ -101,7 +123,7 @@ public sealed class DomChangeCheck
     /// order.</summary>
     public void Add(string eventType, JsonElement payload)
     {
-        var token = LayoutChangeState.DocumentToken(payload);
+        var token = DocumentKey(payload);
         if (token is null)
         {
             return;
@@ -113,7 +135,10 @@ public sealed class DomChangeCheck
                     payload.GetProperty("checkpointId").GetString()!,
                     payload.TryGetProperty("walkReason", out var walkReason) &&
                         walkReason.ValueKind == JsonValueKind.String &&
-                        walkReason.GetString() == "after-loss");
+                        walkReason.GetString() == "after-loss",
+                    payload.TryGetProperty("reason", out var reason) &&
+                        reason.ValueKind == JsonValueKind.String &&
+                        reason.GetString() == "finished-parsing");
                 break;
             case "dom-checkpoint-node":
                 if (_open.TryGetValue(token, out var open))
@@ -272,6 +297,7 @@ public sealed class DomChangeCheck
         report.AppendLine($"checkpoints compared with the rebuilt tree: {CheckpointsCompared}");
         report.AppendLine($"checkpoints cut, not compared: {CheckpointsTruncated}");
         report.AppendLine($"checkpoints walked after a lost record, not compared: {CheckpointsAfterLoss}");
+        report.AppendLine($"checkpoints at a finished parse, not compared: {CheckpointsAtFinishedParse}");
         report.AppendLine($"nodes compared: {NodesCompared}, equal in every field {NodesMatched}");
         report.AppendLine($"insertions: {Insertions}, inserted node records {InsertedNodes}");
         report.AppendLine($"removals: {Removals}");
@@ -604,6 +630,10 @@ public sealed class DomChangeCheck
         if (checkpoint.AfterLoss)
         {
             CheckpointsAfterLoss++;
+        }
+        else if (checkpoint.FinishedParsing)
+        {
+            CheckpointsAtFinishedParse++;
         }
         else if (_documents.TryGetValue(token, out var rebuilt))
         {

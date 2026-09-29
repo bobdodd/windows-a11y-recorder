@@ -13,8 +13,9 @@ removals, and scroll offsets, protocol 0.34) is implemented and was checked
 in one recording on the target Windows machine, which found two kinds of
 change it did not record; their hooks are implemented and not yet tested
 there. See "Slice 4 status". Slice 5 (full walks only where they are
-needed, protocol 0.35) is implemented and not yet tested on the target
-Windows machine; see "Slice 5 design". The
+needed, protocol 0.35) is implemented and was measured in one recording on
+the target Windows machine with the check setting off; the recording with it
+on is still to be made. See "Slice 5 status". The
 Blink locations below were read from the Chromium checkout on the target
 Windows machine, version 156.0.8065.0 (`chrome/VERSION`), and must be read
 again if the checkout changes.
@@ -863,7 +864,9 @@ checkpoints to expect. `DomChangeCheck` and `LayoutChangeCheck` compare only
 where a recording has a checkpoint after the first. A checkpoint walked
 after a loss is counted and not compared: the DOM check takes the tree from
 it, and the layout check, whose state is rebuilt from change records alone,
-compares none of the document's later checkpoints.
+compares none of the document's later checkpoints. The DOM check also takes
+a checkpoint at a finished parse as the state without comparing it, and keys
+each document by its token and its document identity; see "Slice 5 status".
 
 ### Presentation timing and interaction state
 
@@ -924,6 +927,65 @@ none.
 The proposal also listed an integration test in which the app records with
 the setting on; the system recording with the setting on covers it on the
 target machine, since the app's browser capture runs only on Windows.
+
+## Slice 5 status
+
+Measured at revision 70d22d4 in recording
+20260929-161448-562df6cd19f74ad3b4bb2b72666a77b4 on the target Windows
+machine, with the check setting off (`browserFullWalkInterval` 0 in the
+manifest). The user reported that the pages were much smoother and faster
+than at f409513, and that hover effects were smooth.
+
+The busiest renderer, from its `Recorder evidence cost` lines in
+`diagnostics/chromium.log`, compared with the busiest renderer of the
+recording at f409513:
+
+| Measure | f409513 (63.2 s) | 70d22d4 (50.1 s) |
+| --- | --- | --- |
+| Layout walks | 123, 13.29 s, max 355.7 ms | 22, 0.19 s, max 67.8 ms |
+| DOM walks | 102, 9.80 s, max 305.9 ms | 26, 0.17 s, max 51.4 ms |
+| Queue waits | 131,226, 18.57 s | 0 |
+| Writer thread | 446,016 writes, 43.99 s, 845.7 MB | 84,913 writes, 14.15 s, 289.6 MB |
+| Layout change records | 322 calls, 0.50 s | 1,428 calls, 0.25 s |
+| Interaction checkpoints | 225 | 782 |
+| Presentation requests | 123 | 538 |
+
+The two recordings visited pages chosen by the user and are not the same
+session, so the table compares the cost of the recorder's work, not the same
+page activity. Interaction checkpoints and presentation requests were
+recorded more often than before, as the design requires.
+
+The checks of the recording file:
+
+- Layout: 614 change sets and 25 checkpoints, the first walk of each
+  document; 2,021 of 2,021 checkpoint nodes equal, largest rectangle
+  difference 1.29e-05 CSS px.
+- Character data: 67 checkpoints, 5,044 data records, none cut; 56 of 56
+  transitions and 5 of 5 checkpoints equal to the rebuilt data.
+- DOM: the first run of the check reported 52 differences, in six pairs of
+  small documents (`#document`, `HTML`, `HEAD`, `BODY`) of one renderer.
+  Two causes, both in the check:
+  - Two documents with different document identities (for example
+    `dom-document-123` and `dom-document-127`) were recorded under one
+    document token in the same process, 3 ms apart. The check keyed a
+    document by its token alone and compared one document's walk with the
+    other's tree. It now keys a document by its token and its identity.
+  - A document whose children were removed (`dom-children-removed` on the
+    document node) was then parsed again, and its next finished-parsing
+    walk held new `HTML`, `HEAD`, and `BODY` nodes. Structural changes are
+    recorded only while a document is not parsing
+    (`RecorderRecordsDomChanges` in the integration script), so the parser's
+    insertions were not recorded and the finished-parsing walk is the
+    document's state. The check now takes a finished-parsing checkpoint as
+    the state without comparing it.
+  With both corrections, the recording reports no differences: 58
+  checkpoints at a finished parse and 9 first walks, none with a previous
+  walk of the same document to compare with. Scroll offsets: 120 of 120
+  equal. The recording at f409513, checked again with the corrected check,
+  still compares 167,005 of 167,005 nodes equal in 140 checkpoints.
+
+With the setting off, the DOM check has nothing to compare, as designed; the
+recording with the setting on is the check of the change records.
 
 ## Slice 4 status
 
