@@ -327,7 +327,10 @@ Protocol 0.34 records each change to the structure of the DOM as Blink
 makes it: insertions with the whole inserted subtree, removals, removals of
 all children, shadow root attachments and changes, and slot assignments. It
 also records each scroll offset Blink stores, with the layout changes of the
-same rendering update. It is implemented and tested in the sandbox only; see
+same rendering update. In one recording on the target Windows machine,
+243,461 of 243,502 checkpoint nodes equalled the tree rebuilt from the
+change records; the two kinds of change behind the rest are now recorded
+and not yet tested there. See
 [change-driven recording](docs/architecture/change-driven-recording.md).
 
 Each captured monitor image is the newest frame that reached the Windows

@@ -9,8 +9,10 @@ status". The content limits are removed and await their test there; see "No
 limit to content". Slice 3 (change-driven style and layout capture,
 protocol 0.32) is implemented and was measured in recordings on the target
 Windows machine; see "Slice 3 design". Slice 4 (DOM insertions and
-removals, and scroll offsets, protocol 0.34) is implemented and tested in
-the sandbox only; see "Slice 4 status". Slice 5 is not implemented. The
+removals, and scroll offsets, protocol 0.34) is implemented and was checked
+in one recording on the target Windows machine, which found two kinds of
+change it did not record; their hooks are implemented and not yet tested
+there. See "Slice 4 status". Slice 5 is not implemented. The
 Blink locations below were read from the Chromium checkout on the target
 Windows machine, version 156.0.8065.0 (`chrome/VERSION`), and must be read
 again if the checkout changes.
@@ -663,6 +665,37 @@ A `ChildrenChanged` override can change the DOM before it calls the base
 method. The check reports any checkpoint whose tree differs from the
 rebuilt one, which is how such an order would be found.
 
+### Style attributes changed through the CSSOM
+
+A style attribute changed through `element.style` or Blink's own inline
+style setters is not written to the attribute when it changes. Both call
+`Element::InvalidateStyleAttribute` (`core/dom/element.cc`, line 13392):
+`element.style` from `InlineCSSStyleDeclaration::DidMutate`
+(`core/css/inline_css_style_declaration.cc`, line 50), and the setters from
+`Element::InlineStyleChanged` (line 12713). In `element.cc` it is the only
+function that marks the attribute dirty (line 13395). The path of the typed
+OM (`element.attributeStyleMap`) was not read, and is covered only if it
+calls the same function. Blink writes a dirty attribute when it is next
+read, and that write does not call
+`DidModifyAttribute`, so the attribute hooks do not see it. The first
+Windows recording of slice 4 showed 24 elements whose checkpoint held a
+style attribute the change records did not.
+
+While a connected element's changes are recorded, the recorder writes the
+attribute after each change, as `getAttribute()` would, and records the
+change as `dom-attribute-changed` with the text before and after. The write
+is Blink's own lazy write, so it runs no attribute callback and queues no
+mutation record. Because the recorder writes the attribute at every change,
+the text the element holds before a change is the text before it.
+`Element::InlineStyleChanged` (line 12713) reads the held text for its
+mutation observers after it calls `InvalidateStyleAttribute`, so within it
+the attribute is written, and the change recorded, only after the
+observers' record is queued; they see the old value they see without the
+recorder. No DOM checkpoint is queued for the change: the change record is
+the evidence. The cost is one serialization of the element's inline style
+per change, which Blink also pays when a mutation observer watches the
+element's style attribute.
+
 ### Shadow roots and slots
 
 - A shadow root attached to a connected host is recorded as
@@ -677,6 +710,13 @@ rebuilt one, which is how such an order would be found.
   `dom-shadow-root-changed`, with every field of the checkpoint's shadow
   root record, from `ShadowRoot::setReferenceTarget`
   (`core/dom/shadow_root.cc`, line 559).
+- `Element::AttachShadowRootInternal` (`core/dom/element.cc`, line 8044) and
+  a declarative shadow root (line 7973) set the root's flags, among them
+  `availableToElementInternals`, after the root is attached and its
+  insertion recorded. The root is recorded again as `dom-shadow-root-changed`
+  once they are set. The first Windows recording of slice 4 showed 17
+  shadow roots whose checkpoint held `availableToElementInternals` true while
+  their insertion held false.
 - Slot assignments are recomputed lazily in `SlotAssignment::RecalcAssignment`
   (`core/dom/slot_assignment.cc`, line 232), which appends each assigned
   node to its slot (lines 289 and 312). At its end, every slot of the shadow
@@ -747,8 +787,11 @@ the next whole one. The scroll comparison above is reported with it.
 
 ## Slice 4 status
 
-Implemented. Tested in the sandbox only; not yet built or recorded on the
-target Windows machine.
+Implemented. Checked in one recording on the target Windows machine at
+revision 90b3b95 (see "Windows evidence" in this section). The hooks for
+style attributes changed through the CSSOM and for shadow root flags,
+added after that recording, are tested in the sandbox only. The record
+shapes are unchanged, so the protocol stays 0.34.
 
 Sandbox evidence, 2026-09-29:
 
@@ -766,8 +809,39 @@ Sandbox evidence, 2026-09-29:
   changes, and shadow root attachments to equal the next checkpoint, reports
   each kind of difference, and compares a scroll offset with its scroll
   translation.
-- Not measured: the records of real pages, the check on a recording, and the
-  renderer's recorder work per update.
+- Not measured in the sandbox: the records of real pages and the renderer's
+  recorder work per update.
+
+Windows evidence, 2026-09-29, revision 90b3b95, one recording of 66.0 s with
+instrumented Chromium and every collector on:
+
+- The Chromium build first failed on a local variable in the bridge that
+  shadowed another (revision a59569b); 90b3b95 renamed it and built. The
+  five Blink names above compiled.
+- `DomChangeCheck`: 196 DOM checkpoints compared with the tree rebuilt from
+  the one before and the change records; 243,461 of 243,502 nodes equal in
+  every field. The 41 that differ are 24 style attributes changed through
+  the CSSOM and 17 shadow roots whose `availableToElementInternals` was set
+  after their insertion was recorded; both are described above and
+  recorded from the next revision. 56 scroll offsets, each equal to the
+  negated translation of its scroll translation node. 1,495 change records
+  named a node outside the document's tree, such as an attribute set on an
+  element before it was inserted; the element's state arrives with its
+  insertion, so the check counts them without comparing them.
+- `LayoutChangeCheck`: 192 layout checkpoints, 117,456 nodes, all equal, the
+  largest rectangle edge difference 0.000245 CSS px. This is the first
+  Windows measurement of the SVG fix in revision b25a54b.
+- `DomCharacterDataCheck`: 236 DOM checkpoints; 144,309 of 144,309 text,
+  comment, and other character data compared equal to the data rebuilt
+  before them. This is the first Windows measurement of protocol 0.33.
+- The user reported that hovering over a button is still very slow. The
+  renderer's cost log for the busiest renderer, over 60.0 s: 183 full
+  layout checkpoints took 17.7 s of its main thread, at most 352.0 ms each;
+  179 full DOM checkpoints took 14.9 s, at most 267.7 ms; and 192,698 waits
+  for space in the full evidence queue took 23.5 s, at most 26.8 ms each.
+  The slice 3 and 4 change records took 0.58 s. The evidence writer thread
+  was busy for 57.6 s of the 60.0 s. Slices 3 and 4 add records beside the
+  full checkpoints and remove none; slice 5 is the slice that stops them.
 
 ## Slice 2 design: playback from the file
 

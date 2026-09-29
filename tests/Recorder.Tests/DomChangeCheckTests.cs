@@ -263,6 +263,30 @@ public sealed class DomChangeCheckTests
     }
 
     [Fact]
+    public void CountsAChangeToANodeBeforeItsInsertionWithoutReportingIt()
+    {
+        var paragraph = new TreeNode(20, 10, "element", "P", [("class", "new")]);
+        var check = Check(
+            Checkpoint(1, Document, Html, Head, Body),
+            One(SetAttribute(20, "class", "new", "added")),
+            Insert(10, null, paragraph),
+            Checkpoint(2, Document, Html, Head, Body, paragraph));
+
+        Assert.Empty(check.Differences);
+        Assert.Equal(1, check.ChangesOutsideTheTree);
+    }
+
+    [Fact]
+    public void ReportsAnInsertionIntoAContainerOutsideTheTree()
+    {
+        var check = Check(
+            Checkpoint(1, Document, Html, Head, Body),
+            Insert(40, null, new TreeNode(41, 40, "element", "P")));
+
+        Assert.Equal(1, check.Differences["node-not-in-tree"]);
+    }
+
+    [Fact]
     public void ReportsAnInsertionWhoseCountsDoNotMatchItsRecords()
     {
         var records = Insert(10, null, new TreeNode(20, 10, "element", "P")).ToList();

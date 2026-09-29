@@ -5198,12 +5198,7 @@ class LayoutIntegrationTests(unittest.TestCase):
             (
                 "element.cc",
                 INTEGRATE.BLINK_DOM_CHANGE_DECLARATION,
-                (
-                    (
-                        INTEGRATE.BLINK_ELEMENT_SHADOW_ROOT_ANCHOR,
-                        INTEGRATE.BLINK_ELEMENT_SHADOW_ROOT_HOOK,
-                    ),
-                ),
+                INTEGRATE.BLINK_ELEMENT_DOM_CHANGE_HOOKS,
             ),
             (
                 "shadow_root.cc",
@@ -5247,6 +5242,50 @@ class LayoutIntegrationTests(unittest.TestCase):
                 )
                 for _, hook in hooks:
                     self.assertEqual(1, first.count(hook))
+
+    def test_records_style_attribute_changes_made_through_the_cssom(self):
+        helper = INTEGRATE.BLINK_ELEMENT_STYLE_ATTRIBUTE_HELPER
+        # The attribute is written as getAttribute() writes it, and the
+        # change is recorded without queuing a DOM checkpoint.
+        self.assertIn("getAttribute(html_names::kStyleAttr)", helper)
+        self.assertIn("AttributesWithoutUpdate()", helper)
+        self.assertIn("RecordBlinkDomAttributeChanged(", helper)
+        self.assertNotIn("EnqueueRecorderDomCheckpoint", helper)
+        self.assertIn("isConnected()", helper)
+        self.assertIn("RecorderRecordsDomChanges(", helper)
+        # Every CSSOM path reaches InvalidateStyleAttribute, which reads the
+        # held text before the change and records after it.
+        start = INTEGRATE.BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_START_HOOK
+        end = INTEGRATE.BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_END_HOOK
+        self.assertIn("RecorderHeldStyleAttribute(*this)", start)
+        self.assertIn("!g_recorder_inline_style_changing", end)
+        # InlineStyleChanged records only after its mutation observers'
+        # record is queued, so their old value is the one Blink gives them.
+        inline_end = INTEGRATE.BLINK_ELEMENT_INLINE_STYLE_CHANGED_END_HOOK
+        self.assertLess(
+            inline_end.index("SynchronizeAttribute(html_names::kStyleAttr);"),
+            inline_end.index("RecorderRecordStyleAttributeChange("),
+        )
+        inline_start = INTEGRATE.BLINK_ELEMENT_INLINE_STYLE_CHANGED_START_HOOK
+        self.assertLess(
+            inline_start.index("g_recorder_inline_style_changing = true;"),
+            inline_start.index("InvalidateStyleAttribute("),
+        )
+        self.assertLess(
+            inline_start.index("InvalidateStyleAttribute("),
+            inline_start.index("g_recorder_inline_style_changing = false;"),
+        )
+
+    def test_records_a_shadow_root_again_once_its_flags_are_set(self):
+        for hook in (
+            INTEGRATE.BLINK_ELEMENT_SHADOW_ROOT_FLAGS_HOOK,
+            INTEGRATE.BLINK_ELEMENT_DECLARATIVE_SHADOW_ROOT_FLAGS_HOOK,
+        ):
+            with self.subTest(hook=hook):
+                self.assertLess(
+                    hook.index("SetAvailableToElementInternals("),
+                    hook.index("RecorderRecordDomShadowRootChanged(shadow_root);"),
+                )
 
     def test_upgrades_a_light_tree_helper_in_place(self):
         """A helper written before the composed traversal is rewritten."""

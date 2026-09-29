@@ -1478,6 +1478,160 @@ BLINK_ELEMENT_SHADOW_ROOT_HOOK = """\
                                *shadow_root);
   }
 """
+# A style attribute changed through the CSSOM (element.style, and Blink's
+# own inline style setters) is not written to the attribute at once:
+# Element::InvalidateStyleAttribute, which both paths call, marks it dirty,
+# and Blink writes it when it is next read without calling
+# DidModifyAttribute, so the attribute hooks never see it. While a connected
+# element's changes are recorded, the hooks write the attribute after each
+# change, as getAttribute() would, and record the change. The write passes
+# kBySynchronizationOfLazyAttribute, so it runs no attribute callback and
+# queues no mutation record. Because the recorder writes the attribute at
+# every change, the text the element holds before a change is the text
+# before it. InlineStyleChanged reads that text for its mutation observers
+# after InvalidateStyleAttribute, so within it the attribute is written only
+# after the observers' record is queued, and they see the value they see
+# without the recorder.
+BLINK_ELEMENT_STYLE_ATTRIBUTE_HELPER_ANCHOR = """\
+void Element::DidAddAttribute(const QualifiedName& name,
+                              const AtomicString& value) {
+"""
+BLINK_ELEMENT_STYLE_ATTRIBUTE_HELPER = """\
+// Whether InlineStyleChanged is running, which records its own change.
+static bool g_recorder_inline_style_changing = false;
+
+// The style attribute's text as the element holds it, without writing it.
+static AtomicString RecorderHeldStyleAttribute(const Element& recorder_element) {
+  const Attribute* recorder_attribute =
+      recorder_element.AttributesWithoutUpdate().Find(html_names::kStyleAttr);
+  return recorder_attribute ? recorder_attribute->Value() : g_null_atom;
+}
+
+// Writes a connected element's style attribute from its inline style and
+// records the change from the text it held before. No DOM checkpoint is
+// queued: the change record is the evidence.
+static void RecorderRecordStyleAttributeChange(
+    Element& recorder_element,
+    const AtomicString& recorder_previous_style) {
+  if (!recorder_element.isConnected() ||
+      !RecorderRecordsDomChanges(recorder_element.GetDocument())) {
+    return;
+  }
+  const AtomicString recorder_style =
+      recorder_element.getAttribute(html_names::kStyleAttr);
+  if (recorder_style == recorder_previous_style) {
+    return;
+  }
+  Document& recorder_document = recorder_element.GetDocument();
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  if (recorder_document_node_id <= 0) {
+    return;
+  }
+  // Every value is recorded whole, as the attribute hooks record it.
+  constexpr int kRecorderMaximumDomValueLength = 2147483647;
+  const bool recorder_has_value = !recorder_style.IsNull();
+  const bool recorder_has_previous_value = !recorder_previous_style.IsNull();
+  const int recorder_change_type =
+      !recorder_has_previous_value ? 0 : (!recorder_has_value ? 1 : 2);
+  const String recorder_value =
+      recorder_has_value ? recorder_style.GetString() : g_empty_string;
+  const String recorder_previous_value =
+      recorder_has_previous_value ? recorder_previous_style.GetString()
+                                  : g_empty_string;
+  a11y_recorder::RecordBlinkDomAttributeChanged(
+      recorder_document_node_id, recorder_document.Token().ToString(),
+      recorder_element.GetDomNodeId(),
+      recorder_element.nodeName().Utf8().c_str(), "", "style",
+      recorder_change_type, recorder_value.Utf8().c_str(),
+      static_cast<int>(recorder_value.length()), false,
+      recorder_previous_value.Utf8().c_str(),
+      static_cast<int>(recorder_previous_value.length()), false,
+      kRecorderMaximumDomValueLength);
+}
+
+"""
+BLINK_ELEMENT_STYLE_ATTRIBUTE_HELPER_HOOK = (
+    BLINK_ELEMENT_STYLE_ATTRIBUTE_HELPER
+    + BLINK_ELEMENT_STYLE_ATTRIBUTE_HELPER_ANCHOR
+)
+BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_START_ANCHOR = """\
+void Element::InvalidateStyleAttribute(
+    bool only_changed_independent_properties) {
+  DCHECK(HasElementData());
+"""
+BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_START_HOOK = (
+    BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_START_ANCHOR
+    + """\
+  const AtomicString recorder_previous_style = RecorderHeldStyleAttribute(*this);
+"""
+)
+BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_END_ANCHOR = """\
+  GetDocument().GetStyleEngine().AttributeChangedForElement(
+      html_names::kStyleAttr, *this);
+  SoftNavigationHeuristics::ModifiedAttribute(this, html_names::kStyleAttr);
+}
+"""
+BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_END_HOOK = """\
+  GetDocument().GetStyleEngine().AttributeChangedForElement(
+      html_names::kStyleAttr, *this);
+  SoftNavigationHeuristics::ModifiedAttribute(this, html_names::kStyleAttr);
+  if (!g_recorder_inline_style_changing) {
+    RecorderRecordStyleAttributeChange(*this, recorder_previous_style);
+  }
+}
+"""
+BLINK_ELEMENT_INLINE_STYLE_CHANGED_START_ANCHOR = """\
+  DCHECK(IsStyledElement());
+  InvalidateStyleAttribute(only_changed_independent_properties);
+  probe::DidInvalidateStyleAttr(this);
+"""
+BLINK_ELEMENT_INLINE_STYLE_CHANGED_START_HOOK = """\
+  DCHECK(IsStyledElement());
+  const AtomicString recorder_previous_style = RecorderHeldStyleAttribute(*this);
+  g_recorder_inline_style_changing = true;
+  InvalidateStyleAttribute(only_changed_independent_properties);
+  g_recorder_inline_style_changing = false;
+  probe::DidInvalidateStyleAttr(this);
+"""
+BLINK_ELEMENT_INLINE_STYLE_CHANGED_END_ANCHOR = """\
+    // Need to synchronize every time so that following MutationRecords will
+    // have correct oldValues.
+    SynchronizeAttribute(html_names::kStyleAttr);
+  }
+}
+"""
+BLINK_ELEMENT_INLINE_STYLE_CHANGED_END_HOOK = """\
+    // Need to synchronize every time so that following MutationRecords will
+    // have correct oldValues.
+    SynchronizeAttribute(html_names::kStyleAttr);
+  }
+  RecorderRecordStyleAttributeChange(*this, recorder_previous_style);
+}
+"""
+# attachShadow() and a declarative shadow root set the root's flags after
+# the root is attached and its insertion recorded; the root's state is
+# recorded again once they are set.
+BLINK_ELEMENT_SHADOW_ROOT_FLAGS_ANCHOR = """\
+  shadow_root.SetAvailableToElementInternals(
+      !(IsCustomElement() &&
+        GetCustomElementState() != CustomElementState::kCustom &&
+        GetCustomElementState() != CustomElementState::kPreCustomized));
+"""
+BLINK_ELEMENT_SHADOW_ROOT_FLAGS_HOOK = (
+    BLINK_ELEMENT_SHADOW_ROOT_FLAGS_ANCHOR
+    + """\
+  RecorderRecordDomShadowRootChanged(shadow_root);
+"""
+)
+BLINK_ELEMENT_DECLARATIVE_SHADOW_ROOT_FLAGS_ANCHOR = """\
+  shadow_root.SetAvailableToElementInternals(true);
+"""
+BLINK_ELEMENT_DECLARATIVE_SHADOW_ROOT_FLAGS_HOOK = (
+    BLINK_ELEMENT_DECLARATIVE_SHADOW_ROOT_FLAGS_ANCHOR
+    + """\
+  RecorderRecordDomShadowRootChanged(shadow_root);
+"""
+)
 BLINK_SHADOW_ROOT_REFERENCE_TARGET_ANCHOR = """\
   reference_target_id_observer_ =
       reference_target ? MakeGarbageCollected<ReferenceTargetIdObserver>(
@@ -1499,6 +1653,34 @@ BLINK_SHADOW_ROOT_REFERENCE_TARGET_HOOK = (
     + """\
   RecorderRecordDomShadowRootChanged(*this);
 """
+)
+BLINK_ELEMENT_DOM_CHANGE_HOOKS = (
+    (BLINK_ELEMENT_SHADOW_ROOT_ANCHOR, BLINK_ELEMENT_SHADOW_ROOT_HOOK),
+    (BLINK_ELEMENT_SHADOW_ROOT_FLAGS_ANCHOR, BLINK_ELEMENT_SHADOW_ROOT_FLAGS_HOOK),
+    (
+        BLINK_ELEMENT_DECLARATIVE_SHADOW_ROOT_FLAGS_ANCHOR,
+        BLINK_ELEMENT_DECLARATIVE_SHADOW_ROOT_FLAGS_HOOK,
+    ),
+    (
+        BLINK_ELEMENT_STYLE_ATTRIBUTE_HELPER_ANCHOR,
+        BLINK_ELEMENT_STYLE_ATTRIBUTE_HELPER_HOOK,
+    ),
+    (
+        BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_START_ANCHOR,
+        BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_START_HOOK,
+    ),
+    (
+        BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_END_ANCHOR,
+        BLINK_ELEMENT_INVALIDATE_STYLE_ATTRIBUTE_END_HOOK,
+    ),
+    (
+        BLINK_ELEMENT_INLINE_STYLE_CHANGED_START_ANCHOR,
+        BLINK_ELEMENT_INLINE_STYLE_CHANGED_START_HOOK,
+    ),
+    (
+        BLINK_ELEMENT_INLINE_STYLE_CHANGED_END_ANCHOR,
+        BLINK_ELEMENT_INLINE_STYLE_CHANGED_END_HOOK,
+    ),
 )
 BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR = (
     "void Document::NotifyChangeChildren(\n"
@@ -11114,13 +11296,14 @@ def main() -> int:
         / "dom"
         / "character_data.cc"
     )
-    # Protocol 0.34: shadow roots attached to connected hosts, reference
-    # target changes, and slot assignment recalculations.
+    # Protocol 0.34: shadow roots attached to connected hosts and their
+    # flags, style attributes changed through the CSSOM, reference target
+    # changes, and slot assignment recalculations.
     blink_dom = source / "third_party" / "blink" / "renderer" / "core" / "dom"
     patch_blink_layout_change_notes(
         blink_dom / "element.cc",
         BLINK_DOM_CHANGE_DECLARATION,
-        ((BLINK_ELEMENT_SHADOW_ROOT_ANCHOR, BLINK_ELEMENT_SHADOW_ROOT_HOOK),),
+        BLINK_ELEMENT_DOM_CHANGE_HOOKS,
     )
     patch_blink_layout_change_notes(
         blink_dom / "shadow_root.cc",

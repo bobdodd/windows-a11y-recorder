@@ -84,6 +84,7 @@ public sealed class DomChangeCheck
     public int CharacterDataTransitions { get; private set; }
     public int ShadowRootChanges { get; private set; }
     public int SlotAssignmentChanges { get; private set; }
+    public int ChangesOutsideTheTree { get; private set; }
     public int ScrollOffsets { get; private set; }
     public int ScrollOffsetsCompared { get; private set; }
     public int ScrollOffsetsMatched { get; private set; }
@@ -145,7 +146,7 @@ public sealed class DomChangeCheck
                 StartInsertion(token, payload);
                 break;
             case "dom-inserted-node":
-                if (FindInsertion(payload) is { } insertion)
+                if (FindInsertion(token, payload) is { } insertion)
                 {
                     insertion.Nodes++;
                     InsertedNodes++;
@@ -153,35 +154,35 @@ public sealed class DomChangeCheck
                 }
                 break;
             case "dom-inserted-node-attribute":
-                if (FindInsertion(payload) is { } withAttribute)
+                if (FindInsertion(token, payload) is { } withAttribute)
                 {
                     withAttribute.Attributes++;
                     SetAttribute(withAttribute.Tree, payload, withAttribute.Id);
                 }
                 break;
             case "dom-inserted-node-character-data":
-                if (FindInsertion(payload) is { } withData)
+                if (FindInsertion(token, payload) is { } withData)
                 {
                     withData.CharacterData++;
                     SetData(withData.Tree, payload, "data", withData.Id);
                 }
                 break;
             case "dom-inserted-shadow-root":
-                if (FindInsertion(payload) is { } withShadowRoot)
+                if (FindInsertion(token, payload) is { } withShadowRoot)
                 {
                     withShadowRoot.ShadowRoots++;
                     SetShadowRoot(withShadowRoot.Tree, payload, withShadowRoot.Id);
                 }
                 break;
             case "dom-inserted-slot-assignment":
-                if (FindInsertion(payload) is { } withSlot)
+                if (FindInsertion(token, payload) is { } withSlot)
                 {
                     withSlot.Slots++;
                     SetAssignment(withSlot.Tree, payload, withSlot.Id);
                 }
                 break;
             case "dom-insertion-completed":
-                CompleteInsertion(payload);
+                CompleteInsertion(token, payload);
                 break;
             case "dom-node-removed":
                 Removals++;
@@ -270,6 +271,8 @@ public sealed class DomChangeCheck
         report.AppendLine($"shadow root changes: {ShadowRootChanges}");
         report.AppendLine($"slot assignment changes: {SlotAssignmentChanges}");
         report.AppendLine(
+            $"changes to nodes outside the document's tree, not compared: {ChangesOutsideTheTree}");
+        report.AppendLine(
             $"scroll offsets: {ScrollOffsets}, compared with their scroll translation {ScrollOffsetsCompared}, equal {ScrollOffsetsMatched}");
         foreach (var (kind, count) in _differences.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {
@@ -302,7 +305,20 @@ public sealed class DomChangeCheck
         {
             return node;
         }
-        Note("record-for-unknown-node", $"{where} node {id}");
+        Note("node-not-in-tree", $"{where} node {id}");
+        return null;
+    }
+
+    // A change to a node outside the document's tree: Blink records changes
+    // to elements before they are inserted, whose state then arrives with
+    // their insertion. It is counted, not reported as a difference.
+    private DomNode? InTree(DocumentTree tree, long id)
+    {
+        if (tree.Nodes.TryGetValue(id, out var node))
+        {
+            return node;
+        }
+        ChangesOutsideTheTree++;
         return null;
     }
 
@@ -360,6 +376,13 @@ public sealed class DomChangeCheck
             : "\u0000cut";
     }
 
+    // The node a record names: a transition may name a node outside the
+    // tree, a checkpoint or inserted subtree record may not.
+    private DomNode? Find(DocumentTree tree, JsonElement payload, string where) =>
+        payload.TryGetProperty("transitionId", out _)
+            ? InTree(tree, payload.GetProperty("nodeId").GetInt64())
+            : Known(tree, payload.GetProperty("nodeId").GetInt64(), where);
+
     private void SetAttribute(DocumentTree tree, JsonElement payload, string where)
     {
         if (Known(tree, payload.GetProperty("nodeId").GetInt64(), where) is { } node)
@@ -371,7 +394,7 @@ public sealed class DomChangeCheck
     private void ChangeAttribute(DocumentTree tree, JsonElement payload)
     {
         var where = payload.GetProperty("transitionId").GetString()!;
-        if (Known(tree, payload.GetProperty("nodeId").GetInt64(), where) is not { } node)
+        if (InTree(tree, payload.GetProperty("nodeId").GetInt64()) is not { } node)
         {
             return;
         }
@@ -389,7 +412,7 @@ public sealed class DomChangeCheck
 
     private void SetData(DocumentTree tree, JsonElement payload, string property, string where)
     {
-        if (Known(tree, payload.GetProperty("nodeId").GetInt64(), where) is { } node)
+        if (Find(tree, payload, where) is { } node)
         {
             node.Data = TextValue(payload, property);
         }
@@ -403,7 +426,7 @@ public sealed class DomChangeCheck
 
     private void SetShadowRoot(DocumentTree tree, JsonElement payload, string where)
     {
-        if (Known(tree, payload.GetProperty("nodeId").GetInt64(), where) is { } node)
+        if (Find(tree, payload, where) is { } node)
         {
             node.ShadowRootFields = string.Join(
                 ",",
@@ -413,7 +436,7 @@ public sealed class DomChangeCheck
 
     private void SetAssignment(DocumentTree tree, JsonElement payload, string where)
     {
-        if (Known(tree, payload.GetProperty("nodeId").GetInt64(), where) is { } node)
+        if (Find(tree, payload, where) is { } node)
         {
             node.AssignedNodes = payload.GetProperty("assignedNodesTruncated").GetBoolean()
                 ? "\u0000cut"
@@ -499,16 +522,18 @@ public sealed class DomChangeCheck
             }
             container.Children.Insert(index, nodeId);
         }
-        _insertions[id] = new Insertion(id, tree);
+        _insertions[token + " " + id] = new Insertion(id, tree);
     }
 
-    private Insertion? FindInsertion(JsonElement payload) =>
-        _insertions.GetValueOrDefault(payload.GetProperty("insertionId").GetString()!);
+    // Transition numbers are counted in each renderer process, so an
+    // insertion is found by its document and its identity.
+    private Insertion? FindInsertion(string token, JsonElement payload) =>
+        _insertions.GetValueOrDefault(token + " " + payload.GetProperty("insertionId").GetString()!);
 
-    private void CompleteInsertion(JsonElement payload)
+    private void CompleteInsertion(string token, JsonElement payload)
     {
         var id = payload.GetProperty("insertionId").GetString()!;
-        if (!_insertions.Remove(id, out var insertion))
+        if (!_insertions.Remove(token + " " + id, out var insertion))
         {
             return;
         }
