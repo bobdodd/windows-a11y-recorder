@@ -2930,6 +2930,368 @@ void RecordBlinkDomCharacterDataChanged(int document_node_id,
                     std::move(payload));
 }
 
+namespace {
+
+// The base of a record of an inserted subtree: its context and the
+// transition identity of the insertion it belongs to.
+base::DictValue CreateDomInsertionBasePayload(const RecorderPipeClient& client,
+                                              uint64_t insertion_sequence,
+                                              int document_node_id,
+                                              std::string document_token) {
+  base::DictValue payload;
+  payload.Set("context",
+              CreateContext(client, document_node_id,
+                            std::move(document_token)));
+  payload.Set("insertionId", DomTransitionId(insertion_sequence));
+  return payload;
+}
+
+bool IsValidShadowRootFields(const std::string& mode,
+                             const std::string& slot_assignment) {
+  return (mode == "open" || mode == "closed" || mode == "user-agent") &&
+         (slot_assignment == "named" || slot_assignment == "manual");
+}
+
+void SetShadowRootFields(base::DictValue& payload,
+                         int node_id,
+                         int host_node_id,
+                         std::string mode,
+                         bool delegates_focus,
+                         std::string slot_assignment,
+                         bool clonable,
+                         bool serializable,
+                         bool declarative,
+                         bool available_to_element_internals,
+                         bool reference_target_present,
+                         std::string reference_target) {
+  payload.Set("nodeId", node_id);
+  payload.Set("hostNodeId", host_node_id);
+  payload.Set("mode", std::move(mode));
+  payload.Set("delegatesFocus", delegates_focus);
+  payload.Set("slotAssignment", std::move(slot_assignment));
+  payload.Set("clonable", clonable);
+  payload.Set("serializable", serializable);
+  payload.Set("declarative", declarative);
+  payload.Set("availableToElementInternals", available_to_element_internals);
+  payload.Set("referenceTarget", reference_target_present
+                                     ? base::Value(std::move(reference_target))
+                                     : base::Value());
+}
+
+base::ListValue AssignedNodeIdList(const std::vector<int>& assigned_node_ids) {
+  base::ListValue assigned;
+  for (int assigned_node_id : assigned_node_ids) {
+    if (assigned_node_id > 0) {
+      assigned.Append(assigned_node_id);
+    } else {
+      assigned.Append(base::Value());
+    }
+  }
+  return assigned;
+}
+
+}  // namespace
+
+uint64_t RecordBlinkDomNodeInserted(int document_node_id,
+                                    std::string document_token,
+                                    std::string insertion_kind,
+                                    int container_node_id,
+                                    int node_id,
+                                    int previous_sibling_node_id) {
+  A11Y_RECORDER_COST("RecordBlinkDomNodeInserted");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      (insertion_kind != "child" && insertion_kind != "shadow-root") ||
+      container_node_id <= 0 || node_id <= 0 ||
+      previous_sibling_node_id < 0 ||
+      (insertion_kind == "shadow-root" && previous_sibling_node_id != 0)) {
+    return 0;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateContext(*client, document_node_id,
+                            std::move(document_token)));
+  const uint64_t insertion_sequence =
+      AssignDomTransitionIdentity(document_node_id);
+  payload.Set("transitionId", DomTransitionId(insertion_sequence));
+  payload.Set("insertionKind", std::move(insertion_kind));
+  payload.Set("containerNodeId", container_node_id);
+  payload.Set("nodeId", node_id);
+  payload.Set("previousSiblingNodeId", previous_sibling_node_id > 0
+                                           ? base::Value(previous_sibling_node_id)
+                                           : base::Value());
+  SendBlinkEvidence("browser.dom", "dom-node-inserted", std::move(payload));
+  return insertion_sequence;
+}
+
+void RecordBlinkDomInsertedNode(uint64_t insertion_sequence,
+                                int document_node_id,
+                                std::string document_token,
+                                int node_index,
+                                int node_id,
+                                int parent_node_id,
+                                int node_type,
+                                std::string node_name) {
+  A11Y_RECORDER_COST("RecordBlinkDomInsertedNode");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || insertion_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_index < 0 || node_id <= 0 ||
+      parent_node_id <= 0 || node_name.empty()) {
+    return;
+  }
+  base::DictValue payload = CreateDomInsertionBasePayload(
+      *client, insertion_sequence, document_node_id, std::move(document_token));
+  payload.Set("nodeIndex", node_index);
+  payload.Set("nodeId", node_id);
+  payload.Set("parentNodeId", parent_node_id);
+  payload.Set("nodeType", DomNodeTypeName(node_type));
+  payload.Set("nodeName", std::move(node_name));
+  SendBlinkEvidence("browser.dom", "dom-inserted-node", std::move(payload));
+}
+
+void RecordBlinkDomInsertedNodeAttribute(uint64_t insertion_sequence,
+                                         int document_node_id,
+                                         std::string document_token,
+                                         int node_id,
+                                         int attribute_index,
+                                         std::string attribute_namespace,
+                                         std::string attribute_name,
+                                         std::string attribute_value,
+                                         int attribute_value_length,
+                                         bool attribute_value_truncated,
+                                         int maximum_value_length) {
+  A11Y_RECORDER_COST("RecordBlinkDomInsertedNodeAttribute");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || insertion_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_id <= 0 || attribute_index < 0 ||
+      attribute_name.empty() || attribute_value_length < 0 ||
+      maximum_value_length <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomInsertionBasePayload(
+      *client, insertion_sequence, document_node_id, std::move(document_token));
+  payload.Set("nodeId", node_id);
+  payload.Set("attributeIndex", attribute_index);
+  if (attribute_namespace.empty()) {
+    payload.Set("attributeNamespace", base::Value());
+  } else {
+    payload.Set("attributeNamespace", std::move(attribute_namespace));
+  }
+  payload.Set("attributeName", std::move(attribute_name));
+  SetTruncatedTextProperties(payload, "attributeValue", "attributeValueLength",
+                             "attributeValueTruncated",
+                             std::move(attribute_value),
+                             attribute_value_length,
+                             attribute_value_truncated);
+  payload.Set("maximumValueLength", maximum_value_length);
+  SendBlinkEvidence("browser.dom", "dom-inserted-node-attribute",
+                    std::move(payload));
+}
+
+void RecordBlinkDomInsertedNodeCharacterData(uint64_t insertion_sequence,
+                                             int document_node_id,
+                                             std::string document_token,
+                                             int node_id,
+                                             std::string data,
+                                             int data_length,
+                                             bool data_truncated,
+                                             int maximum_value_length) {
+  A11Y_RECORDER_COST("RecordBlinkDomInsertedNodeCharacterData");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || insertion_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_id <= 0 || data_length < 0 ||
+      maximum_value_length <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomInsertionBasePayload(
+      *client, insertion_sequence, document_node_id, std::move(document_token));
+  payload.Set("nodeId", node_id);
+  SetTruncatedTextProperties(payload, "data", "dataLength", "dataTruncated",
+                             std::move(data), data_length, data_truncated);
+  payload.Set("maximumValueLength", maximum_value_length);
+  SendBlinkEvidence("browser.dom", "dom-inserted-node-character-data",
+                    std::move(payload));
+}
+
+void RecordBlinkDomInsertedShadowRoot(uint64_t insertion_sequence,
+                                      int document_node_id,
+                                      std::string document_token,
+                                      int node_id,
+                                      int host_node_id,
+                                      std::string mode,
+                                      bool delegates_focus,
+                                      std::string slot_assignment,
+                                      bool clonable,
+                                      bool serializable,
+                                      bool declarative,
+                                      bool available_to_element_internals,
+                                      bool reference_target_present,
+                                      std::string reference_target) {
+  A11Y_RECORDER_COST("RecordBlinkDomInsertedShadowRoot");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || insertion_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_id <= 0 || host_node_id <= 0 ||
+      !IsValidShadowRootFields(mode, slot_assignment)) {
+    return;
+  }
+  base::DictValue payload = CreateDomInsertionBasePayload(
+      *client, insertion_sequence, document_node_id, std::move(document_token));
+  SetShadowRootFields(payload, node_id, host_node_id, std::move(mode),
+                      delegates_focus, std::move(slot_assignment), clonable,
+                      serializable, declarative,
+                      available_to_element_internals, reference_target_present,
+                      std::move(reference_target));
+  SendBlinkEvidence("browser.dom", "dom-inserted-shadow-root",
+                    std::move(payload));
+}
+
+void RecordBlinkDomInsertedSlotAssignment(uint64_t insertion_sequence,
+                                          int document_node_id,
+                                          std::string document_token,
+                                          int node_id,
+                                          std::vector<int> assigned_node_ids,
+                                          int assigned_node_count,
+                                          int maximum_assigned_nodes,
+                                          bool assignment_current) {
+  A11Y_RECORDER_COST("RecordBlinkDomInsertedSlotAssignment");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || insertion_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_id <= 0 || assigned_node_count < 0 ||
+      maximum_assigned_nodes <= 0 ||
+      static_cast<int>(assigned_node_ids.size()) > assigned_node_count ||
+      static_cast<int>(assigned_node_ids.size()) > maximum_assigned_nodes) {
+    return;
+  }
+  base::DictValue payload = CreateDomInsertionBasePayload(
+      *client, insertion_sequence, document_node_id, std::move(document_token));
+  payload.Set("nodeId", node_id);
+  const bool truncated =
+      static_cast<int>(assigned_node_ids.size()) < assigned_node_count;
+  payload.Set("assignedNodeIds", AssignedNodeIdList(assigned_node_ids));
+  payload.Set("assignedNodeCount", assigned_node_count);
+  payload.Set("assignedNodesTruncated", truncated);
+  payload.Set("maximumAssignedNodes", maximum_assigned_nodes);
+  payload.Set("assignmentCurrent", assignment_current);
+  SendBlinkEvidence("browser.dom", "dom-inserted-slot-assignment",
+                    std::move(payload));
+}
+
+void CompleteBlinkDomInsertion(uint64_t insertion_sequence,
+                               int document_node_id,
+                               std::string document_token,
+                               int node_count,
+                               int attribute_count,
+                               int character_data_count,
+                               int shadow_root_count,
+                               int slot_count) {
+  A11Y_RECORDER_COST("CompleteBlinkDomInsertion");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || insertion_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_count <= 0 || attribute_count < 0 ||
+      character_data_count < 0 || shadow_root_count < 0 || slot_count < 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomInsertionBasePayload(
+      *client, insertion_sequence, document_node_id, std::move(document_token));
+  payload.Set("nodeCount", node_count);
+  payload.Set("attributeCount", attribute_count);
+  payload.Set("characterDataCount", character_data_count);
+  payload.Set("shadowRootCount", shadow_root_count);
+  payload.Set("slotCount", slot_count);
+  SendBlinkEvidence("browser.dom", "dom-insertion-completed",
+                    std::move(payload));
+}
+
+void RecordBlinkDomNodeRemoved(int document_node_id,
+                               std::string document_token,
+                               int container_node_id,
+                               int node_id) {
+  A11Y_RECORDER_COST("RecordBlinkDomNodeRemoved");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      container_node_id <= 0 || node_id <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomStateChangeBasePayload(
+      *client, document_node_id, std::move(document_token));
+  payload.Set("containerNodeId", container_node_id);
+  payload.Set("nodeId", node_id);
+  SendBlinkEvidence("browser.dom", "dom-node-removed", std::move(payload));
+}
+
+void RecordBlinkDomChildrenRemoved(int document_node_id,
+                                   std::string document_token,
+                                   int container_node_id) {
+  A11Y_RECORDER_COST("RecordBlinkDomChildrenRemoved");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      container_node_id <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomStateChangeBasePayload(
+      *client, document_node_id, std::move(document_token));
+  payload.Set("containerNodeId", container_node_id);
+  SendBlinkEvidence("browser.dom", "dom-children-removed", std::move(payload));
+}
+
+void RecordBlinkDomShadowRootChanged(int document_node_id,
+                                     std::string document_token,
+                                     int node_id,
+                                     int host_node_id,
+                                     std::string mode,
+                                     bool delegates_focus,
+                                     std::string slot_assignment,
+                                     bool clonable,
+                                     bool serializable,
+                                     bool declarative,
+                                     bool available_to_element_internals,
+                                     bool reference_target_present,
+                                     std::string reference_target) {
+  A11Y_RECORDER_COST("RecordBlinkDomShadowRootChanged");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || host_node_id <= 0 ||
+      !IsValidShadowRootFields(mode, slot_assignment)) {
+    return;
+  }
+  base::DictValue payload = CreateDomStateChangeBasePayload(
+      *client, document_node_id, std::move(document_token));
+  SetShadowRootFields(payload, node_id, host_node_id, std::move(mode),
+                      delegates_focus, std::move(slot_assignment), clonable,
+                      serializable, declarative,
+                      available_to_element_internals, reference_target_present,
+                      std::move(reference_target));
+  SendBlinkEvidence("browser.dom", "dom-shadow-root-changed",
+                    std::move(payload));
+}
+
+void RecordBlinkDomSlotAssignmentChanged(int document_node_id,
+                                         std::string document_token,
+                                         int node_id,
+                                         std::vector<int> assigned_node_ids,
+                                         int assigned_node_count,
+                                         int maximum_assigned_nodes) {
+  A11Y_RECORDER_COST("RecordBlinkDomSlotAssignmentChanged");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || assigned_node_count < 0 || maximum_assigned_nodes <= 0 ||
+      static_cast<int>(assigned_node_ids.size()) > assigned_node_count ||
+      static_cast<int>(assigned_node_ids.size()) > maximum_assigned_nodes) {
+    return;
+  }
+  base::DictValue payload = CreateDomStateChangeBasePayload(
+      *client, document_node_id, std::move(document_token));
+  payload.Set("nodeId", node_id);
+  const bool truncated =
+      static_cast<int>(assigned_node_ids.size()) < assigned_node_count;
+  payload.Set("assignedNodeIds", AssignedNodeIdList(assigned_node_ids));
+  payload.Set("assignedNodeCount", assigned_node_count);
+  payload.Set("assignedNodesTruncated", truncated);
+  payload.Set("maximumAssignedNodes", maximum_assigned_nodes);
+  SendBlinkEvidence("browser.dom", "dom-slot-assignment-changed",
+                    std::move(payload));
+}
+
 void RecordBlinkSchedulerWakeUpDeferred(
     int queue_type,
     int throttling_type,
@@ -4018,6 +4380,14 @@ bool IsValidLayoutChangedNode(const LayoutChangedNode& changed) {
   return true;
 }
 
+bool IsValidLayoutScrollOffset(const LayoutScrollOffset& scroll) {
+  return scroll.node_id > 0 && IsFiniteNumber(scroll.scroll_offset_x) &&
+         IsFiniteNumber(scroll.scroll_offset_y) &&
+         IsFiniteNumber(scroll.web_exposed_scroll_offset_x) &&
+         IsFiniteNumber(scroll.web_exposed_scroll_offset_y) &&
+         IsFiniteNumber(scroll.effective_zoom) && scroll.effective_zoom > 0;
+}
+
 bool IsValidLayoutTransformNode(const LayoutTransformNode& node) {
   if (node.id == 0 || node.parent_id == node.id) {
     return false;
@@ -4090,7 +4460,8 @@ void RecordBlinkLayoutChanges(int document_node_id,
                               LayoutChangesFrame frame,
                               int noted_node_count,
                               std::vector<LayoutTransformNode> transform_nodes,
-                              std::vector<LayoutChangedNode> nodes) {
+                              std::vector<LayoutChangedNode> nodes,
+                              std::vector<LayoutScrollOffset> scroll_offsets) {
   A11Y_RECORDER_COST("RecordBlinkLayoutChanges");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
@@ -4112,6 +4483,7 @@ void RecordBlinkLayoutChanges(int document_node_id,
   }
   std::vector<size_t> changed_transforms;
   std::vector<size_t> changed_nodes;
+  std::vector<size_t> valid_scroll_offsets;
   int unchanged_node_count = 0;
   uint64_t change_set_sequence = 0;
   uint64_t named_checkpoint_sequence = 0;
@@ -4156,7 +4528,13 @@ void RecordBlinkLayoutChanges(int document_node_id,
         ++unchanged_node_count;
       }
     }
-    if (changed_transforms.empty() && changed_nodes.empty()) {
+    for (size_t index = 0; index < scroll_offsets.size(); ++index) {
+      if (IsValidLayoutScrollOffset(scroll_offsets[index])) {
+        valid_scroll_offsets.push_back(index);
+      }
+    }
+    if (changed_transforms.empty() && changed_nodes.empty() &&
+        valid_scroll_offsets.empty()) {
       return;
     }
     change_set_sequence = storage.next_change_set_id++;
@@ -4212,6 +4590,32 @@ void RecordBlinkLayoutChanges(int document_node_id,
     evidence->changed = std::move(nodes[index]);
     QueueBlinkEvidence(client, std::move(evidence));
   }
+  for (size_t index : valid_scroll_offsets) {
+    const LayoutScrollOffset& scroll = scroll_offsets[index];
+    base::DictValue payload = CreateLayoutChangesBasePayload(
+        *client, change_set_sequence, document_node_id, document_token);
+    payload.Set("nodeId", scroll.node_id);
+    base::DictValue offset;
+    offset.Set("x", scroll.scroll_offset_x);
+    offset.Set("y", scroll.scroll_offset_y);
+    payload.Set("scrollOffset", std::move(offset));
+    base::DictValue exposed;
+    exposed.Set("x", scroll.web_exposed_scroll_offset_x);
+    exposed.Set("y", scroll.web_exposed_scroll_offset_y);
+    payload.Set("webExposedScrollOffset", std::move(exposed));
+    base::DictValue origin;
+    origin.Set("x", scroll.scroll_origin_x);
+    origin.Set("y", scroll.scroll_origin_y);
+    payload.Set("scrollOrigin", std::move(origin));
+    payload.Set("effectiveZoom", scroll.effective_zoom);
+    payload.Set("scrollTranslationNodeId",
+                scroll.scroll_translation_node_id == 0
+                    ? base::Value()
+                    : base::Value(LayoutTransformNodeId(
+                          scroll.scroll_translation_node_id)));
+    SendBlinkEvidence("browser.layout", "layout-scroll-offset-changed",
+                      std::move(payload));
+  }
   base::DictValue completed = CreateLayoutChangesBasePayload(
       *client, change_set_sequence, document_node_id, std::move(document_token));
   completed.Set("notedNodeCount", noted_node_count);
@@ -4220,6 +4624,8 @@ void RecordBlinkLayoutChanges(int document_node_id,
   completed.Set("unchangedNodeCount", unchanged_node_count);
   completed.Set("transformNodeCount",
                 base::saturated_cast<int>(changed_transforms.size()));
+  completed.Set("scrollOffsetCount",
+                base::saturated_cast<int>(valid_scroll_offsets.size()));
   SendBlinkEvidence("browser.layout", "layout-changes-completed",
                     std::move(completed));
 }

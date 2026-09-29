@@ -2827,6 +2827,93 @@ public sealed class EventRecordValidatorTests
         Assert.Empty(issues);
     }
 
+    public static TheoryData<string, string> DomChangeRecords()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (eventType, json) in BrowserDomChangePayloads.All())
+        {
+            data.Add(eventType, json);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(DomChangeRecords))]
+    public void AcceptsEveryDomChangeRecordShape(string eventType, string json)
+    {
+        var issues = ValidateRecord(BrowserEvidenceChannels.Dom, eventType, JsonNode.Parse(json)!);
+
+        Assert.Empty(issues);
+    }
+
+    [Theory]
+    [MemberData(nameof(DomChangeRecords))]
+    public void RejectsAnUndeclaredPropertyInEveryDomChangeRecord(string eventType, string json)
+    {
+        var payload = JsonNode.Parse(json)!;
+        payload["undeclared"] = 1;
+
+        var issues = ValidateRecord(BrowserEvidenceChannels.Dom, eventType, payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void RejectsADomChangeRecordWithoutATransitionIdentity()
+    {
+        var payload = JsonNode.Parse(BrowserDomChangePayloads.InsertedNode)!;
+        payload["insertionId"] = "dom-checkpoint-4";
+
+        var issues = ValidateRecord(BrowserEvidenceChannels.Dom, "dom-inserted-node", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-dom-transition-id-invalid");
+    }
+
+    [Fact]
+    public void RejectsAShadowRootInsertionWithAPreviousSibling()
+    {
+        var payload = JsonNode.Parse(BrowserDomChangePayloads.ShadowRootInserted)!;
+        payload["previousSiblingNodeId"] = 3;
+
+        var issues = ValidateRecord(BrowserEvidenceChannels.Dom, "dom-node-inserted", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-dom-shadow-root-insertion-sibling");
+    }
+
+    [Fact]
+    public void RejectsAnAssignmentCurrentFlagOnASlotAssignmentChange()
+    {
+        var payload = JsonNode.Parse(BrowserDomChangePayloads.SlotAssignmentChanged)!;
+        payload["assignmentCurrent"] = true;
+
+        var issues = ValidateRecord(BrowserEvidenceChannels.Dom, "dom-slot-assignment-changed", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void RejectsAScrollOffsetWithoutItsCoordinates()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ScrollOffsetChanged)!;
+        payload["scrollOffset"]!.AsObject().Remove("y");
+
+        var issues = ValidateLayoutRecord("layout-scroll-offset-changed", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void RejectsALayoutChangeCompletionWithoutItsScrollOffsetCount()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesCompleted)!;
+        payload.AsObject().Remove("scrollOffsetCount");
+
+        var issues = ValidateLayoutRecord("layout-changes-completed", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
     public static TheoryData<string, string> LayoutRecords()
     {
         var data = new TheoryData<string, string>();

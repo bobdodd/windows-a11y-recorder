@@ -934,7 +934,20 @@ states their number on the completion. The record is described in
 [the DOM checkpoint evidence model](dom-checkpoint-evidence-model.md) and
 its use in [page recreation](page-recreation.md).
 
-Live 0.33 connections require an exact protocol-version match.
+Protocol version 0.34 records structural DOM changes as Blink makes them:
+`dom-node-inserted` with the inserted subtree as `dom-inserted-node`,
+`dom-inserted-node-attribute`, `dom-inserted-node-character-data`,
+`dom-inserted-shadow-root`, and `dom-inserted-slot-assignment` records and a
+`dom-insertion-completed` record that counts them; `dom-node-removed`;
+`dom-children-removed`; `dom-shadow-root-changed`; and
+`dom-slot-assignment-changed`. Character data changes made by the parser to
+a connected node after parsing are now recorded. Each scroll offset Blink
+stores is recorded as `layout-scroll-offset-changed` in the layout change
+set of its rendering update, whose completion counts them
+(`scrollOffsetCount`). The design is in
+[change-driven recording](change-driven-recording.md).
+
+Live 0.34 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

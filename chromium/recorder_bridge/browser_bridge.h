@@ -588,6 +588,136 @@ void RecordBlinkDomCharacterDataChanged(int document_node_id,
                                         bool previous_text_truncated,
                                         int maximum_value_length);
 
+// Protocol 0.34: the structural changes of a connected DOM tree, recorded as
+// DOM transitions in the order Blink makes them, from the time a document's
+// finished-parsing checkpoint is recorded.
+//
+// Records a node inserted into a connected container, or a shadow root
+// attached to a connected host, and returns the transition's sequence, which
+// names the records of the inserted subtree that follow. The insertion kind
+// is "child" or "shadow-root". The previous sibling is the inserted node's
+// previous sibling when the record is made, or 0 for none; a shadow root has
+// none. Returns 0 when nothing was recorded.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t RecordBlinkDomNodeInserted(int document_node_id,
+                                    std::string document_token,
+                                    std::string insertion_kind,
+                                    int container_node_id,
+                                    int node_id,
+                                    int previous_sibling_node_id);
+
+// Records one node of an inserted subtree, in the order a DOM checkpoint
+// walks a document, with the same fields as a checkpoint node.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomInsertedNode(uint64_t insertion_sequence,
+                                int document_node_id,
+                                std::string document_token,
+                                int node_index,
+                                int node_id,
+                                int parent_node_id,
+                                int node_type,
+                                std::string node_name);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomInsertedNodeAttribute(uint64_t insertion_sequence,
+                                         int document_node_id,
+                                         std::string document_token,
+                                         int node_id,
+                                         int attribute_index,
+                                         std::string attribute_namespace,
+                                         std::string attribute_name,
+                                         std::string attribute_value,
+                                         int attribute_value_length,
+                                         bool attribute_value_truncated,
+                                         int maximum_value_length);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomInsertedNodeCharacterData(uint64_t insertion_sequence,
+                                             int document_node_id,
+                                             std::string document_token,
+                                             int node_id,
+                                             std::string data,
+                                             int data_length,
+                                             bool data_truncated,
+                                             int maximum_value_length);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomInsertedShadowRoot(uint64_t insertion_sequence,
+                                      int document_node_id,
+                                      std::string document_token,
+                                      int node_id,
+                                      int host_node_id,
+                                      std::string mode,
+                                      bool delegates_focus,
+                                      std::string slot_assignment,
+                                      bool clonable,
+                                      bool serializable,
+                                      bool declarative,
+                                      bool available_to_element_internals,
+                                      bool reference_target_present,
+                                      std::string reference_target);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomInsertedSlotAssignment(uint64_t insertion_sequence,
+                                          int document_node_id,
+                                          std::string document_token,
+                                          int node_id,
+                                          std::vector<int> assigned_node_ids,
+                                          int assigned_node_count,
+                                          int maximum_assigned_nodes,
+                                          bool assignment_current);
+
+// Completes the records of an inserted subtree with their counts.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void CompleteBlinkDomInsertion(uint64_t insertion_sequence,
+                               int document_node_id,
+                               std::string document_token,
+                               int node_count,
+                               int attribute_count,
+                               int character_data_count,
+                               int shadow_root_count,
+                               int slot_count);
+
+// Records a child removed from a connected container.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomNodeRemoved(int document_node_id,
+                               std::string document_token,
+                               int container_node_id,
+                               int node_id);
+
+// Records the removal of every child of a connected container.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomChildrenRemoved(int document_node_id,
+                                   std::string document_token,
+                                   int container_node_id);
+
+// Records the state of a connected shadow root after its reference target
+// changed, with the fields of a checkpoint's shadow root record.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomShadowRootChanged(int document_node_id,
+                                     std::string document_token,
+                                     int node_id,
+                                     int host_node_id,
+                                     std::string mode,
+                                     bool delegates_focus,
+                                     std::string slot_assignment,
+                                     bool clonable,
+                                     bool serializable,
+                                     bool declarative,
+                                     bool available_to_element_internals,
+                                     bool reference_target_present,
+                                     std::string reference_target);
+
+// Records the nodes assigned to a connected slot after Blink recalculated
+// the slot assignments of its shadow root.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomSlotAssignmentChanged(int document_node_id,
+                                         std::string document_token,
+                                         int node_id,
+                                         std::vector<int> assigned_node_ids,
+                                         int assigned_node_count,
+                                         int maximum_assigned_nodes);
+
 // Records an authoritative task-queue scheduler decision only when the final
 // allowed wake-up is later than the desired wake-up. This queue boundary does
 // not identify an individual DOM timer or document.
@@ -1097,8 +1227,8 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
 
 // Records one layout change set of a document whose rendering update reached
 // the paint-clean state: the transform nodes and the noted nodes whose record
-// differs from the last one recorded for them in this renderer process, and
-// the counts. The set names the layout checkpoint recorded for the document
+// differs from the last one recorded for them in this renderer process, the
+// scroll offsets stored during the update (protocol 0.34), and the counts. The set names the layout checkpoint recorded for the document
 // since the previous call for it, if any. Nothing is recorded when no record
 // differs, and nothing when the recorder is not connected.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
@@ -1107,7 +1237,8 @@ void RecordBlinkLayoutChanges(int document_node_id,
                               LayoutChangesFrame frame,
                               int noted_node_count,
                               std::vector<LayoutTransformNode> transform_nodes,
-                              std::vector<LayoutChangedNode> nodes);
+                              std::vector<LayoutChangedNode> nodes,
+                              std::vector<LayoutScrollOffset> scroll_offsets);
 
 // The local-root widget a presentation request was queued on. The frame sink
 // is the viz::FrameSinkId whose compositor frames the frame tokens number, and

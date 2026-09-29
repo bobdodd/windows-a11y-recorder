@@ -123,6 +123,43 @@ public sealed class RecordingFileTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadsBackTheDomChangeAndScrollOffsetRecordsUnchanged()
+    {
+        var path = Path.Combine(_directory, "dom-changes.mcap");
+        var collector = Collector("test.browser", "browser.dom", "browser.layout");
+        var samples = BrowserDomChangePayloads.All().Select(sample => ("browser.dom", sample.EventType, sample.Json))
+            .Concat(BrowserLayoutPayloads.All().Select(sample => ("browser.layout", sample.EventType, sample.Json)))
+            .ToArray();
+        var events = samples.Select((sample, index) =>
+                Event(SessionId, collector, (ulong)index + 1, (index + 1) * 1_000L, sample.Item1, sample.Item2) with
+                {
+                    Payload = Json(sample.Item3),
+                })
+            .ToArray();
+
+        using (var target = new RecordingFileBatchTarget(path, Recording, new RecordingFileWriterOptions()))
+        {
+            var batch = events.Select((record, index) => new BufferedEvent(index, record, record.Payload.GetRawText()))
+                .ToArray();
+            Assert.Empty(await target.WriteAsync(new EventBatch(batch, [], []), TestContext.Current.CancellationToken));
+            target.Finish();
+        }
+
+        using var reader = RecordingFileReader.Open(path);
+        var stored = reader.ReadAll()
+            .Select(message => RecordingEventCodec.Decode(message.Data.Span))
+            .OrderBy(item => item.EventKey)
+            .ToArray();
+        Assert.Equal(events.Length, stored.Length);
+        for (var index = 0; index < events.Length; index++)
+        {
+            Assert.Equal(events[index].EventType, stored[index].Event.EventType);
+            Assert.Equal(events[index].Channel, stored[index].Event.Channel);
+            Assert.Equal(events[index].Payload.GetRawText(), stored[index].Event.Payload.GetRawText());
+        }
+    }
+
+    [Fact]
     public async Task ReadsAFileCutShortUpToItsLastWholeChunk()
     {
         var path = Path.Combine(_directory, "recording.mcap");

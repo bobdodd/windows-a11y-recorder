@@ -241,6 +241,34 @@ public sealed class BrowserDomPayloadIngestTests
             document.RootElement);
     }
 
+    public static TheoryData<string, string> DomChangeRecords()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var (eventType, json) in BrowserDomChangePayloads.All())
+        {
+            data.Add(eventType, json);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(DomChangeRecords))]
+    public void AcceptsEveryDomChangeRecordTheBridgeWrites(string eventType, string json)
+    {
+        Accept(eventType, json);
+    }
+
+    [Theory]
+    [MemberData(nameof(DomChangeRecords))]
+    public void RejectsAnUndeclaredMemberInEveryDomChangeRecord(string eventType, string json)
+    {
+        var payload = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+        payload["undeclared"] = 1;
+
+        Assert.ThrowsAny<Exception>(() => Accept(eventType, payload.ToJsonString()));
+    }
+
     private static void Accept(string eventType, string payload)
     {
         using var document = JsonDocument.Parse(payload);

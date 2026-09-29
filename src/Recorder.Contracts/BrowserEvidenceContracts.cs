@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.33";
+    public const string CurrentVersion = "0.34";
 }
 
 public static class BrowserEvidenceChannels
@@ -49,6 +49,17 @@ public static class BrowserEvidenceEventTypes
     public const string DomCheckpointCompleted = "dom-checkpoint-completed";
     public const string DomAttributeChanged = "dom-attribute-changed";
     public const string DomCharacterDataChanged = "dom-character-data-changed";
+    public const string DomNodeInserted = "dom-node-inserted";
+    public const string DomInsertedNode = "dom-inserted-node";
+    public const string DomInsertedNodeAttribute = "dom-inserted-node-attribute";
+    public const string DomInsertedNodeCharacterData = "dom-inserted-node-character-data";
+    public const string DomInsertedShadowRoot = "dom-inserted-shadow-root";
+    public const string DomInsertedSlotAssignment = "dom-inserted-slot-assignment";
+    public const string DomInsertionCompleted = "dom-insertion-completed";
+    public const string DomNodeRemoved = "dom-node-removed";
+    public const string DomChildrenRemoved = "dom-children-removed";
+    public const string DomShadowRootChanged = "dom-shadow-root-changed";
+    public const string DomSlotAssignmentChanged = "dom-slot-assignment-changed";
     public const string AccessibilityCheckpointStarted =
         "accessibility-checkpoint-started";
     public const string AccessibilityCheckpointNode =
@@ -78,6 +89,7 @@ public static class BrowserEvidenceEventTypes
     public const string LayoutChangesStarted = "layout-changes-started";
     public const string LayoutTransformNode = "layout-transform-node";
     public const string LayoutNodeChanged = "layout-node-changed";
+    public const string LayoutScrollOffsetChanged = "layout-scroll-offset-changed";
     public const string LayoutChangesCompleted = "layout-changes-completed";
     public const string PresentationRequested = "presentation-requested";
     public const string PresentationNotSwapped = "presentation-not-swapped";
@@ -401,6 +413,125 @@ public sealed record BrowserDomCharacterDataChangedPayload(
     int PreviousTextLength,
     bool PreviousTextTruncated,
     int MaximumValueLength);
+
+// Structural DOM changes (protocol 0.34), recorded as DOM transitions in the
+// order Blink makes them, from the time a document's finished-parsing
+// checkpoint is recorded. An insertion names its container, the inserted node,
+// and the node's previous sibling when it was recorded, or null for none.
+// InsertionKind is "child", or "shadow-root" for a shadow root attached to a
+// connected host, which has no previous sibling. The inserted subtree follows
+// in dom-inserted-* records whose InsertionId is the insertion's TransitionId,
+// in the order a DOM checkpoint walks a document, and a
+// dom-insertion-completed record closes it with its counts.
+public sealed record BrowserDomNodeInsertedPayload(
+    BrowserContext Context,
+    string TransitionId,
+    string InsertionKind,
+    long ContainerNodeId,
+    long NodeId,
+    long? PreviousSiblingNodeId);
+
+public sealed record BrowserDomInsertedNodePayload(
+    BrowserContext Context,
+    string InsertionId,
+    int NodeIndex,
+    long NodeId,
+    long ParentNodeId,
+    string NodeType,
+    string NodeName);
+
+public sealed record BrowserDomInsertedNodeAttributePayload(
+    BrowserContext Context,
+    string InsertionId,
+    long NodeId,
+    int AttributeIndex,
+    string? AttributeNamespace,
+    string AttributeName,
+    string AttributeValue,
+    int AttributeValueLength,
+    bool AttributeValueTruncated,
+    int MaximumValueLength);
+
+public sealed record BrowserDomInsertedNodeCharacterDataPayload(
+    BrowserContext Context,
+    string InsertionId,
+    long NodeId,
+    string Data,
+    int DataLength,
+    bool DataTruncated,
+    int MaximumValueLength);
+
+public sealed record BrowserDomInsertedShadowRootPayload(
+    BrowserContext Context,
+    string InsertionId,
+    long NodeId,
+    long HostNodeId,
+    string Mode,
+    bool DelegatesFocus,
+    string SlotAssignment,
+    bool Clonable,
+    bool Serializable,
+    bool Declarative,
+    bool AvailableToElementInternals,
+    string? ReferenceTarget);
+
+public sealed record BrowserDomInsertedSlotAssignmentPayload(
+    BrowserContext Context,
+    string InsertionId,
+    long NodeId,
+    IReadOnlyList<long?> AssignedNodeIds,
+    int AssignedNodeCount,
+    bool AssignedNodesTruncated,
+    int MaximumAssignedNodes,
+    bool AssignmentCurrent);
+
+public sealed record BrowserDomInsertionCompletedPayload(
+    BrowserContext Context,
+    string InsertionId,
+    int NodeCount,
+    int AttributeCount,
+    int CharacterDataCount,
+    int ShadowRootCount,
+    int SlotCount);
+
+public sealed record BrowserDomNodeRemovedPayload(
+    BrowserContext Context,
+    string TransitionId,
+    long ContainerNodeId,
+    long NodeId);
+
+// Every child of the container was removed.
+public sealed record BrowserDomChildrenRemovedPayload(
+    BrowserContext Context,
+    string TransitionId,
+    long ContainerNodeId);
+
+// The state of a connected shadow root after its reference target changed.
+public sealed record BrowserDomShadowRootChangedPayload(
+    BrowserContext Context,
+    string TransitionId,
+    long NodeId,
+    long HostNodeId,
+    string Mode,
+    bool DelegatesFocus,
+    string SlotAssignment,
+    bool Clonable,
+    bool Serializable,
+    bool Declarative,
+    bool AvailableToElementInternals,
+    string? ReferenceTarget);
+
+// The nodes assigned to a connected slot after Blink recalculated the slot
+// assignments of its shadow root. A recalculation records every slot of the
+// root, whether or not its assignment changed.
+public sealed record BrowserDomSlotAssignmentChangedPayload(
+    BrowserContext Context,
+    string TransitionId,
+    long NodeId,
+    IReadOnlyList<long?> AssignedNodeIds,
+    int AssignedNodeCount,
+    bool AssignedNodesTruncated,
+    int MaximumAssignedNodes);
 
 public sealed record BrowserAccessibilityCheckpointStartedPayload(
     BrowserContext Context,
@@ -842,7 +973,25 @@ public sealed record BrowserLayoutChangesCompletedPayload(
     int NotedNodeCount,
     int RecordedNodeCount,
     int UnchangedNodeCount,
-    int TransformNodeCount);
+    int TransformNodeCount,
+    int ScrollOffsetCount = 0);
+
+// A scroller whose scroll offset Blink stored during the rendering update
+// (protocol 0.34), read at the end of the update. NodeId is the scroller's
+// element, or the document for the frame's own scroller. ScrollOffset is the
+// offset Blink holds, in physical pixels; WebExposedScrollOffset is the value
+// scrollLeft and scrollTop divide by EffectiveZoom; ScrollOrigin is the
+// position of offset zero. ScrollTranslationNodeId is the transform node the
+// offset moves, or null when the scroller has none.
+public sealed record BrowserLayoutScrollOffsetChangedPayload(
+    BrowserContext Context,
+    string ChangeSetId,
+    long NodeId,
+    BrowserLayoutPoint ScrollOffset,
+    BrowserLayoutPoint WebExposedScrollOffset,
+    BrowserLayoutPoint ScrollOrigin,
+    double EffectiveZoom,
+    string? ScrollTranslationNodeId);
 
 // Presentation records follow the compositor frame that carries one layout
 // checkpoint's rendering update. A request names the checkpoint and the

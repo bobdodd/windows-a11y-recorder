@@ -1,7 +1,8 @@
 namespace Recorder.Tests;
 
-// The JSON the bridge writes for each browser.layout record in protocol 0.32,
-// shared by the ingest and archive tests so both check the same shapes.
+// The JSON the bridge writes for each browser.layout record in protocols 0.32
+// to 0.34, shared by the ingest and archive tests so both check the same
+// shapes.
 internal static class BrowserLayoutPayloads
 {
     private const string ContextJson = """
@@ -316,7 +317,35 @@ internal static class BrowserLayoutPayloads
           "notedNodeCount": 5,
           "recordedNodeCount": 3,
           "unchangedNodeCount": 1,
-          "transformNodeCount": 2
+          "transformNodeCount": 2,
+          "scrollOffsetCount": 0
+        }
+        """;
+
+    // Protocol 0.34.
+    public static readonly string ScrollOffsetChanged = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "nodeId": 44,
+          "scrollOffset": { "x": 0, "y": 300.625 },
+          "webExposedScrollOffset": { "x": 0, "y": 300.625 },
+          "scrollOrigin": { "x": 0, "y": 0 },
+          "effectiveZoom": 1,
+          "scrollTranslationNodeId": "layout-transform-2"
+        }
+        """;
+
+    public static readonly string ScrollOffsetChangedWithoutTranslation = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "nodeId": 45,
+          "scrollOffset": { "x": 3, "y": 0 },
+          "webExposedScrollOffset": { "x": 3, "y": 0 },
+          "scrollOrigin": { "x": -40, "y": 0 },
+          "effectiveZoom": 1.25,
+          "scrollTranslationNodeId": null
         }
         """;
 
@@ -338,6 +367,8 @@ internal static class BrowserLayoutPayloads
         yield return ("layout-node-changed", ChangedElementNode);
         yield return ("layout-node-changed", ChangedEmptyTextNode);
         yield return ("layout-node-changed", ChangedUnrenderedPseudoElement);
+        yield return ("layout-scroll-offset-changed", ScrollOffsetChanged);
+        yield return ("layout-scroll-offset-changed", ScrollOffsetChangedWithoutTranslation);
         yield return ("layout-changes-completed", ChangesCompleted);
     }
 }

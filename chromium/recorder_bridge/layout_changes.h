@@ -110,6 +110,25 @@ struct LayoutChangesFrame {
   double layout_zoom_factor = 0;
 };
 
+// One scroller whose scroll offset Blink stored during a rendering update,
+// read at the end of the update. The node is the scroller's element, or the
+// document for the frame's own scroller. The scroll offset is the one
+// PaintLayerScrollableArea holds, the web-exposed offset is the one
+// scrollLeft and scrollTop divide by the effective zoom, and the scroll
+// origin is the position of offset zero. The scroll translation is the
+// transform node the offset moves, or zero when the scroller has none.
+struct LayoutScrollOffset {
+  int node_id = 0;
+  double scroll_offset_x = 0;
+  double scroll_offset_y = 0;
+  double web_exposed_scroll_offset_x = 0;
+  double web_exposed_scroll_offset_y = 0;
+  int scroll_origin_x = 0;
+  int scroll_origin_y = 0;
+  double effective_zoom = 1;
+  uint64_t scroll_translation_node_id = 0;
+};
+
 // Hashes every field a change record states, except the reasons it was
 // noted, which describe the noting and not the node.
 uint64_t HashLayoutChangedNode(const LayoutChangedNode& node);

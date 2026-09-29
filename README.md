@@ -323,6 +323,13 @@ was parsed with was not recorded. It is the first slice of recreating the
 page at a captured frame in Chrome, described in
 [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.34 records each change to the structure of the DOM as Blink
+makes it: insertions with the whole inserted subtree, removals, removals of
+all children, shadow root attachments and changes, and slot assignments. It
+also records each scroll offset Blink stores, with the layout changes of the
+same rendering update. It is implemented and tested in the sandbox only; see
+[change-driven recording](docs/architecture/change-driven-recording.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

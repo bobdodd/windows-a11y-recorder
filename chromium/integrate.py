@@ -1168,6 +1168,343 @@ void RecorderRecordDomCheckpoint(Document& recorder_document,
 }
 
 """
+# Protocol 0.34. The structural changes of a connected DOM tree, recorded in
+# the order Blink makes them. The helper is defined in document.cc beside the
+# checkpoint, since the document's mutation hook is its main caller, and is
+# declared in element.cc, shadow_root.cc, and slot_assignment.cc.
+BLINK_DOM_CHANGE_HELPER_MARKER = (
+    "bool RecorderRecordsDomChanges(const Document& recorder_document) {\n"
+)
+BLINK_DOM_CHANGE_DECLARATION = """\
+// Defined in document.cc; the recorder's DOM change records (protocol 0.34).
+class HTMLSlotElement;
+bool RecorderRecordsDomChanges(const Document& recorder_document);
+void RecorderRecordDomInsertion(Document& recorder_document,
+                                const char* recorder_insertion_kind,
+                                Node& recorder_container,
+                                Node& recorder_inserted);
+void RecorderRecordDomShadowRootChanged(ShadowRoot& recorder_shadow_root);
+void RecorderRecordDomSlotAssignments(
+    ShadowRoot& recorder_shadow_root,
+    const HeapVector<Member<HTMLSlotElement>>& recorder_slots);
+
+"""
+BLINK_DOM_CHANGE_HELPER = """\
+// Whether the structural changes of a document are recorded: from the time
+// its finished-parsing checkpoint is recorded, while it is active and the
+// recorder is connected. The checkpoint is the state the changes apply to.
+bool RecorderRecordsDomChanges(const Document& recorder_document) {
+  return a11y_recorder::IsRecorderActive() && !recorder_document.Parsing() &&
+         recorder_document.IsActive();
+}
+
+// Records a node inserted into a connected container, or a shadow root
+// attached to a connected host, and then the inserted subtree, walked as a
+// DOM checkpoint walks the document: each node, its character data, the
+// shadow root it hosts and that shadow tree, its children, its attributes,
+// and a slot's assignment as Blink holds it.
+void RecorderRecordDomInsertion(Document& recorder_document,
+                                const char* recorder_insertion_kind,
+                                Node& recorder_container,
+                                Node& recorder_inserted) {
+  // Every value is recorded whole, as in the checkpoint.
+  constexpr int kRecorderMaximumDomValueLength = 2147483647;
+  constexpr int kRecorderMaximumAssignedNodes = 2147483647;
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  if (recorder_document_node_id <= 0) {
+    return;
+  }
+  const std::string recorder_document_token =
+      recorder_document.Token().ToString();
+  Node* recorder_previous = recorder_inserted.IsShadowRoot()
+                                ? nullptr
+                                : recorder_inserted.previousSibling();
+  const uint64_t recorder_insertion_sequence =
+      a11y_recorder::RecordBlinkDomNodeInserted(
+          recorder_document_node_id, recorder_document_token,
+          recorder_insertion_kind, recorder_container.GetDomNodeId(),
+          recorder_inserted.GetDomNodeId(),
+          recorder_previous ? recorder_previous->GetDomNodeId() : 0);
+  if (recorder_insertion_sequence == 0) {
+    return;
+  }
+  int recorder_node_count = 0;
+  int recorder_attribute_count = 0;
+  int recorder_character_data_count = 0;
+  int recorder_shadow_root_count = 0;
+  int recorder_slot_count = 0;
+  HeapVector<Member<Node>> recorder_pending;
+  recorder_pending.push_back(&recorder_inserted);
+  while (!recorder_pending.empty()) {
+    Node& recorder_node = *recorder_pending.back();
+    recorder_pending.pop_back();
+    ContainerNode* recorder_parent = recorder_node.ParentOrShadowHostNode();
+    a11y_recorder::RecordBlinkDomInsertedNode(
+        recorder_insertion_sequence, recorder_document_node_id,
+        recorder_document_token, recorder_node_count,
+        recorder_node.GetDomNodeId(),
+        recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+        static_cast<int>(recorder_node.getNodeType()),
+        recorder_node.nodeName().Utf8());
+    ++recorder_node_count;
+    if (auto* recorder_character_data =
+            DynamicTo<CharacterData>(recorder_node)) {
+      const String& recorder_data = recorder_character_data->data();
+      const int recorder_data_length =
+          static_cast<int>(recorder_data.length());
+      a11y_recorder::RecordBlinkDomInsertedNodeCharacterData(
+          recorder_insertion_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_node.GetDomNodeId(),
+          recorder_data.Utf8(), recorder_data_length,
+          recorder_data_length > kRecorderMaximumDomValueLength,
+          kRecorderMaximumDomValueLength);
+      ++recorder_character_data_count;
+    }
+    for (Node* recorder_child = recorder_node.lastChild(); recorder_child;
+         recorder_child = recorder_child->previousSibling()) {
+      recorder_pending.push_back(recorder_child);
+    }
+    if (auto* recorder_shadow_root = DynamicTo<ShadowRoot>(recorder_node)) {
+      ++recorder_shadow_root_count;
+      const ShadowRootMode recorder_mode = recorder_shadow_root->GetMode();
+      const AtomicString& recorder_reference_target =
+          recorder_shadow_root->referenceTarget();
+      a11y_recorder::RecordBlinkDomInsertedShadowRoot(
+          recorder_insertion_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_shadow_root->GetDomNodeId(),
+          recorder_shadow_root->host().GetDomNodeId(),
+          recorder_mode == ShadowRootMode::kOpen     ? "open"
+          : recorder_mode == ShadowRootMode::kClosed ? "closed"
+                                                     : "user-agent",
+          recorder_shadow_root->delegatesFocus(),
+          recorder_shadow_root->IsManualSlotting() ? "manual" : "named",
+          recorder_shadow_root->clonable(),
+          recorder_shadow_root->serializable(),
+          recorder_shadow_root->IsDeclarativeShadowRoot(),
+          recorder_shadow_root->IsAvailableToElementInternals(),
+          !recorder_reference_target.IsNull(),
+          recorder_reference_target.IsNull()
+              ? std::string()
+              : recorder_reference_target.Utf8());
+    }
+    Element* recorder_element = DynamicTo<Element>(recorder_node);
+    if (!recorder_element) {
+      continue;
+    }
+    if (ShadowRoot* recorder_hosted_root = recorder_element->GetShadowRoot()) {
+      recorder_pending.push_back(recorder_hosted_root);
+    }
+    int recorder_node_attribute_index = 0;
+    for (const Attribute& recorder_attribute :
+         recorder_element->Attributes()) {
+      const String recorder_attribute_value = recorder_attribute.Value();
+      const int recorder_attribute_value_length =
+          static_cast<int>(recorder_attribute_value.length());
+      a11y_recorder::RecordBlinkDomInsertedNodeAttribute(
+          recorder_insertion_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_element->GetDomNodeId(),
+          recorder_node_attribute_index,
+          recorder_attribute.NamespaceURI().Utf8(),
+          recorder_attribute.LocalName().Utf8(),
+          recorder_attribute_value.Utf8(), recorder_attribute_value_length,
+          recorder_attribute_value_length > kRecorderMaximumDomValueLength,
+          kRecorderMaximumDomValueLength);
+      ++recorder_node_attribute_index;
+      ++recorder_attribute_count;
+    }
+    auto* recorder_slot = DynamicTo<HTMLSlotElement>(recorder_element);
+    ShadowRoot* recorder_slot_root =
+        recorder_slot ? recorder_slot->ContainingShadowRoot() : nullptr;
+    if (recorder_slot_root && recorder_slot->SupportsAssignment()) {
+      ++recorder_slot_count;
+      const HeapVector<Member<Node>>& recorder_assigned =
+          recorder_slot->AssignedNodesNoRecalc();
+      std::vector<int> recorder_assigned_ids;
+      recorder_assigned_ids.reserve(recorder_assigned.size());
+      for (const Member<Node>& recorder_assigned_node : recorder_assigned) {
+        recorder_assigned_ids.push_back(
+            recorder_assigned_node->GetDomNodeId());
+      }
+      a11y_recorder::RecordBlinkDomInsertedSlotAssignment(
+          recorder_insertion_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_slot->GetDomNodeId(),
+          std::move(recorder_assigned_ids),
+          static_cast<int>(recorder_assigned.size()),
+          kRecorderMaximumAssignedNodes,
+          !recorder_slot_root->GetSlotAssignment().NeedsAssignmentRecalc());
+    }
+  }
+  a11y_recorder::CompleteBlinkDomInsertion(
+      recorder_insertion_sequence, recorder_document_node_id,
+      recorder_document_token, recorder_node_count, recorder_attribute_count,
+      recorder_character_data_count, recorder_shadow_root_count,
+      recorder_slot_count);
+}
+
+// Records one change to a connected container's child list. A change to a
+// container that is not connected is not recorded: a detached tree is
+// recorded in full when it is inserted.
+void RecorderRecordDomChildrenChange(
+    Document& recorder_document,
+    const ContainerNode& recorder_container,
+    const ContainerNode::ChildrenChange& recorder_change) {
+  if (!RecorderRecordsDomChanges(recorder_document) ||
+      !recorder_container.isConnected()) {
+    return;
+  }
+  ContainerNode& recorder_mutable_container =
+      const_cast<ContainerNode&>(recorder_container);
+  switch (recorder_change.type) {
+    case ContainerNode::ChildrenChangeType::kElementInserted:
+    case ContainerNode::ChildrenChangeType::kNonElementInserted:
+      // A ChildrenChanged override may have moved the node before the base
+      // method ran; the check finds any such difference.
+      if (recorder_change.sibling_changed &&
+          recorder_change.sibling_changed->parentNode() ==
+              &recorder_container) {
+        RecorderRecordDomInsertion(recorder_document, "child",
+                                   recorder_mutable_container,
+                                   *recorder_change.sibling_changed);
+      }
+      break;
+    case ContainerNode::ChildrenChangeType::kElementRemoved:
+    case ContainerNode::ChildrenChangeType::kNonElementRemoved:
+      if (recorder_change.sibling_changed) {
+        a11y_recorder::RecordBlinkDomNodeRemoved(
+            recorder_document.GetDomNodeId(),
+            recorder_document.Token().ToString(),
+            recorder_mutable_container.GetDomNodeId(),
+            recorder_change.sibling_changed->GetDomNodeId());
+      }
+      break;
+    case ContainerNode::ChildrenChangeType::kAllChildrenRemoved:
+      a11y_recorder::RecordBlinkDomChildrenRemoved(
+          recorder_document.GetDomNodeId(),
+          recorder_document.Token().ToString(),
+          recorder_mutable_container.GetDomNodeId());
+      break;
+    case ContainerNode::ChildrenChangeType::kTextChanged:
+    case ContainerNode::ChildrenChangeType::
+        kFinishedBuildingDocumentFragmentTree:
+      // Character data changes are recorded as transitions, and a fragment
+      // built by the parser is recorded when it is inserted.
+      break;
+  }
+}
+
+// Records a connected shadow root's state after its reference target
+// changed.
+void RecorderRecordDomShadowRootChanged(ShadowRoot& recorder_shadow_root) {
+  Document& recorder_document = recorder_shadow_root.GetDocument();
+  if (!RecorderRecordsDomChanges(recorder_document) ||
+      !recorder_shadow_root.isConnected()) {
+    return;
+  }
+  const ShadowRootMode recorder_mode = recorder_shadow_root.GetMode();
+  const AtomicString& recorder_reference_target =
+      recorder_shadow_root.referenceTarget();
+  a11y_recorder::RecordBlinkDomShadowRootChanged(
+      recorder_document.GetDomNodeId(), recorder_document.Token().ToString(),
+      recorder_shadow_root.GetDomNodeId(),
+      recorder_shadow_root.host().GetDomNodeId(),
+      recorder_mode == ShadowRootMode::kOpen     ? "open"
+      : recorder_mode == ShadowRootMode::kClosed ? "closed"
+                                                 : "user-agent",
+      recorder_shadow_root.delegatesFocus(),
+      recorder_shadow_root.IsManualSlotting() ? "manual" : "named",
+      recorder_shadow_root.clonable(), recorder_shadow_root.serializable(),
+      recorder_shadow_root.IsDeclarativeShadowRoot(),
+      recorder_shadow_root.IsAvailableToElementInternals(),
+      !recorder_reference_target.IsNull(),
+      recorder_reference_target.IsNull() ? std::string()
+                                         : recorder_reference_target.Utf8());
+}
+
+// Records the assigned nodes of every slot of a connected shadow root after
+// Blink recalculated its slot assignments. The slots are the shadow root's
+// slot assignment's list, which only the assignment reads.
+void RecorderRecordDomSlotAssignments(
+    ShadowRoot& recorder_shadow_root,
+    const HeapVector<Member<HTMLSlotElement>>& recorder_slots) {
+  constexpr int kRecorderMaximumAssignedNodes = 2147483647;
+  Document& recorder_document = recorder_shadow_root.GetDocument();
+  if (!RecorderRecordsDomChanges(recorder_document) ||
+      !recorder_shadow_root.isConnected()) {
+    return;
+  }
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  const std::string recorder_document_token =
+      recorder_document.Token().ToString();
+  for (const Member<HTMLSlotElement>& recorder_slot : recorder_slots) {
+    if (!recorder_slot->SupportsAssignment()) {
+      continue;
+    }
+    const HeapVector<Member<Node>>& recorder_assigned =
+        recorder_slot->AssignedNodesNoRecalc();
+    std::vector<int> recorder_assigned_ids;
+    recorder_assigned_ids.reserve(recorder_assigned.size());
+    for (const Member<Node>& recorder_assigned_node : recorder_assigned) {
+      recorder_assigned_ids.push_back(recorder_assigned_node->GetDomNodeId());
+    }
+    a11y_recorder::RecordBlinkDomSlotAssignmentChanged(
+        recorder_document_node_id, recorder_document_token,
+        recorder_slot->GetDomNodeId(), std::move(recorder_assigned_ids),
+        static_cast<int>(recorder_assigned.size()),
+        kRecorderMaximumAssignedNodes);
+  }
+}
+
+"""
+BLINK_DOCUMENT_DOM_CHANGE_DECLARATION = BLINK_DOM_CHANGE_DECLARATION.replace(
+    "    const HeapVector<Member<HTMLSlotElement>>& recorder_slots);\n",
+    "    const HeapVector<Member<HTMLSlotElement>>& recorder_slots);\n"
+    "void RecorderRecordDomChildrenChange(\n"
+    "    Document& recorder_document,\n"
+    "    const ContainerNode& recorder_container,\n"
+    "    const ContainerNode::ChildrenChange& recorder_change);\n",
+    1,
+)
+BLINK_DOCUMENT_DOM_CHANGE_HOOK = """\
+  RecorderRecordDomChildrenChange(*this, container, change);
+"""
+# A shadow root attached to a connected host is an insertion of the root.
+BLINK_ELEMENT_SHADOW_ROOT_ANCHOR = """\
+  shadow_root->InsertedInto(*this);
+"""
+BLINK_ELEMENT_SHADOW_ROOT_HOOK = """\
+  shadow_root->InsertedInto(*this);
+  if (isConnected() && RecorderRecordsDomChanges(GetDocument())) {
+    RecorderRecordDomInsertion(GetDocument(), "shadow-root", *this,
+                               *shadow_root);
+  }
+"""
+BLINK_SHADOW_ROOT_REFERENCE_TARGET_ANCHOR = """\
+  reference_target_id_observer_ =
+      reference_target ? MakeGarbageCollected<ReferenceTargetIdObserver>(
+                             reference_target, this)
+                       : nullptr;
+"""
+BLINK_SLOT_ASSIGNMENT_ANCHOR = """\
+      slot->DidRecalcAssignedNodes(
+          !!DisplayLockUtilities::
+               LockedInclusiveAncestorPreventingStyleWithinTreeScope(*slot));
+    }
+  }
+"""
+BLINK_SLOT_ASSIGNMENT_HOOK = BLINK_SLOT_ASSIGNMENT_ANCHOR + """\
+  RecorderRecordDomSlotAssignments(*owner_, Slots());
+"""
+BLINK_SHADOW_ROOT_REFERENCE_TARGET_HOOK = (
+    BLINK_SHADOW_ROOT_REFERENCE_TARGET_ANCHOR
+    + """\
+  RecorderRecordDomShadowRootChanged(*this);
+"""
+)
+BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR = (
+    "void Document::NotifyChangeChildren(\n"
+    "    const ContainerNode& container,\n"
+    "    const ContainerNode::ChildrenChange& change) {\n"
+)
 BLINK_INTERACTION_CHECKPOINT_HELPER_MARKER = (
     "void RecorderRecordInteractionCheckpoint(Document& recorder_document,\n"
     "                                         uint64_t recorder_source_sequence,"
@@ -1837,7 +2174,7 @@ INTERMEDIATE_BLINK_CHARACTER_DATA_MUTATION_HOOK = """\
   }
 """
 
-BLINK_CHARACTER_DATA_MUTATION_HOOK = """\
+LEGACY_PARSER_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK = """\
   // Parser-driven text updates are excluded. The text a document was parsed
   // with is already reported by the finished-parsing checkpoint, and recording
   // every parse-time chunk would queue a checkpoint per chunk during load.
@@ -1879,6 +2216,30 @@ BLINK_CHARACTER_DATA_MUTATION_HOOK = """\
     }
   }
 """
+# Protocol 0.34 records a parser update of a connected node once the document
+# has finished parsing, since the finished-parsing checkpoint no longer holds
+# it. A parser update during parsing, or of a node the parser is building
+# outside the document, is still excluded.
+BLINK_CHARACTER_DATA_MUTATION_HOOK = (
+    LEGACY_PARSER_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK.replace(
+        """\
+  // Parser-driven text updates are excluded. The text a document was parsed
+  // with is already reported by the finished-parsing checkpoint, and recording
+  // every parse-time chunk would queue a checkpoint per chunk during load.
+  if (source != kUpdateFromParser) {
+""",
+        """\
+  // Parser-driven text updates are excluded while the document is parsed and
+  // for a node that is not connected. The text a document was parsed with is
+  // reported by the finished-parsing checkpoint, recording every parse-time
+  // chunk would queue a checkpoint per chunk during load, and a fragment the
+  // parser builds is recorded when it is inserted.
+  if (source != kUpdateFromParser ||
+      (isConnected() && !GetDocument().Parsing())) {
+""",
+        1,
+    )
+)
 
 
 BLINK_MUTATION_OBSERVER_METHOD = """\
@@ -3839,6 +4200,14 @@ def patch_blink_character_data(path: Path) -> None:
             BLINK_CHARACTER_DATA_MUTATION_HOOK,
             path,
         )
+    # A checkout patched before protocol 0.34 excludes every parser update.
+    if LEGACY_PARSER_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK in text:
+        text = replace_once(
+            text,
+            LEGACY_PARSER_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK,
+            BLINK_CHARACTER_DATA_MUTATION_HOOK,
+            path,
+        )
     if "RecordBlinkDomCharacterDataChanged" not in text:
         anchor = "  String old_data = this->data();\n"
         text = replace_once(
@@ -4476,6 +4845,30 @@ def patch_blink_document(path: Path) -> None:
             anchor + BLINK_DOCUMENT_MUTATION_HOOK,
             path,
         )
+    # Protocol 0.34 records the structural changes of the connected tree.
+    text = insert_before_once(
+        text,
+        BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR,
+        BLINK_DOCUMENT_DOM_CHANGE_DECLARATION,
+        BLINK_DOCUMENT_DOM_CHANGE_DECLARATION,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        "void Document::FinishedParsing() {\n",
+        BLINK_DOM_CHANGE_HELPER,
+        BLINK_DOM_CHANGE_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+        + BLINK_DOCUMENT_MUTATION_HOOK,
+        BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+        + BLINK_DOCUMENT_MUTATION_HOOK
+        + BLINK_DOCUMENT_DOM_CHANGE_HOOK,
+        path,
+    )
     text = remove_earlier_node_limits(text)
     write_patched(path, text)
 
@@ -7689,7 +8082,7 @@ BLINK_LAYOUT_CHANGES_CHILD_FRAGMENT_NOTES = """\
     }
   }
 """
-BLINK_LAYOUT_CHANGES_DEFINITION = (
+LEGACY_UNSCROLLED_BLINK_LAYOUT_CHANGES_DEFINITION = (
     """\
 namespace {
 
@@ -8069,6 +8462,155 @@ void RecorderRecordLayoutChanges(LocalFrameView& recorder_frame_view) {
 
 """
 )
+# Protocol 0.34 notes each scroller whose scroll offset Blink stores and
+# records its offset in the next change set, which is recorded when only an
+# offset changed.
+BLINK_SCROLL_OFFSET_NOTE_DECLARATION = """\
+// Defined in local_frame_view.cc; notes a scroller whose scroll offset Blink
+// stored, for the recorder's next layout change set.
+void RecorderNoteScrollOffset(const LayoutBox& recorder_box);
+
+"""
+BLINK_LAYOUT_CHANGES_SCROLL_DECLARATION = BLINK_SCROLL_OFFSET_NOTE_DECLARATION.replace(
+    "// Defined in local_frame_view.cc; notes", "// Notes"
+)
+BLINK_PAINT_LAYER_SCROLLABLE_AREA_HOOKS = (
+    (
+        "  scroll_offset_ = new_offset;\n",
+        "  scroll_offset_ = new_offset;\n"
+        "  RecorderNoteScrollOffset(*GetLayoutBox());\n",
+    ),
+)
+BLINK_LAYOUT_CHANGES_DEFINITION = (
+    LEGACY_UNSCROLLED_BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+        """\
+    recorder_visitor->Trace(nodes);
+    recorder_visitor->Trace(transforms);
+  }
+
+  HeapHashMap<WeakMember<const Node>, unsigned> nodes;
+""",
+        """\
+    recorder_visitor->Trace(nodes);
+    recorder_visitor->Trace(transforms);
+    recorder_visitor->Trace(scrolls);
+  }
+
+  HeapHashMap<WeakMember<const Node>, unsigned> nodes;
+  // The nodes of scrollers whose scroll offset was stored: an element, or
+  // the document for the frame's own scroller.
+  HeapHashSet<WeakMember<const Node>> scrolls;
+""",
+        1,
+    )
+    .replace(
+        """\
+void RecorderNoteLayoutObjectChange(const LayoutObject& recorder_object,
+                                    unsigned recorder_reasons) {
+  RecorderNoteLayoutChange(recorder_object.GetNode(), recorder_reasons);
+}
+""",
+        """\
+void RecorderNoteLayoutObjectChange(const LayoutObject& recorder_object,
+                                    unsigned recorder_reasons) {
+  RecorderNoteLayoutChange(recorder_object.GetNode(), recorder_reasons);
+}
+
+void RecorderNoteScrollOffset(const LayoutBox& recorder_box) {
+  if (!a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  // The layout view's node is its document.
+  if (const Node* recorder_node = recorder_box.GetNode()) {
+    RecorderLayoutNotes().scrolls.insert(recorder_node);
+  }
+}
+""",
+        1,
+    )
+    .replace(
+        """\
+    recorder_notes.nodes.clear();
+    recorder_notes.transforms.clear();
+    return;
+""",
+        """\
+    recorder_notes.nodes.clear();
+    recorder_notes.transforms.clear();
+    recorder_notes.scrolls.clear();
+    return;
+""",
+        1,
+    )
+    .replace(
+        """\
+  // Every transform node named for the document is read again, since a
+""",
+        """\
+  // The document's scrollers whose offset was stored are read now, at the
+  // end of the update, before the transform nodes, so the scroll translation
+  // each names is read with them.
+  HeapVector<Member<const Node>> recorder_scrolled;
+  for (const auto& recorder_entry : recorder_notes.scrolls) {
+    const Node* recorder_node = recorder_entry.Get();
+    if (recorder_node && &recorder_node->GetDocument() == recorder_document) {
+      recorder_scrolled.push_back(recorder_node);
+    }
+  }
+  std::vector<a11y_recorder::LayoutScrollOffset> recorder_scroll_offsets;
+  for (const Member<const Node>& recorder_node : recorder_scrolled) {
+    recorder_notes.scrolls.erase(recorder_node.Get());
+    if (!recorder_node->isConnected()) {
+      continue;
+    }
+    const auto* recorder_box =
+        DynamicTo<LayoutBox>(recorder_node->GetLayoutObject());
+    PaintLayerScrollableArea* recorder_area =
+        recorder_box ? recorder_box->GetScrollableArea() : nullptr;
+    if (!recorder_area) {
+      continue;
+    }
+    a11y_recorder::LayoutScrollOffset recorder_scroll;
+    recorder_scroll.node_id =
+        const_cast<Node&>(*recorder_node).GetDomNodeId();
+    const auto recorder_offset = recorder_area->GetScrollOffset();
+    recorder_scroll.scroll_offset_x = recorder_offset.x();
+    recorder_scroll.scroll_offset_y = recorder_offset.y();
+    const auto recorder_exposed = recorder_area->GetWebExposedScrollOffset();
+    recorder_scroll.web_exposed_scroll_offset_x = recorder_exposed.x();
+    recorder_scroll.web_exposed_scroll_offset_y = recorder_exposed.y();
+    recorder_scroll.scroll_origin_x = recorder_area->ScrollOrigin().x();
+    recorder_scroll.scroll_origin_y = recorder_area->ScrollOrigin().y();
+    recorder_scroll.effective_zoom = recorder_box->StyleRef().EffectiveZoom();
+    if (const ObjectPaintProperties* recorder_properties =
+            recorder_box->FirstFragment().PaintProperties()) {
+      if (const TransformPaintPropertyNode* recorder_translation =
+              recorder_properties->ScrollTranslation()) {
+        recorder_scroll.scroll_translation_node_id = RecorderTransformNodeId(
+            *recorder_translation, recorder_document_node_id);
+      }
+    }
+    recorder_scroll_offsets.push_back(std::move(recorder_scroll));
+  }
+
+  // Every transform node named for the document is read again, since a
+""",
+        1,
+    )
+    .replace(
+        """\
+      std::move(recorder_transform_records),
+      std::move(recorder_changed_nodes));
+}
+""",
+        """\
+      std::move(recorder_transform_records),
+      std::move(recorder_changed_nodes), std::move(recorder_scroll_offsets));
+}
+""",
+        1,
+    )
+)
 BLINK_LAYOUT_CHANGES_INCLUDES = (
     "#include <array>",
     '#include "base/numerics/safe_conversions.h"',
@@ -8078,6 +8620,9 @@ BLINK_LAYOUT_CHANGES_INCLUDES = (
     '#include "third_party/blink/renderer/core/layout/layout_view.h"',
     '#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"',
     '#include "third_party/blink/renderer/core/paint/fragment_data.h"',
+    '#include "third_party/blink/renderer/core/paint/object_paint_properties.h"',
+    '#include "third_party/blink/renderer/core/paint/'
+    'paint_layer_scrollable_area.h"',
     '#include "third_party/blink/renderer/platform/graphics/paint/'
     'geometry_mapper.h"',
     '#include "third_party/blink/renderer/platform/graphics/paint/'
@@ -8086,6 +8631,8 @@ BLINK_LAYOUT_CHANGES_INCLUDES = (
     'transform_paint_property_node.h"',
     '#include "third_party/blink/renderer/platform/heap/collection_support/'
     'heap_hash_map.h"',
+    '#include "third_party/blink/renderer/platform/heap/collection_support/'
+    'heap_hash_set.h"',
     '#include "third_party/blink/renderer/platform/heap/collection_support/'
     'heap_vector.h"',
     '#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"',
@@ -8144,15 +8691,17 @@ BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS = """\
             recorder_layout_object->AbsoluteQuads(recorder_quads);
 """
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.34 recorded scroll offsets.
+    LEGACY_UNSCROLLED_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before a new layout result noted the objects of its child fragments.
-    BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    LEGACY_UNSCROLLED_BLINK_LAYOUT_CHANGES_DEFINITION.replace(
         BLINK_LAYOUT_CHANGES_CHILD_FRAGMENT_NOTES, "", 1
     ).replace(
         BLINK_LAYOUT_CHANGES_ROTATED_QUADS,
         BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS,
         1,
     ),
-    BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    LEGACY_UNSCROLLED_BLINK_LAYOUT_CHANGES_DEFINITION.replace(
         BLINK_LAYOUT_CHANGES_ROTATED_QUADS,
         BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS,
         1,
@@ -8179,6 +8728,14 @@ def add_layout_changes_to_local_frame_view(text: str, path: Path) -> str:
             text,
             BLINK_LAYOUT_CHECKPOINT_HELPER,
             BLINK_LAYOUT_CHANGES_DECLARATION + BLINK_LAYOUT_CHECKPOINT_HELPER,
+            path,
+        )
+    if BLINK_LAYOUT_CHANGES_SCROLL_DECLARATION not in text:
+        text = replace_once(
+            text,
+            BLINK_LAYOUT_CHANGES_DECLARATION,
+            BLINK_LAYOUT_CHANGES_DECLARATION
+            + BLINK_LAYOUT_CHANGES_SCROLL_DECLARATION,
             path,
         )
     for legacy in BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS:
@@ -10557,6 +11114,29 @@ def main() -> int:
         / "dom"
         / "character_data.cc"
     )
+    # Protocol 0.34: shadow roots attached to connected hosts, reference
+    # target changes, and slot assignment recalculations.
+    blink_dom = source / "third_party" / "blink" / "renderer" / "core" / "dom"
+    patch_blink_layout_change_notes(
+        blink_dom / "element.cc",
+        BLINK_DOM_CHANGE_DECLARATION,
+        ((BLINK_ELEMENT_SHADOW_ROOT_ANCHOR, BLINK_ELEMENT_SHADOW_ROOT_HOOK),),
+    )
+    patch_blink_layout_change_notes(
+        blink_dom / "shadow_root.cc",
+        BLINK_DOM_CHANGE_DECLARATION,
+        (
+            (
+                BLINK_SHADOW_ROOT_REFERENCE_TARGET_ANCHOR,
+                BLINK_SHADOW_ROOT_REFERENCE_TARGET_HOOK,
+            ),
+        ),
+    )
+    patch_blink_layout_change_notes(
+        blink_dom / "slot_assignment.cc",
+        BLINK_DOM_CHANGE_DECLARATION,
+        ((BLINK_SLOT_ASSIGNMENT_ANCHOR, BLINK_SLOT_ASSIGNMENT_HOOK),),
+    )
     patch_blink_document(
         source
         / "third_party"
@@ -10614,6 +11194,11 @@ def main() -> int:
             blink_core / "paint" / "pre_paint_tree_walk.cc",
             BLINK_LAYOUT_OBJECT_CHANGE_NOTE_DECLARATION,
             BLINK_PRE_PAINT_LAYOUT_CHANGE_HOOKS,
+        ),
+        (
+            blink_core / "paint" / "paint_layer_scrollable_area.cc",
+            BLINK_SCROLL_OFFSET_NOTE_DECLARATION,
+            BLINK_PAINT_LAYER_SCROLLABLE_AREA_HOOKS,
         ),
     ):
         patch_blink_layout_change_notes(

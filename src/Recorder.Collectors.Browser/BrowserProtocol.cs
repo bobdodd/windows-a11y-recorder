@@ -116,6 +116,39 @@ internal static class BrowserProtocol
             (BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCharacterDataChanged) =>
                 payload.Deserialize<BrowserDomCharacterDataChangedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomNodeInserted) =>
+                payload.Deserialize<BrowserDomNodeInsertedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomInsertedNode) =>
+                payload.Deserialize<BrowserDomInsertedNodePayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomInsertedNodeAttribute) =>
+                payload.Deserialize<BrowserDomInsertedNodeAttributePayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomInsertedNodeCharacterData) =>
+                payload.Deserialize<BrowserDomInsertedNodeCharacterDataPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomInsertedShadowRoot) =>
+                payload.Deserialize<BrowserDomInsertedShadowRootPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomInsertedSlotAssignment) =>
+                payload.Deserialize<BrowserDomInsertedSlotAssignmentPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomInsertionCompleted) =>
+                payload.Deserialize<BrowserDomInsertionCompletedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomNodeRemoved) =>
+                payload.Deserialize<BrowserDomNodeRemovedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomChildrenRemoved) =>
+                payload.Deserialize<BrowserDomChildrenRemovedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomShadowRootChanged) =>
+                payload.Deserialize<BrowserDomShadowRootChangedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomSlotAssignmentChanged) =>
+                payload.Deserialize<BrowserDomSlotAssignmentChangedPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Accessibility,
                 BrowserEvidenceEventTypes.AccessibilityCheckpointStarted) =>
                 payload.Deserialize<BrowserAccessibilityCheckpointStartedPayload>(JsonOptions) as object,
@@ -212,6 +245,10 @@ internal static class BrowserProtocol
             (BrowserEvidenceChannels.Layout,
                 BrowserEvidenceEventTypes.LayoutChangesCompleted) =>
                 payload.Deserialize<BrowserLayoutChangesCompletedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Layout,
+                BrowserEvidenceEventTypes.LayoutScrollOffsetChanged) =>
+                payload.Deserialize<BrowserLayoutScrollOffsetChangedPayload>(
                     JsonOptions) as object,
             (BrowserEvidenceChannels.Network,
                 BrowserEvidenceEventTypes.NetworkRequestWillBeSent) =>

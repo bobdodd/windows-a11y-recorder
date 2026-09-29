@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.33"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.33"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.34"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.34"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -2796,6 +2796,115 @@ class IntegrateTests(unittest.TestCase):
             1, first.count(INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER)
         )
 
+    def test_records_structural_dom_changes_from_the_document(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(
+                self.document_source(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER),
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_document(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHANGE_HELPER))
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_DOCUMENT_DOM_CHANGE_DECLARATION)
+        )
+        hook = (
+            INTEGRATE.BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+            + INTEGRATE.BLINK_DOCUMENT_MUTATION_HOOK
+            + INTEGRATE.BLINK_DOCUMENT_DOM_CHANGE_HOOK
+        )
+        self.assertEqual(1, first.count(hook))
+        # The declaration precedes the hook, and the definition follows the
+        # checkpoint it shares its walk with.
+        self.assertLess(
+            first.index(INTEGRATE.BLINK_DOCUMENT_DOM_CHANGE_DECLARATION),
+            first.index(hook),
+        )
+        self.assertLess(
+            first.index(INTEGRATE.BLINK_DOM_CHANGE_HELPER),
+            first.index("void Document::FinishedParsing() {"),
+        )
+
+    def test_dom_change_helper_records_what_the_design_states(self):
+        helper = INTEGRATE.BLINK_DOM_CHANGE_HELPER
+        # Changes are recorded once the document stops parsing.
+        self.assertIn("!recorder_document.Parsing()", helper)
+        self.assertNotIn("HasFinishedParsing()", helper)
+        # Every child list change type is handled explicitly.
+        for change_type in (
+            "kElementInserted",
+            "kNonElementInserted",
+            "kElementRemoved",
+            "kNonElementRemoved",
+            "kAllChildrenRemoved",
+            "kTextChanged",
+            "kFinishedBuildingDocumentFragmentTree",
+        ):
+            self.assertIn(change_type, helper)
+        for entry in (
+            "RecordBlinkDomNodeInserted(",
+            "RecordBlinkDomInsertedNode(",
+            "RecordBlinkDomInsertedNodeAttribute(",
+            "RecordBlinkDomInsertedNodeCharacterData(",
+            "RecordBlinkDomInsertedShadowRoot(",
+            "RecordBlinkDomInsertedSlotAssignment(",
+            "CompleteBlinkDomInsertion(",
+            "RecordBlinkDomNodeRemoved(",
+            "RecordBlinkDomChildrenRemoved(",
+            "RecordBlinkDomShadowRootChanged(",
+            "RecordBlinkDomSlotAssignmentChanged(",
+        ):
+            self.assertIn(f"a11y_recorder::{entry}", helper)
+        # Nothing is cut: every value and every assigned node is recorded.
+        self.assertIn("kRecorderMaximumDomValueLength = 2147483647", helper)
+        self.assertIn("kRecorderMaximumAssignedNodes = 2147483647", helper)
+        self.assertNotIn("->AssignedNodes()", helper)
+        self.assertNotIn("RecalcAssignment()", helper)
+
+    def test_upgrades_a_character_data_hook_that_excludes_the_parser(self):
+        legacy = INTEGRATE.LEGACY_PARSER_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "character_data.cc"
+            path.write_text(
+                '#include "third_party/blink/renderer/core/dom/'
+                'character_data.h"\n'
+                f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+                '#include "third_party/blink/renderer/core/dom/document.h"\n'
+                '#include "third_party/blink/renderer/core/dom/'
+                'mutation_observer.h"\n'
+                "\n"
+                "void CharacterData::SetDataAndUpdate() {\n"
+                "  String old_data = this->data();\n"
+                + legacy
+                + "}\n",
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_character_data(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_character_data(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(legacy, first)
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_CHARACTER_DATA_MUTATION_HOOK)
+        )
+
+    def test_upgrades_a_layout_change_definition_without_scroll_offsets(self):
+        definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        legacy = INTEGRATE.LEGACY_UNSCROLLED_BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertIn(legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS)
+        self.assertNotIn("RecorderNoteScrollOffset", legacy)
+        self.assertIn("void RecorderNoteScrollOffset(", definition)
+        self.assertIn("std::move(recorder_scroll_offsets));", definition)
+        # The offsets are read before the transform nodes, so the scroll
+        # translation each names is read in the same change set.
+        self.assertLess(
+            definition.index("recorder_scroll_offsets.push_back("),
+            definition.index("recorder_transforms.push_back("),
+        )
+
     def test_upgrades_a_dom_helper_without_character_data(self):
         legacy = INTEGRATE.LEGACY_UNTEXTED_BLINK_DOM_CHECKPOINT_HELPER
         self.assertNotIn("RecordBlinkDomCheckpointNodeCharacterData", legacy)
@@ -3127,7 +3236,11 @@ class IntegrateTests(unittest.TestCase):
             self.assertEqual(
                 1, first.count("RecordBlinkDomCharacterDataChanged(")
             )
-            self.assertIn("if (source != kUpdateFromParser) {", first)
+            self.assertIn(
+                "  if (source != kUpdateFromParser ||\n"
+                "      (isConnected() && !GetDocument().Parsing())) {\n",
+                first,
+            )
             self.assertIn("kRecorderMaximumDomValueLength = 2147483647", first)
             self.assertIn(
                 "MutationObserver::EnqueueRecorderDomCheckpoint("
@@ -5076,6 +5189,41 @@ class LayoutIntegrationTests(unittest.TestCase):
                 "pre_paint_tree_walk.cc",
                 INTEGRATE.BLINK_LAYOUT_OBJECT_CHANGE_NOTE_DECLARATION,
                 INTEGRATE.BLINK_PRE_PAINT_LAYOUT_CHANGE_HOOKS,
+            ),
+            (
+                "paint_layer_scrollable_area.cc",
+                INTEGRATE.BLINK_SCROLL_OFFSET_NOTE_DECLARATION,
+                INTEGRATE.BLINK_PAINT_LAYER_SCROLLABLE_AREA_HOOKS,
+            ),
+            (
+                "element.cc",
+                INTEGRATE.BLINK_DOM_CHANGE_DECLARATION,
+                (
+                    (
+                        INTEGRATE.BLINK_ELEMENT_SHADOW_ROOT_ANCHOR,
+                        INTEGRATE.BLINK_ELEMENT_SHADOW_ROOT_HOOK,
+                    ),
+                ),
+            ),
+            (
+                "shadow_root.cc",
+                INTEGRATE.BLINK_DOM_CHANGE_DECLARATION,
+                (
+                    (
+                        INTEGRATE.BLINK_SHADOW_ROOT_REFERENCE_TARGET_ANCHOR,
+                        INTEGRATE.BLINK_SHADOW_ROOT_REFERENCE_TARGET_HOOK,
+                    ),
+                ),
+            ),
+            (
+                "slot_assignment.cc",
+                INTEGRATE.BLINK_DOM_CHANGE_DECLARATION,
+                (
+                    (
+                        INTEGRATE.BLINK_SLOT_ASSIGNMENT_ANCHOR,
+                        INTEGRATE.BLINK_SLOT_ASSIGNMENT_HOOK,
+                    ),
+                ),
             ),
         ):
             with self.subTest(file=name):

@@ -190,6 +190,81 @@ internal static class EventPayloadValidator
             case ("browser.dom", "dom-character-data-changed"):
                 ValidateBrowserDomCharacterDataChanged(payload, issues);
                 break;
+            case ("browser.dom", "dom-node-inserted"):
+                ValidateBrowserDomNodeInserted(payload, issues);
+                break;
+            case ("browser.dom", "dom-inserted-node"):
+                ValidateBrowserDomInsertedNode(payload, issues);
+                break;
+            case ("browser.dom", "dom-inserted-node-attribute"):
+                ValidateBrowserDomCheckpointNodeAttribute(
+                    payload, issues, "insertionId");
+                ValidateLayoutIdentity(
+                    payload,
+                    "insertionId",
+                    "dom-transition-",
+                    "browser-dom-transition-id-invalid",
+                    issues);
+                break;
+            case ("browser.dom", "dom-inserted-node-character-data"):
+                ValidateBrowserDomCheckpointNodeCharacterData(
+                    payload, issues, "insertionId");
+                ValidateLayoutIdentity(
+                    payload,
+                    "insertionId",
+                    "dom-transition-",
+                    "browser-dom-transition-id-invalid",
+                    issues);
+                break;
+            case ("browser.dom", "dom-inserted-shadow-root"):
+                ValidateBrowserDomCheckpointShadowRoot(
+                    payload, issues, "insertionId");
+                ValidateLayoutIdentity(
+                    payload,
+                    "insertionId",
+                    "dom-transition-",
+                    "browser-dom-transition-id-invalid",
+                    issues);
+                break;
+            case ("browser.dom", "dom-inserted-slot-assignment"):
+                ValidateBrowserDomCheckpointSlotAssignment(
+                    payload, issues, "insertionId");
+                ValidateLayoutIdentity(
+                    payload,
+                    "insertionId",
+                    "dom-transition-",
+                    "browser-dom-transition-id-invalid",
+                    issues);
+                break;
+            case ("browser.dom", "dom-insertion-completed"):
+                ValidateBrowserDomInsertionCompleted(payload, issues);
+                break;
+            case ("browser.dom", "dom-node-removed"):
+                ValidateBrowserDomNodeRemoved(payload, issues);
+                break;
+            case ("browser.dom", "dom-children-removed"):
+                ValidateBrowserDomChildrenRemoved(payload, issues);
+                break;
+            case ("browser.dom", "dom-shadow-root-changed"):
+                ValidateBrowserDomCheckpointShadowRoot(
+                    payload, issues, "transitionId");
+                ValidateLayoutIdentity(
+                    payload,
+                    "transitionId",
+                    "dom-transition-",
+                    "browser-dom-transition-id-invalid",
+                    issues);
+                break;
+            case ("browser.dom", "dom-slot-assignment-changed"):
+                ValidateBrowserDomCheckpointSlotAssignment(
+                    payload, issues, "transitionId");
+                ValidateLayoutIdentity(
+                    payload,
+                    "transitionId",
+                    "dom-transition-",
+                    "browser-dom-transition-id-invalid",
+                    issues);
+                break;
             case ("browser.cookie", "document-cookie-read"):
                 ValidateBrowserDocumentCookieRead(payload, issues);
                 break;
@@ -253,6 +328,9 @@ internal static class EventPayloadValidator
                 break;
             case ("browser.layout", "layout-changes-completed"):
                 ValidateBrowserLayoutChangesCompleted(payload, issues);
+                break;
+            case ("browser.layout", "layout-scroll-offset-changed"):
+                ValidateBrowserLayoutScrollOffsetChanged(payload, issues);
                 break;
             case ("browser.presentation", "presentation-requested"):
                 ValidateBrowserPresentationRequested(payload, issues);
@@ -2930,6 +3008,45 @@ internal static class EventPayloadValidator
         }
     }
 
+    private static void ValidateBrowserLayoutScrollOffsetChanged(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("changeSetId"),
+                RequiredInteger("nodeId", positive: true),
+                RequiredObject("scrollOffset"),
+                RequiredObject("webExposedScrollOffset"),
+                RequiredObject("scrollOrigin"),
+                RequiredNumber("effectiveZoom", positive: true),
+                NullableString("scrollTranslationNodeId")
+            ],
+            issues);
+        ValidateLayoutChangeSetIdentity(payload, issues);
+        ValidateLayoutIdentity(
+            payload,
+            "scrollTranslationNodeId",
+            "layout-transform-",
+            "browser-layout-transform-node-id-invalid",
+            issues);
+        foreach (var property in new[]
+            { "scrollOffset", "webExposedScrollOffset", "scrollOrigin" })
+        {
+            if (payload.TryGetProperty(property, out var point) &&
+                point.ValueKind == JsonValueKind.Object)
+            {
+                ValidateShape(
+                    point,
+                    [RequiredNumber("x"), RequiredNumber("y")],
+                    issues,
+                    $"#/payload/{property}");
+            }
+        }
+    }
+
     private static void ValidateBrowserLayoutChangesCompleted(
         JsonElement payload,
         ICollection<EventValidationIssue> issues)
@@ -2942,7 +3059,8 @@ internal static class EventPayloadValidator
                 RequiredInteger("notedNodeCount", nonnegative: true),
                 RequiredInteger("recordedNodeCount", nonnegative: true),
                 RequiredInteger("unchangedNodeCount", nonnegative: true),
-                RequiredInteger("transformNodeCount", nonnegative: true)
+                RequiredInteger("transformNodeCount", nonnegative: true),
+                RequiredInteger("scrollOffsetCount", nonnegative: true)
             ],
             issues);
         ValidateLayoutChangeSetIdentity(payload, issues);
@@ -3936,15 +4054,18 @@ internal static class EventPayloadValidator
         ValidateRendererDocumentContext(payload, issues);
     }
 
+    // The same record shape names a checkpoint, or, from protocol 0.34, the
+    // insertion or transition it belongs to.
     private static void ValidateBrowserDomCheckpointNodeAttribute(
         JsonElement payload,
-        ICollection<EventValidationIssue> issues)
+        ICollection<EventValidationIssue> issues,
+        string identityProperty = "checkpointId")
     {
         ValidateShape(
             payload,
             [
                 RequiredObject("context"),
-                RequiredString("checkpointId"),
+                RequiredString(identityProperty),
                 RequiredInteger("nodeId", positive: true),
                 RequiredInteger("attributeIndex", nonnegative: true),
                 NullableString("attributeNamespace"),
@@ -3965,15 +4086,18 @@ internal static class EventPayloadValidator
             issues);
     }
 
+    // The same record shape names a checkpoint, or, from protocol 0.34, the
+    // insertion or transition it belongs to.
     private static void ValidateBrowserDomCheckpointNodeCharacterData(
         JsonElement payload,
-        ICollection<EventValidationIssue> issues)
+        ICollection<EventValidationIssue> issues,
+        string identityProperty = "checkpointId")
     {
         ValidateShape(
             payload,
             [
                 RequiredObject("context"),
-                RequiredString("checkpointId"),
+                RequiredString(identityProperty),
                 RequiredInteger("nodeId", positive: true),
                 RequiredText("data"),
                 RequiredInteger("dataLength", nonnegative: true),
@@ -3991,15 +4115,18 @@ internal static class EventPayloadValidator
             issues);
     }
 
+    // The same record shape names a checkpoint, or, from protocol 0.34, the
+    // insertion or transition it belongs to.
     private static void ValidateBrowserDomCheckpointShadowRoot(
         JsonElement payload,
-        ICollection<EventValidationIssue> issues)
+        ICollection<EventValidationIssue> issues,
+        string identityProperty = "checkpointId")
     {
         ValidateShape(
             payload,
             [
                 RequiredObject("context"),
-                RequiredString("checkpointId"),
+                RequiredString(identityProperty),
                 RequiredInteger("nodeId", positive: true),
                 RequiredInteger("hostNodeId", positive: true),
                 RequiredEnum("mode", "open", "closed", "user-agent"),
@@ -4016,15 +4143,18 @@ internal static class EventPayloadValidator
         ValidateRendererDocumentContext(payload, issues);
     }
 
+    // The same record shape names a checkpoint, or, from protocol 0.34, the
+    // insertion or transition it belongs to.
     private static void ValidateBrowserDomCheckpointSlotAssignment(
         JsonElement payload,
-        ICollection<EventValidationIssue> issues)
+        ICollection<EventValidationIssue> issues,
+        string identityProperty = "checkpointId")
     {
         ValidateShape(
             payload,
             [
                 RequiredObject("context"),
-                RequiredString("checkpointId"),
+                RequiredString(identityProperty),
                 RequiredInteger("nodeId", positive: true),
                 new PropertyRule(
                     "assignedNodeIds",
@@ -4040,7 +4170,9 @@ internal static class EventPayloadValidator
                 RequiredInteger("assignedNodeCount", nonnegative: true),
                 RequiredBoolean("assignedNodesTruncated"),
                 RequiredInteger("maximumAssignedNodes", positive: true),
-                RequiredBoolean("assignmentCurrent")
+                .. (identityProperty == "transitionId"
+                    ? Array.Empty<PropertyRule>()
+                    : [RequiredBoolean("assignmentCurrent")])
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
@@ -4069,6 +4201,126 @@ internal static class EventPayloadValidator
                 $"The slot records {recorded} assigned nodes of {count}, which " +
                     "does not agree with its truncation flag and maximum.");
         }
+    }
+
+    // Structural DOM change records (protocol 0.34). Transitions and the
+    // insertions they name are "dom-transition-N".
+    private static void ValidateDomTransitionIdentity(
+        JsonElement payload,
+        string property,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateLayoutIdentity(
+            payload,
+            property,
+            "dom-transition-",
+            "browser-dom-transition-id-invalid",
+            issues);
+    }
+
+    private static void ValidateBrowserDomNodeInserted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("transitionId"),
+                RequiredEnum("insertionKind", "child", "shadow-root"),
+                RequiredInteger("containerNodeId", positive: true),
+                RequiredInteger("nodeId", positive: true),
+                NullableInteger("previousSiblingNodeId", positive: true)
+            ],
+            issues);
+        ValidateDomTransitionIdentity(payload, "transitionId", issues);
+        if (ReadString(payload, "insertionKind") == "shadow-root" &&
+            HasNonnullProperty(payload, "previousSiblingNodeId"))
+        {
+            AddError(
+                issues,
+                "browser-dom-shadow-root-insertion-sibling",
+                "#/payload/previousSiblingNodeId",
+                "An attached shadow root has no previous sibling.");
+        }
+    }
+
+    private static void ValidateBrowserDomInsertedNode(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("insertionId"),
+                RequiredInteger("nodeIndex", nonnegative: true),
+                RequiredInteger("nodeId", positive: true),
+                RequiredInteger("parentNodeId", positive: true),
+                RequiredEnum(
+                    "nodeType",
+                    "document",
+                    "element",
+                    "text",
+                    "comment",
+                    "shadow-root",
+                    "other"),
+                RequiredString("nodeName")
+            ],
+            issues);
+        ValidateDomTransitionIdentity(payload, "insertionId", issues);
+    }
+
+    private static void ValidateBrowserDomInsertionCompleted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("insertionId"),
+                RequiredInteger("nodeCount", positive: true),
+                RequiredInteger("attributeCount", nonnegative: true),
+                RequiredInteger("characterDataCount", nonnegative: true),
+                RequiredInteger("shadowRootCount", nonnegative: true),
+                RequiredInteger("slotCount", nonnegative: true)
+            ],
+            issues);
+        ValidateDomTransitionIdentity(payload, "insertionId", issues);
+    }
+
+    private static void ValidateBrowserDomNodeRemoved(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("transitionId"),
+                RequiredInteger("containerNodeId", positive: true),
+                RequiredInteger("nodeId", positive: true)
+            ],
+            issues);
+        ValidateDomTransitionIdentity(payload, "transitionId", issues);
+    }
+
+    private static void ValidateBrowserDomChildrenRemoved(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("transitionId"),
+                RequiredInteger("containerNodeId", positive: true)
+            ],
+            issues);
+        ValidateDomTransitionIdentity(payload, "transitionId", issues);
     }
 
     // A checkpoint either covers no transition and names neither bound, or
