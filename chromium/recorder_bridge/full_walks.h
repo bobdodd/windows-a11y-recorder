@@ -31,6 +31,9 @@ class FullWalkSchedule {
  public:
   // An interval of 0 walks no document to check its change records.
   explicit FullWalkSchedule(int interval);
+  FullWalkSchedule(const FullWalkSchedule&) = delete;
+  FullWalkSchedule& operator=(const FullWalkSchedule&) = delete;
+  ~FullWalkSchedule();
 
   // Why a checkpoint Blink requests is walked, or an empty string when it is
   // not: "first" when the document has no walk yet, "after-loss" when a

@@ -5,6 +5,8 @@ namespace a11y_recorder {
 FullWalkSchedule::FullWalkSchedule(int interval)
     : interval_(interval < 0 ? 0 : interval) {}
 
+FullWalkSchedule::~FullWalkSchedule() = default;
+
 FullWalkSchedule::Document& FullWalkSchedule::Find(
     std::unordered_map<int, Document>& documents,
     int document_node_id) {
