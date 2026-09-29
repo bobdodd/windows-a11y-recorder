@@ -569,6 +569,35 @@ public sealed class BrowserStateTests : IDisposable
                 report.AppendLine($"written again with snapshots in {copying.Elapsed.TotalSeconds:F1} s: {path}, {new FileInfo(path).Length} bytes");
                 report.AppendLine($"state thread: {JsonSerializer.Serialize(summary)}");
             }
+            else
+            {
+                // The state thread's own records, written while recording.
+                foreach (var message in original.ReadAll())
+                {
+                    if (message.Channel.Topic != RecordingFileStateRecorder.IndexTopic)
+                    {
+                        continue;
+                    }
+                    using var json = JsonDocument.Parse(message.Data);
+                    var kind = json.RootElement.GetProperty("kind").GetString();
+                    if (kind is "state-summary" or "state-stopped")
+                    {
+                        report.AppendLine($"state thread, as recorded: {json.RootElement.GetRawText()}");
+                    }
+                }
+                var timings = Path.Combine(Path.GetDirectoryName(source)!, "database-writer-timings.json");
+                if (File.Exists(timings))
+                {
+                    using var json = JsonDocument.Parse(File.ReadAllBytes(timings));
+                    foreach (var stage in json.RootElement.GetProperty("stages").EnumerateArray())
+                    {
+                        if (stage.GetProperty("stage").GetString() == "complete.state")
+                        {
+                            report.AppendLine($"stopping the state thread: {stage.GetProperty("totalMilliseconds").GetDouble()} ms");
+                        }
+                    }
+                }
+            }
         }
 
         using var reader = RecordingFileReader.Open(path);

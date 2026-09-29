@@ -402,9 +402,13 @@ Release build:
   code.
 - Hover and scrolling were reported to be as responsive as in the
   recording at 66030a7, and stopping to take no noticeable time.
-- The report does not give the state thread's time or its largest queue
-  for a recording made with the state thread, only for a file written
-  again by the check.
+- The report at 37f65ec did not give the state thread's time or its
+  largest queue for a recording made with the state thread, only for a
+  file written again by the check. From the commit after e118748 on, it also reports the
+  state thread's summary and stop record as recorded in the file, and the
+  time taken to stop the state thread from the writer timings beside it.
+  The writer timings of this recording give 24.5 ms to stop the state
+  thread.
 
 A recording of 70.5 s says nothing about the state thread's memory or the
 rebuild time in a recording of an hour.
