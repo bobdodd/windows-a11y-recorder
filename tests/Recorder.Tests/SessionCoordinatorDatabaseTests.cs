@@ -92,6 +92,7 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
             Assert.Equal(recordingId.ToString(), file.Metadata["recording"]["recordingId"]);
             Assert.Equal(sessionKey, file.Metadata["recording"]["sessionKey"]);
             var stored = file.ReadAll()
+                .Where(message => RecordingFileBatchTarget.IsEventTopic(message.Channel.Topic))
                 .Select(message => RecordingEventCodec.Decode(message.Data.Span))
                 .OrderBy(item => item.EventKey)
                 .Select(item => (item.Event.Channel, (long)item.Event.Sequence))
@@ -218,6 +219,7 @@ public sealed class SessionCoordinatorDatabaseTests : IAsyncLifetime
         {
             Assert.True(file.HasSummary);
             var annotations = file.ReadAll()
+                .Where(message => RecordingFileBatchTarget.IsEventTopic(message.Channel.Topic))
                 .Select(message => RecordingEventCodec.Decode(message.Data.Span).Event)
                 .Where(record => record.Channel == "session.annotations")
                 .ToArray();

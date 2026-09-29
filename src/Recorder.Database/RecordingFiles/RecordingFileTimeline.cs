@@ -41,7 +41,7 @@ public sealed class RecordingFileTimeline : ISessionTimeline, ISessionEventRecor
         Count = channelCounts.Values.Sum();
         Occupancy = occupancy;
         _channelIds = reader.Channels.Values
-            .Where(channel => channel.Topic != RecordingFileBatchTarget.WriterTopic)
+            .Where(channel => RecordingFileBatchTarget.IsEventTopic(channel.Topic))
             .GroupBy(channel => channel.Topic, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Select(channel => channel.Id).ToArray(), StringComparer.Ordinal);
         _chunks = reader.Chunks

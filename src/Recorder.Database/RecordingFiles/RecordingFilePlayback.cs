@@ -93,7 +93,7 @@ public static class RecordingFilePlayback
 
     // The index stored in the file, or one derived from its chunks, and why
     // it was derived.
-    private static (PlaybackIndex Index, string? Derived) ReadIndex(
+    internal static (PlaybackIndex Index, string? Derived) ReadIndex(
         RecordingFileReader reader,
         CancellationToken cancellationToken)
     {
@@ -135,7 +135,7 @@ public static class RecordingFilePlayback
                 ? value
                 : throw new InvalidDataException("The recording file does not state its clock frequency.");
         var chunks = reader.Chunks
-            .Where(chunk => chunk.Stream != "recorder")
+            .Where(chunk => chunk.Stream is not ("recorder" or RecordingFileStateRecorder.SnapshotStream or RecordingFileStateRecorder.IndexStream))
             .ToArray();
         var builder = new PlaybackIndexBuilder(frequency, TimeSpan.Zero);
         var starts = new List<long>();
@@ -155,7 +155,7 @@ public static class RecordingFilePlayback
         ForEachGroup(
             reader,
             chunks,
-            topic => topic != RecordingFileBatchTarget.WriterTopic,
+            RecordingFileBatchTarget.IsEventTopic,
             stored => builder.Add(stored.EventKey, stored.Event),
             cancellationToken);
         return builder.Build();

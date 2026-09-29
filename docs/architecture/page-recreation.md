@@ -6,8 +6,10 @@ Slice 1 (character data in DOM checkpoints, protocol 0.33) is merged, and
 the character data check passed in the recordings at protocols 0.35 and 0.36
 on the target Windows machine; see "Slice 5 status" in
 [change-driven recording](change-driven-recording.md). Slice 2 (rebuilding
-the recorded state at any captured frame) is proposed below, in "Slice 2
-design", and not implemented. Slice 3 is proposed and not implemented.
+the recorded state at any captured frame) is implemented on the
+`frame-state` branch as designed in "Slice 2 design", with the differences
+listed in "Slice 2 implementation", and is not yet tested on the target
+Windows machine. Slice 3 is proposed and not implemented.
 Recording text by content hash is agreed and deferred; see "Text by content
 hash".
 
@@ -100,7 +102,7 @@ Each slice is tested on the target Windows machine before the next.
 
 ## Slice 2 design: the recorded state at any captured frame
 
-Proposed 2026-09-29, not yet agreed. The record names, counts, and sizes
+Proposed and agreed 2026-09-29. The record names, counts, and sizes
 below are from recording 20260929-172645-baa5818d82194001acf0edaa560b335c
 (protocol 0.36, 92.6 s) unless stated.
 
@@ -269,6 +271,116 @@ background task the player does not wait for.
   the snapshots, the time to stop, and the time to rebuild at frames at the
   start, middle, and end; and that hover and scrolling are as smooth as in
   the recording at 66030a7.
+
+## Slice 2 implementation
+
+Implemented 2026-09-29 on the `frame-state` branch. The measurements below
+were made on the development machine with a debug build, not on the target
+machine, and say nothing about the target machine's times.
+
+### Classes
+
+- `DomTreeRebuilder` (in `Recorder.Session`) holds the DOM rebuild that
+  `DomChangeCheck` did: checkpoints, insertion sets, and changes, applied in
+  record order. `DomChangeCheck` now uses it, and compares its tree with
+  every full walk as before.
+- `LayoutDocumentChangeState` gained a public `Apply` for layout records,
+  the layout zoom factor, the transform records as recorded, and the scroll
+  offsets.
+- `BrowserDocumentState` holds one document's DOM, layout, and interaction
+  state, the completeness of each part, and the event key and time of the
+  record that last changed each part. `BrowserStateBuilder` applies DOM,
+  layout, interaction, and presentation records to the documents they
+  name.
+- `BrowserStateSnapshot` writes and reads a document's state as JSON,
+  format version 1. Nodes are in identifier order and recorded payloads are
+  kept as recorded.
+- `RecordingFileStateRecorder` is the state thread. `RecordingFileBrowserState`
+  is the reader, with `At` for a time and `AtFrame` for a captured frame.
+
+### Differences from the design
+
+- `DomCharacterDataCheck` keeps its own per-node data map. Its check is of
+  record order, that each text node's data record follows its node record,
+  which the rebuilt tree does not keep. The character data the state holds
+  is the `DomTreeRebuilder`'s, which `DomChangeCheck` compares with every
+  full walk. The reports of the DOM, layout, and character data checks on
+  the recordings at f409513, 70d22d4, and 66030a7 are unchanged by the
+  move.
+- Completeness has a fifth value, walk cut: a full walk of the part was
+  started and its completion was not recorded, so its nodes are those
+  recorded before the cut.
+- The playback index does not list the snapshots. The playback index is
+  written when recording stops, so a file cut short has none. The state
+  thread instead writes a state index record on the topic
+  `recorder.state-index`, in a stream of its own, `state-index`, at each
+  sweep in which it wrote a snapshot or a document changed. Each lists, for
+  every document, its last record time, its latest snapshot's event key,
+  time, and position, and the time of its first record not in that
+  snapshot. The reader reads only these records when it opens a file, so a
+  file cut short is read from the snapshots before the cut.
+- The state thread checks for due snapshots once a second of recording
+  time. A document part way through a checkpoint, insertion set, or change
+  set is not snapshotted until it completes.
+- The queue to the state thread is not bounded by count: it holds up to
+  256 MB of estimated record bytes. Passing a batch never waits. When the
+  limit is passed, the thread stops as designed, and a record on
+  `recorder.state` states when and why.
+- The writer's own omissions, records it could not write, are reported on
+  the reader's result for the whole file, with their times, not for each
+  document, since an omission does not name a document.
+- The presentation records are also in the `browser-state` stream, since
+  the state thread reads them.
+- The frame match reads the presented updates from the playback index's
+  presented checkpoints, by document token, which is the join the design
+  names.
+- A document whose last presented update is long before the frame, such as
+  a document not drawn since, is read from the snapshot before that update,
+  so the time to rebuild grows with the number of such documents. The
+  reader holds the state of such a document at its cut between calls, up
+  to 512 MB, so each is rebuilt once.
+- There is no player change in this slice, as designed.
+
+### Tests
+
+- Unit (`BrowserStateTests`): generated sessions of DOM, layout, and
+  interaction records over several documents, rebuilt with and without
+  snapshots and compared at many times; each completeness value, including
+  a lost record, a parsing document, a document with no walk, and a cut
+  walk; the frame match for a presented update, an update presented after
+  the frame, and a document with no presentation; snapshot writing and
+  reading; the state thread stopping when its queue limit is passed while
+  the writer does not wait; and a file cut short, read from its snapshots
+  before the cut.
+- Integration (`ChecksTheStateOfARecordingFile`, run when
+  `RECORDER_STATE_FILE` names a recording file): writes the file again with
+  the state thread, then compares the state with and without snapshots at
+  times and frames spread over the recording, and in a copy cut short at
+  half. It reports the state thread's summary, the size of each stream, and
+  the time of each rebuild. The DOM, layout, and character data check
+  reports on the recordings at f409513, 70d22d4, and 66030a7 are compared
+  with those made before the move.
+- System, on the target Windows machine: not yet run.
+
+### Measurements on the development machine
+
+Recording 20260929-172645-baa5818d82194001acf0edaa560b335c (protocol 0.36,
+92.6 s), written again with the state thread:
+
+- The state thread applied 153,363 records in 0.55 s and wrote 139
+  snapshots in 0.99 s. The snapshots are 93 MB of JSON, 3.0 MB compressed;
+  the file grew from 28.5 MB to 30.4 MB.
+- At 8 times and 8 frames spread over the recording, and in the copy cut
+  short at half, the state rebuilt with snapshots equals the state rebuilt
+  from every record.
+- At the end, with 125 documents, a rebuild from snapshots took 0.23 s and
+  one from every record took 2.1 s. At the other sampled times and frames,
+  a rebuild from snapshots took 0.16 s to 0.69 s, excluding the first,
+  which includes the time to load the code.
+
+These are not the target machine's times, and do not show that a one-hour
+recording meets the proposed 1 s limit; the system test on the target
+machine does.
 
 ## Text by content hash (agreed, deferred)
 

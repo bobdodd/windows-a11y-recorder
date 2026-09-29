@@ -264,6 +264,12 @@ How the recorder uses MCAP:
   on disk within about a second.
 - The writer's rejections and omissions are messages on the topic
   `recorder.writer` in a fourth stream, `recorder`.
+- Since page recreation slice 2, the DOM, layout, interaction, and
+  presentation channels are in a stream of their own, `browser-state`, and
+  the state thread's snapshots and state index records are in the streams
+  `state` and `state-index`; see
+  [page recreation](page-recreation.md). Files written before are read from
+  the `browser` stream.
 
 The design this section proposed before slice 1:
 

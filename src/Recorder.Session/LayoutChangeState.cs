@@ -88,7 +88,9 @@ public sealed class LayoutChangeState
 public sealed class LayoutDocumentChangeState
 {
     private readonly Dictionary<string, TransformNode> _transforms = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, JsonElement> _transformRecords = new(StringComparer.Ordinal);
     private readonly Dictionary<long, JsonElement> _nodes = [];
+    private readonly Dictionary<long, JsonElement> _scrollOffsets = [];
 
     private sealed record TransformNode(string? ParentId, double[] Matrix, bool Flattens);
 
@@ -99,13 +101,88 @@ public sealed class LayoutDocumentChangeState
 
     public double ViewPaintOffsetY { get; private set; }
 
+    /// <summary>The layout zoom factor named by the latest change set, or null before one.</summary>
+    public double? LayoutZoomFactor { get; private set; }
+
+    /// <summary>The start record of the latest change set, or null before one.</summary>
+    public JsonElement? LastStarted { get; private set; }
+
+    /// <summary>True between a change set's start record and its completion.</summary>
+    public bool IsOpen { get; private set; }
+
+    /// <summary>The last record of each transform node, by transform node identity.</summary>
+    public IReadOnlyDictionary<string, JsonElement> TransformRecords => _transformRecords;
+
+    /// <summary>The last scroll offset record of each scrolling node, by node identity.</summary>
+    public IReadOnlyDictionary<long, JsonElement> ScrollOffsets => _scrollOffsets;
+
     /// <summary>The last change record of each node, by node identity.</summary>
     public IReadOnlyDictionary<long, JsonElement> Nodes => _nodes;
 
     public int TransformNodeCount => _transforms.Count;
 
+    /// <summary>
+    /// Applies one browser.layout change record of this document: a change
+    /// set's start, transform node, node, and scroll offset records, and its
+    /// completion. Other records are ignored.
+    /// </summary>
+    public void Apply(string eventType, JsonElement payload)
+    {
+        switch (eventType)
+        {
+            case "layout-changes-started":
+                ApplyStarted(payload);
+                break;
+            case "layout-transform-node":
+                ApplyTransformNode(payload);
+                break;
+            case "layout-node-changed":
+                ApplyNode(payload);
+                break;
+            case "layout-scroll-offset-changed":
+                _scrollOffsets[payload.GetProperty("nodeId").GetInt64()] = payload.Clone();
+                break;
+            case "layout-changes-completed":
+                IsOpen = false;
+                break;
+        }
+    }
+
+    // Restores the state a snapshot holds: the latest change set's start,
+    // and the last record of each transform node, node, and scroll offset.
+    internal void Load(
+        JsonElement? started,
+        IEnumerable<JsonElement> transforms,
+        IEnumerable<JsonElement> nodes,
+        IEnumerable<JsonElement> scrollOffsets)
+    {
+        if (started is { } start)
+        {
+            ApplyStarted(start);
+            IsOpen = false;
+        }
+        foreach (var transform in transforms)
+        {
+            ApplyTransformNode(transform);
+        }
+        foreach (var node in nodes)
+        {
+            ApplyNode(node);
+        }
+        foreach (var scroll in scrollOffsets)
+        {
+            _scrollOffsets[scroll.GetProperty("nodeId").GetInt64()] = scroll.Clone();
+        }
+    }
+
     internal void ApplyStarted(JsonElement payload)
     {
+        LastStarted = payload.Clone();
+        IsOpen = true;
+        LayoutZoomFactor = payload.TryGetProperty("layoutZoomFactor", out var zoom) &&
+            zoom.ValueKind == JsonValueKind.Number
+                ? zoom.GetDouble()
+                : null;
         ViewTransformNodeId = payload.GetProperty("viewTransformNodeId").GetString();
         var offset = payload.GetProperty("viewPaintOffset");
         ViewPaintOffsetX = offset.GetProperty("x").GetDouble();
@@ -123,6 +200,7 @@ public sealed class LayoutDocumentChangeState
             parent.ValueKind == JsonValueKind.String ? parent.GetString() : null,
             matrix,
             payload.GetProperty("flattensInheritedTransform").GetBoolean());
+        _transformRecords[id] = payload.Clone();
     }
 
     internal void ApplyNode(JsonElement payload) =>
