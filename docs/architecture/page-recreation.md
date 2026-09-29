@@ -2,11 +2,14 @@
 
 ## Status
 
-Slice 1 (character data in DOM checkpoints, protocol 0.33) is implemented on
-branch `recording-object-store` and awaits its test on the target Windows
-machine. Slices 2 and 3 are proposed and not implemented. Recording text by
-content hash is agreed and deferred until slice 4 of change-driven recording;
-see "Text by content hash".
+Slice 1 (character data in DOM checkpoints, protocol 0.33) is merged, and
+the character data check passed in the recordings at protocols 0.35 and 0.36
+on the target Windows machine; see "Slice 5 status" in
+[change-driven recording](change-driven-recording.md). Slice 2 (rebuilding
+the recorded state at any captured frame) is proposed below, in "Slice 2
+design", and not implemented. Slice 3 is proposed and not implemented.
+Recording text by content hash is agreed and deferred; see "Text by content
+hash".
 
 ## Purpose
 
@@ -94,6 +97,178 @@ Each slice is tested on the target Windows machine before the next.
    writer, including escaping of recorded text and attribute values, and of
    disabled scripts and blocked network access; system test on the target
    machine: open a frame of a recording and inspect it in DevTools.
+
+## Slice 2 design: the recorded state at any captured frame
+
+Proposed 2026-09-29, not yet agreed. The record names, counts, and sizes
+below are from recording 20260929-172645-baa5818d82194001acf0edaa560b335c
+(protocol 0.36, 92.6 s) unless stated.
+
+### What slice 2 adds, and what it does not change
+
+The app gains a reader that returns, for a time in a recording, the recorded
+state of each browser document at that time, and for a captured desktop
+frame, the state that frame shows, with the basis of the match. Nothing
+recorded changes, no browser change is needed, and the protocol stays at
+0.36. The player shows nothing new in this slice; slice 3 writes the state
+as a page. The recording file gains derived records, the snapshots, which
+the reader never needs for a correct answer, only for a fast one.
+
+### One reading of state
+
+The DOM, character data, and layout checks each rebuild a document's state
+from its checkpoints and change records, in three separate classes
+(`DomChangeCheck`, `DomCharacterDataCheck`, and `LayoutChangeState`). Slice 2
+moves the rebuild into one class, `BrowserDocumentState`, which applies
+records in order and exposes the state, and the checks compare that state
+with each full walk. The rebuild the reader returns is then the one the
+checks have compared with every full walk of every recording checked, and a
+fix to either is a fix to both. The checks' reports on the recordings at
+f409513, 70d22d4, and 66030a7 must be unchanged by the move.
+
+### What the state holds
+
+For each document, identified by its renderer process, document token, and
+document identity, as the checks now identify it:
+
+- The DOM tree: each node's parent, children in order, type, name,
+  attributes, character data, shadow root fields, and slot assignment.
+- For each node with a layout record: its computed style values, whether it
+  has a layout object, whether it is display locked, its geometry, and the
+  viewport rectangle derived from the geometry and the transform nodes, in
+  CSS pixels.
+- The transform nodes, the view's transform node, paint offset, and layout
+  zoom factor, and each scroll offset.
+- The interaction state: focus, selection, and each text control's value
+  and selection, from the latest interaction checkpoint and the interaction
+  changes after it.
+- For each part (DOM, layout, interaction), the event key and time of the
+  record that last changed it, so that a value shown later can be traced to
+  its record.
+- Completeness, for each part, as one of:
+  - complete: taken from a full walk and changed by every record since;
+  - parsing: the document has not finished parsing, and the parser's
+    insertions are not recorded, so nodes the parser added since the last
+    walk are missing;
+  - after loss: a record of the channel was lost after the last walk, and
+    the state lacks that change until the next walk;
+  - not walked: no full walk of the document was recorded yet, so the part
+    has no state.
+
+A document's last record time is kept. No record states that a document was
+discarded, so the reader returns every document with a record at or before
+the time, with its last record time, and does not guess which are still
+shown. Choosing the document a frame shows is part of the frame match below.
+
+### Matching a captured frame
+
+A desktop frame has the time the Windows compositor composed it. For each
+document, the frame shows the last rendering update of that document whose
+`presentation-feedback` reports a presentation at or before that
+composition. The state returned is the state after that update's change set
+or checkpoint, and the basis is `presented`. A document with no presented
+update at or before the frame is matched by time, the state at the
+composition time, with the basis `by time`. The DOM and interaction records
+after the presented update and before the composition are applied to the
+DOM and interaction parts only when the basis is `by time`, since a
+presented frame was drawn before them; the reader states which.
+
+The presentation records join to the change set or checkpoint of their
+update through `layoutChangeSetId` or `layoutCheckpointId` (protocol 0.35),
+as the playback index already joins them for presented checkpoints.
+
+### Snapshots
+
+The state at a time can always be rebuilt from a document's first full walk
+and every record after it, but the time taken grows with the recording. In
+the recording above, the DOM, layout, and interaction channels hold 149,182
+records, 366 MB of JSON, in 92.6 s, about 4 MB per second; reading them
+with the MCAP project's Python reader took 1.4 s on the development
+machine, not the target machine. An hour at that rate is about 14 GB.
+
+The app therefore writes snapshots as it records:
+
+1. After the writer accepts a batch, it passes the batch's DOM, layout,
+   interaction, and presentation records to a state thread through a
+   bounded queue. The thread waits on the queue and does no work while it
+   is empty. It applies each record to the state of its document.
+2. When 10 s of recording time have passed since a document's last
+   snapshot and the document has changed since, the state thread writes a
+   snapshot of that document: its whole state, and the event key of the last
+   record applied, and passes it to the writer as a record of its own. A
+   snapshot is also written for each changed document when recording stops.
+3. Snapshots are messages on the topic `recorder.state`, in a stream of
+   their own, `state`, so that reading the browser records never
+   decompresses a snapshot. They are marked as derived records. The playback
+   index lists each snapshot's document, time, event key, and position.
+4. If the queue is full, the state thread stops applying records and writes
+   no snapshot for the rest of the recording, and a `recorder.state` record
+   states when and why. No evidence is lost: the file still holds every
+   record, and the reader rebuilds without the snapshots after that time.
+   The writer never waits for the state thread.
+
+To rebuild a document at time t, the reader takes the document's last
+snapshot at or before t, or its first full walk if it has none, and applies
+the document's records from the snapshot's event key to t. With a snapshot
+every 10 s, that is at most about 10 s of records, about 40 MB of DOM,
+layout, and interaction JSON at the rate above.
+
+The browser records are one stream, and the DOM, layout, and interaction
+records are about 40% of its bytes in the recording above; dispatch records
+alone are 456 MB of the 916 MB. The reader decompresses every browser chunk
+in the range it reads. Slice 2 therefore also writes the DOM, layout,
+interaction, and presentation channels in a stream of their own,
+`browser-state`, so a rebuild decompresses only those. Recordings made
+before this slice are read as before, from the `browser` stream.
+
+A snapshot holds the rebuilt state, so it is checked in the same way as the
+rebuild: the tests rebuild each document at each snapshot's time without
+snapshots and compare.
+
+### The alternative considered
+
+Snapshots could be made after recording stops, or when a recording is
+first opened, by reading the file once. That adds no work while recording,
+but makes stopping or first opening take time proportional to the
+recording, which the app must avoid: at least the time to read the DOM,
+layout, and interaction records, 1.4 s for the 92.6 s above with the Python
+reader on the development machine. It remains the way a recording without
+snapshots, or one whose state thread stopped, is given them later, as a
+background task the player does not wait for.
+
+### To be settled
+
+- Memory. The state thread holds the whole state of every document of the
+  recording that has not been discarded, and nothing records a discard, so
+  it holds every document until its renderer exits. Its memory is to be
+  measured on the target machine, and if it grows without bound, documents
+  with no record for a set time are dropped from the thread, with a final
+  snapshot, and rebuilt by the reader from that snapshot if they change
+  again.
+- The snapshot interval, 10 s, to be set from the measured rebuild time.
+- Whether the time taken to rebuild at a frame has a required limit. The
+  proposed limit is 1 s on the target machine for any frame of a one-hour
+  recording.
+
+### Required tests
+
+- Unit: the document state rebuilt from generated sequences of checkpoints
+  and change records, compared with the state those sequences describe,
+  including a lost record, a document that is parsing, and a document with
+  no walk; each completeness state; the frame match for a presented update,
+  an update presented after the frame, and a document with no presentation;
+  the snapshot writer and reader; the state thread's behaviour when its
+  queue is full, and that the writer never waits for it.
+- Integration: every check's report on each recording file checked in
+  slice 5 is unchanged by the move to one state class; the state rebuilt
+  with snapshots equals the state rebuilt without them, at every snapshot
+  and at times between; a recording written with the `browser-state`
+  stream plays back as it did with one browser stream.
+- System, on the target Windows machine: a recording of at least an hour
+  with snapshots, reporting the state thread's memory and time, the size of
+  the snapshots, the time to stop, and the time to rebuild at frames at the
+  start, middle, and end; and that hover and scrolling are as smooth as in
+  the recording at 66030a7.
 
 ## Text by content hash (agreed, deferred)
 
