@@ -7474,7 +7474,22 @@ void RecorderRecordLayoutChanges(LocalFrameView& recorder_frame_view);
 BLINK_LAYOUT_CHANGES_DEFINITION_MARKER = (
     "void RecorderRecordLayoutChanges(LocalFrameView& recorder_frame_view) {"
 )
-BLINK_LAYOUT_CHANGES_DEFINITION = """\
+# A child whose layout result is reused is noted with its parent's new one.
+BLINK_LAYOUT_CHANGES_CHILD_FRAGMENT_NOTES = """\
+  // A child whose own layout result is reused can still change: the
+  // resolved values of its right, bottom, and margins depend on the size of
+  // the box it is placed in. Its fragment is a child of the new fragment,
+  // including an out-of-flow child this box contains.
+  for (const PhysicalFragmentLink& recorder_child :
+       recorder_fragment.Children()) {
+    if (const LayoutObject* recorder_object =
+            recorder_child.fragment->GetLayoutObject()) {
+      RecorderNoteLayoutChange(recorder_object->GetNode(), 2);
+    }
+  }
+"""
+BLINK_LAYOUT_CHANGES_DEFINITION = (
+    """\
 namespace {
 
 // A transform node the recorder has named, with the document whose records
@@ -7708,17 +7723,9 @@ void RecorderNoteLayoutResult(const LayoutBox& recorder_box,
     return;
   }
   RecorderNoteLayoutChange(recorder_box.GetNode(), 2);
-  // A child whose own layout result is reused can still change: the
-  // resolved values of its right, bottom, and margins depend on the size of
-  // the box it is placed in. Its fragment is a child of the new fragment,
-  // including an out-of-flow child this box contains.
-  for (const PhysicalFragmentLink& recorder_child :
-       recorder_fragment.Children()) {
-    if (const LayoutObject* recorder_object =
-            recorder_child.fragment->GetLayoutObject()) {
-      RecorderNoteLayoutChange(recorder_object->GetNode(), 2);
-    }
-  }
+"""
+    + BLINK_LAYOUT_CHANGES_CHILD_FRAGMENT_NOTES
+    + """\
   // Text and inline boxes are positioned by the fragment items of the block
   // that contains them, so each object an item names has changed layout.
   if (const FragmentItems* recorder_items = recorder_fragment.Items()) {
@@ -7850,6 +7857,7 @@ void RecorderRecordLayoutChanges(LocalFrameView& recorder_frame_view) {
 }
 
 """
+)
 BLINK_LAYOUT_CHANGES_INCLUDES = (
     "#include <array>",
     '#include "base/numerics/safe_conversions.h"',
@@ -7895,6 +7903,17 @@ def insert_after_first_once(
     return text[:index] + block + text[index:]
 
 
+# Definitions an earlier integration wrote, replaced by the current one. A
+# checkout keeps its patched sources between builds, so a definition that
+# changes must be recognised in its earlier form.
+BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before a new layout result noted the objects of its child fragments.
+    BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+        BLINK_LAYOUT_CHANGES_CHILD_FRAGMENT_NOTES, "", 1
+    ),
+)
+
+
 def add_layout_changes_to_local_frame_view(text: str, path: Path) -> str:
     """Adds the layout change notes, the change set, and its hook.
 
@@ -7916,6 +7935,11 @@ def add_layout_changes_to_local_frame_view(text: str, path: Path) -> str:
             BLINK_LAYOUT_CHANGES_DECLARATION + BLINK_LAYOUT_CHECKPOINT_HELPER,
             path,
         )
+    for legacy in BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS:
+        if legacy in text:
+            text = replace_once(
+                text, legacy, BLINK_LAYOUT_CHANGES_DEFINITION, path
+            )
     if BLINK_LAYOUT_CHANGES_DEFINITION_MARKER not in text:
         end = text.rfind("}  // namespace blink\n")
         if end < 0:

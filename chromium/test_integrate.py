@@ -4979,6 +4979,23 @@ class LayoutIntegrationTests(unittest.TestCase):
             with self.subTest(include=include_line):
                 self.assertEqual(1, patched.count(include_line + "\n"))
 
+    def test_upgrades_an_earlier_layout_change_definition_in_place(self):
+        source = cookie_source(
+            self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
+            BLINK_NAMESPACE_END,
+        )
+        current = self.patch_twice(source)
+        for legacy in INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS:
+            with self.subTest(legacy=legacy[:40]):
+                self.assertNotEqual(INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION, legacy)
+                earlier = current.replace(
+                    INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION, legacy, 1
+                )
+                self.assertNotEqual(current, earlier)
+                self.assertEqual(current, self.patch_twice(earlier))
+
     def test_the_change_set_reads_held_geometry_without_forcing_work(self):
         definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
         self.assertIn("GetBoundingClientRectNoLifecycleUpdateNoAdjustment", definition)

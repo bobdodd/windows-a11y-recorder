@@ -524,10 +524,20 @@ The 61 nodes that differed all differed in a resolved value that depends on
 the containing box's size: `right` (11 of the 20 examples listed), `bottom`
 (4), and `margin-right` (5). The nodes had kept their own layout results
 while the box they are placed in was laid out again, so no hook noted them.
-Commit e09625a noted only the box whose layout result was set; the following
-commit also notes the objects of its child fragments. That change has not
-been measured. One recording of a few pages is not evidence of completeness
-on other pages.
+Commit e09625a noted only the box whose layout result was set; commit
+63ef82e also notes the objects of its child fragments.
+
+A second recording, made the same evening with the package of commit
+63ef82e, gave the same result: 362 checkpoints and 228,434 node records
+compared, every one of 166,904 rectangles matching (largest edge difference
+0.00049 CSS pixels), and 66 differences, all in `right`, `bottom`, or
+`margin-right`. That build did not contain the fix. The integration writes
+the change-set definition into `local_frame_view.cc` only when the file holds
+none, and the checkout keeps its patched sources between builds, so the
+definition from commit e09625a stayed in place. The integration now replaces
+an earlier definition it recognises, as it does for its other helpers. The
+fix has not been measured. Two recordings of a few pages are not evidence of
+completeness on other pages.
 
 ### Limits
 
