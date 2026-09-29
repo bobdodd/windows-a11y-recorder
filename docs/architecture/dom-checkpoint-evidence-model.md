@@ -67,7 +67,34 @@ All records use the `browser.dom` channel and renderer-process
 
 The node record does not contain text content, element IDs, classes, attribute
 names, attribute values, form values, URLs, styles, geometry, or rendered
-pixels.
+pixels. Attributes follow it as their own records, described in the
+attribute and text evidence model, and so does character data.
+
+### Checkpoint character data
+
+From protocol 0.33, `dom-checkpoint-node-character-data` follows the node
+record of every text, comment, CDATA section, and processing instruction
+node, before the records of any other node. It contains:
+
+- `context` and `checkpointId`, as the node record;
+- `nodeId`: the node whose data it is;
+- `data`: the node's data, as Blink's `CharacterData::data()` holds it;
+- `dataLength`: the data's full length in UTF-16 code units, and
+  `dataTruncated`: whether `data` holds less than that; and
+- `maximumValueLength`: the bound on `data`, 2147483647, so data is cut only
+  where its length cannot be stated.
+
+The data of text inside `script` and `style` elements is recorded like any
+other text. A CDATA section and a processing instruction have node type
+`other` in the node record, so a reader tells them from other `other` nodes
+by the data record that follows them.
+
+Before protocol 0.33 no checkpoint recorded character data: the text a page
+was parsed with was not recorded anywhere, and only character-data changes
+made after parsing were. In a recording made with protocol 0.32 on the
+target Windows machine, the DOM checkpoints held 246,202 text nodes and
+7,652 comment nodes with no data, and 155 character-data transitions were
+recorded.
 
 ### Checkpoint completion
 
@@ -83,9 +110,11 @@ pixels.
 - from protocol 0.16, `coveredTransitionCount`, `coveredTransitionFirstId`, and
   `coveredTransitionLastId`, which state the attribute and character-data
   transitions recorded for this document since its previous completed
-  checkpoint. The attribute and text evidence model specifies them; and
+  checkpoint. The attribute and text evidence model specifies them;
 - from protocol 0.28, `shadowRootCount` and `slotCount`, the numbers of shadow
-  root and slot assignment records the checkpoint emitted.
+  root and slot assignment records the checkpoint emitted; and
+- from protocol 0.33, `characterDataCount`, the number of character data
+  records the checkpoint emitted.
 
 The implementation records every node, shadow-tree nodes included. Its
 `maximumNodes` is 2147483647, the largest value a 32-bit count holds; the
@@ -126,7 +155,9 @@ The evidence can establish:
   were represented by one checkpoint for that document;
 - the observed preorder structural prefix at that boundary;
 - stable node-to-parent relationships within the checkpoint;
-- the observed node type and node name for each emitted node; and
+- the observed node type and node name for each emitted node;
+- from protocol 0.33, the data of each emitted text, comment, CDATA section,
+  and processing instruction node at the checkpoint;
 - whether the checkpoint was complete within the configured node limit; and
 - which committed browser-process document, page, and frame correspond to the
   renderer document when the complete correlation tuple matches.
@@ -139,7 +170,9 @@ The evidence does not establish:
 - which node operation caused a structural difference;
 - an exact mutation count within a coalesced delivery pass;
 - attribute or character-data changes that do not change a child list;
-- element attributes, DOM text, form values, style, layout, or geometry;
+- element attributes or DOM text from the node records alone; they are in
+  the attribute and character data records;
+- form values, style, layout, or geometry;
 - pseudo-element or isolated-world structure, and slot assignment at a moment
   Blink had not yet recalculated it;
 - accessibility-tree state or platform accessibility exposure;

@@ -1447,7 +1447,8 @@ public sealed class EventRecordValidatorTests
                     coveredTransitionFirstId = (string?)null,
                     coveredTransitionLastId = (string?)null,
                     shadowRootCount = 0,
-                    slotCount = 0
+                    slotCount = 0,
+                    characterDataCount = 0
                 }),
             CreateEvent(
                 5,
@@ -1497,7 +1498,8 @@ public sealed class EventRecordValidatorTests
                     coveredTransitionFirstId = "dom-transition-1",
                     coveredTransitionLastId = "dom-transition-2",
                     shadowRootCount = 0,
-                    slotCount = 0
+                    slotCount = 0,
+                    characterDataCount = 0
                 })
         };
         IReadOnlyList<RecorderEvent> events = (records);
@@ -1628,6 +1630,60 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void AcceptsDomCheckpointCharacterDataWithItsFullLength()
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dom,
+            BrowserEvidenceEventTypes.DomCheckpointNodeCharacterData,
+            new
+            {
+                context = CreateRendererDocumentContext(),
+                checkpointId = "dom-checkpoint-1",
+                nodeId = 12,
+                data = "Save changes",
+                dataLength = 12,
+                dataTruncated = false,
+                maximumValueLength = 2147483647
+            });
+        IReadOnlyList<RecorderEvent> events = ([record]);
+
+        var result = Validate(events);
+
+        Assert.True(result.IsValid, JsonSerializer.Serialize(result.Issues));
+    }
+
+    [Fact]
+    public void RejectsDomCheckpointCharacterDataLengthWithoutTruncationState()
+    {
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Dom,
+            BrowserEvidenceEventTypes.DomCheckpointNodeCharacterData,
+            new
+            {
+                context = CreateRendererDocumentContext(),
+                checkpointId = "dom-checkpoint-1",
+                nodeId = 12,
+                data = "Save",
+                dataLength = 12,
+                dataTruncated = false,
+                maximumValueLength = 2147483647
+            });
+        IReadOnlyList<RecorderEvent> events = ([record]);
+
+        var result = Validate(events);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Issues,
+            issue =>
+                issue.Code == "browser-dom-text-truncation-inconsistent");
+    }
+
+    [Fact]
     public void RejectsDomAttributeValueLengthWithoutTruncationState()
     {
         var record = CreateEvent(
@@ -1690,7 +1746,8 @@ public sealed class EventRecordValidatorTests
                 coveredTransitionFirstId,
                 coveredTransitionLastId,
                 shadowRootCount = 0,
-                slotCount = 0
+                slotCount = 0,
+                characterDataCount = 0
             });
         IReadOnlyList<RecorderEvent> events = ([record]);
 

@@ -412,8 +412,8 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string reason,
                                  int maximum_nodes);
 
-// Records one node in preorder. Text content is carried by character-data
-// evidence rather than by the node record.
+// Records one node in preorder. The data of a character data node is recorded
+// after it by RecordBlinkDomCheckpointNodeCharacterData.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
                                   int document_node_id,
@@ -440,6 +440,19 @@ void RecordBlinkDomCheckpointNodeAttribute(uint64_t checkpoint_sequence,
                                            int attribute_value_length,
                                            bool attribute_value_truncated,
                                            int maximum_value_length);
+
+// Records the data of a text, comment, CDATA section, or processing
+// instruction node already emitted in the same checkpoint. The caller cuts the
+// data at its own limit and reports the full length in UTF-16 code units.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomCheckpointNodeCharacterData(uint64_t checkpoint_sequence,
+                                               int document_node_id,
+                                               std::string document_token,
+                                               int node_id,
+                                               std::string data,
+                                               int data_length,
+                                               bool data_truncated,
+                                               int maximum_value_length);
 
 // Records the properties of a shadow root already emitted as a node of the
 // same checkpoint. The shadow root's parent in the checkpoint is its host.
@@ -490,7 +503,8 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int maximum_attributes_per_node,
                                 int maximum_value_length,
                                 int shadow_root_count,
-                                int slot_count);
+                                int slot_count,
+                                int character_data_count);
 
 // Starts one checkpoint for the accessibility updates Chromium is about to
 // send from the renderer to the browser process. The shared document token

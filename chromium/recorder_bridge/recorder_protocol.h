@@ -16,7 +16,7 @@
 
 namespace a11y_recorder {
 
-inline constexpr char kProtocolVersion[] = "0.32";
+inline constexpr char kProtocolVersion[] = "0.33";
 // The largest frame the recorder reads: its length is a 32-bit signed count.
 // Values are recorded whole, so a record is as large as what it records.
 inline constexpr uint32_t kDefaultMaximumMessageBytes = 2147483647;

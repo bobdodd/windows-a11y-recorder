@@ -317,6 +317,12 @@ elements; the fix for those has not been measured. The design and
 measurements are in
 [change-driven recording](docs/architecture/change-driven-recording.md).
 
+Protocol 0.33 records the data of every text, comment, CDATA section, and
+processing instruction node in DOM checkpoints. Before it, the text a page
+was parsed with was not recorded. It is the first slice of recreating the
+page at a captured frame in Chrome, described in
+[page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

@@ -79,6 +79,24 @@ public sealed class BrowserDomPayloadIngestTests
             """);
     }
 
+    [Fact]
+    public void AcceptsDomCheckpointNodeCharacterDataAsWritten()
+    {
+        Accept(
+            BrowserEvidenceEventTypes.DomCheckpointNodeCharacterData,
+            $$"""
+            {
+              "context": {{ContextJson}},
+              "checkpointId": "dom-checkpoint-7",
+              "nodeId": 92,
+              "data": "Save changes",
+              "dataLength": 12,
+              "dataTruncated": false,
+              "maximumValueLength": 2147483647
+            }
+            """);
+    }
+
     [Theory]
     [InlineData(0, "null", "null")]
     [InlineData(6, "\"dom-transition-1\"", "\"dom-transition-6\"")]
@@ -105,7 +123,8 @@ public sealed class BrowserDomPayloadIngestTests
               "coveredTransitionFirstId": {{coveredTransitionFirstId}},
               "coveredTransitionLastId": {{coveredTransitionLastId}},
               "shadowRootCount": 1,
-              "slotCount": 1
+              "slotCount": 1,
+              "characterDataCount": 3
             }
             """);
     }

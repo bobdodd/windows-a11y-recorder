@@ -806,7 +806,9 @@ void RecorderRecordDomCheckpoint(Document& recorder_document,
 }
 
 """
-BLINK_DOM_CHECKPOINT_HELPER = """\
+# A tree patched for protocols 0.29 to 0.32 holds a DOM helper that does not
+# record the data of character data nodes.
+LEGACY_UNTEXTED_BLINK_DOM_CHECKPOINT_HELPER = """\
 // Declared before its definition so the definition has a prior declaration.
 // The mutation observer declares it as well, so the finished-parsing and
 // post-mutation checkpoints share one traversal.
@@ -969,6 +971,197 @@ void RecorderRecordDomCheckpoint(Document& recorder_document,
       recorder_attribute_count, recorder_attributes_truncated,
       kRecorderMaximumDomAttributesPerNode, kRecorderMaximumDomValueLength,
       recorder_shadow_root_count, recorder_slot_count);
+  RecorderRecordInteractionCheckpoint(recorder_document,
+                                      recorder_checkpoint_sequence,
+                                      "browser.dom", recorder_reason);
+}
+
+"""
+BLINK_DOM_CHECKPOINT_HELPER = """\
+// Declared before its definition so the definition has a prior declaration.
+// The mutation observer declares it as well, so the finished-parsing and
+// post-mutation checkpoints share one traversal.
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason);
+
+// Defined further down this file; records the interaction state immediately
+// after the DOM checkpoint it follows.
+void RecorderRecordInteractionCheckpoint(Document& recorder_document,
+                                         uint64_t recorder_source_sequence,
+                                         const char* recorder_source_channel,
+                                         const char* recorder_reason);
+
+// Records a structural checkpoint of the whole composed tree. Each node is
+// followed by the shadow root it hosts, of any mode, and that shadow tree, and
+// then by its own children, so a shadow root is recorded with its host as its
+// parent. Slot assignments are read as Blink currently holds them; the
+// traversal never requests an assignment recalculation, so recording does not
+// change the state it records.
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason) {
+  // Every node is recorded. The bound is the largest value the protocol's
+  // 32-bit counts hold, so the walk stops only where a count cannot grow.
+  constexpr int kRecorderMaximumDomCheckpointNodes = 2147483647;
+  // Every attribute is recorded. The bound is the largest value the
+  // protocol's 32-bit counts hold.
+  constexpr int kRecorderMaximumDomAttributesPerNode = 2147483647;
+  // Every value is recorded whole. The bound is the largest length the
+  // protocol's 32-bit lengths hold, so a value is cut only where its length
+  // cannot be stated.
+  constexpr int kRecorderMaximumDomValueLength = 2147483647;
+  const int recorder_document_node_id = recorder_document.GetDomNodeId();
+  const std::string recorder_document_token =
+      recorder_document.Token().ToString();
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_reason, kRecorderMaximumDomCheckpointNodes);
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+  int recorder_node_count = 0;
+  bool recorder_truncated = false;
+  int recorder_attribute_count = 0;
+  bool recorder_attributes_truncated = false;
+  int recorder_shadow_root_count = 0;
+  int recorder_slot_count = 0;
+  int recorder_character_data_count = 0;
+  HeapVector<Member<Node>> recorder_pending;
+  recorder_pending.push_back(&recorder_document);
+  while (!recorder_pending.empty()) {
+    Node& recorder_node = *recorder_pending.back();
+    recorder_pending.pop_back();
+    if (recorder_node_count >= kRecorderMaximumDomCheckpointNodes) {
+      recorder_truncated = true;
+      break;
+    }
+    ContainerNode* recorder_parent = recorder_node.ParentOrShadowHostNode();
+    a11y_recorder::RecordBlinkDomCheckpointNode(
+        recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token,
+        recorder_node_count, recorder_node.GetDomNodeId(),
+        recorder_parent ? recorder_parent->GetDomNodeId() : 0,
+        static_cast<int>(recorder_node.getNodeType()),
+        recorder_node.nodeName().Utf8().c_str());
+    ++recorder_node_count;
+    // A text, comment, CDATA section, or processing instruction node is
+    // followed by its data, recorded whole.
+    if (auto* recorder_character_data =
+            DynamicTo<CharacterData>(recorder_node)) {
+      const String& recorder_data = recorder_character_data->data();
+      const int recorder_data_length =
+          static_cast<int>(recorder_data.length());
+      const bool recorder_data_truncated =
+          recorder_data_length > kRecorderMaximumDomValueLength;
+      const String recorder_recorded_data =
+          recorder_data_truncated
+              ? recorder_data.substr(0, kRecorderMaximumDomValueLength)
+              : recorder_data;
+      a11y_recorder::RecordBlinkDomCheckpointNodeCharacterData(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_node.GetDomNodeId(),
+          recorder_recorded_data.Utf8(), recorder_data_length,
+          recorder_data_truncated, kRecorderMaximumDomValueLength);
+      ++recorder_character_data_count;
+    }
+    for (Node* recorder_child = recorder_node.lastChild(); recorder_child;
+         recorder_child = recorder_child->previousSibling()) {
+      recorder_pending.push_back(recorder_child);
+    }
+    if (auto* recorder_shadow_root = DynamicTo<ShadowRoot>(recorder_node)) {
+      ++recorder_shadow_root_count;
+      const ShadowRootMode recorder_mode = recorder_shadow_root->GetMode();
+      const AtomicString& recorder_reference_target =
+          recorder_shadow_root->referenceTarget();
+      a11y_recorder::RecordBlinkDomCheckpointShadowRoot(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_shadow_root->GetDomNodeId(),
+          recorder_shadow_root->host().GetDomNodeId(),
+          recorder_mode == ShadowRootMode::kOpen     ? "open"
+          : recorder_mode == ShadowRootMode::kClosed ? "closed"
+                                                     : "user-agent",
+          recorder_shadow_root->delegatesFocus(),
+          recorder_shadow_root->IsManualSlotting() ? "manual" : "named",
+          recorder_shadow_root->clonable(),
+          recorder_shadow_root->serializable(),
+          recorder_shadow_root->IsDeclarativeShadowRoot(),
+          recorder_shadow_root->IsAvailableToElementInternals(),
+          !recorder_reference_target.IsNull(),
+          recorder_reference_target.IsNull()
+              ? std::string()
+              : recorder_reference_target.Utf8());
+    }
+    Element* recorder_element = DynamicTo<Element>(recorder_node);
+    if (!recorder_element) {
+      continue;
+    }
+    if (ShadowRoot* recorder_hosted_root = recorder_element->GetShadowRoot()) {
+      recorder_pending.push_back(recorder_hosted_root);
+    }
+    int recorder_node_attribute_index = 0;
+    for (const Attribute& recorder_attribute :
+         recorder_element->Attributes()) {
+      if (recorder_node_attribute_index >=
+          kRecorderMaximumDomAttributesPerNode) {
+        recorder_attributes_truncated = true;
+        break;
+      }
+      const String recorder_attribute_value = recorder_attribute.Value();
+      const int recorder_attribute_value_length =
+          static_cast<int>(recorder_attribute_value.length());
+      const bool recorder_attribute_value_truncated =
+          recorder_attribute_value_length > kRecorderMaximumDomValueLength;
+      const String recorder_recorded_attribute_value =
+          recorder_attribute_value_truncated
+              ? recorder_attribute_value.substr(
+                    0, kRecorderMaximumDomValueLength)
+              : recorder_attribute_value;
+      a11y_recorder::RecordBlinkDomCheckpointNodeAttribute(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_node.GetDomNodeId(),
+          recorder_node_attribute_index,
+          recorder_attribute.NamespaceURI().Utf8().c_str(),
+          recorder_attribute.LocalName().Utf8().c_str(),
+          recorder_recorded_attribute_value.Utf8().c_str(),
+          recorder_attribute_value_length,
+          recorder_attribute_value_truncated,
+          kRecorderMaximumDomValueLength);
+      ++recorder_node_attribute_index;
+      ++recorder_attribute_count;
+    }
+    auto* recorder_slot = DynamicTo<HTMLSlotElement>(recorder_element);
+    ShadowRoot* recorder_slot_root =
+        recorder_slot ? recorder_slot->ContainingShadowRoot() : nullptr;
+    if (recorder_slot_root && recorder_slot->SupportsAssignment()) {
+      ++recorder_slot_count;
+      const HeapVector<Member<Node>>& recorder_assigned =
+          recorder_slot->AssignedNodesNoRecalc();
+      std::vector<int> recorder_assigned_ids;
+      for (const Member<Node>& recorder_assigned_node : recorder_assigned) {
+        if (static_cast<int>(recorder_assigned_ids.size()) >=
+            kRecorderMaximumDomCheckpointNodes) {
+          break;
+        }
+        recorder_assigned_ids.push_back(
+            recorder_assigned_node->GetDomNodeId());
+      }
+      a11y_recorder::RecordBlinkDomCheckpointSlotAssignment(
+          recorder_checkpoint_sequence, recorder_document_node_id,
+          recorder_document_token, recorder_slot->GetDomNodeId(),
+          std::move(recorder_assigned_ids),
+          static_cast<int>(recorder_assigned.size()),
+          kRecorderMaximumDomCheckpointNodes,
+          !recorder_slot_root->GetSlotAssignment().NeedsAssignmentRecalc());
+    }
+  }
+  a11y_recorder::CompleteBlinkDomCheckpoint(
+      recorder_checkpoint_sequence, recorder_document_node_id,
+      recorder_document_token, recorder_reason, recorder_node_count,
+      recorder_truncated, kRecorderMaximumDomCheckpointNodes,
+      recorder_attribute_count, recorder_attributes_truncated,
+      kRecorderMaximumDomAttributesPerNode, kRecorderMaximumDomValueLength,
+      recorder_shadow_root_count, recorder_slot_count,
+      recorder_character_data_count);
   RecorderRecordInteractionCheckpoint(recorder_document,
                                       recorder_checkpoint_sequence,
                                       "browser.dom", recorder_reason);
@@ -1181,6 +1374,7 @@ BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
     }
 """
 BLINK_DOM_CHECKPOINT_INCLUDES = (
+    '#include "third_party/blink/renderer/core/dom/character_data.h"',
     '#include "third_party/blink/renderer/core/dom/shadow_root.h"',
     '#include "third_party/blink/renderer/core/dom/slot_assignment.h"',
     '#include "third_party/blink/renderer/core/html/html_slot_element.h"',
@@ -4238,6 +4432,13 @@ def patch_blink_document(path: Path) -> None:
         text = replace_once(
             text,
             LEGACY_SHADOW_TREE_BLINK_DOM_CHECKPOINT_HELPER,
+            BLINK_DOM_CHECKPOINT_HELPER,
+            path,
+        )
+    if LEGACY_UNTEXTED_BLINK_DOM_CHECKPOINT_HELPER in text:
+        text = replace_once(
+            text,
+            LEGACY_UNTEXTED_BLINK_DOM_CHECKPOINT_HELPER,
             BLINK_DOM_CHECKPOINT_HELPER,
             path,
         )

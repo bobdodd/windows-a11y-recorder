@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.32"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.32"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.33"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.33"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -2795,6 +2795,38 @@ class IntegrateTests(unittest.TestCase):
         self.assertEqual(
             1, first.count(INTEGRATE.BLINK_INTERACTION_CHECKPOINT_HELPER)
         )
+
+    def test_upgrades_a_dom_helper_without_character_data(self):
+        legacy = INTEGRATE.LEGACY_UNTEXTED_BLINK_DOM_CHECKPOINT_HELPER
+        self.assertNotIn("RecordBlinkDomCheckpointNodeCharacterData", legacy)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(self.document_source(legacy), encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER))
+        self.assertEqual(
+            1,
+            first.count(
+                '#include "third_party/blink/renderer/core/dom/'
+                'character_data.h"\n'
+            ),
+        )
+
+    def test_dom_helper_records_character_data_after_its_node(self):
+        helper = INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER
+        node = helper.index("a11y_recorder::RecordBlinkDomCheckpointNode(")
+        data = helper.index(
+            "a11y_recorder::RecordBlinkDomCheckpointNodeCharacterData("
+        )
+        children = helper.index("for (Node* recorder_child")
+        self.assertLess(node, data)
+        self.assertLess(data, children)
+        self.assertIn("DynamicTo<CharacterData>(recorder_node)", helper)
+        self.assertIn("recorder_character_data_count);", helper)
 
     def test_no_current_hook_limits_the_number_of_nodes(self):
         hooks = {

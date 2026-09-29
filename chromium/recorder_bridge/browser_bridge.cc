@@ -2550,6 +2550,32 @@ void RecordBlinkDomCheckpointNodeAttribute(uint64_t checkpoint_sequence,
                     std::move(payload));
 }
 
+void RecordBlinkDomCheckpointNodeCharacterData(uint64_t checkpoint_sequence,
+                                               int document_node_id,
+                                               std::string document_token,
+                                               int node_id,
+                                               std::string data,
+                                               int data_length,
+                                               bool data_truncated,
+                                               int maximum_value_length) {
+  A11Y_RECORDER_COST("RecordBlinkDomCheckpointNodeCharacterData");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || node_id <= 0 || data_length < 0 ||
+      maximum_value_length <= 0) {
+    return;
+  }
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("nodeId", node_id);
+  SetTruncatedTextProperties(payload, "data", "dataLength", "dataTruncated",
+                             std::move(data), data_length, data_truncated);
+  payload.Set("maximumValueLength", maximum_value_length);
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-node-character-data",
+                    std::move(payload));
+}
+
 void RecordBlinkDomCheckpointShadowRoot(uint64_t checkpoint_sequence,
                                         int document_node_id,
                                         std::string document_token,
@@ -2643,7 +2669,8 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
                                 int maximum_attributes_per_node,
                                 int maximum_value_length,
                                 int shadow_root_count,
-                                int slot_count) {
+                                int slot_count,
+                                int character_data_count) {
   static const int recorder_span_slot = CostSpanSlot("span:dom-checkpoint");
   // The span ends when this function returns, so it includes the completion.
   struct SpanEnd {
@@ -2656,7 +2683,7 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
       reason.empty() || node_count < 0 || maximum_nodes <= 0 ||
       attribute_count < 0 || maximum_attributes_per_node <= 0 ||
       maximum_value_length <= 0 || shadow_root_count < 0 ||
-      slot_count < 0) {
+      slot_count < 0 || character_data_count < 0) {
     return;
   }
   base::DictValue payload = CreateDomCheckpointBasePayload(
@@ -2672,6 +2699,7 @@ void CompleteBlinkDomCheckpoint(uint64_t checkpoint_sequence,
   payload.Set("maximumValueLength", maximum_value_length);
   payload.Set("shadowRootCount", shadow_root_count);
   payload.Set("slotCount", slot_count);
+  payload.Set("characterDataCount", character_data_count);
   const EvidenceIdentityStorage::DomTransitionCoverage coverage =
       TakeDomTransitionCoverage(document_node_id);
   payload.Set("coveredTransitionCount", coverage.transition_count);

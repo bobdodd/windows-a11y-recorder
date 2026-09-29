@@ -172,6 +172,9 @@ internal static class EventPayloadValidator
             case ("browser.dom", "dom-checkpoint-node-attribute"):
                 ValidateBrowserDomCheckpointNodeAttribute(payload, issues);
                 break;
+            case ("browser.dom", "dom-checkpoint-node-character-data"):
+                ValidateBrowserDomCheckpointNodeCharacterData(payload, issues);
+                break;
             case ("browser.dom", "dom-checkpoint-shadow-root"):
                 ValidateBrowserDomCheckpointShadowRoot(payload, issues);
                 break;
@@ -3962,6 +3965,32 @@ internal static class EventPayloadValidator
             issues);
     }
 
+    private static void ValidateBrowserDomCheckpointNodeCharacterData(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("nodeId", positive: true),
+                RequiredText("data"),
+                RequiredInteger("dataLength", nonnegative: true),
+                RequiredBoolean("dataTruncated"),
+                RequiredInteger("maximumValueLength", positive: true)
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidateTruncatedText(
+            payload,
+            "data",
+            "dataLength",
+            "dataTruncated",
+            issues);
+    }
+
     private static void ValidateBrowserDomCheckpointShadowRoot(
         JsonElement payload,
         ICollection<EventValidationIssue> issues)
@@ -4100,7 +4129,11 @@ internal static class EventPayloadValidator
                 NullableString("coveredTransitionFirstId"),
                 NullableString("coveredTransitionLastId"),
                 RequiredInteger("shadowRootCount", nonnegative: true),
-                RequiredInteger("slotCount", nonnegative: true)
+                RequiredInteger("slotCount", nonnegative: true),
+                // Protocol 0.33. Optional because the database evidence
+                // tables, which are not written for a recording with a
+                // recording file, have no column for it.
+                OptionalInteger("characterDataCount", nonnegative: true)
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);

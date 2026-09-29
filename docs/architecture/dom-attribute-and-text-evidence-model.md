@@ -145,11 +145,14 @@ fields are `transitionId`, `nodeId`, `parentNodeId`, `nodeType`, `text`,
 `textLength`, `textTruncated`, `previousText`, `previousTextLength`,
 `previousTextTruncated`, and `maximumValueLength`.
 
-Parser-driven character-data updates are excluded. The text a document was
-parsed with is already reported by the finished-parsing checkpoint, and
-recording every parse-time chunk would queue a checkpoint per chunk during load.
-This is a volume decision, and its cost is that text appended by the parser is
-observable only as checkpoint state, not as a transition.
+Parser-driven character-data updates are excluded, since recording every
+parse-time chunk would queue a checkpoint per chunk during load. This is a
+volume decision, and its cost is that text appended by the parser is
+observable only as checkpoint state, not as a transition. This document
+formerly stated that the finished-parsing checkpoint reported the parsed
+text. It did not: until protocol 0.33, no checkpoint recorded character data.
+From protocol 0.33 every checkpoint records the data of each character data
+node (see the DOM checkpoint evidence model).
 
 ### Trigger integration
 

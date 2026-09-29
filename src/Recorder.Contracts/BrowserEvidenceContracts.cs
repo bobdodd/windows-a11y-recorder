@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.32";
+    public const string CurrentVersion = "0.33";
 }
 
 public static class BrowserEvidenceChannels
@@ -43,6 +43,7 @@ public static class BrowserEvidenceEventTypes
     public const string DomCheckpointStarted = "dom-checkpoint-started";
     public const string DomCheckpointNode = "dom-checkpoint-node";
     public const string DomCheckpointNodeAttribute = "dom-checkpoint-node-attribute";
+    public const string DomCheckpointNodeCharacterData = "dom-checkpoint-node-character-data";
     public const string DomCheckpointShadowRoot = "dom-checkpoint-shadow-root";
     public const string DomCheckpointSlotAssignment = "dom-checkpoint-slot-assignment";
     public const string DomCheckpointCompleted = "dom-checkpoint-completed";
@@ -311,6 +312,18 @@ public sealed record BrowserDomCheckpointNodeAttributePayload(
     bool AttributeValueTruncated,
     int MaximumValueLength);
 
+// Records the data of a text, comment, CDATA section, or processing instruction
+// node, after its node record in a DOM checkpoint (protocol 0.33). DataLength
+// is the full length in UTF-16 code units.
+public sealed record BrowserDomCheckpointNodeCharacterDataPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    long NodeId,
+    string Data,
+    int DataLength,
+    bool DataTruncated,
+    int MaximumValueLength);
+
 // Records the shadow root that follows its host in a DOM checkpoint. Mode is
 // "open", "closed", or "user-agent"; SlotAssignment is "named" or "manual".
 // ReferenceTarget is null when the root has none.
@@ -356,7 +369,8 @@ public sealed record BrowserDomCheckpointCompletedPayload(
     string? CoveredTransitionFirstId,
     string? CoveredTransitionLastId,
     int ShadowRootCount = 0,
-    int SlotCount = 0);
+    int SlotCount = 0,
+    int CharacterDataCount = 0);
 
 public sealed record BrowserDomAttributeChangedPayload(
     BrowserContext Context,

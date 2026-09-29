@@ -927,7 +927,14 @@ The records are described in
 [the layout and computed-style checkpoint evidence model](layout-and-style-checkpoint-evidence-model.md)
 and the design in [change-driven recording](change-driven-recording.md).
 
-Live 0.32 connections require an exact protocol-version match.
+Protocol version 0.33 records the data of every text, comment, CDATA
+section, and processing instruction node in DOM checkpoints, as a
+`dom-checkpoint-node-character-data` record after the node's record, and
+states their number on the completion. The record is described in
+[the DOM checkpoint evidence model](dom-checkpoint-evidence-model.md) and
+its use in [page recreation](page-recreation.md).
+
+Live 0.33 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
