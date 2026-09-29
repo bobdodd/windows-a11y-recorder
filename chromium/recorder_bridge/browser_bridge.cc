@@ -4595,10 +4595,10 @@ void RecordBlinkLayoutChanges(int document_node_id,
     base::DictValue payload = CreateLayoutChangesBasePayload(
         *client, change_set_sequence, document_node_id, document_token);
     payload.Set("nodeId", scroll.node_id);
-    base::DictValue offset;
-    offset.Set("x", scroll.scroll_offset_x);
-    offset.Set("y", scroll.scroll_offset_y);
-    payload.Set("scrollOffset", std::move(offset));
+    base::DictValue scroll_offset;
+    scroll_offset.Set("x", scroll.scroll_offset_x);
+    scroll_offset.Set("y", scroll.scroll_offset_y);
+    payload.Set("scrollOffset", std::move(scroll_offset));
     base::DictValue exposed;
     exposed.Set("x", scroll.web_exposed_scroll_offset_x);
     exposed.Set("y", scroll.web_exposed_scroll_offset_y);
