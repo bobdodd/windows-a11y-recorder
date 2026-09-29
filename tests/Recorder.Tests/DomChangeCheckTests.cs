@@ -30,11 +30,15 @@ public sealed class DomChangeCheckTests
         string? Data = null);
 
     // The records of a completed checkpoint of the nodes, in walk order.
-    private static IEnumerable<(string, JsonElement)> Checkpoint(int checkpoint, params TreeNode[] nodes)
+    private static IEnumerable<(string, JsonElement)> Checkpoint(int checkpoint, params TreeNode[] nodes) =>
+        Checkpoint(checkpoint, "check", nodes);
+
+    private static IEnumerable<(string, JsonElement)> Checkpoint(
+        int checkpoint, string walkReason, params TreeNode[] nodes)
     {
         var id = $"dom-checkpoint-{checkpoint}";
         yield return ("dom-checkpoint-started", Json($$"""
-            {"context":{{Context}},"checkpointId":"{{id}}","reason":"post-mutation","maximumNodes":2147483647}
+            {"context":{{Context}},"checkpointId":"{{id}}","reason":"post-mutation","walkReason":"{{walkReason}}","maximumNodes":2147483647}
             """));
         var index = 0;
         foreach (var node in nodes)
@@ -194,6 +198,24 @@ public sealed class DomChangeCheckTests
         Assert.Equal(9, check.NodesMatched);
         Assert.Equal(3, check.Insertions);
         Assert.Equal(1, check.Removals);
+    }
+
+    [Fact]
+    public void TakesAWalkAfterALostRecordAsANewBaseWithoutComparingIt()
+    {
+        var paragraph = new TreeNode(20, 10, "element", "P");
+        // The insertion of the paragraph was lost, so the walk after the loss
+        // differs from the rebuilt tree; the next walk is compared with the
+        // tree taken from it.
+        var check = Check(
+            Checkpoint(1, "first", Document, Html, Head, Body),
+            Checkpoint(2, "after-loss", Document, Html, Head, Body, paragraph),
+            Checkpoint(3, Document, Html, Head, Body, paragraph));
+
+        Assert.Empty(check.Differences);
+        Assert.Equal(1, check.CheckpointsAfterLoss);
+        Assert.Equal(1, check.CheckpointsCompared);
+        Assert.Equal(5, check.NodesMatched);
     }
 
     [Fact]

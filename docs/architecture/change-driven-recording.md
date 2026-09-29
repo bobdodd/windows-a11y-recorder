@@ -12,7 +12,9 @@ Windows machine; see "Slice 3 design". Slice 4 (DOM insertions and
 removals, and scroll offsets, protocol 0.34) is implemented and was checked
 in one recording on the target Windows machine, which found two kinds of
 change it did not record; their hooks are implemented and not yet tested
-there. See "Slice 4 status". Slice 5 is not implemented. The
+there. See "Slice 4 status". Slice 5 (full walks only where they are
+needed, protocol 0.35) is implemented and not yet tested on the target
+Windows machine; see "Slice 5 design". The
 Blink locations below were read from the Chromium checkout on the target
 Windows machine, version 156.0.8065.0 (`chrome/VERSION`), and must be read
 again if the checkout changes.
@@ -334,8 +336,9 @@ not note. The form is off in normal recording.
 2. Playback from the file.
 3. Change-driven style and layout capture in Blink, with the validation form.
 4. DOM insertions and removals, and scroll offsets.
-5. Snapshots, and the full walk kept only for a document's first update and
-   after a loss.
+5. The full walk kept only for a document's first update, a finished parse,
+   after a loss, and at the check setting's interval. Snapshots move to the
+   app in a later slice.
 
 ## Slice 3 design: change-driven style and layout capture
 
@@ -787,11 +790,14 @@ the next whole one. The scroll comparison above is reported with it.
 
 ## Slice 5 design: full walks only where they are needed
 
-Proposed 2026-09-29, and not yet agreed. Two points were decided by the user
-the same day: a renderer that connects again walks each of its documents
-in full, and the full walks that check the change records are a setting in
-the app. The Blink and bridge locations are from the integration script and
-the bridge in this repository at revision 66ad1c8.
+Proposed 2026-09-29 and agreed the same day, with snapshots moved to the app
+in a later slice. Two points were decided by the user the same day: a
+renderer that connects again walks each of its documents in full, and the
+full walks that check the change records are a setting in the app. The
+Blink and bridge locations are from the integration script and the bridge in
+this repository at revision 66ad1c8. The sections below describe what was
+implemented (protocol 0.35), which differs from the proposal in the points
+noted.
 
 ### What slice 5 changes, and what it does not change
 
@@ -807,79 +813,117 @@ recorded at least as often as before.
 
 ### When a document is walked in full
 
-- DOM: the `finished-parsing` checkpoint is kept, since it is the state the
-  DOM change records of a document apply to. The `post-mutation` checkpoint,
-  now taken at every mutation delivery, is taken only when the check setting
-  asks for it. A document whose changes would be recorded before it has a
-  DOM checkpoint is walked first, with the reason `first-change`, so no
-  change is recorded without a state it applies to.
-- Layout: the first rendering update of a document at which its layout
-  checkpoint's conditions hold records the checkpoint as now. Later updates
-  record change sets only, unless the check setting asks for a checkpoint.
+The bridge decides, per document, whether a DOM or layout checkpoint request
+from Blink is walked (`FullWalkSchedule` in
+`chromium/recorder_bridge/full_walks.h`). A walked checkpoint's start record
+keeps `reason`, the request Blink made, and gains `walkReason`, why it was
+walked. The proposal named the reasons `first-change` and `after-loss` as
+values of `reason`; `reason` is unchanged instead, and `walkReason` carries
+the bridge's decision.
+
+- DOM: a `finished-parsing` request is always walked, since it is the state
+  the DOM change records of a document apply to; its `walkReason` is
+  `first`, `after-loss`, `check`, or `finished-parsing`. A `post-mutation`
+  request is walked when the document has no DOM walk yet (`first`), after a
+  loss (`after-loss`), or at the check interval (`check`), and is otherwise
+  not walked. The proposal walked a document before its first change was
+  recorded. Instead, a change made before the document's first walk is
+  recorded as it happens, and the walk at the next mutation delivery, with
+  `walkReason` `first`, gives the state later changes apply to.
+- Layout: a rendering update whose counters are unchanged is not walked, as
+  before. Otherwise the update is walked when the document has no layout
+  walk yet (`first`), after a loss (`after-loss`), or at the check interval
+  (`check`), and is otherwise not walked.
 - After a loss: when a record on `browser.dom` or `browser.layout` could not
   be written, the bridge holds the count for an omission record
-  (`HoldOmittedEvidence`). From then, the next update of each document of
-  that renderer on that channel is walked in full, with the reason
-  `after-loss`, and the change records continue from that walk.
+  (`HoldOmittedEvidence`), and counts the loss for that channel. A document
+  whose last walk on the channel was before the latest loss is walked at its
+  next request, with `walkReason` `after-loss`, and the change records
+  continue from that walk.
 - A renderer that connects again is a new process with new documents, so
-  each of its documents is walked at its first update under the rules above.
+  each of its documents is walked at its first request under the rules
+  above.
+
+The bridge tracks at most 4,096 documents per renderer and forgets the least
+recently used; a forgotten document that makes a request again is walked as
+`first`.
 
 ### The check setting
 
-The app gains a setting, "Check change records against a full walk every N
-updates", off by default. When it is on, every Nth mutation delivery of a
-document records a `post-mutation` DOM checkpoint, and every Nth rendering
-update with layout changes records a layout checkpoint, as the validation
-form above describes. N defaults to 100 when the setting is turned on. The
-value reaches the bridge in the bootstrap message, as `fullWalkInterval`
-(0 when off), and each child process reads it from the child bootstrap. The
-recording's capture settings hold it, so a reader of the recording knows
-which checkpoints to expect. `DomChangeCheck` and `LayoutChangeCheck`
-compare only where a recording has a checkpoint after the first; with the
-setting off they report that there was nothing to compare.
+The app's browser capture settings gain "Check change records against a
+full walk", off by default, and "Walk every N updates", 100 by default, a
+whole number from 1. When the setting is on, every Nth mutation delivery of
+a document records a `post-mutation` DOM checkpoint, and every Nth rendering
+update with changed counters records a layout checkpoint, as the validation
+form above describes. The value reaches the bridge in the bootstrap message
+as `fullWalkInterval` (0 when off), and each child process reads it from the
+child bootstrap. The session manifest's recording configuration holds it as
+`browserFullWalkInterval`, so a reader of the recording knows which
+checkpoints to expect. `DomChangeCheck` and `LayoutChangeCheck` compare only
+where a recording has a checkpoint after the first. A checkpoint walked
+after a loss is counted and not compared: the DOM check takes the tree from
+it, and the layout check, whose state is rebuilt from change records alone,
+compares none of the document's later checkpoints.
 
 ### Presentation timing and interaction state
 
-Both are now tied to checkpoints, and would stop with them:
+Both were tied to checkpoints, and would have stopped with them:
 
-- A `presentation-requested` record is made for each completed layout
+- A `presentation-requested` record was made for each completed layout
   checkpoint (`RecorderRequestLayoutPresentation`), and the playback index
   joins presentation feedback to layout checkpoints to place each rendering
-  update on the recording's timeline. From protocol 0.35 a request is also
-  made for each completed layout change set, and the record names either
-  `layoutCheckpointId` or `layoutChangeSetId`. The playback index joins
-  both.
+  update on the recording's timeline. From protocol 0.35, a rendering update
+  that is not walked always records a layout change set, even one with no
+  changed records, and the request is made after the change set. The record
+  names either `layoutCheckpointId` or `layoutChangeSetId`, and the other is
+  null. The playback index joins both. A change set of an update that was
+  walked is not presented again, since its checkpoint was.
 - An interaction checkpoint follows each DOM and layout checkpoint. From
-  protocol 0.35 one also follows each layout change set, naming it as
-  `sourceChangeSetId`, and each mutation delivery that no longer records a
-  DOM checkpoint, with no source record and the reason `post-mutation`.
+  protocol 0.35 one also follows each layout change set of an update that
+  was not walked, naming it as `sourceChangeSetId` with a null
+  `sourceCheckpointId`, and each mutation delivery that is not walked, with
+  no source record and the reason `post-mutation`.
+- Blink passes the change set's source to the presentation and interaction
+  hooks as a sequence number with bit 63 set
+  (`kLayoutChangeSetSourceBit`), which the bridge decodes to the change set
+  identity.
+
+With the setting off, a document whose rendering updates had been walked at
+every update now records presentation requests and interaction checkpoints
+at least as often, and an update with changes but no new counters, which
+before recorded no checkpoint, also records them.
+
+The database evidence tables are not written for a recording that has a
+recording file. Migration 0014 adds their columns for the new fields, so the
+database writer still maps every member of every record.
 
 ### Snapshots
 
-The agreed design (decision 2 above) has the bridge write a snapshot of its
+The agreed design (decision 2 above) had the bridge write a snapshot of its
 cache at a fixed interval. The bridge's cache holds a hash of each node's
 last record, not the record, so a snapshot from it would need every record
 held in each renderer, and would add the snapshot's bytes to the pipe, which
 the recording at f409513 showed is already the busiest part of the path: the
 writer thread wrote for 44.0 s of 63.2 s. The app receives every record, and
-the checks already rebuild a document's state from them. This design
-proposes that snapshots are made by the app, from the records it writes, in
-the slice that plays back the page at a frame, and that slice 5 makes no
-snapshots.
+the checks already rebuild a document's state from them. Snapshots are made
+by the app, from the records it writes, in a later slice, and slice 5 makes
+none.
 
 ### Required tests
 
 - Unit: the integration script's tests of each changed hook; the bridge's
-  choice of when to walk (first update, check interval, after a loss, first
-  change) from generated sequences; payload validation of the new fields;
-  the playback index joining presentation feedback to change sets; the
-  checks with the setting off and on.
-- Integration: an app test that records with the setting on and reads back
-  the checkpoints at the interval.
+  choice of when to walk (first request, check interval, after a loss, a
+  finished parse, eviction) from generated sequences; payload validation of
+  the new fields; the playback index joining presentation feedback to
+  change sets; the checks with walks after a loss.
 - System, on the target Windows machine: a recording with the setting off,
   with the renderer's walk time and queue waits compared with the recording
   at f409513, and hover responsiveness reported by the user; and a
   recording with the setting on, checked with no differences.
+
+The proposal also listed an integration test in which the app records with
+the setting on; the system recording with the setting on covers it on the
+target machine, since the app's browser capture runs only on Windows.
 
 ## Slice 4 status
 

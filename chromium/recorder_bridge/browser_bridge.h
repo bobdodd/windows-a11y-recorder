@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/component_export.h"
+#include "chromium/recorder_bridge/full_walks.h"
 #include "chromium/recorder_bridge/layout_changes.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
 
@@ -405,7 +406,11 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
 
 // Starts one bounded structural checkpoint at a named Blink document boundary.
 // The document token is Chromium's shared browser-renderer document identity.
-// Returns zero when the recorder is not connected.
+// Returns zero when the recorder is not connected, or when the document is not
+// walked at this request (protocol 0.35): a "post-mutation" request is walked
+// only when the document has no walk yet, when a DOM record was lost since its
+// last walk, or at the recording's check interval. The caller still records
+// the interaction snapshot of a mutation delivery that was not walked.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string document_token,
@@ -1083,7 +1088,9 @@ struct InteractionCheckpointState {
 // Starts one snapshot of a document's interaction state, taken immediately
 // after the named DOM or layout checkpoint completed. The source channel is
 // "browser.dom" or "browser.layout", and the reason is the source checkpoint's
-// reason. Returns zero when the snapshot is not recorded, in which case no
+// reason. From protocol 0.35 the source may also be a mutation delivery that
+// was not walked, with sequence zero and the reason "post-mutation", or a
+// layout change set, with the sequence RecordBlinkLayoutChanges returned. Returns zero when the snapshot is not recorded, in which case no
 // text-control or completion record may follow.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 uint64_t BeginBlinkInteractionCheckpoint(int document_node_id,
@@ -1142,8 +1149,11 @@ struct LayoutCheckpointFrame {
 // rendering update reached the paint-clean state. The two counters are Blink's
 // cumulative style resolution count for the document and layout count for its
 // frame view. Returns zero when the recorder is not connected or when neither
-// counter has changed since the previous checkpoint of the same document, so
-// an unchanged rendering update produces no evidence.
+// counter has changed since the previous update of the same document, so an
+// unchanged rendering update produces no evidence. From protocol 0.35 it also
+// returns zero when the document is not walked at this update, which is
+// then recorded by its change set: a document is walked at its first update,
+// after a layout record was lost, and at the recording's check interval.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 uint64_t BeginBlinkLayoutCheckpoint(
     int document_node_id,
@@ -1228,17 +1238,26 @@ void CompleteBlinkLayoutCheckpoint(uint64_t checkpoint_sequence,
 // Records one layout change set of a document whose rendering update reached
 // the paint-clean state: the transform nodes and the noted nodes whose record
 // differs from the last one recorded for them in this renderer process, the
-// scroll offsets stored during the update (protocol 0.34), and the counts. The set names the layout checkpoint recorded for the document
-// since the previous call for it, if any. Nothing is recorded when no record
-// differs, and nothing when the recorder is not connected.
+// scroll offsets stored during the update (protocol 0.34), and the counts.
+// The set names the layout checkpoint recorded for the document since the
+// previous call for it, if any. Nothing is recorded when no record differs,
+// unless the update recalculated the document's style or layout and was not
+// walked in full (protocol 0.35), and nothing when the recorder is not
+// connected.
+//
+// Returns the change set as a presentation and interaction source, marked by
+// kLayoutChangeSetSourceBit, when the update recorded no layout checkpoint;
+// the caller then requests the update's presentation and interaction
+// snapshot with it. Returns zero otherwise.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
-void RecordBlinkLayoutChanges(int document_node_id,
-                              std::string document_token,
-                              LayoutChangesFrame frame,
-                              int noted_node_count,
-                              std::vector<LayoutTransformNode> transform_nodes,
-                              std::vector<LayoutChangedNode> nodes,
-                              std::vector<LayoutScrollOffset> scroll_offsets);
+uint64_t RecordBlinkLayoutChanges(
+    int document_node_id,
+    std::string document_token,
+    LayoutChangesFrame frame,
+    int noted_node_count,
+    std::vector<LayoutTransformNode> transform_nodes,
+    std::vector<LayoutChangedNode> nodes,
+    std::vector<LayoutScrollOffset> scroll_offsets);
 
 // The local-root widget a presentation request was queued on. The frame sink
 // is the viz::FrameSinkId whose compositor frames the frame tokens number, and
@@ -1265,7 +1284,9 @@ struct PresentationFeedbackTiming {
 };
 
 // Records a request for the presentation of the compositor frame that carries
-// the named layout checkpoint's rendering update. An empty not-queued reason
+// the named layout checkpoint's rendering update, or, when the sequence is
+// marked by kLayoutChangeSetSourceBit, the named layout change set's
+// (protocol 0.35). An empty not-queued reason
 // means the caller queues a swap promise when a nonzero sequence is returned;
 // otherwise it is "no-widget" or "not-compositing" and nothing is queued.
 // The source frame number is LayerTreeHost::SourceFrameNumber(), or -1 when

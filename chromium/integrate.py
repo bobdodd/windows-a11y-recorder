@@ -1168,6 +1168,32 @@ void RecorderRecordDomCheckpoint(Document& recorder_document,
 }
 
 """
+# Protocol 0.35 walks a document at a mutation delivery only when it has no
+# walk yet, after a loss, and at the recording's check interval. A delivery
+# that is not walked still records its interaction snapshot, which followed
+# every post-mutation checkpoint before.
+LEGACY_UNSKIPPED_BLINK_DOM_CHECKPOINT_HELPER = BLINK_DOM_CHECKPOINT_HELPER
+BLINK_DOM_CHECKPOINT_HELPER = BLINK_DOM_CHECKPOINT_HELPER.replace(
+    """\
+          recorder_reason, kRecorderMaximumDomCheckpointNodes);
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+""",
+    """\
+          recorder_reason, kRecorderMaximumDomCheckpointNodes);
+  if (recorder_checkpoint_sequence == 0) {
+    // The bridge did not walk this mutation delivery; its change records
+    // hold what changed. Its interaction state is recorded as before.
+    if (std::string_view(recorder_reason) == "post-mutation") {
+      RecorderRecordInteractionCheckpoint(recorder_document, 0, "browser.dom",
+                                          recorder_reason);
+    }
+    return;
+  }
+""",
+    1,
+)
 # Protocol 0.34. The structural changes of a connected DOM tree, recorded in
 # the order Blink makes them. The helper is defined in document.cc beside the
 # checkpoint, since the document's mutation hook is its main caller, and is
@@ -1893,6 +1919,7 @@ BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
     }
 """
 BLINK_DOM_CHECKPOINT_INCLUDES = (
+    "#include <string_view>",
     '#include "third_party/blink/renderer/core/dom/character_data.h"',
     '#include "third_party/blink/renderer/core/dom/shadow_root.h"',
     '#include "third_party/blink/renderer/core/dom/slot_assignment.h"',
@@ -4990,6 +5017,15 @@ def patch_blink_document(path: Path) -> None:
         text = replace_once(
             text,
             LEGACY_UNTEXTED_BLINK_DOM_CHECKPOINT_HELPER,
+            BLINK_DOM_CHECKPOINT_HELPER,
+            path,
+        )
+    # A tree patched for protocols 0.33 and 0.34 holds a DOM helper that
+    # records no interaction snapshot for a mutation delivery it does not walk.
+    if LEGACY_UNSKIPPED_BLINK_DOM_CHECKPOINT_HELPER in text:
+        text = replace_once(
+            text,
+            LEGACY_UNSKIPPED_BLINK_DOM_CHECKPOINT_HELPER,
             BLINK_DOM_CHECKPOINT_HELPER,
             path,
         )
@@ -8793,6 +8829,44 @@ void RecorderNoteScrollOffset(const LayoutBox& recorder_box) {
         1,
     )
 )
+# Protocol 0.35 walks a document's layout only at its first update, after a
+# loss, and at the recording's check interval. A change set recorded without
+# a checkpoint in its update carries the update's presentation request and
+# interaction snapshot, which followed every checkpoint before.
+BLINK_LAYOUT_CHANGES_SOURCE_CALL = """\
+  a11y_recorder::RecordBlinkLayoutChanges(
+      recorder_document_node_id, recorder_document->Token().ToString(),
+      recorder_changes_frame, base::saturated_cast<int>(recorder_noted.size()),
+      std::move(recorder_transform_records),
+      std::move(recorder_changed_nodes), std::move(recorder_scroll_offsets));
+}
+"""
+BLINK_LAYOUT_CHANGES_SOURCE_HOOK = """\
+  const std::string recorder_document_token =
+      recorder_document->Token().ToString();
+  const uint64_t recorder_change_set_source =
+      a11y_recorder::RecordBlinkLayoutChanges(
+          recorder_document_node_id, recorder_document_token,
+          recorder_changes_frame,
+          base::saturated_cast<int>(recorder_noted.size()),
+          std::move(recorder_transform_records),
+          std::move(recorder_changed_nodes),
+          std::move(recorder_scroll_offsets));
+  if (recorder_change_set_source == 0) {
+    return;
+  }
+  RecorderRequestLayoutPresentation(recorder_frame, recorder_change_set_source,
+                                    recorder_document_node_id,
+                                    recorder_document_token);
+  RecorderRecordInteractionCheckpoint(*recorder_document,
+                                      recorder_change_set_source,
+                                      "browser.layout", "rendering-update");
+}
+"""
+LEGACY_UNSOURCED_BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_SOURCE_CALL, BLINK_LAYOUT_CHANGES_SOURCE_HOOK, 1
+)
 BLINK_LAYOUT_CHANGES_INCLUDES = (
     "#include <array>",
     '#include "base/numerics/safe_conversions.h"',
@@ -8873,6 +8947,8 @@ BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS = """\
             recorder_layout_object->AbsoluteQuads(recorder_quads);
 """
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.35 requested presentation from change sets.
+    LEGACY_UNSOURCED_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.34 recorded scroll offsets.
     LEGACY_UNSCROLLED_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before a new layout result noted the objects of its child fragments.

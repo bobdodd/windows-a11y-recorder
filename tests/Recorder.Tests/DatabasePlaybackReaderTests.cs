@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Recorder.Contracts;
 using Recorder.Database;
 using Recorder.Database.RecordingFiles;
@@ -315,6 +316,37 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         Assert.Equal(BrowserNavigationFrameBasis.PresentationFeedback, navigation.FirstFrameBasis);
         Assert.Equal(3_600_000, navigation.FirstFrameNanoseconds);
         Assert.Equal(3_600_000, navigation.SeekNanoseconds);
+    }
+
+    [Fact]
+    public void JoinsAPresentationToTheLayoutChangeSetOfAnUpdateThatWasNotWalked()
+    {
+        var sessionKey = "change-set-" + Guid.NewGuid().ToString("N");
+        var collector = Collector("test.rendered", "browser.layout", "browser.presentation");
+        var builder = new PlaybackIndexBuilder(10_000_000, TimeSpan.Zero);
+        var completed = JsonNode.Parse(EvidenceSamples.Sample("browser.layout", "layout-checkpoint-completed"))!;
+        var changes = new JsonObject
+        {
+            ["context"] = completed["context"]!.DeepClone(),
+            ["changeSetId"] = "layout-changes-9"
+        };
+        var request = JsonNode.Parse(EvidenceSamples.Sample("browser.presentation", "presentation-requested"))!;
+        request["layoutCheckpointId"] = null;
+        request["layoutChangeSetId"] = "layout-changes-9";
+        var feedback = EvidenceSamples.Sample("browser.presentation", "presentation-feedback")
+            .Replace("\"presentedTicks\":\"98765432109\"", "\"presentedTicks\":\"1014000\"");
+
+        builder.Add(1, Event(sessionKey, collector, 0, 2_000_000, "browser.layout", "layout-changes-completed",
+            Json(changes.ToJsonString())));
+        builder.Add(2, Event(sessionKey, collector, 0, 2_000_100, "browser.presentation", "presentation-requested",
+            Json(request.ToJsonString())));
+        builder.Add(3, Event(sessionKey, collector, 1, 2_100_000, "browser.presentation", "presentation-feedback",
+            Json(feedback)) with { NativeTimestamp = new NativeTimestamp("chromium-monotonic", 1_000_000, "ticks") });
+
+        // Presented 14,000 ticks of 100 ns after the feedback's 2.1 ms.
+        var presented = Assert.Single(builder.Build().PresentedCheckpoints);
+        Assert.Equal(2_000_000, presented.CheckpointNanoseconds);
+        Assert.Equal(3_500_000, presented.PresentedNanoseconds);
     }
 
     [Fact]

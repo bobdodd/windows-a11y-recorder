@@ -18,6 +18,7 @@ public sealed class DomCharacterDataCheckTests
 
     private static (string, JsonElement) Started(int checkpoint) => ("dom-checkpoint-started", Json($$"""
         {"context":{{Context}},"checkpointId":"dom-checkpoint-{{checkpoint}}","reason":"post-mutation",
+         "walkReason": "check",
          "maximumNodes":2147483647}
         """));
 

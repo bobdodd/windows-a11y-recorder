@@ -947,7 +947,18 @@ set of its rendering update, whose completion counts them
 (`scrollOffsetCount`). The design is in
 [change-driven recording](change-driven-recording.md).
 
-Live 0.34 connections require an exact protocol-version match.
+Protocol version 0.35 walks a document in full only for its first
+request, a finished parse, a request after a lost record on the channel,
+and, when the app's check setting is on, every Nth request, where N is the
+bootstrap message's `fullWalkInterval` (0 when off). The DOM and layout
+checkpoint start records gain `walkReason`. A rendering update that is not
+walked always records a layout change set, and its `presentation-requested`
+record names `layoutChangeSetId` in place of `layoutCheckpointId`; an
+interaction checkpoint follows it, naming `sourceChangeSetId`, and follows a
+mutation delivery that is not walked with no source record. The design is
+in [change-driven recording](change-driven-recording.md).
+
+Live 0.35 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

@@ -31,6 +31,7 @@
 #include "base/win/windows_handle_util.h"
 #include "chromium/recorder_bridge/cookie_text.h"
 #include "chromium/recorder_bridge/evidence_cost.h"
+#include "chromium/recorder_bridge/full_walks.h"
 #include "chromium/recorder_bridge/network_text.h"
 #include "chromium/recorder_bridge/recorder_protocol.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
@@ -1202,6 +1203,69 @@ inline constexpr char kEvidenceWriteFailedOmissionReason[] =
 // same channel as soon as the pipe accepts a write again. A loss the process
 // never gets to report, because it is shutting down or its pipe never recovers,
 // stays unreported in the archive, which no in-process reporter can fix.
+// The count of records of the DOM and layout channels this process could not
+// write. A document whose channel lost a record since its last full walk is
+// walked again at its next update (protocol 0.35), so its change records
+// continue from a state they apply to.
+std::atomic<uint64_t>& DomEvidenceLosses() {
+  static std::atomic<uint64_t> losses{0};
+  return losses;
+}
+
+std::atomic<uint64_t>& LayoutEvidenceLosses() {
+  static std::atomic<uint64_t> losses{0};
+  return losses;
+}
+
+void CountEvidenceLoss(const std::string& channel, int count) {
+  if (count <= 0) {
+    return;
+  }
+  if (channel == "browser.dom") {
+    DomEvidenceLosses().fetch_add(static_cast<uint64_t>(count));
+  } else if (channel == "browser.layout") {
+    LayoutEvidenceLosses().fetch_add(static_cast<uint64_t>(count));
+  }
+}
+
+// When each document is walked in full. The interval comes from the
+// recording's bootstrap, and is set once the process connects.
+struct FullWalkStorage {
+  base::Lock lock;
+  std::unique_ptr<FullWalkSchedule> schedule;
+};
+
+FullWalkStorage& FullWalks() {
+  static base::NoDestructor<FullWalkStorage> storage;
+  return *storage;
+}
+
+void SetFullWalkInterval(int interval) {
+  FullWalkStorage& storage = FullWalks();
+  base::AutoLock lock(storage.lock);
+  storage.schedule = std::make_unique<FullWalkSchedule>(interval);
+}
+
+std::string DomWalkReason(int document_node_id, const std::string& requested) {
+  FullWalkStorage& storage = FullWalks();
+  base::AutoLock lock(storage.lock);
+  if (!storage.schedule) {
+    storage.schedule = std::make_unique<FullWalkSchedule>(0);
+  }
+  return storage.schedule->DomWalkReason(document_node_id, requested,
+                                         DomEvidenceLosses().load());
+}
+
+std::string LayoutWalkReason(int document_node_id) {
+  FullWalkStorage& storage = FullWalks();
+  base::AutoLock lock(storage.lock);
+  if (!storage.schedule) {
+    storage.schedule = std::make_unique<FullWalkSchedule>(0);
+  }
+  return storage.schedule->LayoutWalkReason(document_node_id,
+                                            LayoutEvidenceLosses().load());
+}
+
 base::Lock& OmittedEvidenceLock() {
   static base::NoDestructor<base::Lock> lock;
   return *lock;
@@ -1213,6 +1277,7 @@ std::map<std::string, int>& OmittedEvidenceCounts() {
 }
 
 void HoldOmittedEvidence(const std::string& channel, int count) {
+  CountEvidenceLoss(channel, count);
   base::AutoLock lock(OmittedEvidenceLock());
   OmittedEvidenceCounts()[channel] += count;
 }
@@ -1682,6 +1747,7 @@ bool InitializeProcessBridge(std::string* error) {
         "Recorder child process metadata validation completed.");
   }
 
+  SetFullWalkInterval(configuration.full_walk_interval);
   auto client = std::make_unique<RecorderPipeClient>(std::move(configuration));
   client->SetWriteFailureHandler(&HoldFailedEvidenceWrite);
   WriteDiagnosticLine("Recorder process bridge is connecting to the pipe.");
@@ -2467,11 +2533,16 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
       maximum_nodes <= 0) {
     return 0;
   }
+  std::string walk_reason = DomWalkReason(document_node_id, reason);
+  if (walk_reason.empty()) {
+    return 0;
+  }
   const uint64_t checkpoint_sequence = AssignDomCheckpointIdentity();
   base::DictValue payload = CreateDomCheckpointBasePayload(
       *client, checkpoint_sequence, document_node_id,
       std::move(document_token));
   payload.Set("reason", std::move(reason));
+  payload.Set("walkReason", std::move(walk_reason));
   payload.Set("maximumNodes", maximum_nodes);
   SendBlinkEvidence("browser.dom", "dom-checkpoint-started",
                     std::move(payload));
@@ -3927,10 +3998,15 @@ namespace {
 struct LayoutCheckpointStorage {
   base::Lock lock;
   uint64_t next_checkpoint_id = 1;
+  // What the document's last rendering update recorded, until its change
+  // set reads it: nothing yet, a layout checkpoint, or a recalculation that
+  // was not walked (protocol 0.35).
+  enum class Update { kNone, kWalked, kNotWalked };
   struct DocumentCounters {
     unsigned style_resolution_count = 0;
     unsigned layout_count = 0;
     uint64_t checkpoint_sequence = 0;
+    Update update = Update::kNone;
   };
   std::unordered_map<int, DocumentCounters> documents;
 };
@@ -3992,6 +4068,7 @@ uint64_t BeginBlinkLayoutCheckpoint(
   }
   uint64_t checkpoint_sequence = 0;
   uint64_t previous_sequence = 0;
+  std::string walk_reason;
   {
     LayoutCheckpointStorage& storage = LayoutCheckpoints();
     base::AutoLock lock(storage.lock);
@@ -4003,16 +4080,30 @@ uint64_t BeginBlinkLayoutCheckpoint(
       }
       previous_sequence = found->second.checkpoint_sequence;
     }
+    walk_reason = LayoutWalkReason(document_node_id);
+    if (walk_reason.empty() && found != storage.documents.end()) {
+      // The update is recorded by its change set. The counters move on, so
+      // the next update is compared with this one, as when it is walked.
+      found->second.style_resolution_count = style_resolution_count;
+      found->second.layout_count = layout_count;
+      found->second.update = LayoutCheckpointStorage::Update::kNotWalked;
+      return 0;
+    }
+    if (walk_reason.empty()) {
+      walk_reason = "first";
+    }
     checkpoint_sequence = storage.next_checkpoint_id++;
     storage.documents.insert_or_assign(
         document_node_id,
         LayoutCheckpointStorage::DocumentCounters{
-            style_resolution_count, layout_count, checkpoint_sequence});
+            style_resolution_count, layout_count, checkpoint_sequence,
+            LayoutCheckpointStorage::Update::kWalked});
   }
   base::DictValue payload = CreateLayoutCheckpointBasePayload(
       *client, checkpoint_sequence, document_node_id,
       std::move(document_token));
   payload.Set("reason", "rendering-update");
+  payload.Set("walkReason", std::move(walk_reason));
   payload.Set("previousCheckpointId",
               previous_sequence == 0
                   ? base::Value()
@@ -4455,13 +4546,14 @@ struct LayoutChangedNodeEvidence : PendingEvidence {
 
 }  // namespace
 
-void RecordBlinkLayoutChanges(int document_node_id,
-                              std::string document_token,
-                              LayoutChangesFrame frame,
-                              int noted_node_count,
-                              std::vector<LayoutTransformNode> transform_nodes,
-                              std::vector<LayoutChangedNode> nodes,
-                              std::vector<LayoutScrollOffset> scroll_offsets) {
+uint64_t RecordBlinkLayoutChanges(
+    int document_node_id,
+    std::string document_token,
+    LayoutChangesFrame frame,
+    int noted_node_count,
+    std::vector<LayoutTransformNode> transform_nodes,
+    std::vector<LayoutChangedNode> nodes,
+    std::vector<LayoutScrollOffset> scroll_offsets) {
   A11Y_RECORDER_COST("RecordBlinkLayoutChanges");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
@@ -4470,15 +4562,18 @@ void RecordBlinkLayoutChanges(int document_node_id,
       !IsFiniteNumber(frame.view_paint_offset_y) ||
       !IsFiniteNumber(frame.layout_zoom_factor) ||
       frame.layout_zoom_factor <= 0) {
-    return;
+    return 0;
   }
   uint64_t checkpoint_sequence = 0;
+  LayoutCheckpointStorage::Update update = LayoutCheckpointStorage::Update::kNone;
   {
     LayoutCheckpointStorage& checkpoints = LayoutCheckpoints();
     base::AutoLock lock(checkpoints.lock);
     auto found = checkpoints.documents.find(document_node_id);
     if (found != checkpoints.documents.end()) {
       checkpoint_sequence = found->second.checkpoint_sequence;
+      update = found->second.update;
+      found->second.update = LayoutCheckpointStorage::Update::kNone;
     }
   }
   std::vector<size_t> changed_transforms;
@@ -4533,9 +4628,13 @@ void RecordBlinkLayoutChanges(int document_node_id,
         valid_scroll_offsets.push_back(index);
       }
     }
+    // A recalculation that was not walked is recorded by a change set even
+    // when no record changed, so the update's presentation and interaction
+    // state are recorded as they were with a checkpoint.
     if (changed_transforms.empty() && changed_nodes.empty() &&
-        valid_scroll_offsets.empty()) {
-      return;
+        valid_scroll_offsets.empty() &&
+        update != LayoutCheckpointStorage::Update::kNotWalked) {
+      return 0;
     }
     change_set_sequence = storage.next_change_set_id++;
   }
@@ -4628,6 +4727,9 @@ void RecordBlinkLayoutChanges(int document_node_id,
                 base::saturated_cast<int>(valid_scroll_offsets.size()));
   SendBlinkEvidence("browser.layout", "layout-changes-completed",
                     std::move(completed));
+  return update == LayoutCheckpointStorage::Update::kWalked
+             ? 0
+             : LayoutChangeSetSource(change_set_sequence);
 }
 
 
@@ -4715,10 +4817,17 @@ uint64_t BeginBlinkPresentationRequest(int document_node_id,
   A11Y_RECORDER_COST("BeginBlinkPresentationRequest");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
-      layout_checkpoint_sequence == 0 || !IsValidPresentationWidget(widget) ||
-      source_frame_number < -1) {
+      layout_checkpoint_sequence == 0 ||
+      layout_checkpoint_sequence == kLayoutChangeSetSourceBit ||
+      !IsValidPresentationWidget(widget) || source_frame_number < -1) {
     return 0;
   }
+  // From protocol 0.35 the source is a layout checkpoint or a layout change
+  // set, marked by kLayoutChangeSetSourceBit; the record names one of them.
+  const bool change_set_source =
+      (layout_checkpoint_sequence & kLayoutChangeSetSourceBit) != 0;
+  const uint64_t source_sequence =
+      layout_checkpoint_sequence & ~kLayoutChangeSetSourceBit;
   // A request is queued only on a widget with a layer tree host; a request
   // without a widget names no widget and no frame number.
   const bool queued = not_queued_reason.empty();
@@ -4734,7 +4843,13 @@ uint64_t BeginBlinkPresentationRequest(int document_node_id,
       *client, request_sequence, document_node_id, std::move(document_token),
       widget);
   payload.Set("layoutCheckpointId",
-              LayoutCheckpointId(layout_checkpoint_sequence));
+              change_set_source
+                  ? base::Value()
+                  : base::Value(LayoutCheckpointId(source_sequence)));
+  payload.Set("layoutChangeSetId",
+              change_set_source
+                  ? base::Value(LayoutChangeSetId(source_sequence))
+                  : base::Value());
   payload.Set("queued", queued);
   payload.Set("notQueuedReason",
               queued ? base::Value() : base::Value(not_queued_reason));
@@ -4896,19 +5011,35 @@ uint64_t BeginBlinkInteractionCheckpoint(int document_node_id,
   A11Y_RECORDER_COST("BeginBlinkInteractionCheckpoint");
   RecorderPipeClient* client = GetProcessRecorderClient();
   if (!client || document_node_id <= 0 || document_token.empty() ||
-      source_checkpoint_sequence == 0 || maximum_text_controls <= 0 ||
-      maximum_value_length <= 0) {
+      maximum_text_controls <= 0 || maximum_value_length <= 0) {
     return 0;
   }
-  // The reason must be one the source checkpoint's channel uses, so the
-  // snapshot cannot name a reason its source did not record.
-  std::string source_checkpoint_id;
+  // The reason must be one the source's channel uses, so the snapshot cannot
+  // name a reason its source did not record. From protocol 0.35 the source
+  // is a DOM checkpoint, a mutation delivery that was not walked (sequence
+  // zero), a layout checkpoint, or a layout change set, marked by
+  // kLayoutChangeSetSourceBit.
+  const bool change_set_source =
+      (source_checkpoint_sequence & kLayoutChangeSetSourceBit) != 0;
+  const uint64_t source_sequence =
+      source_checkpoint_sequence & ~kLayoutChangeSetSourceBit;
+  base::Value source_checkpoint_id;
+  base::Value source_change_set_id;
   if (source_channel == "browser.dom" &&
-      IsOneOf(reason, {"finished-parsing", "post-mutation"})) {
-    source_checkpoint_id = DomCheckpointId(source_checkpoint_sequence);
+      IsOneOf(reason, {"finished-parsing", "post-mutation"}) &&
+      !change_set_source) {
+    if (source_sequence != 0) {
+      source_checkpoint_id = base::Value(DomCheckpointId(source_sequence));
+    } else if (reason != "post-mutation") {
+      return 0;
+    }
   } else if (source_channel == "browser.layout" &&
-             reason == "rendering-update") {
-    source_checkpoint_id = LayoutCheckpointId(source_checkpoint_sequence);
+             reason == "rendering-update" && source_sequence != 0) {
+    if (change_set_source) {
+      source_change_set_id = base::Value(LayoutChangeSetId(source_sequence));
+    } else {
+      source_checkpoint_id = base::Value(LayoutCheckpointId(source_sequence));
+    }
   } else {
     return 0;
   }
@@ -4930,6 +5061,7 @@ uint64_t BeginBlinkInteractionCheckpoint(int document_node_id,
       *client, checkpoint_sequence, document_node_id,
       std::move(document_token));
   payload.Set("sourceCheckpointId", std::move(source_checkpoint_id));
+  payload.Set("sourceChangeSetId", std::move(source_change_set_id));
   payload.Set("sourceChannel", std::move(source_channel));
   payload.Set("reason", std::move(reason));
   payload.Set("documentHasFocus", state.document_has_focus);

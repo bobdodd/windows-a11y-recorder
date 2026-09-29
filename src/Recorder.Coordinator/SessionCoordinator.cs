@@ -522,7 +522,8 @@ public sealed class SessionCoordinator : IAsyncDisposable
                 _options.CaptureDesktopFrames,
                 _options.FramesPerSecond,
                 _options.CaptureMicrophone,
-                _options.CaptureSystemAudio),
+                _options.CaptureSystemAudio,
+                _options.CaptureBrowserEvidence ? _options.BrowserFullWalkInterval : 0),
             _collectors.Select(runtime => new SessionCollectorManifest(
                 runtime.Collector.Descriptor.CollectorType,
                 runtime.Collector.Descriptor.Implementation,

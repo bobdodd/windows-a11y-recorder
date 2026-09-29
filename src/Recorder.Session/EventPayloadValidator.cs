@@ -1491,7 +1491,8 @@ internal static class EventPayloadValidator
             [
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
-                RequiredString("sourceCheckpointId"),
+                NullableString("sourceCheckpointId"),
+                NullableString("sourceChangeSetId"),
                 RequiredEnum("sourceChannel", "browser.dom", "browser.layout"),
                 RequiredEnum(
                     "reason", "finished-parsing", "post-mutation",
@@ -1535,6 +1536,36 @@ internal static class EventPayloadValidator
                 "#/payload/sourceCheckpointId",
                 $"'{sourceCheckpointId}' is not a checkpoint identity of the " +
                     $"'{sourceChannel}' channel.");
+        }
+        // From protocol 0.35 a snapshot may follow a mutation delivery that
+        // was not walked, which names no source record, or a layout change
+        // set. A DOM source names a checkpoint unless it is such a delivery;
+        // a layout source names a checkpoint or a change set, not both.
+        var sourceChangeSetId = ReadString(payload, "sourceChangeSetId");
+        var sourceConsistent = sourceChannel switch
+        {
+            "browser.dom" => sourceChangeSetId is null &&
+                (sourceCheckpointId is not null || reason == "post-mutation"),
+            "browser.layout" => (sourceCheckpointId is null) != (sourceChangeSetId is null),
+            _ => true
+        };
+        if (!sourceConsistent)
+        {
+            AddError(
+                issues,
+                "browser-interaction-checkpoint-source-inconsistent",
+                "#/payload/sourceCheckpointId",
+                $"The source records named are not ones the '{sourceChannel}' channel " +
+                    "makes a snapshot after.");
+        }
+        if (sourceChangeSetId is not null &&
+            !IsCheckpointIdentity(sourceChangeSetId, "layout-changes-"))
+        {
+            AddError(
+                issues,
+                "browser-interaction-checkpoint-change-set-invalid",
+                "#/payload/sourceChangeSetId",
+                $"'{sourceChangeSetId}' is not a layout change set identity.");
         }
         if (sourcePrefix is not null && reason is not null &&
             !sourceReasons.Contains(reason))
@@ -2511,6 +2542,7 @@ internal static class EventPayloadValidator
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
                 RequiredEnum("reason", "rendering-update"),
+                RequiredEnum("walkReason", "first", "after-loss", "check"),
                 NullableString("previousCheckpointId"),
                 RequiredInteger("styleResolutionCount", nonnegative: true),
                 RequiredInteger("layoutCount", nonnegative: true),
@@ -3216,7 +3248,8 @@ internal static class EventPayloadValidator
             payload,
             [
                 .. PresentationBaseRules(widgetRequired: false),
-                RequiredString("layoutCheckpointId"),
+                NullableString("layoutCheckpointId"),
+                NullableString("layoutChangeSetId"),
                 RequiredBoolean("queued"),
                 NullableEnum("notQueuedReason", "no-widget", "not-compositing"),
                 NullableInteger("sourceFrameNumber", nonnegative: true),
@@ -3235,6 +3268,26 @@ internal static class EventPayloadValidator
                 "browser-presentation-checkpoint-id-invalid",
                 "#/payload/layoutCheckpointId",
                 $"'{checkpointId}' is not a layout checkpoint identity.");
+        }
+        // From protocol 0.35 a request follows a layout checkpoint or, for a
+        // rendering update that was not walked, its layout change set.
+        var changeSetId = ReadString(payload, "layoutChangeSetId");
+        if (changeSetId is not null &&
+            !IsCheckpointIdentity(changeSetId, "layout-changes-"))
+        {
+            AddError(
+                issues,
+                "browser-presentation-change-set-id-invalid",
+                "#/payload/layoutChangeSetId",
+                $"'{changeSetId}' is not a layout change set identity.");
+        }
+        if ((checkpointId is null) == (changeSetId is null))
+        {
+            AddError(
+                issues,
+                "browser-presentation-source-inconsistent",
+                "#/payload/layoutCheckpointId",
+                "A presentation request names one layout checkpoint or one layout change set.");
         }
         if (!payload.TryGetProperty("queued", out var queuedValue) ||
             !IsBoolean(queuedValue))
@@ -4020,11 +4073,25 @@ internal static class EventPayloadValidator
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
                 RequiredEnum("reason", "finished-parsing", "post-mutation"),
+                RequiredEnum(
+                    "walkReason", "first", "after-loss", "check",
+                    "finished-parsing"),
                 RequiredInteger("maximumNodes", positive: true)
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererDocumentContext(payload, issues);
+        // From protocol 0.35 a document is walked at a mutation delivery only
+        // for a reason of its own; only a finished parse is always walked.
+        if (ReadString(payload, "reason") == "post-mutation" &&
+            ReadString(payload, "walkReason") == "finished-parsing")
+        {
+            AddError(
+                issues,
+                "browser-dom-checkpoint-walk-reason-inconsistent",
+                "#/payload/walkReason",
+                "A post-mutation checkpoint is walked for a first walk, a loss, or a check.");
+        }
     }
 
     private static void ValidateBrowserDomCheckpointNode(

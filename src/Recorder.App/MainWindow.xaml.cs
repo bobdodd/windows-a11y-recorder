@@ -177,7 +177,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!TryValidateBrowserCapture(out var chromiumPath, out var browserStartUrl))
+        if (!TryValidateBrowserCapture(
+                out var chromiumPath,
+                out var browserStartUrl,
+                out var fullWalkInterval))
         {
             return;
         }
@@ -204,7 +207,8 @@ public partial class MainWindow : Window
                 CaptureSystemAudio = SystemAudioCheckBox.IsChecked == true,
                 CaptureBrowserEvidence = BrowserEvidenceCheckBox.IsChecked == true,
                 ChromiumExecutablePath = chromiumPath,
-                BrowserStartUrl = browserStartUrl
+                BrowserStartUrl = browserStartUrl,
+                BrowserFullWalkInterval = fullWalkInterval
             });
             SessionFolderTextBox.Text = status.SessionDirectory;
             StartButton.IsEnabled = false;
@@ -1407,13 +1411,32 @@ public partial class MainWindow : Window
 
     private bool TryValidateBrowserCapture(
         out string? chromiumPath,
-        out string? browserStartUrl)
+        out string? browserStartUrl,
+        out int fullWalkInterval)
     {
         chromiumPath = null;
         browserStartUrl = null;
+        fullWalkInterval = 0;
         if (BrowserEvidenceCheckBox.IsChecked != true)
         {
             return true;
+        }
+
+        if (FullWalkCheckBox.IsChecked == true)
+        {
+            if (!int.TryParse(
+                    FullWalkIntervalTextBox.Text.Trim(),
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.CurrentCulture,
+                    out fullWalkInterval) ||
+                fullWalkInterval < 1)
+            {
+                fullWalkInterval = 0;
+                ShowBrowserValidationError(
+                    "Enter a whole number from 1 for how often each page is walked in full.",
+                    FullWalkIntervalTextBox);
+                return false;
+            }
         }
 
         if (string.IsNullOrWhiteSpace(ChromiumPathTextBox.Text))

@@ -50,8 +50,8 @@ public sealed class LayoutChangeCheckTests
          "computedStyle":{"color":"{{color}}"},"pseudoElement":null,"shadowHostNodeId":null,"shadowRootMode":null}
         """);
 
-    private static JsonElement CheckpointStarted(int id) => Json($$"""
-        {"context":{{Context}},"checkpointId":"layout-checkpoint-{{id}}"}
+    private static JsonElement CheckpointStarted(int id, string walkReason = "check") => Json($$"""
+        {"context":{{Context}},"checkpointId":"layout-checkpoint-{{id}}","walkReason":"{{walkReason}}"}
         """);
 
     private static JsonElement CheckpointNode(int id, long node, double x, double y, double width, double height,
@@ -66,9 +66,12 @@ public sealed class LayoutChangeCheckTests
         {"context":{{Context}},"checkpointId":"layout-checkpoint-{{id}}"}
         """);
 
-    private static void Checkpoint(LayoutChangeCheck check, int id, params JsonElement[] nodes)
+    private static void Checkpoint(LayoutChangeCheck check, int id, params JsonElement[] nodes) =>
+        Checkpoint(check, id, "check", nodes);
+
+    private static void Checkpoint(LayoutChangeCheck check, int id, string walkReason, params JsonElement[] nodes)
     {
-        check.Add("layout-checkpoint-started", CheckpointStarted(id));
+        check.Add("layout-checkpoint-started", CheckpointStarted(id, walkReason));
         foreach (var node in nodes)
         {
             check.Add("layout-checkpoint-node", node);
@@ -162,6 +165,29 @@ public sealed class LayoutChangeCheckTests
 
         Assert.Equal(2, check.CheckpointsCompared);
         Assert.Equal(2, check.NodesMatched);
+        Assert.Empty(check.Differences);
+    }
+
+    [Fact]
+    public void DoesNotCompareADocumentFromAWalkAfterALostRecord()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, "first", CheckpointNode(1, 42, 8, 80, 120, 20));
+        check.Add("layout-changes-started", ChangesStarted(1, "layout-checkpoint-1"));
+        check.Add("layout-transform-node", Transform(1, null, Translation(0, 0)));
+        check.Add("layout-transform-node", Transform(2, 1, Translation(0, -300)));
+        check.Add("layout-node-changed", Changed(42, 2, 10, 400, 150, 25));
+        check.Add("layout-changes-completed", ChangesCompleted(1));
+
+        // The change records of the node's move were lost. The state is
+        // rebuilt from change records alone, so neither the walk after the
+        // loss nor a later one is compared.
+        Checkpoint(check, 2, "after-loss", CheckpointNode(2, 42, 8, 180, 120, 20));
+        Checkpoint(check, 3, CheckpointNode(3, 42, 8, 180, 120, 20));
+        check.Finish();
+
+        Assert.Equal(1, check.CheckpointsCompared);
+        Assert.Equal(2, check.CheckpointsAfterLoss);
         Assert.Empty(check.Differences);
     }
 

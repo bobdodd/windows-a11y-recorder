@@ -57,7 +57,8 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
             _options.AuthenticationToken,
             BrowserEvidenceProtocol.CurrentVersion,
             _options.BrowserInstanceId,
-            _options.MaximumMessageBytes);
+            _options.MaximumMessageBytes,
+            _options.FullWalkInterval);
         _launcher.Exited += OnBrowserExited;
     }
 

@@ -146,6 +146,12 @@ bool ParseBootstrapConfiguration(std::string_view json,
   configuration->maximum_message_bytes = static_cast<uint32_t>(*maximum);
   configuration->parent_process_id = value.FindInt("parentProcessId");
   configuration->child_process_id = value.FindInt("childProcessId");
+  std::optional<int> interval = value.FindInt("fullWalkInterval");
+  if (!interval || *interval < 0) {
+    *error = "Recorder bootstrap full walk interval was invalid.";
+    return false;
+  }
+  configuration->full_walk_interval = *interval;
   if (configuration->protocol_version != kProtocolVersion) {
     *error = "Recorder protocol version " +
              DescribeReportedProtocolVersion(configuration->protocol_version) +
@@ -180,6 +186,7 @@ bool SerializeBootstrapConfiguration(
   if (configuration.child_process_id) {
     value.Set("childProcessId", *configuration.child_process_id);
   }
+  value.Set("fullWalkInterval", configuration.full_walk_interval);
   if (!base::JSONWriter::Write(value, json)) {
     *error = "Recorder bootstrap could not be serialized.";
     return false;

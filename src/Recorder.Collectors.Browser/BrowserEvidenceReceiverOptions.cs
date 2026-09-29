@@ -23,6 +23,10 @@ public sealed record BrowserEvidenceReceiverOptions
     // environment first.
     public string? BridgeDiagnosticLogPath { get; init; }
     public int? RemoteDebuggingPort { get; init; }
+
+    // Every how many requests the browser walks a document in full to check
+    // its change records, or 0 when it does not (protocol 0.35).
+    public int FullWalkInterval { get; init; }
 }
 
 public sealed record BrowserEvidenceConnectionInfo(
@@ -30,4 +34,5 @@ public sealed record BrowserEvidenceConnectionInfo(
     string AuthenticationToken,
     string ProtocolVersion,
     string BrowserInstanceId,
-    int MaximumMessageBytes);
+    int MaximumMessageBytes,
+    int FullWalkInterval = 0);

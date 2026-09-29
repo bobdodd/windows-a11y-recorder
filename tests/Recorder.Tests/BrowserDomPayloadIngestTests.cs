@@ -35,6 +35,7 @@ public sealed class BrowserDomPayloadIngestTests
               "context": {{ContextJson}},
               "checkpointId": "dom-checkpoint-7",
               "reason": "post-mutation",
+              "walkReason": "check",
               "maximumNodes": 512
             }
             """);

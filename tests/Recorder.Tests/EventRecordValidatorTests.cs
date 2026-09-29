@@ -1376,6 +1376,7 @@ public sealed class EventRecordValidatorTests
                     context,
                     checkpointId = "dom-checkpoint-1",
                     reason = "finished-parsing",
+                    walkReason = "first",
                     maximumNodes = 512
                 }),
             CreateEvent(
@@ -1460,6 +1461,7 @@ public sealed class EventRecordValidatorTests
                     context,
                     checkpointId = "dom-checkpoint-2",
                     reason = "post-mutation",
+                    walkReason = "check",
                     maximumNodes = 512
                 }),
             CreateEvent(
@@ -1887,6 +1889,7 @@ public sealed class EventRecordValidatorTests
                 },
                 checkpointId = "dom-checkpoint-1",
                 reason = "finished-parsing",
+                walkReason = "first",
                 maximumNodes = 512
             });
         IReadOnlyList<RecorderEvent> events = ([record]);
@@ -2697,6 +2700,48 @@ public sealed class EventRecordValidatorTests
     }
 
     [Theory]
+    [InlineData("browser.layout", "rendering-update", null, "layout-changes-7")]
+    [InlineData("browser.dom", "post-mutation", null, null)]
+    public void AcceptsAnInteractionCheckpointAfterAnUpdateThatWasNotWalked(
+        string sourceChannel,
+        string reason,
+        string? sourceCheckpointId,
+        string? sourceChangeSetId)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
+        payload["sourceChannel"] = sourceChannel;
+        payload["reason"] = reason;
+        payload["sourceCheckpointId"] = sourceCheckpointId;
+        payload["sourceChangeSetId"] = sourceChangeSetId;
+
+        Assert.Empty(ValidateInteractionRecord("interaction-checkpoint-started", payload));
+    }
+
+    [Theory]
+    [InlineData("browser.layout", "rendering-update", null, null, "browser-interaction-checkpoint-source-inconsistent")]
+    [InlineData("browser.layout", "rendering-update", "layout-checkpoint-12", "layout-changes-7", "browser-interaction-checkpoint-source-inconsistent")]
+    [InlineData("browser.dom", "finished-parsing", null, null, "browser-interaction-checkpoint-source-inconsistent")]
+    [InlineData("browser.dom", "post-mutation", null, "layout-changes-7", "browser-interaction-checkpoint-source-inconsistent")]
+    [InlineData("browser.layout", "rendering-update", null, "layout-checkpoint-7", "browser-interaction-checkpoint-change-set-invalid")]
+    public void RejectsAnInteractionCheckpointWithSourcesItsChannelDoesNotName(
+        string sourceChannel,
+        string reason,
+        string? sourceCheckpointId,
+        string? sourceChangeSetId,
+        string code)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
+        payload["sourceChannel"] = sourceChannel;
+        payload["reason"] = reason;
+        payload["sourceCheckpointId"] = sourceCheckpointId;
+        payload["sourceChangeSetId"] = sourceChangeSetId;
+
+        var issues = ValidateInteractionRecord("interaction-checkpoint-started", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Theory]
     [InlineData("dom-checkpoint-12")]
     [InlineData("layout-checkpoint-")]
     [InlineData("layout-checkpoint-012")]
@@ -3049,6 +3094,45 @@ public sealed class EventRecordValidatorTests
         var issues = ValidateLayoutRecord("layout-changes-completed", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-layout-change-counts-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsALayoutCheckpointWalkedForAFinishedParse()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.LaterCheckpointStarted)!;
+        payload["walkReason"] = "finished-parsing";
+
+        var issues = ValidateLayoutRecord("layout-checkpoint-started", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "payload-property-invalid" &&
+            issue.Path.EndsWith("/walkReason", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("post-mutation", "finished-parsing", true)]
+    [InlineData("post-mutation", "check", false)]
+    [InlineData("finished-parsing", "finished-parsing", false)]
+    [InlineData("finished-parsing", "after-loss", false)]
+    public void ChecksTheWalkReasonOfADomCheckpoint(string reason, string walkReason, bool rejected)
+    {
+        var payload = new JsonObject
+        {
+            ["context"] = JsonNode.Parse(BrowserLayoutPayloads.LaterCheckpointStarted)!["context"]!.DeepClone(),
+            ["checkpointId"] = "dom-checkpoint-3",
+            ["reason"] = reason,
+            ["walkReason"] = walkReason,
+            ["maximumNodes"] = 512
+        };
+
+        var issues = ValidateRecord(BrowserEvidenceChannels.Dom, "dom-checkpoint-started", payload);
+
+        Assert.Equal(
+            rejected,
+            issues.Any(issue => issue.Code == "browser-dom-checkpoint-walk-reason-inconsistent"));
+        if (!rejected)
+        {
+            Assert.Empty(issues);
+        }
     }
 
     [Fact]
@@ -3691,6 +3775,34 @@ public sealed class EventRecordValidatorTests
 
         var issues = ValidatePresentationRecord(
             "presentation-requested", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void AcceptsAPresentationRequestAfterALayoutChangeSet()
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.QueuedRequest)!;
+        payload["layoutCheckpointId"] = null;
+        payload["layoutChangeSetId"] = "layout-changes-4";
+
+        Assert.Empty(ValidatePresentationRecord("presentation-requested", payload));
+    }
+
+    [Theory]
+    [InlineData(null, null, "browser-presentation-source-inconsistent")]
+    [InlineData("layout-checkpoint-12", "layout-changes-4", "browser-presentation-source-inconsistent")]
+    [InlineData(null, "layout-checkpoint-4", "browser-presentation-change-set-id-invalid")]
+    public void RejectsAPresentationRequestWithoutOneLayoutSource(
+        string? checkpointId,
+        string? changeSetId,
+        string code)
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.QueuedRequest)!;
+        payload["layoutCheckpointId"] = checkpointId;
+        payload["layoutChangeSetId"] = changeSetId;
+
+        var issues = ValidatePresentationRecord("presentation-requested", payload);
 
         Assert.Contains(issues, issue => issue.Code == code);
     }

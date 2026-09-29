@@ -28,7 +28,8 @@ public sealed record SessionRecordingConfiguration(
     bool CaptureDesktopFrames,
     int FramesPerSecond,
     bool CaptureMicrophone,
-    bool CaptureSystemAudio);
+    bool CaptureSystemAudio,
+    int BrowserFullWalkInterval = 0);
 
 public sealed record SessionCollectorManifest(
     string CollectorType,

@@ -333,6 +333,15 @@ from the change records, after two kinds of change the first recording
 found missing were added. See
 [change-driven recording](docs/architecture/change-driven-recording.md).
 
+Protocol 0.35 stops the full walks of a page that the change records make
+redundant. A document is walked in full for its first update, when it
+finishes parsing, and after a record of the channel was lost. A setting in
+the app, off by default, also walks each document every N updates so the
+change records can be checked against the walk. Presentation timing and
+interaction state are recorded after each rendering update that is not
+walked. It is not yet tested on the target Windows machine. See
+[change-driven recording](docs/architecture/change-driven-recording.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

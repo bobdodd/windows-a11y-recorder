@@ -121,6 +121,17 @@
                          Text="about:blank"
                          AutomationProperties.Name="Starting website address"
                          AutomationProperties.HelpText="Enter an absolute website address, or about:blank." />
+                <CheckBox x:Name="FullWalkCheckBox"
+                          Margin="0,8,0,0"
+                          Content="C_heck change records against a full walk"
+                          AutomationProperties.HelpText="Walks each page in full every so many updates, so the change records can be compared with it. Slows the page while it walks." />
+                <Label Target="{Binding ElementName=FullWalkIntervalTextBox}"
+                       Content="Wa_lk every N updates:" />
+                <TextBox x:Name="FullWalkIntervalTextBox"
+                         Text="100"
+                         IsEnabled="{Binding IsChecked, ElementName=FullWalkCheckBox}"
+                         AutomationProperties.Name="Full walk interval in updates"
+                         AutomationProperties.HelpText="A whole number from 1. Each page is walked in full at every Nth mutation delivery and every Nth rendering update." />
               </StackPanel>
             </GroupBox>
 

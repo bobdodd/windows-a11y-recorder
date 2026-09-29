@@ -16,6 +16,10 @@ public sealed record RecordingOptions
     public string? ChromiumExecutablePath { get; init; }
     public string? BrowserStartUrl { get; init; }
     public int? BrowserRemoteDebuggingPort { get; init; }
+
+    // Every how many requests instrumented Chromium walks a document in full
+    // to check its change records, or 0 when it does not (protocol 0.35).
+    public int BrowserFullWalkInterval { get; init; }
 }
 
 public enum RecordingSessionState

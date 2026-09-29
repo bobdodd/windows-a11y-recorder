@@ -14,7 +14,10 @@ namespace Recorder.Session;
 /// its children in order, its type and name, its attributes, its character
 /// data, its shadow root fields, and its slot assignment. The tree is then
 /// taken from that checkpoint, so each difference is reported in the
-/// interval between the two checkpoints where it arose.
+/// interval between the two checkpoints where it arose. A checkpoint walked
+/// after a lost DOM record (protocol 0.35, walk reason "after-loss") is not
+/// compared, since the rebuilt tree lacks the lost change; the tree is taken
+/// from it.
 ///
 /// Each scroll offset record is compared with the last record of its scroll
 /// translation node at the end of its change set, whose translation is the
@@ -55,9 +58,10 @@ public sealed class DomChangeCheck
         public Dictionary<long, DomNode> Nodes { get; } = [];
     }
 
-    private sealed class CheckpointTree(string id)
+    private sealed class CheckpointTree(string id, bool afterLoss)
     {
         public string Id { get; } = id;
+        public bool AfterLoss { get; } = afterLoss;
         public DocumentTree Tree { get; } = new();
     }
 
@@ -74,6 +78,7 @@ public sealed class DomChangeCheck
 
     public int CheckpointsCompared { get; private set; }
     public int CheckpointsTruncated { get; private set; }
+    public int CheckpointsAfterLoss { get; private set; }
     public int NodesCompared { get; private set; }
     public int NodesMatched { get; private set; }
     public int Insertions { get; private set; }
@@ -104,7 +109,11 @@ public sealed class DomChangeCheck
         switch (eventType)
         {
             case "dom-checkpoint-started":
-                _open[token] = new CheckpointTree(payload.GetProperty("checkpointId").GetString()!);
+                _open[token] = new CheckpointTree(
+                    payload.GetProperty("checkpointId").GetString()!,
+                    payload.TryGetProperty("walkReason", out var walkReason) &&
+                        walkReason.ValueKind == JsonValueKind.String &&
+                        walkReason.GetString() == "after-loss");
                 break;
             case "dom-checkpoint-node":
                 if (_open.TryGetValue(token, out var open))
@@ -262,6 +271,7 @@ public sealed class DomChangeCheck
         var report = new StringBuilder();
         report.AppendLine($"checkpoints compared with the rebuilt tree: {CheckpointsCompared}");
         report.AppendLine($"checkpoints cut, not compared: {CheckpointsTruncated}");
+        report.AppendLine($"checkpoints walked after a lost record, not compared: {CheckpointsAfterLoss}");
         report.AppendLine($"nodes compared: {NodesCompared}, equal in every field {NodesMatched}");
         report.AppendLine($"insertions: {Insertions}, inserted node records {InsertedNodes}");
         report.AppendLine($"removals: {Removals}");
@@ -591,7 +601,11 @@ public sealed class DomChangeCheck
             _documents.Remove(token);
             return;
         }
-        if (_documents.TryGetValue(token, out var rebuilt))
+        if (checkpoint.AfterLoss)
+        {
+            CheckpointsAfterLoss++;
+        }
+        else if (_documents.TryGetValue(token, out var rebuilt))
         {
             Compare(checkpoint, rebuilt);
         }

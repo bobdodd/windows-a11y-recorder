@@ -408,6 +408,7 @@ internal static class EvidenceCatalog
         new IdentityField("context", R, BrowserContexts),
         Text("checkpointId"),
         Name("reason"),
+        Name("walkReason", N),
         Int("maximumNodes"));
 
     public static readonly EvidenceTable DomCheckpointNodes = Evidence(
@@ -572,7 +573,8 @@ internal static class EvidenceCatalog
         "browser_interaction_checkpoint_starts",
         new IdentityField("context", R, BrowserContexts),
         Text("checkpointId"),
-        Text("sourceCheckpointId"),
+        Text("sourceCheckpointId", N),
+        Text("sourceChangeSetId", N),
         Name("sourceChannel"),
         Name("reason"),
         Bool("documentHasFocus"),
@@ -637,6 +639,7 @@ internal static class EvidenceCatalog
         new IdentityField("context", R, BrowserContexts),
         Text("checkpointId"),
         Name("reason"),
+        Name("walkReason", N),
         Text("previousCheckpointId", N),
         Int("styleResolutionCount"),
         Int("layoutCount"),
@@ -689,7 +692,8 @@ internal static class EvidenceCatalog
         Text("requestId"),
         Text("frameSinkId", N),
         Text("localRootFrameToken", N),
-        Text("layoutCheckpointId"),
+        Text("layoutCheckpointId", N),
+        Text("layoutChangeSetId", N),
         Bool("queued"),
         Name("notQueuedReason", N),
         BigInt("sourceFrameNumber", N),

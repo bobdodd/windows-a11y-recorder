@@ -12,7 +12,9 @@ namespace Recorder.Session;
 /// observed one. A checkpoint is compared with the state after the change set
 /// of the same rendering update, which names it; a checkpoint whose update
 /// recorded no change set is compared with the state before the document's
-/// next record.
+/// next record. The state is rebuilt from change records alone, so once a
+/// document's layout is walked after a lost record (protocol 0.35, walk
+/// reason "after-loss"), its later checkpoints are counted and not compared.
 /// </summary>
 public sealed class LayoutChangeCheck
 {
@@ -26,6 +28,7 @@ public sealed class LayoutChangeCheck
     private readonly Dictionary<string, Checkpoint> _open = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Checkpoint> _pending = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _openChangeSets = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _afterLoss = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _differences = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<string>> _examples = new(StringComparer.Ordinal);
 
@@ -36,6 +39,7 @@ public sealed class LayoutChangeCheck
     }
 
     public int CheckpointsCompared { get; private set; }
+    public int CheckpointsAfterLoss { get; private set; }
 
     /// <summary>Checkpoints whose change set had not completed when the
     /// records ended, so the state after it is unknown and they are not
@@ -71,6 +75,12 @@ public sealed class LayoutChangeCheck
         {
             case "layout-checkpoint-started":
                 ComparePending(token);
+                if (payload.TryGetProperty("walkReason", out var walkReason) &&
+                    walkReason.ValueKind == JsonValueKind.String &&
+                    walkReason.GetString() == "after-loss")
+                {
+                    _afterLoss.Add(token);
+                }
                 _open[token] = new Checkpoint(payload.GetProperty("checkpointId").GetString()!);
                 break;
             case "layout-checkpoint-node":
@@ -140,6 +150,7 @@ public sealed class LayoutChangeCheck
         report.AppendLine($"changed node records: {ChangedNodeRecords}");
         report.AppendLine($"transform node records: {TransformNodeRecords}");
         report.AppendLine($"checkpoints compared: {CheckpointsCompared}");
+        report.AppendLine($"checkpoints at or after a walk after a lost record, not compared: {CheckpointsAfterLoss}");
         report.AppendLine(
             $"checkpoints not compared, their change set incomplete at the end: {CheckpointsWithIncompleteChangeSets}");
         report.AppendLine($"checkpoint nodes compared: {NodesCompared}");
@@ -163,6 +174,11 @@ public sealed class LayoutChangeCheck
     {
         if (!_pending.Remove(token, out var checkpoint))
         {
+            return;
+        }
+        if (_afterLoss.Contains(token))
+        {
+            CheckpointsAfterLoss++;
             return;
         }
         CheckpointsCompared++;

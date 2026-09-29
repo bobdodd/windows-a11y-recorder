@@ -21,6 +21,8 @@ component("recorder_bridge") {
     "evidence_cost.h",
     "evidence_queue.cc",
     "evidence_queue.h",
+    "full_walks.cc",
+    "full_walks.h",
     "layout_changes.cc",
     "layout_changes.h",
     "network_text.cc",

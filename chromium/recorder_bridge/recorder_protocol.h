@@ -16,7 +16,7 @@
 
 namespace a11y_recorder {
 
-inline constexpr char kProtocolVersion[] = "0.34";
+inline constexpr char kProtocolVersion[] = "0.35";
 // The largest frame the recorder reads: its length is a 32-bit signed count.
 // Values are recorded whole, so a record is as large as what it records.
 inline constexpr uint32_t kDefaultMaximumMessageBytes = 2147483647;
@@ -38,6 +38,9 @@ struct BootstrapConfiguration {
   uint32_t maximum_message_bytes = kDefaultMaximumMessageBytes;
   std::optional<int> parent_process_id;
   std::optional<int> child_process_id;
+  // Every how many requests a document is walked in full to check its change
+  // records (protocol 0.35), or 0 when it is not.
+  int full_walk_interval = 0;
 };
 
 bool ParseBootstrapConfiguration(std::string_view json,

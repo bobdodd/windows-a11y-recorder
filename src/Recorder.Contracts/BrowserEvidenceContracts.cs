@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.34";
+    public const string CurrentVersion = "0.35";
 }
 
 public static class BrowserEvidenceChannels
@@ -297,10 +297,15 @@ public sealed record BrowserNavigationPayload(
     string? Outcome,
     int? RendererProcessId);
 
+// WalkReason (protocol 0.35) says why the document was walked: "first" when it
+// had no walk yet, "after-loss" when a DOM record was lost since its last
+// walk, "check" at the recording's full walk interval, or "finished-parsing"
+// for a finished parse, which is always walked.
 public sealed record BrowserDomCheckpointStartedPayload(
     BrowserContext Context,
     string CheckpointId,
     string Reason,
+    string WalkReason,
     int MaximumNodes);
 
 public sealed record BrowserDomCheckpointNodePayload(
@@ -789,14 +794,18 @@ public sealed record BrowserActiveDescendantReferenceSetPayload(
 // Interaction checkpoint records report the interaction state Blink held for a
 // document immediately after a DOM or layout checkpoint completed, read
 // without requesting any lifecycle update. SourceCheckpointId names that
-// checkpoint and SourceChannel its channel. Node identities are Blink DOM node
+// checkpoint and SourceChannel its channel. From protocol 0.35 a snapshot also
+// follows a mutation delivery that was not walked, naming no source record,
+// and a layout change set recorded without a checkpoint, named by
+// SourceChangeSetId. Node identities are Blink DOM node
 // ids. FocusedNodeId is the element Blink holds as focused, which may be inside
 // a shadow tree, and is not retargeted. The selection positions are null when
 // SelectionType is "none".
 public sealed record BrowserInteractionCheckpointStartedPayload(
     BrowserContext Context,
     string CheckpointId,
-    string SourceCheckpointId,
+    string? SourceCheckpointId,
+    string? SourceChangeSetId,
     string SourceChannel,
     string Reason,
     bool DocumentHasFocus,
@@ -852,11 +861,13 @@ public sealed record BrowserLayoutRect(double X, double Y, double Width, double 
 // Blink's cumulative counters for the document and its frame view, and
 // PreviousCheckpointId names the document's previous layout checkpoint, which
 // is null for the first. StyleProperties lists the computed-style properties
-// every element record reports, in order.
+// every element record reports, in order. WalkReason (protocol 0.35) says why
+// the document was walked: "first", "after-loss", or "check".
 public sealed record BrowserLayoutCheckpointStartedPayload(
     BrowserContext Context,
     string CheckpointId,
     string Reason,
+    string WalkReason,
     string? PreviousCheckpointId,
     int StyleResolutionCount,
     int LayoutCount,
@@ -994,8 +1005,9 @@ public sealed record BrowserLayoutScrollOffsetChangedPayload(
     string? ScrollTranslationNodeId);
 
 // Presentation records follow the compositor frame that carries one layout
-// checkpoint's rendering update. A request names the checkpoint and the
-// local-root widget whose layer tree it rides. At most one terminal record
+// checkpoint's rendering update, or, from protocol 0.35, one layout change
+// set's when the update was not walked. A request names the checkpoint or the
+// change set, and the local-root widget whose layer tree it rides. At most one terminal record
 // follows: a not-swapped record whose action is "broken", or a swapped record
 // and then, when viz reports it, feedback for the same frame token. Frame
 // tokens are unsigned 32-bit decimal strings numbered per frame sink, and the
@@ -1008,7 +1020,8 @@ public sealed record BrowserPresentationRequestedPayload(
     string RequestId,
     string? FrameSinkId,
     string? LocalRootFrameToken,
-    string LayoutCheckpointId,
+    string? LayoutCheckpointId,
+    string? LayoutChangeSetId,
     bool Queued,
     string? NotQueuedReason,
     int? SourceFrameNumber,

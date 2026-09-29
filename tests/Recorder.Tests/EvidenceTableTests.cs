@@ -760,8 +760,8 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             await CreateLegacyPartitionsAsync(dataSource, recordingId, token);
 
             // Migrations 0010 and 0011 changed how layout nodes and dispatch
-            // path scopes are stored, so the writer cannot store them in the
-            // tables of version 8.
+            // path scopes are stored, and 0014 added columns, so the writer
+            // cannot store those records in the tables of version 8.
             await WriteAsync(
                 sessionKey,
                 recordingId,
@@ -822,8 +822,11 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     // The tables of version 8 have no computed style key on layout nodes and
     // hold a dispatch path scope's visible indexes as rows, so a sample with
     // either cannot be written into them.
+    // Migration 0014 added the protocol 0.35 walk and change set columns.
     private static bool WritableAtVersion8(RecorderEvent record) =>
-        record.EventType != "layout-checkpoint-node" &&
+        record.EventType is not ("layout-checkpoint-node" or "dom-checkpoint-started" or
+            "layout-checkpoint-started" or "interaction-checkpoint-started" or
+            "presentation-requested") &&
         !(record.Payload.TryGetProperty("pathScopes", out var scopes) &&
           scopes.ValueKind == JsonValueKind.Array &&
           scopes.GetArrayLength() > 0);

@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.34"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.34"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.35"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.35"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -2904,6 +2904,19 @@ class IntegrateTests(unittest.TestCase):
             definition.index("recorder_scroll_offsets.push_back("),
             definition.index("recorder_transforms.push_back("),
         )
+
+    def test_upgrades_a_dom_helper_that_skips_unwalked_deliveries(self):
+        legacy = INTEGRATE.LEGACY_UNSKIPPED_BLINK_DOM_CHECKPOINT_HELPER
+        self.assertNotEqual(legacy, INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(self.document_source(legacy), encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER))
 
     def test_upgrades_a_dom_helper_without_character_data(self):
         legacy = INTEGRATE.LEGACY_UNTEXTED_BLINK_DOM_CHECKPOINT_HELPER
@@ -4530,6 +4543,101 @@ class CookieIntegrationTests(unittest.TestCase):
                 check=True,
             )
             subprocess.run([str(binary)], check=True)
+
+    def test_full_walks_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "full_walks_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "full_walks.cc"),
+                    str(bridge / "full_walks_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_bridge_walks_documents_only_where_the_schedule_asks(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        protocol = (bridge / "recorder_protocol.cc").read_text(encoding="utf-8")
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"full_walks.cc",', build)
+        self.assertIn('"full_walks.h",', build)
+        # The interval is required in the bootstrap and passed to children.
+        self.assertIn('value.FindInt("fullWalkInterval")', protocol)
+        self.assertIn('value.Set("fullWalkInterval"', protocol)
+        self.assertIn("SetFullWalkInterval(configuration.full_walk_interval);", source)
+        # Each checkpoint names why it was walked.
+        self.assertEqual(2, source.count('payload.Set("walkReason"'))
+        dom = source[source.index("uint64_t BeginBlinkDomCheckpoint("):]
+        self.assertLess(
+            dom.index("DomWalkReason(document_node_id, reason)"),
+            dom.index("AssignDomCheckpointIdentity()"),
+        )
+        layout = source[source.index("uint64_t BeginBlinkLayoutCheckpoint("):]
+        self.assertLess(
+            layout.index("LayoutWalkReason(document_node_id)"),
+            layout.index("storage.next_checkpoint_id++"),
+        )
+        # A lost record of either channel is counted before it is reported.
+        held = source[source.index("void HoldOmittedEvidence("):]
+        self.assertLess(
+            held.index("CountEvidenceLoss(channel, count);"),
+            held.index("OmittedEvidenceCounts()"),
+        )
+        # A change set is the source of presentation and interaction records.
+        self.assertIn('payload.Set("layoutChangeSetId"', source)
+        self.assertIn('payload.Set("sourceChangeSetId"', source)
+        self.assertIn("LayoutChangeSetSource(change_set_sequence)", source)
+
+    def test_a_change_set_without_a_checkpoint_records_the_update(self):
+        definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertNotIn(INTEGRATE.BLINK_LAYOUT_CHANGES_SOURCE_CALL, definition)
+        hook = definition.index(INTEGRATE.BLINK_LAYOUT_CHANGES_SOURCE_HOOK)
+        tail = definition[hook:]
+        self.assertLess(
+            tail.index("a11y_recorder::RecordBlinkLayoutChanges("),
+            tail.index("RecorderRequestLayoutPresentation("),
+        )
+        self.assertLess(
+            tail.index("RecorderRequestLayoutPresentation("),
+            tail.index("RecorderRecordInteractionCheckpoint("),
+        )
+        self.assertIn("if (recorder_change_set_source == 0) {", tail)
+        self.assertIn(
+            INTEGRATE.LEGACY_UNSOURCED_BLINK_LAYOUT_CHANGES_DEFINITION,
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS,
+        )
+
+    def test_dom_helper_records_the_interaction_state_of_an_unwalked_delivery(
+        self,
+    ):
+        helper = INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER
+        skipped = helper.index("if (recorder_checkpoint_sequence == 0) {")
+        body = helper[skipped:helper.index("    return;\n  }\n", skipped)]
+        self.assertIn('std::string_view(recorder_reason) == "post-mutation"', body)
+        self.assertIn(
+            'RecorderRecordInteractionCheckpoint(recorder_document, 0, "browser.dom",',
+            body,
+        )
+        self.assertIn(
+            "#include <string_view>", INTEGRATE.BLINK_DOM_CHECKPOINT_INCLUDES
+        )
 
     def test_bridge_measures_the_cost_of_each_kind_of_evidence(self):
         bridge = MODULE_PATH.parent / "recorder_bridge"

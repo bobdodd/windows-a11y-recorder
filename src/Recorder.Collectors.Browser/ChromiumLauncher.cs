@@ -136,7 +136,8 @@ public sealed class ChromiumLauncher : IAsyncDisposable
                 connection.PipeName,
                 connection.AuthenticationToken,
                 connection.BrowserInstanceId,
-                connection.MaximumMessageBytes);
+                connection.MaximumMessageBytes,
+                connection.FullWalkInterval);
             var json = JsonSerializer.Serialize(bootstrap, JsonOptions);
             await process.StandardInput.WriteLineAsync(
                 json.AsMemory(),
@@ -731,4 +732,5 @@ public sealed record ChromiumBootstrapMessage(
     string PipeName,
     string AuthenticationToken,
     string BrowserInstanceId,
-    int MaximumMessageBytes);
+    int MaximumMessageBytes,
+    int FullWalkInterval);

@@ -333,9 +333,15 @@ public sealed class PlaybackIndexBuilder
             : default;
         switch ((record.Channel, record.EventType))
         {
+            // From protocol 0.35 a rendering update that was not walked is
+            // presented after its layout change set, which takes the
+            // checkpoint's place. The two identities never share a value.
             case ("browser.layout", "layout-checkpoint-completed"):
+            case ("browser.layout", "layout-changes-completed"):
                 if (ReadString(context, "documentToken") is { } token &&
-                    ReadString(payload, "checkpointId") is { } checkpoint)
+                    (record.EventType == "layout-checkpoint-completed"
+                        ? ReadString(payload, "checkpointId")
+                        : ReadString(payload, "changeSetId")) is { } checkpoint)
                 {
                     _completions.Add(new LayoutCompletion(
                         ReadString(context, "browserInstanceId"),
@@ -347,7 +353,8 @@ public sealed class PlaybackIndexBuilder
 
                 break;
             case ("browser.presentation", "presentation-requested"):
-                if (ReadString(payload, "layoutCheckpointId") is { } layoutCheckpoint &&
+                if ((ReadString(payload, "layoutCheckpointId") ??
+                        ReadString(payload, "layoutChangeSetId")) is { } layoutCheckpoint &&
                     ReadString(payload, "requestId") is { } request)
                 {
                     _requests.Add(new PresentationRequest(
