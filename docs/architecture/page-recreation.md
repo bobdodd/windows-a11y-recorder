@@ -360,7 +360,9 @@ machine, and say nothing about the target machine's times.
   the time of each rebuild. The DOM, layout, and character data check
   reports on the recordings at f409513, 70d22d4, and 66030a7 are compared
   with those made before the move.
-- System, on the target Windows machine: not yet run.
+- System, on the target Windows machine: a first, short recording has been
+  checked; see "First recording on the target machine". The recording of
+  at least an hour is not yet made.
 
 ### Measurements on the development machine
 
@@ -381,6 +383,31 @@ Recording 20260929-172645-baa5818d82194001acf0edaa560b335c (protocol 0.36,
 These are not the target machine's times, and do not show that a one-hour
 recording meets the proposed 1 s limit; the system test on the target
 machine does.
+
+### First recording on the target machine
+
+Recording 20260929-201652-b1261415cb204312943567e88e1305b2 (70.5 s,
+17.1 MB), made at 37f65ec with the state thread, and checked with a
+Release build:
+
+- The state thread did not stop. The snapshots are 1.56 MB compressed and
+  54 MB uncompressed, about 9% of the file; the state index records are
+  65 KB compressed.
+- At 8 times, 8 frames, and in a copy cut short at half, the state rebuilt
+  with snapshots equals the state rebuilt from every record.
+- A rebuild from snapshots took 50 ms to 394 ms at the sampled times and
+  87 ms to 339 ms at the sampled frames. A rebuild from every record took
+  up to 904 ms. The one rebuild over 1 s, 1,060 ms at 11.8 s, was before
+  the first snapshot and was the first call, which includes loading the
+  code.
+- Hover and scrolling were reported to be as responsive as in the
+  recording at 66030a7, and stopping to take no noticeable time.
+- The report does not give the state thread's time or its largest queue
+  for a recording made with the state thread, only for a file written
+  again by the check.
+
+A recording of 70.5 s says nothing about the state thread's memory or the
+rebuild time in a recording of an hour.
 
 ## Text by content hash (agreed, deferred)
 
