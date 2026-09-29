@@ -566,6 +566,153 @@ completeness on other pages.
 - A change record lost after the bridge has hashed it is not sent again
   until the node changes. Slice 5 handles loss.
 
+## Slice 4 design: DOM insertions and removals, and scroll offsets
+
+Proposed 2026-09-29 from the Blink source of the Chromium checkout on the
+target Windows machine, version 156.0.8065.0, and not yet agreed. Line
+numbers are from that checkout; `document.cc` and `element.cc` there already
+hold the recorder's earlier patches. Protocol 0.34.
+
+### What slice 4 adds, and what it does not change
+
+Slice 4 records each change to the structure of the DOM as Blink makes it,
+and each scroll offset Blink stores, beside the full DOM and layout
+checkpoints. As in slice 3, the checkpoints are unchanged and are the
+reference: an app check rebuilds each document's DOM from its first
+checkpoint and the change records after it, and compares the result with
+every later checkpoint of the same recording. Recording costs more with
+slice 4, not less, until slice 5 removes the walks.
+
+Attribute and character data changes are already recorded as transitions
+(`dom-attribute-changed` and `dom-character-data-changed`). With the
+structural changes below, every field a DOM checkpoint records has a change
+record, so the check can compare the whole checkpoint.
+
+Change records are recorded only for a document that has finished parsing,
+the condition under which Blink's mutation hook queues a post-mutation
+checkpoint now (`Document::NotifyChangeChildren`, `core/dom/document.cc`,
+line 6621). The finished-parsing checkpoint is the state the changes apply
+to.
+
+### Insertions and removals
+
+Every change to a child list passes through
+`ContainerNode::ChildrenChanged` (`core/dom/container_node.cc`, line 1472),
+which first calls `Document::NotifyChangeChildren` with the container and
+the `ChildrenChange` (`core/dom/container_node.h`, line 275). The recorder's
+hook is already in `NotifyChangeChildren`, so the change records are made
+there, synchronously, in the order Blink makes the changes. Changes to a
+container that is not connected are not recorded: a detached tree is
+recorded in full when it is inserted.
+
+- An insertion (`kElementInserted`, `kNonElementInserted`) is recorded as
+  `dom-node-inserted`: the container, the inserted node, and its previous
+  sibling as it is when the record is made. When several nodes are inserted
+  at once, Blink inserts all of them and then calls `ChildrenChanged` once
+  for each in order (`ContainerNode::DidInsertNodeVector`, line 427), so
+  the previous sibling of each is the node recorded before it. The record
+  is followed by the inserted subtree, walked as a checkpoint walks the
+  document: each node, its attributes, its character data, the shadow root
+  it hosts and that shadow tree, and slot assignments, then a completion
+  record with the counts. A node moved from one place to another is a
+  removal and an insertion, and its subtree is recorded again.
+- A removal (`kElementRemoved`, `kNonElementRemoved`) is recorded as
+  `dom-node-removed`: the container and the removed node.
+- The removal of all children (`kAllChildrenRemoved`, used by
+  `textContent` and `innerHTML` assignment, line 1165) is recorded as
+  `dom-children-removed`: the container. The removed nodes are listed by
+  Blink only for some containers
+  (`ChildrenChangedAllChildrenRemovedNeedsList`), so the record does not
+  list them; they are the container's children in the rebuilt state.
+- `kTextChanged` from a script or the editor is already recorded as a
+  character data transition. The transition hook skips a change made by the
+  parser (`CharacterData::ParserAppendData`, `core/dom/character_data.cc`,
+  line 79), so a parser change to a connected node after the document
+  finished parsing is recorded as `dom-character-data-set`, with the node's
+  whole data.
+- `kFinishedBuildingDocumentFragmentTree` is sent for a fragment built by
+  the parser, which is not connected, and is not recorded; the fragment's
+  nodes are recorded when they are inserted.
+
+A `ChildrenChanged` override can change the DOM before it calls the base
+method. The check reports any checkpoint whose tree differs from the
+rebuilt one, which is how such an order would be found.
+
+### Shadow roots and slots
+
+- A shadow root attached to a connected host is recorded as
+  `dom-shadow-root-attached`, with the fields of the checkpoint's shadow
+  root record, from `Element::CreateAndAttachShadowRoot`
+  (`core/dom/element.cc`, line 6843), after the root is inserted into its
+  host. A shadow root is never detached. A root attached to a host that is
+  not connected is recorded with the host's subtree when it is inserted.
+- A change of a shadow root's reference target is recorded as
+  `dom-shadow-root-changed` from `ShadowRoot::setReferenceTarget`
+  (`core/dom/shadow_root.cc`, line 559).
+- Slot assignments are recomputed lazily in `SlotAssignment::RecalcAssignment`
+  (`core/dom/slot_assignment.cc`, line 232), which appends each assigned
+  node to its slot (lines 289 and 312). At its end, each slot of the shadow
+  root is recorded as `dom-slot-assignment-changed` with its assigned
+  nodes, when they differ from its last record. A checkpoint reads the
+  assignments as Blink holds them, without a recalculation, so the check
+  compares the same state.
+
+### Scroll offsets
+
+Every scroll offset Blink stores passes through
+`PaintLayerScrollableArea::UpdateScrollOffset`
+(`core/paint/paint_layer_scrollable_area.cc`, line 428), which returns at
+once when the offset is unchanged. A scroll handled by the compositor
+reaches it through `ScrollableArea::DidCompositorScroll`. The hook notes the
+scroller's node (the document, for the frame's own scroller) and computes
+nothing else. At the end of the rendering update, with the layout change
+set of slice 3, each noted scroller still connected is recorded as
+`layout-scroll-offset-changed`: the node, its scroll offset and scroll
+position as Blink holds them, the factor to CSS pixels, and the transform
+node of its scroll translation. The scroll position is what
+`scrollLeft` and `scrollTop` report, which page recreation needs to restore
+a scrolled element.
+
+The check compares each record with the scroll translation node of the same
+change set, whose translation is the negated offset, and the document's
+record with the scroll offset of the layout checkpoint.
+
+### Snapshots
+
+The decision above says the bridge writes a snapshot of its cache at a
+fixed interval. While every update still records full checkpoints, a
+snapshot would repeat what the checkpoints hold, so snapshots are proposed
+for slice 5, where the walks are removed. Where a snapshot is made is to be
+settled then: in the bridge from a cache of every node's latest record,
+which costs renderer memory, or in the app, from the records it has already
+written, labelled as derived.
+
+### Checking the change records
+
+An app check reads a recording file and, for each document, rebuilds its DOM
+from its first checkpoint and the change records after it, in record order.
+At each later DOM checkpoint it compares, for every node, the parent, the
+position among its siblings, the type and name, the attributes, the
+character data, the shadow root fields, and the slot assignments, and
+reports every node that differs, is missing, or is extra, with the field.
+The DOM change records and the checkpoint of a mutation delivery are made on
+the renderer's main thread and sent in that order, so the checkpoint is
+compared with the state after every change record before it. The scroll
+comparison above is reported with it.
+
+### Required tests
+
+- Unit: rebuilding a DOM from a checkpoint and generated insertions,
+  removals, removals of all children, moves, shadow root attachments, and
+  slot changes, compared with the expected tree; the check's report of
+  each kind of difference; payload validation of each new record type.
+- Integration: the Chromium integration tests of each new hook and of the
+  bridge functions, and an app test that records the new records to a file
+  and reads them back unchanged.
+- System, on the target Windows machine: a recording of pages that insert,
+  move, and remove content and scroll elements, checked with no
+  differences, and the renderer's longest recorder work per update.
+
 ## Slice 2 design: playback from the file
 
 Opening a recording reads what the player shows when it opens, not every
