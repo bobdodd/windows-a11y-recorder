@@ -1113,6 +1113,20 @@ root. Until they are, the panel's fidelity reads "not checked".
   development machine this passed with a Chromium build of the test
   framework's own.
 
+### On the target machine
+
+With revision f1ea0a7, on a recording of https://cnib.ca, as reported:
+
+- Links to other pages were blocked, and links within the page, such as
+  skip links, worked. A link within the page loads no document, so it is
+  not paused.
+- The recreation's inner size and device pixel ratio were 929 by 925 and
+  1, as the panel's note gave them from the page's latest layout
+  checkpoint, recorded at 18.543 s.
+
+Not yet reported: a link that opens a new tab, a form submission, and focus
+holding while DevTools has the keyboard.
+
 ## Text by content hash (agreed, deferred)
 
 Slice 1 records each character data node's data in every checkpoint. Script
