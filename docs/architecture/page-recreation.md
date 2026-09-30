@@ -1124,8 +1124,10 @@ With revision f1ea0a7, on a recording of https://cnib.ca, as reported:
   1, as the panel's note gave them from the page's latest layout
   checkpoint, recorded at 18.543 s.
 
-Not yet reported: a link that opens a new tab, a form submission, and focus
-holding while DevTools has the keyboard.
+The recording has no link that opens a new tab and no form, so neither
+could be checked on it; both are covered only by the integration test on
+the development machine. Not yet reported: focus holding while DevTools has
+the keyboard.
 
 ## Text by content hash (agreed, deferred)
 
