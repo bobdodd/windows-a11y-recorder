@@ -1122,6 +1122,163 @@ the owner's agreement on 2026-09-30:
   shadow root; state the time from choosing a frame to the page shown and
   to the check completed.
 
+## Slice 3 revision: rendering from recorded values (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built.
+
+### The decision
+
+The owner, on 2026-09-30: "I would much prefer the rendering to use the
+exact numbers. I really wanted you to use the libraries inside of chromium
+to render the page, not to use the default existing browser view." Asked
+whether this meant a recreation mode in Blink that imposes the recorded
+styles and geometry, with DevTools working on the page, the owner answered
+"Yes, I think so", and that more is to be recorded from Blink for it.
+
+This reverses requirement 8 of the slice 3 design, "A difference is listed,
+never hidden by forcing the recorded value", which was a proposal of this
+design, not a requirement of the owner. Requirement 7 changes with it: the
+recorded values are no longer checked against a computed rendering; they
+are the rendering. The page is still a page in the instrumented Chromium,
+in its own profile, with DevTools and the evidence panel, the navigation
+held as in "Leaving the recreation", and the viewport emulated.
+
+### What a recreation mode is
+
+Normally Blink works out an element's computed style from the style sheets
+(the cascade), then its boxes from the style (layout), then draws the boxes
+(paint). In the recreation mode of the instrumented Chromium, for each node
+of the recreated document that the recording holds:
+
+- Style: the node's computed style is the recorded one. Blink resolves the
+  element's style as usual and then sets each recorded property to its
+  recorded value, at the end of `StyleResolver::ResolveStyle`
+  (`core/css/resolver/style_resolver.cc`, line 1377 in the checkout on the
+  target machine). DevTools' Computed pane then shows the recorded values,
+  since it reads that style.
+- Layout: the node's boxes are the recorded ones. Where Blink lays out a
+  block, in `BlockNode::Layout` (`core/layout/block_node.cc`, line 406), the
+  recreation mode builds the layout result from the recorded fragments: each
+  box fragment's size and offset, and, for a block holding lines, its
+  fragment items, the line boxes, text runs, and inline boxes
+  (`core/layout/inline/fragment_item.h`, line 124). The layout algorithms are
+  not run for it. DevTools' box model and element outlines then show the
+  recorded geometry, since they read those fragments.
+- Text: each recorded text run is drawn from its recorded glyphs, positions,
+  and font, as a shaping result (`platform/fonts/shaping/shape_result.h`,
+  line 134), not shaped again, when the recorded font is available.
+- Paint: Blink paints from that style and those fragments with its own
+  code, so borders, backgrounds, text, transforms, clips, and scrolling are
+  drawn as Blink draws them.
+- Animations and transitions are not started: the recorded style is the
+  style at the instant, animated values included.
+
+The DOM is built by the recreation mode in the renderer, not by the builder
+script, so that each recreated node is known to be the recorded node it is
+built from. The page then holds no script of the recorder's, and the
+builder script and its data block are removed.
+
+### What is recorded in addition
+
+The layout checkpoints and change sets record, in a new protocol version:
+
+- Every property `getComputedStyle()` lists (Blink's computable properties,
+  `CSSComputedStyleDeclaration::ComputableProperties`,
+  `core/css/css_computed_style_declaration.cc`, line 103), not only the 283
+  of the list, and the custom properties.
+- For each layout box, each of its box fragments: size, offset in its
+  parent fragment, and the fragment's break token position when it is one
+  of several, as in columns.
+- For each block holding lines, its fragment items: each line box, each
+  text run with its range of the node's text, and each inline box, with
+  its rectangle.
+- For each text run, its glyphs as shaped: glyph identifiers, advances and
+  offsets, and the font: family, typeface name, size, and synthetic bold or
+  italic, with a content hash of the font file when slice 4 records font
+  files.
+- For each scrolling box, its scrollable overflow rectangle; the scroll
+  offsets are already recorded.
+- For each replaced element, such as an image, its intrinsic size; its
+  pixels come with slice 4.
+
+These are recorded when they change, as the layout change sets record
+changed nodes now, so an idle page repeats nothing. What this costs to
+record is measured on the target machine before the recording format is
+fixed.
+
+### What the auditor's changes do
+
+An edit in DevTools, a script run from the console, or an action on the page
+changes the recreation (requirement 12). A node the auditor changes, and
+the boxes whose layout depends on it, are then styled and laid out by
+Blink as normal, from the recorded values as their starting point. Reloading
+returns the whole page to the recorded values.
+
+### Limits
+
+- Values that are not recorded are still worked out by Blink: Blink's
+  internal style state that `getComputedStyle()` does not report, and paint
+  details, such as antialiasing, that no record holds.
+- A text run whose recorded font is not available is shaped again with the
+  font Blink chooses, inside its recorded rectangle; the evidence panel
+  lists those runs. Font files are recorded in slice 4; a system font of the
+  machine the recording was made on is available when the recreation is
+  opened on that machine.
+- Images are drawn only once slice 4 records them; until then a replaced
+  element keeps its recorded size and draws nothing.
+- Layout that is not block or inline layout, such as SVG, is laid out from
+  its recorded style as Blink lays it out. Whether table, flex, grid, and
+  multi-column layouts, which Blink lays out as blocks with their own
+  algorithms, can take recorded fragments in the same way is found by the
+  first step below.
+
+### The background guard
+
+The check of "The check is a background guard" remains, after slice 4, as a
+guard against the recreation mode failing: the recreation's own layout
+checkpoint is compared with the recording, and a difference is a fault of
+the recorder.
+
+### Slices
+
+1. A feasibility step on the target machine: in the instrumented Chromium,
+   impose a recorded computed style and a recorded box size and position on
+   the elements of a small fixed page, and a recorded glyph run on its text,
+   and confirm that DevTools' Computed pane and box model show them and that
+   Blink paints them. Table, flex, grid, and multi-column content is
+   included, to find which layouts take recorded fragments.
+2. Recording: the additions above, in a new protocol version, with its cost
+   measured on the target machine.
+3. The recreation mode: the DOM built in the renderer, the recorded styles
+   imposed.
+4. The recorded geometry and glyph runs imposed.
+
+Slice 4 of the plan (style sheets, fonts, images, and the environment)
+follows. Style sheets are then needed not for the styles, which are
+recorded, but so that DevTools' Styles pane shows which rules applied.
+
+### To be settled
+
+- How the recorded state reaches the renderer of the recreation: over the
+  recorder's own connection to the bridge, or served on the loopback
+  interface and read by the browser process. Settled in the first step.
+- Whether the recreation mode is a switch of the instrumented Chromium that
+  also records, or a separate build. A switch is proposed, so that one
+  build is kept.
+
+### Required tests
+
+- Unit tests of the recording additions against the record contract, and of
+  the recorded state the recorder sends to the recreation mode.
+- Integration tests in the instrumented Chromium: for a generated page,
+  every imposed computed-style value, box fragment, fragment item, and glyph
+  run read back from Blink equals the value imposed; a node the test
+  changes afterwards is styled and laid out as Blink computes it; reloading
+  returns the recorded values.
+- System test on the target machine: a recorded page is inspected, and
+  DevTools' Computed pane and box model show the recorded values of chosen
+  nodes.
+
 ## Slice 3b implementation
 
 In progress on the `recreation` branch. This section records what is built
