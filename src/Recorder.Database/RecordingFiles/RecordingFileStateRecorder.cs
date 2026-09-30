@@ -360,7 +360,7 @@ public sealed class RecordingFileStateRecorder
             }
             return;
         }
-        if (DomTreeRebuilder.DocumentKey(record.Payload) is { } documentKey &&
+        if (_builder.KeyOf(record.Channel, record.Payload) is { } documentKey &&
             _tracked.TryGetValue(documentKey, out var departed) &&
             departed.Departed is not null)
         {
@@ -392,7 +392,11 @@ public sealed class RecordingFileStateRecorder
         }
         if (tracked.FirstUnsnapshottedTime is null)
         {
-            tracked.FirstUnsnapshottedTime = time;
+            // A document's first record can be before the record that made
+            // it: a listener, timer, or accessibility record held until it.
+            tracked.FirstUnsnapshottedTime = tracked.LastSnapshotAt is null
+                ? Math.Min(time, document.FirstTime)
+                : time;
         }
         tracked.LastTime = document.LastTime;
         tracked.Listed = false;

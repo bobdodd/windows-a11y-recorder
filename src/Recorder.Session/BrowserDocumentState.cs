@@ -30,6 +30,24 @@ public enum BrowserStateCompleteness
     WalkCut,
 }
 
+/// <summary>The selection a record gives: its type, and its anchor and focus nodes and offsets.</summary>
+public sealed record SelectionState(string? Type, long? AnchorNodeId, long? AnchorOffset, long? FocusNodeId, long? FocusOffset);
+
+/// <summary>A text control's recorded value, null when it was cut, and its selection.</summary>
+public sealed record TextControlState(
+    long NodeId,
+    string? ControlType,
+    string? Value,
+    long? SelectionStart,
+    long? SelectionEnd,
+    string? SelectionDirection);
+
+/// <summary>The focused node, selection, and text controls the interaction records give.</summary>
+public sealed record InteractionCurrent(
+    long? FocusedNodeId,
+    SelectionState? Selection,
+    IReadOnlyDictionary<long, TextControlState> TextControls);
+
 /// <summary>
 /// The interaction state of one document: the records of its latest completed
 /// interaction checkpoint, and the interaction changes after it, in record
@@ -49,6 +67,78 @@ public sealed class InteractionDocumentState
 
     /// <summary>True between a checkpoint's start record and its completion.</summary>
     public bool IsOpen => _pending is not null;
+
+    /// <summary>
+    /// The interaction state the records give: the focused node, the
+    /// selection, and each text control's value and selection, from the
+    /// latest checkpoint and each change after it in record order.
+    /// </summary>
+    public InteractionCurrent Current()
+    {
+        long? focused = null;
+        SelectionState? selection = null;
+        var controls = new Dictionary<long, TextControlState>();
+        foreach (var record in _checkpoint)
+        {
+            if (record.TryGetProperty("focusedNodeId", out _))
+            {
+                focused = Number(record, "focusedNodeId");
+                selection = SelectionOf(record);
+            }
+            else if (Number(record, "nodeId") is { } node && record.TryGetProperty("controlType", out _))
+            {
+                controls[node] = ControlOf(node, record);
+            }
+        }
+        foreach (var (eventType, payload) in _changes)
+        {
+            switch (eventType)
+            {
+                case "focus-changed":
+                    focused = Number(payload, "focusedNodeId");
+                    break;
+                case "selection-changed":
+                    selection = SelectionOf(payload);
+                    if (Number(payload, "textControlNodeId") is { } control && controls.TryGetValue(control, out var state))
+                    {
+                        controls[control] = state with
+                        {
+                            SelectionStart = Number(payload, "textControlSelectionStart"),
+                            SelectionEnd = Number(payload, "textControlSelectionEnd"),
+                            SelectionDirection = Text(payload, "textControlSelectionDirection"),
+                        };
+                    }
+                    break;
+                case "text-control-value-changed" when Number(payload, "nodeId") is { } node:
+                    controls[node] = ControlOf(node, payload);
+                    break;
+            }
+        }
+        return new InteractionCurrent(focused, selection, controls);
+    }
+
+    private static SelectionState SelectionOf(JsonElement record) => new(
+        Text(record, "selectionType"),
+        Number(record, "anchorNodeId"),
+        Number(record, "anchorOffset"),
+        Number(record, "focusNodeId"),
+        Number(record, "focusOffset"));
+
+    private static TextControlState ControlOf(long node, JsonElement record) => new(
+        node,
+        Text(record, "controlType"),
+        record.TryGetProperty("valueTruncated", out var truncated) && truncated.ValueKind == JsonValueKind.True
+            ? null
+            : Text(record, "value"),
+        Number(record, "selectionStart"),
+        Number(record, "selectionEnd"),
+        Text(record, "selectionDirection"));
+
+    private static long? Number(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetInt64() : null;
+
+    private static string? Text(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     internal void Load(IEnumerable<JsonElement> checkpoint, IEnumerable<(string EventType, JsonElement Payload)> changes)
     {
@@ -93,8 +183,9 @@ public sealed class InteractionDocumentState
 
 /// <summary>
 /// The recorded state of one browser document, rebuilt from its records in
-/// record order: its DOM tree, its layout state, and its interaction state,
-/// with how complete each is and the record that last changed it.
+/// record order: its DOM tree, its layout state, its interaction state, its
+/// listeners and timers, and its accessibility data, with how complete each
+/// is and the record that last changed it.
 /// </summary>
 public sealed class BrowserDocumentState(string key)
 {
@@ -115,9 +206,24 @@ public sealed class BrowserDocumentState(string key)
 
     public InteractionDocumentState Interaction { get; internal set; } = new();
 
+    /// <summary>The listeners registered and timers pending in the document.</summary>
+    public ScriptDocumentState Script { get; internal set; } = new();
+
+    /// <summary>The latest recorded accessibility data of each DOM node of the document.</summary>
+    public AccessibilityDocumentState Accessibility { get; internal set; } = new();
+
     public BrowserStateCompleteness DomCompleteness { get; internal set; } = BrowserStateCompleteness.NotWalked;
     public BrowserStateCompleteness LayoutCompleteness { get; internal set; } = BrowserStateCompleteness.NotWalked;
     public BrowserStateCompleteness InteractionCompleteness { get; internal set; } = BrowserStateCompleteness.NotWalked;
+
+    /// <summary>
+    /// The listener and timer state, and the accessibility state, are
+    /// rebuilt from change records alone: complete from the document's first
+    /// record, and after a loss of one of their records for the rest of the
+    /// document.
+    /// </summary>
+    public BrowserStateCompleteness ScriptCompleteness { get; internal set; } = BrowserStateCompleteness.Complete;
+    public BrowserStateCompleteness AccessibilityCompleteness { get; internal set; } = BrowserStateCompleteness.Complete;
 
     /// <summary>True once a DOM walk at a finished parse was recorded.</summary>
     public bool FinishedParsing { get; internal set; }

@@ -194,6 +194,62 @@ public sealed class BrowserStateTests : IDisposable
             return this;
         }
 
+        // Listener and timer records name the document by its identity, with
+        // no token; accessibility records by its token, with no identity.
+        private void AddScript(string channel, string eventType, string body) =>
+            Items.Add((channel, eventType, J($$"""
+                {"context":{"browserInstanceId":"browser-1","processId":{{process}},"processType":"renderer",
+                 "documentId":"{{document}}","documentToken":null},{{body}}}
+                """)));
+
+        public Records Listener(string id, long node, string eventName)
+        {
+            AddScript("browser.listener", "listener-registered", $$"""
+                "listenerId":"{{id}}","eventName":"{{eventName}}","capture":false,"once":false,"passive":false,
+                "registrationKind":"add-event-listener","target":{"kind":"node","nodeId":{{node}},"documentId":"{{document}}"}
+                """);
+            return this;
+        }
+
+        public Records RemoveListener(string id)
+        {
+            AddScript("browser.listener", "listener-removed", $$"""
+                "listenerId":"{{id}}","eventName":"click","capture":false
+                """);
+            return this;
+        }
+
+        public Records Timer(string eventType, string id, string kind, double delay = 50)
+        {
+            AddScript("browser.timer", eventType, $$"""
+                "timerId":"{{id}}","timerKind":"{{kind}}","requestedDelayMilliseconds":{{delay}},"effectiveDelayMilliseconds":{{delay}}
+                """);
+            return this;
+        }
+
+        public Records Accessibility(params (long Dom, string Role)[] nodes)
+        {
+            var id = $"accessibility-{token}-{++_checkpoint}";
+            Items.Add(("browser.accessibility", "accessibility-checkpoint-started", J($$"""
+                {"context":{"browserInstanceId":"browser-1","processId":{{process}},"processType":"renderer",
+                 "documentId":null,"documentToken":"{{token}}"},"checkpointId":"{{id}}","reason":"renderer-serialization"}
+                """)));
+            var index = 0;
+            foreach (var (dom, role) in nodes)
+            {
+                Items.Add(("browser.accessibility", "accessibility-checkpoint-node", J($$"""
+                    {"context":{"browserInstanceId":"browser-1","processId":{{process}},"processType":"renderer",
+                     "documentId":null,"documentToken":"{{token}}"},"checkpointId":"{{id}}","nodeIndex":{{index++}},
+                     "accessibilityNodeId":{{dom + 1000}},"domNodeId":{{dom}},"roleName":"{{role}}","name":"n{{dom}}"}
+                    """)));
+            }
+            Items.Add(("browser.accessibility", "accessibility-checkpoint-completed", J($$"""
+                {"context":{"browserInstanceId":"browser-1","processId":{{process}},"processType":"renderer",
+                 "documentId":null,"documentToken":"{{token}}"},"checkpointId":"{{id}}","nodeCount":{{nodes.Length}},"truncated":false}
+                """)));
+            return this;
+        }
+
         public Records Omission(string channel)
         {
             Items.Add((channel, "collector-omission", J($$"""
@@ -321,9 +377,12 @@ public sealed class BrowserStateTests : IDisposable
     public void ASnapshotAndTheRecordsAfterItGiveTheStateOfEveryRecord()
     {
         var records = new Records("token-a")
+            .Listener("listener-0", 3, "click")
             .Walk("finished-parsing", "first", false, Page)
             .Layout((3, 10), (4, 12))
             .Interaction(3)
+            .Timer("timer-scheduled", "timer-1", "timeout")
+            .Accessibility((3, "genericContainer"))
             .Insert(3, 4, 5, "DIV");
         var split = records.Items.Count;
         records.Insert(5, null, 6, "#text", "late \u0000 text \"quoted\"")
@@ -332,6 +391,10 @@ public sealed class BrowserStateTests : IDisposable
             .Remove(3, 4)
             .Layout((5, 40))
             .Focus(5)
+            .Listener("listener-9", 5, "click")
+            .Timer("timer-scheduled", "timer-9", "interval")
+            .Timer("timer-fired", "timer-9", "interval")
+            .Accessibility((5, "button"))
             .Omission("browser.layout");
 
         var whole = Build(records.Items);
@@ -357,6 +420,57 @@ public sealed class BrowserStateTests : IDisposable
     }
 
     [Fact]
+    public void KeepsTheListenersTimersAndAccessibilityOfADocument()
+    {
+        // A listener and a timer before the document's first DOM record are
+        // held until it, and the document's first record is then theirs.
+        var records = new Records("token-a")
+            .Listener("listener-1", 3, "click")
+            .Timer("timer-scheduled", "timer-1", "timeout")
+            .Walk("finished-parsing", "first", false, Page)
+            .Listener("listener-2", 3, "keydown")
+            .Listener("listener-3", 2, "focus")
+            .RemoveListener("listener-3")
+            .Timer("timer-scheduled", "timer-2", "interval", 1000)
+            .Timer("timer-scheduled", "timer-3", "timeout")
+            .Timer("timer-fired", "timer-1", "timeout")
+            .Timer("timer-fired", "timer-2", "interval", 1000)
+            .Timer("timer-scheduled", "timer-4", "animation-frame", 0)
+            .Timer("timer-cancelled", "timer-3", "timeout")
+            .Accessibility((3, "genericContainer"), (2, "rootWebArea"))
+            .Accessibility((3, "button"));
+
+        var builder = Build(records.Items);
+        var document = Assert.Single(builder.Documents.Values);
+
+        Assert.Equal(0, document.FirstEventKey);
+        Assert.Equal(["listener-1", "listener-2"], document.Script.Listeners.Keys.Order());
+        Assert.Equal(["timer-2", "timer-4"], document.Script.Timers.Keys.Order());
+        // An interval timer keeps running; its last run is kept.
+        Assert.Equal(document.Script.Timers["timer-2"].ScheduledTime + 3_000, document.Script.Timers["timer-2"].LastRunTime);
+        Assert.Equal("button", document.Accessibility.Nodes[3].Record.GetProperty("roleName").GetString());
+        Assert.Equal("rootWebArea", document.Accessibility.Nodes[2].Record.GetProperty("roleName").GetString());
+        Assert.Equal(BrowserStateCompleteness.Complete, document.ScriptCompleteness);
+        Assert.Equal(document.Key, builder.KeyOf("browser.listener", records.Items[0].Payload));
+        Assert.Equal(document.Key, builder.KeyOf("browser.accessibility", records.Items[^1].Payload));
+
+        records.Omission("browser.timer");
+        var lost = Build(records.Items).Documents.Values.Single();
+        Assert.Equal(BrowserStateCompleteness.AfterLoss, lost.ScriptCompleteness);
+        Assert.Equal(BrowserStateCompleteness.Complete, lost.AccessibilityCompleteness);
+    }
+
+    [Fact]
+    public void ARecordOfAnotherDocumentOfTheProcessIsNotItsListener()
+    {
+        var a = new Records("token-a", "doc-1").Walk("finished-parsing", "first", false, Page).Listener("listener-1", 3, "click");
+        var b = new Records("token-a", "doc-2").Listener("listener-2", 3, "click");
+        var builder = Build(a.Items.Concat(b.Items));
+        var document = Assert.Single(builder.Documents.Values);
+        Assert.Equal(["listener-1"], document.Script.Listeners.Keys);
+    }
+
+    [Fact]
     public void AFrameShowsTheLastUpdatePresentedAtOrBeforeItsComposition()
     {
         (long, long)[] updates = [(100, 90), (200, 150), (260, 240), (400, 300)];
@@ -377,7 +491,7 @@ public sealed class BrowserStateTests : IDisposable
     // Records of two documents over 40 s, with a change every 50 ms.
     private static List<(string Channel, string EventType, JsonElement Payload)> Session(out int count)
     {
-        var a = new Records("token-a", "doc-1", 3440).Walk("finished-parsing", "first", false, Page).Layout((3, 0)).Interaction(null);
+        var a = new Records("token-a", "doc-1", 3440).Listener("listener-early", 3, "load").Walk("finished-parsing", "first", false, Page).Layout((3, 0)).Interaction(null);
         var b = new Records("token-b", "doc-9", 5120).Walk("finished-parsing", "first", false, Page).Layout((3, 0)).Interaction(null);
         var all = new List<(string, string, JsonElement)>();
         all.AddRange(a.Items);
@@ -405,6 +519,15 @@ public sealed class BrowserStateTests : IDisposable
             {
                 records.Remove(3, node - 11);
             }
+            if (step % 5 == 0)
+            {
+                records.Listener($"listener-{step}", node, "click").Timer("timer-scheduled", $"timer-{step}", "timeout");
+            }
+            if (step % 10 == 5)
+            {
+                records.RemoveListener($"listener-{step - 5}").Timer("timer-fired", $"timer-{step - 5}", "timeout")
+                    .Accessibility((node, "paragraph"));
+            }
             all.AddRange(records.Items);
             records.Items.Clear();
         }
@@ -415,7 +538,7 @@ public sealed class BrowserStateTests : IDisposable
     private async Task<string> WriteSessionAsync(string name, long spacing)
     {
         var path = Path.Combine(_directory, name);
-        var collector = Collector("test.browser", "browser.dom", "browser.layout", "browser.interaction");
+        var collector = Collector("test.browser", "browser.dom", "browser.layout", "browser.interaction", "browser.listener", "browser.timer", "browser.accessibility");
         var records = Session(out _);
         using var target = new RecordingFileBatchTarget(path, Recording, new RecordingFileWriterOptions { ChunkBytes = 32 * 1024, ChunkInterval = TimeSpan.Zero });
         for (var start = 0; start < records.Count; start += 200)
@@ -503,7 +626,7 @@ public sealed class BrowserStateTests : IDisposable
         List<((string Channel, string EventType, JsonElement Payload) Item, long Time)> records)
     {
         var path = Path.Combine(_directory, name);
-        var collector = Collector("test.browser", "browser.dom", "browser.layout", "browser.interaction");
+        var collector = Collector("test.browser", "browser.dom", "browser.layout", "browser.interaction", "browser.listener", "browser.timer", "browser.accessibility");
         using var target = new RecordingFileBatchTarget(path, Recording, new RecordingFileWriterOptions { ChunkBytes = 32 * 1024, ChunkInterval = TimeSpan.Zero });
         for (var start = 0; start < records.Count; start += 200)
         {
@@ -522,6 +645,62 @@ public sealed class BrowserStateTests : IDisposable
         Assert.NotNull(target.StateSummary);
         Assert.Null(target.StateSummary!.Stopped);
         return (path, target.StateSummary);
+    }
+
+    [Fact]
+    public async Task ListenersBeforeADocumentsFirstDomRecordAndOfADepartedDocumentAreRead()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var records = IdleSession();
+        // Document c has a listener and a timer 11 s before its first DOM
+        // record, after snapshots of the others; b, departed, gains a
+        // listener at 80 s, which returns it.
+        var c = new Records("token-c", "doc-3", 3440);
+        var b = new Records("token-b", "doc-9", 5120);
+        var added = new List<((string Channel, string EventType, JsonElement Payload) Item, long Time)>();
+        void Take(Records items, long time)
+        {
+            added.AddRange(items.Items.Select(item => (item, time)));
+            items.Items.Clear();
+        }
+        Take(c.Listener("listener-1", 3, "click").Timer("timer-scheduled", "timer-1", "interval", 1000), 40_000_000_001);
+        Take(c.Walk("finished-parsing", "first", false, Page), 51_000_000_001);
+        Take(c.Timer("timer-fired", "timer-1", "interval", 1000), 70_000_000_001);
+        Take(b.Listener("listener-7", 3, "keydown"), 80_000_000_001);
+        var (path, summary) = await WriteTimedAsync(
+            "script.mcap",
+            [.. records.Concat(added).OrderBy(entry => entry.Time)]);
+        Assert.True(summary.Departures >= 1);
+
+        using var reader = RecordingFileReader.Open(path);
+        var state = new RecordingFileBrowserState(reader, null);
+        foreach (var time in new[] { 45_000_000_000L, 52_000_000_000L, 65_000_000_000L, 75_000_000_000L, 85_000_000_000L, 110_000_000_000L })
+        {
+            var fast = state.At(time, cancellationToken: token);
+            var full = state.At(time, useSnapshots: false, cancellationToken: token);
+            Assert.Equal(Describe(full), Describe(fast));
+            Assert.Equal("snapshots", fast.Cost.Source);
+            // Each document read alone, from its own window of records.
+            foreach (var document in full.Documents)
+            {
+                var alone = state.At(time, new HashSet<string>(StringComparer.Ordinal) { document.Key }, cancellationToken: token);
+                Assert.Equal(
+                    Encoding.UTF8.GetString(BrowserStateSnapshot.Serialize(document.State!)),
+                    Encoding.UTF8.GetString(BrowserStateSnapshot.Serialize(alone.Documents.Single(item => item.Key == document.Key).State!)));
+            }
+            var documentC = fast.Documents.SingleOrDefault(item => item.Key.StartsWith("token-c", StringComparison.Ordinal));
+            if (time > 51_000_000_001)
+            {
+                Assert.Equal(["listener-1"], documentC!.State!.Script.Listeners.Keys);
+                Assert.Equal(time > 70_000_000_001 ? 70_000_000_001 : null, documentC.State.Script.Timers["timer-1"].LastRunTime);
+            }
+            else
+            {
+                Assert.Null(documentC);
+            }
+            var documentB = fast.Documents.Single(item => item.Key.StartsWith("token-b", StringComparison.Ordinal));
+            Assert.Equal(time > 80_000_000_001 ? 1 : 0, documentB.State!.Script.Listeners.Count);
+        }
     }
 
     [Fact]

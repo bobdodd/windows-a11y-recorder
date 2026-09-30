@@ -6,7 +6,8 @@ namespace Recorder.Session;
 /// <summary>
 /// The JSON form of a document's rebuilt state, as a snapshot holds it. The
 /// DOM tree is written node by node; the layout and interaction state are
-/// written as the records they were rebuilt from, whose payloads keep their
+/// written as the records they were rebuilt from, as are the listeners,
+/// timers, and accessibility data, whose payloads keep their
 /// recorded text, so reading a snapshot and applying the records after it
 /// gives the state applying every record gives. Nodes, transform nodes, and
 /// scroll offsets are written in order of their identities, so two equal
@@ -15,7 +16,7 @@ namespace Recorder.Session;
 public static class BrowserStateSnapshot
 {
     /// <summary>The snapshot format's version.</summary>
-    public const int FormatVersion = 1;
+    public const int FormatVersion = 2;
 
     public static byte[] Serialize(BrowserDocumentState document)
     {
@@ -109,6 +110,42 @@ public static class BrowserStateSnapshot
         writer.WriteEndArray();
         writer.WriteEndObject();
 
+        var script = document.Script;
+        writer.WriteStartObject("script");
+        writer.WriteString("completeness", Name(document.ScriptCompleteness));
+        writer.WriteNumber("eventKey", script.EventKey);
+        writer.WriteNumber("time", script.Time);
+        WriteRecords(writer, "listeners", script.Listeners.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => item.Value));
+        writer.WriteStartArray("timers");
+        foreach (var (_, timer) in script.Timers.OrderBy(item => item.Key, StringComparer.Ordinal))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("scheduledTime", timer.ScheduledTime);
+            WriteNumber(writer, "lastRunTime", timer.LastRunTime);
+            writer.WritePropertyName("scheduled");
+            writer.WriteRawValue(timer.Scheduled.GetRawText(), skipInputValidation: true);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+
+        var accessibility = document.Accessibility;
+        writer.WriteStartObject("accessibility");
+        writer.WriteString("completeness", Name(document.AccessibilityCompleteness));
+        writer.WriteNumber("eventKey", accessibility.EventKey);
+        writer.WriteNumber("time", accessibility.Time);
+        writer.WriteStartArray("nodes");
+        foreach (var (_, (record, time)) in accessibility.Nodes.OrderBy(item => item.Key))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("time", time);
+            writer.WritePropertyName("record");
+            writer.WriteRawValue(record.GetRawText(), skipInputValidation: true);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+
         writer.WriteEndObject();
     }
 
@@ -175,6 +212,25 @@ public static class BrowserStateSnapshot
             interaction.GetProperty("checkpoint").EnumerateArray(),
             interaction.GetProperty("changes").EnumerateArray()
                 .Select(change => (change.GetProperty("eventType").GetString()!, change.GetProperty("payload"))));
+
+        var script = root.GetProperty("script");
+        document.ScriptCompleteness = Parse(script.GetProperty("completeness").GetString());
+        document.Script.Load(
+            script.GetProperty("listeners").EnumerateArray(),
+            script.GetProperty("timers").EnumerateArray().Select(timer => new PendingTimer(
+                timer.GetProperty("scheduled"),
+                timer.GetProperty("scheduledTime").GetInt64(),
+                Number(timer, "lastRunTime"))),
+            script.GetProperty("eventKey").GetInt64(),
+            script.GetProperty("time").GetInt64());
+
+        var accessibility = root.GetProperty("accessibility");
+        document.AccessibilityCompleteness = Parse(accessibility.GetProperty("completeness").GetString());
+        document.Accessibility.Load(
+            accessibility.GetProperty("nodes").EnumerateArray()
+                .Select(node => (node.GetProperty("record"), node.GetProperty("time").GetInt64())),
+            accessibility.GetProperty("eventKey").GetInt64(),
+            accessibility.GetProperty("time").GetInt64());
         return document;
     }
 

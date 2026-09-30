@@ -420,7 +420,7 @@ public sealed class RecordingFileBrowserState
                 var stored = RecordingEventCodec.Decode(message.Data.Span);
                 var record = stored.Event;
                 if (record.EventType != "collector-omission" &&
-                    DomTreeRebuilder.DocumentKey(record.Payload) is { } key)
+                    builder.KeyOf(record.Channel, record.Payload) is { } key)
                 {
                     named.Add(key);
                     if (!Wanted(key) ||
