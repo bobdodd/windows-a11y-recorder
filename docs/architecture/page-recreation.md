@@ -779,6 +779,183 @@ Chromium process of the recreation remained. Moving the page and DevTools
 to other displays was not tested, since only one display was connected,
 and remains to be tested.
 
+## Slice 3b design: the recorded page at a chosen frame (proposed)
+
+Proposed 2026-09-29 and not agreed. Slice 3b replaces the fixed content of
+slice 3a with the page recorded at a frame the auditor chooses, checks the
+recreation against the recording, and fills the evidence panel from the
+recording. What slice 4 records, and the documents of frames (slice 5), are
+not part of it.
+
+### Choosing the frame and the document
+
+- The player gains "Inspect page at this frame" beside the frame controls,
+  enabled when an open recording has browser state.
+- The documents at the frame come from the slice 2 reader with no state
+  loaded, as "Only the documents asked for" allows. The candidates are the
+  documents of primary main frames: the document token of each is matched
+  to a `navigation-completed` record whose `frameType` is
+  `primary-main-frame`, which also gives its URL. Documents of the
+  browser's own interface, such as `chrome://webui-toolbar.top-chrome/`,
+  are primary main frames of their own in the recordings and are listed
+  last, marked as browser interface.
+- The player lists the candidates with their URL and the time each was
+  last presented, the most recently presented first and selected, and
+  opens the one chosen. The choice is the auditor's; the player does not
+  infer which document the frame shows.
+
+### Building the document exactly
+
+The recorded DOM is not written as HTML markup, since the HTML parser does
+not return every tree a script can build: for example, it moves content out
+of tables ("foster parenting",
+[HTML standard, parsing](https://html.spec.whatwg.org/multipage/parsing.html#foster-parent))
+and closes a `p` element when a block starts inside it. Instead:
+
+- The server returns a short document: the recorded document type if the
+  recording has one (its name only, since its identifiers are not
+  recorded), so the rendering mode is standards mode with a document type
+  and quirks mode without; a data block holding the recorded tree as JSON,
+  which is not run; and a builder script.
+- The content security policy allows only the builder, by a nonce new for
+  each recreation: `script-src 'nonce-...'`. The recorded `script` elements
+  are built as elements and do not run, and event handler attributes and
+  `javascript:` URLs do not run, as in slice 3a.
+- The builder runs before the first rendering. It builds the recorded tree
+  with DOM calls: each node with its recorded type, name, attributes, and
+  character data, in recorded order; each shadow root with `attachShadow`
+  and its recorded mode, `delegatesFocus`, `slotAssignment`, `clonable`,
+  `serializable`, and `referenceTarget`; the nodes assigned to each manually
+  assigned slot. It then replaces the served document's element with the
+  built one and removes itself and the data block, so the Elements panel
+  shows only the recorded tree.
+- User agent shadow roots, such as those of `input` elements, are made by
+  the browser, not the builder, and are compared like every other node.
+- Element namespaces are not recorded. An element whose recorded name is in
+  capitals is in the HTML namespace, since an element's name is given in
+  capitals only for an element in the HTML namespace in an HTML document
+  ([DOM standard](https://dom.spec.whatwg.org/#element-html-uppercased-qualified-name));
+  an `svg` or `math` element and its
+  descendants are in the SVG or MathML namespace. This is an inference, and
+  the evidence panel says so; recording the namespace is added to slice 4.
+- A value cut in the recording, marked by the slice 2 reader, cannot be
+  built; the node is built with the part recorded and is listed as a
+  difference with the reason "cut in the recording".
+- After building: the recorded text control values and selections are set,
+  the recorded focus is set with focus emulation, so it holds while
+  DevTools has the keyboard, and the recorded scroll offset of each
+  scrolling node is set.
+
+### The environment
+
+Before the page is opened, over the DevTools protocol connection of the
+recreation browser: the viewport size and device pixel ratio of the latest
+layout checkpoint of the document at or before the frame, through
+`Emulation.setDeviceMetricsOverride`. A layout zoom factor other than 1 is
+listed as a difference, since browser zoom is not set this way. Media
+features are not recorded and take the browser's values; recording them is
+in slice 4. The viewport size is recorded only in layout checkpoints, so a
+window resized after the latest checkpoint is recreated at the older size;
+the check will show it, and recording the viewport size with each change is
+added to slice 4.
+
+### Recording the recreation to check it
+
+The recreation browser is the instrumented Chromium with its recorder
+bootstrap, as when recording, so its bridge emits the same records for the
+recreated page with the same code. The recorder receives them in memory with
+its browser evidence receiver; they are not written to any recording. The
+receiver launches the browser with the arguments of slice 3a added: the
+profile, the evidence panel, DevTools, and a remote debugging port on the
+loopback interface for the protocol connection above.
+
+The records of the recreated document, found by its URL, are applied with
+the slice 2 state builder, so both sides of the check are rebuilt by the
+same code. Records of DevTools and the browser's interface are ignored.
+
+### The check
+
+The check runs once the recreation is settled: the builder has finished,
+the page's load event has fired, and no layout change set has been recorded
+for 1 s after a presentation of the page. The evidence panel shows
+"checking" until then. It compares the recorded state at the frame with the
+recreation's state:
+
+- Nodes are matched by position: both trees are walked in the same order,
+  light DOM children and then each shadow root. Where the trees differ, the
+  difference is listed and the nodes below it are not compared further.
+- DOM: node type, name, attributes, character data, shadow root fields, and
+  slot assignments, exactly.
+- Layout: for each node, whether it has a layout object, whether a display
+  lock prevents its layout, each of the 283 recorded computed-style
+  properties as text, and its geometry: the local rectangle, the local
+  quads, whether its client rectangle is empty, and its client rectangle
+  derived from its transform nodes by the slice 2 code, all exactly. The
+  transform node identities differ between the two, so only the rectangles
+  they give are compared.
+- Scroll offsets of each scrolling node, and the focused node, selection,
+  and text control values, exactly.
+
+The panel shows the result as a summary first, the number of nodes that
+differ for each property, so that one cause, such as a style sheet that was
+not recorded, is seen as one line, and then each difference with its node,
+its recorded value, and its recreated value. The check describes the
+recreation as it was settled; what the auditor changes afterwards is not
+checked again.
+
+Until slice 4, differences are expected wherever the page used style sheets
+from files, web fonts, or images, and wherever script changed a style sheet.
+
+### The evidence panel from the recording
+
+- The recreation: the frame, recording time, basis, document URL, and
+  document key, and the notice that the page is a recreation.
+- Pending timers: the timers of the document scheduled and neither fired
+  (for a timeout) nor cancelled at the frame, with their kind, requested
+  and effective delay, time scheduled, and time remaining to their next
+  run, counted from their last run for an interval timer.
+- Interactive elements: the nodes with an event listener registered and not
+  removed at the frame, with their event types and options, and the nodes
+  the latest accessibility checkpoint at or before the frame records as
+  focusable, with its role and name and the time of that checkpoint. The
+  panel reads the records; it does not decide what is interactive.
+- Focus, selection, and text control values, from the interaction state.
+- Selecting a node inside a closed shadow root is done by the recorder over
+  its protocol connection, since page script cannot reach it; the method is
+  settled in the first step of the slice.
+
+The slice 2 state and its snapshots gain, for each document, its URL, its
+registered listeners, its pending timers, and its latest accessibility
+checkpoint, and the snapshot version is raised. Recordings made before are
+not supported.
+
+### Added to slice 4
+
+Found while designing slice 3b: element namespaces; the checked state of
+check boxes and radio buttons and the selected options of `select`
+elements, which are properties, not attributes, and are not recorded; and
+the viewport size with each change, not only in layout checkpoints.
+
+### Required tests
+
+- Unit tests: the tree data written for the builder, including namespaces,
+  shadow root fields, manual slot assignment, and cut values; the choice of
+  candidate documents; pending timers and registered listeners at a frame,
+  including interval timers, cancellation, and removal; the matching of
+  nodes by position and the comparison of each property, on generated
+  states with generated differences; the summary of differences.
+- Integration tests, with `RECORDER_RECREATION_CHROMIUM` set: the builder
+  builds generated trees, including trees the HTML parser cannot return,
+  and the DOM the browser then holds equals the tree given; no page script,
+  handler, or `javascript:` URL runs; and, with a recorded file, a
+  recreation at a frame of it is opened, received, and checked.
+- System test on the target machine: record a short session on a page with
+  forms, a shadow root, and scrolled content; open the recreation at
+  several frames; see the check's summary and differences, the timers, the
+  listeners, and the focus; select nodes, including one inside a closed
+  shadow root; state the time from choosing a frame to the page shown and
+  to the check completed.
+
 ## Text by content hash (agreed, deferred)
 
 Slice 1 records each character data node's data in every checkpoint. Script
