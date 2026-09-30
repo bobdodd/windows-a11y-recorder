@@ -11,7 +11,8 @@ the recorded state at any captured frame) is implemented on the
 listed in "Slice 2 implementation". Its hour recording on the target
 machine did not meet the design's limits, and the revision in "Revision
 after the hour recording" is implemented and waits for a second hour
-recording. Slice 3 is proposed and not implemented.
+recording. Slice 3 is redesigned in "Slice 3 design", proposed 2026-09-29
+and not implemented; it replaces the decision below.
 Recording text by content hash is agreed and deferred; see "Text by content
 hash".
 
@@ -24,6 +25,10 @@ analyzer. A recreation is a view of recorded evidence, and it must not be
 presented as the page itself.
 
 ## Decision
+
+This decision is replaced by "Slice 3 design", which serves the DevTools
+front end from the recorded evidence instead of opening a rebuilt document
+in Chrome. The text below is kept as the record of the first decision.
 
 The player writes the page rebuilt for the chosen frame as an HTML document
 and opens it in Chrome, in a profile of its own, so that every Chrome
@@ -96,7 +101,8 @@ Each slice is tested on the target Windows machine before the next.
    Unit tests of the rebuild from generated sequences; integration tests
    comparing the rebuilt state with every full checkpoint of recorded files;
    system test: time to rebuild at the middle and end of a long recording.
-3. App: write the rebuilt page for the current frame and open it in Chrome,
+3. Replaced by "Slice 3 design". As first proposed: App: write the rebuilt
+   page for the current frame and open it in Chrome,
    with the notice of what the recreation lacks. Unit tests of the document
    writer, including escaping of recorded text and attribute values, and of
    disabled scripts and blocked network access; system test on the target
@@ -515,6 +521,153 @@ once; at most 1.2 MB of compressed departed documents; index records
 90 KB against 883 KB before the revision; every sample equal with and
 without snapshots. These are not the target machine's figures, and a
 92.6 s recording says nothing about an hour.
+
+## Slice 3 design: inspecting the recorded instant (proposed)
+
+Proposed 2026-09-29 and not agreed. This section replaces the first
+decision, to open a rebuilt document in Chrome, and the third slice as first
+proposed.
+
+### Why the first decision is replaced
+
+An auditor inspects layout, interactive elements, and timers for
+accessibility issues at one captured frame, so what the inspector shows must
+be what was recorded at that instant, not an approximation. A document
+opened in Chrome is laid out again from its inputs. Even with every style
+sheet, font, image, viewport setting, media feature, and element state
+recorded, the result would match the recording only where it was checked
+against it, and pseudo-class states such as hover would have to be forced
+rather than shown. Rendering is therefore not repeated: every value the
+inspector shows is a recorded value.
+
+Browser extensions and bookmarklets, which need a live page, are not a
+requirement. Automated test tools read the recorded state through the
+reader of slice 2, and later through an interface of their own, which is
+not part of this slice.
+
+### Requirements
+
+1. The auditor chooses a captured frame in the player and opens an
+   inspector for it.
+2. The inspector is the Chrome DevTools front end of the same Chromium
+   version as the instrumented browser, so its Elements panel, computed
+   style pane, accessibility pane, and event listener pane work as auditors
+   know them.
+3. Every value shown comes from the recording at the frame: the DOM,
+   attributes, character data, shadow roots, the recorded computed style,
+   the recorded box of each node, the accessibility checkpoint, registered
+   listeners, form control values, focus, and selection. Nothing is
+   computed again by a layout engine.
+4. The captured frame is shown as the picture of the page. Selecting or
+   hovering a node in DevTools outlines its recorded box on the captured
+   frame.
+5. A panel of our own in DevTools, the evidence panel, lists at the frame:
+   the pending timers with their type, delay, time scheduled, and time
+   remaining; the interactive elements with their XPath, registered
+   listeners and event types, focusability, and recorded role; and form
+   control values, focus, and selection. Selecting a row selects the node
+   in the Elements panel. The evidence panel reads records; it does not
+   judge whether an element is accessible.
+6. Every view states the frame, the recording time, and the basis of the
+   state (presented or by time), as slice 2 returns it.
+7. What was not recorded is stated as not recorded, never filled in: for
+   example, matched style rules until style sheets are recorded, and the
+   Sources, Network, Performance, and Console panels, which have no
+   evidence to show.
+8. The inspector opens within 1 s of choosing a frame, as slice 2 requires
+   of the state.
+9. The inspector listens only on the loopback interface, with a random port
+   and a token of its own in its address, and closes with the player.
+
+### Parts
+
+- The DevTools front end. The instrumented build already contains it:
+  `out\A11yRecorder\gen\third_party\devtools-frontend\src\front_end\devtools_app.html`
+  on the target machine, for Chromium 156.0.8065.0. The front end connects
+  to a target named by its `ws=` query parameter
+  ([devtools-frontend, contributing](https://chromium.googlesource.com/devtools/devtools-frontend/+/main/docs/contributing/README.md)),
+  and a protocol domain is implemented by a back end that the front end does
+  not depend on
+  ([DevTools protocol, devtools-frontend](https://chromium.googlesource.com/devtools/devtools-frontend/+/main/docs/devtools-protocol.md)).
+  The player serves the front end's files and opens them in the
+  instrumented Chromium in a profile of its own. Whether the front end runs
+  from the player's own HTTP server, or through the
+  `--custom-devtools-frontend` switch, which serves a custom front end at
+  `devtools://devtools/custom/`
+  ([Chromium code review 2458033003](https://codereview.chromium.org/2458033003)),
+  is settled by step 1.
+- The inspector back end, in the app: a WebSocket server speaking the
+  Chrome DevTools Protocol
+  ([Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/)).
+  It answers the methods the front end needs from the state of the frame,
+  answers every other method with a protocol error that says the evidence
+  is not recorded, and logs each method asked for, so that the methods
+  needed are known from the front end's use rather than assumed.
+- The frame view, in the player: the captured frame, with the box of the
+  node DevTools highlights drawn on it. Highlight requests reach the back
+  end as `Overlay` methods, and the back end passes the node's recorded box
+  to the frame view. Whether the front end's own screencast view can show
+  the captured frame instead is settled by step 1.
+- The evidence panel: a panel added to the DevTools front end by a patch in
+  the Chromium checkout, built with the browser, reading a protocol domain
+  of the recorder's own from the back end. A DevTools extension panel
+  ([chrome.devtools.panels](https://developer.chrome.com/docs/extensions/reference/api/devtools/panels))
+  is not used, since extensions are not otherwise needed and the front end
+  served by the player may not load them.
+
+### Order: the user interface first
+
+The slice is built backward from what the auditor sees, so that the
+inspector can be opened and tested on the target machine before it reads a
+recording.
+
+1. The inspector with fixed content. The player opens DevTools on a fixed
+   document built in code: a few elements with attributes and text, one
+   shadow root, computed styles and boxes for some nodes, one listener, one
+   timer, and a fixed image as the captured frame. The Elements panel shows
+   the document, selecting a node outlines its box on the image, the
+   computed style pane shows its styles, and the evidence panel shows fixed
+   rows. The log lists every method the front end asked for. This step
+   settles how the front end is served and whether its screencast view is
+   used.
+2. The recorded DOM, computed style, boxes, form values, focus, and
+   selection at a chosen frame, from the slice 2 reader, with the captured
+   frame of the recording.
+3. Listeners, timers, and the accessibility checkpoint added to the state
+   of slice 2, and shown in DevTools and the evidence panel.
+4. What steps 1 to 3 show to be missing from the records, for example the
+   viewport's position on the desktop, recorded by the browser in a new
+   protocol version and designed then.
+
+### Required tests
+
+- Step 1: unit tests of the protocol message handling (request, response,
+  error, and event framing; node identifiers; the error for methods without
+  evidence) and of the fixed document; an integration test in which a
+  WebSocket client sends the messages the front end sent in step 1's log
+  and receives the expected answers; a system test on the target machine:
+  open the inspector, expand the Elements tree, select a node and see its
+  box on the captured frame, see its computed style, see the evidence
+  panel, and close the player leaving no process running.
+- Steps 2 and 3: unit tests of the translation from recorded state to
+  protocol answers, including XPaths through shadow roots and timers'
+  remaining time; integration tests comparing the answers with the slice 2
+  state of recorded files; a system test on the target machine at frames of
+  a recording, including the time to open the inspector.
+
+### To be settled
+
+- The viewport's position on the desktop. Layout checkpoints record the
+  viewport size, scroll offset, device pixel ratio, and zoom, and the
+  foreground window records hold the window's bounds when the foreground
+  changes. The offset of the page's viewport within the browser window is
+  not recorded, and the window can move without a foreground change, so a
+  recorded box cannot yet be placed on the captured frame exactly.
+- Which timers the evidence panel lists: script timers only, or also CSS
+  animations and transitions.
+- Whether iframe documents are in scope.
+- XPath has no step into a shadow root, so a path inside one needs a stated
+  notation for each shadow root crossed.
 
 ## Text by content hash (agreed, deferred)
 
