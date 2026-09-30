@@ -10,11 +10,24 @@ public sealed class RecreationTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "recreation-tests-" + Guid.NewGuid().ToString("N"));
 
+    // Chromium's child processes can hold files in the profile for a moment
+    // after the browser process has been killed and has exited.
     public void Dispose()
     {
-        if (Directory.Exists(_directory))
+        for (var attempt = 0; ; attempt++)
         {
-            Directory.Delete(_directory, recursive: true);
+            try
+            {
+                if (Directory.Exists(_directory))
+                {
+                    Directory.Delete(_directory, recursive: true);
+                }
+                return;
+            }
+            catch (Exception exception) when (attempt < 40 && exception is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(250);
+            }
         }
     }
 
