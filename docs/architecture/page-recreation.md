@@ -772,8 +772,12 @@ instrumented build as `RECORDER_RECREATION_CHROMIUM`, including the
 integration test. At aab4934 the integration test's checks had passed, but
 removing its profile failed while Chromium's child processes still held a
 file in it, so the test now retries the removal. The fixed recreation opened
-from the player and was reported to run very well. The system test's
-individual checks are not recorded separately.
+from the player and was reported to run very well. Of the system test's
+checks: selecting Open and Close, inside the shadow root, from the evidence
+panel selected them in the Elements panel; after the player closed, no
+Chromium process of the recreation remained. Moving the page and DevTools
+to other displays was not tested, since only one display was connected,
+and remains to be tested.
 
 ## Text by content hash (agreed, deferred)
 
