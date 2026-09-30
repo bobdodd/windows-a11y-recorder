@@ -1338,8 +1338,14 @@ On the target machine, with revision 06dcc58, as reported on 2026-09-30:
   inspection knows. Making them a source of their own in DevTools' style
   inspection is to be designed.
 
-Not yet reported: a change to the style sheet rule in the Styles pane, and
-what the Styles pane shows for the recorded values.
+- With the switch, after the `#box` rule's width was changed to 300px in
+  the Styles pane, `getComputedStyle()` still gave the recorded 237.5px.
+- The Styles pane for `#box` showed the user agent style sheet's `div`
+  rule, `display: block`. No block holding the recorded declarations was
+  reported.
+
+Not yet reported: the same edit without the switch, and whether the Styles
+pane marks the `#box` rule's declarations as overridden.
 
 ### To be settled
 
