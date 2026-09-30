@@ -578,7 +578,9 @@ not part of this slice.
 8. The inspector opens within 1 s of choosing a frame, as slice 2 requires
    of the state.
 9. The frame view and DevTools are separate windows, each of which can be
-   moved to any display and maximized there (agreed 2026-09-29).
+   moved to any display and maximized there (agreed 2026-09-29). The frame
+   view shows the page's viewport cut from the captured frame, keeping the
+   viewport's recorded proportions at any window size.
 10. The inspector listens only on the loopback interface, with a random port
    and a token of its own in its address, and closes with the player.
 
@@ -661,7 +663,10 @@ recording.
 
 ### To be settled
 
-- The viewport's position on the desktop. Layout checkpoints record the
+- The viewport's position on the desktop (agreed 2026-09-29 to be recorded
+  in step 4: the browser records the viewport's rectangle in screen
+  pixels with each layout checkpoint and whenever it moves or changes
+  size). Layout checkpoints record the
   viewport size, scroll offset, device pixel ratio, and zoom, and the
   foreground window records hold the window's bounds when the foreground
   changes. The offset of the page's viewport within the browser window is
