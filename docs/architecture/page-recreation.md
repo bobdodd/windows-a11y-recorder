@@ -940,6 +940,100 @@ checked again.
 Until slice 4, differences are expected wherever the page used style sheets
 from files, web fonts, or images, and wherever script changed a style sheet.
 
+### Building the check (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built.
+
+The recreation browser. The recorder's own receiver
+(`BrowserEvidenceReceiver`) and launcher (`ChromiumLauncher`) start the
+recreation browser, as they start the browser when recording, so it has the
+bootstrap, its own pipe name and authentication token, the protocol version
+query, and the refusal to start from an elevated process. The launcher gains
+the arguments of slice 3a (the evidence panel, DevTools in its own window, a
+new window) and a remote debugging port of 0, which the browser chooses and
+writes to the profile, as now. The protocol connection of "Leaving the
+recreation" is unchanged. The recreation browser then records; the slice 3a
+statement that it records nothing no longer holds.
+
+The records. The receiver is given an event sink that keeps nothing on disk
+and writes to no recording: each record is applied at once with the slice 2
+state builder, in the order received. The recreated document is the one
+whose `navigation-completed` record has the recreation's address. Records of
+any other document, such as the blank tab, DevTools, and the evidence
+panel's pages, and of the browser's interface, are dropped when received.
+The records of the recreated document are not kept once applied; only its
+state is.
+
+When the check runs. It runs every time a page is opened with "Inspect page
+at this frame", once the recreation is settled. The recreation is settled
+when:
+
+- the recreated document's DOM, layout, and interaction checkpoints of its
+  first walk have completed;
+- the page's load event has fired (`Page.loadEventFired` on the protocol
+  connection); and
+- 1 s has passed with no layout change set of the document, counted from
+  its latest `presentation-feedback` record.
+
+The wait is a timer reset by each record that applies, not a poll. If the
+recreation is not settled within 30 s, the check runs on the state it has,
+and the panel says it was not settled and which condition was not met.
+
+After the check. The bridge goes on sending records while the recreation is
+open, since the pipe stays connected; they are dropped when received. The
+check is not run again when the auditor changes the page.
+
+The comparison. Both sides are slice 2 states, so both are read by the same
+code:
+
+- DOM nodes are matched by position, as the design above states: the
+  document's children, then each node's children, then its shadow root.
+  Where the node type or name of a matched pair differs, or a node has no
+  counterpart, the difference is listed and the nodes below it are not
+  compared.
+- Identities are not compared, since they are new in the recreation: node,
+  document, checkpoint, change set, and transform node identities, the
+  document token, and node indexes. A value that names a node, such as a
+  shadow host, a slot's assigned nodes, the focused node, and a selection's
+  anchor and focus, is compared through the node match.
+- The document's URL is not compared, since the recreation's address is its
+  own; the panel already shows the recorded one.
+- Layout records are matched through the DOM match; a pseudo-element by its
+  originating node and pseudo-element type. Each field of the layout record
+  of the design above is compared as recorded, exactly: layout object,
+  display lock, bounding client rectangle, each computed-style property as
+  text, and the client rectangle derived from the transform nodes.
+- The viewport, device pixel ratio, and layout zoom factor, the scroll
+  offset of each scrolling node, and the interaction state: focused node,
+  selection, and each text control's value and selection.
+
+The result. The panel's Fidelity section reads "checking" until the result
+is ready, then "checked" with the number of nodes compared and differing. It
+lists the summary first, one line for each property with the number of
+nodes that differ, then every difference, grouped by property, each with
+its node's path, the recorded value, and the recreated value. Every
+difference is listed; none is dropped. The panel reads the result from the
+recorder, as it reads the blocked navigations, and announces when it is
+ready. If the check cannot run, for example because the browser's protocol
+version does not match, the section says "not checked" and why.
+
+Required tests:
+
+- Unit tests of the comparison on states built from records: equal states
+  give no difference; each kind of difference above is found and counted
+  once; nodes below a structural difference are not compared; identities
+  and the document URL are not compared; values that name nodes are
+  compared through the match; pseudo-elements are matched by originating
+  node and type.
+- Unit tests of the settling rule, on records given in order, and of the
+  sink: records of other documents are dropped, and records after the check
+  are dropped.
+- Integration test, with the instrumented Chromium, which is available only
+  on the target machine: a generated recreation is opened, settles, and its
+  check reports no DOM difference.
+- System test on the target machine: a page of a recording is inspected,
+  the panel shows "checking", then the summary and the differences.
+
 ### The evidence panel from the recording
 
 - The recreation: the frame, recording time, basis, document URL, and
