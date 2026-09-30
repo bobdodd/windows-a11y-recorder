@@ -1419,6 +1419,90 @@ as the source of the recorded background color; for `#child`, the Styles
 pane showed the block of `div#parent` as inherited, with its color; and
 without the switch no block was shown.
 
+#### 1b, recorded box fragments (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built.
+
+A box fragment is the rectangle Blink's layout produces for one box: its
+border-box size, and its offset in the fragment that holds it, its parent
+fragment. Paint, hit testing, `getBoundingClientRect()`, and DevTools'
+element highlight and box model are all read from fragments. 1b makes the
+recorded size and offset of a box the ones Blink uses.
+
+Where. Every layout algorithm, for block, flex, grid, table, and
+multi-column layout alike, ends by turning its fragment builder into a box
+fragment, in `BoxFragmentBuilder::ToBoxFragment`
+(`core/layout/box_fragment_builder.cc`, line 673 in the checkout on the
+target machine). Under the switch, at the start of that function, before
+the builder is finalized:
+
+- The box's own size: when its element has a recorded fragment, the
+  builder's inline and block sizes are set to the recorded width and
+  height.
+- Its children's offsets: for each child fragment whose element has a
+  recorded fragment, the child's offset in the builder is set to the
+  recorded offset.
+
+Blink then finalizes the fragment from these values as from its own, so
+overflow and scrolling follow.
+
+This differs from the earlier text of this design, which had the layout
+algorithms not run for a box with recorded fragments. Here the algorithms
+still run and their sizes and offsets are replaced at the one place every
+algorithm passes through. Building a layout result without an algorithm
+would need a new algorithm that lays out children itself and would lose the
+data that tables, flex, and grid add to their fragments, which paint and
+DevTools use. Whether replacing sizes and offsets is enough is what 1b
+finds out.
+
+In 1b only, as in 1a, the recorded values are written in the test page, in
+an attribute of each element: `data-a11y-recorded-fragment="x y width
+height"`, the border-box offset in the parent fragment and the border-box
+size, in CSS pixels. They are multiplied by the element's effective zoom to
+give Blink's layout units.
+
+Not covered by 1b, left to Blink's own layout:
+
+- A box broken into several fragments, as across columns, and any box laid
+  out under block fragmentation: a recorded fragment is one fragment, so
+  only a fragment that is the whole of its box takes it.
+- Line boxes and the boxes inside lines, such as inline blocks: these are
+  1c.
+- A writing mode other than horizontal, left to right. Blink's builder
+  holds logical offsets and the recorded offsets are physical; they are
+  equal only in that writing mode, and 1b does not convert between them.
+- Anonymous boxes, which have no element to carry a recorded fragment; the
+  test page has none between a recorded box and its parent.
+- Data that algorithms add to their fragments beside sizes and offsets,
+  such as a table's column positions and a grid's tracks, which Blink uses
+  to paint collapsed table borders and DevTools uses for its grid overlay.
+
+The test page, `chromium/recreation_spike/boxes.html`, gives each case a
+recorded fragment that differs from what its style sheet produces:
+
+- Block boxes in normal flow, the second recorded above the first.
+- A float and an absolutely positioned box.
+- Flex items and grid items at recorded offsets and sizes.
+- A table's cells, rows, and the table itself.
+- Boxes inside a multi-column container, whose parent fragment is a
+  column; these are checked by eye, since the column has no element.
+
+Checked on the target machine, with the page opened under the switch and
+without it:
+
+- With the switch, for each recorded element except those in columns,
+  `getBoundingClientRect()` gives its parent element's rectangle moved by
+  the recorded offset, with the recorded size; a Console snippet, given
+  with the build, compares them. Without it, Blink's own layout.
+- DevTools' element highlight and box model show the recorded rectangle,
+  and the page is painted there.
+- What DevTools' Layout pane overlays show for the flex and grid
+  containers, and how the table's borders and the columns' content are
+  painted, is reported.
+
+Tests: a unit test of the integration script's new patch; the check above
+as the system test.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
