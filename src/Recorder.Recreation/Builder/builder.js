@@ -10,6 +10,10 @@
   const SVG = "http://www.w3.org/2000/svg";
   const MATHML = "http://www.w3.org/1998/Math/MathML";
   const XMLNS = "http://www.w3.org/2000/xmlns/";
+  // The recording gives an attribute's namespace and local name, not its
+  // prefix. The prefixes are those the HTML parser gives foreign attributes:
+  // https://html.spec.whatwg.org/multipage/parsing.html#adjust-foreign-attributes
+  const XLINK = "http://www.w3.org/1999/xlink";
   const XML = "http://www.w3.org/XML/1998/namespace";
 
   const block = document.getElementById("recorder-recreation-tree");
@@ -52,6 +56,8 @@
           qualified = "xmlns:" + name;
         } else if (namespace === XML && !name.includes(":")) {
           qualified = "xml:" + name;
+        } else if (namespace === XLINK && !name.includes(":")) {
+          qualified = "xlink:" + name;
         }
         element.setAttributeNS(namespace, qualified, value);
       }

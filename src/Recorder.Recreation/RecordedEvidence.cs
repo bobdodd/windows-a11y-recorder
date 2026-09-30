@@ -154,7 +154,7 @@ public static class RecordedEvidence
         }
 
         var interactive = new List<RecordedInteractiveElement>();
-        var ids = new SortedSet<long>(byNode.Keys);
+        var ids = new HashSet<long>(byNode.Keys);
         foreach (var (dom, (record, _)) in state.Accessibility.Nodes)
         {
             if (tree.Nodes.TryGetValue(dom, out var node) && node.NodeType == "element" && Focusable(record) == true)
@@ -162,7 +162,7 @@ public static class RecordedEvidence
                 ids.Add(dom);
             }
         }
-        foreach (var id in ids)
+        foreach (var id in TreeOrder(tree).Where(ids.Contains))
         {
             if (RecordedPaths.Of(tree, id) is not { } path)
             {
@@ -220,7 +220,33 @@ public static class RecordedEvidence
         {
             OtherListeners = others,
             Notes = notes,
+            AnimationsNotRead = "Running animations and transitions are not yet read from the recording, so none are listed.",
         };
+    }
+
+    // The nodes of the tree in tree order, each shadow root before its
+    // host's children, as the DevTools protocol orders them.
+    private static IEnumerable<long> TreeOrder(DomDocumentTree tree)
+    {
+        var stack = new Stack<long>();
+        stack.Push(RecordedPage.DocumentNodeId(tree));
+        while (stack.Count > 0)
+        {
+            var id = stack.Pop();
+            if (!tree.Nodes.TryGetValue(id, out var node))
+            {
+                continue;
+            }
+            yield return id;
+            for (var index = node.Children.Count - 1; index >= 0; index--)
+            {
+                stack.Push(node.Children[index]);
+            }
+            if (node.ShadowRootId is { } shadow)
+            {
+                stack.Push(shadow);
+            }
+        }
     }
 
     public static RecordedTimer Timer(PendingTimer timer, long recordingNanoseconds)

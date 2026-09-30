@@ -294,18 +294,61 @@ public sealed class RecordedPageTests : IDisposable
         Assert.Equal("[\"slotted\"]", values.GetProperty("assigned").GetRawText());
         Assert.Equal("CSS1Compat", values.GetProperty("mode").GetString());
         Assert.Equal("Built <exactly> </script>", values.GetProperty("title").GetString());
+
+        // Every path in the evidence selects its node through the panel's
+        // own resolver, except the one in the closed shadow root, which the
+        // page cannot reach.
+        var evidence = content.Evidence;
+        var paths = evidence.InteractiveElements.Select(item => item.Node)
+            .Concat(evidence.Interaction.FormValues.Select(item => item.Node))
+            .Append(evidence.Interaction.Focus!)
+            .ToArray();
+        var found = await ResolveAsync(await FindNodeSource(server), paths, client, token);
+        Assert.Equal(["no-shadow-root", "a", "input", "input"], found.Select(item => item.Name ?? item.Failure));
+    }
+
+    private async Task<string> FindNodeSource(RecreationServer server)
+    {
+        var extension = Path.Combine(_directory, "extension-for-test");
+        RecreationBrowser.WriteExtension(extension, server.EvidenceAddress);
+        var panel = await File.ReadAllTextAsync(Path.Combine(extension, "panel.js"));
+        return panel[panel.IndexOf("function findNode", StringComparison.Ordinal)..panel.IndexOf("// Selects the node", StringComparison.Ordinal)];
+    }
+
+    // The local name of the node each path selects in the page, or why none.
+    internal static async Task<IReadOnlyList<(string? Name, string? Failure)>> ResolveAsync(
+        string findNode, IReadOnlyList<NodePath> paths, DevToolsConnection client, CancellationToken token)
+    {
+        var expression = $$"""
+            (() => {
+              {{findNode}}
+              return JSON.stringify({{JsonSerializer.Serialize(paths.Select(path => path.Scopes))}}.map(scopes => {
+                const found = findNode(scopes);
+                return found.node ? [found.node.localName || found.node.nodeName, null] : [null, found.failure];
+              }));
+            })()
+            """;
+        using var answer = await client.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, token);
+        using var result = JsonDocument.Parse(answer.RootElement.GetProperty("result").GetProperty("result").GetProperty("value").GetString()!);
+        return result.RootElement.EnumerateArray().Select(item => (item[0].GetString(), item[1].GetString())).ToArray();
     }
 
     // The tree as recorded, one line per node, in the order the DevTools
     // protocol gives: each node's shadow root before its children. The
     // attribute cut in the recording is not built, and is left out; user
     // agent shadow roots are left out on both sides.
-    private static string Describe(DomDocumentTree tree, long id)
+    // The protocol leaves out text nodes of white space only, so they are
+    // left out here too, and character data is written escaped.
+    internal static string Describe(DomDocumentTree tree, long id)
     {
         var lines = new StringBuilder();
         void Walk(long nodeId, int depth)
         {
             var node = tree.Nodes[nodeId];
+            if (node.NodeType == "text" && (node.Data ?? "").All(character => character is ' ' or '\t' or '\n' or '\r' or '\f'))
+            {
+                return;
+            }
             if (node.NodeType == "shadow-root")
             {
                 var mode = RecordedPaths.ShadowMode(node);
@@ -323,7 +366,7 @@ public sealed class RecordedPageTests : IDisposable
                     .Select(item => $"{Local(item.Key)}={item.Value}")
                     .Order(StringComparer.Ordinal);
                 lines.Append(' ', depth).Append(name).Append(' ').Append(string.Join(" ", attributes))
-                    .Append(' ').Append(node.Data ?? "").Append('\n');
+                    .Append(' ').Append(JsonSerializer.Serialize(node.Data ?? "")).Append('\n');
             }
             if (node.ShadowRootId is { } root)
             {
@@ -339,14 +382,24 @@ public sealed class RecordedPageTests : IDisposable
     }
 
     // The protocol names an attribute by its qualified name.
-    private static string Local(string key) => key switch
+    private static string Local(string key)
     {
-        "{http://www.w3.org/2000/xmlns/}xlink" => "xmlns:xlink",
-        "{http://www.w3.org/1999/xlink}href" => "href",
-        _ => key,
-    };
+        if (!key.StartsWith('{'))
+        {
+            return key;
+        }
+        var end = key.IndexOf('}');
+        var name = key[(end + 1)..];
+        return key[1..end] switch
+        {
+            "http://www.w3.org/2000/xmlns/" when name != "xmlns" => "xmlns:" + name,
+            "http://www.w3.org/XML/1998/namespace" => "xml:" + name,
+            "http://www.w3.org/1999/xlink" => "xlink:" + name,
+            _ => name,
+        };
+    }
 
-    private static string Describe(JsonElement root)
+    internal static string Describe(JsonElement root)
     {
         var lines = new StringBuilder();
         void Walk(JsonElement node, int depth)
@@ -374,7 +427,7 @@ public sealed class RecordedPageTests : IDisposable
                 attributes.Sort(StringComparer.Ordinal);
                 var data = type is 3 or 8 ? node.GetProperty("nodeValue").GetString() : "";
                 lines.Append(' ', depth).Append(node.GetProperty("nodeName").GetString()).Append(' ')
-                    .Append(string.Join(" ", attributes)).Append(' ').Append(data).Append('\n');
+                    .Append(string.Join(" ", attributes)).Append(' ').Append(JsonSerializer.Serialize(data)).Append('\n');
             }
             if (node.TryGetProperty("shadowRoots", out var roots))
             {
@@ -432,12 +485,24 @@ internal sealed class HeadlessChromium : IAsyncDisposable
                 await Task.Delay(100, token);
             }
             var port = int.Parse((await File.ReadAllLinesAsync(portFile, token))[0]);
+            // The page target can be listed a moment after the port is.
             using var http = new HttpClient();
-            using var targets = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/list", token));
-            var page = targets.RootElement.EnumerateArray().First(item => item.GetProperty("type").GetString() == "page");
+            string? address = null;
+            for (var attempt = 0; attempt < 100 && address is null; attempt++)
+            {
+                using var targets = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/list", token));
+                address = targets.RootElement.EnumerateArray()
+                    .Where(item => item.GetProperty("type").GetString() == "page")
+                    .Select(item => item.GetProperty("webSocketDebuggerUrl").GetString())
+                    .FirstOrDefault();
+                if (address is null)
+                {
+                    await Task.Delay(100, token);
+                }
+            }
             var socket = new ClientWebSocket();
             socket.Options.KeepAliveInterval = TimeSpan.Zero;
-            await socket.ConnectAsync(new Uri(page.GetProperty("webSocketDebuggerUrl").GetString()!), token);
+            await socket.ConnectAsync(new Uri(address ?? throw new InvalidOperationException("Chromium listed no page.")), token);
             return new HeadlessChromium(process, socket);
         }
         catch

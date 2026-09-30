@@ -956,6 +956,109 @@ the viewport size with each change, not only in layout checkpoints.
   shadow root; state the time from choosing a frame to the page shown and
   to the check completed.
 
+## Slice 3b implementation
+
+In progress on the `recreation` branch. This section records what is built
+so far and where it differs from the design.
+
+### Built so far
+
+- The slice 2 state (`Recorder.Session`) keeps, for each document, its
+  registered listeners, its pending timers, the latest accessibility data
+  of each DOM node, and the viewport of its latest layout checkpoint. The
+  listener, timer, and accessibility channels are state channels, written
+  to the `browser-state` stream, and the snapshot format is version 2.
+  Recordings made before are read without these parts, as the design
+  allows.
+- `InteractionDocumentState.Current()` gives the focused node, the
+  selection, and each text control's value and selection, from the latest
+  interaction checkpoint and the changes after it.
+- The recorded page (`Recorder.Recreation`): `RecordedPage` writes the
+  short document of the design, with the recorded tree as JSON in a data
+  block that cannot end early, since `<` is escaped, and the builder script
+  (`Builder\builder.js`) allowed by a nonce new for each recreation.
+  `RecordedEvidence` fills the evidence panel from the state, and
+  `RecordedPaths` gives each node's path through its shadow roots.
+- `RecordingFileDocuments` (`Recorder.Database`) lists the candidate
+  documents at a frame and reads the chosen one's state.
+- The player's "Inspect page at this frame" lists the pages at the frame
+  shown and opens the one chosen in the recreation browser of slice 3a.
+
+Not yet built: the recreation browser with the recorder bootstrap and the
+in-memory receiver, the DevTools protocol connection with the viewport and
+focus emulation, the check, and selecting a node inside a closed shadow
+root. Until they are, the page opens at the browser window's size, the
+panel's fidelity reads "not checked", and focus is set by the builder
+without emulation, so it can move when DevTools takes the keyboard.
+
+### Differences from the design
+
+- The document's URL comes from the playback index's `navigation-completed`
+  record, which the index keeps whole, not from the state or its snapshots.
+- The accessibility records are update batches, each naming only the nodes
+  that changed (see accessibility-checkpoint-evidence-model.md), not
+  checkpoints of the whole tree. The state therefore keeps, for each DOM
+  node, the latest record that named it and the time of its batch. Removals
+  of accessibility nodes are not recorded, so a node's data can be older
+  than the frame.
+- "Focusable" is read from the FOCUSABLE state in Chromium's
+  `serializedProperties` text as recorded. That text is Chromium's
+  diagnostic form, not a field of the record contract; the panel says so.
+- Listener, timer, and accessibility records can come before the first DOM
+  record of their document: 98 listener records in the recording of
+  2026-09-29 did. They are held until that record and then applied, and
+  the document's first record time moves to the earliest of them.
+- The recording gives an attribute's namespace and local name, not its
+  prefix. The builder gives `xlink`, `xml`, and `xmlns` attributes the
+  prefixes the HTML parser gives foreign attributes
+  ([HTML standard, adjust foreign attributes](https://html.spec.whatwg.org/multipage/parsing.html#adjust-foreign-attributes)).
+- A pending timer's time remaining is counted from the recording time of
+  the state used, the cut of the frame's basis, not from the frame's time.
+- Running animations and transitions are not read from the recording yet;
+  the panel says so rather than listing none.
+
+### Found while building
+
+- A page can be drawn before its first DOM walk. In the recording of
+  2026-09-29, a product page's first presentation was at 65.52 s and its
+  first DOM walk, at finished parsing, at 66.13 s; its layout and
+  interaction checkpoints began at 65.42 s. At a frame between the two the
+  page cannot be recreated, and the player says so.
+- Template contents are not recorded: the records have no field for them,
+  and the six `template` elements of that recording have no recorded
+  children.
+
+### Tests
+
+- Unit tests: the listeners, timers, accessibility data, and viewport of a
+  document, including records before its first DOM record and records of
+  another document of the same process; snapshots of version 2 and the
+  records after them giving the state of every record; the tree data
+  written for the builder, including namespaces, shadow root fields, manual
+  slot assignment, cut values, and a title that holds `</script>`; paths
+  through open and closed shadow roots, SVG, text, and comments, and none
+  into a user agent shadow root; the evidence read from a state.
+- Integration test, with `RECORDER_RECREATION_CHROMIUM` set: a generated
+  tree the HTML parser cannot return (a `div` directly in a `table`, a `p`
+  in a `p`), with a document type, SVG with `xlink` attributes, an open
+  shadow root with a manually assigned slot, a closed shadow root, a
+  script, an event handler attribute, and a `javascript:` link, is built,
+  and the DOM Chromium then holds, read through every shadow root over the
+  DevTools protocol, equals the tree given. No script, handler, or link
+  runs; the value, caret, and focus of the text control are set; every
+  path in the evidence selects its node through the panel's resolver,
+  except the one inside the closed shadow root, which reports that it
+  cannot be reached. The protocol leaves out text nodes of white space
+  only, so the comparison leaves them out on both sides. On the
+  development machine this passed with a Chromium build of the test
+  framework's own.
+- On the development machine, the same comparison was run on two
+  documents of the recording of 2026-09-29, at 28.2 s and 94.0 s: the
+  built DOM equalled the recorded tree in every node compared (627 and 729
+  lines), and each of the 65 and 80 interactive element paths selected an
+  element of the recorded name. This was a measurement, not a committed
+  test.
+
 ## Text by content hash (agreed, deferred)
 
 Slice 1 records each character data node's data in every checkpoint. Script

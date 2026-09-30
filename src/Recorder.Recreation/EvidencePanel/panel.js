@@ -29,6 +29,34 @@ function milliseconds(value) {
   return `${Number(value).toFixed(1)} ms`;
 }
 
+// A cell of long text, such as an address, which may wrap anywhere.
+function longCell(text) {
+  return element("td", text, { class: "long" });
+}
+
+function optionalMilliseconds(value) {
+  return value === null || value === undefined ? "not recorded" : milliseconds(value);
+}
+
+function describeListener(listener) {
+  const flags = [
+    listener.capture ? "capture" : null,
+    listener.once ? "once" : null,
+    listener.passive ? "passive" : null
+  ].filter(Boolean);
+  let text = listener.eventName;
+  if (flags.length > 0) {
+    text += ` (${flags.join(", ")})`;
+  }
+  if (listener.registrationKind) {
+    text += `, ${listener.registrationKind}`;
+  }
+  if (listener.location) {
+    text += `, at ${listener.location}`;
+  }
+  return text;
+}
+
 function say(text) {
   status.textContent = "";
   // A new text node, so screen readers announce a repeated message.
@@ -167,7 +195,9 @@ function describe(evidence) {
     ["Title", recreation.title],
     ["Frame", seconds(recreation.frameNanoseconds)],
     ["Recording time", seconds(recreation.recordingNanoseconds)],
-    ["Basis", recreation.basis || "not recorded"]
+    ["Basis", recreation.basis || "not recorded"],
+    ["Address", recreation.url || "not recorded"],
+    ["Document", recreation.documentKey || "not recorded"]
   ]) {
     facts.append(element("dt", term), element("dd", value));
   }
@@ -184,35 +214,73 @@ function describe(evidence) {
       "");
   }
 
+  if (evidence.notes && evidence.notes.length > 0) {
+    content.appendChild(element("h2", "Notes on the recreation"));
+    const list = element("ul");
+    for (const item of evidence.notes) {
+      list.appendChild(element("li", item));
+    }
+    content.appendChild(list);
+  }
+
   table(
     "Pending timers",
-    ["Timer", "Kind", "Delay", "Scheduled", "Remaining at the frame", "Scheduled by"],
+    ["Timer", "Kind", "Requested delay", "Effective delay", "Scheduled", "Last run", "Remaining at the frame"],
     evidence.timers.map(item => [
-      String(item.timerId), item.kind, milliseconds(item.delayMilliseconds), seconds(item.scheduledNanoseconds),
-      milliseconds(item.remainingMilliseconds), pathCell(item.owner, `the owner of timer ${item.timerId}`)
+      item.timerId, item.kind, optionalMilliseconds(item.requestedDelayMilliseconds),
+      optionalMilliseconds(item.effectiveDelayMilliseconds), seconds(item.scheduledNanoseconds),
+      item.lastRunNanoseconds === null || item.lastRunNanoseconds === undefined ? "not run" : seconds(item.lastRunNanoseconds),
+      item.remainingMilliseconds === null || item.remainingMilliseconds === undefined
+        ? "no due time"
+        : item.remainingMilliseconds < 0
+          ? `${milliseconds(-item.remainingMilliseconds)} overdue`
+          : milliseconds(item.remainingMilliseconds)
     ]),
     "No timers were pending at the frame.");
 
-  table(
-    "Running animations and transitions",
-    ["Kind", "Name or property", "Target", "Start", "Duration", "Progress"],
-    evidence.animations.map(item => [
-      item.kind, item.name, pathCell(item.target, `the target of ${item.kind} ${item.name}`), seconds(item.startNanoseconds),
-      milliseconds(item.durationMilliseconds), `${(item.progress * 100).toFixed(1)} %`
-    ]),
-    "No animations or transitions were running at the frame.");
+  if (evidence.animationsNotRead) {
+    content.appendChild(element("h2", "Running animations and transitions"));
+    content.appendChild(element("p", evidence.animationsNotRead));
+  } else {
+    table(
+      "Running animations and transitions",
+      ["Kind", "Name or property", "Target", "Start", "Duration", "Progress"],
+      evidence.animations.map(item => [
+        item.kind, item.name, pathCell(item.target, `the target of ${item.kind} ${item.name}`), seconds(item.startNanoseconds),
+        milliseconds(item.durationMilliseconds), `${(item.progress * 100).toFixed(1)} %`
+      ]),
+      "No animations or transitions were running at the frame.");
+  }
 
   table(
     "Interactive elements",
-    ["Element", "Name", "Role", "Focusable", "Listeners", "Path"],
+    ["Element", "Name", "Role", "Focusable", "Listeners", "Accessibility data recorded", "Path"],
     evidence.interactiveElements.map(item => {
       const label = `${item.element} ${item.name || ""}`.trim();
       return [
-        item.element, item.name || "none recorded", item.role || "none recorded", item.focusable ? "yes" : "no",
-        item.listeners.length > 0 ? item.listeners.join(", ") : "none", pathCell(item.node, label)
+        item.element, item.name || "none recorded", item.role || "none recorded",
+        item.focusable === null || item.focusable === undefined ? "not recorded" : item.focusable ? "yes" : "no",
+        longCell(item.listeners.length > 0 ? item.listeners.map(describeListener).join("; ") : "none"),
+        longCell(item.accessibilityNanoseconds === null || item.accessibilityNanoseconds === undefined
+          ? "none"
+          : `${seconds(item.accessibilityNanoseconds)}: ${item.accessibilityProperties || ""}`),
+        pathCell(item.node, label)
       ];
     }),
     "No interactive elements were recorded at the frame.");
+  if (evidence.recreation.source !== "fixed") {
+    content.appendChild(element("p",
+      "An element is listed when a listener is registered on it, or when its latest accessibility data has the FOCUSABLE state. " +
+      "Focusable and the accessibility data are read from Chromium's accessibility property text as recorded, which is a diagnostic form."));
+  }
+
+  if (evidence.otherListeners && evidence.otherListeners.length > 0) {
+    table(
+      "Listeners on other targets",
+      ["Target", "Listener"],
+      evidence.otherListeners.map(item => [item.target, longCell(describeListener(item.listener))]),
+      "");
+  }
 
   const interaction = evidence.interaction;
   content.appendChild(element("h2", "Focus and selection"));
@@ -230,7 +298,7 @@ function describe(evidence) {
   table(
     "Form control values",
     ["Value", "Path"],
-    interaction.formValues.map(item => [item.value, pathCell(item.node, `the control with value ${item.value}`)]),
+    interaction.formValues.map(item => [longCell(item.value), pathCell(item.node, `the control with value ${item.value}`)]),
     "No form control values were recorded at the frame.");
 }
 

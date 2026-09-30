@@ -16,7 +16,11 @@ namespace Recorder.Database.RecordingFiles;
 public sealed record RecordingFilePlaybackResult(
     SessionPlaybackArchive Archive,
     string? Incomplete,
-    string? IndexDerived);
+    string? IndexDerived)
+{
+    /// <summary>The recording's browser documents, for recreating a page at a frame.</summary>
+    public RecordingFileDocuments? Documents { get; init; }
+}
 
 /// <summary>
 /// Opens a recording for playback from its recording file. The file's
@@ -82,7 +86,10 @@ public static class RecordingFilePlayback
                 Timeline = timeline,
                 RecordSource = timeline
             };
-            return new RecordingFilePlaybackResult(archive, reader.Incomplete, derived);
+            return new RecordingFilePlaybackResult(archive, reader.Incomplete, derived)
+            {
+                Documents = new RecordingFileDocuments(reader, index)
+            };
         }
         catch
         {

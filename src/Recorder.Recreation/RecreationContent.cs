@@ -22,6 +22,10 @@ public sealed record RecreationEvidence(
     // Notes on how the recreation was built: values cut in the recording,
     // and what the builder inferred or could not build.
     public IReadOnlyList<string> Notes { get; init; } = [];
+
+    // Why the animations list is not evidence, when it is not: running
+    // animations and transitions are not yet read from a recording.
+    public string? AnimationsNotRead { get; init; }
 }
 
 // Source is "fixed" for slice 3a and "recording" from slice 3b. The frame,

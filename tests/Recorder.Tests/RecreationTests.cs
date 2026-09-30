@@ -210,75 +210,45 @@ public sealed class RecreationTests : IDisposable
         var token = TestContext.Current.CancellationToken;
         var content = FixedRecreation.Create();
         await using var server = await RecreationServer.StartAsync(content, token);
-        var profile = Path.Combine(_directory, "headless-profile");
-        using var process = Process.Start(new ProcessStartInfo(chromium)
-        {
-            ArgumentList =
-            {
-                "--headless=new", $"--user-data-dir={profile}", "--remote-debugging-address=127.0.0.1",
-                "--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check", "about:blank"
-            },
-            UseShellExecute = false,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true
-        })!;
-        try
-        {
-            var portFile = Path.Combine(profile, "DevToolsActivePort");
-            for (var attempt = 0; attempt < 100 && !File.Exists(portFile); attempt++)
-            {
-                await Task.Delay(100, token);
-            }
-            var port = int.Parse((await File.ReadAllLinesAsync(portFile, token))[0]);
-            using var http = new HttpClient();
-            using var targets = JsonDocument.Parse(await http.GetStringAsync($"http://127.0.0.1:{port}/json/list", token));
-            var page = targets.RootElement.EnumerateArray().First(item => item.GetProperty("type").GetString() == "page");
-            using var socket = new ClientWebSocket();
-            await socket.ConnectAsync(new Uri(page.GetProperty("webSocketDebuggerUrl").GetString()!), token);
-            var client = new DevToolsClient(socket);
-            await client.CallAsync("Page.enable", new { }, token);
-            await client.CallAsync("Page.navigate", new { url = server.PageAddress }, token);
-            await client.WaitForEventAsync("Page.loadEventFired", token);
+        await using var browser = await HeadlessChromium.StartAsync(chromium, Path.Combine(_directory, "headless-profile"), token);
+        var client = browser.Client;
+        await client.CallAsync("Page.enable", new { }, token);
+        await client.CallAsync("Page.navigate", new { url = server.PageAddress }, token);
+        await client.WaitForEventAsync("Page.loadEventFired", token);
 
-            var panel = File.ReadAllText(Path.Combine(WriteExtensionForTest(server), "panel.js"));
-            var findNode = panel[panel.IndexOf("function findNode", StringComparison.Ordinal)..panel.IndexOf("// Selects the node", StringComparison.Ordinal)];
-            var evidence = content.Evidence;
-            var paths = evidence.InteractiveElements.Select(item => item.Node)
-                .Concat(evidence.Animations.Select(item => item.Target))
-                .Concat(evidence.Interaction.FormValues.Select(item => item.Node))
-                .Append(evidence.Interaction.Focus!)
-                .ToArray();
-            var expression = $$"""
-                (() => {
-                  {{findNode}}
-                  document.querySelector("#form button").click();
-                  return JSON.stringify({
-                    title: document.title,
-                    found: {{JsonSerializer.Serialize(paths.Select(path => path.Scopes))}}.map(scopes => {
-                      const found = findNode(scopes);
-                      return found.node ? found.node.localName : found.failure;
-                    }),
-                    missing: findNode(["/html[1]/body[1]/main[1]/section[9]"]).failure
-                  });
-                })()
-                """;
-            using var answer = await client.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, token);
-            var value = answer.RootElement.GetProperty("result").GetProperty("result").GetProperty("value").GetString()!;
-            using var result = JsonDocument.Parse(value);
-            Assert.Equal("Fixed recreation", result.RootElement.GetProperty("title").GetString());
-            Assert.Equal("not-found", result.RootElement.GetProperty("missing").GetString());
-            var found = result.RootElement.GetProperty("found").EnumerateArray().Select(item => item.GetString()).ToArray();
-            Assert.Equal(paths.Length, found.Length);
-            for (var index = 0; index < paths.Length; index++)
-            {
-                var expected = paths[index].Scopes[^1].Split('/')[^1].Split('[')[0];
-                Assert.True(expected == found[index], $"{paths[index].Display} selected {found[index]}");
-            }
-        }
-        finally
+        var panel = File.ReadAllText(Path.Combine(WriteExtensionForTest(server), "panel.js"));
+        var findNode = panel[panel.IndexOf("function findNode", StringComparison.Ordinal)..panel.IndexOf("// Selects the node", StringComparison.Ordinal)];
+        var evidence = content.Evidence;
+        var paths = evidence.InteractiveElements.Select(item => item.Node)
+            .Concat(evidence.Animations.Select(item => item.Target))
+            .Concat(evidence.Interaction.FormValues.Select(item => item.Node))
+            .Append(evidence.Interaction.Focus!)
+            .ToArray();
+        var expression = $$"""
+            (() => {
+              {{findNode}}
+              document.querySelector("#form button").click();
+              return JSON.stringify({
+                title: document.title,
+                found: {{JsonSerializer.Serialize(paths.Select(path => path.Scopes))}}.map(scopes => {
+                  const found = findNode(scopes);
+                  return found.node ? found.node.localName : found.failure;
+                }),
+                missing: findNode(["/html[1]/body[1]/main[1]/section[9]"]).failure
+              });
+            })()
+            """;
+        using var answer = await client.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, token);
+        var value = answer.RootElement.GetProperty("result").GetProperty("result").GetProperty("value").GetString()!;
+        using var result = JsonDocument.Parse(value);
+        Assert.Equal("Fixed recreation", result.RootElement.GetProperty("title").GetString());
+        Assert.Equal("not-found", result.RootElement.GetProperty("missing").GetString());
+        var found = result.RootElement.GetProperty("found").EnumerateArray().Select(item => item.GetString()).ToArray();
+        Assert.Equal(paths.Length, found.Length);
+        for (var index = 0; index < paths.Length; index++)
         {
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(CancellationToken.None);
+            var expected = paths[index].Scopes[^1].Split('/')[^1].Split('[')[0];
+            Assert.True(expected == found[index], $"{paths[index].Display} selected {found[index]}");
         }
     }
 
@@ -287,54 +257,5 @@ public sealed class RecreationTests : IDisposable
         var extension = Path.Combine(_directory, "extension-for-test");
         RecreationBrowser.WriteExtension(extension, server.EvidenceAddress);
         return extension;
-    }
-
-    private sealed class DevToolsClient(ClientWebSocket socket)
-    {
-        private int _next;
-
-        public async Task<JsonDocument> CallAsync(string method, object parameters, CancellationToken cancellationToken)
-        {
-            var id = ++_next;
-            var request = JsonSerializer.SerializeToUtf8Bytes(new { id, method, @params = parameters });
-            await socket.SendAsync(request, WebSocketMessageType.Text, true, cancellationToken);
-            while (true)
-            {
-                var message = await ReceiveAsync(cancellationToken);
-                if (message.RootElement.TryGetProperty("id", out var answered) && answered.GetInt32() == id)
-                {
-                    Assert.False(message.RootElement.TryGetProperty("error", out var error), $"{method}: {error}");
-                    return message;
-                }
-                message.Dispose();
-            }
-        }
-
-        public async Task WaitForEventAsync(string method, CancellationToken cancellationToken)
-        {
-            while (true)
-            {
-                using var message = await ReceiveAsync(cancellationToken);
-                if (message.RootElement.TryGetProperty("method", out var name) && name.GetString() == method)
-                {
-                    return;
-                }
-            }
-        }
-
-        private async Task<JsonDocument> ReceiveAsync(CancellationToken cancellationToken)
-        {
-            var buffer = new byte[64 * 1024];
-            using var stream = new MemoryStream();
-            while (true)
-            {
-                var received = await socket.ReceiveAsync(buffer, cancellationToken);
-                stream.Write(buffer, 0, received.Count);
-                if (received.EndOfMessage)
-                {
-                    return JsonDocument.Parse(stream.ToArray());
-                }
-            }
-        }
     }
 }

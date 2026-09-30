@@ -11,6 +11,7 @@ using Microsoft.Win32;
 using Npgsql;
 using Recorder.Coordinator;
 using Recorder.Database;
+using Recorder.Database.RecordingFiles;
 using Recorder.Recreation;
 using Recorder.Session;
 using Recorder.WindowsCapture;
@@ -64,6 +65,7 @@ public partial class MainWindow : Window
     private string? _databaseStartError;
     private SessionAudioPlayer? _audioPlayer;
     private SessionPlaybackArchive? _playbackArchive;
+    private RecordingFileDocuments? _recordedDocuments;
     private HashSet<string> _visibleTimelineChannels = new(StringComparer.Ordinal);
     private long _visibleTimelineEventCount;
 
@@ -670,6 +672,7 @@ public partial class MainWindow : Window
             CloseAudio();
             CloseRecordingFile();
             _playbackArchive = archive;
+            _recordedDocuments = opened.Documents;
             _playbackPositionNanoseconds = 0;
             _displayedFrameIndex = -1;
             TimelineControl.SetSession(
@@ -743,6 +746,7 @@ public partial class MainWindow : Window
     // another recording is opened.
     private void CloseRecordingFile()
     {
+        _recordedDocuments = null;
         (_playbackArchive?.Timeline as IDisposable)?.Dispose();
     }
 
@@ -1139,6 +1143,7 @@ public partial class MainWindow : Window
         PreviousFrameButton.IsEnabled = enabled;
         NextFrameButton.IsEnabled = enabled;
         PlaybackSlider.IsEnabled = enabled;
+        InspectPageButton.IsEnabled = enabled && _recordedDocuments is not null;
         var timelineEnabled = _playbackArchive is not null &&
             _playbackArchive.DurationNanoseconds > 0;
         TimelineZoomSlider.IsEnabled = timelineEnabled;
@@ -1599,6 +1604,86 @@ public partial class MainWindow : Window
         {
             busy.Dispose();
             OpenFixedRecreationButton.IsEnabled = true;
+        }
+    }
+
+    // Slice 3b: recreates a recorded page as it was at the frame shown. The
+    // auditor chooses the page from the top-level documents at the frame. A
+    // recreation already open is closed first, so at most one is open.
+    private async void InspectPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_playbackArchive is null || _recordedDocuments is not { } documents || _displayedFrameIndex < 0)
+        {
+            MessageBox.Show(
+                this,
+                "No frame is shown, or this recording was not read from its recording file.",
+                "Inspect page at this frame",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+        var frame = _playbackArchive.Frames[_displayedFrameIndex].MonotonicNanoseconds;
+        var chromium = ChromiumPathTextBox.Text.Trim();
+        InspectPageButton.IsEnabled = false;
+        PausePlayback();
+        try
+        {
+            IReadOnlyList<RecordedDocumentChoice> choices;
+            using (_busy.Begin("Finding the pages at this frame."))
+            {
+                choices = await Task.Run(() => documents.At(frame));
+            }
+            if (choices.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No top-level page was recorded at or before this frame.",
+                    "Inspect page at this frame",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+            var dialog = new RecordedDocumentDialog(this, FormatTime(frame), choices, FormatTime);
+            if (dialog.ShowDialog() != true || dialog.Chosen is not { } chosen)
+            {
+                return;
+            }
+            using (_busy.Begin("Opening the recreation."))
+            {
+                await CloseRecreationAsync();
+                var content = await Task.Run(() =>
+                {
+                    var found = documents.Document(chosen.Key, frame)
+                        ?? throw new InvalidDataException("The page's state at this frame could not be read from the recording.");
+                    if (found.State!.Dom is null)
+                    {
+                        throw new InvalidDataException("No DOM walk of this page was recorded at or before this frame, so it cannot be recreated here. A page can be drawn before its first DOM walk; a later frame may have one.");
+                    }
+                    var basis = found.Basis is { Basis: "presented", PresentedTime: { } presented }
+                        ? $"the state after the page's last rendering update drawn at or before the frame, drawn at {FormatTime(presented)}"
+                        : "no rendering update of the page was drawn at or before the frame, so this is its state at the frame's composition time";
+                    return RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis);
+                });
+                var directory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Windows A11y Recorder",
+                    "recreations",
+                    Guid.NewGuid().ToString("N"));
+                _recreation = await RecreationSession.OpenAsync(chromium, directory, content, CancellationToken.None);
+            }
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"The page could not be recreated. {exception.Message}",
+                "Inspect page at this frame",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            InspectPageButton.IsEnabled = _playbackArchive is not null && _recordedDocuments is not null;
         }
     }
 

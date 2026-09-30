@@ -23,6 +23,12 @@ public sealed record DatabasePlaybackResult(
     public string? RecordingFile { get; init; }
 
     /// <summary>
+    /// The browser documents of the recording file, for recreating a page at
+    /// a frame, or null when the archive was read from the evidence tables.
+    /// </summary>
+    public RecordingFiles.RecordingFileDocuments? Documents { get; init; }
+
+    /// <summary>
     /// What was not read as written: the file read without its summary, or
     /// its playback index derived from its chunks. Null when neither.
     /// </summary>
@@ -105,6 +111,7 @@ public sealed class DatabasePlaybackReader(NpgsqlDataSource dataSource)
                 return new DatabasePlaybackResult(opened.Archive, status, null)
                 {
                     RecordingFile = path,
+                    Documents = opened.Documents,
                     FileNote = notes.Length == 0 ? null : string.Join(" ", notes)
                 };
             }
