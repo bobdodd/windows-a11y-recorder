@@ -581,7 +581,8 @@ not part of these slices.
    not replayed into it, since a replay would start CSS transitions and
    animations the page had finished. The page is shown only after it and
    its resources have loaded.
-7. Precision is checked, not assumed. The instrumented Chromium takes a
+7. Precision is checked, not assumed (revised 2026-09-30: the check is a
+   background guard; see "The check is a background guard"). The instrumented Chromium takes a
    layout checkpoint of the recreation with the code that recorded the
    page, and every node is compared with the recording: its bounding
    rectangle exactly, and each of the 283 recorded computed-style
@@ -592,7 +593,7 @@ not part of these slices.
    exact at the level of recorded boxes and styles, and states that limit.
 8. A difference is listed, never hidden by forcing the recorded value.
 9. A panel of our own in DevTools, the evidence panel, shows at the frame:
-   the fidelity result and each difference; the pending script timers with
+   the pending script timers with
    their type, delay, time scheduled, and time remaining; the running CSS
    animations and transitions with their name or property, start, duration,
    and progress; the interactive elements with their path (see "Paths
@@ -940,9 +941,35 @@ checked again.
 Until slice 4, differences are expected wherever the page used style sheets
 from files, web fonts, or images, and wherever script changed a style sheet.
 
+### The check is a background guard
+
+Decided by the owner on 2026-09-30: "This check, if it exists at all, is in
+the background and the most the user gets is a toast warning that the
+rendering is off compared the the recording. In practice it should almost
+NEVER happen or the tool is useless."
+
+A recreation is therefore required to match the recording, and the check is
+a guard against the recorder failing that requirement, not a feature of the
+evidence panel. It changes the design above and the proposal below:
+
+- The check runs in the background. The auditor sees nothing of it unless
+  the recreation differs from the recording, and then only a notification
+  in the player that the recreation differs from the recording.
+- The panel has no fidelity section and lists no differences.
+- The differences are written to the recorder's diagnostics, for fixing the
+  recorder, and are not evidence.
+- Until slice 4 records style sheets, fonts, and images, the recreation
+  cannot match the recording on most pages, and the check would warn on
+  almost every recreation. The check is therefore built after slice 4, and
+  slice 4 is where the requirement is met.
+
+The proposal below is kept as the design of what the check compares and
+when it runs; its parts on the panel are replaced by this section.
+
 ### Building the check (proposed)
 
-Proposed on 2026-09-30, for agreement before it is built.
+Proposed on 2026-09-30, for agreement before it is built. Its result is
+shown as "The check is a background guard" states.
 
 The recreation browser. The recorder's own receiver
 (`BrowserEvidenceReceiver`) and launcher (`ChromiumLauncher`) start the
@@ -1131,7 +1158,8 @@ so far and where it differs from the design.
 
 Not yet built: the recreation browser with the recorder bootstrap and the
 in-memory receiver, the check, and selecting a node inside a closed shadow
-root. Until they are, the panel's fidelity reads "not checked".
+root. The check is built after slice 4 (see "The check is a background
+guard").
 
 ### Differences from the design
 
