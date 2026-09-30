@@ -11,6 +11,7 @@ using Microsoft.Win32;
 using Npgsql;
 using Recorder.Coordinator;
 using Recorder.Database;
+using Recorder.Recreation;
 using Recorder.Session;
 using Recorder.WindowsCapture;
 
@@ -58,6 +59,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _announcedHealthReasons =
         new(StringComparer.Ordinal);
     private SessionCoordinator? _coordinator;
+    private RecreationSession? _recreation;
     private SessionDatabase? _database;
     private string? _databaseStartError;
     private SessionAudioPlayer? _audioPlayer;
@@ -1539,6 +1541,7 @@ public partial class MainWindow : Window
         }
 
         await DisposeCoordinatorAsync();
+        await CloseRecreationAsync();
         if (_database is not null)
         {
             var busy = _busy.Begin("Stopping the database.");
@@ -1561,6 +1564,52 @@ public partial class MainWindow : Window
 
         _allowClose = true;
         Application.Current.Shutdown();
+    }
+
+    // Slice 3a: opens the fixed test page. A recreation already open is
+    // closed first, so at most one is open.
+    private async void OpenFixedRecreationButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenFixedRecreationButton.IsEnabled = false;
+        var busy = _busy.Begin("Opening the recreation.");
+        try
+        {
+            await CloseRecreationAsync();
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Windows A11y Recorder",
+                "recreations",
+                Guid.NewGuid().ToString("N"));
+            _recreation = await RecreationSession.OpenAsync(
+                ChromiumPathTextBox.Text.Trim(),
+                directory,
+                FixedRecreation.Create(),
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"The recreation could not be opened. {exception.Message}",
+                "Recreation",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            busy.Dispose();
+            OpenFixedRecreationButton.IsEnabled = true;
+        }
+    }
+
+    private async Task CloseRecreationAsync()
+    {
+        if (_recreation is not null)
+        {
+            var recreation = _recreation;
+            _recreation = null;
+            await recreation.DisposeAsync();
+        }
     }
 
     private async Task DisposeCoordinatorAsync()

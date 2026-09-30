@@ -12,7 +12,9 @@ listed in "Slice 2 implementation". Its hour recording on the target
 machine did not meet the design's limits, and the revision in "Revision
 after the hour recording" is implemented and waits for a second hour
 recording. Slices 3 to 5 are designed in "Slice 3 design", proposed
-2026-09-29 and not agreed; it revises the decision below.
+2026-09-29 and agreed the same day; it revises the decision below. Slice
+3a is implemented on the `recreation` branch and not yet tested on the
+target machine; see "Slice 3a implementation".
 Recording text by content hash is agreed and deferred; see "Text by content
 hash".
 
@@ -524,9 +526,9 @@ once; at most 1.2 MB of compressed departed documents; index records
 without snapshots. These are not the target machine's figures, and a
 92.6 s recording says nothing about an hour.
 
-## Slice 3 design: inspecting the whole page at a recorded instant (proposed)
+## Slice 3 design: inspecting the whole page at a recorded instant
 
-Proposed 2026-09-29 and not agreed. This section revises the first
+Proposed and agreed 2026-09-29. This section revises the first
 decision and the third slice as first proposed, and divides the work into
 slices 3 to 5.
 
@@ -676,6 +678,92 @@ light DOM, and its assigned slot is shown with it.
 - How the page's scripts are kept from running while the evidence panel
   and the precision check can still act on the page, for example a content
   security policy that allows no page script, which slice 3a tests.
+
+## Slice 3a implementation
+
+Implemented 2026-09-29 on the `recreation` branch, which starts from
+`frame-state`.
+
+### Parts
+
+- `Recorder.Recreation`, a new project:
+  - `RecreationContent` and its records: the page, and the evidence the
+    panel shows, including `NodePath`, a path as its list of scopes and the
+    mode of each shadow root crossed, shown as agreed in "Paths through
+    shadow roots".
+  - `FixedRecreation`: the fixed page and evidence written in code. The page
+    has a header and navigation, a form, a custom element with a
+    declarative open shadow root, an SVG image, and 60 paragraphs below the
+    first screen, so the whole page can be explored. It also has a script
+    and an event handler attribute that change the title if they run. The
+    evidence panel states that none of it is evidence.
+  - `RecreationServer`: Kestrel on 127.0.0.1 at a random port, answering
+    only under a random 256-bit token and only to requests whose Host header
+    names that address and port. The page is served with a content security
+    policy that allows no script, so neither the page's scripts nor its
+    event handler attributes run, and allows nothing from another origin.
+  - `RecreationBrowser`: writes the profile and the evidence panel, and
+    opens the page in the instrumented Chromium without the recorder
+    bootstrap, so it records nothing. DevTools opens for the page
+    (`--auto-open-devtools-for-tabs`) in a window of its own, set by the
+    profile's DevTools dock preference, so the page and DevTools can each
+    be moved to any display and maximized there. Closing kills the browser
+    and its child processes and removes the profile.
+  - `RecreationSession`: the server and browser of one recreation.
+  - The evidence panel, an unpacked extension of our own
+    (`EvidencePanel\`), loaded with `--load-extension` and
+    `--disable-extensions-except`. Google removed `--load-extension` from
+    Chrome branded builds only, from Chrome 137
+    ([Chromium extensions group](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/1-g8EFx2BBY/m/8IEC1RCVAQAJ)),
+    and the instrumented build is not branded. The panel reads the evidence
+    from the server and inserts every value as text, never as markup, since
+    recorded values are page content. Selecting a row selects the node in
+    the Elements panel through `chrome.devtools.inspectedWindow.eval` and
+    `inspect()`.
+- The player: "Open recreation with fixed content", in the Instrumented
+  Chromium group, opens the fixed page; a recreation already open is closed
+  first, and closing the player closes it.
+
+### Differences from the design
+
+- The evidence panel is a tab in the DevTools window, so it moves with
+  DevTools rather than in a window of its own.
+- The recreation states that it is a recreation in its window title, which
+  is the page's own, and in the evidence panel, not in the page, since text
+  added to the page would change its layout.
+- Blink's `document.evaluate` does not take a shadow root as its context
+  node: it fails with "The node provided is '#document-fragment', which is
+  not a valid context node type", found on the development machine. The
+  panel's path resolver therefore matches the first step of each scope
+  after the first against the shadow root's children itself, and evaluates
+  the rest of the scope from the node that step selects. Closed shadow
+  roots cannot be reached from page script, so the panel reports that it
+  cannot select a node inside one; slice 3b settles how DevTools selects
+  such a node.
+
+### Tests
+
+- Unit tests: paths through shadow roots and their validation; the fixed
+  page and evidence; the server's token, Host check, methods, and headers,
+  including the content security policy; the evidence panel's files, its
+  address of the evidence, and that it inserts no markup; the browser's
+  arguments, which include no recorder bootstrap or remote debugging
+  switch, and the undocked DevTools preference; and that no recreation is
+  opened, and no profile left, without the browser.
+- Integration test, run when `RECORDER_RECREATION_CHROMIUM` names a Chromium
+  executable: the fixed recreation is opened without a window, a click on
+  the button with the event handler leaves the title unchanged, the page's
+  script has not changed it, and every path in the evidence selects the
+  node it names through the panel's own resolver. On the development
+  machine it passed with a Chromium build of the test framework's own; it
+  has not yet run with the instrumented build.
+- System test on the target machine, still to be run: open the recreation
+  from the player; see the page and DevTools in windows of their own; move
+  each to another display and maximize it; see the Evidence tab and its
+  rows; select rows, including the buttons inside the shadow root, and see
+  each node selected in the Elements panel; see that the title is "Fixed
+  recreation" after clicking Save; scroll to the end of the page; close the
+  player and see that no Chromium process of the recreation remains.
 
 ## Text by content hash (agreed, deferred)
 

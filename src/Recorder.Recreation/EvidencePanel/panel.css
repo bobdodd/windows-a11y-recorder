@@ -1,0 +1,17 @@
+:root { color-scheme: light dark; }
+body { font: 13px/1.45 system-ui, sans-serif; margin: 0; background: Canvas; color: CanvasText; }
+main { padding: 0.5rem 1rem 2rem; }
+h1 { font-size: 1.2rem; margin: 0.5rem 0; }
+h2 { font-size: 1rem; margin: 1.25rem 0 0.4rem; }
+#notice { border-left: 4px solid Highlight; padding: 0.25rem 0.6rem; margin: 0.25rem 0 0.75rem; }
+#status:not(:empty) { border: 1px solid GrayText; padding: 0.25rem 0.6rem; margin-bottom: 0.75rem; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 0.5rem; }
+caption { text-align: left; font-weight: 600; padding: 0.25rem 0; }
+th, td { text-align: left; vertical-align: top; border: 1px solid GrayText; padding: 0.2rem 0.4rem; }
+th { font-weight: 600; }
+code { font-family: Consolas, ui-monospace, monospace; overflow-wrap: anywhere; }
+button { font: inherit; margin: 0 0.25rem 0.2rem 0; }
+button:focus-visible { outline: 2px solid Highlight; outline-offset: 1px; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 1rem; margin: 0; }
+dt { font-weight: 600; }
+dd { margin: 0; }

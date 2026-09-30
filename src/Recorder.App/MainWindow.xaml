@@ -132,6 +132,12 @@
                          IsEnabled="{Binding IsChecked, ElementName=FullWalkCheckBox}"
                          AutomationProperties.Name="Full walk interval in updates"
                          AutomationProperties.HelpText="A whole number from 1. Each page is walked in full at every Nth mutation delivery and every Nth rendering update." />
+                <Button x:Name="OpenFixedRecreationButton"
+                        Margin="0,12,0,0"
+                        HorizontalAlignment="Left"
+                        Content="Open recreation with _fixed content"
+                        AutomationProperties.HelpText="Opens a fixed test page in the instrumented Chromium with DevTools and the evidence panel. The page is written in code and is not evidence from a recording."
+                        Click="OpenFixedRecreationButton_Click" />
               </StackPanel>
             </GroupBox>
 
