@@ -562,8 +562,9 @@ not part of this slice.
    hovering a node in DevTools outlines its recorded box on the captured
    frame.
 5. A panel of our own in DevTools, the evidence panel, lists at the frame:
-   the pending timers with their type, delay, time scheduled, and time
-   remaining; the interactive elements with their XPath, registered
+   the pending script timers with their type, delay, time scheduled, and
+   time remaining; the running CSS animations and transitions with their
+   property or name, start, duration, and progress at the frame; the interactive elements with their XPath, registered
    listeners and event types, focusability, and recorded role; and form
    control values, focus, and selection. Selecting a row selects the node
    in the Elements panel. The evidence panel reads records; it does not
@@ -576,7 +577,9 @@ not part of this slice.
    evidence to show.
 8. The inspector opens within 1 s of choosing a frame, as slice 2 requires
    of the state.
-9. The inspector listens only on the loopback interface, with a random port
+9. The frame view and DevTools are separate windows, each of which can be
+   moved to any display and maximized there (agreed 2026-09-29).
+10. The inspector listens only on the loopback interface, with a random port
    and a token of its own in its address, and closes with the player.
 
 ### Parts
@@ -633,10 +636,11 @@ recording.
 2. The recorded DOM, computed style, boxes, form values, focus, and
    selection at a chosen frame, from the slice 2 reader, with the captured
    frame of the recording.
-3. Listeners, timers, and the accessibility checkpoint added to the state
+3. Listeners, script timers, and the accessibility checkpoint added to the state
    of slice 2, and shown in DevTools and the evidence panel.
 4. What steps 1 to 3 show to be missing from the records, for example the
-   viewport's position on the desktop, recorded by the browser in a new
+   viewport's position on the desktop and the CSS animations and
+   transitions running at a frame, which are not recorded now, recorded by the browser in a new
    protocol version and designed then.
 
 ### Required tests
@@ -663,8 +667,6 @@ recording.
   changes. The offset of the page's viewport within the browser window is
   not recorded, and the window can move without a foreground change, so a
   recorded box cannot yet be placed on the captured frame exactly.
-- Which timers the evidence panel lists: script timers only, or also CSS
-  animations and transitions.
 - Whether iframe documents are in scope.
 - XPath has no step into a shadow root, so a path inside one needs a stated
   notation for each shadow root crossed.
