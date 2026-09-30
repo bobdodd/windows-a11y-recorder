@@ -6377,3 +6377,65 @@ class RecreationIntegrationTests(unittest.TestCase):
             [],
             INTEGRATE.describe_signature_mismatches("patched", first, signatures),
         )
+
+    BOX_FRAGMENT_BUILDER_SOURCE = (
+        '#include "third_party/blink/renderer/core/layout/'
+        'box_fragment_builder.h"\n'
+        "\n"
+        "namespace blink {\n"
+        "\n"
+        "const LayoutResult* BoxFragmentBuilder::ToBoxFragment(\n"
+        "    WritingMode block_or_line_writing_mode) {\n"
+        "  Finalize();\n"
+        "\n"
+        "  if (box_type_ == PhysicalFragment::kNormalBox && node_ &&\n"
+        "      node_.IsBlockInInline()) [[unlikely]] {\n"
+        "    SetIsBlockInInline();\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "}  // namespace blink\n"
+    )
+
+    def test_imposes_recorded_box_fragments_before_finalizing_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box_fragment_builder.cc"
+            path.write_text(self.BOX_FRAGMENT_BUILDER_SOURCE, encoding="utf-8")
+            INTEGRATE.patch_blink_box_fragment_builder(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_box_fragment_builder(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER)
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+        for include in INTEGRATE.BLINK_RECREATION_FRAGMENT_INCLUDES:
+            self.assertEqual(1, first.count(include + "\n"))
+        # The helper precedes the function, and the recorded values are set
+        # before the builder is finalized.
+        helper = first.index(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER)
+        function = first.index("BoxFragmentBuilder::ToBoxFragment(")
+        hook = first.index(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK)
+        finalize = first.index("  Finalize();")
+        self.assertLess(helper, function)
+        self.assertLess(function, hook)
+        self.assertLess(hook, finalize)
+        hook_text = INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK
+        self.assertIn("a11y_recorder::IsRecreationMode()", hook_text)
+        self.assertIn("GetWritingDirection().IsHorizontalLtr()", hook_text)
+        self.assertIn("!GetConstraintSpace().HasBlockFragmentation()", hook_text)
+        self.assertIn("recorder_child->IsOnlyForNode()", hook_text)
+        self.assertIn("SetChildOffset(recorder_index,", hook_text)
+        self.assertIn(
+            '"data-a11y-recorded-fragment"',
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER,
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", first, signatures),
+        )

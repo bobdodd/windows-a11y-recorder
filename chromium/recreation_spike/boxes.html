@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<!--
+  Recreation mode, feasibility step 1b: recorded box fragments. See
+  docs/architecture/page-recreation.md, "1b, recorded box fragments".
+
+  An element's data-a11y-recorded-fragment attribute holds "x y width
+  height" in CSS pixels: its border-box offset in its parent fragment and
+  its border-box size. For every recorded element here, the parent fragment
+  is its parent element's box, except inside the multi-column container,
+  where it is a column; those elements are marked data-a11y-check="visual".
+  Each recorded value differs from what the style sheet produces.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Recreation mode step 1b: recorded box fragments</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; }
+  h2 { font-size: 16px; margin: 24px 0 4px; }
+  p.note { margin: 0 0 8px; }
+  .case { position: relative; width: 400px; height: 130px; border: 1px solid rgb(0, 0, 0); }
+  .item { box-sizing: border-box; border: 2px solid rgb(0, 0, 0); font-size: 12px; }
+  .one { background-color: rgb(255, 200, 200); }
+  .two { background-color: rgb(200, 255, 200); }
+  .three { background-color: rgb(200, 200, 255); }
+  #a, #b { width: 150px; height: 40px; }
+  #float { float: left; width: 80px; height: 80px; }
+  #absolute { position: absolute; left: 0; top: 0; width: 50px; height: 50px; }
+  #flex { display: flex; }
+  #flex > .item { width: 60px; height: 60px; }
+  #grid { display: grid; grid-template-columns: 100px 100px 100px; grid-auto-rows: 50px; }
+  #table { border-collapse: separate; border-spacing: 2px; border: 1px solid rgb(0, 0, 0); }
+  #table td { border: 1px solid rgb(0, 0, 0); padding: 2px; }
+  #columns { column-count: 2; column-gap: 20px; }
+  #columns > .item { height: 30px; margin: 0 0 4px; }
+</style>
+</head>
+<body>
+<h1>Recreation mode step 1b: recorded box fragments</h1>
+
+<h2>Normal flow</h2>
+<p class="note">Recorded: B above A, B 300 by 50 at 10, 10; A 200 by 40 at 10, 70. Style sheet: A above B, each 150 by 40.</p>
+<div class="case" id="flow">
+  <div class="item one" id="a" data-a11y-recorded-fragment="10 70 200 40">A</div>
+  <div class="item two" id="b" data-a11y-recorded-fragment="10 10 300 50">B</div>
+</div>
+
+<h2>Float and absolute position</h2>
+<p class="note">Recorded: the float 60 by 60 at 300, 20; the absolutely positioned box 100 by 40 at 150, 50. Style sheet: the float 80 by 80 at the left, the absolute box 50 by 50 at the top left.</p>
+<div class="case" id="placed">
+  <div class="item one" id="float" data-a11y-recorded-fragment="300 20 60 60">Float</div>
+  <div class="item two" id="absolute" data-a11y-recorded-fragment="150 50 100 40">Absolute</div>
+</div>
+
+<h2>Flex</h2>
+<p class="note">Recorded: the items in reverse order, 3 at the left, of different sizes. Style sheet: 1, 2, 3 in a row, each 60 by 60.</p>
+<div class="case" id="flex">
+  <div class="item one" id="flex1" data-a11y-recorded-fragment="300 20 80 60">1</div>
+  <div class="item two" id="flex2" data-a11y-recorded-fragment="160 10 60 80">2</div>
+  <div class="item three" id="flex3" data-a11y-recorded-fragment="10 30 100 40">3</div>
+</div>
+
+<h2>Grid</h2>
+<p class="note">Recorded: 2 wide across the top, 3 and 1 below it. Style sheet: 1, 2, 3 in three 100 pixel columns.</p>
+<div class="case" id="grid">
+  <div class="item one" id="grid1" data-a11y-recorded-fragment="220 60 80 50">1</div>
+  <div class="item two" id="grid2" data-a11y-recorded-fragment="10 10 180 40">2</div>
+  <div class="item three" id="grid3" data-a11y-recorded-fragment="110 60 90 50">3</div>
+</div>
+
+<h2>Table</h2>
+<p class="note">Recorded: the table 300 by 100 at 20, 10; the second row 40 high; in each row the two cells swapped, B and D at the left. Style sheet: the table sized to its content, A and C at the left.</p>
+<div class="case" id="tablecase">
+  <table id="table" data-a11y-recorded-fragment="20 10 300 100">
+    <tbody>
+      <tr id="row1">
+        <td class="one" id="cellA" data-a11y-recorded-fragment="150 0 140 30">A</td>
+        <td class="two" id="cellB" data-a11y-recorded-fragment="0 0 146 30">B</td>
+      </tr>
+      <tr id="row2" data-a11y-recorded-fragment="2 34 294 40">
+        <td class="three" id="cellC" data-a11y-recorded-fragment="150 0 140 40">C</td>
+        <td class="one" id="cellD" data-a11y-recorded-fragment="0 0 146 40">D</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>Columns</h2>
+<p class="note">Recorded, checked by eye: in each column the boxes swapped, and moved 40 pixels right within their column. Style sheet: 1 and 2 in the first column, 3 and 4 in the second. Their sizes are not recorded here, as they are laid out in columns.</p>
+<div class="case" id="columns">
+  <div class="item one" id="col1" data-a11y-check="visual" data-a11y-recorded-fragment="40 34 150 30">1</div>
+  <div class="item two" id="col2" data-a11y-check="visual" data-a11y-recorded-fragment="40 0 150 30">2</div>
+  <div class="item three" id="col3" data-a11y-check="visual" data-a11y-recorded-fragment="40 34 150 30">3</div>
+  <div class="item one" id="col4" data-a11y-check="visual" data-a11y-recorded-fragment="40 0 150 30">4</div>
+</div>
+</body>
+</html>

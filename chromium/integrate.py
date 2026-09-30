@@ -6773,6 +6773,140 @@ def patch_blink_inspector_css_agent(path: Path) -> None:
     write_patched(path, text)
 
 
+# Recreation mode, feasibility step 1b: recorded box fragments. See
+# docs/architecture/page-recreation.md, "1b, recorded box fragments".
+BLINK_BOX_FRAGMENT_BUILDER_INCLUDE = (
+    '#include "third_party/blink/renderer/core/layout/box_fragment_builder.h"'
+)
+BLINK_RECREATION_FRAGMENT_INCLUDES = (
+    "#include <cmath>",
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/layout/geometry/'
+    'physical_rect.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_to_number.h"',
+)
+BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR = (
+    "\nconst LayoutResult* BoxFragmentBuilder::ToBoxFragment(\n"
+    "    WritingMode block_or_line_writing_mode) {\n"
+)
+BLINK_RECREATION_FRAGMENT_HELPER_MARKER = "RecorderRecordedFragment("
+BLINK_RECREATION_FRAGMENT_HELPER = """
+namespace {
+
+// Windows A11y Recorder recreation mode: the recorded box fragment of a node,
+// its border-box offset in its parent fragment and its border-box size, in
+// layout units. In feasibility step 1b it is read from the element's
+// data-a11y-recorded-fragment attribute, "x y width height" in CSS pixels.
+// Returns nothing for a node without one or with a malformed one.
+std::optional<PhysicalRect> RecorderRecordedFragment(const Node* node) {
+  const auto* element = DynamicTo<Element>(node);
+  if (!element) {
+    return std::nullopt;
+  }
+  const AtomicString& recorder_text =
+      element->getAttribute(AtomicString("data-a11y-recorded-fragment"));
+  if (recorder_text.IsNull()) {
+    return std::nullopt;
+  }
+  const Vector<String> recorder_parts =
+      recorder_text.GetString().SplitSkippingEmpty(' ');
+  if (recorder_parts.size() != 4u) {
+    return std::nullopt;
+  }
+  const LayoutObject* recorder_layout_object = element->GetLayoutObject();
+  const double recorder_zoom =
+      recorder_layout_object
+          ? recorder_layout_object->StyleRef().EffectiveZoom()
+          : 1.0;
+  Vector<LayoutUnit> recorder_values;
+  for (const String& recorder_part : recorder_parts) {
+    const std::optional<double> recorder_value =
+        recorder_part.Is8Bit() ? CharactersToDouble(recorder_part.Span8())
+                               : CharactersToDouble(recorder_part.Span16());
+    if (!recorder_value || !std::isfinite(*recorder_value)) {
+      return std::nullopt;
+    }
+    recorder_values.push_back(
+        LayoutUnit::FromDoubleRound(*recorder_value * recorder_zoom));
+  }
+  if (recorder_values[2] < LayoutUnit() || recorder_values[3] < LayoutUnit()) {
+    return std::nullopt;
+  }
+  return PhysicalRect(recorder_values[0], recorder_values[1],
+                      recorder_values[2], recorder_values[3]);
+}
+
+}  // namespace
+"""
+BLINK_RECREATION_FRAGMENT_ANCHOR = (
+    "  Finalize();\n\n"
+    "  if (box_type_ == PhysicalFragment::kNormalBox && node_ &&\n"
+)
+BLINK_RECREATION_FRAGMENT_MARKER = "recorder_own_fragment"
+BLINK_RECREATION_FRAGMENT_HOOK = """\
+  // Windows A11y Recorder recreation mode: the box's recorded size and its
+  // children's recorded offsets replace those its layout algorithm produced.
+  // Only a fragment that is the whole of its box takes a recorded fragment,
+  // and only in a horizontal, left to right writing mode, in which the
+  // builder's logical offsets equal the recorded physical ones.
+  if (a11y_recorder::IsRecreationMode() && node_ &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    if (!GetConstraintSpace().HasBlockFragmentation() &&
+        !IsFragmentainerBoxType() && !PreviousBreakToken()) {
+      if (const std::optional<PhysicalRect> recorder_own_fragment =
+              RecorderRecordedFragment(node_.GetDOMNode())) {
+        size_.inline_size = recorder_own_fragment->Width();
+        size_.block_size = recorder_own_fragment->Height();
+      }
+    }
+    for (wtf_size_t recorder_index = 0; recorder_index < children_.size();
+         ++recorder_index) {
+      const auto* recorder_child = DynamicTo<PhysicalBoxFragment>(
+          children_[recorder_index].fragment.Get());
+      if (!recorder_child || !recorder_child->IsCSSBox() ||
+          !recorder_child->IsOnlyForNode()) {
+        continue;
+      }
+      if (const std::optional<PhysicalRect> recorder_child_fragment =
+              RecorderRecordedFragment(recorder_child->GetNode())) {
+        SetChildOffset(recorder_index,
+                       LogicalOffset(recorder_child_fragment->X(),
+                                     recorder_child_fragment->Y()));
+      }
+    }
+  }
+
+"""
+
+
+def patch_blink_box_fragment_builder(path: Path) -> None:
+    """Imposes the recreation mode's recorded box fragments."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_BOX_FRAGMENT_BUILDER_INCLUDE,
+        BLINK_RECREATION_FRAGMENT_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+        BLINK_RECREATION_FRAGMENT_HELPER,
+        BLINK_RECREATION_FRAGMENT_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_FRAGMENT_ANCHOR,
+        BLINK_RECREATION_FRAGMENT_HOOK,
+        BLINK_RECREATION_FRAGMENT_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
 def patch_blink_cookie_jar(path: Path) -> None:
     text = read_source(path)
     text = add_includes_after(
@@ -11788,6 +11922,15 @@ def main() -> int:
         / "core"
         / "inspector"
         / "inspector_css_agent.cc"
+    )
+    patch_blink_box_fragment_builder(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "layout"
+        / "box_fragment_builder.cc"
     )
     cookie_store = (
         source / "third_party" / "blink" / "renderer" / "modules"

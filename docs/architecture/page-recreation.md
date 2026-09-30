@@ -1503,6 +1503,19 @@ without it:
 Tests: a unit test of the integration script's new patch; the check above
 as the system test.
 
+Built on the `recreation` branch: `patch_blink_box_fragment_builder` in
+`chromium/integrate.py` writes the helper `RecorderRecordedFragment` and
+the hook at the start of `ToBoxFragment`, and
+`chromium/recreation_spike/boxes.html` is the test page. The patch was
+applied to the checkout's `box_fragment_builder.cc`, copied from the target
+machine, and applied again without change. As with 1a, the unit test checks
+the text of the patch, not its compilation. In an unmodified Chromium in
+the development sandbox, the comparison snippet reported Blink's own layout
+for every compared element, as expected without the switch. The builder's
+scrollable overflow and the data it gathers from children as they are
+added, such as their bounds for anchor queries, are not recomputed from the
+recorded offsets.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
