@@ -779,9 +779,9 @@ Chromium process of the recreation remained. Moving the page and DevTools
 to other displays was not tested, since only one display was connected,
 and remains to be tested.
 
-## Slice 3b design: the recorded page at a chosen frame (proposed)
+## Slice 3b design: the recorded page at a chosen frame
 
-Proposed 2026-09-29 and not agreed. Slice 3b replaces the fixed content of
+Proposed and agreed 2026-09-29. Slice 3b replaces the fixed content of
 slice 3a with the page recorded at a frame the auditor chooses, checks the
 recreation against the recording, and fills the evidence panel from the
 recording. What slice 4 records, and the documents of frames (slice 5), are
