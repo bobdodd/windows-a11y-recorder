@@ -765,6 +765,16 @@ Implemented 2026-09-29 on the `recreation` branch, which starts from
   recreation" after clicking Save; scroll to the end of the page; close the
   player and see that no Chromium process of the recreation remains.
 
+### On the target machine
+
+2026-09-29, at b9c4d8b: the seven recreation tests passed with the
+instrumented build as `RECORDER_RECREATION_CHROMIUM`, including the
+integration test. At aab4934 the integration test's checks had passed, but
+removing its profile failed while Chromium's child processes still held a
+file in it, so the test now retries the removal. The fixed recreation opened
+from the player and was reported to run very well. The system test's
+individual checks are not recorded separately.
+
 ## Text by content hash (agreed, deferred)
 
 Slice 1 records each character data node's data in every checkpoint. Script
