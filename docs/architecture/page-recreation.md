@@ -1331,21 +1331,74 @@ On the target machine, with revision 06dcc58, as reported on 2026-09-30:
   `getComputedStyle()`; without it, every one gave the style sheet value;
   the two pages looked different accordingly.
 - DevTools' Computed pane showed the recorded `width` of `#box`, 237.5px,
-  and its recorded `background-color`, rgb(0, 90, 160), and under the
-  latter only the style sheet's rgb(200, 0, 0) from
+  and its recorded `background-color`, rgb(0, 90, 160). Expanded,
+  `background-color` listed only the style sheet's rgb(200, 0, 0) from
   `#box` at styles.html line 19. DevTools names no source for the recorded
   value, since the recorded declarations are not a rule its style
-  inspection knows. Making them a source of their own in DevTools' style
-  inspection is to be designed.
-
+  inspection knows.
 - With the switch, after the `#box` rule's width was changed to 300px in
   the Styles pane, `getComputedStyle()` still gave the recorded 237.5px.
 - The Styles pane for `#box` showed the user agent style sheet's `div`
-  rule, `display: block`. No block holding the recorded declarations was
-  reported.
+  rule, `display: block`, and no block holding the recorded declarations.
+  Of the `#box` rule's declarations, none was shown as overridden until
+  its width was changed to 300px; the width was then shown struck
+  through, and the height and background color were not. Why the edit
+  changed this was not examined.
 
-Not yet reported: the same edit without the switch, and whether the Styles
-pane marks the `#box` rule's declarations as overridden.
+Not yet reported: the same edit without the switch.
+
+#### 1a addition: recorded styles in DevTools (proposed)
+
+The check found that DevTools shows the recorded values as the computed
+style but names no source for them, and shows the style sheet declarations
+they override as if they were in effect. The addition makes the recorded
+declarations a source of their own in DevTools' style inspection. Blink's
+side of DevTools only is changed; the DevTools front end is not.
+
+Under the switch, `InspectorCSSAgent::getMatchedStylesForNode`
+(`core/inspector/inspector_css_agent.cc`, line 1461) adds, for an element
+with recorded declarations, one more matched rule after all the others:
+
+- Its selector text is `Recorded style`, so the Styles pane shows a block
+  under that name.
+- Its declarations are the recorded ones, each marked important, as
+  imposed in style resolution.
+- It has no style sheet, so DevTools offers no editing of it, as fits a
+  read-only snapshot.
+- Its origin is the author origin, the one Blink gives it in the cascade.
+
+The DevTools front end orders a node's styles by the order Blink gives and
+then by importance
+(`front_end/core/sdk/CSSMatchedStyles.ts`), so it should show the block
+first, its declarations in effect, and each style sheet declaration of a
+recorded property struck through; the Computed pane should list the block
+as the source of each recorded value. The same block is added for each
+ancestor in the inherited entries, so an inherited recorded value is shown
+as inherited from that ancestor. These are expectations from reading the
+front end's source, to be confirmed on the target machine.
+
+In the step the block's declarations are read from the same attribute as in
+style resolution; when the recorded state comes over its connection, both
+read it there.
+
+Not changed by the addition: a style sheet rule can still be edited in the
+Styles pane. An edit has no effect on a recorded property. When every
+computed property is recorded, as the recreation will record them, no edit
+has an effect on the page.
+
+Checked on the target machine, with the test page under the switch:
+
+- For `#box`, the Styles pane shows the `Recorded style` block first, with
+  its width, height and background color, and the `#box` rule's width,
+  height and background color struck through.
+- The block cannot be edited.
+- The Computed pane lists the block as the source of each recorded value.
+- For `#child`, the Styles pane shows the block of `#parent` as inherited,
+  with its color.
+- Without the switch, no block is shown.
+
+Tests: a unit test of the integration script's new patch; the check above
+as the system test.
 
 ### To be settled
 
