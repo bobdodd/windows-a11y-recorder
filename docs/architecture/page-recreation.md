@@ -1321,6 +1321,25 @@ patch and of the switch check the text of the hook and of the bridge; they
 do not compile it. Whether it compiles and behaves as intended is found by
 the build and the check on the target machine.
 
+On the target machine, with revision 06dcc58, as reported on 2026-09-30:
+
+- The build first stopped at the V8 context snapshot step. The generator,
+  run by hand with its output written elsewhere, exited with 0, and the
+  build was run again; its failure was most likely the output file held
+  open by a running instrumented Chromium, which was not confirmed.
+- With the switch, every recorded property compared as equal in
+  `getComputedStyle()`; without it, every one gave the style sheet value;
+  the two pages looked different accordingly.
+- DevTools' Computed pane showed the recorded `background-color` of `#box`,
+  rgb(0, 90, 160), and under it only the style sheet's rgb(200, 0, 0) from
+  `#box` at styles.html line 19. DevTools names no source for the recorded
+  value, since the recorded declarations are not a rule its style
+  inspection knows. Making them a source of their own in DevTools' style
+  inspection is to be designed.
+
+Not yet reported: a change to the style sheet rule in the Styles pane, and
+what the Styles pane shows for the recorded values.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
