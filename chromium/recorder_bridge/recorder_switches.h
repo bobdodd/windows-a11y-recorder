@@ -28,6 +28,12 @@ inline constexpr int kBridgeInitializationFailureExitCode = 0xA11B;
 // and exit without starting. A file written beside the executable could be
 // separated from the executable it describes, so the recorder asks the binary
 // it is about to run rather than trusting anything alongside it.
+// Opens pages in the recreation mode, in which Blink shows a recorded page
+// from its recorded values. The browser passes it to each renderer it starts,
+// whether or not a recorder is connected. See
+// docs/architecture/page-recreation.md, "Slice 3 revision".
+inline constexpr char kRecreationSwitch[] = "a11y-recorder-recreation";
+
 inline constexpr char kPrintProtocolVersionSwitch[] =
     "a11y-recorder-print-protocol-version";
 

@@ -1794,6 +1794,16 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
       (process_type.empty() ? std::string("<empty>") : process_type) +
       " child " + base::NumberToString(child_process_id) + ".");
 
+  // The recreation mode needs no recorder connection, so it is passed to a
+  // renderer before the bootstrap is looked for.
+  if (process_type == kChromiumRendererProcess &&
+      base::CommandLine::ForCurrentProcess()->HasSwitch(kRecreationSwitch) &&
+      !command_line->HasSwitch(kRecreationSwitch)) {
+    command_line->AppendSwitch(kRecreationSwitch);
+    WriteDiagnosticLine("Recorder passed the recreation mode to renderer " +
+                        base::NumberToString(child_process_id) + ".");
+  }
+
   const std::optional<std::string> metadata =
       base::Environment::Create()->GetVar(kChildBootstrapMetadataEnvironment);
   if (!metadata.has_value()) {
@@ -1851,6 +1861,12 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
   WriteDiagnosticLine("Attached recorder bootstrap to " + process_type +
                       " child " + base::NumberToString(child_process_id) + ".");
   return true;
+}
+
+bool IsRecreationMode() {
+  static const bool recreation_mode =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(kRecreationSwitch);
+  return recreation_mode;
 }
 
 RecorderPipeClient* GetProcessRecorderClient() {

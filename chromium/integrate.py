@@ -6570,6 +6570,70 @@ def insert_before_once(
     return replace_once(text, anchor, f"{block}{anchor}", path)
 
 
+# Recreation mode, feasibility step 1a: recorded styles. See
+# docs/architecture/page-recreation.md, "The feasibility step".
+BLINK_STYLE_RESOLVER_INCLUDE = (
+    '#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"'
+)
+BLINK_RECREATION_STYLE_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/css/css_property_value_set.h"',
+    '#include "third_party/blink/renderer/core/css/parser/css_parser.h"',
+)
+BLINK_RECREATION_STYLE_ANCHOR = (
+    "\n}\n\nconst ComputedStyle& StyleResolver::StyleForViewport() {\n"
+)
+BLINK_RECREATION_STYLE_MARKER = "recorder_recorded_style"
+BLINK_RECREATION_STYLE_HOOK = """
+  // Windows A11y Recorder recreation mode: an element's recorded computed
+  // style is added as its last author declarations, important and attached
+  // to the element, so it wins over every style sheet rule, the element's
+  // own style attribute, and animations. In feasibility step 1a the recorded
+  // style is read from the element's data-a11y-recorded-style attribute.
+  if (a11y_recorder::IsRecreationMode() && element.IsStyledElement() &&
+      !state.IsForPseudoElement()) {
+    const AtomicString& recorder_recorded_style =
+        element.getAttribute(AtomicString("data-a11y-recorded-style"));
+    if (!recorder_recorded_style.IsNull()) {
+      const ImmutableCSSPropertyValueSet* recorder_parsed =
+          CSSParser::ParseInlineStyleDeclaration(recorder_recorded_style,
+                                                 &element);
+      auto* recorder_imposed =
+          MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+      for (unsigned recorder_index = 0;
+           recorder_index < recorder_parsed->PropertyCount();
+           ++recorder_index) {
+        const CSSPropertyValue& recorder_property =
+            recorder_parsed->PropertyAt(recorder_index);
+        recorder_imposed->SetProperty(recorder_property.Name(),
+                                      recorder_property.Value(),
+                                      /*important=*/true);
+      }
+      collector.BeginAddingAuthorRulesForTreeScope(element.GetTreeScope());
+      collector.AddElementStyleProperties(recorder_imposed,
+                                          CascadeOrigin::kAuthor,
+                                          /*is_cacheable=*/false,
+                                          /*is_inline_style=*/true);
+    }
+  }"""
+
+
+def patch_blink_style_resolver(path: Path) -> None:
+    """Adds the recreation mode's recorded styles to rule matching."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_STYLE_RESOLVER_INCLUDE, BLINK_RECREATION_STYLE_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_STYLE_ANCHOR,
+        BLINK_RECREATION_STYLE_HOOK,
+        BLINK_RECREATION_STYLE_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
 def patch_blink_cookie_jar(path: Path) -> None:
     text = read_source(path)
     text = add_includes_after(
@@ -11566,6 +11630,16 @@ def main() -> int:
         / "core"
         / "loader"
         / "cookie_jar.cc"
+    )
+    patch_blink_style_resolver(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "css"
+        / "resolver"
+        / "style_resolver.cc"
     )
     cookie_store = (
         source / "third_party" / "blink" / "renderer" / "modules"

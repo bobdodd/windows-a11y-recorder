@@ -1310,6 +1310,17 @@ without it:
 Tests: unit tests of the integration script's new patch and of the switch
 passed to renderers; the check above as the system test.
 
+Built on the `recreation` branch: the switch in
+`chromium/recorder_bridge/recorder_switches.h`, passed to renderers in
+`AppendRecorderBootstrapToChildProcess` before the bootstrap is looked for;
+`IsRecreationMode()` in the bridge; the hook, written by
+`patch_blink_style_resolver` in `chromium/integrate.py`; and the test page.
+The patch was applied to the checkout's `style_resolver.cc`, copied from the
+target machine, and applied again without change. The unit tests of the
+patch and of the switch check the text of the hook and of the bridge; they
+do not compile it. Whether it compiles and behaves as intended is found by
+the build and the check on the target machine.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the

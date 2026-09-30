@@ -47,6 +47,11 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
                                            int child_process_id,
                                            std::string* error);
 
+// Returns whether this process runs in the recreation mode: the browser was
+// started with --a11y-recorder-recreation, which it passes to its renderers.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool IsRecreationMode();
+
 // Appends a non-secret startup diagnostic when the opt-in bridge log
 // environment variable is present. This works before Chromium logging starts.
 COMPONENT_EXPORT(RECORDER_BRIDGE)

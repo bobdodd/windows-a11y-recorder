@@ -6202,3 +6202,100 @@ class NetworkServiceCookieNameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecreationIntegrationTests(unittest.TestCase):
+    """The recreation mode's switch and its recorded styles hook."""
+
+    STYLE_RESOLVER_SOURCE = (
+        '#include "third_party/blink/renderer/core/css/resolver/'
+        'style_resolver.h"\n'
+        "\n"
+        "#include <optional>\n"
+        "\n"
+        "void StyleResolver::MatchAllRules(StyleResolverState& state,\n"
+        "                                  ElementRuleCollector& collector,\n"
+        "                                  bool include_smil_properties) {\n"
+        "  Element& element = state.GetElement();\n"
+        "  MatchAuthorRules(element, collector);\n"
+        "\n"
+        "  if (element.IsStyledElement() && !state.IsForPseudoElement()) {\n"
+        "    collector.BeginAddingAuthorRulesForTreeScope("
+        "element.GetTreeScope());\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "const ComputedStyle& StyleResolver::StyleForViewport() {\n"
+        "  return *builder.TakeStyle();\n"
+        "}\n"
+    )
+
+    def test_adds_recorded_styles_last_in_rule_matching_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(self.STYLE_RESOLVER_SOURCE, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_STYLE_HOOK))
+        for include in INTEGRATE.BLINK_RECREATION_STYLE_INCLUDES:
+            self.assertEqual(1, first.count(include + "\n"))
+        # The recorded declarations come after every other author rule of
+        # the element, at the end of MatchAllRules.
+        match_all_rules = first.index("void StyleResolver::MatchAllRules(")
+        author_rules = first.index("MatchAuthorRules(element, collector);")
+        hook = first.index(INTEGRATE.BLINK_RECREATION_STYLE_HOOK)
+        viewport = first.index("StyleResolver::StyleForViewport()")
+        self.assertLess(match_all_rules, author_rules)
+        self.assertLess(author_rules, hook)
+        self.assertLess(hook, viewport)
+        self.assertEqual(
+            "\n}\n\nconst ComputedStyle& StyleResolver::StyleForViewport()",
+            first[
+                hook + len(INTEGRATE.BLINK_RECREATION_STYLE_HOOK) : viewport
+                + len("StyleResolver::StyleForViewport()")
+            ],
+        )
+        # Only under the switch, important, attached to the element, and not
+        # kept in the matched properties cache.
+        hook_text = INTEGRATE.BLINK_RECREATION_STYLE_HOOK
+        self.assertIn("a11y_recorder::IsRecreationMode()", hook_text)
+        self.assertIn("/*important=*/true", hook_text)
+        self.assertIn("/*is_inline_style=*/true", hook_text)
+        self.assertIn("/*is_cacheable=*/false", hook_text)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(0, signatures["IsRecreationMode"])
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", first, signatures),
+        )
+
+    def test_the_switch_is_passed_to_renderers_without_a_recorder(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        switches = (bridge / "recorder_switches.h").read_text(encoding="utf-8")
+        self.assertIn(
+            'inline constexpr char kRecreationSwitch[] = '
+            '"a11y-recorder-recreation";',
+            switches,
+        )
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        start = source.index("bool AppendRecorderBootstrapToChildProcess(")
+        end = source.index("\n}\n", start)
+        function = source[start:end]
+        appended = function.index("command_line->AppendSwitch(kRecreationSwitch);")
+        # Passed before the bootstrap metadata is looked for, so a browser
+        # started without a recorder passes it too, and only to renderers.
+        self.assertLess(
+            appended, function.index("kChildBootstrapMetadataEnvironment")
+        )
+        condition = function[: appended]
+        self.assertIn("process_type == kChromiumRendererProcess", condition)
+        self.assertIn(
+            "base::CommandLine::ForCurrentProcess()->HasSwitch(kRecreationSwitch)",
+            condition,
+        )
