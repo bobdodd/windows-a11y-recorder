@@ -970,6 +970,17 @@ check boxes and radio buttons and the selected options of `select`
 elements, which are properties, not attributes, and are not recorded; and
 the viewport size with each change, not only in layout checkpoints.
 
+Found while building slice 3b (see "Found while building"), and added with
+the owner's agreement on 2026-09-30:
+
+- A DOM walk of each document no later than its first presentation, so
+  that a page can be recreated at any frame that shows it. In the
+  recording of 2026-09-29 a product page was drawn at 65.52 s and first
+  walked at 66.13 s.
+- The contents of `template` elements. The records have no field for them,
+  so the six `template` elements of that recording have no recorded
+  children.
+
 ### Required tests
 
 - Unit tests: the tree data written for the builder, including namespaces,
@@ -1066,10 +1077,10 @@ root. Until they are, the panel's fidelity reads "not checked".
   2026-09-29, a product page's first presentation was at 65.52 s and its
   first DOM walk, at finished parsing, at 66.13 s; its layout and
   interaction checkpoints began at 65.42 s. At a frame between the two the
-  page cannot be recreated, and the player says so.
+  page cannot be recreated, and the player says so. Added to slice 4.
 - Template contents are not recorded: the records have no field for them,
   and the six `template` elements of that recording have no recorded
-  children.
+  children. Added to slice 4.
 
 ### Tests
 
