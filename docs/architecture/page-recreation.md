@@ -1410,6 +1410,15 @@ generated `css.h`. As with 1a, the unit test checks the text of the patch,
 not its compilation. DevTools shows each recorded declaration with
 `!important`, as Blink reports an important declaration.
 
+On the target machine, with revision 979b17e, as reported on 2026-09-30,
+the build succeeded and every check above passed: the Styles pane showed
+the `Recorded style` block for `#box` first, with its three recorded
+values, and the `#box` rule's width, height and background color struck
+through; the block could not be edited; the Computed pane listed the block
+as the source of the recorded background color; for `#child`, the Styles
+pane showed the block of `div#parent` as inherited, with its color; and
+without the switch no block was shown.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
