@@ -302,6 +302,49 @@ function describe(evidence) {
     "No form control values were recorded at the frame.");
 }
 
+// Navigations the recorder refused, read from the recorder every second
+// while the panel is open, each new one announced.
+let blockedShown = 0;
+let blockedList = null;
+
+function showBlocked(items) {
+  if (items.length === blockedShown) {
+    return;
+  }
+  if (!blockedList) {
+    content.appendChild(element("h2", "Navigations blocked"));
+    content.appendChild(element("p",
+      "The recreation does not leave the recorded page. Each attempt to load another page in the recreation browser, such as a followed link, is refused and listed here."));
+    blockedList = element("ul");
+    content.appendChild(blockedList);
+  }
+  for (const item of items.slice(blockedShown)) {
+    const where = item.inRecreationTab ? "in the recreation's tab" : "in a new tab, which was closed";
+    blockedList.appendChild(longItem(`${new Date(item.time).toLocaleTimeString()}: ${item.url}, ${where}`));
+    say(`Navigation to ${item.url} was blocked; the recreation does not leave the recorded page.`);
+  }
+  blockedShown = items.length;
+}
+
+function longItem(text) {
+  const item = element("li", text);
+  item.className = "long";
+  return item;
+}
+
+async function watchBlocked(address) {
+  try {
+    const response = await fetch(address, { cache: "no-store" });
+    if (response.ok) {
+      showBlocked(await response.json());
+    }
+  } catch (error) {
+    // The recorder has closed this recreation; the panel stops asking.
+    return;
+  }
+  setTimeout(() => watchBlocked(address), 1000);
+}
+
 async function load() {
   try {
     const config = await (await fetch(chrome.runtime.getURL("config.json"))).json();
@@ -310,6 +353,7 @@ async function load() {
       throw new Error(`the recorder answered ${response.status}`);
     }
     describe(await response.json());
+    watchBlocked(config.evidenceAddress.replace(/evidence\.json$/, "blocked.json"));
   } catch (error) {
     notice.textContent = `The evidence could not be read from the recorder: ${error.message}. The recorder may have closed this recreation.`;
   }

@@ -8,7 +8,7 @@ h2 { font-size: 1rem; margin: 1.25rem 0 0.4rem; }
 table { border-collapse: collapse; width: 100%; margin-bottom: 0.5rem; }
 caption { text-align: left; font-weight: 600; padding: 0.25rem 0; }
 th, td { text-align: left; vertical-align: top; border: 1px solid GrayText; padding: 0.2rem 0.4rem; overflow-wrap: break-word; }
-td.long { overflow-wrap: anywhere; }
+td.long, li.long { overflow-wrap: anywhere; }
 th { font-weight: 600; }
 code { font-family: Consolas, ui-monospace, monospace; overflow-wrap: anywhere; }
 button { font: inherit; margin: 0 0.25rem 0.2rem 0; }

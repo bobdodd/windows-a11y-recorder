@@ -46,6 +46,7 @@ public sealed class RecreationServer : IAsyncDisposable
     private readonly byte[] _evidence;
     private readonly string _policy;
     private readonly byte[]? _builder;
+    private readonly List<BlockedNavigation> _blocked = [];
 
     private RecreationServer(WebApplication application, string token, RecreationContent content)
     {
@@ -67,6 +68,28 @@ public sealed class RecreationServer : IAsyncDisposable
     public string PageAddress => BaseAddress;
 
     public string EvidenceAddress => BaseAddress + "evidence.json";
+
+    public string BlockedAddress => BaseAddress + "blocked.json";
+
+    // Records a navigation the recreation browser refused, for the panel.
+    public void AddBlocked(BlockedNavigation navigation)
+    {
+        lock (_blocked)
+        {
+            _blocked.Add(navigation);
+        }
+    }
+
+    public IReadOnlyList<BlockedNavigation> Blocked
+    {
+        get
+        {
+            lock (_blocked)
+            {
+                return [.. _blocked];
+            }
+        }
+    }
 
     public static async Task<RecreationServer> StartAsync(RecreationContent content, CancellationToken cancellationToken)
     {
@@ -128,6 +151,10 @@ public sealed class RecreationServer : IAsyncDisposable
             case "evidence.json":
                 response.ContentType = "application/json; charset=utf-8";
                 body = _evidence;
+                break;
+            case "blocked.json":
+                response.ContentType = "application/json; charset=utf-8";
+                body = JsonSerializer.SerializeToUtf8Bytes(Blocked, EvidenceJson);
                 break;
             default:
                 response.StatusCode = StatusCodes.Status404NotFound;

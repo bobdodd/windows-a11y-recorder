@@ -317,7 +317,7 @@ public sealed class RecordedPageTests : IDisposable
 
     // The local name of the node each path selects in the page, or why none.
     internal static async Task<IReadOnlyList<(string? Name, string? Failure)>> ResolveAsync(
-        string findNode, IReadOnlyList<NodePath> paths, DevToolsConnection client, CancellationToken token)
+        string findNode, IReadOnlyList<NodePath> paths, TestDevToolsClient client, CancellationToken token)
     {
         var expression = $$"""
             (() => {
@@ -459,10 +459,10 @@ internal sealed class HeadlessChromium : IAsyncDisposable
     {
         _process = process;
         _socket = socket;
-        Client = new DevToolsConnection(socket);
+        Client = new TestDevToolsClient(socket);
     }
 
-    public DevToolsConnection Client { get; }
+    public TestDevToolsClient Client { get; }
 
     public static async Task<HeadlessChromium> StartAsync(string executable, string profile, CancellationToken token)
     {
@@ -522,7 +522,7 @@ internal sealed class HeadlessChromium : IAsyncDisposable
     }
 }
 
-internal sealed class DevToolsConnection(ClientWebSocket socket)
+internal sealed class TestDevToolsClient(ClientWebSocket socket)
 {
     private int _next;
 
@@ -568,5 +568,151 @@ internal sealed class DevToolsConnection(ClientWebSocket socket)
                 return JsonDocument.Parse(stream.ToArray());
             }
         }
+    }
+}
+
+// The recreation browser held to the recreation over the DevTools protocol,
+// with RECORDER_RECREATION_CHROMIUM set.
+public sealed class RecreationControlTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "recreation-control-tests-" + Guid.NewGuid().ToString("N"));
+
+    public void Dispose()
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(_directory))
+                {
+                    Directory.Delete(_directory, recursive: true);
+                }
+                return;
+            }
+            catch (Exception exception) when (attempt < 40 && exception is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(250);
+            }
+        }
+    }
+
+    [Fact]
+    public void OnlyTheRecreationAndDevToolsMayBeLoaded()
+    {
+        const string page = "http://127.0.0.1:5000/token/";
+        Assert.True(RecreationControl.IsAllowed(page, page));
+        Assert.True(RecreationControl.IsAllowed(page + "?reload", page));
+        Assert.True(RecreationControl.IsAllowed("devtools://devtools/bundled/devtools_app.html", page));
+        Assert.False(RecreationControl.IsAllowed("http://127.0.0.1:5000/other/", page));
+        Assert.False(RecreationControl.IsAllowed("https://www.cnib.ca/en", page));
+        Assert.False(RecreationControl.IsAllowed("chrome://settings/", page));
+        Assert.False(RecreationControl.IsAllowed("data:text/html,x", page));
+    }
+
+    // A followed link, a link to a new tab, and a form submission are each
+    // refused; the page stays, its DOM unchanged, the new tab is closed, and
+    // the recorded viewport is emulated.
+    [Fact]
+    public async Task TheRecreationDoesNotLeaveThePage()
+    {
+        if (Environment.GetEnvironmentVariable("RECORDER_RECREATION_CHROMIUM") is not { } chromium)
+        {
+            return;
+        }
+        var token = TestContext.Current.CancellationToken;
+        var content = new RecreationContent(
+            """
+            <!DOCTYPE html><html><head><title>Held</title></head><body>
+            <p><a id="away" href="https://example.test/away">away</a></p>
+            <p><a id="tab" href="https://example.test/tab" target="_blank">tab</a></p>
+            <form id="form" action="https://example.test/form"><button id="submit">submit</button></form>
+            </body></html>
+            """,
+            FixedRecreation.Create().Evidence)
+        {
+            Viewport = new RecreationViewport(800, 600, 1, 1),
+        };
+        await using var session = await RecreationSession.OpenAsync(
+            chromium, Path.Combine(_directory, "recreation"), content, token, ["--headless=new"]);
+
+        using var http = new HttpClient();
+        var list = $"http://127.0.0.1:{session.DevToolsAddress.Port}/json/list";
+        string? address = null;
+        for (var attempt = 0; attempt < 100 && address is null; attempt++)
+        {
+            using var targets = JsonDocument.Parse(await http.GetStringAsync(list, token));
+            address = targets.RootElement.EnumerateArray()
+                .Where(item => item.GetProperty("type").GetString() == "page" &&
+                               item.GetProperty("url").GetString() == session.PageAddress)
+                .Select(item => item.GetProperty("webSocketDebuggerUrl").GetString())
+                .FirstOrDefault();
+            if (address is null)
+            {
+                await Task.Delay(100, token);
+            }
+        }
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(new Uri(address!), token);
+        var client = new TestDevToolsClient(socket);
+
+        async Task<string> Evaluate(string expression)
+        {
+            using var answer = await client.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, token);
+            return answer.RootElement.GetProperty("result").GetProperty("result").GetProperty("value").ToString();
+        }
+        async Task Click(string id)
+        {
+            using var rectangle = JsonDocument.Parse(await Evaluate(
+                $"JSON.stringify((r => [r.x + r.width / 2, r.y + r.height / 2])(document.getElementById('{id}').getBoundingClientRect()))"));
+            var x = rectangle.RootElement[0].GetDouble();
+            var y = rectangle.RootElement[1].GetDouble();
+            foreach (var type in new[] { "mousePressed", "mouseReleased" })
+            {
+                using var _ = await client.CallAsync("Input.dispatchMouseEvent", new { type, x, y, button = "left", clickCount = 1 }, token);
+            }
+        }
+        async Task WaitForBlocked(int count)
+        {
+            for (var attempt = 0; attempt < 100 && session.Blocked.Count < count; attempt++)
+            {
+                await Task.Delay(100, token);
+            }
+        }
+
+        Assert.Equal("800x600", await Evaluate("`${innerWidth}x${innerHeight}`"));
+        var before = await Evaluate("document.documentElement.outerHTML");
+
+        await Click("away");
+        await WaitForBlocked(1);
+        await Click("tab");
+        await WaitForBlocked(2);
+        await Click("submit");
+        await Task.Delay(1000, token);
+
+        var blocked = session.Blocked;
+        using (var seen = JsonDocument.Parse(await http.GetStringAsync(list, token)))
+        {
+            Assert.True(blocked.Count >= 2, $"{string.Join(", ", blocked)} | {string.Join(" ; ", seen.RootElement.EnumerateArray().Select(item => item.GetProperty("type").GetString() + " " + item.GetProperty("url").GetString()![..Math.Min(60, item.GetProperty("url").GetString()!.Length)]))}");
+        }
+        Assert.Equal("https://example.test/away", blocked[0].Url);
+        Assert.True(blocked[0].InRecreationTab);
+        Assert.Equal("https://example.test/tab", blocked[1].Url);
+        Assert.False(blocked[1].InRecreationTab);
+        // The form is stopped by the page's content security policy, before
+        // any request, so it is not listed.
+        Assert.Equal(2, blocked.Count);
+        Assert.Equal(session.PageAddress, await Evaluate("location.href"));
+        Assert.Equal(before, await Evaluate("document.documentElement.outerHTML"));
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            using var targets = JsonDocument.Parse(await http.GetStringAsync(list, token));
+            if (targets.RootElement.EnumerateArray().Count(item => item.GetProperty("type").GetString() == "page" &&
+                    !item.GetProperty("url").GetString()!.StartsWith("devtools://", StringComparison.Ordinal)) == 1)
+            {
+                return;
+            }
+            await Task.Delay(100, token);
+        }
+        Assert.Fail("The tab opened by the link was not closed.");
     }
 }

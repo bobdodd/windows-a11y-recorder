@@ -1,37 +1,52 @@
 namespace Recorder.Recreation;
 
-// One open recreation: the server that holds it and the browser that shows
-// it. Disposing it closes the browser, stops the server, and removes the
-// profile.
+// One open recreation: the server that holds it, the browser that shows it,
+// and the DevTools protocol control that holds the browser to it. Disposing
+// it closes the browser, stops the server, and removes the profile.
 public sealed class RecreationSession : IAsyncDisposable
 {
     private readonly RecreationServer _server;
     private readonly RecreationBrowser _browser;
+    private readonly RecreationControl _control;
 
-    private RecreationSession(RecreationServer server, RecreationBrowser browser)
+    private RecreationSession(RecreationServer server, RecreationBrowser browser, RecreationControl control)
     {
         _server = server;
         _browser = browser;
+        _control = control;
     }
 
     public string PageAddress => _server.PageAddress;
 
     public bool BrowserHasExited => _browser.HasExited;
 
+    public IReadOnlyList<BlockedNavigation> Blocked => _server.Blocked;
+
+    public Uri DevToolsAddress { get; private init; } = null!;
+
     // The directory is a new folder of its own for this recreation.
     public static async Task<RecreationSession> OpenAsync(
         string executablePath,
         string directory,
         RecreationContent content,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IEnumerable<string>? extraArguments = null)
     {
         var server = await RecreationServer.StartAsync(content, cancellationToken);
+        RecreationBrowser? browser = null;
         try
         {
-            return new RecreationSession(server, RecreationBrowser.Open(executablePath, directory, server));
+            browser = RecreationBrowser.Open(executablePath, directory, server, extraArguments);
+            var address = await browser.DevToolsAddressAsync(cancellationToken);
+            var control = await RecreationControl.StartAsync(address, server.PageAddress, content.Viewport, server.AddBlocked, cancellationToken);
+            return new RecreationSession(server, browser, control) { DevToolsAddress = address };
         }
         catch
         {
+            if (browser is not null)
+            {
+                await browser.DisposeAsync();
+            }
             await server.DisposeAsync();
             throw;
         }
@@ -39,6 +54,7 @@ public sealed class RecreationSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await _control.DisposeAsync();
         await _browser.DisposeAsync();
         await _server.DisposeAsync();
     }

@@ -159,7 +159,7 @@ public sealed class RecreationTests : IDisposable
     }
 
     [Fact]
-    public void TheBrowserOpensThePageInItsOwnProfileWithDevToolsInItsOwnWindow()
+    public void TheBrowserOpensInItsOwnProfileWithDevToolsInItsOwnWindowAndItsProtocolPort()
     {
         var profile = Path.Combine(_directory, RecreationBrowser.ProfileFolder);
         var extension = Path.Combine(_directory, RecreationBrowser.ExtensionFolder);
@@ -171,16 +171,20 @@ public sealed class RecreationTests : IDisposable
                 preferences.RootElement.GetProperty("devtools").GetProperty("preferences").GetProperty("currentDockState").GetString());
         }
 
-        var start = RecreationBrowser.CreateStartInfo("chrome.exe", profile, extension, "http://127.0.0.1:5000/token/");
+        var start = RecreationBrowser.CreateStartInfo("chrome.exe", profile, extension);
         var arguments = start.ArgumentList.ToArray();
         Assert.Contains($"--user-data-dir={Path.GetFullPath(profile)}", arguments);
         Assert.Contains($"--load-extension={Path.GetFullPath(extension)}", arguments);
         Assert.Contains($"--disable-extensions-except={Path.GetFullPath(extension)}", arguments);
         Assert.Contains("--auto-open-devtools-for-tabs", arguments);
-        Assert.Equal("http://127.0.0.1:5000/token/", arguments[^1]);
+        // The browser opens a blank tab; the recorder opens the page in it
+        // once it holds the browser over the DevTools protocol, on a port
+        // the browser chooses on the loopback interface.
+        Assert.Equal("about:blank", arguments[^1]);
+        Assert.Contains("--remote-debugging-port=0", arguments);
+        Assert.DoesNotContain(arguments, argument => argument.StartsWith("--remote-debugging-address", StringComparison.Ordinal));
         // Without the bootstrap switch the instrumented browser records nothing.
         Assert.DoesNotContain(arguments, argument => argument.StartsWith("--a11y-recorder", StringComparison.Ordinal));
-        Assert.DoesNotContain(arguments, argument => argument.StartsWith("--remote-debugging", StringComparison.Ordinal));
     }
 
     [Fact]

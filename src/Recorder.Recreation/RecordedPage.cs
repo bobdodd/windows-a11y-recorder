@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Recorder.Session;
@@ -57,6 +58,22 @@ public static class RecordedPage
         {
             notes.Add($"{cut} nodes have an attribute value or character data cut in the recording; those values are not built.");
         }
+        RecreationViewport? viewport = null;
+        if (state.Viewport is { } recorded)
+        {
+            viewport = new RecreationViewport(recorded.Width, recorded.Height, recorded.DevicePixelRatio, recorded.LayoutZoomFactor);
+            notes.Add($"The viewport is shown at {recorded.Width.ToString(CultureInfo.InvariantCulture)} by {recorded.Height.ToString(CultureInfo.InvariantCulture)} CSS pixels and a device pixel ratio of {recorded.DevicePixelRatio.ToString(CultureInfo.InvariantCulture)}, from the page's latest layout checkpoint, recorded at {(recorded.Time / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s. The window may have been resized after it.");
+            // Chromium's layout zoom factor includes the device pixel ratio,
+            // so a factor other than the ratio means the page was zoomed.
+            if (Math.Abs(recorded.LayoutZoomFactor - recorded.DevicePixelRatio) > 1e-6)
+            {
+                notes.Add($"The recorded layout zoom factor, {recorded.LayoutZoomFactor.ToString(CultureInfo.InvariantCulture)}, differs from the device pixel ratio, so the page may have been zoomed; browser zoom is not set in the recreation.");
+            }
+        }
+        else
+        {
+            notes.Add("No layout checkpoint of the page was recorded at or before the frame, so the viewport is the browser window's.");
+        }
         notes.Add("Element namespaces are not recorded: an element named in capitals is built in the HTML namespace, and any other in the namespace of an svg or math ancestor.");
         var evidence = RecordedEvidence.Create(
             state,
@@ -69,7 +86,10 @@ public static class RecordedPage
         return new RecreationContent(
             Markup(Tree(state), DocumentTypeName(tree, DocumentNodeId(tree)), nonce),
             evidence,
-            nonce);
+            nonce)
+        {
+            Viewport = viewport,
+        };
     }
 
     public static byte[] Builder()

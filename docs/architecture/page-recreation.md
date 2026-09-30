@@ -748,7 +748,8 @@ Implemented 2026-09-29 on the `recreation` branch, which starts from
   including the content security policy; the evidence panel's files, its
   address of the evidence, and that it inserts no markup; the browser's
   arguments, which include no recorder bootstrap or remote debugging
-  switch, and the undocked DevTools preference; and that no recreation is
+  switch (slice 3b adds the remote debugging port; see "Leaving the
+  recreation"), and the undocked DevTools preference; and that no recreation is
   opened, and no profile left, without the browser.
 - Integration test, run when `RECORDER_RECREATION_CHROMIUM` names a Chromium
   executable: the fixed recreation is opened without a window, a click on
@@ -858,6 +859,39 @@ in slice 4. The viewport size is recorded only in layout checkpoints, so a
 window resized after the latest checkpoint is recreated at the older size;
 the check will show it, and recording the viewport size with each change is
 added to slice 4.
+
+### Leaving the recreation
+
+A recreation is a static copy of a recorded page, but its links and forms
+are live elements: a followed link would load the live site in the
+recreation's tab, in place of the recorded page. On the target machine a
+recreation of a recording of https://cnib.ca did so. The recreation must not
+leave the recorded page, and nothing is added to the page to stop it, since
+a listener added by the builder would show in DevTools' Event Listeners
+pane as though recorded.
+
+The recorder holds the recreation browser over its DevTools protocol
+connection instead:
+
+- The browser opens a blank tab and a DevTools protocol port that it
+  chooses on the loopback interface. The recorder connects, attaches to
+  every tab before it runs (`Target.setAutoAttach` with
+  `waitForDebuggerOnStart`), and only then opens the page.
+- In every tab, every document request is paused (`Fetch.enable` for
+  documents at the request stage). A request for the recreation's own
+  address continues; any other is refused as a stopped navigation
+  (`Fetch.failRequest` with `Aborted`), so no error page replaces the
+  recreation. A tab opened by a refused request, such as a link with
+  `target="_blank"`, is closed.
+- Each refused navigation is recorded with its address and time and listed
+  in the evidence panel, which announces it: "Navigation to ... was
+  blocked; the recreation does not leave the recorded page."
+- Form submission is already refused by the page's content security policy
+  (`form-action 'none'`), before any request is made.
+
+The same connection sets the viewport of "The environment" and focus
+emulation (`Emulation.setFocusEmulationEnabled`), so the recorded focus
+holds while DevTools has the keyboard.
 
 ### Recording the recreation to check it
 
@@ -983,13 +1017,16 @@ so far and where it differs from the design.
   documents at a frame and reads the chosen one's state.
 - The player's "Inspect page at this frame" lists the pages at the frame
   shown and opens the one chosen in the recreation browser of slice 3a.
+- The DevTools protocol connection (`DevToolsConnection`,
+  `RecreationControl`), as in "Leaving the recreation": navigations away
+  from the recreation are refused and listed in the panel, and the
+  recreation's tab is given the recorded viewport and focus emulation. The
+  panel's notes state the viewport used and the time of the layout
+  checkpoint it came from.
 
 Not yet built: the recreation browser with the recorder bootstrap and the
-in-memory receiver, the DevTools protocol connection with the viewport and
-focus emulation, the check, and selecting a node inside a closed shadow
-root. Until they are, the page opens at the browser window's size, the
-panel's fidelity reads "not checked", and focus is set by the builder
-without emulation, so it can move when DevTools takes the keyboard.
+in-memory receiver, the check, and selecting a node inside a closed shadow
+root. Until they are, the panel's fidelity reads "not checked".
 
 ### Differences from the design
 
@@ -1016,6 +1053,12 @@ without emulation, so it can move when DevTools takes the keyboard.
   the state used, the cut of the frame's basis, not from the frame's time.
 - Running animations and transitions are not read from the recording yet;
   the panel says so rather than listing none.
+- Chromium's layout zoom factor includes the device pixel ratio, so the
+  panel notes a possible browser zoom when the recorded factor differs from
+  the recorded ratio, not when it differs from 1.
+- A tab waiting for the debugger answers its release only after its first
+  request has been paused and handled, so the connection sends a new tab's
+  commands in order without waiting for their answers.
 
 ### Found while building
 
@@ -1058,6 +1101,17 @@ without emulation, so it can move when DevTools takes the keyboard.
   lines), and each of the 65 and 80 interactive element paths selected an
   element of the recorded name. This was a measurement, not a committed
   test.
+- Unit test: only the recreation's own address, DevTools, and a blank tab
+  may be loaded.
+- Integration test, with `RECORDER_RECREATION_CHROMIUM` set: a recreation
+  with a link, a link with `target="_blank"`, and a form is opened through
+  the recorder's own session, without a window, at a recorded viewport of
+  800 by 600. The page's inner size is 800 by 600; a real click on each
+  link and on the form's button leaves the page's address and its whole
+  markup unchanged; both links are listed as refused, the second as in a
+  new tab, and that tab is closed; the form makes no request. On the
+  development machine this passed with a Chromium build of the test
+  framework's own.
 
 ## Text by content hash (agreed, deferred)
 

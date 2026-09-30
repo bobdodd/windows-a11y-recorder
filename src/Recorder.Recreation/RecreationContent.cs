@@ -5,7 +5,11 @@ namespace Recorder.Recreation;
 // A page to recreate and the evidence the evidence panel shows with it. A
 // recorded page has a script nonce: its builder script is the only script
 // the page's content security policy allows.
-public sealed record RecreationContent(string Html, RecreationEvidence Evidence, string? ScriptNonce = null);
+// The viewport, when recorded, is emulated in the recreation's tab.
+public sealed record RecreationContent(string Html, RecreationEvidence Evidence, string? ScriptNonce = null)
+{
+    public RecreationViewport? Viewport { get; init; }
+}
 
 // What the evidence panel shows. Every value is a recorded value, or, for
 // the fixed content of slice 3a, a value written in code and stated as such.
