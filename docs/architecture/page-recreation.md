@@ -1123,11 +1123,12 @@ With revision f1ea0a7, on a recording of https://cnib.ca, as reported:
 - The recreation's inner size and device pixel ratio were 929 by 925 and
   1, as the panel's note gave them from the page's latest layout
   checkpoint, recorded at 18.543 s.
+- After a click into DevTools, `document.activeElement` in the recreation
+  was the element the recording had focused.
 
 The recording has no link that opens a new tab and no form, so neither
 could be checked on it; both are covered only by the integration test on
-the development machine. Not yet reported: focus holding while DevTools has
-the keyboard.
+the development machine.
 
 ## Text by content hash (agreed, deferred)
 
