@@ -1516,6 +1516,14 @@ scrollable overflow and the data it gathers from children as they are
 added, such as their bounds for anchor queries, are not recomputed from the
 recorded offsets.
 
+On the target machine, with revision 5ea654e, as reported on 2026-09-30,
+everything checked tallied with the recorded values. The cells of the
+table's second row were painted slightly to the right of those of the
+first. This came from the test page, not from Blink: the second row was
+recorded at an offset of 2 pixels in its section, and the first row, which
+has no recorded fragment, was placed by Blink at 0. The page now records
+the second row at 0.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
