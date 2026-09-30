@@ -1206,13 +1206,21 @@ changed nodes now, so an idle page repeats nothing. What this costs to
 record is measured on the target machine before the recording format is
 fixed.
 
-### What the auditor's changes do
+### A read-only snapshot
 
-An edit in DevTools, a script run from the console, or an action on the page
-changes the recreation (requirement 12). A node the auditor changes, and
-the boxes whose layout depends on it, are then styled and laid out by
-Blink as normal, from the recorded values as their starting point. Reloading
-returns the whole page to the recorded values.
+The owner, on 2026-09-30: "the page is a read-only snapshot, I didn't think
+there was anything to edit except the user typing in a text field or text
+area." This replaces requirement 12 of the slice 3 design. In the recreation
+mode:
+
+- Typing into a text field or text area changes its value; that control's
+  text is laid out by Blink as it changes.
+- Scrolling changes scroll offsets only, and is allowed.
+- Every other change to the DOM or to styles is refused, whether it comes
+  from DevTools' Elements and Styles panes, from script run in the console,
+  or from the page's own controls, such as check boxes, radio buttons,
+  `select` elements, and `details` elements.
+- Reloading returns the page to the recorded instant.
 
 ### Limits
 
@@ -1257,14 +1265,58 @@ Slice 4 of the plan (style sheets, fonts, images, and the environment)
 follows. Style sheets are then needed not for the styles, which are
 recorded, but so that DevTools' Styles pane shows which rules applied.
 
+### The feasibility step (proposed)
+
+Delivered in three parts, each built and checked on the target machine
+before the next is designed in detail:
+
+- 1a, recorded styles, below.
+- 1b, recorded box fragments: sizes and offsets of blocks, and of table,
+  flex, grid, and multi-column content.
+- 1c, recorded lines and glyph runs.
+
+The step uses the switch the recreation mode keeps,
+`--a11y-recorder-recreation`. The browser passes it to each renderer it
+starts, in the child process hook that passes the recorder bootstrap, and
+does so whether or not a recorder is connected, so the step runs without
+one. Without the switch nothing changes.
+
+In the step only, the recorded values are written in the test page itself,
+in an attribute of each element, since the connection that will carry them
+is not built yet: `data-a11y-recorded-style` holds the recorded computed
+style as CSS declarations. The attribute has effect only under the switch.
+The test page, `chromium/recreation_spike/styles.html`, gives each element
+a style sheet value and a different recorded value, for layout, color,
+font, and visibility properties.
+
+1a, recorded styles. At the end of `StyleResolver::MatchAllRules`
+(`core/css/resolver/style_resolver.cc`, line 1278), under the switch, an
+element's recorded declarations are parsed as CSS and added as the last
+author declarations, marked important and as element-attached, so they win
+over every style sheet rule, the element's own `style` attribute, and
+animations. Blink then builds the computed style from them as from any
+declaration, so inherited and dependent values follow. The step records
+what DevTools' Styles pane shows for them.
+
+Checked on the target machine, with the page opened under the switch and
+without it:
+
+- With the switch, DevTools' Computed pane and `getComputedStyle()` give
+  the recorded value of each property, and Blink paints with them; without
+  it, the style sheet values.
+- Changing the style sheet in DevTools' Styles pane does not change a
+  recorded property.
+
+Tests: unit tests of the integration script's new patch and of the switch
+passed to renderers; the check above as the system test.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
   recorder's own connection to the bridge, or served on the loopback
   interface and read by the browser process. Settled in the first step.
-- Whether the recreation mode is a switch of the instrumented Chromium that
-  also records, or a separate build. A switch is proposed, so that one
-  build is kept.
+- The recreation mode is a switch of the instrumented Chromium that also
+  records, so that one build is kept (agreed 2026-09-30).
 
 ### Required tests
 
@@ -1272,9 +1324,9 @@ recorded, but so that DevTools' Styles pane shows which rules applied.
   the recorded state the recorder sends to the recreation mode.
 - Integration tests in the instrumented Chromium: for a generated page,
   every imposed computed-style value, box fragment, fragment item, and glyph
-  run read back from Blink equals the value imposed; a node the test
-  changes afterwards is styled and laid out as Blink computes it; reloading
-  returns the recorded values.
+  run read back from Blink equals the value imposed; a change to the DOM or
+  a style is refused; typing into a text field changes only its value and
+  its own text layout; reloading returns the recorded values.
 - System test on the target machine: a recorded page is inspected, and
   DevTools' Computed pane and box model show the recorded values of chosen
   nodes.
