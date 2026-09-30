@@ -1400,6 +1400,16 @@ Checked on the target machine, with the test page under the switch:
 Tests: a unit test of the integration script's new patch; the check above
 as the system test.
 
+Built on the `recreation` branch: `patch_blink_inspector_css_agent` in
+`chromium/integrate.py` writes the helper `RecorderRecordedStyleMatch`, its
+call after the element's matched rules, and its call for each ancestor's
+inherited entry. The patch was applied to the checkout's
+`inspector_css_agent.cc`, copied from the target machine, and applied again
+without change; the protocol names it uses were read from the checkout's
+generated `css.h`. As with 1a, the unit test checks the text of the patch,
+not its compilation. DevTools shows each recorded declaration with
+`!important`, as Blink reports an important declaration.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the

@@ -6299,3 +6299,81 @@ class RecreationIntegrationTests(unittest.TestCase):
             "base::CommandLine::ForCurrentProcess()->HasSwitch(kRecreationSwitch)",
             condition,
         )
+
+    INSPECTOR_CSS_AGENT_SOURCE = (
+        '#include "third_party/blink/renderer/core/inspector/'
+        'inspector_css_agent.h"\n'
+        "\n"
+        "namespace blink {\n"
+        "\n"
+        "protocol::Response InspectorCSSAgent::getMatchedStylesForNode(\n"
+        "    int node_id) {\n"
+        "  // Matched rules.\n"
+        "  *matched_css_rules = BuildArrayForMatchedRuleList(\n"
+        "      resolver.MatchedRules(), element, ghost_rules, "
+        "element_pseudo_id,\n"
+        "      pseudo_argument);\n"
+        "\n"
+        "  // Inherited styles.\n"
+        "  *inherited_entries =\n"
+        "      std::make_unique<protocol::Array<"
+        "protocol::CSS::InheritedStyleEntry>>();\n"
+        "  for (InspectorCSSMatchedRules* match : resolver.ParentRules()) {\n"
+        "    std::unique_ptr<protocol::CSS::InheritedStyleEntry> entry;\n"
+        "    (*inherited_entries)->emplace_back(std::move(entry));\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "}  // namespace blink\n"
+    )
+
+    def test_reports_recorded_styles_to_devtools_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inspector_css_agent.cc"
+            path.write_text(self.INSPECTOR_CSS_AGENT_SOURCE, encoding="utf-8")
+            INTEGRATE.patch_blink_inspector_css_agent(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_inspector_css_agent(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+
+        for hook in (
+            INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER,
+            INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK,
+            INTEGRATE.BLINK_RECREATION_INSPECTOR_INHERITED_HOOK,
+        ):
+            self.assertEqual(1, first.count(hook))
+        for include in INTEGRATE.BLINK_RECREATION_INSPECTOR_INCLUDES:
+            self.assertEqual(1, first.count(include + "\n"))
+        # The helper is defined before its use; the element's block follows
+        # every matched rule; each ancestor's block is added to its entry
+        # before the entry is kept.
+        helper = first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER)
+        function = first.index("InspectorCSSAgent::getMatchedStylesForNode(")
+        matched = first.index("*matched_css_rules = BuildArrayForMatchedRuleList(")
+        own = first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK)
+        inherited_list = first.index("  // Inherited styles.")
+        inherited = first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_INHERITED_HOOK)
+        kept = first.index("(*inherited_entries)->emplace_back(std::move(entry));")
+        self.assertLess(helper, function)
+        self.assertLess(matched, own)
+        self.assertLess(own, inherited_list)
+        self.assertLess(inherited_list, inherited)
+        self.assertLess(inherited, kept)
+        helper_text = INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER
+        self.assertIn("a11y_recorder::IsRecreationMode()", helper_text)
+        self.assertIn('.setText("Recorded style")', helper_text)
+        self.assertIn("/*important=*/true", helper_text)
+        self.assertIn("StyleSheetOriginEnum::Regular", helper_text)
+        self.assertNotIn("setStyleSheetId", helper_text)
+        self.assertIn(
+            "element_pseudo_id == kPseudoIdNone",
+            INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK,
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", first, signatures),
+        )

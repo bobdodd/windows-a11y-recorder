@@ -6634,6 +6634,145 @@ def patch_blink_style_resolver(path: Path) -> None:
     write_patched(path, text)
 
 
+# Recreation mode, 1a addition: the recorded declarations as a source of their
+# own in DevTools' style inspection. See docs/architecture/page-recreation.md,
+# "1a addition: recorded styles in DevTools".
+BLINK_INSPECTOR_CSS_AGENT_INCLUDE = (
+    '#include "third_party/blink/renderer/core/inspector/'
+    'inspector_css_agent.h"'
+)
+BLINK_RECREATION_INSPECTOR_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/css/css_property_value_set.h"',
+    '#include "third_party/blink/renderer/core/css/parser/css_parser.h"',
+    '#include "third_party/blink/renderer/core/inspector/'
+    'inspector_style_sheet.h"',
+)
+BLINK_RECREATION_INSPECTOR_HELPER_ANCHOR = (
+    "\nprotocol::Response InspectorCSSAgent::getMatchedStylesForNode(\n"
+)
+BLINK_RECREATION_INSPECTOR_HELPER_MARKER = "RecorderRecordedStyleMatch("
+BLINK_RECREATION_INSPECTOR_HELPER = """
+// Windows A11y Recorder recreation mode: an element's recorded declarations,
+// as style resolution imposes them, reported to DevTools as a matched rule
+// named "Recorded style". It has no style sheet, so DevTools offers no
+// editing of it, and it is reported after every other rule, so DevTools shows
+// it first. Returns null outside the recreation mode and for an element with
+// no recorded declarations.
+static std::unique_ptr<protocol::CSS::RuleMatch> RecorderRecordedStyleMatch(
+    Element* element) {
+  if (!a11y_recorder::IsRecreationMode() || !element ||
+      !element->IsStyledElement()) {
+    return nullptr;
+  }
+  const AtomicString& recorder_recorded_text =
+      element->getAttribute(AtomicString("data-a11y-recorded-style"));
+  if (recorder_recorded_text.IsNull()) {
+    return nullptr;
+  }
+  const ImmutableCSSPropertyValueSet* recorder_parsed =
+      CSSParser::ParseInlineStyleDeclaration(recorder_recorded_text, element);
+  auto* recorder_declarations =
+      MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+  for (unsigned recorder_index = 0;
+       recorder_index < recorder_parsed->PropertyCount(); ++recorder_index) {
+    const CSSPropertyValue& recorder_property =
+        recorder_parsed->PropertyAt(recorder_index);
+    recorder_declarations->SetProperty(recorder_property.Name(),
+                                       recorder_property.Value(),
+                                       /*important=*/true);
+  }
+  if (!recorder_declarations->PropertyCount()) {
+    return nullptr;
+  }
+  InspectorStyle* recorder_style = MakeGarbageCollected<InspectorStyle>(
+      recorder_declarations->EnsureCSSStyleDeclaration(
+          element->GetExecutionContext()),
+      nullptr, nullptr);
+  auto recorder_selectors =
+      std::make_unique<protocol::Array<protocol::CSS::Value>>();
+  recorder_selectors->emplace_back(
+      protocol::CSS::Value::create().setText("Recorded style").build());
+  auto recorder_matching = std::make_unique<protocol::Array<int>>();
+  recorder_matching->push_back(0);
+  return protocol::CSS::RuleMatch::create()
+      .setRule(protocol::CSS::CSSRule::create()
+                   .setSelectorList(
+                       protocol::CSS::SelectorList::create()
+                           .setSelectors(std::move(recorder_selectors))
+                           .setText("Recorded style")
+                           .build())
+                   .setOrigin(protocol::CSS::StyleSheetOriginEnum::Regular)
+                   .setStyle(recorder_style->BuildObjectForStyle())
+                   .build())
+      .setMatchingSelectors(std::move(recorder_matching))
+      .build();
+}
+"""
+BLINK_RECREATION_INSPECTOR_MATCHED_ANCHOR = (
+    "  // Inherited styles.\n  *inherited_entries =\n"
+)
+BLINK_RECREATION_INSPECTOR_MATCHED_MARKER = (
+    "RecorderRecordedStyleMatch(element)"
+)
+BLINK_RECREATION_INSPECTOR_MATCHED_HOOK = """\
+  // Windows A11y Recorder recreation mode: the element's recorded style.
+  if (element_pseudo_id == kPseudoIdNone) {
+    if (std::unique_ptr<protocol::CSS::RuleMatch> recorder_match =
+            RecorderRecordedStyleMatch(element)) {
+      (*matched_css_rules)->emplace_back(std::move(recorder_match));
+    }
+  }
+
+"""
+BLINK_RECREATION_INSPECTOR_INHERITED_ANCHOR = (
+    "    (*inherited_entries)->emplace_back(std::move(entry));\n"
+)
+BLINK_RECREATION_INSPECTOR_INHERITED_MARKER = (
+    "RecorderRecordedStyleMatch(match->element)"
+)
+BLINK_RECREATION_INSPECTOR_INHERITED_HOOK = """\
+    // Windows A11y Recorder recreation mode: the ancestor's recorded style.
+    if (std::unique_ptr<protocol::CSS::RuleMatch> recorder_match =
+            RecorderRecordedStyleMatch(match->element)) {
+      entry->getMatchedCSSRules()->emplace_back(std::move(recorder_match));
+    }
+"""
+
+
+def patch_blink_inspector_css_agent(path: Path) -> None:
+    """Reports the recreation mode's recorded styles to DevTools."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_INSPECTOR_CSS_AGENT_INCLUDE,
+        BLINK_RECREATION_INSPECTOR_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_HELPER_ANCHOR,
+        BLINK_RECREATION_INSPECTOR_HELPER,
+        BLINK_RECREATION_INSPECTOR_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_MATCHED_ANCHOR,
+        BLINK_RECREATION_INSPECTOR_MATCHED_HOOK,
+        BLINK_RECREATION_INSPECTOR_MATCHED_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_INHERITED_ANCHOR,
+        BLINK_RECREATION_INSPECTOR_INHERITED_HOOK,
+        BLINK_RECREATION_INSPECTOR_INHERITED_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
 def patch_blink_cookie_jar(path: Path) -> None:
     text = read_source(path)
     text = add_includes_after(
@@ -11640,6 +11779,15 @@ def main() -> int:
         / "css"
         / "resolver"
         / "style_resolver.cc"
+    )
+    patch_blink_inspector_css_agent(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "inspector"
+        / "inspector_css_agent.cc"
     )
     cookie_store = (
         source / "third_party" / "blink" / "renderer" / "modules"
