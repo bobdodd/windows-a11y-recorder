@@ -1330,8 +1330,9 @@ On the target machine, with revision 06dcc58, as reported on 2026-09-30:
 - With the switch, every recorded property compared as equal in
   `getComputedStyle()`; without it, every one gave the style sheet value;
   the two pages looked different accordingly.
-- DevTools' Computed pane showed the recorded `background-color` of `#box`,
-  rgb(0, 90, 160), and under it only the style sheet's rgb(200, 0, 0) from
+- DevTools' Computed pane showed the recorded `width` of `#box`, 237.5px,
+  and its recorded `background-color`, rgb(0, 90, 160), and under the
+  latter only the style sheet's rgb(200, 0, 0) from
   `#box` at styles.html line 19. DevTools names no source for the recorded
   value, since the recorded declarations are not a rule its style
   inspection knows. Making them a source of their own in DevTools' style
