@@ -245,7 +245,6 @@ public sealed class RecreationTests : IDisposable
             var evidence = content.Evidence;
             var paths = evidence.InteractiveElements.Select(item => item.Node)
                 .Concat(evidence.Animations.Select(item => item.Target))
-                .Concat(evidence.Timers.Where(item => item.Owner is not null).Select(item => item.Owner!))
                 .Concat(evidence.Interaction.FormValues.Select(item => item.Node))
                 .Append(evidence.Interaction.Focus!)
                 .ToArray();

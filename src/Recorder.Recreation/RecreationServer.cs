@@ -28,6 +28,13 @@ public sealed class RecreationServer : IAsyncDisposable
         "img-src 'self' data:; font-src 'self' data:; media-src 'self'; " +
         "connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 
+    // For a recorded page, only the builder script runs, allowed by its
+    // nonce. Without 'unsafe-inline', 'unsafe-hashes', or 'strict-dynamic',
+    // the recorded script elements, event handler attributes, and
+    // javascript: URLs do not run.
+    public static string RecordedPageContentSecurityPolicy(string nonce) =>
+        PageContentSecurityPolicy.Replace("script-src 'none'", $"script-src 'nonce-{nonce}'", StringComparison.Ordinal);
+
     public static readonly JsonSerializerOptions EvidenceJson = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
@@ -37,6 +44,8 @@ public sealed class RecreationServer : IAsyncDisposable
     private readonly byte[] _token;
     private readonly byte[] _page;
     private readonly byte[] _evidence;
+    private readonly string _policy;
+    private readonly byte[]? _builder;
 
     private RecreationServer(WebApplication application, string token, RecreationContent content)
     {
@@ -45,6 +54,8 @@ public sealed class RecreationServer : IAsyncDisposable
         _token = Encoding.ASCII.GetBytes(token);
         _page = Encoding.UTF8.GetBytes(content.Html);
         _evidence = JsonSerializer.SerializeToUtf8Bytes(content.Evidence, EvidenceJson);
+        _policy = content.ScriptNonce is { } nonce ? RecordedPageContentSecurityPolicy(nonce) : PageContentSecurityPolicy;
+        _builder = content.ScriptNonce is null ? null : RecordedPage.Builder();
     }
 
     public string Token { get; }
@@ -107,8 +118,12 @@ public sealed class RecreationServer : IAsyncDisposable
         {
             case "":
                 response.ContentType = "text/html; charset=utf-8";
-                response.Headers["Content-Security-Policy"] = PageContentSecurityPolicy;
+                response.Headers["Content-Security-Policy"] = _policy;
                 body = _page;
+                break;
+            case RecordedPage.BuilderResource when _builder is not null:
+                response.ContentType = "text/javascript; charset=utf-8";
+                body = _builder;
                 break;
             case "evidence.json":
                 response.ContentType = "application/json; charset=utf-8";

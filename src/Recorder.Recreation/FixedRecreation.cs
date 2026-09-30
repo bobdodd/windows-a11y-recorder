@@ -75,6 +75,9 @@ public static class FixedRecreation
     public static readonly NodePath Close = NodePath.Create([Card, "/div[1]/button[2]"], ["open"]);
     public static readonly NodePath End = NodePath.Of("/html[1]/body[1]/main[1]/section[3]/button[1]");
 
+    private static RecordedListener L(string eventName) =>
+        new(eventName, "add-event-listener", false, false, false, null);
+
     private static NodePath Link(int position) => NodePath.Of($"/html[1]/body[1]/header[1]/nav[1]/a[{position}]");
 
     private static RecreationEvidence Evidence() => new(
@@ -90,21 +93,21 @@ public static class FixedRecreation
             "Fixed content is not compared with a recording.",
             []),
         [
-            new RecordedTimer(12, "timeout", 30_000, 10_000_000_000, 27_500, Save),
-            new RecordedTimer(13, "interval", 1_000, 2_000_000_000, 500, null)
+            new RecordedTimer("timer-12", "timeout", 30_000, 30_000, 10_000_000_000, null, 27_500),
+            new RecordedTimer("timer-13", "interval", 1_000, 1_000, 2_000_000_000, 11_500_000_000, 500)
         ],
         [
             new RecordedAnimation("transition", "opacity", Status, 12_000_000_000, 1_000, 0.5)
         ],
         [
-            new RecordedInteractiveElement(Link(1), "a", [], true, "link", "Form"),
-            new RecordedInteractiveElement(Link(2), "a", [], true, "link", "Card"),
-            new RecordedInteractiveElement(Link(3), "a", [], true, "link", "Long content"),
-            new RecordedInteractiveElement(Input, "input", ["input", "change"], true, "textbox", "Name"),
-            new RecordedInteractiveElement(Save, "button", ["click"], true, "button", "Save"),
-            new RecordedInteractiveElement(Open, "button", ["click"], true, "button", "Open"),
-            new RecordedInteractiveElement(Close, "button", ["click", "keydown"], true, "button", "Close"),
-            new RecordedInteractiveElement(End, "button", [], true, "button", "End of page")
+            new RecordedInteractiveElement(Link(1), "a", [], true, "link", "Form", null, null),
+            new RecordedInteractiveElement(Link(2), "a", [], true, "link", "Card", null, null),
+            new RecordedInteractiveElement(Link(3), "a", [], true, "link", "Long content", null, null),
+            new RecordedInteractiveElement(Input, "input", [L("input"), L("change")], true, "textbox", "Name", null, null),
+            new RecordedInteractiveElement(Save, "button", [L("click")], true, "button", "Save", null, null),
+            new RecordedInteractiveElement(Open, "button", [L("click")], true, "button", "Open", null, null),
+            new RecordedInteractiveElement(Close, "button", [L("click"), L("keydown")], true, "button", "Close", null, null),
+            new RecordedInteractiveElement(End, "button", [], true, "button", "End of page", null, null)
         ],
         new RecordedInteraction(Input, "Caret after \"Ada\" in the Name field", [new RecordedFormValue(Input, "Ada")]));
 }

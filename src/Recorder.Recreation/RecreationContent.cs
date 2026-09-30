@@ -2,8 +2,10 @@ using System.Text.Json.Serialization;
 
 namespace Recorder.Recreation;
 
-// A page to recreate and the evidence the evidence panel shows with it.
-public sealed record RecreationContent(string Html, RecreationEvidence Evidence);
+// A page to recreate and the evidence the evidence panel shows with it. A
+// recorded page has a script nonce: its builder script is the only script
+// the page's content security policy allows.
+public sealed record RecreationContent(string Html, RecreationEvidence Evidence, string? ScriptNonce = null);
 
 // What the evidence panel shows. Every value is a recorded value, or, for
 // the fixed content of slice 3a, a value written in code and stated as such.
@@ -13,7 +15,14 @@ public sealed record RecreationEvidence(
     IReadOnlyList<RecordedTimer> Timers,
     IReadOnlyList<RecordedAnimation> Animations,
     IReadOnlyList<RecordedInteractiveElement> InteractiveElements,
-    RecordedInteraction Interaction);
+    RecordedInteraction Interaction)
+{
+    public IReadOnlyList<RecordedTargetListener> OtherListeners { get; init; } = [];
+
+    // Notes on how the recreation was built: values cut in the recording,
+    // and what the builder inferred or could not build.
+    public IReadOnlyList<string> Notes { get; init; } = [];
+}
 
 // Source is "fixed" for slice 3a and "recording" from slice 3b. The frame,
 // recording time, and basis are null for fixed content.
@@ -23,7 +32,11 @@ public sealed record RecreationDescription(
     string Notice,
     long? FrameNanoseconds,
     long? RecordingNanoseconds,
-    string? Basis);
+    string? Basis)
+{
+    public string? Url { get; init; }
+    public string? DocumentKey { get; init; }
+}
 
 // Status is "not-checked", "equal", or "different".
 public sealed record RecreationFidelity(
@@ -37,15 +50,20 @@ public sealed record RecreationDifference(
     string Recorded,
     string Recreated);
 
-// Kind is "timeout" or "interval". Times are recording times in
-// nanoseconds, and the remaining time is from the frame's recording time.
+// Kind is the recorded timer kind: "timeout", "interval",
+// "animation-frame", or "idle-callback". Times are recording times in
+// nanoseconds. The time remaining is from the frame's recording time to the
+// timer's next run, from its last run for an interval timer; it is null for
+// an animation frame or idle callback, which have no due time, and negative
+// for a timer due before the frame that had not yet run.
 public sealed record RecordedTimer(
-    long TimerId,
+    string TimerId,
     string Kind,
-    double DelayMilliseconds,
+    double? RequestedDelayMilliseconds,
+    double? EffectiveDelayMilliseconds,
     long ScheduledNanoseconds,
-    double RemainingMilliseconds,
-    NodePath? Owner);
+    long? LastRunNanoseconds,
+    double? RemainingMilliseconds);
 
 // Kind is "animation" or "transition". Name is the animation name or the
 // transitioned property.
@@ -57,13 +75,33 @@ public sealed record RecordedAnimation(
     double DurationMilliseconds,
     double Progress);
 
+// A listener as its registration record gives it. Location is the script
+// address, line, and column of the registration, when recorded.
+public sealed record RecordedListener(
+    string EventName,
+    string? RegistrationKind,
+    bool Capture,
+    bool Once,
+    bool Passive,
+    string? Location);
+
+// A node with a listener registered at the frame, or with accessibility
+// data. Focusable is read from Chromium's accessibility property text, as
+// recorded, and is null when the node has no accessibility data. The
+// accessibility values are those of the latest update batch that named the
+// node, recorded at AccessibilityNanoseconds.
 public sealed record RecordedInteractiveElement(
     NodePath Node,
     string Element,
-    IReadOnlyList<string> Listeners,
-    bool Focusable,
+    IReadOnlyList<RecordedListener> Listeners,
+    bool? Focusable,
     string? Role,
-    string? Name);
+    string? Name,
+    long? AccessibilityNanoseconds,
+    string? AccessibilityProperties);
+
+// A listener on a target that is not a node of the tree, such as the window.
+public sealed record RecordedTargetListener(string Target, RecordedListener Listener);
 
 public sealed record RecordedInteraction(
     NodePath? Focus,

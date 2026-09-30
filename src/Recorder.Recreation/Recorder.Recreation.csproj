@@ -8,6 +8,10 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="EvidencePanel\*" LogicalName="EvidencePanel.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Builder\*" LogicalName="Builder.%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Recorder.Tests" />
