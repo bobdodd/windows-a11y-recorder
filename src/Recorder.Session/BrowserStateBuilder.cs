@@ -407,6 +407,14 @@ public sealed class BrowserStateBuilder
                 }
                 break;
             case "layout-checkpoint-started":
+                if (payload.TryGetProperty("viewport", out var viewport) && viewport.ValueKind == JsonValueKind.Object &&
+                    viewport.TryGetProperty("width", out var width) && width.ValueKind == JsonValueKind.Number &&
+                    viewport.TryGetProperty("height", out var height) && height.ValueKind == JsonValueKind.Number &&
+                    payload.TryGetProperty("devicePixelRatio", out var ratio) && ratio.ValueKind == JsonValueKind.Number &&
+                    payload.TryGetProperty("layoutZoomFactor", out var zoom) && zoom.ValueKind == JsonValueKind.Number)
+                {
+                    document.Viewport = new RecordedViewport(width.GetDouble(), height.GetDouble(), ratio.GetDouble(), zoom.GetDouble(), time);
+                }
                 // A layout walk after a lost record states the loss; the
                 // change records that follow it lack the lost change.
                 if (payload.TryGetProperty("walkReason", out var reason) &&

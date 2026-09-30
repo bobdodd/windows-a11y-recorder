@@ -42,6 +42,12 @@ public sealed record TextControlState(
     long? SelectionEnd,
     string? SelectionDirection);
 
+/// <summary>
+/// The viewport size in CSS pixels, device pixel ratio, and layout zoom
+/// factor of a layout checkpoint's start record, and when it was recorded.
+/// </summary>
+public sealed record RecordedViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor, long Time);
+
 /// <summary>The focused node, selection, and text controls the interaction records give.</summary>
 public sealed record InteractionCurrent(
     long? FocusedNodeId,
@@ -203,6 +209,12 @@ public sealed class BrowserDocumentState(string key)
     public DomDocumentTree? Dom { get; internal set; }
 
     public LayoutDocumentChangeState Layout { get; internal set; } = new();
+
+    /// <summary>
+    /// The viewport of the document's latest layout checkpoint, or null
+    /// before one. Change sets do not record the viewport size.
+    /// </summary>
+    public RecordedViewport? Viewport { get; internal set; }
 
     public InteractionDocumentState Interaction { get; internal set; } = new();
 

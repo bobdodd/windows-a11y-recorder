@@ -88,6 +88,21 @@ public static class BrowserStateSnapshot
         {
             writer.WriteNullValue();
         }
+        writer.WritePropertyName("viewport");
+        if (document.Viewport is { } viewport)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("width", viewport.Width);
+            writer.WriteNumber("height", viewport.Height);
+            writer.WriteNumber("devicePixelRatio", viewport.DevicePixelRatio);
+            writer.WriteNumber("layoutZoomFactor", viewport.LayoutZoomFactor);
+            writer.WriteNumber("time", viewport.Time);
+            writer.WriteEndObject();
+        }
+        else
+        {
+            writer.WriteNullValue();
+        }
         WriteRecords(writer, "transformNodes", layout.TransformRecords.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => item.Value));
         WriteRecords(writer, "nodes", layout.Nodes.OrderBy(item => item.Key).Select(item => item.Value));
         WriteRecords(writer, "scrollOffsets", layout.ScrollOffsets.OrderBy(item => item.Key).Select(item => item.Value));
@@ -197,6 +212,15 @@ public static class BrowserStateSnapshot
         document.LayoutCompleteness = Parse(layout.GetProperty("completeness").GetString());
         document.LayoutEventKey = layout.GetProperty("eventKey").GetInt64();
         document.LayoutTime = layout.GetProperty("time").GetInt64();
+        var viewport = layout.GetProperty("viewport");
+        document.Viewport = viewport.ValueKind == JsonValueKind.Object
+            ? new RecordedViewport(
+                viewport.GetProperty("width").GetDouble(),
+                viewport.GetProperty("height").GetDouble(),
+                viewport.GetProperty("devicePixelRatio").GetDouble(),
+                viewport.GetProperty("layoutZoomFactor").GetDouble(),
+                viewport.GetProperty("time").GetInt64())
+            : null;
         var started = layout.GetProperty("started");
         document.Layout.Load(
             started.ValueKind == JsonValueKind.Object ? started : null,

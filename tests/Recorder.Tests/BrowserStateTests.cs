@@ -169,7 +169,8 @@ public sealed class BrowserStateTests : IDisposable
         public Records LayoutWalk(string walkReason)
         {
             Add("browser.layout", "layout-checkpoint-started", $$"""
-                "checkpointId":"layout-checkpoint-{{token}}-{{++_checkpoint}}","walkReason":"{{walkReason}}"
+                "checkpointId":"layout-checkpoint-{{token}}-{{++_checkpoint}}","walkReason":"{{walkReason}}",
+                "viewport":{"width":{{1000 + _checkpoint}},"height":700.5},"devicePixelRatio":1.25,"layoutZoomFactor":1.25
                 """);
             return this;
         }
@@ -380,6 +381,7 @@ public sealed class BrowserStateTests : IDisposable
             .Listener("listener-0", 3, "click")
             .Walk("finished-parsing", "first", false, Page)
             .Layout((3, 10), (4, 12))
+            .LayoutWalk("check")
             .Interaction(3)
             .Timer("timer-scheduled", "timer-1", "timeout")
             .Accessibility((3, "genericContainer"))
@@ -390,6 +392,7 @@ public sealed class BrowserStateTests : IDisposable
             .Attribute(3, "data-x", null)
             .Remove(3, 4)
             .Layout((5, 40))
+            .LayoutWalk("check")
             .Focus(5)
             .Listener("listener-9", 5, "click")
             .Timer("timer-scheduled", "timer-9", "interval")
@@ -414,6 +417,10 @@ public sealed class BrowserStateTests : IDisposable
         }
 
         Assert.Equal(split, resumed.RecordsSkipped);
+        // The loaded document is the builder's own, so the snapshot is read again.
+        var first = BrowserStateSnapshot.Read(snapshot).Viewport!;
+        Assert.Equal(700.5, first.Height);
+        Assert.True(resumed.Documents.Values.Single().Viewport!.Width > first.Width);
         Assert.Equal(
             Encoding.UTF8.GetString(BrowserStateSnapshot.Serialize(whole.Documents.Values.Single())),
             Encoding.UTF8.GetString(BrowserStateSnapshot.Serialize(resumed.Documents.Values.Single())));
