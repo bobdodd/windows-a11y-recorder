@@ -667,9 +667,25 @@ recording.
   changes. The offset of the page's viewport within the browser window is
   not recorded, and the window can move without a foreground change, so a
   recorded box cannot yet be placed on the captured frame exactly.
-- Whether iframe documents are in scope.
-- XPath has no step into a shadow root, so a path inside one needs a stated
-  notation for each shadow root crossed.
+
+### Settled
+
+- Iframe documents are in scope, in a later slice (agreed 2026-09-29).
+- Paths through shadow roots (the notation recommended and accepted
+  2026-09-29). XPath has no step into a shadow root, so a node's path is a
+  list of XPath expressions, one for each tree scope from the document to
+  the node. The first is evaluated from the document; each later one from
+  the shadow root of the element the previous one selects. Each expression
+  uses positional steps only, such as `/html[1]/body[1]/div[3]`, since an
+  `id` or other attribute may be repeated or changed and a position in the
+  recorded tree is not. An element outside the HTML namespace is selected
+  by a local name test, such as `*[local-name()='svg'][1]`, and a text node
+  by `text()[n]`. The evidence panel shows the list joined by
+  `/#shadow-root(open)` or `/#shadow-root(closed)`, as recorded, for
+  example `/html[1]/body[1]/my-card[1]/#shadow-root(open)/div[1]/button[2]`,
+  and copies either that form or the list itself. A path follows the DOM
+  tree, not the tree as slots render it: a slotted node is found under its
+  host's light DOM, and its assigned slot is shown with it.
 
 ## Text by content hash (agreed, deferred)
 
