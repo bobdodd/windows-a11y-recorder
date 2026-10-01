@@ -8880,8 +8880,7 @@ void RecorderReadCustomProperties(
               return CodeUnitCompareLessThan(recorder_a, recorder_b);
             });
   for (const AtomicString& recorder_name : recorder_names) {
-    const CSSValue* recorder_value =
-        recorder_variables.at(recorder_name).Get();
+    const CSSValue* recorder_value = recorder_variables.at(recorder_name);
     if (!recorder_value) {
       continue;
 """,
