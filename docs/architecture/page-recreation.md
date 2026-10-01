@@ -1853,6 +1853,113 @@ What this shows, within these two recordings:
   this and is not measured.
 - The recordings differ in length, so per-minute rates are not compared.
 
+The owner, on 2026-10-01, on the main-thread time: "for now, let's carry
+on and come back to the optimization later. There may be more to do, so we
+can deal with it in one session." The time of 2a is to be measured in full
+and reduced after 2b and 2c, together with theirs.
+
+#### 2b design (proposed)
+
+Proposed on 2026-10-01, for agreement before it is built. It fills in item
+2 of "What is recorded, and when" above, with two changes from it, marked.
+
+Where it is recorded. Change from the outline: the fragments are a new
+field of the node records the change sets and checkpoints already write,
+`boxFragments`, not a new `layout-box-fragments` record. In the 2a
+recording a record with almost no fields, `layout-changes-completed`, took
+1,292 bytes, so a record of its own for each box would add about that much
+to every box recorded; and the bridge's comparison with the node's last
+record, which decides whether a record is sent, then covers the fragments
+with no second cache. A node record is sent when its fragments differ from
+its last record, as when its style or geometry differs; the whole
+`boxFragments` is sent each time, not only what changed.
+
+Protocol version. Change from the outline: 2b is protocol 0.38, not 0.37,
+since 0.37 was built and recorded for 2a, and a live connection needs an
+exact version match.
+
+When a node is read. A box that receives a new layout result is already
+noted, with the objects of its child fragments
+(`RecorderNoteLayoutResult`); a new size, child offset, scrollable
+overflow, or natural size comes with a new layout result, so nothing new is
+noted. The checkpoint walk reads every node, as now.
+
+What `boxFragments` holds, for a node whose layout object is a layout box
+(`LayoutObject::IsBox`), and null otherwise (a text node, an inline box
+such as a `span`, which 2c covers through its block's items, and a node
+without a layout object):
+
+- `effectiveZoom`: the box's `ComputedStyle::EffectiveZoom`.
+- `fragments`: each of the box's physical fragments
+  (`LayoutBox::PhysicalFragments`, `core/layout/layout_box.h`, line 583),
+  in order. Each holds:
+  - `width` and `height`: its border-box size (`PhysicalFragment::Size`).
+  - `breakToken`: null for a fragment that ends the box; otherwise the
+    position its next fragment continues from
+    (`PhysicalBoxFragment::GetBreakToken`): `consumedBlockSize`,
+    `sequenceNumber`, and `atBlockEnd`.
+  - `scrollableOverflow`: its scrollable overflow rectangle
+    (`PhysicalBoxFragment::ScrollableOverflow`) when it has one
+    (`HasScrollableOverflow`), and null otherwise.
+  - `children`: each child link (`PhysicalBoxFragment::PostLayoutChildren`,
+    the latest generation of each child), in order, with `x` and `y`, its
+    offset in this fragment (`PhysicalFragmentLink::Offset`), and `kind`:
+    - `box`: a box with a DOM node, an element or pseudo-element, named by
+      `nodeId`, with `fragmentIndex`, which of that node's fragments it
+      is. That node's own record holds its fragment.
+    - `anonymous`: a box Blink generated with no node, such as an
+      anonymous block, and `column` and `page`: a column or page
+      fragment of a multi-column or paged box. These have no record of
+      their own, so the child holds its fragment, `fragment`, in the same
+      form, nested.
+    - `line`: a line box, if a fragment holds one as a child; a block's
+      lines are otherwise its fragment items, which 2c records.
+- `naturalSize`: for a replaced element, such as an image, its natural
+  dimensions (`LayoutReplaced::ComputeNaturalSizingInfo`,
+  `core/layout/natural_sizing_info.h`): `width`, `height`, `hasWidth`,
+  `hasHeight`, `aspectRatioWidth`, and `aspectRatioHeight`; null for
+  other boxes.
+
+Units. Every length is the value Blink holds, a layout unit (1/64 of a
+pixel) written as a number, which is exact; physical, not logical; and
+zoomed, as Blink lays out, so a length in CSS pixels is the value divided by
+`effectiveZoom`. Recording Blink's own values keeps them exact for the
+recreation, which gives them back to Blink.
+
+What the app does. The validator checks the field's shape and that a
+`box` child names a node and the others do not; the contracts gain its
+records; the layout change state keeps it with the node, a record of style
+changes carrying the node's current `boxFragments` as it carries its
+geometry; snapshots hold it, as they hold node records as they are. The
+layout change check compares each checkpoint node's `boxFragments` with the
+rebuilt one, as `box-fragments`, exactly, since both are read from the same
+fragments.
+
+Cost. Measured as for 2a, with a recording of the same pages at 0.37 and
+0.38, and the check setting on in one recording so the comparison covers
+nodes recorded after their first record.
+
+Limits:
+
+- 1b imposes one fragment per box in horizontal, left-to-right writing;
+  the record holds every fragment and its break position, and physical
+  offsets in any writing mode, so the recreation can take more cases
+  later without a new recording.
+- Data layout algorithms keep beside sizes and offsets, such as a grid's
+  tracks, are not recorded, as above.
+- A child link's fragment is read in its latest generation; a fragment
+  Blink holds from an earlier generation is not recorded.
+
+Required tests:
+
+- Unit: the integration script's tests of the new reading in both the
+  checkpoint and the change set; the bridge's serialization of the field
+  and its part in the comparison with the last record; the validator's
+  checks; the layout change state and check with fragments, including a
+  record of style changes; the contract round trip.
+- System, on the target machine: the two recordings above, with the check
+  setting on in the 0.38 one and no `box-fragments` differences.
+
 
 #### Required tests
 
