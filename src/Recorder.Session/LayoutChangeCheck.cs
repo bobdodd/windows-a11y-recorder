@@ -164,7 +164,7 @@ public sealed class LayoutChangeCheck
         report.AppendLine(
             $"checkpoint nodes under a display lock, without a change record, layout object, or style, not compared: {NodesLockedWithoutRecord}");
         report.AppendLine($"rectangles compared: {RectsCompared}");
-        report.AppendLine($"box fragments compared: {BoxFragmentsCompared}");
+        report.AppendLine($"checkpoint nodes whose box fragments were compared, null ones included: {BoxFragmentsCompared}");
         report.AppendLine($"largest rectangle edge difference: {LargestRectDifference:G6} CSS px");
         foreach (var (kind, count) in _differences.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {

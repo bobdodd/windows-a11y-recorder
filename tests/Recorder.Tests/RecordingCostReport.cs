@@ -25,6 +25,8 @@ public sealed class RecordingCostReport
         long changeSetBytes = 0;
         var styleKinds = new SortedDictionary<string, StyleTotals>(StringComparer.Ordinal);
         var listedProperties = new SortedSet<int>();
+        var walkReasons = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var changeSetsByDocument = new Dictionary<string, int>(StringComparer.Ordinal);
         var fragmentTotals = new SortedDictionary<string, (long Records, long Bytes, long Fragments, long Children)>(StringComparer.Ordinal);
         var urls = new SortedSet<string>(StringComparer.Ordinal);
         long first = long.MaxValue;
@@ -88,7 +90,20 @@ public sealed class RecordingCostReport
                 {
                     styleKinds["checkpoint"] = AddStyle(styleKinds.GetValueOrDefault("checkpoint"), bytes, payload);
                 }
-                else if (type == "layout-checkpoint-started" &&
+                if (type == "layout-changes-started" &&
+                    payload.GetProperty("context").TryGetProperty("documentToken", out var changedToken))
+                {
+                    var key = changedToken.GetString() ?? "null";
+                    changeSetsByDocument[key] = changeSetsByDocument.GetValueOrDefault(key) + 1;
+                }
+                if (type == "layout-checkpoint-started")
+                {
+                    var walkReason = payload.TryGetProperty("walkReason", out var reason)
+                        ? reason.GetString() ?? "null"
+                        : "absent";
+                    walkReasons[walkReason] = walkReasons.GetValueOrDefault(walkReason) + 1;
+                }
+                if (type == "layout-checkpoint-started" &&
                     payload.TryGetProperty("styleProperties", out var listed))
                 {
                     listedProperties.Add(listed.GetArrayLength());
@@ -126,6 +141,10 @@ public sealed class RecordingCostReport
         }
         report.AppendLine(CultureInfo.InvariantCulture,
             $"properties listed by checkpoint starts: {string.Join(", ", listedProperties)}");
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"checkpoints by walk reason: {string.Join(", ", walkReasons.Select(entry => $"{entry.Key} {entry.Value}"))}");
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"change sets per document, most first: {string.Join(", ", changeSetsByDocument.Values.OrderDescending())}");
         report.AppendLine("node records by computedStyleComplete: records, bytes per record, style values per styled record, custom properties per styled record");
         foreach (var (kind, totals) in styleKinds)
         {

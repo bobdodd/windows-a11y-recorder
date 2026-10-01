@@ -293,7 +293,7 @@ public sealed class LayoutChangeCheckTests
         Assert.Equal(2, check.BoxFragmentsCompared);
         Assert.Equal(2, check.NodesMatched);
         Assert.Empty(check.Differences);
-        Assert.Contains("box fragments compared: 2", check.Report());
+        Assert.Contains("box fragments were compared, null ones included: 2", check.Report());
     }
 
     [Fact]

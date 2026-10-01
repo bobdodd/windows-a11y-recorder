@@ -2004,6 +2004,50 @@ Two details added in building, beyond the design:
 No database migration, as for 2a: the database tables are not written for
 recordings that have a recording file.
 
+#### 2b results
+
+Recorded by the owner on 2026-10-01 on the target machine with a3c21b4, on
+the same pages as the 2a recording: two recordings at 0.38, one without the
+check setting (20261001-200852) and one with it at every 100 updates
+(20261001-201008). The 0.37 recording of 2a (20261001-185400) is the
+baseline. Bytes are those of the records before chunk compression.
+
+| | 0.37 | 0.38 | 0.38, check on |
+| --- | --- | --- | --- |
+| Minutes recorded | 0.85 | 0.99 | 1.21 |
+| `browser.layout` bytes | 93.9 MB | 101.3 MB | 106.1 MB |
+| Change sets | 202 | 229 | 257 |
+| Bytes per `layout-node-changed` record | 5,187 | 5,343 | 4,885 |
+| Bytes per checkpoint node record | 9,422 | 9,368 | 9,372 |
+| Bridge change-set time, mean | 2,038 µs | 1,767 µs | 1,380 µs |
+| Bridge change-set time, largest | 157.6 ms | 158.4 ms | 157.0 ms |
+| Walk field reading, mean per walk | 56 µs | 83 µs | 85 µs |
+| Walk field reading, largest | 280 µs | 620 µs | 571 µs |
+
+- Size. In the 0.38 recording without the check, the `boxFragments` JSON
+  of change records was 2.83 MB of their 87.8 MB (3.2%), in 9,463 records
+  holding 9,765 fragments and 15,267 child links; in checkpoint records it
+  was 90 KB of 12.1 MB (0.7%), for 348 boxes. The recordings differ in
+  length and in the number of change sets, so the totals are not compared
+  as a rate.
+- Time. The bridge's time per change set did not rise; its differences
+  are within those between recordings of the same build. Blink's reading of
+  the fragments in a change set happens before the bridge is called and is
+  not timed. In a walk it is part of the node-fields phase, whose mean rose
+  from 56 to 83 µs per walk.
+- Layout check. In both 0.38 recordings every compared checkpoint node
+  matched, box fragments included: 1,288 of 1,288 nodes, 706 of them with
+  a change record whose box fragments were compared, and 1,265 of 1,265
+  nodes, 674 compared. The largest rectangle difference was
+  1.3 × 10⁻⁵ CSS px.
+- Limit. Every checkpoint in both recordings was a document's first walk,
+  so the comparison covers each node's first record only, not a record
+  after it, nor a record of style changes merged into an earlier one. The
+  check setting walks a document at every Nth layout checkpoint it
+  requests; the busiest document had 79 change sets, and no check walk was
+  recorded. A recording with a smaller interval is needed to cover later
+  records.
+
 
 #### Required tests
 
