@@ -7159,9 +7159,9 @@ BLINK_RECREATION_ITEMS_HOOK = """\
               if (!recorder_code_point || !recorder_advance) {
                 break;
               }
-              recorder_run.push_back(
-                  {*recorder_code_point,
-                   static_cast<float>(*recorder_advance * recorder_zoom)});
+              recorder_run.push_back(ShapeResult::RecorderGlyph{
+                  *recorder_code_point,
+                  static_cast<float>(*recorder_advance * recorder_zoom)});
             }
             if (recorder_run.size() != recorder_length) {
               continue;
@@ -7194,6 +7194,17 @@ BLINK_RECREATION_ITEMS_HOOK = """\
 
 """
 
+# The hook as written by revision f23a582, which did not compile: WTF's
+# Vector::push_back cannot take a braced initializer list. A checkout that
+# holds it is upgraded to the current hook.
+INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK = BLINK_RECREATION_ITEMS_HOOK.replace(
+    """              recorder_run.push_back(ShapeResult::RecorderGlyph{
+                  *recorder_code_point,
+                  static_cast<float>(*recorder_advance * recorder_zoom)});""",
+    """              recorder_run.push_back(
+                  {*recorder_code_point,
+                   static_cast<float>(*recorder_advance * recorder_zoom)});""",
+)
 
 def patch_blink_fragment_item_header(path: Path) -> None:
     """Adds the recreation mode's setters to FragmentItem."""
@@ -7250,6 +7261,10 @@ def patch_blink_fragment_items_builder(path: Path) -> None:
         BLINK_RECREATION_ITEMS_HELPER_MARKER,
         path,
     )
+    if INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK in text:
+        text = text.replace(
+            INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK
+        )
     text = insert_before_once(
         text,
         BLINK_RECREATION_ITEMS_ANCHOR,

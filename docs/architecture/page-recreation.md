@@ -1623,6 +1623,11 @@ compilation. In an unmodified Chromium in the development sandbox, the
 comparison snippet reported Blink's own layout for every compared item, as
 expected without the switch.
 
+On the target machine, revision f23a582 did not compile: the hook passed a
+braced initializer list to WTF's `Vector::push_back`, which cannot deduce
+its argument type from one. The hook now names the type, and a checkout
+holding the earlier hook is upgraded to it.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the

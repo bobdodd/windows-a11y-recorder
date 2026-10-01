@@ -6547,3 +6547,26 @@ class RecreationIntegrationTests(unittest.TestCase):
             "font_data->GlyphForCharacter(glyphs[i].code_point)",
             INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION,
         )
+
+    def test_upgrades_the_items_hook_that_did_not_compile(self):
+        self.assertNotEqual(
+            INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK,
+            INTEGRATE.BLINK_RECREATION_ITEMS_HOOK,
+        )
+        source = (
+            '#include "third_party/blink/renderer/core/layout/inline/'
+            'fragment_items_builder.h"\n'
+            + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER_ANCHOR
+            + INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK
+            + INTEGRATE.BLINK_RECREATION_ITEMS_ANCHOR
+            + "LayoutUnit offset, bool b) {}\n"
+        )
+        patched = self.patch_source_twice(
+            "fragment_items_builder.cc",
+            source,
+            INTEGRATE.patch_blink_fragment_items_builder,
+        )
+        self.assertNotIn(
+            INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, patched
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK))
