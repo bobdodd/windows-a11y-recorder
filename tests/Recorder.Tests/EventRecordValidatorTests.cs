@@ -3118,6 +3118,78 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void AcceptsBoxFragmentsInBothNodeRecords()
+    {
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-node-changed",
+            JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!));
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-checkpoint-node",
+            JsonNode.Parse(BrowserLayoutPayloads.BoxedElementNode)!));
+
+        var unboxed = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        unboxed["boxFragments"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", unboxed));
+
+        // A break before has no sequence number.
+        var before = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        var token = before["boxFragments"]!["fragments"]![0]!["breakToken"]!;
+        token["breakBefore"] = true;
+        token["sequenceNumber"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", before));
+    }
+
+    [Theory]
+    [InlineData("children/0/nodeId", "null", "browser-layout-fragment-child-node-inconsistent")]
+    [InlineData("children/1/nodeId", "7", "browser-layout-fragment-child-node-inconsistent")]
+    [InlineData("children/3/fragmentIndex", "0", "browser-layout-fragment-child-node-inconsistent")]
+    [InlineData("children/1/fragment", "null", "browser-layout-fragment-child-fragment-inconsistent")]
+    [InlineData("children/0/fragment", """{"width":1,"height":1,"breakToken":null,"scrollableOverflow":null,"children":[]}""", "browser-layout-fragment-child-fragment-inconsistent")]
+    [InlineData("children/0/kind", "\"inline\"", "payload-property-invalid")]
+    [InlineData("children/1/fragment/width", "-1", "payload-property-invalid")]
+    [InlineData("breakToken/sequenceNumber", "null", "browser-layout-break-token-inconsistent")]
+    [InlineData("scrollableOverflow/height", "-1", "payload-property-invalid")]
+    [InlineData("width", "\"80px\"", "payload-property-invalid")]
+    public void RejectsInconsistentBoxFragments(string path, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        var parts = path.Split('/');
+        var target = payload["boxFragments"]!["fragments"]![0]!;
+        for (var index = 0; index < parts.Length - 1; index++)
+        {
+            target = int.TryParse(parts[index], out var item) ? target[item]! : target[parts[index]]!;
+        }
+        target[parts[^1]] = JsonNode.Parse(value);
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void RejectsBoxFragmentsWithoutABox()
+    {
+        var text = JsonNode.Parse(BrowserLayoutPayloads.TextNode)!;
+        text["boxFragments"] = JsonNode.Parse(BrowserLayoutPayloads.BoxFragmentsJson);
+        Assert.Contains(
+            ValidateLayoutRecord("layout-checkpoint-node", text),
+            issue => issue.Code == "browser-layout-box-fragments-without-box");
+
+        var unrendered = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        unrendered["layoutObjectPresent"] = false;
+        unrendered["geometry"] = null;
+        Assert.Contains(
+            ValidateLayoutRecord("layout-node-changed", unrendered),
+            issue => issue.Code == "browser-layout-box-fragments-without-box");
+
+        var zoom = JsonNode.Parse(BrowserLayoutPayloads.BoxedElementNode)!;
+        zoom["boxFragments"]!["effectiveZoom"] = 0;
+        Assert.Contains(
+            ValidateLayoutRecord("layout-checkpoint-node", zoom),
+            issue => issue.Code == "payload-property-invalid");
+    }
+
+    [Fact]
     public void AcceptsTheBoundsOfEachQuad()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;

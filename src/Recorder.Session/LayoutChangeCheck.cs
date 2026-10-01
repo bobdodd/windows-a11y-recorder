@@ -53,6 +53,9 @@ public sealed class LayoutChangeCheck
     public int NodesCompared { get; private set; }
     public int NodesMatched { get; private set; }
     public int RectsCompared { get; private set; }
+
+    /// <summary>The checkpoint nodes whose box fragments were compared (protocol 0.38).</summary>
+    public int BoxFragmentsCompared { get; private set; }
     public double LargestRectDifference { get; private set; }
     public int ChangeSets { get; private set; }
     public int ChangedNodeRecords { get; private set; }
@@ -161,6 +164,7 @@ public sealed class LayoutChangeCheck
         report.AppendLine(
             $"checkpoint nodes under a display lock, without a change record, layout object, or style, not compared: {NodesLockedWithoutRecord}");
         report.AppendLine($"rectangles compared: {RectsCompared}");
+        report.AppendLine($"box fragments compared: {BoxFragmentsCompared}");
         report.AppendLine($"largest rectangle edge difference: {LargestRectDifference:G6} CSS px");
         foreach (var (kind, count) in _differences.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {
@@ -270,6 +274,19 @@ public sealed class LayoutChangeCheck
         {
             Note("computed-style-incomplete", where);
             matched = false;
+        }
+        // Protocol 0.38: the box fragments, exactly, since the checkpoint and
+        // the change record read the same fragments. A checkpoint of an
+        // earlier version states none.
+        if (node.TryGetProperty("boxFragments", out var observedFragments))
+        {
+            BoxFragmentsCompared++;
+            if (!changed.TryGetProperty("boxFragments", out var changedFragments) ||
+                !JsonElement.DeepEquals(observedFragments, changedFragments))
+            {
+                Note("box-fragments", where);
+                matched = false;
+            }
         }
         if (node.GetProperty("boundingClientRect") is { ValueKind: JsonValueKind.Object } observed)
         {

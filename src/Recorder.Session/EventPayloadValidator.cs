@@ -2633,13 +2633,15 @@ internal static class EventPayloadValidator
                 CustomPropertiesRule(),
                 NullableObject("pseudoElement"),
                 NullableInteger("shadowHostNodeId", positive: true),
-                NullableEnum("shadowRootMode", "open", "closed", "user-agent")
+                NullableEnum("shadowRootMode", "open", "closed", "user-agent"),
+                BoxFragmentsRule()
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererDocumentContext(payload, issues);
         ValidateBrowserLayoutPseudoElement(payload, issues);
         ValidateBrowserLayoutStyleCompleteness(payload, changeRecord: false, issues);
+        ValidateBrowserLayoutBoxFragments(payload, issues);
         if (HasNonnullProperty(payload, "shadowHostNodeId") !=
             HasNonnullProperty(payload, "shadowRootMode"))
         {
@@ -2852,6 +2854,193 @@ internal static class EventPayloadValidator
         }
     }
 
+    // Box fragments (protocol 0.38): an object, or null for a node whose
+    // layout object is not a box. Absent from records of earlier versions.
+    private static PropertyRule BoxFragmentsRule() =>
+        new(
+            "boxFragments",
+            false,
+            true,
+            value => value.ValueKind == JsonValueKind.Object,
+            "must be an object, or null");
+
+    private static readonly string[] FragmentChildKinds =
+        ["box", "anonymous", "column", "page", "line"];
+
+    // A node's box fragments: the effective zoom, each fragment, and a
+    // replaced element's natural size. Only a node with a layout object other
+    // than text has them.
+    private static void ValidateBrowserLayoutBoxFragments(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (!payload.TryGetProperty("boxFragments", out var fragments) ||
+            fragments.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        const string pointer = "#/payload/boxFragments";
+        var hasLayoutObject = payload.TryGetProperty("layoutObjectPresent", out var layoutObject) &&
+            layoutObject.ValueKind == JsonValueKind.True;
+        if (!hasLayoutObject || ReadString(payload, "nodeType") == "text")
+        {
+            AddError(
+                issues,
+                "browser-layout-box-fragments-without-box",
+                pointer,
+                "Box fragments are recorded only for a node whose layout object is a box.");
+        }
+        ValidateShape(
+            fragments,
+            [
+                RequiredNumber("effectiveZoom", positive: true),
+                RequiredObjectArray("fragments"),
+                NullableObject("naturalSize")
+            ],
+            issues,
+            pointer);
+        if (fragments.TryGetProperty("fragments", out var list) &&
+            list.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var fragment in list.EnumerateArray())
+            {
+                if (fragment.ValueKind == JsonValueKind.Object)
+                {
+                    ValidateBrowserLayoutBoxFragment(
+                        fragment, $"{pointer}/fragments/{index}", issues);
+                }
+                index++;
+            }
+        }
+        if (fragments.TryGetProperty("naturalSize", out var natural) &&
+            natural.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                natural,
+                [
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true),
+                    RequiredBoolean("hasWidth"),
+                    RequiredBoolean("hasHeight"),
+                    RequiredNumber("aspectRatioWidth", nonnegative: true),
+                    RequiredNumber("aspectRatioHeight", nonnegative: true)
+                ],
+                issues,
+                $"{pointer}/naturalSize");
+        }
+    }
+
+    private static void ValidateBrowserLayoutBoxFragment(
+        JsonElement fragment,
+        string pointer,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            fragment,
+            [
+                RequiredNumber("width", nonnegative: true),
+                RequiredNumber("height", nonnegative: true),
+                NullableObject("breakToken"),
+                NullableObject("scrollableOverflow"),
+                RequiredObjectArray("children")
+            ],
+            issues,
+            pointer);
+        if (fragment.TryGetProperty("breakToken", out var token) &&
+            token.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                token,
+                [
+                    RequiredNumber("consumedBlockSize", nonnegative: true),
+                    RequiredBoolean("breakBefore"),
+                    NullableInteger("sequenceNumber", nonnegative: true),
+                    RequiredBoolean("atBlockEnd")
+                ],
+                issues,
+                $"{pointer}/breakToken");
+            var breakBefore = token.TryGetProperty("breakBefore", out var before) &&
+                before.ValueKind == JsonValueKind.True;
+            if (breakBefore == HasNonnullProperty(token, "sequenceNumber"))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-break-token-inconsistent",
+                    $"{pointer}/breakToken",
+                    "A break token states a sequence number exactly when it is not a break before.");
+            }
+        }
+        if (fragment.TryGetProperty("scrollableOverflow", out var overflow) &&
+            overflow.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                overflow,
+                [
+                    RequiredNumber("x"),
+                    RequiredNumber("y"),
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true)
+                ],
+                issues,
+                $"{pointer}/scrollableOverflow");
+        }
+        if (!fragment.TryGetProperty("children", out var children) ||
+            children.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        var index = 0;
+        foreach (var child in children.EnumerateArray())
+        {
+            if (child.ValueKind != JsonValueKind.Object)
+            {
+                index++;
+                continue;
+            }
+            var childPointer = $"{pointer}/children/{index}";
+            ValidateShape(
+                child,
+                [
+                    RequiredEnum("kind", FragmentChildKinds),
+                    RequiredNumber("x"),
+                    RequiredNumber("y"),
+                    NullableInteger("nodeId", positive: true),
+                    NullableInteger("fragmentIndex", nonnegative: true),
+                    NullableObject("fragment")
+                ],
+                issues,
+                childPointer);
+            var kind = ReadString(child, "kind");
+            var isBox = kind == "box";
+            if (isBox != HasNonnullProperty(child, "nodeId") ||
+                (!isBox && HasNonnullProperty(child, "fragmentIndex")))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-fragment-child-node-inconsistent",
+                    childPointer,
+                    "A child link names a node and its fragment index only when it is a box with a node.");
+            }
+            var holdsFragment = kind is "anonymous" or "column" or "page";
+            var hasFragment = child.TryGetProperty("fragment", out var nested) &&
+                nested.ValueKind == JsonValueKind.Object;
+            if (kind is not null && holdsFragment != hasFragment)
+            {
+                AddError(
+                    issues,
+                    "browser-layout-fragment-child-fragment-inconsistent",
+                    childPointer,
+                    "A child link holds its own fragment exactly when it has no node: an anonymous box, column, or page.");
+            }
+            if (hasFragment)
+            {
+                ValidateBrowserLayoutBoxFragment(nested, $"{childPointer}/fragment", issues);
+            }
+            index++;
+        }
+    }
+
     private static PropertyRule ComputedStyleRule() =>
         new(
             "computedStyle",
@@ -3031,12 +3220,14 @@ internal static class EventPayloadValidator
                     "must be an array of distinct custom property names, or null"),
                 NullableObject("pseudoElement"),
                 NullableInteger("shadowHostNodeId", positive: true),
-                NullableEnum("shadowRootMode", "open", "closed", "user-agent")
+                NullableEnum("shadowRootMode", "open", "closed", "user-agent"),
+                BoxFragmentsRule()
             ],
             issues);
         ValidateLayoutChangeSetIdentity(payload, issues);
         ValidateBrowserLayoutPseudoElement(payload, issues);
         ValidateBrowserLayoutStyleCompleteness(payload, changeRecord: true, issues);
+        ValidateBrowserLayoutBoxFragments(payload, issues);
         if (HasNonnullProperty(payload, "shadowHostNodeId") !=
             HasNonnullProperty(payload, "shadowRootMode"))
         {

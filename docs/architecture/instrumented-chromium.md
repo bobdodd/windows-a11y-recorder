@@ -974,7 +974,15 @@ that changed, states `computedStyleComplete` false, and lists the custom
 properties removed in `removedCustomProperties`. The design is in
 [page recreation](page-recreation.md), "2a as built".
 
-Live 0.37 connections require an exact protocol-version match.
+Protocol version 0.38 adds `boxFragments` to layout checkpoint nodes and
+`layout-node-changed` records: for a node whose layout object is a layout
+box, its effective zoom, each of its physical fragments with its
+border-box size, break token, scrollable overflow, and child links, and a
+replaced element's natural size, in Blink's layout units; null for any
+other node. The design is in [page recreation](page-recreation.md), "2b
+design" and "2b as built".
+
+Live 0.38 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

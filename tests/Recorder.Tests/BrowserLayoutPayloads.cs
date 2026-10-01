@@ -383,6 +383,109 @@ internal static class BrowserLayoutPayloads
         }
         """;
 
+    // The box fragments of a block (protocol 0.38), in layout units at an
+    // effective zoom of 1.25: one fragment that breaks before its next one,
+    // with scrollable overflow, a child box with a node, an anonymous block
+    // holding its own fragment, and a column.
+    public const string BoxFragmentsJson = """
+        {
+          "effectiveZoom": 1.25,
+          "fragments": [
+            {
+              "width": 187.5,
+              "height": 31.25,
+              "breakToken": {
+                "consumedBlockSize": 31.25,
+                "breakBefore": false,
+                "sequenceNumber": 0,
+                "atBlockEnd": false
+              },
+              "scrollableOverflow": { "x": 0, "y": 0, "width": 187.5, "height": 40.015625 },
+              "children": [
+                { "kind": "box", "x": 0, "y": 0, "nodeId": 44, "fragmentIndex": 0, "fragment": null },
+                {
+                  "kind": "anonymous", "x": 0, "y": 30, "nodeId": null, "fragmentIndex": null,
+                  "fragment": {
+                    "width": 187.5, "height": 1.25, "breakToken": null,
+                    "scrollableOverflow": null, "children": []
+                  }
+                },
+                {
+                  "kind": "column", "x": 0, "y": 31.25, "nodeId": null, "fragmentIndex": null,
+                  "fragment": {
+                    "width": 90, "height": 0, "breakToken": null,
+                    "scrollableOverflow": null, "children": []
+                  }
+                },
+                { "kind": "line", "x": 0, "y": 31.25, "nodeId": null, "fragmentIndex": null, "fragment": null }
+              ]
+            }
+          ],
+          "naturalSize": null
+        }
+        """;
+
+    // A checkpoint record of an image with its box fragment and natural size
+    // (protocol 0.38).
+    public static readonly string BoxedElementNode = $$"""
+        {
+          "context": {{ContextJson}},
+          "checkpointId": "layout-checkpoint-1",
+          "nodeIndex": 5,
+          "nodeId": 46,
+          "nodeType": "element",
+          "nodeName": "IMG",
+          "layoutObjectPresent": true,
+          "displayLocked": false,
+          "boundingClientRect": { "x": 8, "y": 60, "width": 64, "height": 32 },
+          "computedStyle": { "display": "inline", "width": "64px", "color": "rgb(0, 0, 0)" },
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null,
+          "customProperties": {},
+          "boxFragments": {
+            "effectiveZoom": 1.25,
+            "fragments": [
+              { "width": 80, "height": 40, "breakToken": null, "scrollableOverflow": null, "children": [] }
+            ],
+            "naturalSize": {
+              "width": 400, "height": 200, "hasWidth": true, "hasHeight": true,
+              "aspectRatioWidth": 400, "aspectRatioHeight": 200
+            }
+          }
+        }
+        """;
+
+    // A change record of a block with its box fragments (protocol 0.38).
+    public static readonly string ChangedBoxedElementNode = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-1",
+          "reasons": ["layout"],
+          "nodeId": 42,
+          "nodeType": "element",
+          "nodeName": "DIV",
+          "layoutObjectPresent": true,
+          "displayLocked": false,
+          "geometry": {
+            "transformNodeId": "layout-transform-2",
+            "localRect": { "x": 10, "y": 338.75, "width": 150, "height": 25 },
+            "localQuadRects": null,
+            "clientRectEmpty": false,
+            "localRectMapped": true,
+            "clientRectScale": 0.8
+          },
+          "computedStyle": { "display": "block", "width": "150px", "color": null },
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null,
+          "computedStyleComplete": true,
+          "customProperties": {},
+          "removedCustomProperties": null,
+          "boxFragments": {{BoxFragmentsJson}}
+        }
+        """;
+
     public static IEnumerable<(string EventType, string Json)> All()
     {
         yield return ("layout-checkpoint-started", FirstCheckpointStarted);
@@ -393,6 +496,7 @@ internal static class BrowserLayoutPayloads
         yield return ("layout-checkpoint-node", TextNode);
         yield return ("layout-checkpoint-node", ShadowTreeElementNode);
         yield return ("layout-checkpoint-node", PseudoElementNode);
+        yield return ("layout-checkpoint-node", BoxedElementNode);
         yield return ("layout-checkpoint-completed", CheckpointCompleted);
         yield return ("layout-changes-started", ChangesStarted);
         yield return ("layout-changes-started", ChangesStartedWithoutCheckpoint);
@@ -401,6 +505,7 @@ internal static class BrowserLayoutPayloads
         yield return ("layout-node-changed", ChangedElementNode);
         yield return ("layout-node-changed", ChangedEmptyTextNode);
         yield return ("layout-node-changed", ChangedUnrenderedPseudoElement);
+        yield return ("layout-node-changed", ChangedBoxedElementNode);
         yield return ("layout-scroll-offset-changed", ScrollOffsetChanged);
         yield return ("layout-scroll-offset-changed", ScrollOffsetChangedWithoutTranslation);
         yield return ("layout-changes-completed", ChangesCompleted);

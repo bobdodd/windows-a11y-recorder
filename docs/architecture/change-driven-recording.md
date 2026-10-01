@@ -214,7 +214,9 @@ is to be measured on the target machine.
    recorded again. From protocol 0.37 a record after a node's first holds
    only the computed-style values and custom properties that changed since
    the node's last record; see "2a as built" in
-   [page recreation](page-recreation.md).
+   [page recreation](page-recreation.md). From protocol 0.38 a node's
+   record also holds its box fragments, whole, and is recorded again when
+   they differ; see "2b as built" there.
 4. DOM insertions and removals are recorded as they happen. A removed node
    leaves the cache.
 5. The first rendering update of a document, and any update after a record

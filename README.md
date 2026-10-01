@@ -352,8 +352,16 @@ full walk, including text of two lines under a rotation. See
 Protocol 0.37 records every computed-style property `getComputedStyle()`
 lists, in place of a fixed list of 283, and each element's custom
 properties. After a node's first record, a layout change record holds only
-the style values that changed. It is not yet tested on the target Windows
-machine. See [page recreation](docs/architecture/page-recreation.md).
+the style values that changed. Its cost in one recording on the target
+Windows machine is in "2a results" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.38 records each layout box's physical fragments in its node
+records: the border-box size of each fragment, its break position, its
+scrollable overflow, its child links with their offsets, and a replaced
+element's natural size, in Blink's layout units. It is not yet tested on the
+target Windows machine. See "2b as built" in
+[page recreation](docs/architecture/page-recreation.md).
 
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals

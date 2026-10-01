@@ -21,6 +21,86 @@ struct LayoutCheckpointStyleValue {
   std::string value;
 };
 
+// A rectangle in a transform node's space, or in a fragment's own space.
+struct LayoutLocalRect {
+  double x = 0;
+  double y = 0;
+  double width = 0;
+  double height = 0;
+};
+
+struct LayoutBoxFragment;
+
+// One child link of a box fragment (protocol 0.38): its kind, "box" for a box
+// with a DOM node, "anonymous" for a box with none, "column" or "page" for a
+// fragmentainer, or "line" for a line box; its offset in the parent fragment;
+// for a box with a node, the node and which of its fragments this is, or -1
+// when it was not found among them; and for an anonymous box, column, or
+// page, its own fragment, as the one element of the fragment list.
+struct LayoutFragmentChild {
+  LayoutFragmentChild();
+  LayoutFragmentChild(const LayoutFragmentChild&);
+  LayoutFragmentChild(LayoutFragmentChild&&);
+  LayoutFragmentChild& operator=(const LayoutFragmentChild&);
+  LayoutFragmentChild& operator=(LayoutFragmentChild&&);
+  ~LayoutFragmentChild();
+
+  std::string kind;
+  int node_id = 0;
+  int fragment_index = -1;
+  double x = 0;
+  double y = 0;
+  std::vector<LayoutBoxFragment> fragment;
+};
+
+// One physical fragment of a layout box (protocol 0.38): its border-box size;
+// the position its next fragment continues from, when it has a break token;
+// its scrollable overflow, when it has one; and its child links in order.
+// Lengths are Blink's layout units, physical and zoomed. The sequence number
+// is only meaningful for a break token that is not a break before.
+struct LayoutBoxFragment {
+  LayoutBoxFragment();
+  LayoutBoxFragment(const LayoutBoxFragment&);
+  LayoutBoxFragment(LayoutBoxFragment&&);
+  LayoutBoxFragment& operator=(const LayoutBoxFragment&);
+  LayoutBoxFragment& operator=(LayoutBoxFragment&&);
+  ~LayoutBoxFragment();
+
+  double width = 0;
+  double height = 0;
+  bool break_token_present = false;
+  double consumed_block_size = 0;
+  bool break_before = false;
+  unsigned sequence_number = 0;
+  bool at_block_end = false;
+  bool scrollable_overflow_present = false;
+  LayoutLocalRect scrollable_overflow;
+  std::vector<LayoutFragmentChild> children;
+};
+
+// The fragments of a node whose layout object is a layout box (protocol
+// 0.38), with the box's effective zoom, and a replaced element's natural
+// dimensions. Not present for any other node.
+struct LayoutBoxFragments {
+  LayoutBoxFragments();
+  LayoutBoxFragments(const LayoutBoxFragments&);
+  LayoutBoxFragments(LayoutBoxFragments&&);
+  LayoutBoxFragments& operator=(const LayoutBoxFragments&);
+  LayoutBoxFragments& operator=(LayoutBoxFragments&&);
+  ~LayoutBoxFragments();
+
+  bool present = false;
+  double effective_zoom = 1;
+  std::vector<LayoutBoxFragment> fragments;
+  bool natural_size_present = false;
+  double natural_width = 0;
+  double natural_height = 0;
+  bool natural_has_width = false;
+  bool natural_has_height = false;
+  double natural_aspect_ratio_width = 0;
+  double natural_aspect_ratio_height = 0;
+};
+
 // One element or text node at a layout checkpoint. The rectangle is the value
 // getBoundingClientRect would return at the checkpoint, in CSS pixels relative
 // to the frame's viewport, and is only meaningful when a layout object exists.
@@ -58,6 +138,8 @@ struct LayoutCheckpointNode {
   // root and that root's mode.
   int shadow_host_node_id = 0;
   std::string shadow_root_mode;
+  // The node's box fragments (protocol 0.38).
+  LayoutBoxFragments box_fragments;
 };
 
 // The reasons a node was noted, as bits.
@@ -65,14 +147,6 @@ enum LayoutChangeReason : unsigned {
   kLayoutChangeStyle = 1u << 0,
   kLayoutChangeLayout = 1u << 1,
   kLayoutChangePaintProperties = 1u << 2,
-};
-
-// A rectangle in a transform node's space.
-struct LayoutLocalRect {
-  double x = 0;
-  double y = 0;
-  double width = 0;
-  double height = 0;
 };
 
 // One node of a layout change set. The node's fields are those of a

@@ -1640,7 +1640,7 @@ With 1c, the feasibility step is complete: recorded styles, box fragments,
 lines, text items, and glyphs can each be imposed in Blink under the
 switch, and DevTools shows the recorded styles as their source.
 
-### Stage 2: recording for the recreation (agreed; 2a built)
+### Stage 2: recording for the recreation (agreed; 2a and 2b built)
 
 Proposed on 2026-09-30 and agreed by the user the same day, with changed
 style values only and packed glyph arrays. 2a is built and not yet tested
@@ -1858,10 +1858,11 @@ on and come back to the optimization later. There may be more to do, so we
 can deal with it in one session." The time of 2a is to be measured in full
 and reduced after 2b and 2c, together with theirs.
 
-#### 2b design (proposed)
+#### 2b design (agreed)
 
-Proposed on 2026-10-01, for agreement before it is built. It fills in item
-2 of "What is recorded, and when" above, with two changes from it, marked.
+Proposed on 2026-10-01 and agreed by the owner the same day, with both
+changes from the outline. It fills in item 2 of "What is recorded, and
+when" above, with two changes from it, marked.
 
 Where it is recorded. Change from the outline: the fragments are a new
 field of the node records the change sets and checkpoints already write,
@@ -1959,6 +1960,49 @@ Required tests:
   record of style changes; the contract round trip.
 - System, on the target machine: the two recordings above, with the check
   setting on in the 0.38 one and no `box-fragments` differences.
+
+#### 2b as built
+
+Built on 2026-10-01; not yet compiled or recorded on the target machine.
+
+- Integration script (`chromium/integrate.py`): the layout checkpoint
+  helper gains `RecorderReadBoxFragment` and `RecorderReadBoxFragments`,
+  called in the checkpoint walk after a node's shadow fields, and the
+  change set's node reader calls the same reader at its end. A checkout
+  patched at 0.37 has its change-set definition recognised and replaced;
+  the helper region is rewritten whole, as before. New includes:
+  `block_break_token.h`, `layout_replaced.h`, `natural_sizing_info.h`, and
+  `physical_fragment_link.h`.
+- Bridge (`chromium/recorder_bridge`): `LayoutBoxFragments`,
+  `LayoutBoxFragment`, and `LayoutFragmentChild` in `layout_changes.h`, a
+  field of `LayoutCheckpointNode`, so the checkpoint and the change set
+  share them; the node hash covers every field, so a node whose fragments
+  differ from its last record is recorded again. `SetLayoutNodeFields`
+  writes `boxFragments`, and the size estimate counts it.
+- App: contracts `BrowserLayoutBoxFragments`, `BrowserLayoutBoxFragment`,
+  `BrowserLayoutFragmentChild`, `BrowserLayoutBreakToken`, and
+  `BrowserLayoutNaturalSize`. Validator rules and errors:
+  `browser-layout-box-fragments-without-box`,
+  `browser-layout-fragment-child-node-inconsistent`,
+  `browser-layout-fragment-child-fragment-inconsistent`, and
+  `browser-layout-break-token-inconsistent`. The layout change state needs
+  no change, since a record of style changes is merged by copying every
+  other field, `boxFragments` included. The layout change check compares
+  the field exactly and reports `box-fragments compared`. Snapshots hold
+  node records as they are, so they hold the field without a format
+  change.
+
+Two details added in building, beyond the design:
+
+- `breakToken` also states `breakBefore`, whether the token is a break
+  before the box rather than inside it. Blink states no sequence number
+  for such a token (`BlockBreakToken::SequenceNumber` requires one that is
+  not), so `sequenceNumber` is null exactly then.
+- A `box` child whose fragment is not among its node's fragments has a
+  null `fragmentIndex`.
+
+No database migration, as for 2a: the database tables are not written for
+recordings that have a recording file.
 
 
 #### Required tests

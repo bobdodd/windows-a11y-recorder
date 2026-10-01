@@ -25,6 +25,7 @@ public sealed class RecordingCostReport
         long changeSetBytes = 0;
         var styleKinds = new SortedDictionary<string, StyleTotals>(StringComparer.Ordinal);
         var listedProperties = new SortedSet<int>();
+        var fragmentTotals = new SortedDictionary<string, (long Records, long Bytes, long Fragments, long Children)>(StringComparer.Ordinal);
         var urls = new SortedSet<string>(StringComparer.Ordinal);
         long first = long.MaxValue;
         long last = long.MinValue;
@@ -62,6 +63,18 @@ public sealed class RecordingCostReport
                     changeSetBytes += bytes;
                 }
                 var payload = record.Event.Payload;
+                // Protocol 0.38: the JSON text of the box fragments, and the
+                // fragments and child links they hold, in node records.
+                if (payload.TryGetProperty("boxFragments", out var boxFragments) &&
+                    boxFragments.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    var (fragmentCount, childCount) = CountFragments(boxFragments.GetProperty("fragments"));
+                    fragmentTotals[type] = (
+                        fragmentTotals.GetValueOrDefault(type).Records + 1,
+                        fragmentTotals.GetValueOrDefault(type).Bytes + boxFragments.GetRawText().Length,
+                        fragmentTotals.GetValueOrDefault(type).Fragments + fragmentCount,
+                        fragmentTotals.GetValueOrDefault(type).Children + childCount);
+                }
                 if (type == "layout-node-changed")
                 {
                     // Protocol 0.37 states whether the style is whole; an
@@ -120,9 +133,49 @@ public sealed class RecordingCostReport
                 $"  {kind}: {totals.Count}, {(double)totals.Bytes / totals.Count:F0}, {(totals.Styled > 0 ? (double)totals.Values / totals.Styled : 0):F1}, {(totals.Styled > 0 ? (double)totals.Custom / totals.Styled : 0):F1}");
         }
 
+        report.AppendLine("box fragments by record type: records with them, characters of their JSON, fragments, child links");
+        foreach (var (type, totals) in fragmentTotals)
+        {
+            report.AppendLine(CultureInfo.InvariantCulture,
+                $"  {type}: {totals.Records}, {totals.Bytes}, {totals.Fragments}, {totals.Children}");
+        }
+
         var reportPath = Environment.GetEnvironmentVariable("RECORDER_COST_REPORT") ??
             Path.Combine(Path.GetTempPath(), "cost-report.txt");
         await File.WriteAllTextAsync(reportPath, report.ToString(), TestContext.Current.CancellationToken);
+    }
+
+    // The fragments and child links in a list of fragments, nested ones
+    // included.
+    private static (long Fragments, long Children) CountFragments(System.Text.Json.JsonElement fragments)
+    {
+        long fragmentCount = 0;
+        long childCount = 0;
+        foreach (var fragment in fragments.EnumerateArray())
+        {
+            var (nestedFragments, nestedChildren) = CountFragment(fragment);
+            fragmentCount += nestedFragments;
+            childCount += nestedChildren;
+        }
+        return (fragmentCount, childCount);
+    }
+
+    private static (long Fragments, long Children) CountFragment(System.Text.Json.JsonElement fragment)
+    {
+        long fragmentCount = 1;
+        long childCount = 0;
+        foreach (var child in fragment.GetProperty("children").EnumerateArray())
+        {
+            childCount++;
+            if (child.TryGetProperty("fragment", out var nested) &&
+                nested.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                var (nestedFragments, nestedChildren) = CountFragment(nested);
+                fragmentCount += nestedFragments;
+                childCount += nestedChildren;
+            }
+        }
+        return (fragmentCount, childCount);
     }
 
     private sealed record StyleTotals(long Count, long Bytes, long Styled, long Values, long Custom);

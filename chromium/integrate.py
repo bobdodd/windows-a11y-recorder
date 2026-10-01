@@ -9880,14 +9880,184 @@ BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
     BLINK_LAYOUT_CHANGES_COMPUTABLE_STYLE,
     1,
 )
+# Protocol 0.38 records each layout box's physical fragments in its node
+# record, in the checkpoint and the change set alike. See
+# docs/architecture/page-recreation.md, "2b design".
+BLINK_LAYOUT_BOX_FRAGMENTS_READER = """\
+
+// Reads one physical fragment of a box: its border-box size, its break
+// position, its scrollable overflow, and each child link with its offset. A
+// child with no node of its own, an anonymous box or a column or page, holds
+// its fragment, nested (protocol 0.38). Lengths are Blink's layout units.
+void RecorderReadBoxFragment(const PhysicalBoxFragment& recorder_fragment,
+                             a11y_recorder::LayoutBoxFragment& recorder_out) {
+  recorder_out.width = recorder_fragment.Size().width.ToDouble();
+  recorder_out.height = recorder_fragment.Size().height.ToDouble();
+  if (const BlockBreakToken* recorder_token =
+          recorder_fragment.GetBreakToken()) {
+    recorder_out.break_token_present = true;
+    recorder_out.consumed_block_size =
+        recorder_token->ConsumedBlockSize().ToDouble();
+    recorder_out.break_before = recorder_token->IsBreakBefore();
+    if (!recorder_token->IsBreakBefore()) {
+      recorder_out.sequence_number = recorder_token->SequenceNumber();
+    }
+    recorder_out.at_block_end = recorder_token->IsAtBlockEnd();
+  }
+  if (recorder_fragment.HasScrollableOverflow()) {
+    const PhysicalRect recorder_overflow =
+        recorder_fragment.ScrollableOverflow();
+    recorder_out.scrollable_overflow_present = true;
+    recorder_out.scrollable_overflow = a11y_recorder::LayoutLocalRect{
+        recorder_overflow.offset.left.ToDouble(),
+        recorder_overflow.offset.top.ToDouble(),
+        recorder_overflow.size.width.ToDouble(),
+        recorder_overflow.size.height.ToDouble()};
+  }
+  for (const PhysicalFragmentLink& recorder_link :
+       recorder_fragment.PostLayoutChildren()) {
+    const PhysicalFragment& recorder_child = *recorder_link.fragment;
+    a11y_recorder::LayoutFragmentChild recorder_child_out;
+    recorder_child_out.x = recorder_link.Offset().left.ToDouble();
+    recorder_child_out.y = recorder_link.Offset().top.ToDouble();
+    const Node* recorder_child_node = recorder_child.GetNode();
+    bool recorder_nested = false;
+    if (recorder_child.IsLineBox()) {
+      recorder_child_out.kind = "line";
+    } else if (recorder_child.IsFragmentainerBox()) {
+      recorder_child_out.kind =
+          recorder_child.IsColumnBox() ? "column" : "page";
+      recorder_nested = true;
+    } else if (recorder_child_node) {
+      recorder_child_out.kind = "box";
+      recorder_child_out.node_id =
+          const_cast<Node*>(recorder_child_node)->GetDomNodeId();
+      if (const auto* recorder_child_box =
+              DynamicTo<LayoutBox>(recorder_child.GetLayoutObject())) {
+        int recorder_index = 0;
+        for (const PhysicalBoxFragment& recorder_sibling :
+             recorder_child_box->PhysicalFragments()) {
+          if (&recorder_sibling == &recorder_child) {
+            recorder_child_out.fragment_index = recorder_index;
+            break;
+          }
+          ++recorder_index;
+        }
+      }
+    } else {
+      recorder_child_out.kind = "anonymous";
+      recorder_nested = recorder_child.IsBox();
+    }
+    if (recorder_nested) {
+      recorder_child_out.fragment.emplace_back();
+      RecorderReadBoxFragment(To<PhysicalBoxFragment>(recorder_child),
+                              recorder_child_out.fragment.back());
+    }
+    recorder_out.children.push_back(std::move(recorder_child_out));
+  }
+}
+
+// Reads every physical fragment of a node's layout box, its effective zoom,
+// and a replaced element's natural dimensions (protocol 0.38). A node whose
+// layout object is not a box has none.
+void RecorderReadBoxFragments(
+    const LayoutObject* recorder_layout_object,
+    a11y_recorder::LayoutCheckpointNode& recorder_record) {
+  const auto* recorder_box = DynamicTo<LayoutBox>(recorder_layout_object);
+  if (!recorder_box) {
+    return;
+  }
+  a11y_recorder::LayoutBoxFragments& recorder_fragments =
+      recorder_record.box_fragments;
+  recorder_fragments.present = true;
+  recorder_fragments.effective_zoom = recorder_box->StyleRef().EffectiveZoom();
+  for (const PhysicalBoxFragment& recorder_fragment :
+       recorder_box->PhysicalFragments()) {
+    recorder_fragments.fragments.emplace_back();
+    RecorderReadBoxFragment(recorder_fragment,
+                            recorder_fragments.fragments.back());
+  }
+  if (const auto* recorder_replaced =
+          DynamicTo<LayoutReplaced>(recorder_layout_object)) {
+    const PhysicalNaturalSizingInfo recorder_natural =
+        recorder_replaced->ComputeNaturalSizingInfo();
+    recorder_fragments.natural_size_present = true;
+    recorder_fragments.natural_width = recorder_natural.size.width.ToDouble();
+    recorder_fragments.natural_height =
+        recorder_natural.size.height.ToDouble();
+    recorder_fragments.natural_has_width = recorder_natural.has_width;
+    recorder_fragments.natural_has_height = recorder_natural.has_height;
+    recorder_fragments.natural_aspect_ratio_width =
+        recorder_natural.aspect_ratio.width.ToDouble();
+    recorder_fragments.natural_aspect_ratio_height =
+        recorder_natural.aspect_ratio.height.ToDouble();
+  }
+}
+"""
+BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR = """\
+
+const char* RecorderShadowRootModeName(ShadowRootMode recorder_mode) {
+"""
+BLINK_LAYOUT_CHECKPOINT_BOX_FRAGMENTS_ANCHOR = """\
+          RecorderShadowRootModeName(recorder_containing_root->GetMode());
+    }
+    recorder_cost.node_fields_nanoseconds +=
+"""
+for _anchor in (
+    BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR,
+    BLINK_LAYOUT_CHECKPOINT_BOX_FRAGMENTS_ANCHOR,
+):
+    if BLINK_LAYOUT_CHECKPOINT_HELPER.count(_anchor) != 1:
+        raise RuntimeError("a box fragment anchor was not found once")
+BLINK_LAYOUT_CHECKPOINT_HELPER = BLINK_LAYOUT_CHECKPOINT_HELPER.replace(
+    BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR,
+    BLINK_LAYOUT_BOX_FRAGMENTS_READER + BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR,
+    1,
+).replace(
+    BLINK_LAYOUT_CHECKPOINT_BOX_FRAGMENTS_ANCHOR,
+    """\
+          RecorderShadowRootModeName(recorder_containing_root->GetMode());
+    }
+    RecorderReadBoxFragments(recorder_layout_object, recorder_record);
+    recorder_cost.node_fields_nanoseconds +=
+""",
+    1,
+)
+BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END = """\
+        RecorderShadowRootModeName(recorder_containing_root->GetMode());
+  }
+  return recorder_changed;
+}
+"""
+LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION = (
+    BLINK_LAYOUT_CHANGES_DEFINITION
+)
+if BLINK_LAYOUT_CHANGES_DEFINITION.count(BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END) != 1:
+    raise RuntimeError("the layout change node reader's end was not found once")
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END,
+    """\
+        RecorderShadowRootModeName(recorder_containing_root->GetMode());
+  }
+  RecorderReadBoxFragments(recorder_layout_object, recorder_record);
+  return recorder_changed;
+}
+""",
+    1,
+)
 BLINK_LAYOUT_CHANGES_INCLUDES = (
     "#include <array>",
     '#include "base/numerics/safe_conversions.h"',
     '#include "third_party/blink/renderer/core/layout/inline/fragment_item.h"',
     '#include "third_party/blink/renderer/core/layout/inline/fragment_items.h"',
+    '#include "third_party/blink/renderer/core/layout/block_break_token.h"',
     '#include "third_party/blink/renderer/core/layout/layout_box.h"',
+    '#include "third_party/blink/renderer/core/layout/layout_replaced.h"',
     '#include "third_party/blink/renderer/core/layout/layout_view.h"',
+    '#include "third_party/blink/renderer/core/layout/natural_sizing_info.h"',
     '#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"',
+    '#include "third_party/blink/renderer/core/layout/'
+    'physical_fragment_link.h"',
     '#include "third_party/blink/renderer/core/paint/fragment_data.h"',
     '#include "third_party/blink/renderer/core/paint/object_paint_properties.h"',
     '#include "third_party/blink/renderer/core/paint/'
@@ -9960,6 +10130,8 @@ BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS = """\
             recorder_layout_object->AbsoluteQuads(recorder_quads);
 """
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.38 recorded box fragments.
+    LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.37 read every computable property.
     LEGACY_FIXED_LIST_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.36 recorded the bounds of each quad.

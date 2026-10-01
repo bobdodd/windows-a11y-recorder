@@ -4146,6 +4146,111 @@ uint64_t BeginBlinkLayoutCheckpoint(
 
 namespace {
 
+base::DictValue BoxFragmentValue(LayoutBoxFragment& fragment);
+
+// A child link of a box fragment (protocol 0.38).
+base::DictValue FragmentChildValue(LayoutFragmentChild& child) {
+  base::DictValue value;
+  value.Set("kind", std::move(child.kind));
+  value.Set("x", child.x);
+  value.Set("y", child.y);
+  if (child.node_id > 0) {
+    value.Set("nodeId", child.node_id);
+    value.Set("fragmentIndex", child.fragment_index >= 0
+                                   ? base::Value(child.fragment_index)
+                                   : base::Value());
+  } else {
+    value.Set("nodeId", base::Value());
+    value.Set("fragmentIndex", base::Value());
+  }
+  if (!child.fragment.empty()) {
+    value.Set("fragment", BoxFragmentValue(child.fragment.front()));
+  } else {
+    value.Set("fragment", base::Value());
+  }
+  return value;
+}
+
+// One physical fragment of a box, in Blink's layout units (protocol 0.38).
+base::DictValue BoxFragmentValue(LayoutBoxFragment& fragment) {
+  base::DictValue value;
+  value.Set("width", fragment.width);
+  value.Set("height", fragment.height);
+  if (fragment.break_token_present) {
+    base::DictValue token;
+    token.Set("consumedBlockSize", fragment.consumed_block_size);
+    token.Set("breakBefore", fragment.break_before);
+    token.Set("sequenceNumber",
+              fragment.break_before
+                  ? base::Value()
+                  : base::Value(base::saturated_cast<int>(
+                        fragment.sequence_number)));
+    token.Set("atBlockEnd", fragment.at_block_end);
+    value.Set("breakToken", std::move(token));
+  } else {
+    value.Set("breakToken", base::Value());
+  }
+  if (fragment.scrollable_overflow_present) {
+    base::DictValue overflow;
+    overflow.Set("x", fragment.scrollable_overflow.x);
+    overflow.Set("y", fragment.scrollable_overflow.y);
+    overflow.Set("width", fragment.scrollable_overflow.width);
+    overflow.Set("height", fragment.scrollable_overflow.height);
+    value.Set("scrollableOverflow", std::move(overflow));
+  } else {
+    value.Set("scrollableOverflow", base::Value());
+  }
+  base::ListValue children;
+  for (LayoutFragmentChild& child : fragment.children) {
+    children.Append(FragmentChildValue(child));
+  }
+  value.Set("children", std::move(children));
+  return value;
+}
+
+// The box fragments of a node, or null when its layout object is not a box
+// (protocol 0.38).
+base::Value BoxFragmentsValue(LayoutBoxFragments& fragments) {
+  if (!fragments.present) {
+    return base::Value();
+  }
+  base::DictValue value;
+  value.Set("effectiveZoom", fragments.effective_zoom);
+  base::ListValue list;
+  for (LayoutBoxFragment& fragment : fragments.fragments) {
+    list.Append(BoxFragmentValue(fragment));
+  }
+  value.Set("fragments", std::move(list));
+  if (fragments.natural_size_present) {
+    base::DictValue natural;
+    natural.Set("width", fragments.natural_width);
+    natural.Set("height", fragments.natural_height);
+    natural.Set("hasWidth", fragments.natural_has_width);
+    natural.Set("hasHeight", fragments.natural_has_height);
+    natural.Set("aspectRatioWidth", fragments.natural_aspect_ratio_width);
+    natural.Set("aspectRatioHeight", fragments.natural_aspect_ratio_height);
+    value.Set("naturalSize", std::move(natural));
+  } else {
+    value.Set("naturalSize", base::Value());
+  }
+  return base::Value(std::move(value));
+}
+
+// Estimates a fragment's serialized size: its fixed members and, for each
+// child, its members and any nested fragment.
+size_t EstimateBoxFragmentBytes(const LayoutBoxFragment& fragment) {
+  constexpr size_t kFragmentBytes = 240;
+  constexpr size_t kChildBytes = 110;
+  size_t bytes = kFragmentBytes;
+  for (const LayoutFragmentChild& child : fragment.children) {
+    bytes += kChildBytes;
+    for (const LayoutBoxFragment& nested : child.fragment) {
+      bytes += EstimateBoxFragmentBytes(nested);
+    }
+  }
+  return bytes;
+}
+
 // Sets the fields a checkpoint record and a change record of a node share:
 // its identity, type, and name, its pseudo-element and shadow fields, whether
 // it has a layout object and is display locked, and its computed style.
@@ -4201,6 +4306,7 @@ void SetLayoutNodeFields(base::DictValue& payload, LayoutCheckpointNode& node) {
     payload.Set("computedStyle", base::Value());
     payload.Set("customProperties", base::Value());
   }
+  payload.Set("boxFragments", BoxFragmentsValue(node.box_fragments));
 }
 
 // Builds a layout checkpoint node record from the values the renderer copied
@@ -4260,6 +4366,14 @@ size_t EstimateLayoutCheckpointNodeBytes(const LayoutCheckpointNode& node,
   }
   for (const LayoutCheckpointStyleValue& entry : node.custom_properties) {
     bytes += kStyleEntryBytes + entry.property_name.size() + entry.value.size();
+  }
+  if (node.box_fragments.present) {
+    // The zoom and the natural size, with their member names.
+    constexpr size_t kBoxFragmentsBytes = 200;
+    bytes += kBoxFragmentsBytes;
+    for (const LayoutBoxFragment& fragment : node.box_fragments.fragments) {
+      bytes += EstimateBoxFragmentBytes(fragment);
+    }
   }
   return bytes;
 }

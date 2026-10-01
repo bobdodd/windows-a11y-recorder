@@ -75,6 +75,61 @@ void TestEveryStatedFieldChangesTheNodeHash() {
   }
   Expect(differs([](auto& n) { n.node.shadow_root_mode = "open"; }), "shadow");
   Expect(differs([](auto& n) { n.node.generated_text = "x"; }), "generated");
+  {
+    // Every field of the box fragments, including a nested fragment.
+    a11y_recorder::LayoutChangedNode boxed = SampleNode();
+    boxed.node.box_fragments.present = true;
+    a11y_recorder::LayoutBoxFragment fragment;
+    fragment.width = 6400;
+    fragment.height = 1280;
+    a11y_recorder::LayoutFragmentChild child;
+    child.kind = "box";
+    child.node_id = 9;
+    child.fragment_index = 0;
+    a11y_recorder::LayoutFragmentChild anonymous;
+    anonymous.kind = "anonymous";
+    anonymous.fragment.emplace_back();
+    anonymous.fragment.back().width = 64;
+    fragment.children = {child, anonymous};
+    boxed.node.box_fragments.fragments.push_back(fragment);
+    const uint64_t boxed_hash = a11y_recorder::HashLayoutChangedNode(boxed);
+    Expect(boxed_hash != a11y_recorder::HashLayoutChangedNode(SampleNode()),
+           "box fragments present");
+    auto box_differs = [&boxed, boxed_hash](auto change) {
+      a11y_recorder::LayoutChangedNode node = boxed;
+      change(node.node.box_fragments);
+      return a11y_recorder::HashLayoutChangedNode(node) != boxed_hash;
+    };
+    Expect(box_differs([](auto& f) { f.effective_zoom = 2; }), "zoom");
+    Expect(box_differs([](auto& f) { f.fragments[0].width = 6464; }),
+           "fragment width");
+    Expect(box_differs([](auto& f) { f.fragments[0].break_token_present = true; }),
+           "break token");
+    Expect(box_differs([](auto& f) { f.fragments[0].sequence_number = 1; }),
+           "sequence number");
+    Expect(box_differs([](auto& f) {
+             f.fragments[0].scrollable_overflow_present = true;
+           }),
+           "scrollable overflow");
+    Expect(box_differs([](auto& f) { f.fragments[0].children[0].y = 64; }),
+           "child offset");
+    Expect(box_differs([](auto& f) { f.fragments[0].children[0].node_id = 10; }),
+           "child node");
+    Expect(box_differs([](auto& f) {
+             f.fragments[0].children[0].fragment_index = 1;
+           }),
+           "child fragment index");
+    Expect(box_differs([](auto& f) {
+             f.fragments[0].children[1].fragment[0].width = 128;
+           }),
+           "nested fragment");
+    Expect(box_differs([](auto& f) { f.fragments.push_back({}); }),
+           "fragment count");
+    Expect(box_differs([](auto& f) { f.natural_size_present = true; }),
+           "natural size");
+    Expect(box_differs([](auto& f) { f.natural_aspect_ratio_height = 3; }),
+           "natural aspect ratio");
+  }
   // The field boundaries are part of the hash.
   Expect(differs([](auto& n) {
            n.node.computed_style[0].property_name = "colo";

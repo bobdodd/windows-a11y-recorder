@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.37";
+    public const string CurrentVersion = "0.38";
 }
 
 public static class BrowserEvidenceChannels
@@ -888,6 +888,53 @@ public sealed record BrowserLayoutPseudoElement(
     int GeneratedTextLength,
     bool GeneratedTextTruncated);
 
+// Box fragments (protocol 0.38). Every length is a Blink layout unit written as
+// a number: physical, not logical, and zoomed, so dividing by EffectiveZoom
+// gives CSS pixels. A box fragment holds its border-box size, the break token
+// it continues from when the box continues in a later fragment, its scrollable
+// overflow when it has any, and its child links in order.
+public sealed record BrowserLayoutBreakToken(
+    double ConsumedBlockSize,
+    bool BreakBefore,
+    int? SequenceNumber,
+    bool AtBlockEnd);
+
+// One child link: Kind is "box" for a box with a DOM node, named by NodeId,
+// FragmentIndex naming which of that node's fragments it is; "anonymous",
+// "column", or "page" for a box with no node, which holds its own Fragment;
+// or "line" for a line box. X and Y are its offset in the parent fragment.
+public sealed record BrowserLayoutFragmentChild(
+    string Kind,
+    double X,
+    double Y,
+    long? NodeId,
+    int? FragmentIndex,
+    BrowserLayoutBoxFragment? Fragment);
+
+public sealed record BrowserLayoutBoxFragment(
+    double Width,
+    double Height,
+    BrowserLayoutBreakToken? BreakToken,
+    BrowserLayoutRect? ScrollableOverflow,
+    IReadOnlyList<BrowserLayoutFragmentChild> Children);
+
+// A replaced element's natural dimensions, in zoomed CSS pixels as Blink holds
+// them.
+public sealed record BrowserLayoutNaturalSize(
+    double Width,
+    double Height,
+    bool HasWidth,
+    bool HasHeight,
+    double AspectRatioWidth,
+    double AspectRatioHeight);
+
+// The fragments of a node whose layout object is a layout box. NaturalSize is
+// null except for a replaced element.
+public sealed record BrowserLayoutBoxFragments(
+    double EffectiveZoom,
+    IReadOnlyList<BrowserLayoutBoxFragment> Fragments,
+    BrowserLayoutNaturalSize? NaturalSize);
+
 // Records one element, laid-out text node, or pseudo-element.
 // BoundingClientRect is null when the node has no layout object. ComputedStyle
 // maps each listed property to its resolved value, or to null when Blink
@@ -896,7 +943,9 @@ public sealed record BrowserLayoutPseudoElement(
 // the shadow tree that contains the node, and are null in a document tree.
 // CustomProperties (protocol 0.37) maps each custom property of the computed
 // style to its value, and is null when ComputedStyle is; ComputedStyle then
-// holds every property getComputedStyle() lists.
+// holds every property getComputedStyle() lists. BoxFragments (protocol
+// 0.38) holds the node's box fragments, and is null when its layout object is
+// not a layout box.
 public sealed record BrowserLayoutCheckpointNodePayload(
     BrowserContext Context,
     string CheckpointId,
@@ -911,7 +960,8 @@ public sealed record BrowserLayoutCheckpointNodePayload(
     BrowserLayoutPseudoElement? PseudoElement = null,
     long? ShadowHostNodeId = null,
     string? ShadowRootMode = null,
-    IReadOnlyDictionary<string, string?>? CustomProperties = null);
+    IReadOnlyDictionary<string, string?>? CustomProperties = null,
+    BrowserLayoutBoxFragments? BoxFragments = null);
 
 public sealed record BrowserLayoutCheckpointCompletedPayload(
     BrowserContext Context,
@@ -976,7 +1026,8 @@ public sealed record BrowserLayoutNodeGeometry(
 // CustomProperties hold every value, as in a node's first record, and false
 // when they hold only the values that changed since the node's last record,
 // RemovedCustomProperties then naming the custom properties that record held
-// and this one does not. Both are null when ComputedStyle is.
+// and this one does not. Both are null when ComputedStyle is. BoxFragments
+// (protocol 0.38) is always whole, as in a checkpoint node record.
 public sealed record BrowserLayoutNodeChangedPayload(
     BrowserContext Context,
     string ChangeSetId,
@@ -993,7 +1044,8 @@ public sealed record BrowserLayoutNodeChangedPayload(
     string? ShadowRootMode = null,
     bool? ComputedStyleComplete = null,
     IReadOnlyDictionary<string, string?>? CustomProperties = null,
-    IReadOnlyList<string>? RemovedCustomProperties = null);
+    IReadOnlyList<string>? RemovedCustomProperties = null,
+    BrowserLayoutBoxFragments? BoxFragments = null);
 
 public sealed record BrowserLayoutChangesCompletedPayload(
     BrowserContext Context,

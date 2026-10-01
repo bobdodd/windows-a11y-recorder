@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.37"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.37"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.38"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.38"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -5716,6 +5716,77 @@ class LayoutIntegrationTests(unittest.TestCase):
         self.assertIn(
             INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHANGES_DEFINITION,
             INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS,
+        )
+
+    def test_both_readings_record_box_fragments(self):
+        # Protocol 0.38: the checkpoint and the change set read each node's
+        # box fragments with the one reader, after its other fields.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertEqual(1, helper.count("void RecorderReadBoxFragments("))
+        self.assertEqual(1, helper.count("void RecorderReadBoxFragment("))
+        call = "RecorderReadBoxFragments(recorder_layout_object, recorder_record);"
+        self.assertEqual(1, helper.count(call))
+        self.assertLess(
+            helper.index("void RecorderReadBoxFragments("),
+            helper.index("RecorderRecordLayoutCheckpoint("),
+        )
+        self.assertLess(
+            helper.index(call),
+            helper.index("a11y_recorder::RecordBlinkLayoutCheckpointNode("),
+        )
+        for reading in (
+            "recorder_box->PhysicalFragments()",
+            "recorder_fragment.PostLayoutChildren()",
+            "recorder_fragment.GetBreakToken()",
+            "recorder_fragment.HasScrollableOverflow()",
+            "recorder_replaced->ComputeNaturalSizingInfo()",
+            "recorder_box->StyleRef().EffectiveZoom()",
+        ):
+            with self.subTest(reading=reading):
+                self.assertIn(reading, helper)
+        # A break before has no sequence number to read.
+        self.assertIn(
+            "    if (!recorder_token->IsBreakBefore()) {\n"
+            "      recorder_out.sequence_number = recorder_token->SequenceNumber();",
+            helper,
+        )
+        definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertEqual(1, definition.count(call))
+        self.assertNotIn(
+            call, INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION
+        )
+        self.assertEqual(
+            INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION,
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[0],
+        )
+        for include in (
+            "layout/block_break_token.h",
+            "layout/layout_replaced.h",
+            "layout/natural_sizing_info.h",
+            "physical_fragment_link.h",
+        ):
+            with self.subTest(include=include):
+                self.assertTrue(
+                    any(include in line
+                        for line in INTEGRATE.BLINK_LAYOUT_CHANGES_INCLUDES)
+                )
+
+    def test_a_checkout_at_protocol_0_37_takes_the_box_fragment_reading(self):
+        # The definition a 0.37 checkout holds is the first one recognised,
+        # and only the node reader's end differs from the current one.
+        legacy = INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertNotIn(legacy, current)
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END,
+                INTEGRATE.BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END.replace(
+                    "  return recorder_changed;",
+                    "  RecorderReadBoxFragments(recorder_layout_object, "
+                    "recorder_record);\n  return recorder_changed;",
+                ),
+            ),
         )
 
     def test_the_fixed_list_before_protocol_0_37_stays_documented(self):

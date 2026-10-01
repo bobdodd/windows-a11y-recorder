@@ -79,6 +79,26 @@ public sealed class BrowserLayoutPayloadIngestTests
         Assert.Equal("green", changesPayload.CustomProperties!["--accent"]);
         Assert.Equal(["--gap"], changesPayload.RemovedCustomProperties);
 
+        using var boxed = JsonDocument.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode);
+        var boxedPayload = BrowserProtocol.Deserialize<BrowserLayoutNodeChangedPayload>(
+            boxed.RootElement);
+        var fragments = boxedPayload.BoxFragments!;
+        Assert.Equal(1.25, fragments.EffectiveZoom);
+        var fragment = Assert.Single(fragments.Fragments);
+        Assert.Equal(187.5, fragment.Width);
+        Assert.Equal(31.25, fragment.BreakToken!.ConsumedBlockSize);
+        Assert.Equal(0, fragment.BreakToken.SequenceNumber);
+        Assert.Equal(40.015625, fragment.ScrollableOverflow!.Height);
+        Assert.Equal(["box", "anonymous", "column", "line"], fragment.Children.Select(child => child.Kind));
+        Assert.Equal(44, fragment.Children[0].NodeId);
+        Assert.Equal(1.25, fragment.Children[1].Fragment!.Height);
+        Assert.Null(fragments.NaturalSize);
+
+        using var image = JsonDocument.Parse(BrowserLayoutPayloads.BoxedElementNode);
+        var imagePayload = BrowserProtocol.Deserialize<BrowserLayoutCheckpointNodePayload>(
+            image.RootElement);
+        Assert.Equal(400, imagePayload.BoxFragments!.NaturalSize!.Width);
+
         using var text = JsonDocument.Parse(BrowserLayoutPayloads.ChangedEmptyTextNode);
         var textPayload = BrowserProtocol.Deserialize<BrowserLayoutNodeChangedPayload>(
             text.RootElement);

@@ -125,6 +125,12 @@ and the document node are not recorded.
   0.28, the pseudo-element's originating node, type, and generated text, and
   the host and mode of the shadow tree containing the node. Each is null when
   it does not apply.
+- `boxFragments`: from protocol 0.38, for a node whose layout object is a
+  layout box, its effective zoom, its physical fragments, and a replaced
+  element's natural size, in Blink's layout units; null for any other node.
+  The fields are listed in "2b design" in
+  [page recreation](page-recreation.md). A `layout-node-changed` record
+  holds the same field, always whole.
 
 ### Checkpoint completion
 

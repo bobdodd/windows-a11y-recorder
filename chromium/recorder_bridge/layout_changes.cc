@@ -45,7 +45,60 @@ uint64_t HashStyleValue(const LayoutCheckpointStyleValue& value) {
   return hasher.Value();
 }
 
+void HashBoxFragment(Hasher& hasher, const LayoutBoxFragment& fragment) {
+  hasher.Number(fragment.width);
+  hasher.Number(fragment.height);
+  hasher.Boolean(fragment.break_token_present);
+  hasher.Number(fragment.consumed_block_size);
+  hasher.Boolean(fragment.break_before);
+  hasher.Integer(fragment.sequence_number);
+  hasher.Boolean(fragment.at_block_end);
+  hasher.Boolean(fragment.scrollable_overflow_present);
+  hasher.Number(fragment.scrollable_overflow.x);
+  hasher.Number(fragment.scrollable_overflow.y);
+  hasher.Number(fragment.scrollable_overflow.width);
+  hasher.Number(fragment.scrollable_overflow.height);
+  hasher.Integer(fragment.children.size());
+  for (const LayoutFragmentChild& child : fragment.children) {
+    hasher.Text(child.kind);
+    hasher.Integer(static_cast<uint64_t>(child.node_id));
+    hasher.Integer(static_cast<uint64_t>(child.fragment_index));
+    hasher.Number(child.x);
+    hasher.Number(child.y);
+    hasher.Integer(child.fragment.size());
+    for (const LayoutBoxFragment& nested : child.fragment) {
+      HashBoxFragment(hasher, nested);
+    }
+  }
+}
+
 }  // namespace
+
+LayoutFragmentChild::LayoutFragmentChild() = default;
+LayoutFragmentChild::LayoutFragmentChild(const LayoutFragmentChild&) = default;
+LayoutFragmentChild::LayoutFragmentChild(LayoutFragmentChild&&) = default;
+LayoutFragmentChild& LayoutFragmentChild::operator=(
+    const LayoutFragmentChild&) = default;
+LayoutFragmentChild& LayoutFragmentChild::operator=(LayoutFragmentChild&&) =
+    default;
+LayoutFragmentChild::~LayoutFragmentChild() = default;
+
+LayoutBoxFragment::LayoutBoxFragment() = default;
+LayoutBoxFragment::LayoutBoxFragment(const LayoutBoxFragment&) = default;
+LayoutBoxFragment::LayoutBoxFragment(LayoutBoxFragment&&) = default;
+LayoutBoxFragment& LayoutBoxFragment::operator=(const LayoutBoxFragment&) =
+    default;
+LayoutBoxFragment& LayoutBoxFragment::operator=(LayoutBoxFragment&&) = default;
+LayoutBoxFragment::~LayoutBoxFragment() = default;
+
+LayoutBoxFragments::LayoutBoxFragments() = default;
+LayoutBoxFragments::LayoutBoxFragments(const LayoutBoxFragments&) = default;
+LayoutBoxFragments::LayoutBoxFragments(LayoutBoxFragments&&) = default;
+LayoutBoxFragments& LayoutBoxFragments::operator=(const LayoutBoxFragments&) =
+    default;
+LayoutBoxFragments& LayoutBoxFragments::operator=(LayoutBoxFragments&&) =
+    default;
+LayoutBoxFragments::~LayoutBoxFragments() = default;
 
 uint64_t HashLayoutChangedNode(const LayoutChangedNode& changed) {
   Hasher hasher;
@@ -76,6 +129,20 @@ uint64_t HashLayoutChangedNode(const LayoutChangedNode& changed) {
   hasher.Boolean(node.generated_text_truncated);
   hasher.Integer(static_cast<uint64_t>(node.shadow_host_node_id));
   hasher.Text(node.shadow_root_mode);
+  const LayoutBoxFragments& fragments = node.box_fragments;
+  hasher.Boolean(fragments.present);
+  hasher.Number(fragments.effective_zoom);
+  hasher.Integer(fragments.fragments.size());
+  for (const LayoutBoxFragment& fragment : fragments.fragments) {
+    HashBoxFragment(hasher, fragment);
+  }
+  hasher.Boolean(fragments.natural_size_present);
+  hasher.Number(fragments.natural_width);
+  hasher.Number(fragments.natural_height);
+  hasher.Boolean(fragments.natural_has_width);
+  hasher.Boolean(fragments.natural_has_height);
+  hasher.Number(fragments.natural_aspect_ratio_width);
+  hasher.Number(fragments.natural_aspect_ratio_height);
   hasher.Boolean(changed.geometry_present);
   hasher.Integer(changed.transform_node_id);
   hasher.Boolean(changed.client_rect_empty);
