@@ -2048,6 +2048,20 @@ baseline. Bytes are those of the records before chunk compression.
   recorded. A recording with a smaller interval is needed to cover later
   records.
 
+A third 0.38 recording, by the owner on 2026-10-01 with the same build and
+pages and the check setting at every 10 updates (20261001-202215), covers
+later records:
+
+- 35 checkpoints: 20 first walks and 15 check walks, all compared.
+- 19,516 of 19,516 compared checkpoint nodes matched in every field,
+  16,092 of them with a change record whose box fragments were compared
+  (null ones included). The largest rectangle difference was
+  2.5 × 10⁻⁴ CSS px.
+- The change records held 9,934 records of style changes alone
+  (`computedStyleComplete` false), merged into the nodes' earlier records;
+  no compared node's rebuilt style was incomplete and none differed. This
+  is the first recording on the target machine to check the 2a merging.
+
 
 #### Required tests
 
