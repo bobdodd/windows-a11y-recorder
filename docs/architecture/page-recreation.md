@@ -2062,6 +2062,121 @@ later records:
   no compared node's rebuilt style was incomplete and none differed. This
   is the first recording on the target machine to check the 2a merging.
 
+#### 2c design (proposed)
+
+Proposed on 2026-10-01, for agreement before it is built. It fills in items
+3 and 4 of "What is recorded, and when" above, with three changes from
+them, marked.
+
+Where it is recorded. As in 2b, in the node records: each fragment in a
+block's `boxFragments` gains `items`, and the block's `boxFragments` gains
+`textContent`. A block is noted when it receives a new layout result, with
+the objects its items name, so nothing new is noted.
+
+Protocol version. Change from the outline: 0.39, since 0.37 and 0.38 are
+built and recorded.
+
+The text content. `textContent` is the block's text as laid out
+(`FragmentItems::NormalText`, `core/layout/inline/fragment_items.h`, line
+47), which item offsets index, and `firstLineText`, the text for
+`::first-line` when Blink holds one (`FirstLineText`), and null otherwise.
+Both are recorded whole, with no length limit. As the outline says, they
+are recorded when they change: the bridge keeps a hash of each node's last
+text, and a record whose text equals it states `textContent` and
+`firstLineText` null with `textContentUnchanged` true. The app's layout
+change state then keeps the node's earlier text, as it keeps earlier style
+values in 2a, and after a lost record the bridge forgets its hashes, so the
+next record holds the text again.
+
+The items. For each fragment with items (`PhysicalBoxFragment::Items`),
+`items` lists them in Blink's order, a pre-order list in which a line or
+box item is followed by its descendants (`FragmentItem::DescendantsCount`,
+`core/layout/inline/fragment_item.h`, line 280). It is null for a fragment
+without items. Each item holds:
+
+- `type`: `line`, `text`, `generated-text`, or `box`
+  (`FragmentItem::Type`, line 151).
+- `x`, `y`, `width`, `height`: its rectangle in the fragment
+  (`RectInContainerFragment`, line 239), in layout units.
+- `descendantsCount`, for a line or box item.
+- `nodeId`: the node of its layout object, or null for one with no node,
+  such as an anonymous box. For a text item it is the text node, for a box
+  item the inline box or atomic inline.
+- For a text or generated-text item: `start` and `end`, its range of the
+  text content (`TextOffset`); `firstLineStyle`
+  (`UsesFirstLineStyle`); `direction`, `ltr` or `rtl`
+  (`ResolvedDirection`); `hiddenForPaint` (`IsHiddenForPaint`); and its
+  glyph runs.
+- For a generated-text item, such as an ellipsis, a list marker, or a
+  hyphen, which is not part of the text content: `generatedText`, its
+  text (`GeneratedText`).
+
+The glyph runs. For each text item, its shaping result
+(`FragmentItem::TextShapeResult`) is read with
+`ShapeResultView::ForEachGlyph`
+(`platform/fonts/shaping/shape_result_view.h`, line 137), which reports
+each glyph with its font. A run is a sequence of glyphs with the same font,
+orientation, and rotation, so text drawn with fallback fonts gives several
+runs. Each run holds:
+
+- `font`: `family` (`FontPlatformData::FontFamilyName`), `postScriptName`
+  (the typeface's), `size` (`FontPlatformData::size`), `syntheticBold`, and
+  `syntheticItalic`.
+- `horizontal` and `rotation`: the glyphs' orientation and their rotation
+  in vertical text, as the callback reports them.
+- `glyphs`: a packed little-endian array, encoded in base64, of 18 bytes
+  per glyph: the glyph identifier (2 bytes), the character index as Blink
+  reports it, an index into the text content (4 bytes), the glyph's
+  position along the run, the total advance before it (4 bytes, a float),
+  and its offset, x and y (4 bytes each, floats).
+
+Changes from the outline in the glyphs. First, a character index takes 4
+bytes, not 2: it indexes the block's text content, which can be longer than
+65,535 code units, and a limit on it would drop glyphs. Second, the
+callback reports the total advance before each glyph rather than its own
+advance, so that is what is recorded; a glyph's advance is the difference
+from the next glyph's, and the last glyph's is the item's width less its
+position. A glyph costs 18 bytes before encoding, 24 after.
+
+Units. Item rectangles are layout units, physical and zoomed, as in 2b.
+Glyph positions and offsets are the floats Blink reports, in zoomed
+pixels. SVG text items are scaled as Blink holds them and are recorded as
+they are.
+
+What the app does. The validator checks the shapes, that every item's
+range lies within the text content, that each glyphs field decodes to a
+whole number of 18-byte glyphs, and that `textContentUnchanged` comes only
+with null text; the contracts gain the records; the layout change state
+keeps a node's text when a record states it unchanged; snapshots hold the
+merged records as they are. The layout change check compares each
+checkpoint node's `boxFragments`, items and text included, exactly, as for
+2b; a rebuilt node whose text was never recorded whole is noted as
+`text-content-incomplete`.
+
+Cost. Measured as for 2b: one 0.39 recording of the same pages without the
+check setting, against the 2b recording without it, and one with the check
+at every 10 updates.
+
+Limits:
+
+- Fonts are recorded by name, as above; font files come with slice 4 of the
+  plan.
+- Ink overflow, text decorations, and emphasis marks are not recorded;
+  paint computes them from style and the recorded glyphs.
+- A ruby annotation's items are recorded as Blink holds them; the
+  recreation of ruby is not designed.
+
+Required tests:
+
+- Unit: the integration script's tests of the item and glyph reading in
+  the checkpoint and the change set; the bridge's packing of glyphs, its
+  text hashes, and their part in the comparison with the last record; the
+  validator's checks; the layout change state's keeping of unchanged text;
+  the check with items and text; the contract round trip.
+- System, on the target machine: the two recordings above, with no
+  `box-fragments` or `text-content-incomplete` differences in the one with
+  the check.
+
 
 #### Required tests
 
