@@ -8249,6 +8249,10 @@ BLINK_LAYOUT_CHECKPOINT_INCLUDES = (
     "#include <vector>",
     '#include "base/no_destructor.h"',
     '#include "third_party/blink/renderer/platform/heap/persistent.h"',
+    '#include "third_party/blink/renderer/core/css/'
+    'computed_style_css_value_mapping.h"',
+    '#include "third_party/blink/renderer/core/css/'
+    'css_computed_style_declaration.h"',
     '#include "third_party/blink/renderer/core/css/css_value.h"',
     '#include "third_party/blink/renderer/core/css/properties/css_property.h"',
     '#include "third_party/blink/renderer/core/css/style_engine.h"',
@@ -8809,6 +8813,192 @@ BLINK_LAYOUT_CHECKPOINT_HELPER = (
         BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
     )
 )
+
+# Protocol 0.37 reads every property getComputedStyle() lists, and the
+# custom properties, in place of the fixed list above. A checkout patched
+# before holds the earlier helper, which is kept to test its upgrade.
+LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER = BLINK_LAYOUT_CHECKPOINT_HELPER
+BLINK_LAYOUT_CHECKPOINT_COMPUTABLE_STYLE_EDITS = (
+    (
+        """\
+// The computed-style properties recorded for each element, in recorded order.
+@@RECORDER_LAYOUT_STYLE_PROPERTY_ARRAY@@
+const std::vector<std::string>& RecorderLayoutStylePropertyNames() {
+  static const base::NoDestructor<std::vector<std::string>> names([] {
+    std::vector<std::string> result;
+    for (CSSPropertyID id : kRecorderLayoutStyleProperties) {
+      result.push_back(CSSProperty::Get(id).GetPropertyNameString().Utf8());
+""",
+        """\
+// The computed-style properties recorded for each element and pseudo-element:
+// every property getComputedStyle() lists for the document, in its order
+// (protocol 0.37). Blink keeps one list for the process, built for the first
+// document that asks, as getComputedStyle() builds it.
+const Vector<const CSSProperty*>& RecorderLayoutStyleProperties(
+    const Document& recorder_document) {
+  return CSSComputedStyleDeclaration::ComputableProperties(
+      recorder_document.GetExecutionContext());
+}
+
+// The names of those properties, read once, since the list is kept for the
+// process.
+const std::vector<std::string>& RecorderLayoutStylePropertyNames(
+    const Document& recorder_document) {
+  static const base::NoDestructor<std::vector<std::string>> names(
+      [&recorder_document] {
+        std::vector<std::string> result;
+        for (const CSSProperty* recorder_property :
+             RecorderLayoutStyleProperties(recorder_document)) {
+          result.push_back(
+              recorder_property->GetPropertyNameString().Utf8());
+        }
+        return result;
+      }());
+  return *names;
+}
+
+// Appends the custom properties of a computed style, by name in code-unit
+// order, each with the value getComputedStyle() reports for it (protocol
+// 0.37). A name whose value Blink does not report is not recorded, as
+// getComputedStyle() does not list it.
+void RecorderReadCustomProperties(
+    const Document& recorder_document,
+    const ComputedStyle& recorder_style,
+    std::vector<a11y_recorder::LayoutCheckpointStyleValue>& recorder_values) {
+  Vector<AtomicString> recorder_names;
+  for (const AtomicString& recorder_name : recorder_style.GetVariableNames()) {
+    recorder_names.push_back(recorder_name);
+  }
+  std::sort(recorder_names.begin(), recorder_names.end(),
+            [](const AtomicString& recorder_a, const AtomicString& recorder_b) {
+              return CodeUnitCompareLessThan(recorder_a, recorder_b);
+            });
+  for (const AtomicString& recorder_name : recorder_names) {
+    const CSSValue* recorder_value = ComputedStyleCSSValueMapping::Get(
+        recorder_name, recorder_style,
+        recorder_document.GetPropertyRegistry(),
+        CSSValuePhase::kResolvedValue);
+    if (!recorder_value) {
+      continue;
+""",
+    ),
+    (
+        """\
+    return result;
+  }());
+  return *names;
+""",
+        """\
+    a11y_recorder::LayoutCheckpointStyleValue recorder_entry;
+    recorder_entry.property_name = recorder_name.Utf8();
+    recorder_entry.value_present = true;
+    recorder_entry.value = recorder_value->CssText().Utf8();
+    recorder_values.push_back(std::move(recorder_entry));
+  }
+""",
+    ),
+    (
+        """\
+          RecorderLayoutStylePropertyNames(),
+""",
+        """\
+          RecorderLayoutStylePropertyNames(*recorder_document),
+""",
+    ),
+    (
+        """\
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+""",
+        """\
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+  const Vector<const CSSProperty*>& recorder_style_properties =
+      RecorderLayoutStyleProperties(*recorder_document);
+""",
+    ),
+    (
+        """\
+      RecorderLayoutStylePropertyNames();
+""",
+        """\
+      RecorderLayoutStylePropertyNames(*recorder_document);
+""",
+    ),
+    (
+        """\
+                std::size(kRecorderLayoutStyleProperties)) {
+""",
+        """\
+                recorder_style_properties.size()) {
+""",
+    ),
+    (
+        """\
+        recorder_reading.values.resize(
+            static_cast<wtf_size_t>(std::size(kRecorderLayoutStyleProperties)));
+""",
+        """\
+        recorder_reading.values.resize(recorder_style_properties.size());
+""",
+    ),
+    (
+        """\
+        recorder_reading.layout_dependent.resize(
+            static_cast<wtf_size_t>(std::size(kRecorderLayoutStyleProperties)));
+""",
+        """\
+        recorder_reading.layout_dependent.resize(
+            recorder_style_properties.size());
+""",
+    ),
+    (
+        """\
+      recorder_record.computed_style.reserve(
+          std::size(kRecorderLayoutStyleProperties));
+""",
+        """\
+      recorder_record.computed_style.reserve(recorder_style_properties.size());
+""",
+    ),
+    (
+        """\
+      for (CSSPropertyID recorder_property_id :
+           kRecorderLayoutStyleProperties) {
+        const CSSProperty& recorder_property =
+            CSSProperty::Get(recorder_property_id);
+""",
+        """\
+      for (const CSSProperty* recorder_property_entry :
+           recorder_style_properties) {
+        const CSSProperty& recorder_property = *recorder_property_entry;
+""",
+    ),
+    (
+        """\
+        ++recorder_index;
+      }
+""",
+        """\
+        ++recorder_index;
+      }
+      RecorderReadCustomProperties(*recorder_document, *recorder_style,
+                                   recorder_record.custom_properties);
+""",
+    ),
+)
+for _legacy, _current in BLINK_LAYOUT_CHECKPOINT_COMPUTABLE_STYLE_EDITS:
+    _legacy = _legacy.replace(
+        "@@RECORDER_LAYOUT_STYLE_PROPERTY_ARRAY@@\n",
+        BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
+    )
+    if BLINK_LAYOUT_CHECKPOINT_HELPER.count(_legacy) != 1:
+        raise RuntimeError("a layout checkpoint helper block was not found")
+    BLINK_LAYOUT_CHECKPOINT_HELPER = BLINK_LAYOUT_CHECKPOINT_HELPER.replace(
+        _legacy, _current, 1
+    )
 BLINK_LAYOUT_STYLE_PROPERTY_ARRAY_PATTERN = re.compile(
     r"constexpr CSSPropertyID kRecorderLayoutStyleProperties\[\] = \{\n"
     r"(?:    CSSPropertyID::k[A-Za-z]+,\n)+"
@@ -8916,16 +9106,8 @@ def patch_blink_local_frame_view(path: Path) -> None:
         text = upgrade_legacy_hooks(
             text, BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS, path
         )
-    # A tree patched by an earlier revision holds an older property list.
-    # Replace that list in place, since the helper is inserted only once.
-    if BLINK_LAYOUT_CHECKPOINT_HELPER_MARKER in text:
-        arrays = BLINK_LAYOUT_STYLE_PROPERTY_ARRAY_PATTERN.findall(text)
-        if len(arrays) != 1:
-            raise RuntimeError(
-                f"{path}: expected one layout style property array, "
-                f"found {len(arrays)}"
-            )
-        text = text.replace(arrays[0], BLINK_LAYOUT_STYLE_PROPERTY_ARRAY)
+    # A tree patched before protocol 0.37 holds a fixed property list in the
+    # helper region, which replace_layout_checkpoint_helper rewrites whole.
     text = replace_layout_checkpoint_helper(text, path)
     text = insert_before_once(
         text,
@@ -9659,6 +9841,42 @@ BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
     BLINK_LAYOUT_CHANGES_QUAD_RECT_GEOMETRY,
     1,
 )
+# Protocol 0.37 reads every property getComputedStyle() lists, and the
+# custom properties, in place of the fixed list.
+BLINK_LAYOUT_CHANGES_FIXED_LIST_STYLE = """\
+    const std::vector<std::string>& recorder_property_names =
+        RecorderLayoutStylePropertyNames();
+    recorder_record.computed_style_present = true;
+    recorder_record.computed_style.reserve(
+        std::size(kRecorderLayoutStyleProperties));
+    size_t recorder_index = 0;
+    for (CSSPropertyID recorder_property_id : kRecorderLayoutStyleProperties) {
+      const CSSValue* recorder_value =
+          CSSProperty::Get(recorder_property_id)
+              .CSSValueFromComputedStyle(*recorder_style,
+"""
+BLINK_LAYOUT_CHANGES_COMPUTABLE_STYLE = """\
+    const Vector<const CSSProperty*>& recorder_style_properties =
+        RecorderLayoutStyleProperties(recorder_document);
+    const std::vector<std::string>& recorder_property_names =
+        RecorderLayoutStylePropertyNames(recorder_document);
+    recorder_record.computed_style_present = true;
+    recorder_record.computed_style.reserve(recorder_style_properties.size());
+    RecorderReadCustomProperties(recorder_document, *recorder_style,
+                                 recorder_record.custom_properties);
+    size_t recorder_index = 0;
+    for (const CSSProperty* recorder_property : recorder_style_properties) {
+      const CSSValue* recorder_value =
+          recorder_property->CSSValueFromComputedStyle(*recorder_style,
+"""
+LEGACY_FIXED_LIST_BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION
+if BLINK_LAYOUT_CHANGES_FIXED_LIST_STYLE not in BLINK_LAYOUT_CHANGES_DEFINITION:
+    raise RuntimeError("the layout change style block was not found")
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_FIXED_LIST_STYLE,
+    BLINK_LAYOUT_CHANGES_COMPUTABLE_STYLE,
+    1,
+)
 BLINK_LAYOUT_CHANGES_INCLUDES = (
     "#include <array>",
     '#include "base/numerics/safe_conversions.h"',
@@ -9739,6 +9957,8 @@ BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS = """\
             recorder_layout_object->AbsoluteQuads(recorder_quads);
 """
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.37 read every computable property.
+    LEGACY_FIXED_LIST_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.36 recorded the bounds of each quad.
     LEGACY_SINGLE_RECT_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.35 requested presentation from change sets.

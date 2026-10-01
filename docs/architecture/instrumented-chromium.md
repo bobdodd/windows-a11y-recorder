@@ -965,7 +965,16 @@ record's transform node space, and null otherwise. A rectangle derived under
 a transform that rotates or skews is the union of the bounds of each mapped
 quad. The design is in [change-driven recording](change-driven-recording.md).
 
-Live 0.36 connections require an exact protocol-version match.
+Protocol version 0.37 records every computed-style property
+`getComputedStyle()` lists, read at run time in place of the fixed list of
+283, and each element's custom properties as `customProperties`, in layout
+checkpoint nodes and `layout-node-changed` records. After a node's first
+change record, a record holds only the style values and custom properties
+that changed, states `computedStyleComplete` false, and lists the custom
+properties removed in `removedCustomProperties`. The design is in
+[page recreation](page-recreation.md), "2a as built".
+
+Live 0.37 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

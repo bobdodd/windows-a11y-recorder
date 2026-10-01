@@ -1640,9 +1640,11 @@ With 1c, the feasibility step is complete: recorded styles, box fragments,
 lines, text items, and glyphs can each be imposed in Blink under the
 switch, and DevTools shows the recorded styles as their source.
 
-### Stage 2: recording for the recreation (proposed)
+### Stage 2: recording for the recreation (agreed; 2a built)
 
-Proposed on 2026-09-30, for agreement before it is built. This is slice 2
+Proposed on 2026-09-30 and agreed by the user the same day, with changed
+style values only and packed glyph arrays. 2a is built and not yet tested
+on the target machine; see "2a as built" below. This is slice 2
 of "Slices" above: the recorded additions, in a new protocol version, with
 their cost measured on the target machine.
 
@@ -1742,6 +1744,60 @@ Each is built, checked on the target machine, and measured before the next:
 - Fonts are recorded by name; font files come with slice 4 of the plan.
 - A transform or opacity animation running on the compositor is not
   recorded, as now.
+
+#### 2a as built
+
+Protocol 0.37. The differences from the design above are marked.
+
+- The checkpoint helper in `chromium/integrate.py` reads the property list
+  from `CSSComputedStyleDeclaration::ComputableProperties` for the
+  document's execution context, and keeps the names in a static list. The
+  fixed list of 283 is kept in the script
+  (`LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER`) only to recognise and
+  upgrade a checkout patched before 0.37.
+- Custom properties are read with `ComputedStyle::GetVariableNames`, sorted
+  by code unit, and their values with
+  `ComputedStyleCSSValueMapping::Get` and the document's property registry,
+  as `getComputedStyle()` resolves them. The names include the custom
+  properties an element inherits, so an element under a page that defines
+  many of them records each one in its first record.
+- Each checkpoint node and change record states `customProperties`, an
+  object of name and value, or null when `computedStyle` is null.
+- Difference from the design: the property list is recorded in each layout
+  checkpoint's start record (`styleProperties`), as before, and not in each
+  change set's start record. A node's first change record holds every
+  property by name, and every later record names the properties it holds,
+  so the list adds nothing a reader needs, and repeating it would add
+  several kilobytes to every change set.
+- After a node's first record, the bridge (`LayoutChangeFilter::
+  ReduceToStyleChanges` in `chromium/recorder_bridge/layout_changes.h`)
+  keeps a hash of each style value and of each custom property, and a
+  change record holds only the values that differ from the node's last
+  record, with `computedStyleComplete` false and
+  `removedCustomProperties` listing the custom properties the node no
+  longer has. A first record, and a record after a record of the
+  `browser.layout` channel was lost, holds every value, with
+  `computedStyleComplete` true and `removedCustomProperties` null. A node
+  whose document the bridge stopped tracking is recorded in full again.
+  `computedStyleComplete` is null when `computedStyle` is null.
+- The app's validator checks these fields together: a record of changes
+  must state its custom properties and removals, and a complete record
+  must not list removals. The layout change state merges a record of
+  changes into the node's last record, so the state and its snapshots hold
+  each node's whole style; a merged record states that it is complete only
+  when the record it was merged into was. The snapshot format is
+  unchanged, since it holds node records as they are.
+- The layout change check compares the rebuilt custom properties with the
+  checkpoint's, as `custom-properties`, and counts a rebuilt style that was
+  never recorded whole as `computed-style-incomplete`.
+
+The cost of 2a is measured on the target machine before 2b is built. The
+app test `RecordingCostReport` (`tests/Recorder.Tests/RecordingCostReport.cs`),
+run with `RECORDER_COST_FILE` naming a recording file, reports the bytes of
+each channel, over the recording and per minute, before chunk compression,
+and the bytes of each layout record type and of an average change set. The
+rendering update time is read from the bridge's "Recorder evidence cost"
+lines in the recording's Chromium log.
 
 #### Required tests
 

@@ -1,6 +1,8 @@
 #include "chromium/recorder_bridge/layout_changes.h"
 
+#include <algorithm>
 #include <bit>
+#include <utility>
 
 namespace a11y_recorder {
 
@@ -35,6 +37,14 @@ class Hasher {
   uint64_t hash_ = 14695981039346656037ull;
 };
 
+uint64_t HashStyleValue(const LayoutCheckpointStyleValue& value) {
+  Hasher hasher;
+  hasher.Text(value.property_name);
+  hasher.Boolean(value.value_present);
+  hasher.Text(value.value);
+  return hasher.Value();
+}
+
 }  // namespace
 
 uint64_t HashLayoutChangedNode(const LayoutChangedNode& changed) {
@@ -48,6 +58,12 @@ uint64_t HashLayoutChangedNode(const LayoutChangedNode& changed) {
   hasher.Boolean(node.computed_style_present);
   hasher.Integer(node.computed_style.size());
   for (const LayoutCheckpointStyleValue& value : node.computed_style) {
+    hasher.Text(value.property_name);
+    hasher.Boolean(value.value_present);
+    hasher.Text(value.value);
+  }
+  hasher.Integer(node.custom_properties.size());
+  for (const LayoutCheckpointStyleValue& value : node.custom_properties) {
     hasher.Text(value.property_name);
     hasher.Boolean(value.value_present);
     hasher.Text(value.value);
@@ -118,6 +134,59 @@ bool LayoutChangeFilter::TransformNodeChanged(uint64_t transform_node_id,
   }
   found->second = hash;
   return true;
+}
+
+void LayoutChangeFilter::ReduceToStyleChanges(LayoutChangedNode& changed) {
+  LayoutCheckpointNode& node = changed.node;
+  changed.computed_style_complete = true;
+  changed.removed_custom_properties.clear();
+  if (!node.computed_style_present) {
+    styles_.erase(node.node_id);
+    return;
+  }
+  StyleHashes current;
+  current.values.reserve(node.computed_style.size());
+  for (const LayoutCheckpointStyleValue& value : node.computed_style) {
+    current.values.push_back(HashStyleValue(value));
+  }
+  for (const LayoutCheckpointStyleValue& value : node.custom_properties) {
+    current.custom_properties[value.property_name] = HashStyleValue(value);
+  }
+  auto [found, inserted] = styles_.try_emplace(node.node_id);
+  StyleHashes& last = found->second;
+  if (inserted || last.values.size() != current.values.size()) {
+    last = std::move(current);
+    return;
+  }
+  changed.computed_style_complete = false;
+  std::vector<LayoutCheckpointStyleValue> values;
+  for (size_t index = 0; index < node.computed_style.size(); ++index) {
+    if (current.values[index] != last.values[index]) {
+      values.push_back(std::move(node.computed_style[index]));
+    }
+  }
+  node.computed_style = std::move(values);
+  std::vector<LayoutCheckpointStyleValue> custom_properties;
+  for (LayoutCheckpointStyleValue& value : node.custom_properties) {
+    auto kept = last.custom_properties.find(value.property_name);
+    if (kept == last.custom_properties.end() ||
+        kept->second != current.custom_properties[value.property_name]) {
+      custom_properties.push_back(std::move(value));
+    }
+  }
+  node.custom_properties = std::move(custom_properties);
+  for (const auto& [name, hash] : last.custom_properties) {
+    if (!current.custom_properties.contains(name)) {
+      changed.removed_custom_properties.push_back(name);
+    }
+  }
+  std::sort(changed.removed_custom_properties.begin(),
+            changed.removed_custom_properties.end());
+  last = std::move(current);
+}
+
+void LayoutChangeFilter::ForgetStyles() {
+  styles_.clear();
 }
 
 }  // namespace a11y_recorder

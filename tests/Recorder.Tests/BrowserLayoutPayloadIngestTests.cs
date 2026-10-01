@@ -72,6 +72,13 @@ public sealed class BrowserLayoutPayloadIngestTests
         Assert.Equal(338.75, nodePayload.Geometry!.LocalRect!.Y);
         Assert.Equal(0.8, nodePayload.Geometry.ClientRectScale);
 
+        using var changes = JsonDocument.Parse(BrowserLayoutPayloads.ChangedElementStyleChanges);
+        var changesPayload = BrowserProtocol.Deserialize<BrowserLayoutNodeChangedPayload>(
+            changes.RootElement);
+        Assert.False(changesPayload.ComputedStyleComplete);
+        Assert.Equal("green", changesPayload.CustomProperties!["--accent"]);
+        Assert.Equal(["--gap"], changesPayload.RemovedCustomProperties);
+
         using var text = JsonDocument.Parse(BrowserLayoutPayloads.ChangedEmptyTextNode);
         var textPayload = BrowserProtocol.Deserialize<BrowserLayoutNodeChangedPayload>(
             text.RootElement);

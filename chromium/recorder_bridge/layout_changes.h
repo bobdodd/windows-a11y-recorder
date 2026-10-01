@@ -40,6 +40,10 @@ struct LayoutCheckpointNode {
   double height = 0;
   bool computed_style_present = false;
   std::vector<LayoutCheckpointStyleValue> computed_style;
+  // The custom properties of the computed style, by name in code-unit order,
+  // each with its value (protocol 0.37). Only meaningful with a computed
+  // style.
+  std::vector<LayoutCheckpointStyleValue> custom_properties;
   // Set for a pseudo-element. The originating node is the element or
   // pseudo-element that holds it. The generated text is the text laid out in
   // the pseudo-element's layout subtree, truncated by the caller, with its
@@ -100,6 +104,12 @@ struct LayoutChangedNode {
   // which the local rectangle alone does not determine. Empty otherwise.
   std::vector<LayoutLocalRect> local_quad_rects;
   double client_rect_scale = 1;
+  // Set by LayoutChangeFilter::ReduceToStyleChanges (protocol 0.37). When
+  // false, the node's computed style and custom properties hold only the
+  // values that differ from the node's last record, and the removed custom
+  // properties name those its last record held and this one does not.
+  bool computed_style_complete = true;
+  std::vector<std::string> removed_custom_properties;
 };
 
 // One transform node of the paint property tree. The matrix is the node's
@@ -159,8 +169,28 @@ class LayoutChangeFilter {
   bool NodeChanged(int node_id, uint64_t hash);
   bool TransformNodeChanged(uint64_t transform_node_id, uint64_t hash);
 
+  // Reduces a changed node's computed style and custom properties to the
+  // values that differ from those of the node's last record, and keeps a
+  // hash of each value. The record is left complete when no values were
+  // kept for the node, when the node has no computed style, whose values
+  // are then forgotten, and when the number of properties differs.
+  void ReduceToStyleChanges(LayoutChangedNode& changed);
+
+  // Forgets every kept style value, so the next record of each node holds
+  // its whole computed style. Used after a record may have been lost.
+  void ForgetStyles();
+
+  // The number of nodes whose style values are kept.
+  size_t StyleNodeCount() const { return styles_.size(); }
+
  private:
+  struct StyleHashes {
+    std::vector<uint64_t> values;
+    std::unordered_map<std::string, uint64_t> custom_properties;
+  };
+
   std::unordered_map<int, uint64_t> nodes_;
+  std::unordered_map<int, StyleHashes> styles_;
   std::unordered_map<uint64_t, uint64_t> transform_nodes_;
 };
 

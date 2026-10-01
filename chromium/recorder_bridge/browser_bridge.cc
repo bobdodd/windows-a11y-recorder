@@ -4189,8 +4189,17 @@ void SetLayoutNodeFields(base::DictValue& payload, LayoutCheckpointNode& node) {
                                     : base::Value());
     }
     payload.Set("computedStyle", std::move(style));
+    base::DictValue custom_properties;
+    for (LayoutCheckpointStyleValue& entry : node.custom_properties) {
+      custom_properties.Set(entry.property_name,
+                            entry.value_present
+                                ? base::Value(std::move(entry.value))
+                                : base::Value());
+    }
+    payload.Set("customProperties", std::move(custom_properties));
   } else {
     payload.Set("computedStyle", base::Value());
+    payload.Set("customProperties", base::Value());
   }
 }
 
@@ -4247,6 +4256,9 @@ size_t EstimateLayoutCheckpointNodeBytes(const LayoutCheckpointNode& node,
                  node.pseudo_type.size() + node.generated_text.size() +
                  node.shadow_root_mode.size();
   for (const LayoutCheckpointStyleValue& entry : node.computed_style) {
+    bytes += kStyleEntryBytes + entry.property_name.size() + entry.value.size();
+  }
+  for (const LayoutCheckpointStyleValue& entry : node.custom_properties) {
     bytes += kStyleEntryBytes + entry.property_name.size() + entry.value.size();
   }
   return bytes;
@@ -4408,6 +4420,10 @@ struct LayoutChangeStorage {
     LayoutChangeFilter filter;
     uint64_t checkpoint_sequence_seen = 0;
     uint64_t last_use = 0;
+    // The count of lost browser.layout records when the document's style
+    // values were last trusted. A record lost since may have held a style
+    // change, so the next record of each node holds its whole style again.
+    uint64_t losses_seen = 0;
   };
   std::unordered_map<int, Document> documents;
 };
@@ -4546,7 +4562,22 @@ struct LayoutChangedNodeEvidence : PendingEvidence {
         *client, change_set_sequence, document_node_id,
         std::move(document_token));
     payload.Set("reasons", LayoutChangeReasonList(changed.reasons));
+    const bool style_present = changed.node.computed_style_present;
     SetLayoutNodeFields(payload, changed.node);
+    // Protocol 0.37: after a node's first record, its computed style and
+    // custom properties hold only the values that changed.
+    payload.Set("computedStyleComplete",
+                style_present ? base::Value(changed.computed_style_complete)
+                              : base::Value());
+    if (style_present && !changed.computed_style_complete) {
+      base::ListValue removed;
+      for (std::string& name : changed.removed_custom_properties) {
+        removed.Append(std::move(name));
+      }
+      payload.Set("removedCustomProperties", std::move(removed));
+    } else {
+      payload.Set("removedCustomProperties", base::Value());
+    }
     if (changed.geometry_present) {
       base::DictValue geometry;
       geometry.Set("transformNodeId",
@@ -4641,6 +4672,11 @@ uint64_t RecordBlinkLayoutChanges(
     LayoutChangeStorage::Document& document =
         storage.documents[document_node_id];
     document.last_use = ++storage.use_clock;
+    const uint64_t losses = LayoutEvidenceLosses().load();
+    if (losses != document.losses_seen) {
+      document.filter.ForgetStyles();
+      document.losses_seen = losses;
+    }
     if (checkpoint_sequence != document.checkpoint_sequence_seen) {
       named_checkpoint_sequence = checkpoint_sequence;
       document.checkpoint_sequence_seen = checkpoint_sequence;
@@ -4660,6 +4696,7 @@ uint64_t RecordBlinkLayoutChanges(
       }
       if (document.filter.NodeChanged(node.node.node_id,
                                       HashLayoutChangedNode(node))) {
+        document.filter.ReduceToStyleChanges(nodes[index]);
         changed_nodes.push_back(index);
       } else {
         ++unchanged_node_count;

@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.36"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.36"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.37"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.37"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -5521,7 +5521,7 @@ class LayoutIntegrationTests(unittest.TestCase):
                 self.assertNotIn(forcing, helper)
 
     def test_upgrades_a_helper_that_indexes_the_property_array(self):
-        legacy_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        legacy_helper = INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER
         for legacy, current in INTEGRATE.BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS:
             legacy_helper = legacy_helper.replace(current, legacy, 1)
         self.assertRegex(legacy_helper, r"kRecorderLayoutStyleProperties\[\w")
@@ -5555,13 +5555,16 @@ class LayoutIntegrationTests(unittest.TestCase):
             + "};\n"
         )
         current_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
-        earlier_helper = current_helper.replace(
+        fixed_list_helper = (
+            INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER
+        )
+        earlier_helper = fixed_list_helper.replace(
             INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY, earlier_array, 1
         )
         indexed_helper = earlier_helper
         for legacy, current in INTEGRATE.BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS:
             indexed_helper = indexed_helper.replace(current, legacy, 1)
-        self.assertNotEqual(current_helper, earlier_helper)
+        self.assertNotEqual(fixed_list_helper, earlier_helper)
         self.assertNotEqual(earlier_helper, indexed_helper)
         source = cookie_source(
             self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
@@ -5574,7 +5577,7 @@ class LayoutIntegrationTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
             INTEGRATE.patch_blink_local_frame_view(path)
             current = path.read_text(encoding="utf-8")
-            for older_helper in (earlier_helper, indexed_helper):
+            for older_helper in (fixed_list_helper, earlier_helper, indexed_helper):
                 with self.subTest(indexed=older_helper is indexed_helper):
                     path.write_text(
                         current.replace(current_helper, older_helper, 1),
@@ -5583,28 +5586,16 @@ class LayoutIntegrationTests(unittest.TestCase):
                     INTEGRATE.patch_blink_local_frame_view(path)
                     self.assertEqual(current, path.read_text(encoding="utf-8"))
 
-    def test_a_patched_tree_holds_exactly_one_property_array(self):
-        source = cookie_source(
-            self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
-            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
-            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
-                BLINK_NAMESPACE_END,
+    def test_the_helper_holds_no_fixed_property_array(self):
+        # Protocol 0.37 reads the list getComputedStyle() uses at run time,
+        # and a checkout holding the fixed array is upgraded whole.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertNotIn("kRecorderLayoutStyleProperties", helper)
+        self.assertNotIn("CSSPropertyID::k", helper)
+        self.assertIn(
+            "kRecorderLayoutStyleProperties[] = {",
+            INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER,
         )
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "local_frame_view.cc"
-            path.write_text(source, encoding="utf-8")
-            INTEGRATE.patch_blink_local_frame_view(path)
-            current = path.read_text(encoding="utf-8")
-            path.write_text(
-                current.replace(
-                    INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
-                    INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY * 2,
-                    1,
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaises(RuntimeError):
-                INTEGRATE.patch_blink_local_frame_view(path)
 
     def test_the_layout_checkpoint_is_followed_by_an_interaction_checkpoint(
         self,
@@ -5693,9 +5684,37 @@ class LayoutIntegrationTests(unittest.TestCase):
                 self.assertNotIn(forcing_call, helper)
         self.assertIn("GetBoundingClientRectNoLifecycleUpdate()", helper)
 
-    def test_the_helper_records_the_documented_property_list(self):
+    def test_the_helper_records_every_computable_property(self):
         helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
-        identifiers = re.findall(r"CSSPropertyID::(k[A-Za-z]+),", helper)
+        self.assertIn(
+            "CSSComputedStyleDeclaration::ComputableProperties(\n"
+            "      recorder_document.GetExecutionContext());",
+            helper,
+        )
+        self.assertIn(
+            "RecorderLayoutStylePropertyNames(*recorder_document)", helper
+        )
+        self.assertIn(
+            "RecorderReadCustomProperties(*recorder_document, *recorder_style,\n"
+            "                                   recorder_record.custom_properties);",
+            helper,
+        )
+        self.assertIn("recorder_style.GetVariableNames()", helper)
+        self.assertIn("CodeUnitCompareLessThan(recorder_a, recorder_b)", helper)
+        self.assertIn("CSSValuePhase::kResolvedValue", helper)
+        definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertIn(INTEGRATE.BLINK_LAYOUT_CHANGES_COMPUTABLE_STYLE, definition)
+        self.assertNotIn("kRecorderLayoutStyleProperties", definition)
+        self.assertIn(
+            INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHANGES_DEFINITION,
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS,
+        )
+
+    def test_the_fixed_list_before_protocol_0_37_stays_documented(self):
+        # The list recorded before protocol 0.37 is kept to recognise the
+        # helpers written with it.
+        legacy = INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER
+        identifiers = re.findall(r"CSSPropertyID::(k[A-Za-z]+),", legacy)
         expected = [
             "k" + "".join(word.capitalize() for word in name.split("-"))
             for name in INTEGRATE.LAYOUT_STYLE_PROPERTIES
@@ -5710,13 +5729,9 @@ class LayoutIntegrationTests(unittest.TestCase):
             root / "docs" / "architecture"
             / "layout-and-style-checkpoint-evidence-model.md"
         ).read_text(encoding="utf-8")
-        verifier = (
-            root / "scripts" / "Verify-BlinkEvidence.ps1"
-        ).read_text(encoding="utf-8")
         for name in INTEGRATE.LAYOUT_STYLE_PROPERTIES:
             with self.subTest(property=name):
                 self.assertIn(f"`{name}`", document)
-                self.assertIn(f"'{name}'", verifier)
 
 
 class PresentationIntegrationTests(unittest.TestCase):

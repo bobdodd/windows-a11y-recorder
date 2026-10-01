@@ -349,6 +349,12 @@ recording on the target Windows machine, every compared node equalled its
 full walk, including text of two lines under a rotation. See
 [change-driven recording](docs/architecture/change-driven-recording.md).
 
+Protocol 0.37 records every computed-style property `getComputedStyle()`
+lists, in place of a fixed list of 283, and each element's custom
+properties. After a node's first record, a layout change record holds only
+the style values that changed. It is not yet tested on the target Windows
+machine. See [page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

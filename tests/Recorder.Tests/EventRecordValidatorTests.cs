@@ -3064,6 +3064,60 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void AcceptsStyleChangesAndCustomProperties()
+    {
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-node-changed",
+            JsonNode.Parse(BrowserLayoutPayloads.ChangedElementStyleChanges)!));
+
+        var complete = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        complete["computedStyleComplete"] = true;
+        complete["customProperties"] = JsonNode.Parse("""{"--gap":"4px"}""");
+        complete["removedCustomProperties"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", complete));
+
+        var checkpoint = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
+        checkpoint["customProperties"] = JsonNode.Parse("""{"--gap":"4px"}""");
+        Assert.Empty(ValidateLayoutRecord("layout-checkpoint-node", checkpoint));
+    }
+
+    [Theory]
+    [InlineData("removedCustomProperties", "null", "browser-layout-style-changes-incomplete")]
+    [InlineData("customProperties", "null", "browser-layout-style-changes-incomplete")]
+    [InlineData("computedStyleComplete", "true", "browser-layout-style-removals-in-complete-style")]
+    [InlineData("customProperties", """{"gap":"4px"}""", "payload-property-invalid")]
+    [InlineData("removedCustomProperties", """["--gap","--gap"]""", "payload-property-invalid")]
+    [InlineData("computedStyleComplete", "\"no\"", "payload-property-invalid")]
+    public void RejectsInconsistentStyleChanges(string property, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementStyleChanges)!;
+        payload[property] = JsonNode.Parse(value);
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void RejectsStyleCompletenessWithoutAComputedStyle()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementStyleChanges)!;
+        payload["computedStyle"] = null;
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-custom-properties-without-style");
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-style-completeness-without-style");
+
+        var checkpoint = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
+        checkpoint["computedStyle"] = null;
+        checkpoint["customProperties"] = JsonNode.Parse("""{"--gap":"4px"}""");
+        Assert.Contains(
+            ValidateLayoutRecord("layout-checkpoint-node", checkpoint),
+            issue => issue.Code == "browser-layout-custom-properties-without-style");
+    }
+
+    [Fact]
     public void AcceptsTheBoundsOfEachQuad()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;

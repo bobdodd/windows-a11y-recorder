@@ -51,6 +51,10 @@ void TestEveryStatedFieldChangesTheNodeHash() {
          "style presence");
   Expect(differs([](auto& n) { n.node.computed_style.pop_back(); }),
          "style count");
+  Expect(differs([](auto& n) {
+           n.node.custom_properties.push_back({"--gap", true, "4px"});
+         }),
+         "custom property");
   Expect(differs([](auto& n) { n.transform_node_id = 4; }), "transform node");
   Expect(differs([](auto& n) { n.local_y = 17; }), "rectangle");
   Expect(differs([](auto& n) { n.client_rect_scale = 2; }), "scale");
@@ -117,6 +121,73 @@ void TestTheFilterPassesOnlyNewRecords() {
   Expect(filter.TransformNodeChanged(7, 5), "changed transform");
 }
 
+a11y_recorder::LayoutChangedNode StyledNode(const char* color,
+                                            const char* gap,
+                                            const char* accent) {
+  a11y_recorder::LayoutChangedNode changed = SampleNode();
+  changed.node.computed_style[0].value = color;
+  if (gap) {
+    changed.node.custom_properties.push_back({"--gap", true, gap});
+  }
+  if (accent) {
+    changed.node.custom_properties.push_back({"--accent", true, accent});
+  }
+  return changed;
+}
+
+void TestOnlyChangedStyleValuesFollowAFirstRecord() {
+  a11y_recorder::LayoutChangeFilter filter;
+  a11y_recorder::LayoutChangedNode first = StyledNode("red", "4px", nullptr);
+  filter.ReduceToStyleChanges(first);
+  Expect(first.computed_style_complete, "first record complete");
+  Expect(first.node.computed_style.size() == 2, "first record every value");
+  Expect(first.node.custom_properties.size() == 1, "first record custom");
+
+  a11y_recorder::LayoutChangedNode same = StyledNode("red", "4px", nullptr);
+  filter.ReduceToStyleChanges(same);
+  Expect(!same.computed_style_complete, "same style partial");
+  Expect(same.node.computed_style.empty(), "same style no values");
+  Expect(same.node.custom_properties.empty(), "same style no custom");
+  Expect(same.removed_custom_properties.empty(), "same style no removal");
+
+  a11y_recorder::LayoutChangedNode changed =
+      StyledNode("blue", nullptr, "green");
+  filter.ReduceToStyleChanges(changed);
+  Expect(!changed.computed_style_complete, "changed style partial");
+  Expect(changed.node.computed_style.size() == 1 &&
+             changed.node.computed_style[0].property_name == "color" &&
+             changed.node.computed_style[0].value == "blue",
+         "changed value only");
+  Expect(changed.node.custom_properties.size() == 1 &&
+             changed.node.custom_properties[0].property_name == "--accent",
+         "added custom property");
+  Expect(changed.removed_custom_properties.size() == 1 &&
+             changed.removed_custom_properties[0] == "--gap",
+         "removed custom property");
+
+  a11y_recorder::LayoutChangedNode unstyled = SampleNode();
+  unstyled.node.computed_style_present = false;
+  unstyled.node.computed_style.clear();
+  filter.ReduceToStyleChanges(unstyled);
+  Expect(unstyled.computed_style_complete, "no style complete");
+  a11y_recorder::LayoutChangedNode restyled = StyledNode("blue", nullptr, "green");
+  filter.ReduceToStyleChanges(restyled);
+  Expect(restyled.computed_style_complete, "style after none complete");
+  Expect(restyled.node.computed_style.size() == 2, "style after none whole");
+
+  a11y_recorder::LayoutChangedNode shorter = StyledNode("blue", nullptr, "green");
+  shorter.node.computed_style.pop_back();
+  filter.ReduceToStyleChanges(shorter);
+  Expect(shorter.computed_style_complete, "other property count complete");
+
+  filter.ForgetStyles();
+  Expect(filter.StyleNodeCount() == 0, "styles forgotten");
+  a11y_recorder::LayoutChangedNode forgotten =
+      StyledNode("blue", nullptr, "green");
+  filter.ReduceToStyleChanges(forgotten);
+  Expect(forgotten.computed_style_complete, "record after forgetting complete");
+}
+
 }  // namespace
 
 int main() {
@@ -124,6 +195,7 @@ int main() {
   TestTheReasonsDoNotChangeTheNodeHash();
   TestEveryTransformFieldChangesItsHash();
   TestTheFilterPassesOnlyNewRecords();
+  TestOnlyChangedStyleValuesFollowAFirstRecord();
   if (failures == 0) {
     std::printf("layout change tests passed\n");
   }

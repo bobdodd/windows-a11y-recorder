@@ -265,6 +265,36 @@ internal static class BrowserLayoutPayloads
         }
         """;
 
+    // A later record of the node (protocol 0.37): only the style values that
+    // changed since its last record, with a custom property removed.
+    public static readonly string ChangedElementStyleChanges = $$"""
+        {
+          "context": {{ContextJson}},
+          "changeSetId": "layout-changes-2",
+          "reasons": ["style"],
+          "nodeId": 42,
+          "nodeType": "element",
+          "nodeName": "DIV",
+          "layoutObjectPresent": true,
+          "displayLocked": false,
+          "geometry": {
+            "transformNodeId": "layout-transform-2",
+            "localRect": { "x": 10, "y": 338.75, "width": 150, "height": 25 },
+            "localQuadRects": null,
+            "clientRectEmpty": false,
+            "localRectMapped": true,
+            "clientRectScale": 0.8
+          },
+          "computedStyle": { "color": "rgb(0, 0, 255)" },
+          "computedStyleComplete": false,
+          "customProperties": { "--accent": "green" },
+          "removedCustomProperties": ["--gap"],
+          "pseudoElement": null,
+          "shadowHostNodeId": null,
+          "shadowRootMode": null
+        }
+        """;
+
     public static readonly string ChangedEmptyTextNode = $$"""
         {
           "context": {{ContextJson}},

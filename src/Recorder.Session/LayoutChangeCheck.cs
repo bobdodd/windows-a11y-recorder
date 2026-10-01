@@ -250,6 +250,27 @@ public sealed class LayoutChangeCheck
             Note("computed-style", $"{where} {property}");
             matched = false;
         }
+        // Protocol 0.37: the custom properties, and whether the rebuilt style
+        // is whole. A checkpoint of an earlier version states neither.
+        if (node.TryGetProperty("customProperties", out var observedCustom))
+        {
+            var custom = StyleDifference(
+                observedCustom,
+                changed.TryGetProperty("customProperties", out var changedCustom)
+                    ? changedCustom
+                    : default);
+            if (custom is not null)
+            {
+                Note("custom-properties", $"{where} {custom}");
+                matched = false;
+            }
+        }
+        if (changed.TryGetProperty("computedStyleComplete", out var complete) &&
+            complete.ValueKind == JsonValueKind.False)
+        {
+            Note("computed-style-incomplete", where);
+            matched = false;
+        }
         if (node.GetProperty("boundingClientRect") is { ValueKind: JsonValueKind.Object } observed)
         {
             var derived = document.DeriveClientRect(nodeId, out var failure);

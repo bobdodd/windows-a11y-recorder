@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.36";
+    public const string CurrentVersion = "0.37";
 }
 
 public static class BrowserEvidenceChannels
@@ -894,6 +894,9 @@ public sealed record BrowserLayoutPseudoElement(
 // produced none, and is null for a text node or an element without a current
 // computed style. ShadowHostNodeId and ShadowRootMode name the host and mode of
 // the shadow tree that contains the node, and are null in a document tree.
+// CustomProperties (protocol 0.37) maps each custom property of the computed
+// style to its value, and is null when ComputedStyle is; ComputedStyle then
+// holds every property getComputedStyle() lists.
 public sealed record BrowserLayoutCheckpointNodePayload(
     BrowserContext Context,
     string CheckpointId,
@@ -907,7 +910,8 @@ public sealed record BrowserLayoutCheckpointNodePayload(
     IReadOnlyDictionary<string, string?>? ComputedStyle,
     BrowserLayoutPseudoElement? PseudoElement = null,
     long? ShadowHostNodeId = null,
-    string? ShadowRootMode = null);
+    string? ShadowRootMode = null,
+    IReadOnlyDictionary<string, string?>? CustomProperties = null);
 
 public sealed record BrowserLayoutCheckpointCompletedPayload(
     BrowserContext Context,
@@ -968,6 +972,11 @@ public sealed record BrowserLayoutNodeGeometry(
 // One noted node whose record changed. Reasons lists why it was noted:
 // "style", "layout", or "paint-properties". The node fields are those of a
 // checkpoint node record, and Geometry replaces its viewport rectangle.
+// ComputedStyleComplete (protocol 0.37) is true when ComputedStyle and
+// CustomProperties hold every value, as in a node's first record, and false
+// when they hold only the values that changed since the node's last record,
+// RemovedCustomProperties then naming the custom properties that record held
+// and this one does not. Both are null when ComputedStyle is.
 public sealed record BrowserLayoutNodeChangedPayload(
     BrowserContext Context,
     string ChangeSetId,
@@ -981,7 +990,10 @@ public sealed record BrowserLayoutNodeChangedPayload(
     IReadOnlyDictionary<string, string?>? ComputedStyle,
     BrowserLayoutPseudoElement? PseudoElement = null,
     long? ShadowHostNodeId = null,
-    string? ShadowRootMode = null);
+    string? ShadowRootMode = null,
+    bool? ComputedStyleComplete = null,
+    IReadOnlyDictionary<string, string?>? CustomProperties = null,
+    IReadOnlyList<string>? RemovedCustomProperties = null);
 
 public sealed record BrowserLayoutChangesCompletedPayload(
     BrowserContext Context,

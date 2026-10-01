@@ -2630,6 +2630,7 @@ internal static class EventPayloadValidator
                             entry.Value.ValueKind is
                                 JsonValueKind.String or JsonValueKind.Null),
                     "must be an object of string or null values, or null"),
+                CustomPropertiesRule(),
                 NullableObject("pseudoElement"),
                 NullableInteger("shadowHostNodeId", positive: true),
                 NullableEnum("shadowRootMode", "open", "closed", "user-agent")
@@ -2638,6 +2639,7 @@ internal static class EventPayloadValidator
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererDocumentContext(payload, issues);
         ValidateBrowserLayoutPseudoElement(payload, issues);
+        ValidateBrowserLayoutStyleCompleteness(payload, changeRecord: false, issues);
         if (HasNonnullProperty(payload, "shadowHostNodeId") !=
             HasNonnullProperty(payload, "shadowRootMode"))
         {
@@ -2779,6 +2781,76 @@ internal static class EventPayloadValidator
     // "layout-changes-N" and transform nodes "layout-transform-N".
     private static readonly string[] LayoutChangeReasons =
         ["style", "layout", "paint-properties"];
+
+    // Custom properties (protocol 0.37): each name with its value, or null
+    // with no computed style. Absent from records of earlier versions.
+    private static PropertyRule CustomPropertiesRule() =>
+        new(
+            "customProperties",
+            false,
+            true,
+            value => value.ValueKind == JsonValueKind.Object &&
+                value.EnumerateObject().All(entry =>
+                    entry.Name.StartsWith("--", StringComparison.Ordinal) &&
+                    entry.Name.Length > 2 &&
+                    entry.Value.ValueKind is
+                        JsonValueKind.String or JsonValueKind.Null),
+            "must be an object of custom property values, or null");
+
+    // A record with no computed style states no custom properties and, for
+    // a change record, no completeness or removals. A change record whose
+    // style is not complete holds the changed values and names the removed
+    // custom properties; a complete one names none.
+    private static void ValidateBrowserLayoutStyleCompleteness(
+        JsonElement payload,
+        bool changeRecord,
+        ICollection<EventValidationIssue> issues)
+    {
+        var hasStyle = HasNonnullProperty(payload, "computedStyle");
+        if (!hasStyle && HasNonnullProperty(payload, "customProperties"))
+        {
+            AddError(
+                issues,
+                "browser-layout-custom-properties-without-style",
+                "#/payload/customProperties",
+                "Custom properties are recorded only with a computed style.");
+        }
+        if (!changeRecord)
+        {
+            return;
+        }
+        var hasComplete = HasNonnullProperty(payload, "computedStyleComplete");
+        var hasRemoved = HasNonnullProperty(payload, "removedCustomProperties");
+        if (!hasStyle && (hasComplete || hasRemoved))
+        {
+            AddError(
+                issues,
+                "browser-layout-style-completeness-without-style",
+                "#/payload/computedStyleComplete",
+                "Style completeness and removals are recorded only with a computed style.");
+            return;
+        }
+        if (hasComplete &&
+            payload.GetProperty("computedStyleComplete").ValueKind == JsonValueKind.False)
+        {
+            if (!hasRemoved || !HasNonnullProperty(payload, "customProperties"))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-style-changes-incomplete",
+                    "#/payload/removedCustomProperties",
+                    "A record of changed style values names its custom properties and their removals.");
+            }
+        }
+        else if (hasRemoved)
+        {
+            AddError(
+                issues,
+                "browser-layout-style-removals-in-complete-style",
+                "#/payload/removedCustomProperties",
+                "A complete computed style names no removed custom properties.");
+        }
+    }
 
     private static PropertyRule ComputedStyleRule() =>
         new(
@@ -2943,6 +3015,20 @@ internal static class EventPayloadValidator
                 RequiredBoolean("displayLocked"),
                 NullableObject("geometry"),
                 ComputedStyleRule(),
+                OptionalNullableBoolean("computedStyleComplete"),
+                CustomPropertiesRule(),
+                new PropertyRule(
+                    "removedCustomProperties",
+                    false,
+                    true,
+                    value => value.ValueKind == JsonValueKind.Array &&
+                        value.EnumerateArray().All(item =>
+                            item.ValueKind == JsonValueKind.String &&
+                            item.GetString()!.StartsWith("--", StringComparison.Ordinal)) &&
+                        value.EnumerateArray().Select(item => item.GetString())
+                            .Distinct(StringComparer.Ordinal).Count() ==
+                            value.GetArrayLength(),
+                    "must be an array of distinct custom property names, or null"),
                 NullableObject("pseudoElement"),
                 NullableInteger("shadowHostNodeId", positive: true),
                 NullableEnum("shadowRootMode", "open", "closed", "user-agent")
@@ -2950,6 +3036,7 @@ internal static class EventPayloadValidator
             issues);
         ValidateLayoutChangeSetIdentity(payload, issues);
         ValidateBrowserLayoutPseudoElement(payload, issues);
+        ValidateBrowserLayoutStyleCompleteness(payload, changeRecord: true, issues);
         if (HasNonnullProperty(payload, "shadowHostNodeId") !=
             HasNonnullProperty(payload, "shadowRootMode"))
         {

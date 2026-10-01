@@ -211,7 +211,10 @@ is to be measured on the target machine.
    drawn from.
 3. The bridge compares each record with its cache and records only the ones
    that differ. A style Blink recalculated to the same values is not
-   recorded again.
+   recorded again. From protocol 0.37 a record after a node's first holds
+   only the computed-style values and custom properties that changed since
+   the node's last record; see "2a as built" in
+   [page recreation](page-recreation.md).
 4. DOM insertions and removals are recorded as they happen. A removed node
    leaves the cache.
 5. The first rendering update of a document, and any update after a record

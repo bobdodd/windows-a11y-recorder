@@ -165,9 +165,11 @@ public sealed class LayoutDocumentChangeState
         {
             ApplyTransformNode(transform);
         }
+        // A snapshot holds each node's merged record, which is stored as it
+        // is: one whose style is not whole is not a record of changes.
         foreach (var node in nodes)
         {
-            ApplyNode(node);
+            _nodes[node.GetProperty("nodeId").GetInt64()] = node.Clone();
         }
         foreach (var scroll in scrollOffsets)
         {
@@ -203,8 +205,116 @@ public sealed class LayoutDocumentChangeState
         _transformRecords[id] = payload.Clone();
     }
 
-    internal void ApplyNode(JsonElement payload) =>
-        _nodes[payload.GetProperty("nodeId").GetInt64()] = payload.Clone();
+    // From protocol 0.37 a node record after the node's first holds only the
+    // style values that changed. The state keeps each node's whole style: a
+    // record of changes is merged into the node's last record, and the
+    // merged record states that it is complete only when that last record
+    // was. A merged record is then what a snapshot holds.
+    internal void ApplyNode(JsonElement payload)
+    {
+        var nodeId = payload.GetProperty("nodeId").GetInt64();
+        if (payload.TryGetProperty("computedStyleComplete", out var complete) &&
+            complete.ValueKind == JsonValueKind.False)
+        {
+            _nodes[nodeId] = MergeStyleChanges(
+                _nodes.TryGetValue(nodeId, out var last) ? last : null,
+                payload);
+            return;
+        }
+        _nodes[nodeId] = payload.Clone();
+    }
+
+    internal static JsonElement MergeStyleChanges(JsonElement? last, JsonElement changes)
+    {
+        var lastStyle = last is { } record &&
+            record.TryGetProperty("computedStyle", out var style) &&
+            style.ValueKind == JsonValueKind.Object
+                ? style
+                : (JsonElement?)null;
+        var lastCustom = last is { } customRecord &&
+            customRecord.TryGetProperty("customProperties", out var custom) &&
+            custom.ValueKind == JsonValueKind.Object
+                ? custom
+                : (JsonElement?)null;
+        // The merged style is whole only when the last record's was: a node
+        // whose first record was lost, or whose last record had no style,
+        // keeps the changed values alone and says so.
+        var baseComplete = lastStyle is not null &&
+            (!last!.Value.TryGetProperty("computedStyleComplete", out var lastComplete) ||
+                lastComplete.ValueKind != JsonValueKind.False);
+        var removed = changes.TryGetProperty("removedCustomProperties", out var names) &&
+            names.ValueKind == JsonValueKind.Array
+                ? names.EnumerateArray().Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in changes.EnumerateObject())
+            {
+                switch (property.Name)
+                {
+                    case "computedStyle":
+                        writer.WritePropertyName(property.Name);
+                        WriteMerged(writer, lastStyle, property.Value, removed: null);
+                        break;
+                    case "customProperties":
+                        writer.WritePropertyName(property.Name);
+                        WriteMerged(writer, lastCustom, property.Value, removed);
+                        break;
+                    case "computedStyleComplete":
+                        writer.WriteBoolean(property.Name, baseComplete);
+                        break;
+                    case "removedCustomProperties":
+                        writer.WriteNull(property.Name);
+                        break;
+                    default:
+                        property.WriteTo(writer);
+                        break;
+                }
+            }
+            writer.WriteEndObject();
+        }
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    // Writes the last values with each changed value in its place, in the
+    // last record's order, then the values the last record did not hold.
+    private static void WriteMerged(
+        Utf8JsonWriter writer,
+        JsonElement? last,
+        JsonElement changed,
+        HashSet<string>? removed)
+    {
+        var changes = changed.ValueKind == JsonValueKind.Object
+            ? changed.EnumerateObject().ToDictionary(item => item.Name, item => item.Value, StringComparer.Ordinal)
+            : new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var written = new HashSet<string>(StringComparer.Ordinal);
+        writer.WriteStartObject();
+        if (last is { } values)
+        {
+            foreach (var property in values.EnumerateObject())
+            {
+                if (removed is not null && removed.Contains(property.Name))
+                {
+                    continue;
+                }
+                writer.WritePropertyName(property.Name);
+                (changes.TryGetValue(property.Name, out var value) ? value : property.Value).WriteTo(writer);
+                written.Add(property.Name);
+            }
+        }
+        foreach (var (name, value) in changes)
+        {
+            if (written.Add(name))
+            {
+                writer.WritePropertyName(name);
+                value.WriteTo(writer);
+            }
+        }
+        writer.WriteEndObject();
+    }
 
     /// <summary>
     /// Derives the client rectangle of a node from its last change record:
