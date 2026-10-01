@@ -8865,19 +8865,23 @@ void RecorderReadCustomProperties(
     const Document& recorder_document,
     const ComputedStyle& recorder_style,
     std::vector<a11y_recorder::LayoutCheckpointStyleValue>& recorder_values) {
+  // GetVariables reads each of the style's custom properties as
+  // getComputedStyle() does, and leaves out a name with no value.
+  const HeapHashMap<AtomicString, Member<const CSSValue>> recorder_variables =
+      ComputedStyleCSSValueMapping::GetVariables(
+          recorder_style, recorder_document.GetPropertyRegistry(),
+          CSSValuePhase::kResolvedValue);
   Vector<AtomicString> recorder_names;
-  for (const AtomicString& recorder_name : recorder_style.GetVariableNames()) {
-    recorder_names.push_back(recorder_name);
+  for (const auto& recorder_variable : recorder_variables) {
+    recorder_names.push_back(recorder_variable.key);
   }
   std::sort(recorder_names.begin(), recorder_names.end(),
             [](const AtomicString& recorder_a, const AtomicString& recorder_b) {
               return CodeUnitCompareLessThan(recorder_a, recorder_b);
             });
   for (const AtomicString& recorder_name : recorder_names) {
-    const CSSValue* recorder_value = ComputedStyleCSSValueMapping::Get(
-        recorder_name, recorder_style,
-        recorder_document.GetPropertyRegistry(),
-        CSSValuePhase::kResolvedValue);
+    const CSSValue* recorder_value =
+        recorder_variables.at(recorder_name).Get();
     if (!recorder_value) {
       continue;
 """,

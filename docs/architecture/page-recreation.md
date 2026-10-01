@@ -1755,10 +1755,12 @@ Protocol 0.37. The differences from the design above are marked.
   fixed list of 283 is kept in the script
   (`LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER`) only to recognise and
   upgrade a checkout patched before 0.37.
-- Custom properties are read with `ComputedStyle::GetVariableNames`, sorted
-  by code unit, and their values with
-  `ComputedStyleCSSValueMapping::Get` and the document's property registry,
-  as `getComputedStyle()` resolves them. The names include the custom
+- Custom properties are read with
+  `ComputedStyleCSSValueMapping::GetVariables` and the document's property
+  registry, which reads each name `ComputedStyle::GetVariableNames` holds
+  as `getComputedStyle()` resolves it, and are recorded by name in
+  code-unit order. (`ComputedStyleCSSValueMapping::Get`, which reads one
+  name, is private in the reference checkout.) The names include the custom
   properties an element inherits, so an element under a page that defines
   many of them records each one in its first record.
 - Each checkpoint node and change record states `customProperties`, an

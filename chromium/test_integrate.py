@@ -5699,7 +5699,15 @@ class LayoutIntegrationTests(unittest.TestCase):
             "                                   recorder_record.custom_properties);",
             helper,
         )
-        self.assertIn("recorder_style.GetVariableNames()", helper)
+        # ComputedStyleCSSValueMapping::Get is private in the reference
+        # checkout; GetVariables is its public reader.
+        self.assertIn(
+            "ComputedStyleCSSValueMapping::GetVariables(\n"
+            "          recorder_style, recorder_document.GetPropertyRegistry(),\n"
+            "          CSSValuePhase::kResolvedValue);",
+            helper,
+        )
+        self.assertNotIn("ComputedStyleCSSValueMapping::Get(", helper)
         self.assertIn("CodeUnitCompareLessThan(recorder_a, recorder_b)", helper)
         self.assertIn("CSSValuePhase::kResolvedValue", helper)
         definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
