@@ -1524,6 +1524,92 @@ recorded at an offset of 2 pixels in its section, and the first row, which
 has no recorded fragment, was placed by Blink at 0. The page now records
 the second row at 0.
 
+#### 1c, recorded lines and glyph runs (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built.
+
+A block holding text has, beside its box fragment, a list of fragment
+items: for each line, a line item, followed by an item for each text run
+and each inline box on the line. A text item holds its range of the block's
+text, its rectangle, and its shaping result: the glyphs to draw, each with
+its glyph identifier, the character it belongs to, and its advance. Paint,
+hit testing, selection, `Range.getClientRects()`, and DevTools read these.
+1c makes the recorded items and glyphs the ones Blink uses.
+
+Where. Blink lays out the lines with its own line breaking and shaping, as
+it does now, and then converts the items' offsets to physical ones, in
+`FragmentItemsBuilder::ConvertToPhysical`
+(`core/layout/inline/fragment_items_builder.cc`, line 377 in the checkout
+on the target machine). Under the switch, at the end of that function, for
+a block whose element has recorded items, in a horizontal, left to right
+writing mode:
+
+- Each line item takes the rectangle recorded for the line of the same
+  index.
+- Each text item takes the rectangle recorded for its text range, and, when
+  glyphs are recorded for that range, a shaping result built from them,
+  with the item's font.
+- Each inline box item, such as an inline block, whose element has a
+  recorded fragment takes that rectangle.
+
+Rectangles of items are in the block's coordinates, as Blink holds them.
+The patch adds to Blink two setters on `FragmentItem`
+(`core/layout/inline/fragment_item.h`), for an item's rectangle and a text
+item's shaping result, and a function on `ShapeResult`
+(`platform/fonts/shaping/shape_result.h`, line 134) that builds a shaping
+result from given glyphs and advances with a given font, after the pattern
+of its `CreateForSpaces`.
+
+In 1c only, the recorded values are written in attributes of the block's
+element:
+
+- `data-a11y-recorded-lines`: "x y width height" for each line, separated
+  by semicolons.
+- `data-a11y-recorded-text`: "start end x y width height" for each text
+  item, the range being offsets in the block's text.
+- `data-a11y-recorded-glyphs`: "start end" and then, for each character of
+  the range, a glyph and its advance in CSS pixels. A recording holds glyph
+  identifiers of the font; a page cannot know them, so in 1c each glyph is
+  given as a code point, "U+0058", and Blink's glyph for it in the item's
+  font is used.
+
+Not covered by 1c, left to Blink:
+
+- Line breaking. Recorded items are matched to Blink's items by line index
+  and text range, so when Blink breaks the text differently from the
+  recording, the unmatched items keep Blink's values; the check reports
+  whether that happens on the test page. Imposing the recorded breaks is a
+  later step, if needed.
+- Glyph offsets, the shifts of a glyph from its pen position, which are
+  zero in most Latin text, and text drawn with more than one font, as with
+  font fallback: a recorded run is drawn with the item's primary font.
+- Writing modes other than horizontal, left to right, as in 1b.
+- Ink overflow and other values Blink derives from items after this point
+  are worked out from the recorded values; values derived before it, such
+  as the line's baseline, are not.
+
+The test page, `chromium/recreation_spike/lines.html`, has a block of two
+lines separated by a line break, with the second line recorded above the
+first, the first line's text recorded at a different offset, and the second
+line's glyphs recorded as other characters with fixed advances; a paragraph
+holding an inline block with a recorded fragment; and a paragraph with no
+recorded values, which is unchanged.
+
+Checked on the target machine, with the page opened under the switch and
+without it:
+
+- With the switch, for each recorded text item, `Range.getBoundingClientRect()`
+  over its text gives the block's rectangle moved by the recorded offset,
+  with the recorded size; a Console snippet, given with the build, compares
+  them. Without it, Blink's own layout.
+- The lines are painted in the recorded places, and the second line shows
+  the recorded glyphs at their recorded advances.
+- Selecting text on the recorded lines with the mouse highlights the
+  recorded glyph positions.
+
+Tests: unit tests of the integration script's new patches; the check above
+as the system test.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
