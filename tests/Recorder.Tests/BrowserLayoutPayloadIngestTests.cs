@@ -94,6 +94,28 @@ public sealed class BrowserLayoutPayloadIngestTests
         Assert.Equal(1.25, fragment.Children[1].Fragment!.Height);
         Assert.Null(fragments.NaturalSize);
 
+        using var paragraph = JsonDocument.Parse(BrowserLayoutPayloads.TextBlockNode);
+        var paragraphFragments = BrowserProtocol.Deserialize<BrowserLayoutCheckpointNodePayload>(
+            paragraph.RootElement).BoxFragments!;
+        Assert.Equal("Hiabc", paragraphFragments.TextContent);
+        Assert.Equal("HIABC", paragraphFragments.FirstLineText);
+        Assert.False(paragraphFragments.TextContentUnchanged);
+        var items = paragraphFragments.Fragments[0].Items!;
+        Assert.Equal(["line", "text", "box", "text", "generated-text"], items.Select(item => item.Type));
+        Assert.Equal(5, items[0].DescendantsCount);
+        Assert.Equal((0, 2), (items[1].Start, items[1].End));
+        Assert.Equal("rtl", items[3].Direction);
+        Assert.Equal("-", items[4].GeneratedText);
+        var run = Assert.Single(items[1].GlyphRuns!);
+        Assert.Equal("ArialMT", run.Font.PostScriptName);
+        Assert.Equal(
+            [new BrowserLayoutGlyph(43, 0, 0, 0, 0), new BrowserLayoutGlyph(76, 1, 8.5f, 0, -0.25f)],
+            BrowserLayoutGlyphs.Unpack(run.Glyphs));
+        Assert.Throws<FormatException>(() => BrowserLayoutGlyphs.Unpack("KwAAAAAAAAAAAAAA"));
+        var anonymous = paragraphFragments.Fragments[0].Children[0].Fragment!;
+        Assert.Equal("R", anonymous.TextContent);
+        Assert.Equal(2, anonymous.Items!.Count);
+
         using var image = JsonDocument.Parse(BrowserLayoutPayloads.BoxedElementNode);
         var imagePayload = BrowserProtocol.Deserialize<BrowserLayoutCheckpointNodePayload>(
             image.RootElement);

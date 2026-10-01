@@ -982,7 +982,13 @@ replaced element's natural size, in Blink's layout units; null for any
 other node. The design is in [page recreation](page-recreation.md), "2b
 design" and "2b as built".
 
-Live 0.38 connections require an exact protocol-version match.
+Protocol version 0.39 adds, in `boxFragments`, each fragment's `items`
+when it holds lines, with each text item's `glyphRuns`, and the node's
+`textContent`, `firstLineText`, and `textContentUnchanged`; a fragment held
+by a child link records its own text. The design is in
+[page recreation](page-recreation.md), "2c design" and "2c as built".
+
+Live 0.39 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

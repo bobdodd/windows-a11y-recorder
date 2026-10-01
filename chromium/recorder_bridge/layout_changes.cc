@@ -45,6 +45,49 @@ uint64_t HashStyleValue(const LayoutCheckpointStyleValue& value) {
   return hasher.Value();
 }
 
+void HashFragmentItem(Hasher& hasher, const LayoutFragmentItem& item) {
+  hasher.Text(item.type);
+  hasher.Number(item.x);
+  hasher.Number(item.y);
+  hasher.Number(item.width);
+  hasher.Number(item.height);
+  hasher.Integer(static_cast<uint64_t>(item.descendants_count));
+  hasher.Integer(static_cast<uint64_t>(item.node_id));
+  hasher.Boolean(item.text);
+  hasher.Boolean(item.range_present);
+  hasher.Integer(item.start);
+  hasher.Integer(item.end);
+  hasher.Boolean(item.first_line_style);
+  hasher.Boolean(item.rtl);
+  hasher.Boolean(item.hidden_for_paint);
+  hasher.Boolean(item.generated_text_present);
+  hasher.Text(item.generated_text);
+  hasher.Integer(item.glyph_runs.size());
+  for (const LayoutGlyphRun& run : item.glyph_runs) {
+    hasher.Text(run.family);
+    hasher.Text(run.post_script_name);
+    hasher.Number(run.size);
+    hasher.Boolean(run.synthetic_bold);
+    hasher.Boolean(run.synthetic_italic);
+    hasher.Boolean(run.horizontal);
+    hasher.Integer(static_cast<uint64_t>(run.rotation));
+    hasher.Integer(run.glyphs.size());
+    for (const LayoutGlyph& glyph : run.glyphs) {
+      hasher.Integer(glyph.glyph);
+      hasher.Integer(glyph.character_index);
+      hasher.Integer(std::bit_cast<uint32_t>(glyph.total_advance));
+      hasher.Integer(std::bit_cast<uint32_t>(glyph.offset_x));
+      hasher.Integer(std::bit_cast<uint32_t>(glyph.offset_y));
+    }
+  }
+}
+
+void AppendLittleEndian(std::string& bytes, uint32_t value, int count) {
+  for (int index = 0; index < count; ++index) {
+    bytes.push_back(static_cast<char>((value >> (8 * index)) & 0xff));
+  }
+}
+
 void HashBoxFragment(Hasher& hasher, const LayoutBoxFragment& fragment) {
   hasher.Number(fragment.width);
   hasher.Number(fragment.height);
@@ -70,9 +113,55 @@ void HashBoxFragment(Hasher& hasher, const LayoutBoxFragment& fragment) {
       HashBoxFragment(hasher, nested);
     }
   }
+  hasher.Boolean(fragment.text_present);
+  hasher.Text(fragment.text_content);
+  hasher.Boolean(fragment.first_line_text_present);
+  hasher.Text(fragment.first_line_text);
+  hasher.Boolean(fragment.items_present);
+  hasher.Integer(fragment.items.size());
+  for (const LayoutFragmentItem& item : fragment.items) {
+    HashFragmentItem(hasher, item);
+  }
+}
+
+uint64_t HashText(const LayoutBoxFragments& fragments) {
+  Hasher hasher;
+  hasher.Text(fragments.text_content);
+  hasher.Boolean(fragments.first_line_text_present);
+  hasher.Text(fragments.first_line_text);
+  return hasher.Value();
 }
 
 }  // namespace
+
+std::string PackGlyphs(const std::vector<LayoutGlyph>& glyphs) {
+  std::string bytes;
+  bytes.reserve(glyphs.size() * kPackedGlyphBytes);
+  for (const LayoutGlyph& glyph : glyphs) {
+    AppendLittleEndian(bytes, glyph.glyph, 2);
+    AppendLittleEndian(bytes, glyph.character_index, 4);
+    AppendLittleEndian(bytes, std::bit_cast<uint32_t>(glyph.total_advance), 4);
+    AppendLittleEndian(bytes, std::bit_cast<uint32_t>(glyph.offset_x), 4);
+    AppendLittleEndian(bytes, std::bit_cast<uint32_t>(glyph.offset_y), 4);
+  }
+  return bytes;
+}
+
+LayoutGlyphRun::LayoutGlyphRun() = default;
+LayoutGlyphRun::LayoutGlyphRun(const LayoutGlyphRun&) = default;
+LayoutGlyphRun::LayoutGlyphRun(LayoutGlyphRun&&) = default;
+LayoutGlyphRun& LayoutGlyphRun::operator=(const LayoutGlyphRun&) = default;
+LayoutGlyphRun& LayoutGlyphRun::operator=(LayoutGlyphRun&&) = default;
+LayoutGlyphRun::~LayoutGlyphRun() = default;
+
+LayoutFragmentItem::LayoutFragmentItem() = default;
+LayoutFragmentItem::LayoutFragmentItem(const LayoutFragmentItem&) = default;
+LayoutFragmentItem::LayoutFragmentItem(LayoutFragmentItem&&) = default;
+LayoutFragmentItem& LayoutFragmentItem::operator=(const LayoutFragmentItem&) =
+    default;
+LayoutFragmentItem& LayoutFragmentItem::operator=(LayoutFragmentItem&&) =
+    default;
+LayoutFragmentItem::~LayoutFragmentItem() = default;
 
 LayoutFragmentChild::LayoutFragmentChild() = default;
 LayoutFragmentChild::LayoutFragmentChild(const LayoutFragmentChild&) = default;
@@ -143,6 +232,10 @@ uint64_t HashLayoutChangedNode(const LayoutChangedNode& changed) {
   hasher.Boolean(fragments.natural_has_height);
   hasher.Number(fragments.natural_aspect_ratio_width);
   hasher.Number(fragments.natural_aspect_ratio_height);
+  hasher.Boolean(fragments.text_present);
+  hasher.Text(fragments.text_content);
+  hasher.Boolean(fragments.first_line_text_present);
+  hasher.Text(fragments.first_line_text);
   hasher.Boolean(changed.geometry_present);
   hasher.Integer(changed.transform_node_id);
   hasher.Boolean(changed.client_rect_empty);
@@ -252,8 +345,30 @@ void LayoutChangeFilter::ReduceToStyleChanges(LayoutChangedNode& changed) {
   last = std::move(current);
 }
 
+void LayoutChangeFilter::ReduceToTextChanges(LayoutChangedNode& changed) {
+  LayoutBoxFragments& fragments = changed.node.box_fragments;
+  fragments.text_unchanged = false;
+  if (!fragments.present || !fragments.text_present) {
+    texts_.erase(changed.node.node_id);
+    return;
+  }
+  const uint64_t hash = HashText(fragments);
+  auto [found, inserted] = texts_.try_emplace(changed.node.node_id, hash);
+  if (inserted) {
+    return;
+  }
+  if (found->second != hash) {
+    found->second = hash;
+    return;
+  }
+  fragments.text_unchanged = true;
+  fragments.text_content.clear();
+  fragments.first_line_text.clear();
+}
+
 void LayoutChangeFilter::ForgetStyles() {
   styles_.clear();
+  texts_.clear();
 }
 
 }  // namespace a11y_recorder

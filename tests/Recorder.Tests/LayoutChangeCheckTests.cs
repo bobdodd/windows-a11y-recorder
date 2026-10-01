@@ -223,6 +223,26 @@ public sealed class LayoutChangeCheckTests
          "fragmentIndex":0,"fragment":null}]}],"naturalSize":null}
         """;
 
+    // A paragraph's box fragments with one line of text (protocol 0.39), its
+    // text stated, or left out as unchanged when text is null.
+    private static string TextFragments(string? text, int end = 2)
+    {
+        var textContent = text is null ? "null" : JsonSerializer.Serialize(text);
+        var unchanged = text is null ? "true" : "false";
+        return $$"""
+            {"effectiveZoom":1,"fragments":[{"width":100,"height":20,"breakToken":null,
+             "scrollableOverflow":null,"children":[],"items":[
+              {"type":"line","x":0,"y":0,"width":100,"height":20,"descendantsCount":2,
+               "nodeId":null,"start":null,"end":null,"firstLineStyle":null,"direction":null,
+               "hiddenForPaint":null,"glyphRuns":null,"generatedText":null},
+              {"type":"text","x":0,"y":0,"width":17,"height":20,"descendantsCount":null,
+               "nodeId":43,"start":0,"end":{{end}},"firstLineStyle":false,"direction":"ltr",
+               "hiddenForPaint":false,"glyphRuns":[],"generatedText":null}],
+             "textContent":null,"firstLineText":null}],"naturalSize":null,
+             "textContent":{{textContent}},"firstLineText":null,"textContentUnchanged":{{unchanged}}}
+            """;
+    }
+
     private static void StyleChangeSet(LayoutChangeCheck check, int set, JsonElement node)
     {
         check.Add("layout-changes-started", ChangesStarted(set, $"layout-checkpoint-{set}"));
@@ -322,6 +342,54 @@ public sealed class LayoutChangeCheckTests
         var merged = state.Documents[Token].Nodes[42];
 
         Assert.True(JsonElement.DeepEquals(Json(Fragments(150)), merged.GetProperty("boxFragments")));
+    }
+
+    [Fact]
+    public void ComparesTextLeftOutAsUnchangedWithTheFullWalk()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointStyleNode(1, """{"color":"red"}""", "{}", TextFragments("Hi")));
+        StyleChangeSet(check, 1, ChangedStyle(1, """{"color":"red"}""", "{}", true, "null", TextFragments("Hi")));
+        // The second record's items changed and its text did not.
+        Checkpoint(check, 2, CheckpointStyleNode(2, """{"color":"blue"}""", "{}", TextFragments("Hi", end: 1)));
+        StyleChangeSet(check, 2, ChangedStyle(2, """{"color":"blue"}""", "{}", false, "[]", TextFragments(null, end: 1)));
+        check.Finish();
+
+        Assert.Equal(2, check.NodesMatched);
+        Assert.Empty(check.Differences);
+    }
+
+    [Fact]
+    public void ReportsTextLeftOutThatWasNeverRecorded()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointStyleNode(1, """{"color":"red"}""", "{}", TextFragments("Hi")));
+        StyleChangeSet(check, 1, ChangedStyle(1, """{"color":"red"}""", "{}", true, "null", TextFragments(null)));
+        check.Finish();
+
+        Assert.Equal(0, check.NodesMatched);
+        Assert.Equal(1, check.Differences["text-content-incomplete"]);
+    }
+
+    [Fact]
+    public void TheStatePutsBackTextLeftOutAsUnchanged()
+    {
+        var state = new LayoutChangeState();
+        state.Apply("layout-changes-started", ChangesStarted(1, null));
+        state.Apply("layout-node-changed", ChangedStyle(1,
+            """{"color":"red"}""", "{}", true, "null", TextFragments(null)));
+        var unrestored = state.Documents[Token].Nodes[42].GetProperty("boxFragments");
+        Assert.True(unrestored.GetProperty("textContentUnchanged").GetBoolean());
+
+        state.Apply("layout-node-changed", ChangedStyle(1,
+            """{"color":"red"}""", "{}", true, "null", TextFragments("Hi")));
+        state.Apply("layout-node-changed", ChangedStyle(2,
+            """{"color":"blue"}""", "{}", false, "[]", TextFragments(null, end: 1)));
+        var merged = state.Documents[Token].Nodes[42];
+
+        Assert.True(JsonElement.DeepEquals(
+            Json(TextFragments("Hi", end: 1)), merged.GetProperty("boxFragments")));
+        Assert.Equal("blue", merged.GetProperty("computedStyle").GetProperty("color").GetString());
     }
 
     [Fact]
@@ -487,7 +555,7 @@ public sealed class LayoutChangeCheckTests
         check.Finish();
 
         Assert.Equal(2, check.ChangeSets);
-        Assert.Equal(4, check.ChangedNodeRecords);
+        Assert.Equal(6, check.ChangedNodeRecords);
         Assert.Equal(2, check.TransformNodeRecords);
     }
 }

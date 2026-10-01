@@ -245,7 +245,120 @@ void TestOnlyChangedStyleValuesFollowAFirstRecord() {
 
 }  // namespace
 
+a11y_recorder::LayoutChangedNode TextNodeBlock(const std::string& text) {
+  a11y_recorder::LayoutChangedNode block = SampleNode();
+  block.node.box_fragments.present = true;
+  block.node.box_fragments.text_present = true;
+  block.node.box_fragments.text_content = text;
+  return block;
+}
+
+void TestItemsTextAndGlyphsChangeTheNodeHash() {
+  a11y_recorder::LayoutChangedNode block = TextNodeBlock("Hello");
+  a11y_recorder::LayoutBoxFragment fragment;
+  fragment.items_present = true;
+  a11y_recorder::LayoutFragmentItem line;
+  line.type = "line";
+  line.descendants_count = 2;
+  a11y_recorder::LayoutFragmentItem text;
+  text.type = "text";
+  text.text = true;
+  text.range_present = true;
+  text.end = 5;
+  a11y_recorder::LayoutGlyphRun run;
+  run.family = "Arial";
+  run.glyphs.push_back({43, 0, 0, 0, 0});
+  text.glyph_runs.push_back(run);
+  fragment.items = {line, text};
+  block.node.box_fragments.fragments.push_back(fragment);
+  const uint64_t base = a11y_recorder::HashLayoutChangedNode(block);
+  auto differs = [&block, base](auto change) {
+    a11y_recorder::LayoutChangedNode node = block;
+    change(node.node.box_fragments);
+    return a11y_recorder::HashLayoutChangedNode(node) != base;
+  };
+  Expect(differs([](auto& f) { f.text_content = "Hellp"; }), "text content");
+  Expect(differs([](auto& f) { f.first_line_text_present = true; }),
+         "first line text");
+  Expect(differs([](auto& f) { f.fragments[0].items[1].end = 4; }),
+         "item range");
+  Expect(differs([](auto& f) { f.fragments[0].items[0].descendants_count = 1; }),
+         "item descendants");
+  Expect(differs([](auto& f) { f.fragments[0].items[1].rtl = true; }),
+         "item direction");
+  Expect(differs([](auto& f) {
+           f.fragments[0].items[1].glyph_runs[0].family = "Verdana";
+         }),
+         "run font");
+  Expect(differs([](auto& f) {
+           f.fragments[0].items[1].glyph_runs[0].glyphs[0].total_advance =
+               0.25f;
+         }),
+         "glyphs");
+  Expect(differs([](auto& f) { f.fragments[0].items.pop_back(); }),
+         "item count");
+  Expect(differs([](auto& f) { f.fragments[0].text_content = "Anonymous"; }),
+         "a held fragment's text");
+}
+
+void TestGlyphsArePackedLittleEndian() {
+  const std::string glyphs = a11y_recorder::PackGlyphs(
+      {{0x1234, 0x00070001, 1.0f, -0.5f, 2.0f}});
+  Expect(glyphs.size() == a11y_recorder::kPackedGlyphBytes, "glyph size");
+  const unsigned char expected[] = {
+      0x34, 0x12,              // glyph
+      0x01, 0x00, 0x07, 0x00,  // character index
+      0x00, 0x00, 0x80, 0x3f,  // 1.0f
+      0x00, 0x00, 0x00, 0xbf,  // -0.5f
+      0x00, 0x00, 0x00, 0x40,  // 2.0f
+  };
+  bool same = glyphs.size() == sizeof(expected);
+  for (size_t index = 0; same && index < sizeof(expected); ++index) {
+    same = static_cast<unsigned char>(glyphs[index]) == expected[index];
+  }
+  Expect(same, "glyph bytes");
+}
+
+void TestTextIsLeftOutWhenItEqualsTheLastRecord() {
+  a11y_recorder::LayoutChangeFilter filter;
+  a11y_recorder::LayoutChangedNode first = TextNodeBlock("Hello");
+  filter.ReduceToTextChanges(first);
+  Expect(!first.node.box_fragments.text_unchanged &&
+             first.node.box_fragments.text_content == "Hello",
+         "a first record holds its text");
+  a11y_recorder::LayoutChangedNode same = TextNodeBlock("Hello");
+  filter.ReduceToTextChanges(same);
+  Expect(same.node.box_fragments.text_unchanged &&
+             same.node.box_fragments.text_content.empty(),
+         "an equal text is left out");
+  a11y_recorder::LayoutChangedNode other = TextNodeBlock("Help");
+  filter.ReduceToTextChanges(other);
+  Expect(!other.node.box_fragments.text_unchanged &&
+             other.node.box_fragments.text_content == "Help",
+         "a changed text is recorded");
+  a11y_recorder::LayoutChangedNode first_line = TextNodeBlock("Help");
+  first_line.node.box_fragments.first_line_text_present = true;
+  first_line.node.box_fragments.first_line_text = "HELP";
+  filter.ReduceToTextChanges(first_line);
+  Expect(!first_line.node.box_fragments.text_unchanged,
+         "a new first-line text is recorded");
+  a11y_recorder::LayoutChangedNode none = SampleNode();
+  filter.ReduceToTextChanges(none);
+  a11y_recorder::LayoutChangedNode again = TextNodeBlock("Help");
+  filter.ReduceToTextChanges(again);
+  Expect(!again.node.box_fragments.text_unchanged,
+         "a record without text forgets the hash");
+  filter.ForgetStyles();
+  a11y_recorder::LayoutChangedNode after_loss = TextNodeBlock("Help");
+  filter.ReduceToTextChanges(after_loss);
+  Expect(!after_loss.node.box_fragments.text_unchanged,
+         "text is recorded whole after a loss");
+}
+
 int main() {
+  TestItemsTextAndGlyphsChangeTheNodeHash();
+  TestGlyphsArePackedLittleEndian();
+  TestTextIsLeftOutWhenItEqualsTheLastRecord();
   TestEveryStatedFieldChangesTheNodeHash();
   TestTheReasonsDoNotChangeTheNodeHash();
   TestEveryTransformFieldChangesItsHash();

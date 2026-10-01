@@ -1640,7 +1640,7 @@ With 1c, the feasibility step is complete: recorded styles, box fragments,
 lines, text items, and glyphs can each be imposed in Blink under the
 switch, and DevTools shows the recorded styles as their source.
 
-### Stage 2: recording for the recreation (agreed; 2a and 2b built)
+### Stage 2: recording for the recreation (agreed; 2a, 2b, and 2c built)
 
 Proposed on 2026-09-30 and agreed by the user the same day, with changed
 style values only and packed glyph arrays. 2a is built and not yet tested
@@ -2062,11 +2062,11 @@ later records:
   no compared node's rebuilt style was incomplete and none differed. This
   is the first recording on the target machine to check the 2a merging.
 
-#### 2c design (proposed)
+#### 2c design (agreed)
 
-Proposed on 2026-10-01, for agreement before it is built. It fills in items
-3 and 4 of "What is recorded, and when" above, with three changes from
-them, marked.
+Proposed on 2026-10-01 and agreed by the owner the same day, with its three
+changes from the outline. It fills in items 3 and 4 of "What is recorded,
+and when" above, with the changes marked.
 
 Where it is recorded. As in 2b, in the node records: each fragment in a
 block's `boxFragments` gains `items`, and the block's `boxFragments` gains
@@ -2176,6 +2176,49 @@ Required tests:
 - System, on the target machine: the two recordings above, with no
   `box-fragments` or `text-content-incomplete` differences in the one with
   the check.
+
+#### 2c as built
+
+Built on 2026-10-01 at protocol 0.39, and not yet tested on the target
+machine. As designed, with these additions and details:
+
+- Text of an anonymous block. A block's loose text beside its child blocks,
+  as in `<div>text<p>para</p></div>`, is laid out in an anonymous block,
+  which has no node and whose fragment is held by its parent's child link
+  (2b). Its items index its own text, not the node's, so each fragment held
+  by a child link that holds items records `textContent` and
+  `firstLineText` itself, whole and with no unchanged marker. A node's own
+  fragments state both null, their text being the node's in
+  `boxFragments`. The node's text hash covers only the node's own text;
+  the record's hash covers both, so a changed anonymous text still sends
+  the record.
+- Generated text has no range. Blink holds a generated-text item's text
+  apart from the text content (`FragmentItem::GeneratedTextItem`,
+  `core/layout/inline/fragment_item.h`, line 81), so only a text item
+  states `start` and `end`; a generated-text item states them null and
+  states `generatedText`.
+- Conversion. Text and names are converted to UTF-8 with an unpaired
+  surrogate replaced by U+FFFD
+  (`Utf8ConversionMode::kStrictReplacingErrors`), which keeps every UTF-16
+  offset the items state.
+- Where the packing happens. Blink's reading fills plain glyph records,
+  each with its identifier, character index, total advance, and offset,
+  and the bridge packs them as designed when it writes the record. The
+  integration script lets Blink call only the bridge's exported entry
+  points, so the packing stays in the bridge, where its unit test is.
+- The app reads a run's glyphs with `BrowserLayoutGlyphs.Unpack` in the
+  contracts, which refuses a run that is not whole 18-byte glyphs.
+- Validator errors: `browser-layout-fragment-item-inconsistent` (an item
+  without what its type states, or spanning past the list),
+  `browser-layout-fragment-item-range-outside-text`,
+  `browser-layout-glyphs-invalid`, and
+  `browser-layout-text-content-inconsistent` (text stated where it does not
+  belong, missing where items are, or stated with the unchanged marker).
+  A range is checked against the text it indexes when the record holds
+  it, and not when the text is left out as unchanged.
+- The layout change check notes `text-content-incomplete` instead of
+  comparing the box fragments when the rebuilt record still marks its text
+  unchanged.
 
 
 #### Required tests

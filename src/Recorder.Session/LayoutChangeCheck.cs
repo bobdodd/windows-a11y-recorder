@@ -278,7 +278,14 @@ public sealed class LayoutChangeCheck
         // Protocol 0.38: the box fragments, exactly, since the checkpoint and
         // the change record read the same fragments. A checkpoint of an
         // earlier version states none.
-        if (node.TryGetProperty("boxFragments", out var observedFragments))
+        // Protocol 0.39: text left out as unchanged that the state could not
+        // put back, its node's earlier text never having been recorded.
+        if (LayoutDocumentChangeState.TextContentUnchanged(changed))
+        {
+            Note("text-content-incomplete", where);
+            matched = false;
+        }
+        else if (node.TryGetProperty("boxFragments", out var observedFragments))
         {
             BoxFragmentsCompared++;
             if (!changed.TryGetProperty("boxFragments", out var changedFragments) ||

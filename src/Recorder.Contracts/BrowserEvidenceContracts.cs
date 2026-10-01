@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.38";
+    public const string CurrentVersion = "0.39";
 }
 
 public static class BrowserEvidenceChannels
@@ -911,12 +911,97 @@ public sealed record BrowserLayoutFragmentChild(
     int? FragmentIndex,
     BrowserLayoutBoxFragment? Fragment);
 
+// The font of a glyph run (protocol 0.39), as Blink's platform font data
+// holds it; fonts are recorded by name.
+public sealed record BrowserLayoutFont(
+    string Family,
+    string PostScriptName,
+    double Size,
+    bool SyntheticBold,
+    bool SyntheticItalic);
+
+// A run of glyphs with one font, orientation, and rotation (protocol 0.39).
+// Glyphs is base64 of packed little-endian glyphs, 18 bytes each: the glyph
+// identifier (2 bytes), the character index into the block's text content (4),
+// the total advance before the glyph, and its offset x and y (4-byte floats).
+public sealed record BrowserLayoutGlyphRun(
+    BrowserLayoutFont Font,
+    bool Horizontal,
+    int Rotation,
+    string Glyphs);
+
+// One glyph of a glyph run, as Blink's shaping reports it.
+public readonly record struct BrowserLayoutGlyph(
+    ushort Glyph,
+    uint CharacterIndex,
+    float TotalAdvance,
+    float OffsetX,
+    float OffsetY);
+
+// Reads a glyph run's packed glyphs.
+public static class BrowserLayoutGlyphs
+{
+    public const int PackedGlyphBytes = 18;
+
+    public static IReadOnlyList<BrowserLayoutGlyph> Unpack(string glyphs)
+    {
+        var bytes = Convert.FromBase64String(glyphs);
+        if (bytes.Length % PackedGlyphBytes != 0)
+        {
+            throw new FormatException("Glyphs must be whole packed glyphs of 18 bytes.");
+        }
+        var span = bytes.AsSpan();
+        var result = new BrowserLayoutGlyph[bytes.Length / PackedGlyphBytes];
+        for (var index = 0; index < result.Length; index++)
+        {
+            var glyph = span.Slice(index * PackedGlyphBytes, PackedGlyphBytes);
+            result[index] = new BrowserLayoutGlyph(
+                System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(glyph),
+                System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(glyph[2..]),
+                System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(glyph[6..]),
+                System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(glyph[10..]),
+                System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(glyph[14..]));
+        }
+        return result;
+    }
+}
+
+// One fragment item of a block fragment (protocol 0.39), in Blink's pre-order:
+// Type is "line", "text", "generated-text", or "box"; the rectangle is in the
+// fragment, in layout units. DescendantsCount, for a line or box item, counts
+// the item and those it spans. Start and End, for a text item, are its range of
+// the block's text content. A text or generated-text item has FirstLineStyle,
+// Direction, HiddenForPaint, and GlyphRuns; a generated-text item has
+// GeneratedText. Members that do not apply are null.
+public sealed record BrowserLayoutFragmentItem(
+    string Type,
+    double X,
+    double Y,
+    double Width,
+    double Height,
+    int? DescendantsCount,
+    long? NodeId,
+    int? Start,
+    int? End,
+    bool? FirstLineStyle,
+    string? Direction,
+    bool? HiddenForPaint,
+    IReadOnlyList<BrowserLayoutGlyphRun>? GlyphRuns,
+    string? GeneratedText);
+
+// Items (protocol 0.39) is null for a fragment that holds no lines.
+// TextContent and FirstLineText are the text a fragment held by a child link,
+// such as an anonymous block, lays out, which its items index; a node's own
+// fragments leave them null, their text being the node's.
 public sealed record BrowserLayoutBoxFragment(
     double Width,
     double Height,
     BrowserLayoutBreakToken? BreakToken,
     BrowserLayoutRect? ScrollableOverflow,
-    IReadOnlyList<BrowserLayoutFragmentChild> Children);
+    IReadOnlyList<BrowserLayoutFragmentChild> Children,
+    IReadOnlyList<BrowserLayoutFragmentItem>? Items = null,
+    string? TextContent = null,
+    string? FirstLineText = null);
 
 // A replaced element's natural dimensions, in zoomed CSS pixels as Blink holds
 // them.
@@ -929,11 +1014,18 @@ public sealed record BrowserLayoutNaturalSize(
     double AspectRatioHeight);
 
 // The fragments of a node whose layout object is a layout box. NaturalSize is
-// null except for a replaced element.
+// null except for a replaced element. TextContent (protocol 0.39) is a block's
+// text as laid out, which its items' ranges index, and FirstLineText its
+// ::first-line text when Blink holds one; both are null for a box without
+// items. In a change record, TextContentUnchanged states that the text equals
+// the node's last record and is left out, both being null.
 public sealed record BrowserLayoutBoxFragments(
     double EffectiveZoom,
     IReadOnlyList<BrowserLayoutBoxFragment> Fragments,
-    BrowserLayoutNaturalSize? NaturalSize);
+    BrowserLayoutNaturalSize? NaturalSize,
+    string? TextContent = null,
+    string? FirstLineText = null,
+    bool TextContentUnchanged = false);
 
 // Records one element, laid-out text node, or pseudo-element.
 // BoundingClientRect is null when the node has no layout object. ComputedStyle

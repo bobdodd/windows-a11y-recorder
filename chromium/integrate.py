@@ -9885,6 +9885,137 @@ BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
 # docs/architecture/page-recreation.md, "2b design".
 BLINK_LAYOUT_BOX_FRAGMENTS_READER = """\
 
+// The glyph runs of one text item as ForEachGlyph reports its glyphs: a new
+// run starts at each change of font, orientation, or rotation (protocol
+// 0.39).
+struct RecorderGlyphReading {
+  std::vector<a11y_recorder::LayoutGlyphRun>* runs = nullptr;
+  const SimpleFontData* font = nullptr;
+  bool horizontal = true;
+  int rotation = 0;
+};
+
+void RecorderReadGlyph(void* recorder_context,
+                       unsigned recorder_character_index,
+                       Glyph recorder_glyph,
+                       gfx::Vector2dF recorder_offset,
+                       float recorder_total_advance,
+                       bool recorder_horizontal,
+                       CanvasRotationInVertical recorder_rotation,
+                       const SimpleFontData* recorder_font) {
+  auto& recorder_reading =
+      *static_cast<RecorderGlyphReading*>(recorder_context);
+  const int recorder_rotation_value = static_cast<int>(recorder_rotation);
+  if (recorder_reading.runs->empty() ||
+      recorder_font != recorder_reading.font ||
+      recorder_horizontal != recorder_reading.horizontal ||
+      recorder_rotation_value != recorder_reading.rotation) {
+    recorder_reading.font = recorder_font;
+    recorder_reading.horizontal = recorder_horizontal;
+    recorder_reading.rotation = recorder_rotation_value;
+    a11y_recorder::LayoutGlyphRun& recorder_run =
+        recorder_reading.runs->emplace_back();
+    recorder_run.horizontal = recorder_horizontal;
+    recorder_run.rotation = recorder_rotation_value;
+    if (recorder_font) {
+      const FontPlatformData& recorder_platform =
+          recorder_font->PlatformData();
+      recorder_run.family =
+          recorder_platform.FontFamilyName().Utf8(
+              Utf8ConversionMode::kStrictReplacingErrors);
+      if (const SkTypeface* recorder_typeface =
+              recorder_platform.Typeface()) {
+        SkString recorder_name;
+        if (recorder_typeface->getPostScriptName(&recorder_name)) {
+          recorder_run.post_script_name = recorder_name.c_str();
+        }
+      }
+      recorder_run.size = recorder_platform.size();
+      recorder_run.synthetic_bold = recorder_platform.SyntheticBold();
+      recorder_run.synthetic_italic = recorder_platform.SyntheticItalic();
+    }
+  }
+  recorder_reading.runs->back().glyphs.push_back(
+      {recorder_glyph, recorder_character_index, recorder_total_advance,
+       recorder_offset.x(), recorder_offset.y()});
+}
+
+// Reads the items of a fragment that holds lines, in Blink's pre-order
+// (protocol 0.39).
+void RecorderReadFragmentItems(const FragmentItems& recorder_items,
+                               a11y_recorder::LayoutBoxFragment& recorder_out) {
+  recorder_out.items_present = true;
+  recorder_out.text_present = true;
+  recorder_out.text_content = recorder_items.NormalText().Utf8(
+      Utf8ConversionMode::kStrictReplacingErrors);
+  if (!recorder_items.FirstLineText().IsNull()) {
+    recorder_out.first_line_text_present = true;
+    recorder_out.first_line_text = recorder_items.FirstLineText().Utf8(
+        Utf8ConversionMode::kStrictReplacingErrors);
+  }
+  recorder_out.items.reserve(recorder_items.Size());
+  for (const FragmentItem& recorder_item : recorder_items.Items()) {
+    a11y_recorder::LayoutFragmentItem& recorder_record =
+        recorder_out.items.emplace_back();
+    switch (recorder_item.Type()) {
+      case FragmentItem::kText:
+        recorder_record.type = "text";
+        break;
+      case FragmentItem::kGeneratedText:
+        recorder_record.type = "generated-text";
+        break;
+      case FragmentItem::kLine:
+        recorder_record.type = "line";
+        break;
+      case FragmentItem::kBox:
+        recorder_record.type = "box";
+        break;
+      default:
+        recorder_record.type = "invalid";
+        break;
+    }
+    const PhysicalRect& recorder_rect = recorder_item.RectInContainerFragment();
+    recorder_record.x = recorder_rect.offset.left.ToDouble();
+    recorder_record.y = recorder_rect.offset.top.ToDouble();
+    recorder_record.width = recorder_rect.size.width.ToDouble();
+    recorder_record.height = recorder_rect.size.height.ToDouble();
+    if (recorder_item.IsContainer()) {
+      recorder_record.descendants_count =
+          base::saturated_cast<int>(recorder_item.DescendantsCount());
+    }
+    if (const LayoutObject* recorder_object =
+            recorder_item.GetLayoutObject()) {
+      if (Node* recorder_node = recorder_object->GetNode()) {
+        recorder_record.node_id = recorder_node->GetDomNodeId();
+      }
+    }
+    if (!recorder_item.IsText()) {
+      continue;
+    }
+    recorder_record.text = true;
+    if (recorder_item.Type() == FragmentItem::kText) {
+      recorder_record.range_present = true;
+      recorder_record.start = recorder_item.StartOffset();
+      recorder_record.end = recorder_item.EndOffset();
+    } else {
+      recorder_record.generated_text_present = true;
+      recorder_record.generated_text =
+          recorder_item.GeneratedText().ToString().Utf8(
+              Utf8ConversionMode::kStrictReplacingErrors);
+    }
+    recorder_record.first_line_style = recorder_item.UsesFirstLineStyle();
+    recorder_record.rtl =
+        recorder_item.ResolvedDirection() == TextDirection::kRtl;
+    recorder_record.hidden_for_paint = recorder_item.IsHiddenForPaint();
+    if (const ShapeResultView* recorder_shape =
+            recorder_item.TextShapeResult()) {
+      RecorderGlyphReading recorder_reading;
+      recorder_reading.runs = &recorder_record.glyph_runs;
+      recorder_shape->ForEachGlyph(0, RecorderReadGlyph, &recorder_reading);
+    }
+  }
+}
+
 // Reads one physical fragment of a box: its border-box size, its break
 // position, its scrollable overflow, and each child link with its offset. A
 // child with no node of its own, an anonymous box or a column or page, holds
@@ -9955,6 +10086,9 @@ void RecorderReadBoxFragment(const PhysicalBoxFragment& recorder_fragment,
     }
     recorder_out.children.push_back(std::move(recorder_child_out));
   }
+  if (const FragmentItems* recorder_items = recorder_fragment.Items()) {
+    RecorderReadFragmentItems(*recorder_items, recorder_out);
+  }
 }
 
 // Reads every physical fragment of a node's layout box, its effective zoom,
@@ -9976,6 +10110,23 @@ void RecorderReadBoxFragments(
     recorder_fragments.fragments.emplace_back();
     RecorderReadBoxFragment(recorder_fragment,
                             recorder_fragments.fragments.back());
+    // The block's text content, which every fragment's items share, is
+    // recorded once for the node, from its first fragment that holds lines
+    // (protocol 0.39); fragments held by child links keep their own.
+    a11y_recorder::LayoutBoxFragment& recorder_read =
+        recorder_fragments.fragments.back();
+    if (recorder_read.text_present && !recorder_fragments.text_present) {
+      recorder_fragments.text_present = true;
+      recorder_fragments.text_content = std::move(recorder_read.text_content);
+      recorder_fragments.first_line_text_present =
+          recorder_read.first_line_text_present;
+      recorder_fragments.first_line_text =
+          std::move(recorder_read.first_line_text);
+    }
+    recorder_read.text_present = false;
+    recorder_read.text_content.clear();
+    recorder_read.first_line_text_present = false;
+    recorder_read.first_line_text.clear();
   }
   if (const auto* recorder_replaced =
           DynamicTo<LayoutReplaced>(recorder_layout_object)) {
@@ -10058,6 +10209,15 @@ BLINK_LAYOUT_CHANGES_INCLUDES = (
     '#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"',
     '#include "third_party/blink/renderer/core/layout/'
     'physical_fragment_link.h"',
+    '#include "third_party/blink/renderer/platform/fonts/'
+    'canvas_rotation_in_vertical.h"',
+    '#include "third_party/blink/renderer/platform/fonts/font_platform_data.h"',
+    '#include "third_party/blink/renderer/platform/fonts/glyph.h"',
+    '#include "third_party/blink/renderer/platform/fonts/shaping/'
+    'shape_result_view.h"',
+    '#include "third_party/blink/renderer/platform/fonts/simple_font_data.h"',
+    '#include "third_party/skia/include/core/SkString.h"',
+    '#include "third_party/skia/include/core/SkTypeface.h"',
     '#include "third_party/blink/renderer/core/paint/fragment_data.h"',
     '#include "third_party/blink/renderer/core/paint/object_paint_properties.h"',
     '#include "third_party/blink/renderer/core/paint/'

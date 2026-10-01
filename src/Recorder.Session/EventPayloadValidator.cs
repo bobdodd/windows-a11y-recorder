@@ -2895,10 +2895,26 @@ internal static class EventPayloadValidator
             [
                 RequiredNumber("effectiveZoom", positive: true),
                 RequiredObjectArray("fragments"),
-                NullableObject("naturalSize")
+                NullableObject("naturalSize"),
+                OptionalNullableText("textContent"),
+                OptionalNullableText("firstLineText"),
+                OptionalBoolean("textContentUnchanged")
             ],
             issues,
             pointer);
+        var unchanged = fragments.TryGetProperty("textContentUnchanged", out var unchangedValue) &&
+            unchangedValue.ValueKind == JsonValueKind.True;
+        var text = ReadString(fragments, "textContent");
+        if ((unchanged && (text is not null || HasNonnullProperty(fragments, "firstLineText"))) ||
+            (text is null && HasNonnullProperty(fragments, "firstLineText")))
+        {
+            AddError(
+                issues,
+                "browser-layout-text-content-inconsistent",
+                pointer,
+                "Text left out as unchanged is null, and a first-line text comes only with a text content.");
+        }
+        var ownItems = false;
         if (fragments.TryGetProperty("fragments", out var list) &&
             list.ValueKind == JsonValueKind.Array)
         {
@@ -2907,11 +2923,24 @@ internal static class EventPayloadValidator
             {
                 if (fragment.ValueKind == JsonValueKind.Object)
                 {
+                    ownItems |= HasNonnullProperty(fragment, "items");
                     ValidateBrowserLayoutBoxFragment(
-                        fragment, $"{pointer}/fragments/{index}", issues);
+                        fragment,
+                        $"{pointer}/fragments/{index}",
+                        issues,
+                        heldByLink: false,
+                        nodeTextLength: text?.Length);
                 }
                 index++;
             }
+        }
+        if (ownItems != (text is not null || unchanged))
+        {
+            AddError(
+                issues,
+                "browser-layout-text-content-inconsistent",
+                pointer,
+                "A node states its text content, or that it is unchanged, exactly when one of its fragments holds items.");
         }
         if (fragments.TryGetProperty("naturalSize", out var natural) &&
             natural.ValueKind == JsonValueKind.Object)
@@ -2934,7 +2963,9 @@ internal static class EventPayloadValidator
     private static void ValidateBrowserLayoutBoxFragment(
         JsonElement fragment,
         string pointer,
-        ICollection<EventValidationIssue> issues)
+        ICollection<EventValidationIssue> issues,
+        bool heldByLink,
+        int? nodeTextLength)
     {
         ValidateShape(
             fragment,
@@ -2943,10 +2974,32 @@ internal static class EventPayloadValidator
                 RequiredNumber("height", nonnegative: true),
                 NullableObject("breakToken"),
                 NullableObject("scrollableOverflow"),
-                RequiredObjectArray("children")
+                RequiredObjectArray("children"),
+                OptionalNullableObjectArray("items"),
+                OptionalNullableText("textContent"),
+                OptionalNullableText("firstLineText")
             ],
             issues,
             pointer);
+        var ownText = ReadString(fragment, "textContent");
+        var hasItems = HasNonnullProperty(fragment, "items");
+        if ((heldByLink ? hasItems != (ownText is not null) : ownText is not null) ||
+            (ownText is null && HasNonnullProperty(fragment, "firstLineText")))
+        {
+            AddError(
+                issues,
+                "browser-layout-text-content-inconsistent",
+                pointer,
+                "A fragment held by a child link states its text exactly when it holds items; a node's own fragments leave their text to the node.");
+        }
+        if (hasItems && fragment.TryGetProperty("items", out var items))
+        {
+            ValidateBrowserLayoutFragmentItems(
+                items,
+                $"{pointer}/items",
+                issues,
+                heldByLink ? ownText?.Length : nodeTextLength);
+        }
         if (fragment.TryGetProperty("breakToken", out var token) &&
             token.ValueKind == JsonValueKind.Object)
         {
@@ -3035,9 +3088,159 @@ internal static class EventPayloadValidator
             }
             if (hasFragment)
             {
-                ValidateBrowserLayoutBoxFragment(nested, $"{childPointer}/fragment", issues);
+                ValidateBrowserLayoutBoxFragment(
+                    nested,
+                    $"{childPointer}/fragment",
+                    issues,
+                    heldByLink: true,
+                    nodeTextLength: null);
             }
             index++;
+        }
+    }
+
+    private static readonly string[] FragmentItemTypes =
+        ["line", "text", "generated-text", "box"];
+
+    // The items of a fragment that holds lines (protocol 0.39), in pre-order.
+    // textLength is the length of the text their ranges index, in UTF-16 code
+    // units, or null when it is not in the record, being unchanged.
+    private static void ValidateBrowserLayoutFragmentItems(
+        JsonElement items,
+        string pointer,
+        ICollection<EventValidationIssue> issues,
+        int? textLength)
+    {
+        var count = items.GetArrayLength();
+        var index = 0;
+        foreach (var item in items.EnumerateArray())
+        {
+            var itemPointer = $"{pointer}/{index}";
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                index++;
+                continue;
+            }
+            ValidateShape(
+                item,
+                [
+                    RequiredEnum("type", FragmentItemTypes),
+                    RequiredNumber("x"),
+                    RequiredNumber("y"),
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true),
+                    NullableInteger("descendantsCount", positive: true),
+                    NullableInteger("nodeId", positive: true),
+                    NullableInteger("start", nonnegative: true),
+                    NullableInteger("end", nonnegative: true),
+                    NullableBoolean("firstLineStyle"),
+                    NullableEnum("direction", "ltr", "rtl"),
+                    NullableBoolean("hiddenForPaint"),
+                    NullableObjectArray("glyphRuns"),
+                    NullableText("generatedText")
+                ],
+                issues,
+                itemPointer);
+            var type = ReadString(item, "type");
+            var container = type is "line" or "box";
+            var textLike = type is "text" or "generated-text";
+            var spans = item.TryGetProperty("descendantsCount", out var descendants) &&
+                descendants.ValueKind == JsonValueKind.Number &&
+                descendants.TryGetInt32(out var spanned)
+                    ? spanned
+                    : (int?)null;
+            var hasStart = item.TryGetProperty("start", out var startValue) &&
+                startValue.ValueKind == JsonValueKind.Number;
+            var hasEnd = item.TryGetProperty("end", out var endValue) &&
+                endValue.ValueKind == JsonValueKind.Number;
+            if (type is not null &&
+                (container != HasNonnullProperty(item, "descendantsCount") ||
+                 (spans is { } span && index + span > count) ||
+                 (type == "text") != hasStart ||
+                 hasStart != hasEnd ||
+                 (type == "generated-text") != HasNonnullProperty(item, "generatedText") ||
+                 textLike != HasNonnullProperty(item, "firstLineStyle") ||
+                 textLike != HasNonnullProperty(item, "direction") ||
+                 textLike != HasNonnullProperty(item, "hiddenForPaint") ||
+                 textLike != HasNonnullProperty(item, "glyphRuns")))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-fragment-item-inconsistent",
+                    itemPointer,
+                    "An item states what its type has: a line or box the items it spans, within the list; a text item its range; text and generated text their glyph runs; generated text its text.");
+            }
+            if (hasStart && hasEnd &&
+                startValue.TryGetInt64(out var start) && endValue.TryGetInt64(out var end) &&
+                (start > end || (textLength is { } length && end > length)))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-fragment-item-range-outside-text",
+                    itemPointer,
+                    "A text item's range lies within the text content.");
+            }
+            if (item.TryGetProperty("glyphRuns", out var runs) &&
+                runs.ValueKind == JsonValueKind.Array)
+            {
+                var runIndex = 0;
+                foreach (var run in runs.EnumerateArray())
+                {
+                    if (run.ValueKind == JsonValueKind.Object)
+                    {
+                        ValidateBrowserLayoutGlyphRun(
+                            run, $"{itemPointer}/glyphRuns/{runIndex}", issues);
+                    }
+                    runIndex++;
+                }
+            }
+            index++;
+        }
+    }
+
+    private static void ValidateBrowserLayoutGlyphRun(
+        JsonElement run,
+        string pointer,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            run,
+            [
+                RequiredObject("font"),
+                RequiredBoolean("horizontal"),
+                RequiredInteger("rotation", nonnegative: true),
+                RequiredText("glyphs")
+            ],
+            issues,
+            pointer);
+        if (run.TryGetProperty("font", out var font) && font.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                font,
+                [
+                    RequiredText("family"),
+                    RequiredText("postScriptName"),
+                    RequiredNumber("size", nonnegative: true),
+                    RequiredBoolean("syntheticBold"),
+                    RequiredBoolean("syntheticItalic")
+                ],
+                issues,
+                $"{pointer}/font");
+        }
+        var glyphs = ReadString(run, "glyphs");
+        if (glyphs is null)
+        {
+            return;
+        }
+        var buffer = new byte[(glyphs.Length + 3) / 4 * 3];
+        if (!Convert.TryFromBase64String(glyphs, buffer, out var written) ||
+            written % Recorder.Contracts.BrowserLayoutGlyphs.PackedGlyphBytes != 0)
+        {
+            AddError(
+                issues,
+                "browser-layout-glyphs-invalid",
+                $"{pointer}/glyphs",
+                "Glyphs are base64 of whole packed glyphs, 18 bytes each.");
         }
     }
 
@@ -5535,6 +5738,12 @@ internal static class EventPayloadValidator
     private static PropertyRule NullableBoolean(string name) =>
         new(name, true, true, IsBoolean, "must be a boolean or null");
 
+    private static PropertyRule OptionalBoolean(string name) =>
+        new(name, false, false, IsBoolean, "must be a boolean");
+
+    private static PropertyRule OptionalNullableText(string name) =>
+        new(name, false, true, IsString, "must be a string or null");
+
     private static PropertyRule OptionalNullableBoolean(string name) =>
         new(name, false, true, IsBoolean, "must be a boolean or null");
 
@@ -5555,6 +5764,16 @@ internal static class EventPayloadValidator
                 value.EnumerateArray().All(
                     item => item.ValueKind == JsonValueKind.Object),
             "must be an array of objects");
+
+    private static PropertyRule OptionalNullableObjectArray(string name) =>
+        new(
+            name,
+            false,
+            true,
+            value => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(
+                    item => item.ValueKind == JsonValueKind.Object),
+            "must be an array of objects or null");
 
     private static PropertyRule NullableObjectArray(string name) =>
         new(

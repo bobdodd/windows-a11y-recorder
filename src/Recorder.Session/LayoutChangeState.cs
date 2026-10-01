@@ -210,18 +210,89 @@ public sealed class LayoutDocumentChangeState
     // record of changes is merged into the node's last record, and the
     // merged record states that it is complete only when that last record
     // was. A merged record is then what a snapshot holds.
+    //
+    // From protocol 0.39 a record whose text content equals the node's last
+    // record states it unchanged and leaves it out; the state puts the last
+    // record's text back, and the record stays marked unchanged when the last
+    // record had none to give.
     internal void ApplyNode(JsonElement payload)
     {
         var nodeId = payload.GetProperty("nodeId").GetInt64();
-        if (payload.TryGetProperty("computedStyleComplete", out var complete) &&
-            complete.ValueKind == JsonValueKind.False)
+        JsonElement? last = _nodes.TryGetValue(nodeId, out var found) ? found : null;
+        var record = payload.TryGetProperty("computedStyleComplete", out var complete) &&
+            complete.ValueKind == JsonValueKind.False
+                ? MergeStyleChanges(last, payload)
+                : payload.Clone();
+        _nodes[nodeId] = TextContentUnchanged(record)
+            ? MergeTextContent(last, record)
+            : record;
+    }
+
+    internal static bool TextContentUnchanged(JsonElement record) =>
+        record.TryGetProperty("boxFragments", out var fragments) &&
+        fragments.ValueKind == JsonValueKind.Object &&
+        fragments.TryGetProperty("textContentUnchanged", out var unchanged) &&
+        unchanged.ValueKind == JsonValueKind.True;
+
+    internal static JsonElement MergeTextContent(JsonElement? last, JsonElement record)
+    {
+        if (last is not { } previous ||
+            !previous.TryGetProperty("boxFragments", out var lastFragments) ||
+            lastFragments.ValueKind != JsonValueKind.Object ||
+            TextContentUnchanged(previous) ||
+            !lastFragments.TryGetProperty("textContent", out var text) ||
+            text.ValueKind != JsonValueKind.String)
         {
-            _nodes[nodeId] = MergeStyleChanges(
-                _nodes.TryGetValue(nodeId, out var last) ? last : null,
-                payload);
-            return;
+            return record;
         }
-        _nodes[nodeId] = payload.Clone();
+        var firstLine = lastFragments.TryGetProperty("firstLineText", out var line)
+            ? line
+            : default;
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in record.EnumerateObject())
+            {
+                if (property.Name != "boxFragments")
+                {
+                    property.WriteTo(writer);
+                    continue;
+                }
+                writer.WriteStartObject(property.Name);
+                foreach (var member in property.Value.EnumerateObject())
+                {
+                    switch (member.Name)
+                    {
+                        case "textContent":
+                            writer.WritePropertyName(member.Name);
+                            text.WriteTo(writer);
+                            break;
+                        case "firstLineText":
+                            writer.WritePropertyName(member.Name);
+                            if (firstLine.ValueKind == JsonValueKind.Undefined)
+                            {
+                                writer.WriteNullValue();
+                            }
+                            else
+                            {
+                                firstLine.WriteTo(writer);
+                            }
+                            break;
+                        case "textContentUnchanged":
+                            writer.WriteBoolean(member.Name, false);
+                            break;
+                        default:
+                            member.WriteTo(writer);
+                            break;
+                    }
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndObject();
+        }
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
     }
 
     internal static JsonElement MergeStyleChanges(JsonElement? last, JsonElement changes)

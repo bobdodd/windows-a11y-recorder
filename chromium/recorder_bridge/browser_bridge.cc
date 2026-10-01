@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/containers/span.h"
@@ -4148,6 +4149,59 @@ namespace {
 
 base::DictValue BoxFragmentValue(LayoutBoxFragment& fragment);
 
+// One fragment item (protocol 0.39). Every member is stated, null where it
+// does not apply, and a run's glyphs are base64.
+base::DictValue FragmentItemValue(LayoutFragmentItem& item) {
+  base::DictValue value;
+  value.Set("type", std::move(item.type));
+  value.Set("x", item.x);
+  value.Set("y", item.y);
+  value.Set("width", item.width);
+  value.Set("height", item.height);
+  value.Set("descendantsCount", item.descendants_count >= 0
+                                    ? base::Value(item.descendants_count)
+                                    : base::Value());
+  value.Set("nodeId",
+            item.node_id > 0 ? base::Value(item.node_id) : base::Value());
+  if (item.range_present) {
+    value.Set("start", base::saturated_cast<int>(item.start));
+    value.Set("end", base::saturated_cast<int>(item.end));
+  } else {
+    value.Set("start", base::Value());
+    value.Set("end", base::Value());
+  }
+  if (item.text) {
+    value.Set("firstLineStyle", item.first_line_style);
+    value.Set("direction", item.rtl ? "rtl" : "ltr");
+    value.Set("hiddenForPaint", item.hidden_for_paint);
+    base::ListValue runs;
+    for (LayoutGlyphRun& run : item.glyph_runs) {
+      base::DictValue run_value;
+      base::DictValue font;
+      font.Set("family", std::move(run.family));
+      font.Set("postScriptName", std::move(run.post_script_name));
+      font.Set("size", run.size);
+      font.Set("syntheticBold", run.synthetic_bold);
+      font.Set("syntheticItalic", run.synthetic_italic);
+      run_value.Set("font", std::move(font));
+      run_value.Set("horizontal", run.horizontal);
+      run_value.Set("rotation", run.rotation);
+      run_value.Set("glyphs", base::Base64Encode(PackGlyphs(run.glyphs)));
+      runs.Append(std::move(run_value));
+    }
+    value.Set("glyphRuns", std::move(runs));
+  } else {
+    value.Set("firstLineStyle", base::Value());
+    value.Set("direction", base::Value());
+    value.Set("hiddenForPaint", base::Value());
+    value.Set("glyphRuns", base::Value());
+  }
+  value.Set("generatedText", item.generated_text_present
+                                 ? base::Value(std::move(item.generated_text))
+                                 : base::Value());
+  return value;
+}
+
 // A child link of a box fragment (protocol 0.38).
 base::DictValue FragmentChildValue(LayoutFragmentChild& child) {
   base::DictValue value;
@@ -4205,6 +4259,25 @@ base::DictValue BoxFragmentValue(LayoutBoxFragment& fragment) {
     children.Append(FragmentChildValue(child));
   }
   value.Set("children", std::move(children));
+  if (fragment.text_present) {
+    value.Set("textContent", std::move(fragment.text_content));
+    value.Set("firstLineText",
+              fragment.first_line_text_present
+                  ? base::Value(std::move(fragment.first_line_text))
+                  : base::Value());
+  } else {
+    value.Set("textContent", base::Value());
+    value.Set("firstLineText", base::Value());
+  }
+  if (fragment.items_present) {
+    base::ListValue items;
+    for (LayoutFragmentItem& item : fragment.items) {
+      items.Append(FragmentItemValue(item));
+    }
+    value.Set("items", std::move(items));
+  } else {
+    value.Set("items", base::Value());
+  }
   return value;
 }
 
@@ -4233,6 +4306,17 @@ base::Value BoxFragmentsValue(LayoutBoxFragments& fragments) {
   } else {
     value.Set("naturalSize", base::Value());
   }
+  if (fragments.text_present && !fragments.text_unchanged) {
+    value.Set("textContent", std::move(fragments.text_content));
+    value.Set("firstLineText",
+              fragments.first_line_text_present
+                  ? base::Value(std::move(fragments.first_line_text))
+                  : base::Value());
+  } else {
+    value.Set("textContent", base::Value());
+    value.Set("firstLineText", base::Value());
+  }
+  value.Set("textContentUnchanged", fragments.text_unchanged);
   return base::Value(std::move(value));
 }
 
@@ -4241,7 +4325,18 @@ base::Value BoxFragmentsValue(LayoutBoxFragments& fragments) {
 size_t EstimateBoxFragmentBytes(const LayoutBoxFragment& fragment) {
   constexpr size_t kFragmentBytes = 240;
   constexpr size_t kChildBytes = 110;
-  size_t bytes = kFragmentBytes;
+  // An item's members, and a run's font and members, with their names.
+  constexpr size_t kItemBytes = 260;
+  constexpr size_t kRunBytes = 140;
+  size_t bytes = kFragmentBytes + fragment.text_content.size() +
+                 fragment.first_line_text.size();
+  for (const LayoutFragmentItem& item : fragment.items) {
+    bytes += kItemBytes + item.generated_text.size();
+    for (const LayoutGlyphRun& run : item.glyph_runs) {
+      bytes += kRunBytes + run.family.size() + run.post_script_name.size() +
+               (run.glyphs.size() * kPackedGlyphBytes + 2) / 3 * 4;
+    }
+  }
   for (const LayoutFragmentChild& child : fragment.children) {
     bytes += kChildBytes;
     for (const LayoutBoxFragment& nested : child.fragment) {
@@ -4370,7 +4465,8 @@ size_t EstimateLayoutCheckpointNodeBytes(const LayoutCheckpointNode& node,
   if (node.box_fragments.present) {
     // The zoom and the natural size, with their member names.
     constexpr size_t kBoxFragmentsBytes = 200;
-    bytes += kBoxFragmentsBytes;
+    bytes += kBoxFragmentsBytes + node.box_fragments.text_content.size() +
+             node.box_fragments.first_line_text.size();
     for (const LayoutBoxFragment& fragment : node.box_fragments.fragments) {
       bytes += EstimateBoxFragmentBytes(fragment);
     }
@@ -4811,6 +4907,7 @@ uint64_t RecordBlinkLayoutChanges(
       if (document.filter.NodeChanged(node.node.node_id,
                                       HashLayoutChangedNode(node))) {
         document.filter.ReduceToStyleChanges(nodes[index]);
+        document.filter.ReduceToTextChanges(nodes[index]);
         changed_nodes.push_back(index);
       } else {
         ++unchanged_node_count;

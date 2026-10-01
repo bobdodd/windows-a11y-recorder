@@ -31,6 +31,78 @@ struct LayoutLocalRect {
 
 struct LayoutBoxFragment;
 
+// One glyph as ShapeResultView::ForEachGlyph reports it: its identifier, the
+// character index, an index into the block's text content, the total advance
+// before it, and its offset.
+struct LayoutGlyph {
+  uint16_t glyph = 0;
+  uint32_t character_index = 0;
+  float total_advance = 0;
+  float offset_x = 0;
+  float offset_y = 0;
+};
+
+// One run of glyphs of a text item with the same font, orientation, and
+// rotation (protocol 0.39). The bridge records the glyphs packed
+// little-endian, 18 bytes each, by PackGlyphs.
+struct LayoutGlyphRun {
+  LayoutGlyphRun();
+  LayoutGlyphRun(const LayoutGlyphRun&);
+  LayoutGlyphRun(LayoutGlyphRun&&);
+  LayoutGlyphRun& operator=(const LayoutGlyphRun&);
+  LayoutGlyphRun& operator=(LayoutGlyphRun&&);
+  ~LayoutGlyphRun();
+
+  std::string family;
+  std::string post_script_name;
+  double size = 0;
+  bool synthetic_bold = false;
+  bool synthetic_italic = false;
+  bool horizontal = true;
+  int rotation = 0;
+  std::vector<LayoutGlyph> glyphs;
+};
+
+// A run's glyphs packed little-endian, 18 bytes each: the identifier (2
+// bytes), the character index (4 bytes), the total advance before the glyph,
+// and the offset, x and y (4-byte floats each).
+std::string PackGlyphs(const std::vector<LayoutGlyph>& glyphs);
+inline constexpr size_t kPackedGlyphBytes = 18;
+
+// One fragment item of a block fragment (protocol 0.39): its type, "line",
+// "text", "generated-text", or "box"; its rectangle in the fragment, in
+// layout units; for a line or box item, the number of items it spans, itself
+// included, or -1 otherwise; and the node of its layout object, or 0. A text
+// or generated-text item has its direction, style variant, paint flag, and
+// glyph runs; a text item its range of the block's text content; and a
+// generated-text item its own text.
+struct LayoutFragmentItem {
+  LayoutFragmentItem();
+  LayoutFragmentItem(const LayoutFragmentItem&);
+  LayoutFragmentItem(LayoutFragmentItem&&);
+  LayoutFragmentItem& operator=(const LayoutFragmentItem&);
+  LayoutFragmentItem& operator=(LayoutFragmentItem&&);
+  ~LayoutFragmentItem();
+
+  std::string type;
+  double x = 0;
+  double y = 0;
+  double width = 0;
+  double height = 0;
+  int descendants_count = -1;
+  int node_id = 0;
+  bool text = false;
+  bool range_present = false;
+  uint32_t start = 0;
+  uint32_t end = 0;
+  bool first_line_style = false;
+  bool rtl = false;
+  bool hidden_for_paint = false;
+  bool generated_text_present = false;
+  std::string generated_text;
+  std::vector<LayoutGlyphRun> glyph_runs;
+};
+
 // One child link of a box fragment (protocol 0.38): its kind, "box" for a box
 // with a DOM node, "anonymous" for a box with none, "column" or "page" for a
 // fragmentainer, or "line" for a line box; its offset in the parent fragment;
@@ -76,6 +148,16 @@ struct LayoutBoxFragment {
   bool scrollable_overflow_present = false;
   LayoutLocalRect scrollable_overflow;
   std::vector<LayoutFragmentChild> children;
+  // The fragment's items, when it holds lines (protocol 0.39).
+  bool items_present = false;
+  std::vector<LayoutFragmentItem> items;
+  // The text content of a fragment that holds lines and is held by a child
+  // link, such as an anonymous block, whose items index it, in UTF-8. A
+  // node's own fragments leave it to LayoutBoxFragments.
+  bool text_present = false;
+  std::string text_content;
+  bool first_line_text_present = false;
+  std::string first_line_text;
 };
 
 // The fragments of a node whose layout object is a layout box (protocol
@@ -99,6 +181,15 @@ struct LayoutBoxFragments {
   bool natural_has_height = false;
   double natural_aspect_ratio_width = 0;
   double natural_aspect_ratio_height = 0;
+  // The block's text content as laid out, and its ::first-line text when
+  // Blink holds one (protocol 0.39), in UTF-8. Set by
+  // LayoutChangeFilter::ReduceToTextChanges, text_unchanged means the text
+  // equals the node's last record and is left out.
+  bool text_present = false;
+  std::string text_content;
+  bool first_line_text_present = false;
+  std::string first_line_text;
+  bool text_unchanged = false;
 };
 
 // One element or text node at a layout checkpoint. The rectangle is the value
@@ -250,8 +341,14 @@ class LayoutChangeFilter {
   // are then forgotten, and when the number of properties differs.
   void ReduceToStyleChanges(LayoutChangedNode& changed);
 
-  // Forgets every kept style value, so the next record of each node holds
-  // its whole computed style. Used after a record may have been lost.
+  // Leaves out a changed node's text content when it equals the text of the
+  // node's last record, setting text_unchanged, and keeps a hash of the text
+  // otherwise (protocol 0.39). A node with no text has its hash forgotten.
+  void ReduceToTextChanges(LayoutChangedNode& changed);
+
+  // Forgets every kept style value and text hash, so the next record of each
+  // node holds its whole computed style and text. Used after a record may
+  // have been lost.
   void ForgetStyles();
 
   // The number of nodes whose style values are kept.
@@ -265,6 +362,7 @@ class LayoutChangeFilter {
 
   std::unordered_map<int, uint64_t> nodes_;
   std::unordered_map<int, StyleHashes> styles_;
+  std::unordered_map<int, uint64_t> texts_;
   std::unordered_map<uint64_t, uint64_t> transform_nodes_;
 };
 

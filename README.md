@@ -359,8 +359,16 @@ Windows machine is in "2a results" in
 Protocol 0.38 records each layout box's physical fragments in its node
 records: the border-box size of each fragment, its break position, its
 scrollable overflow, its child links with their offsets, and a replaced
-element's natural size, in Blink's layout units. It is not yet tested on the
-target Windows machine. See "2b as built" in
+element's natural size, in Blink's layout units. Its cost and check on the
+target Windows machine are in "2b results". See "2b as built" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.39 adds, for each fragment that holds lines, its fragment items
+in Blink's order, the block's text as laid out, and each text item's glyph
+runs: the font by name, and each glyph's identifier, character index,
+position, and offset, packed in base64. A block's text after its first
+record is left out when it is unchanged. It is not yet tested on the target
+Windows machine. See "2c as built" in
 [page recreation](docs/architecture/page-recreation.md).
 
 Each captured monitor image is the newest frame that reached the Windows

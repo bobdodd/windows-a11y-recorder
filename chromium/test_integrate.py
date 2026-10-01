@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.38"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.38"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.39"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.39"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -5764,6 +5764,68 @@ class LayoutIntegrationTests(unittest.TestCase):
             "layout/layout_replaced.h",
             "layout/natural_sizing_info.h",
             "physical_fragment_link.h",
+        ):
+            with self.subTest(include=include):
+                self.assertTrue(
+                    any(include in line
+                        for line in INTEGRATE.BLINK_LAYOUT_CHANGES_INCLUDES)
+                )
+
+    def test_box_fragments_hold_their_items_text_and_glyphs(self):
+        # Protocol 0.39: a fragment that holds lines records its items, each
+        # text item its glyph runs, and the block its text content, read from
+        # the first such fragment.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        for definition in (
+            "void RecorderReadGlyph(",
+            "void RecorderReadFragmentItems(",
+        ):
+            with self.subTest(definition=definition):
+                self.assertEqual(1, helper.count(definition))
+                self.assertLess(
+                    helper.index(definition),
+                    helper.index("void RecorderReadBoxFragment("),
+                )
+        for reading in (
+            "recorder_fragment.Items()",
+            "recorder_items.Items()",
+            "recorder_item.RectInContainerFragment()",
+            "recorder_item.DescendantsCount()",
+            "recorder_item.StartOffset()",
+            "recorder_item.GeneratedText()",
+            "recorder_item.ResolvedDirection()",
+            "recorder_item.IsHiddenForPaint()",
+            "recorder_item.UsesFirstLineStyle()",
+            "recorder_shape->ForEachGlyph(0, RecorderReadGlyph, "
+            "&recorder_reading)",
+            "recorder_platform.FontFamilyName()",
+            "recorder_typeface->getPostScriptName(&recorder_name)",
+            "recorder_items.NormalText()",
+            "recorder_items.FirstLineText()",
+        ):
+            with self.subTest(reading=reading):
+                self.assertIn(reading, helper)
+        # Only a text item, not generated text, has a range of the text.
+        self.assertIn(
+            "    if (recorder_item.Type() == FragmentItem::kText) {\n"
+            "      recorder_record.range_present = true;",
+            helper,
+        )
+        # The node's text is taken once, from its first fragment with items,
+        # and its own fragments keep none.
+        self.assertIn(
+            "if (recorder_read.text_present && !recorder_fragments.text_present) {",
+            helper,
+        )
+        self.assertIn("    recorder_read.text_present = false;\n", helper)
+        for include in (
+            "shaping/shape_result_view.h",
+            "fonts/simple_font_data.h",
+            "fonts/font_platform_data.h",
+            "fonts/canvas_rotation_in_vertical.h",
+            "fonts/glyph.h",
+            "core/SkTypeface.h",
+            "core/SkString.h",
         ):
             with self.subTest(include=include):
                 self.assertTrue(

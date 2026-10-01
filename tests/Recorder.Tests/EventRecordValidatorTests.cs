@@ -3167,6 +3167,66 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void AcceptsItemsTextAndGlyphRuns()
+    {
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-checkpoint-node",
+            JsonNode.Parse(BrowserLayoutPayloads.TextBlockNode)!));
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-node-changed",
+            JsonNode.Parse(BrowserLayoutPayloads.ChangedTextBlockNode)!));
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-node-changed",
+            JsonNode.Parse(BrowserLayoutPayloads.ChangedTextBlockNodeTextUnchanged())!));
+    }
+
+    [Theory]
+    [InlineData("fragments/0/items/0/descendantsCount", "null", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/0/descendantsCount", "6", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/1/descendantsCount", "1", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/1/start", "null", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/4/start", "0", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/4/generatedText", "null", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/1/glyphRuns", "null", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/2/direction", "\"ltr\"", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/3/end", "6", "browser-layout-fragment-item-range-outside-text")]
+    [InlineData("fragments/0/items/3/start", "6", "browser-layout-fragment-item-range-outside-text")]
+    [InlineData("fragments/0/children/0/fragment/items/1/end", "2", "browser-layout-fragment-item-range-outside-text")]
+    [InlineData("fragments/0/items/1/glyphRuns/0/glyphs", "\"KwAAAAAAAAAAAAAA\"", "browser-layout-glyphs-invalid")]
+    [InlineData("fragments/0/items/1/glyphRuns/0/glyphs", "\"not base64\"", "browser-layout-glyphs-invalid")]
+    [InlineData("fragments/0/items/1/glyphRuns/0/font/size", "-1", "payload-property-invalid")]
+    [InlineData("fragments/0/items/1/type", "\"atomic\"", "payload-property-invalid")]
+    [InlineData("fragments/0/textContent", "\"Hi\"", "browser-layout-text-content-inconsistent")]
+    [InlineData("fragments/0/children/0/fragment/textContent", "null", "browser-layout-text-content-inconsistent")]
+    [InlineData("textContent", "null", "browser-layout-text-content-inconsistent")]
+    [InlineData("textContentUnchanged", "true", "browser-layout-text-content-inconsistent")]
+    public void RejectsInconsistentItemsAndText(string path, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedTextBlockNode)!;
+        var parts = path.Split('/');
+        var target = payload["boxFragments"]!;
+        for (var index = 0; index < parts.Length - 1; index++)
+        {
+            target = int.TryParse(parts[index], out var item) ? target[item]! : target[parts[index]]!;
+        }
+        target[parts[^1]] = JsonNode.Parse(value);
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void ABoxWithoutItemsStatesNoText()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        payload["boxFragments"]!["textContent"] = "stray";
+        Assert.Contains(
+            ValidateLayoutRecord("layout-node-changed", payload),
+            issue => issue.Code == "browser-layout-text-content-inconsistent");
+    }
+
+    [Fact]
     public void RejectsBoxFragmentsWithoutABox()
     {
         var text = JsonNode.Parse(BrowserLayoutPayloads.TextNode)!;
