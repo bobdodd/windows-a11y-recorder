@@ -1640,6 +1640,120 @@ With 1c, the feasibility step is complete: recorded styles, box fragments,
 lines, text items, and glyphs can each be imposed in Blink under the
 switch, and DevTools shows the recorded styles as their source.
 
+### Stage 2: recording for the recreation (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built. This is slice 2
+of "Slices" above: the recorded additions, in a new protocol version, with
+their cost measured on the target machine.
+
+#### What is recorded, and when
+
+The additions are recorded in the layout change sets of
+`change-driven-recording.md`, for the nodes those change sets already note,
+and in the full walks of slice 5 there, for every node walked. Nothing is
+noted that is not noted now: a box that receives a new layout result is
+noted with the objects its fragment items name and the objects of its child
+fragments, which covers each record below. As now, a record equal to the
+node's last record is not sent again.
+
+1. Computed style. Every property `getComputedStyle()` lists
+   (`CSSComputedStyleDeclaration::ComputableProperties`,
+   `core/css/css_computed_style_declaration.cc`, line 103), read at run time
+   rather than from the fixed list of 283, and every custom property with
+   its value. The list read is recorded in each change set's start record,
+   so a value is a name and a value, as now. After a node's first record, a
+   record holds only the properties whose values differ from the node's last
+   record, and the custom properties added, changed, or removed; the bridge
+   keeps a hash of each value for this. A node whose document the bridge has
+   stopped tracking, as it does beyond 64 documents, is recorded in full
+   again, so a dropped hash costs a repeated record and never a lost one.
+
+2. Box fragments, in a new record, `layout-box-fragments`, for each noted
+   node with a layout box: each of its physical fragments
+   (`LayoutBox::PhysicalFragments()`, `core/layout/layout_box.h`, line 583),
+   in order, with:
+   - its border-box size;
+   - its child links (`PhysicalBoxFragment::Children()`): for each child,
+     its node, or, for an anonymous box or a column, its kind and its index
+     among the links, the child's fragment index, and its offset;
+   - its scrollable overflow rectangle, when it has one
+     (`PhysicalBoxFragment::ScrollableOverflow()`);
+   - for a replaced element, such as an image, its natural size.
+   Offsets are recorded at the parent, as the recreation imposes them in
+   1b. A box broken across columns has one entry for each fragment, with its
+   break position.
+
+3. Fragment items, in the same record, for each fragment that holds lines
+   (`PhysicalBoxFragment::Items()`): the block's text content as laid out,
+   recorded when it changes, and each item in order, with its type (line,
+   text, generated text, or box), its rectangle in the fragment, and, for a
+   text item, its range of the text content, and for a box item, its node.
+
+4. Glyph runs, for each text item, from its shaping result
+   (`ShapeResultView::ForEachGlyph`, `platform/fonts/shaping/
+   shape_result_view.h`, line 137), which reports each glyph with its font,
+   so text drawn with fallback fonts is recorded as several runs: for each
+   run, its font (family, typeface name, size, and synthetic bold or
+   italic), and for each glyph its identifier, the character it belongs to,
+   its advance, and its offset. Glyphs are written as packed little-endian
+   arrays encoded in base64 (2 bytes for an identifier and for a character
+   index, 4 for an advance and for each offset), not as lists of numbers, so
+   a glyph costs 14 bytes before encoding.
+
+The protocol version becomes 0.37. A recording made before keeps its
+records and has none of these.
+
+#### What the app does with them
+
+The recorder's validator accepts the new records and fields; the browser
+state of slice 2 of the plan keeps, for each node, its latest computed
+style, applying the changed properties of each record to the last, its box
+fragments, and, for a block, its fragment items and glyph runs; and the
+state snapshots, at a new snapshot format version, hold them. The player
+shows nothing new yet; the recreation reads them from stage 3.
+
+#### Sub-steps
+
+Each is built, checked on the target machine, and measured before the next:
+
+- 2a, computed style: every computable property and the custom properties,
+  with changed properties only after a node's first record.
+- 2b, box fragments: sizes, child offsets, scrollable overflow, and natural
+  sizes.
+- 2c, fragment items and glyph runs.
+
+#### Checks and measurement
+
+- At each layout checkpoint the change check of `change-driven-recording.md`
+  already compares the state rebuilt from change records with the
+  checkpoint. It is extended to the additions: the rebuilt computed style,
+  fragments, items, and glyphs of each node equal those of the full walk.
+- For each sub-step, a recording on the target machine of the same pages,
+  made with the earlier package and with the new one, compares the bytes
+  written per channel and per minute, the bytes per change set, and the
+  rendering update time the bridge already reports. What it costs is
+  recorded in this document before the next sub-step.
+
+#### Limits
+
+- Values Blink holds outside fragments and items, such as a table's column
+  positions and a grid's tracks, are not recorded; 1b found that the
+  recreation does not need them for the cases tested.
+- Fonts are recorded by name; font files come with slice 4 of the plan.
+- A transform or opacity animation running on the compositor is not
+  recorded, as now.
+
+#### Required tests
+
+- Unit tests of the bridge's new records against the record contract, and
+  of the encoding of glyph arrays.
+- Unit tests of the validator and of the browser state for the new records,
+  including a computed style rebuilt from changed properties and a
+  snapshot holding fragments and glyphs.
+- Integration tests of the integration script's new hooks.
+- The extended change check on recordings from the target machine, as the
+  system test.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
