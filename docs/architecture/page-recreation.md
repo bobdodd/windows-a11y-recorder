@@ -1628,6 +1628,18 @@ braced initializer list to WTF's `Vector::push_back`, which cannot deduce
 its argument type from one. The hook now names the type, and a checkout
 holding the earlier hook is upgraded to it.
 
+On the target machine, with revision acc629a, as reported on 2026-09-30,
+the build succeeded and the checks passed: with the switch, the comparison
+snippet reported every recorded text item and the inline block as equal to
+its recorded rectangle; the lines, the recorded glyphs, and the inline block
+were painted as recorded, and the paragraph without recorded values was
+unchanged; and selecting the recorded second line highlighted its recorded
+glyph positions.
+
+With 1c, the feasibility step is complete: recorded styles, box fragments,
+lines, text items, and glyphs can each be imposed in Blink under the
+switch, and DevTools shows the recorded styles as their source.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
