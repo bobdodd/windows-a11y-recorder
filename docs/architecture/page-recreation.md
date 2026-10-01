@@ -1801,6 +1801,59 @@ and the bytes of each layout record type and of an average change set. The
 rendering update time is read from the bridge's "Recorder evidence cost"
 lines in the recording's Chromium log.
 
+#### 2a results
+
+Two recordings on the target machine on 2026-10-01, with the check setting
+off, of the same pages (the same twelve navigation addresses, on
+`www.cnib.ca` and the pages it embeds): one at revision acc629a (protocol
+0.36), 1.53 minutes, and one at revision d3e1598 (protocol 0.37), 0.86
+minutes. A third recording at d3e1598 held no browser evidence and no
+Chromium log, and is not used. Neither recording dropped an event. The
+bytes are those of the records before chunk compression, from
+`RecordingCostReport`; the times are the sums of the bridge's "Recorder
+evidence cost" lines.
+
+| | acc629a (0.36) | d3e1598 (0.37) |
+| --- | --- | --- |
+| Properties listed per element | 283 | 480 |
+| `browser.layout` bytes | 110,175,252 | 93,899,552 |
+| `layout-node-changed` records, bytes | 14,402, 103,675,974 | 15,591, 80,865,359 |
+| `layout-checkpoint-node` records, bytes per record | 1,114, 4,163 | 1,255, 9,422 |
+| Change sets, bytes per change set | 342, 308,120 | 202, 405,249 |
+| `recorder.state` (snapshots) bytes | 82,519,732 | 99,578,451 |
+| Bridge time in change sets: calls, total, mean, largest | 1,360, 0.307 s, 226 us, 31.1 ms | 530, 1.080 s, 2,038 us, 157.6 ms |
+| Layout checkpoint walks: count, total, largest | 21, 0.076 s, 25.7 ms | 18, 0.290 s, 98.9 ms |
+
+The 0.37 change records split as follows: 3,439 whole records (a node's
+first, 17,424 bytes each, with 480 values and 59.4 custom properties on
+average); 8,963 records of changes only (1,733 bytes each, with 0.7 style
+values and 0.4 custom properties on average); and 3,189 records with no
+style (1,697 bytes each). The checkpoint nodes held 138.8 custom properties
+on average.
+
+The layout change check compared 18 checkpoints and 1,255 nodes of the
+0.37 recording, and every node matched in every field, custom properties
+included; the 0.36 recording's 21 checkpoints and 1,114 nodes also all
+matched. With the check setting off, a checkpoint is a document's first
+walk, so these comparisons do not yet exercise the merging of records of
+changes into later states; a recording with the check setting on does.
+
+What this shows, within these two recordings:
+
+- For the same pages, `browser.layout` held 15 percent fewer bytes,
+  although each element lists 480 properties instead of 283 and its custom
+  properties: a later record of a node holds only what changed.
+- The snapshots grew by 21 percent, since they hold each node's whole
+  style.
+- The bridge's time in change sets rose from a mean of 226 us to 2,038 us
+  per call, and its largest single call from 31.1 ms to 157.6 ms; these
+  calls run on the renderer's main thread at the end of a rendering
+  update. The bridge's lines do not time Blink's reading of the values
+  before the call, so the whole cost to a rendering update is larger than
+  this and is not measured.
+- The recordings differ in length, so per-minute rates are not compared.
+
+
 #### Required tests
 
 - Unit tests of the bridge's new records against the record contract, and
