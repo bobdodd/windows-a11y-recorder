@@ -1610,6 +1610,19 @@ without it:
 Tests: unit tests of the integration script's new patches; the check above
 as the system test.
 
+Built on the `recreation` branch: in `chromium/integrate.py`,
+`patch_blink_fragment_item_header` adds the setters,
+`patch_blink_shape_result_header` and `patch_blink_shape_result` add
+`ShapeResult::CreateFromRecordedGlyphs`, and
+`patch_blink_fragment_items_builder` writes the attribute readers and the
+hook at the end of `ConvertToPhysical`; `chromium/recreation_spike/lines.html`
+is the test page. Each patch was applied to its file copied from the
+checkout on the target machine, and applied again without change. As with
+1a and 1b, the unit tests check the text of the patches, not their
+compilation. In an unmodified Chromium in the development sandbox, the
+comparison snippet reported Blink's own layout for every compared item, as
+expected without the switch.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the

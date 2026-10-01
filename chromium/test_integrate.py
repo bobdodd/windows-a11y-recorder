@@ -6439,3 +6439,111 @@ class RecreationIntegrationTests(unittest.TestCase):
             [],
             INTEGRATE.describe_signature_mismatches("patched", first, signatures),
         )
+
+    def patch_source_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def test_imposes_recorded_items_after_conversion_once(self):
+        source = (
+            '#include "third_party/blink/renderer/core/layout/inline/'
+            'fragment_items_builder.h"\n'
+            "\n"
+            "namespace blink {\n"
+            "\n"
+            "void FragmentItemsBuilder::ConvertToPhysical("
+            "const PhysicalSize& outer_size) {\n"
+            "  if (is_converted_to_physical_)\n"
+            "    return;\n"
+            "\n"
+            "  is_converted_to_physical_ = true;\n"
+            "}\n"
+            "\n"
+            "void FragmentItemsBuilder::MoveChildrenInDirection("
+            "LayoutUnit offset,\n"
+            "                                                   bool b) {}\n"
+            "\n"
+            "}  // namespace blink\n"
+        )
+        patched = self.patch_source_twice(
+            "fragment_items_builder.cc",
+            source,
+            INTEGRATE.patch_blink_fragment_items_builder,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_RECREATION_ITEMS_HELPER))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK))
+        for include in INTEGRATE.BLINK_RECREATION_ITEMS_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        # The helper precedes the function; the recorded items are set after
+        # every item is converted, before the builder is marked converted.
+        self.assertLess(
+            patched.index(INTEGRATE.BLINK_RECREATION_ITEMS_HELPER),
+            patched.index("void FragmentItemsBuilder::ConvertToPhysical("),
+        )
+        hook = patched.index(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK)
+        self.assertLess(patched.index("    return;\n"), hook)
+        self.assertLess(hook, patched.index("  is_converted_to_physical_ = true;"))
+        hook_text = INTEGRATE.BLINK_RECREATION_ITEMS_HOOK
+        for expected in (
+            "a11y_recorder::IsRecreationMode()",
+            "GetWritingDirection().IsHorizontalLtr()",
+            '"data-a11y-recorded-lines"',
+            '"data-a11y-recorded-text"',
+            '"data-a11y-recorded-glyphs"',
+            '"data-a11y-recorded-fragment"',
+            "ShapeResult::CreateFromRecordedGlyphs(",
+            "recorder_item.RecorderSetTextShapeResult(",
+        ):
+            self.assertIn(expected, hook_text)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", patched, signatures),
+        )
+
+    def test_adds_the_item_setters_and_the_recorded_shaping_result_once(self):
+        header = self.patch_source_twice(
+            "fragment_item.h",
+            "class FragmentItem {\n public:\n"
+            + INTEGRATE.BLINK_RECREATION_ITEM_SETTERS_ANCHOR
+            + "};\n",
+            INTEGRATE.patch_blink_fragment_item_header,
+        )
+        self.assertEqual(1, header.count(INTEGRATE.BLINK_RECREATION_ITEM_SETTERS))
+        self.assertLess(
+            header.index(INTEGRATE.BLINK_RECREATION_ITEM_SETTERS_ANCHOR),
+            header.index(INTEGRATE.BLINK_RECREATION_ITEM_SETTERS),
+        )
+        declaration = self.patch_source_twice(
+            "shape_result.h",
+            "class ShapeResult {\n public:\n"
+            + INTEGRATE.BLINK_RECREATION_SHAPE_DECLARATION_ANCHOR
+            + "};\n",
+            INTEGRATE.patch_blink_shape_result_header,
+        )
+        self.assertEqual(
+            1, declaration.count(INTEGRATE.BLINK_RECREATION_SHAPE_DECLARATION)
+        )
+        definition = self.patch_source_twice(
+            "shape_result.cc",
+            "namespace blink {\n"
+            + INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION_ANCHOR
+            + "}\n",
+            INTEGRATE.patch_blink_shape_result,
+        )
+        self.assertEqual(
+            1, definition.count(INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION)
+        )
+        self.assertIn(
+            "font_data->GlyphForCharacter(glyphs[i].code_point)",
+            INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION,
+        )

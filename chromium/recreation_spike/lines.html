@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<!--
+  Recreation mode, feasibility step 1c: recorded lines and glyph runs. See
+  docs/architecture/page-recreation.md, "1c, recorded lines and glyph runs".
+
+  On a block's element:
+  - data-a11y-recorded-lines: "x y width height" for each line;
+  - data-a11y-recorded-text: "start end x y width height" for each text
+    item, the range being offsets in the block's text;
+  - data-a11y-recorded-glyphs: "start end", then a code point and an
+    advance for each character of the range.
+  Rectangles are in CSS pixels, relative to the block's border box. An
+  inline block's data-a11y-recorded-fragment is relative to the block too.
+
+  The block's text here is "First line", a line break, and "Second line":
+  the first text runs from 0 to 10, the line break is 10, and the second
+  text runs from 11 to 22.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Recreation mode step 1c: recorded lines and glyph runs</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; }
+  h2 { font-size: 16px; margin: 24px 0 4px; }
+  p.note { margin: 0 0 8px; }
+  .case { width: 400px; border: 1px solid rgb(0, 0, 0); margin: 0; font: 16px/20px Arial, sans-serif; }
+  #lines { height: 60px; }
+  #inline { height: 70px; }
+  #ib { display: inline-block; width: 40px; height: 20px; background-color: rgb(200, 200, 255); }
+</style>
+</head>
+<body>
+<h1>Recreation mode step 1c: recorded lines and glyph runs</h1>
+
+<h2>Lines and glyphs</h2>
+<p class="note">Recorded: the second line above the first; the first line's text moved 40 pixels right; the second line drawn as "SECOND LINE" with every glyph 14 pixels apart. Style sheet: "First line" above "Second line", at the left.</p>
+<p class="case" id="lines"
+   data-a11y-recorded-lines="1 31 398 20; 1 1 398 20"
+   data-a11y-recorded-text="0 10 41 31 70 20; 11 22 1 1 154 20"
+   data-a11y-recorded-glyphs="11 22 U+0053 14 U+0045 14 U+0043 14 U+004F 14 U+004E 14 U+0044 14 U+0020 14 U+004C 14 U+0049 14 U+004E 14 U+0045 14">First line<br>Second line</p>
+
+<h2>Inline block</h2>
+<p class="note">Recorded: the inline block 60 by 30, at 200, 30 in the paragraph. Style sheet: 40 by 20, between "Before" and "after" on the line.</p>
+<p class="case" id="inline">Before <span id="ib" data-a11y-recorded-fragment="200 30 60 30"></span> after.</p>
+
+<h2>Not recorded</h2>
+<p class="note">No recorded values: the same with the switch and without it.</p>
+<p class="case" id="plain">First line<br>Second line</p>
+</body>
+</html>
