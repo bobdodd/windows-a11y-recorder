@@ -2,9 +2,12 @@
 // the served document's element, then sets the recorded text control values,
 // selection, focus, and scroll offsets. It is the only script the page's
 // content security policy allows, by a nonce new for each recreation, and it
-// runs once, after the served markup is parsed. See
+// runs once, after the served markup is parsed. It is written into the
+// served page (slice 4a), so that nothing is fetched to build the page when
+// it is served at its recorded address, and it waits for the markup to be
+// parsed, as a deferred script would. See
 // docs/architecture/page-recreation.md, "Slice 3b design".
-(() => {
+document.addEventListener("DOMContentLoaded", () => {
   "use strict";
   const HTML = "http://www.w3.org/1999/xhtml";
   const SVG = "http://www.w3.org/2000/svg";
@@ -257,4 +260,4 @@
       times.firstPaint = performance.now();
     }, 0);
   });
-})();
+}, { once: true });

@@ -16,7 +16,11 @@ public sealed class RecreationSession : IAsyncDisposable
         _control = control;
     }
 
-    public string PageAddress => _server.PageAddress;
+    // The address the recreation's tab shows: the recorded document's when
+    // the page is served at it, or the loopback page.
+    public string PageAddress => _server.RecreationAddress;
+
+    public int RefusedRequests => _control.RefusedRequests;
 
     public bool BrowserHasExited => _browser.HasExited;
 
@@ -46,7 +50,13 @@ public sealed class RecreationSession : IAsyncDisposable
             var address = await browser.DevToolsAddressAsync(cancellationToken);
             server.AddTiming("Starting the recreation browser, to its DevTools port", clock.Elapsed);
             clock.Restart();
-            var control = await RecreationControl.StartAsync(address, server.PageAddress, content.Viewport, server.AddBlocked, cancellationToken);
+            var control = await RecreationControl.StartAsync(
+                address,
+                server.RecreationAddress,
+                content.Viewport,
+                server.AddBlocked,
+                cancellationToken,
+                server.ServedAtRecordedAddress ? server.Answer : null);
             server.AddTiming("Attaching to the tab and asking it to load the page", clock.Elapsed);
             return new RecreationSession(server, browser, control) { DevToolsAddress = address };
         }

@@ -45,7 +45,7 @@ public sealed class RecreationServer : IAsyncDisposable
     private readonly byte[] _page;
     private readonly byte[] _evidence;
     private readonly string _policy;
-    private readonly byte[]? _builder;
+    private readonly string? _documentUrl;
     private readonly List<BlockedNavigation> _blocked = [];
     private readonly List<RecreationTiming> _timings = [];
 
@@ -57,7 +57,7 @@ public sealed class RecreationServer : IAsyncDisposable
         _page = Encoding.UTF8.GetBytes(content.Html);
         _evidence = JsonSerializer.SerializeToUtf8Bytes(content.Evidence, EvidenceJson);
         _policy = content.ScriptNonce is { } nonce ? RecordedPageContentSecurityPolicy(nonce) : PageContentSecurityPolicy;
-        _builder = content.ScriptNonce is null ? null : RecordedPage.Builder();
+        _documentUrl = content.DocumentUrl is { } url && IsServableAddress(url) ? url : null;
     }
 
     public string Token { get; }
@@ -67,6 +67,50 @@ public sealed class RecreationServer : IAsyncDisposable
     public string BaseAddress => $"http://127.0.0.1:{Port}/{Token}/";
 
     public string PageAddress => BaseAddress;
+
+    // The address the recreation's tab loads: the recorded document's, when
+    // the page is served at it, or the loopback page.
+    public string RecreationAddress => _documentUrl ?? PageAddress;
+
+    // True when the page is served at its recorded address, and the
+    // recorder answers every request of the recreation's tab.
+    public bool ServedAtRecordedAddress => _documentUrl is not null;
+
+    // An address the page can be served at: absolute, http or https.
+    public static bool IsServableAddress(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    // The recorder's answer to a request of the recreation's tab, or null
+    // when it has none and the request is refused. Only the recorded
+    // document's own address is answered, with the page and its policy; a
+    // request's URL holds no fragment, so the recorded address's is left
+    // out, and an http address is also answered at https, in case the
+    // browser upgrades the navigation.
+    public RecreationAnswer? Answer(string url)
+    {
+        if (_documentUrl is null || !SameDocument(url, _documentUrl))
+        {
+            return null;
+        }
+        return new RecreationAnswer(200,
+        [
+            new("Content-Type", "text/html; charset=utf-8"),
+            new("Content-Security-Policy", _policy),
+            new("Cache-Control", "no-store"),
+            new("X-Content-Type-Options", "nosniff"),
+            new("Referrer-Policy", "no-referrer"),
+        ], _page);
+    }
+
+    public static bool SameDocument(string requested, string recorded)
+    {
+        static string WithoutFragment(string url) => url.IndexOf('#') is var hash and >= 0 ? url[..hash] : url;
+        var request = WithoutFragment(requested);
+        var document = WithoutFragment(recorded);
+        return request == document ||
+               (document.StartsWith("http:", StringComparison.Ordinal) && request == "https:" + document["http:".Length..]);
+    }
 
     public string EvidenceAddress => BaseAddress + "evidence.json";
 
@@ -164,10 +208,6 @@ public sealed class RecreationServer : IAsyncDisposable
                 response.ContentType = "text/html; charset=utf-8";
                 response.Headers["Content-Security-Policy"] = _policy;
                 body = _page;
-                break;
-            case RecordedPage.BuilderResource when _builder is not null:
-                response.ContentType = "text/javascript; charset=utf-8";
-                body = _builder;
                 break;
             case "evidence.json":
                 response.ContentType = "application/json; charset=utf-8";

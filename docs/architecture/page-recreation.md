@@ -2605,6 +2605,73 @@ undoes the offsets of the box's other children.
 
 Each sub-step is tested on the target Windows machine before the next.
 
+#### Sub-step 1 as built
+
+Agreed by the owner on 2026-10-01.
+
+Children matched by node:
+
+- The builder's `data-a11y-recorded-layout` attribute now starts with the
+  element's recorded node, as `{"node":<id>,` followed by the recorded
+  `boxFragments` members. The box hook reads the node from the start of a
+  child's attribute without parsing the rest.
+- The box hook indexes the recorded child links by kind: links of kind
+  "box" by `nodeId`, and "line" and "anonymous" links in order. A node with
+  more than one link matches none. Each child of the builder then takes the
+  offset of its own link: a box with a node by its recorded node, a line
+  box or an anonymous box by its order among its kind when the counts of
+  that kind are equal.
+- The Console reasons are now: a different number of line boxes, or of
+  anonymous boxes, named on the parent; and, named on the child, no child
+  link for its recorded node, or no recorded node, as for a
+  pseudo-element or an element without a layout record.
+- The integration script upgrades the stage 3 box hook and its helper, and
+  the 44736a8 hook, to these, and refuses a checkout that still holds the
+  stage 3 text.
+
+The page served at its recorded address:
+
+- `RecreationContent.DocumentUrl` holds the recorded document's URL when
+  it is an absolute http or https URL. The recreation's tab is navigated
+  to it, and every request of every tab is paused at the request stage.
+- The recorded document's address, without its fragment, is answered with
+  `Fetch.fulfillRequest` with the page, its content security policy, and
+  the headers the loopback server sends. An http address is also answered
+  at https, and the browser is started with
+  `--disable-features=HttpsUpgrades`, so that it does not upgrade the
+  navigation first.
+- Another navigation of a tab's main frame, whose frame ID is the tab's
+  target ID, is refused and listed in the evidence panel, as before. Any
+  other request, such as an image, a style sheet, or an iframe's document,
+  is refused with `BlockedByClient` and counted; DevTools' Network panel
+  lists it. Nothing is continued to the network.
+- The builder script is written into the page, inside the script element
+  its nonce allows, and runs on `DOMContentLoaded`, as a deferred script
+  would; the loopback server no longer serves `builder.js`. The page is
+  refused if the builder ever holds `</script` or `<!--`.
+- A recorded address that is not http or https, such as `about:blank`, is
+  served from the loopback server as before, with a note saying that its
+  relative URLs do not resolve as recorded.
+
+Tests at this sub-step:
+
+- Unit: the recorded node at the start of the layout attribute; which
+  addresses are served, and which requests are answered; the page and
+  policy of the answer; the builder written into the page; the box hook's
+  matching, its upgrade from the stage 3 hook, and the check that it names
+  no `Node` type, which `BoxFragmentBuilder::Node()` hides. The
+  integration script's 171 tests pass; the .NET tests pass except the four
+  that need Windows.
+- Integration, run in this environment with a stock headless Chromium:
+  `TheRecordedPageIsServedAtItsRecordedAddress` (the tab shows the
+  recorded address; a relative image address resolves against it and is
+  refused; a link away is refused; reloading builds the page again), and
+  `TheRecreationDoesNotLeaveThePage`,
+  `TheBuilderBuildsTheRecordedTreeExactlyAndRunsNoPageScript`, and
+  `TheFixedRecreationRunsNoPageScriptAndEveryPathSelectsItsNode` still
+  pass. The box hook needs the instrumented Chromium and is checked on the
+  target machine.
+
 #### Required tests
 
 - Unit tests: the font-file, font-face, and image records against the

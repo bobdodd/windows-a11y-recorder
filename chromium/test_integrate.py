@@ -6587,11 +6587,22 @@ class RecreationIntegrationTests(unittest.TestCase):
         self.assertIn("a11y_recorder::IsRecreationMode()", hook_text)
         self.assertIn("GetWritingDirection().IsHorizontalLtr()", hook_text)
         self.assertIn("GetConstraintSpace().HasBlockFragmentation()", hook_text)
-        self.assertIn("recorder_recorded_count != children_.size()", hook_text)
+        # Slice 4a: children are matched to the recorded links by node, and
+        # lines and anonymous boxes in order.
+        self.assertIn("RecorderRecordedNodeId(recorder_child_node)", hook_text)
+        self.assertIn("recorder_box_links.find(", hook_text)
+        self.assertIn("recorder_lines == recorder_line_links.size()", hook_text)
+        self.assertIn(
+            "recorder_anonymous == recorder_anonymous_links.size()", hook_text
+        )
+        # In a BoxFragmentBuilder member, the Node class is hidden by Node().
+        self.assertNotIn("const Node*", hook_text)
         self.assertIn("SetChildOffset(recorder_index,", hook_text)
         self.assertIn("RecorderReportNotImposed(", hook_text)
         helper = INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER
         self.assertIn('"data-a11y-recorded-layout"', helper)
+        self.assertIn("int RecorderRecordedNodeId(const Node* node)", helper)
+        self.assertIn('kRecorderPrefix[] = "{\\"node\\":"', helper)
         self.assertIn("JSONObject::From(ParseJSON(", helper)
         self.assertIn("/*discard_duplicates=*/true", helper)
         self.assertNotIn('"data-a11y-recorded-fragment"', first)
@@ -6809,6 +6820,34 @@ class RecreationIntegrationTests(unittest.TestCase):
         self.assertNotIn(
             "    const Node* recorder_node = node_.GetDOMNode();\n", box
         )
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+
+    def test_upgrades_the_stage_3_box_hook_to_children_matched_by_node(self):
+        self.assertNotIn(
+            INTEGRATE.STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER,
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER,
+        )
+        self.assertNotIn(
+            INTEGRATE.STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK,
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK,
+        )
+        box = self.patch_source_twice(
+            "box_fragment_builder.cc",
+            self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+                INTEGRATE.STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+            ).replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                INTEGRATE.STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_box_fragment_builder,
+        )
+        self.assertNotIn(
+            "children from its recorded fragment, so its children keep", box
+        )
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER))
         self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
 
     def test_refuses_a_feasibility_hook_it_cannot_upgrade(self):

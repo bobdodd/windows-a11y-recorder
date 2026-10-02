@@ -104,6 +104,9 @@ public sealed class RecreationBrowser : IAsyncDisposable
         // renderers impose the recorded values the builder writes on each
         // element. Without the recorder bootstrap it still records nothing.
         result.ArgumentList.Add("--" + RecreationSwitch);
+        // Slice 4a: a page recorded at an http address is served at that
+        // address, so the browser is kept from upgrading it to https first.
+        result.ArgumentList.Add("--disable-features=HttpsUpgrades");
         foreach (var argument in extraArguments ?? [])
         {
             result.ArgumentList.Add(argument);

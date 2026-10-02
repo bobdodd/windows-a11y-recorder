@@ -9,7 +9,19 @@ namespace Recorder.Recreation;
 public sealed record RecreationContent(string Html, RecreationEvidence Evidence, string? ScriptNonce = null)
 {
     public RecreationViewport? Viewport { get; init; }
+
+    // The recorded document's address, when the page is served at it
+    // (slice 4a): an absolute http or https URL. The recreation's tab is
+    // navigated to it, and the recorder answers its request, and every other
+    // request of the tab, itself, so that the page's relative URLs resolve
+    // as recorded and nothing reaches the network. Null serves the page from
+    // the loopback server, as for fixed content.
+    public string? DocumentUrl { get; init; }
 }
+
+// The recorder's answer to a request of the recreation's tab: a status, the
+// response headers, and the body.
+public sealed record RecreationAnswer(int Status, IReadOnlyList<KeyValuePair<string, string>> Headers, byte[] Body);
 
 // How long one step of opening a recreation took, in milliseconds, measured
 // by the recorder (stage 3).

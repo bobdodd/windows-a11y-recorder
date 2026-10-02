@@ -7,11 +7,11 @@ namespace Recorder.Recreation;
 
 // The page served for a recorded document: a short document holding the
 // recorded tree as JSON in a data block, which is not run, and the builder
-// script, which the page's content security policy allows by a nonce. See
+// script, written into the page, which the page's content security policy
+// allows by a nonce. See
 // docs/architecture/page-recreation.md, "Building the document exactly".
 public static class RecordedPage
 {
-    public const string BuilderResource = "builder.js";
     public const string TreeElementId = "recorder-recreation-tree";
 
     // The HTML markup of the served document. The recorded document type,
@@ -31,11 +31,23 @@ public static class RecordedPage
             .Append(Encoding.UTF8.GetString(tree))
             .Append("</script><script nonce=\"")
             .Append(nonce)
-            .Append("\" src=\"")
-            .Append(BuilderResource)
-            .Append("\" defer></script></head><body></body></html>");
+            .Append("\">")
+            .Append(BuilderText.Value)
+            .Append("</script></head><body></body></html>");
         return markup.ToString();
     }
+
+    // The builder script, written into the served page. It holds neither
+    // "</script" nor "<!--", so it cannot end its script element early.
+    private static readonly Lazy<string> BuilderText = new(() =>
+    {
+        var text = Encoding.UTF8.GetString(Builder());
+        if (text.Contains("</script", StringComparison.OrdinalIgnoreCase) || text.Contains("<!--", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The builder script cannot be written into a script element.");
+        }
+        return text;
+    });
 
     // The content of a recreation of a recorded document at a frame, not yet
     // checked against the recording.
@@ -78,6 +90,14 @@ public static class RecordedPage
         var withLayout = elements.Count(node => state.Layout.Nodes.ContainsKey(node.Id));
         notes.Add($"{withLayout.ToString(CultureInfo.InvariantCulture)} of the {elements.Count.ToString(CultureInfo.InvariantCulture)} recorded elements have a layout record, whose recorded style and box fragments the recreation imposes. They are written on each element in its data-a11y-recorded-style and data-a11y-recorded-layout attributes, which are shown in the Elements pane but were not attributes of the recorded page. Pseudo-elements, such as ::before, take no recorded style: they appear only as far as the page's recorded style elements make them.");
         notes.Add("A box or block whose recorded layout could not be imposed, as when Blink lays out different children or text from those recorded, keeps Blink's layout, and is listed in DevTools' Console with the reason. Images draw nothing, and text in a font that is not on this machine keeps Blink's shaping in a fallback font.");
+        if (url is not null && RecreationServer.IsServableAddress(url))
+        {
+            notes.Add($"The page is served at its recorded address, {url}, so that its relative URLs resolve as they did. The recorder answers that address itself, and refuses every other request of the page, which DevTools' Network panel lists, so nothing reaches the network.");
+        }
+        else
+        {
+            notes.Add("The recorded address is not an http or https URL, so the page is served from the recorder's loopback address, and its relative URLs do not resolve as they did.");
+        }
         notes.Add("Element namespaces are not recorded: an element named in capitals is built in the HTML namespace, and any other in the namespace of an svg or math ancestor.");
         var evidence = RecordedEvidence.Create(
             state,
@@ -93,6 +113,7 @@ public static class RecordedPage
             nonce)
         {
             Viewport = viewport,
+            DocumentUrl = url is not null && RecreationServer.IsServableAddress(url) ? url : null,
         };
     }
 
@@ -259,7 +280,7 @@ public static class RecordedPage
         // latest layout record, which the recreation mode imposes.
         JsonElement? record = node.NodeType == "element" && layout.Nodes.TryGetValue(id, out var found) ? found : null;
         WriteText(writer, "recordedStyle", record is { } styled ? RecordedStyle(styled) : null);
-        WriteText(writer, "recordedLayout", record is { } laidOut ? RecordedLayout(laidOut) : null);
+        WriteText(writer, "recordedLayout", record is { } laidOut ? RecordedLayout(laidOut, id) : null);
         if (node.NodeName == "SLOT" && manual && node.AssignedNodes is { } assigned && assigned != DomTreeRebuilder.Cut)
         {
             manualSlots.Add((id, JsonSerializer.Deserialize<long[]>(assigned) ?? []));
@@ -344,12 +365,28 @@ public static class RecordedPage
     }
 
     // The recorded box fragments of a layout record, its boxFragments object
-    // as recorded, for the data-a11y-recorded-layout attribute. Returns null
-    // for a record without one.
-    public static string? RecordedLayout(JsonElement record) =>
-        record.TryGetProperty("boxFragments", out var fragments) && fragments.ValueKind == JsonValueKind.Object
-            ? fragments.GetRawText()
-            : null;
+    // as recorded, for the data-a11y-recorded-layout attribute, with the
+    // element's recorded node first, as "node", so that the box hook can
+    // match a child box to its parent's recorded child link by reading only
+    // the start of the attribute (slice 4a). Returns null for a record
+    // without box fragments.
+    public static string? RecordedLayout(JsonElement record, long nodeId)
+    {
+        if (!record.TryGetProperty("boxFragments", out var fragments) || fragments.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        var text = new StringBuilder("{\"node\":").Append(nodeId.ToString(CultureInfo.InvariantCulture));
+        foreach (var property in fragments.EnumerateObject())
+        {
+            if (property.NameEquals("node"))
+            {
+                continue;
+            }
+            text.Append(',').Append(JsonSerializer.Serialize(property.Name)).Append(':').Append(property.Value.GetRawText());
+        }
+        return text.Append('}').ToString();
+    }
 
     private static void WriteText(Utf8JsonWriter writer, string name, string? value)
     {

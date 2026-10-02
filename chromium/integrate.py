@@ -6894,9 +6894,17 @@ def patch_blink_box_fragment_builder(path: Path) -> None:
         text,
         (
             (LEGACY_FEASIBILITY_FRAGMENT_HELPER, BLINK_RECREATION_FRAGMENT_HELPER),
+            (
+                STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER,
+                BLINK_RECREATION_FRAGMENT_HELPER,
+            ),
             (LEGACY_FEASIBILITY_FRAGMENT_HOOK, BLINK_RECREATION_FRAGMENT_HOOK),
             (
                 INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK,
+                BLINK_RECREATION_FRAGMENT_HOOK,
+            ),
+            (
+                STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK,
                 BLINK_RECREATION_FRAGMENT_HOOK,
             ),
         ),
@@ -6907,6 +6915,7 @@ def patch_blink_box_fragment_builder(path: Path) -> None:
         (
             '"data-a11y-recorded-fragment"',
             "    const Node* recorder_node = node_.GetDOMNode();\n",
+            "children from its recorded fragment, so its children keep",
         ),
         path,
     )
@@ -7303,16 +7312,55 @@ BLINK_RECREATION_FRAGMENT_INCLUDES = (
     BLINK_BRIDGE_INCLUDE,
     '#include "third_party/blink/renderer/core/dom/element.h"',
     *BLINK_RECREATION_LAYOUT_INCLUDES,
+    '#include "third_party/blink/renderer/platform/wtf/hash_map.h"',
+    '#include "third_party/blink/renderer/platform/wtf/vector.h"',
 )
 BLINK_RECREATION_FRAGMENT_HELPER_MARKER = "RecorderRecordedLayout("
-BLINK_RECREATION_FRAGMENT_HELPER = f"""
+STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER = f"""
 namespace {{
 
 {BLINK_RECREATION_LAYOUT_HELPERS}
 }}  // namespace
 """
+BLINK_RECREATION_NODE_ID_HELPER = """\
+// Windows A11y Recorder recreation mode (slice 4a): the recorded node of an
+// element, which the builder writes first in its data-a11y-recorded-layout
+// attribute, as {"node":<id>, ...}. Read from the start of the attribute,
+// without parsing the rest. Returns 0 for a node without one.
+int RecorderRecordedNodeId(const Node* node) {
+  const auto* recorder_element = DynamicTo<Element>(node);
+  if (!recorder_element) {
+    return 0;
+  }
+  const AtomicString& recorder_text = recorder_element->getAttribute(
+      AtomicString("data-a11y-recorded-layout"));
+  constexpr char kRecorderPrefix[] = "{\\"node\\":";
+  constexpr wtf_size_t kRecorderPrefixLength = sizeof(kRecorderPrefix) - 1;
+  if (recorder_text.IsNull() ||
+      !recorder_text.GetString().StartsWith(kRecorderPrefix)) {
+    return 0;
+  }
+  int recorder_id = 0;
+  for (wtf_size_t recorder_index = kRecorderPrefixLength;
+       recorder_index < recorder_text.length(); ++recorder_index) {
+    const UChar recorder_character = recorder_text[recorder_index];
+    if (recorder_character < '0' || recorder_character > '9' ||
+        recorder_id > 214748363) {
+      break;
+    }
+    recorder_id = recorder_id * 10 + (recorder_character - '0');
+  }
+  return recorder_id;
+}
+"""
+BLINK_RECREATION_FRAGMENT_HELPER = f"""
+namespace {{
+
+{BLINK_RECREATION_LAYOUT_HELPERS}
+{BLINK_RECREATION_NODE_ID_HELPER}}}  // namespace
+"""
 BLINK_RECREATION_FRAGMENT_MARKER = "recorder_recorded_fragment"
-BLINK_RECREATION_FRAGMENT_HOOK = """\
+STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK = """\
   // Windows A11y Recorder recreation mode: the box's recorded border-box
   // size, and its children's recorded offsets, replace those its layout
   // algorithm produced, in a horizontal, left to right writing mode, in which
@@ -7372,6 +7420,166 @@ BLINK_RECREATION_FRAGMENT_HOOK = """\
                                  LayoutUnit::FromDoubleRound(recorder_x),
                                  LayoutUnit::FromDoubleRound(recorder_y)));
             }
+          }
+        }
+      }
+    }
+  }
+
+"""
+BLINK_RECREATION_FRAGMENT_HOOK = """\
+  // Windows A11y Recorder recreation mode (slice 4a): the box's recorded
+  // border-box size, and its children's recorded offsets, replace those its
+  // layout algorithm produced, in a horizontal, left to right writing mode,
+  // in which the builder's logical offsets equal the recorded physical ones.
+  // Only a box laid out in one fragment and recorded in one takes them. Each
+  // child takes the offset of the recorded child link that is the same
+  // child: a box with an element, the link of kind "box" for its recorded
+  // node; a line box or an anonymous box, the recorded link of its kind in
+  // the same order, when the box holds as many of that kind as recorded. A
+  // child that matches no link keeps its offset, and is reported.
+  if (a11y_recorder::IsRecreationMode() && node_ &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    // BoxFragmentBuilder::Node() hides the Node class here.
+    const auto* recorder_node = node_.GetDOMNode();
+    if (std::unique_ptr<JSONObject> recorder_layout =
+            RecorderRecordedLayout(recorder_node)) {
+      const JSONArray* recorder_fragments =
+          recorder_layout->GetArray("fragments");
+      const JSONObject* recorder_recorded_fragment =
+          recorder_fragments && recorder_fragments->size() == 1u
+              ? JSONObject::Cast(recorder_fragments->at(0))
+              : nullptr;
+      double recorder_width = 0;
+      double recorder_height = 0;
+      if (GetConstraintSpace().HasBlockFragmentation() ||
+          IsFragmentainerBoxType() || PreviousBreakToken()) {
+        RecorderReportNotImposed(recorder_node,
+                                 "the box is laid out in more than one "
+                                 "fragment");
+      } else if (!recorder_recorded_fragment ||
+                 !recorder_recorded_fragment->GetDouble("width",
+                                                        &recorder_width) ||
+                 !recorder_recorded_fragment->GetDouble("height",
+                                                        &recorder_height)) {
+        RecorderReportNotImposed(recorder_node,
+                                 "the box was not recorded in one fragment");
+      } else {
+        size_.inline_size = LayoutUnit::FromDoubleRound(recorder_width);
+        size_.block_size = LayoutUnit::FromDoubleRound(recorder_height);
+        const JSONArray* recorder_links =
+            recorder_recorded_fragment->GetArray("children");
+        const wtf_size_t recorder_link_count =
+            recorder_links ? recorder_links->size() : 0u;
+        // The recorded links by kind: boxes by their node, and lines and
+        // anonymous boxes in order. A node with more than one link, which a
+        // box in one fragment cannot have, matches none.
+        HashMap<int, wtf_size_t> recorder_box_links;
+        Vector<wtf_size_t> recorder_line_links;
+        Vector<wtf_size_t> recorder_anonymous_links;
+        for (wtf_size_t recorder_index = 0;
+             recorder_index < recorder_link_count; ++recorder_index) {
+          const JSONObject* recorder_link =
+              JSONObject::Cast(recorder_links->at(recorder_index));
+          String recorder_kind;
+          if (!recorder_link ||
+              !recorder_link->GetString("kind", &recorder_kind)) {
+            continue;
+          }
+          int recorder_link_node = 0;
+          if (recorder_kind == "box" &&
+              recorder_link->GetInteger("nodeId", &recorder_link_node) &&
+              recorder_link_node > 0) {
+            auto recorder_added =
+                recorder_box_links.insert(recorder_link_node, recorder_index);
+            if (!recorder_added.is_new_entry) {
+              recorder_added.stored_value->value = kNotFound;
+            }
+          } else if (recorder_kind == "line") {
+            recorder_line_links.push_back(recorder_index);
+          } else if (recorder_kind == "anonymous") {
+            recorder_anonymous_links.push_back(recorder_index);
+          }
+        }
+        wtf_size_t recorder_lines = 0;
+        wtf_size_t recorder_anonymous = 0;
+        for (const LogicalFragmentLink& recorder_child : children_) {
+          if (recorder_child->IsLineBox()) {
+            ++recorder_lines;
+          } else if (!recorder_child->GetNode()) {
+            ++recorder_anonymous;
+          }
+        }
+        const bool recorder_lines_match =
+            recorder_lines == recorder_line_links.size();
+        const bool recorder_anonymous_match =
+            recorder_anonymous == recorder_anonymous_links.size();
+        if (!recorder_lines_match) {
+          RecorderReportNotImposed(recorder_node,
+                                   "the box holds a different number of "
+                                   "line boxes from its recorded fragment, so "
+                                   "its line boxes keep their offsets");
+        }
+        if (!recorder_anonymous_match) {
+          RecorderReportNotImposed(recorder_node,
+                                   "the box holds a different number of "
+                                   "anonymous boxes from its recorded "
+                                   "fragment, so its anonymous boxes keep "
+                                   "their offsets");
+        }
+        wtf_size_t recorder_line = 0;
+        wtf_size_t recorder_anonymous_index = 0;
+        for (wtf_size_t recorder_index = 0; recorder_index < children_.size();
+             ++recorder_index) {
+          const PhysicalFragment& recorder_child =
+              *children_[recorder_index].fragment;
+          wtf_size_t recorder_link_index = kNotFound;
+          if (recorder_child.IsLineBox()) {
+            if (recorder_lines_match) {
+              recorder_link_index = recorder_line_links[recorder_line];
+            }
+            ++recorder_line;
+          } else if (const auto* recorder_child_node =
+                         recorder_child.GetNode()) {
+            const int recorder_child_id =
+                RecorderRecordedNodeId(recorder_child_node);
+            auto recorder_found = recorder_child_id > 0
+                                      ? recorder_box_links.find(
+                                            recorder_child_id)
+                                      : recorder_box_links.end();
+            if (recorder_found != recorder_box_links.end()) {
+              recorder_link_index = recorder_found->value;
+            }
+            if (recorder_link_index == kNotFound) {
+              RecorderReportNotImposed(
+                  recorder_child_node,
+                  recorder_child_id > 0
+                      ? "its parent's recorded fragment has no child link "
+                        "for its recorded node, so it keeps its offset"
+                      : "it has no recorded node, as for a pseudo-element "
+                        "or an element without a layout record, so it "
+                        "keeps its offset");
+            }
+          } else {
+            if (recorder_anonymous_match) {
+              recorder_link_index =
+                  recorder_anonymous_links[recorder_anonymous_index];
+            }
+            ++recorder_anonymous_index;
+          }
+          if (recorder_link_index == kNotFound) {
+            continue;
+          }
+          const JSONObject* recorder_link =
+              JSONObject::Cast(recorder_links->at(recorder_link_index));
+          double recorder_x = 0;
+          double recorder_y = 0;
+          if (recorder_link && recorder_link->GetDouble("x", &recorder_x) &&
+              recorder_link->GetDouble("y", &recorder_y)) {
+            SetChildOffset(recorder_index,
+                           LogicalOffset(
+                               LayoutUnit::FromDoubleRound(recorder_x),
+                               LayoutUnit::FromDoubleRound(recorder_y)));
           }
         }
       }
@@ -7757,7 +7965,7 @@ BLINK_RECREATION_ITEMS_HOOK = """\
 # The stage 3 box hook as written by revision 44736a8, which did not compile:
 # in a BoxFragmentBuilder member, the Node class is hidden by its Node()
 # method. A checkout that holds it is upgraded to the current hook.
-INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK = BLINK_RECREATION_FRAGMENT_HOOK.replace(
+INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK = STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK.replace(
     "    // BoxFragmentBuilder::Node() hides the Node class here.\n"
     "    const auto* recorder_node = node_.GetDOMNode();\n",
     "    const Node* recorder_node = node_.GetDOMNode();\n",

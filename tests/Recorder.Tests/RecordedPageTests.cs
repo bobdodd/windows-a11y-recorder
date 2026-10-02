@@ -203,7 +203,12 @@ public sealed class RecordedPageTests : IDisposable
         Assert.Equal("html", RecordedPage.DocumentTypeName(state.Dom!, 1));
         var markup = RecordedPage.Markup(data, "html", "n0nce");
         Assert.StartsWith("<!DOCTYPE html><html><head>", markup);
-        Assert.Contains("<script nonce=\"n0nce\" src=\"builder.js\" defer></script>", markup);
+        // The builder is written into the page, and waits for the markup to
+        // be parsed (slice 4a).
+        Assert.Contains("<script nonce=\"n0nce\">// Builds the recorded DOM tree", markup);
+        Assert.Contains("document.addEventListener(\"DOMContentLoaded\", () => {", markup);
+        Assert.EndsWith("}, { once: true });\n</script></head><body></body></html>", markup);
+        Assert.Single(markup.Split("<script nonce=")[1..]);
         Assert.Contains("script-src 'nonce-n0nce';", RecreationServer.RecordedPageContentSecurityPolicy("n0nce"));
         Assert.DoesNotContain("unsafe-inline'; img", RecreationServer.RecordedPageContentSecurityPolicy("n0nce").Split("script-src")[1].Split(';')[0]);
     }
@@ -230,13 +235,18 @@ public sealed class RecordedPageTests : IDisposable
             """));
         var record = state.Layout.Nodes[16];
         Assert.Equal("display: block; color: rgb(255, 0, 0); --gap: 4px;", RecordedPage.RecordedStyle(record));
-        using (var layout = JsonDocument.Parse(RecordedPage.RecordedLayout(record)!))
+        var recordedLayout = RecordedPage.RecordedLayout(record, 16)!;
+        // The recorded node comes first, where the box hook reads it.
+        Assert.StartsWith("{\"node\":16,", recordedLayout, StringComparison.Ordinal);
+        using (var layout = JsonDocument.Parse(recordedLayout))
         {
+            Assert.Equal(16, layout.RootElement.GetProperty("node").GetInt64());
             Assert.Equal(310, layout.RootElement.GetProperty("fragments")[0].GetProperty("width").GetDouble());
             Assert.Equal("Hello", layout.RootElement.GetProperty("textContent").GetString());
         }
         Assert.Null(RecordedPage.RecordedStyle(J("""{"nodeId":3,"computedStyle":null}""")));
-        Assert.Null(RecordedPage.RecordedLayout(J("""{"nodeId":3,"boxFragments":null}""")));
+        Assert.Null(RecordedPage.RecordedLayout(J("""{"nodeId":3,"boxFragments":null}"""), 3));
+        Assert.Equal("{\"node\":3}", RecordedPage.RecordedLayout(J("""{"nodeId":3,"boxFragments":{}}"""), 3));
 
         using var json = JsonDocument.Parse(RecordedPage.Tree(state));
         JsonElement Find(JsonElement node, long id)
@@ -257,6 +267,7 @@ public sealed class RecordedPageTests : IDisposable
         var paragraph = Find(json.RootElement.GetProperty("document"), 16);
         Assert.Equal("display: block; color: rgb(255, 0, 0); --gap: 4px;", paragraph.GetProperty("recordedStyle").GetString());
         Assert.Contains("\"width\":310", paragraph.GetProperty("recordedLayout").GetString());
+        Assert.StartsWith("{\"node\":16,", paragraph.GetProperty("recordedLayout").GetString(), StringComparison.Ordinal);
         var inner = Find(json.RootElement.GetProperty("document"), 17);
         Assert.Equal(JsonValueKind.Null, inner.GetProperty("recordedStyle").ValueKind);
         Assert.Equal(JsonValueKind.Null, inner.GetProperty("recordedLayout").ValueKind);
@@ -745,6 +756,43 @@ public sealed class RecreationControlTests : IDisposable
     }
 
     [Fact]
+    public void OnlyTheRecordedDocumentsOwnAddressIsAnswered()
+    {
+        Assert.True(RecreationServer.IsServableAddress("https://example.test/a"));
+        Assert.True(RecreationServer.IsServableAddress("http://example.test/a"));
+        Assert.False(RecreationServer.IsServableAddress("about:blank"));
+        Assert.False(RecreationServer.IsServableAddress("data:text/html,x"));
+        Assert.False(RecreationServer.IsServableAddress("file:///C:/a.html"));
+        Assert.False(RecreationServer.IsServableAddress("page.html"));
+        Assert.True(RecreationServer.SameDocument("https://example.test/a?q=1", "https://example.test/a?q=1#part"));
+        Assert.True(RecreationServer.SameDocument("https://example.test/a", "http://example.test/a"));
+        Assert.False(RecreationServer.SameDocument("http://example.test/a", "https://example.test/a"));
+        Assert.False(RecreationServer.SameDocument("https://example.test/ab", "https://example.test/a"));
+        Assert.False(RecreationServer.SameDocument("https://example.test/a?q=2", "https://example.test/a?q=1"));
+    }
+
+    [Fact]
+    public async Task TheRecordedAddressIsAnsweredWithThePageAndItsPolicy()
+    {
+        var content = new RecreationContent("<p>page</p>", FixedRecreation.Create().Evidence, "n0nce")
+        {
+            DocumentUrl = "https://example.test/dir/page#part",
+        };
+        await using var server = await RecreationServer.StartAsync(content, TestContext.Current.CancellationToken);
+        Assert.True(server.ServedAtRecordedAddress);
+        Assert.Equal("https://example.test/dir/page#part", server.RecreationAddress);
+        var answer = server.Answer("https://example.test/dir/page")!;
+        Assert.Equal(200, answer.Status);
+        Assert.Equal("<p>page</p>", Encoding.UTF8.GetString(answer.Body));
+        Assert.Contains(answer.Headers, header => header.Key == "Content-Security-Policy" && header.Value.Contains("script-src 'nonce-n0nce'", StringComparison.Ordinal));
+        Assert.Null(server.Answer("https://example.test/dir/images/a.png"));
+        await using var loopback = await RecreationServer.StartAsync(content with { DocumentUrl = "about:blank" }, TestContext.Current.CancellationToken);
+        Assert.False(loopback.ServedAtRecordedAddress);
+        Assert.Equal(loopback.PageAddress, loopback.RecreationAddress);
+        Assert.Null(loopback.Answer("about:blank"));
+    }
+
+    [Fact]
     public void TheWindowIsSizedSoItsPageAreaIsTheRecordedViewport()
     {
         Assert.Equal((1266, 795), RecreationControl.WindowSize(new RecreationViewport(1250, 712, 1.5, 1.5), 16, 82.4));
@@ -762,6 +810,129 @@ public sealed class RecreationControlTests : IDisposable
         Assert.False(RecreationControl.IsAllowed("https://www.cnib.ca/en", page));
         Assert.False(RecreationControl.IsAllowed("chrome://settings/", page));
         Assert.False(RecreationControl.IsAllowed("data:text/html,x", page));
+    }
+
+    // Slice 4a: a recorded page is served at its recorded address. Set
+    // RECORDER_RECREATION_CHROMIUM to a Chromium executable to check, without
+    // a window, that the tab shows the recorded address and the built page,
+    // that a relative image address resolves against it and is refused, not
+    // fetched, that a link away is refused, and that reloading builds the
+    // page again.
+    [Fact]
+    public async Task TheRecordedPageIsServedAtItsRecordedAddress()
+    {
+        if (Environment.GetEnvironmentVariable("RECORDER_RECREATION_CHROMIUM") is not { } chromium)
+        {
+            return;
+        }
+        var token = TestContext.Current.CancellationToken;
+        var tree = new DomDocumentTree();
+        void Add(long id, long? parent, string type, string name, string? data = null, Dictionary<string, string?>? attributes = null)
+        {
+            var node = new DomNode(id) { ParentId = parent, NodeType = type, NodeName = name, Data = data };
+            foreach (var (key, value) in attributes ?? [])
+            {
+                node.Attributes[key] = value;
+            }
+            tree.Nodes.Add(id, node);
+            if (parent is { } parentId)
+            {
+                tree.Nodes[parentId].Children.Add(id);
+            }
+        }
+        Add(1, null, "document", "#document");
+        Add(2, 1, "other", "html");
+        Add(3, 1, "element", "HTML");
+        Add(4, 3, "element", "HEAD");
+        Add(5, 3, "element", "BODY");
+        Add(6, 5, "element", "IMG", attributes: new() { ["src"] = "images/a.png", ["alt"] = "A" });
+        Add(7, 5, "element", "A", attributes: new() { ["id"] = "away", ["href"] = "other.html" });
+        Add(8, 7, "text", "#text", "away");
+        var state = new BrowserDocumentState("token-a dom-document-1") { Dom = tree, DomCompleteness = BrowserStateCompleteness.Complete };
+        const string recorded = "https://example.test/dir/page?q=1#part";
+        var content = RecordedPage.Content(state, recorded, 4_000_000_000, 4_000_000_000, "presented") with
+        {
+            Viewport = new RecreationViewport(800, 600, 1, 1),
+        };
+        Assert.Equal(recorded, content.DocumentUrl);
+        await using var session = await RecreationSession.OpenAsync(
+            chromium, Path.Combine(_directory, "recorded-address"), content, token, ["--headless=new"]);
+        Assert.Equal(recorded, session.PageAddress);
+
+        using var http = new HttpClient();
+        var list = $"http://127.0.0.1:{session.DevToolsAddress.Port}/json/list";
+        string? address = null;
+        for (var attempt = 0; attempt < 100 && address is null; attempt++)
+        {
+            using var targets = JsonDocument.Parse(await http.GetStringAsync(list, token));
+            address = targets.RootElement.EnumerateArray()
+                .Where(item => item.GetProperty("type").GetString() == "page" &&
+                               item.GetProperty("url").GetString() == recorded)
+                .Select(item => item.GetProperty("webSocketDebuggerUrl").GetString())
+                .FirstOrDefault();
+            if (address is null)
+            {
+                await Task.Delay(100, token);
+            }
+        }
+        Assert.NotNull(address);
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(new Uri(address!), token);
+        var client = new TestDevToolsClient(socket);
+        async Task<string> Evaluate(string expression)
+        {
+            using var answer = await client.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, token);
+            return answer.RootElement.GetProperty("result").GetProperty("result").GetProperty("value").ToString();
+        }
+        // While the page reloads, an evaluation may find no context.
+        async Task<string> TryEvaluate(string expression)
+        {
+            try
+            {
+                return await Evaluate(expression);
+            }
+            catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException)
+            {
+                return "";
+            }
+        }
+        async Task WaitForBuilt()
+        {
+            for (var attempt = 0; attempt < 100 && await TryEvaluate("Boolean(window.__recorderRecreation && document.querySelector('img'))") != "True"; attempt++)
+            {
+                await Task.Delay(100, token);
+            }
+        }
+
+        await WaitForBuilt();
+        Assert.Equal(recorded, await Evaluate("location.href"));
+        Assert.Equal("https://example.test/dir/images/a.png", await Evaluate("document.querySelector('img').src"));
+        for (var attempt = 0; attempt < 100 && session.RefusedRequests == 0; attempt++)
+        {
+            await Task.Delay(100, token);
+        }
+        Assert.True(session.RefusedRequests >= 1);
+        Assert.Equal("False", await Evaluate("document.querySelector('img').complete && document.querySelector('img').naturalWidth > 0"));
+
+        await Evaluate("document.getElementById('away').click(), 'clicked'");
+        for (var attempt = 0; attempt < 100 && session.Blocked.Count == 0; attempt++)
+        {
+            await Task.Delay(100, token);
+        }
+        var blocked = Assert.Single(session.Blocked);
+        Assert.Equal("https://example.test/dir/other.html", blocked.Url);
+        Assert.True(blocked.InRecreationTab);
+        Assert.Equal(recorded, await Evaluate("location.href"));
+
+        await Evaluate("window.__reloaded = true, setTimeout(() => location.reload(), 0), 'reloading'");
+        for (var attempt = 0; attempt < 100 && await TryEvaluate("String(window.__reloaded)") is "true" or ""; attempt++)
+        {
+            await Task.Delay(100, token);
+        }
+        await WaitForBuilt();
+        Assert.Equal("undefined", await Evaluate("String(window.__reloaded)"));
+        Assert.Equal("True", await Evaluate("Boolean(window.__recorderRecreation.built)"));
+        Assert.Equal(recorded, await Evaluate("location.href"));
     }
 
     // A followed link, a link to a new tab, and a form submission are each

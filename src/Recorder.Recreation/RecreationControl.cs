@@ -23,30 +23,47 @@ public sealed class RecreationControl : IAsyncDisposable
     private readonly string _allowed;
     private readonly RecreationViewport? _viewport;
     private readonly Action<BlockedNavigation> _blocked;
+    private readonly Func<string, RecreationAnswer?>? _answer;
+    private int _refused;
     private readonly CancellationTokenSource _stop = new();
     private readonly TaskCompletionSource<string> _firstTab = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Dictionary<string, string> _targets = new(StringComparer.Ordinal);
     private Task? _events;
     private string? _recreationSession;
 
-    private RecreationControl(DevToolsConnection connection, string allowed, RecreationViewport? viewport, Action<BlockedNavigation> blocked)
+    private RecreationControl(
+        DevToolsConnection connection,
+        string allowed,
+        RecreationViewport? viewport,
+        Action<BlockedNavigation> blocked,
+        Func<string, RecreationAnswer?>? answer)
     {
         _connection = connection;
         _allowed = allowed;
         _viewport = viewport;
         _blocked = blocked;
+        _answer = answer;
     }
 
+    // How many requests of the tabs, other than refused navigations, were
+    // refused because the recorder had no answer for them (slice 4a).
+    public int RefusedRequests => Volatile.Read(ref _refused);
+
     // Connects to the browser, attaches to its tab, and opens the page in it.
+    // With an answer, the page is served at its recorded address: every
+    // request of every tab is paused, and is answered by the recorder or
+    // refused, so none reaches the network (slice 4a). Without one, only
+    // document requests are paused, and the loopback page's continue.
     public static async Task<RecreationControl> StartAsync(
         Uri browserAddress,
         string pageAddress,
         RecreationViewport? viewport,
         Action<BlockedNavigation> blocked,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, RecreationAnswer?>? answer = null)
     {
         var connection = await DevToolsConnection.ConnectAsync(browserAddress, cancellationToken);
-        var control = new RecreationControl(connection, pageAddress, viewport, blocked);
+        var control = new RecreationControl(connection, pageAddress, viewport, blocked, answer);
         try
         {
             control._events = Task.Run(control.HandleEventsAsync);
@@ -185,7 +202,9 @@ public sealed class RecreationControl : IAsyncDisposable
             _targets[session] = targetId;
             commands.Add(_connection.SendAsync("Fetch.enable", new
             {
-                patterns = new object[] { new { urlPattern = "*", resourceType = "Document", requestStage = "Request" } }
+                patterns = _answer is null
+                    ? new object[] { new { urlPattern = "*", resourceType = "Document", requestStage = "Request" } }
+                    : new object[] { new { urlPattern = "*", requestStage = "Request" } }
             }, session, token));
             if (_recreationSession is null)
             {
@@ -225,7 +244,34 @@ public sealed class RecreationControl : IAsyncDisposable
         var requestId = parameters.GetProperty("requestId").GetString()!;
         var url = parameters.GetProperty("request").GetProperty("url").GetString() ?? "";
         var token = _stop.Token;
-        if (IsAllowed(url, _allowed))
+        if (_answer is not null)
+        {
+            if (_answer(url) is { } answer)
+            {
+                await _connection.SendAsync("Fetch.fulfillRequest", new
+                {
+                    requestId,
+                    responseCode = answer.Status,
+                    responseHeaders = answer.Headers.Select(header => new { name = header.Key, value = header.Value }).ToArray(),
+                    body = Convert.ToBase64String(answer.Body)
+                }, session, token);
+                return;
+            }
+            // A request that is not a tab's own navigation, such as an
+            // image, a style sheet, or an iframe's document, is refused
+            // without a page of its own, and is listed only in DevTools'
+            // Network panel. The main frame's ID is its tab's target ID.
+            var resourceType = parameters.TryGetProperty("resourceType", out var type) ? type.GetString() : null;
+            var frameId = parameters.TryGetProperty("frameId", out var frame) ? frame.GetString() : null;
+            var mainFrame = _targets.TryGetValue(session, out var tabTarget) && frameId == tabTarget;
+            if (resourceType != "Document" || !mainFrame)
+            {
+                Interlocked.Increment(ref _refused);
+                await _connection.SendAsync("Fetch.failRequest", new { requestId, errorReason = "BlockedByClient" }, session, token);
+                return;
+            }
+        }
+        else if (IsAllowed(url, _allowed))
         {
             await _connection.SendAsync("Fetch.continueRequest", new { requestId }, session, token);
             return;
