@@ -2708,14 +2708,14 @@ Measured in the running recreation through its DevTools port:
 The remaining differences seen are text in another font, which wraps
 differently, and images, which slice 4a's later sub-steps address.
 
-#### Elements without a layout object (proposed)
+#### Elements without a layout object
 
-Proposed on 2026-10-02 for the owner's agreement.
+Proposed on 2026-10-02 and agreed by the owner the same day.
 
 - An element whose layout record at the frame has `layoutObjectPresent`
   false is written with a `data-a11y-recorded-no-layout-object` attribute.
-  Its value is `none` when no element or text below it in the flat tree had
-  a layout object at the frame, and `contents` otherwise, as for an element
+  Its value is `none` when no element or text below it, in its subtree or
+  its shadow trees, had a layout object at the frame, and `contents` otherwise, as for an element
   styled `display: contents`. The value is an inference from the recorded
   layout objects, not a recorded style; the recording holds no computed
   style for such an element.
@@ -2736,6 +2736,29 @@ with and without a rendered descendant, through a shadow root, and for an
 element with no layout record; integration script tests of the style and
 inspector hooks; a browser integration test that such an element takes no
 box in the instrumented build.
+
+As built:
+
+- `RecordedPage.NoLayoutObjectDisplays` works out the values from each
+  node's latest layout record, without recursion, so a deep tree cannot
+  exhaust the stack. The tree data carries the value as `noLayoutObject`,
+  and the builder writes the attribute before the element is inserted.
+- The style hook replaces the stage 1a hook, which the integration script
+  upgrades. Both the recorded style and the inferred display go into the
+  one set of important declarations, the inferred display last, so it
+  replaces a recorded display.
+- A copy of an element in a user agent shadow tree, as an svg `use`
+  element makes, does not take the inferred display, in style resolution
+  or in DevTools: the copy's layout object was not the one recorded.
+- DevTools' rule is added after the recorded style's, by a helper and a
+  matched rule of its own, and is not reported for ancestors, since
+  `display` is not inherited.
+- Tests: the unit test covers `none`, `contents` through an open and a
+  closed shadow root, an element without a record, and the evidence
+  panel's note. The integration script's 173 tests pass. The .NET tests
+  pass except the four that need Windows. The stage 3 browser test, run
+  with the instrumented build, now also checks that such an element takes
+  no box; it runs on the target machine.
 
 #### Required tests
 

@@ -279,6 +279,54 @@ public sealed class RecordedPageTests : IDisposable
         Assert.Contains(content.Evidence.Notes, note => note.Contains("DevTools' Console", StringComparison.Ordinal));
     }
 
+    // An element recorded without a layout object takes display: none, or
+    // display: contents when a node below it, in its subtree or a shadow
+    // tree, had a layout object; an element without a layout record, or
+    // with a layout object, takes neither.
+    [Fact]
+    public void AnElementRecordedWithoutALayoutObjectTakesAnInferredDisplay()
+    {
+        var state = State();
+        void Record(long id, bool present) =>
+            state.Layout.ApplyNode(J($$"""{"nodeId":{{id}},"layoutObjectPresent":{{(present ? "true" : "false")}},"computedStyle":null,"boxFragments":null}"""));
+        Record(12, true);
+        Record(13, false);
+        Record(14, false);
+        Record(22, false);
+        Record(25, true);
+        Record(29, false);
+        Record(31, false);
+        Record(32, true);
+        var displays = RecordedPage.NoLayoutObjectDisplays(state);
+        Assert.Equal("none", displays[13]);
+        Assert.Equal("none", displays[14]);
+        Assert.Equal("contents", displays[22]);
+        Assert.Equal("contents", displays[29]);
+        Assert.Equal("contents", displays[31]);
+        Assert.False(displays.ContainsKey(12));
+        Assert.False(displays.ContainsKey(16));
+        Assert.False(displays.ContainsKey(32));
+        Assert.Equal(5, displays.Count);
+
+        using var json = JsonDocument.Parse(RecordedPage.Tree(state));
+        var body = json.RootElement.GetProperty("document").GetProperty("children").EnumerateArray()
+            .Single(item => item.GetProperty("name").GetString() == "HTML")
+            .GetProperty("children").EnumerateArray()
+            .Single(item => item.GetProperty("name").GetString() == "BODY");
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("noLayoutObject").ValueKind);
+        var table = body.GetProperty("children").EnumerateArray().Single(item => item.GetProperty("id").GetInt64() == 13);
+        Assert.Equal("none", table.GetProperty("noLayoutObject").GetString());
+        var card = body.GetProperty("children").EnumerateArray().Single(item => item.GetProperty("id").GetInt64() == 22);
+        Assert.Equal("contents", card.GetProperty("noLayoutObject").GetString());
+
+        var content = RecordedPage.Content(state, "https://example.test/", 4_000_000_000, 4_000_000_000, "presented");
+        Assert.Contains(content.Evidence.Notes, note => note.StartsWith("5 elements had no layout object at the frame", StringComparison.Ordinal) &&
+            note.Contains("gives 2 of them display: none", StringComparison.Ordinal) &&
+            note.Contains("and 3 display: contents", StringComparison.Ordinal) &&
+            note.Contains("No layout object recorded", StringComparison.Ordinal));
+        Assert.Contains("data-a11y-recorded-no-layout-object", Encoding.UTF8.GetString(RecordedPage.Builder()), StringComparison.Ordinal);
+    }
+
     // Stage 3, with RECORDER_RECREATION_CHROMIUM set to the instrumented
     // Chromium: a page whose recorded box sizes, child offsets, and item
     // rectangles differ from those Blink would lay out is drawn with the
@@ -307,7 +355,11 @@ public sealed class RecordedPageTests : IDisposable
         Add(5, 3, "element", "BODY");
         Add(6, 5, "element", "DIV");
         Add(7, 6, "text", "#text", "Hello");
+        // Recorded without a layout object: it takes display: none.
+        Add(8, 5, "element", "SPAN");
+        Add(9, 8, "text", "#text", "not rendered");
         var state = new BrowserDocumentState("token-a dom-document-1") { Dom = tree, DomCompleteness = BrowserStateCompleteness.Complete };
+        state.Layout.ApplyNode(J("""{"nodeId":8,"layoutObjectPresent":false,"computedStyle":null,"boxFragments":null}"""));
         state.Layout.ApplyNode(J("""
             {"nodeId":5,"computedStyle":null,"boxFragments":{"effectiveZoom":1,"fragments":[{"width":784,"height":300,"breakToken":null,"scrollableOverflow":null,
               "children":[{"kind":"box","x":30,"y":40,"nodeId":6,"fragmentIndex":0,"fragment":null}]}],"naturalSize":null}}
@@ -365,6 +417,9 @@ public sealed class RecordedPageTests : IDisposable
             })())
             """));
         Assert.Equal([300, 30, 40, 250, 123, 5, 7, 60], measured.RootElement.EnumerateArray().Select(value => value.GetDouble()).ToArray());
+        Assert.Equal("none 0", await Evaluate("""
+            (() => { const span = document.querySelector("span"); return getComputedStyle(span).display + " " + span.getClientRects().length; })()
+            """));
     }
 
     [Fact]

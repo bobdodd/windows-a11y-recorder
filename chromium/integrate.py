@@ -6584,7 +6584,7 @@ BLINK_RECREATION_STYLE_ANCHOR = (
     "\n}\n\nconst ComputedStyle& StyleResolver::StyleForViewport() {\n"
 )
 BLINK_RECREATION_STYLE_MARKER = "recorder_recorded_style"
-BLINK_RECREATION_STYLE_HOOK = """
+STAGE_1A_BLINK_RECREATION_STYLE_HOOK = """
   // Windows A11y Recorder recreation mode: an element's recorded computed
   // style is added as its last author declarations, important and attached
   // to the element, so it wins over every style sheet rule, the element's
@@ -6616,6 +6616,58 @@ BLINK_RECREATION_STYLE_HOOK = """
                                           /*is_inline_style=*/true);
     }
   }"""
+BLINK_RECREATION_STYLE_HOOK = """
+  // Windows A11y Recorder recreation mode: an element's recorded computed
+  // style is added as its last author declarations, important and attached
+  // to the element, so it wins over every style sheet rule, the element's
+  // own style attribute, and animations. The recorded style is read from the
+  // element's data-a11y-recorded-style attribute. An element recorded without
+  // a layout object at the frame then takes the display the recreation
+  // inferred for it, none or contents, from its
+  // data-a11y-recorded-no-layout-object attribute; it is set after the
+  // recorded style, so that it replaces any recorded display. A copy of the
+  // element in a user agent shadow tree, as an svg use element makes, does
+  // not take it: the copy's own layout object was not the one recorded.
+  if (a11y_recorder::IsRecreationMode() && element.IsStyledElement() &&
+      !state.IsForPseudoElement()) {
+    const AtomicString& recorder_recorded_style =
+        element.getAttribute(AtomicString("data-a11y-recorded-style"));
+    const AtomicString& recorder_no_layout_object = element.getAttribute(
+        AtomicString("data-a11y-recorded-no-layout-object"));
+    const char* recorder_inferred_display =
+        element.IsInUserAgentShadowRoot()         ? nullptr
+        : recorder_no_layout_object == "none"     ? "display: none"
+        : recorder_no_layout_object == "contents" ? "display: contents"
+                                                  : nullptr;
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display) {
+      auto* recorder_imposed =
+          MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+      auto recorder_impose = [&](const String& recorder_text) {
+        const ImmutableCSSPropertyValueSet* recorder_parsed =
+            CSSParser::ParseInlineStyleDeclaration(recorder_text, &element);
+        for (unsigned recorder_index = 0;
+             recorder_index < recorder_parsed->PropertyCount();
+             ++recorder_index) {
+          const CSSPropertyValue& recorder_property =
+              recorder_parsed->PropertyAt(recorder_index);
+          recorder_imposed->SetProperty(recorder_property.Name(),
+                                        recorder_property.Value(),
+                                        /*important=*/true);
+        }
+      };
+      if (!recorder_recorded_style.IsNull()) {
+        recorder_impose(recorder_recorded_style);
+      }
+      if (recorder_inferred_display) {
+        recorder_impose(recorder_inferred_display);
+      }
+      collector.BeginAddingAuthorRulesForTreeScope(element.GetTreeScope());
+      collector.AddElementStyleProperties(recorder_imposed,
+                                          CascadeOrigin::kAuthor,
+                                          /*is_cacheable=*/false,
+                                          /*is_inline_style=*/true);
+    }
+  }"""
 
 
 def patch_blink_style_resolver(path: Path) -> None:
@@ -6623,6 +6675,11 @@ def patch_blink_style_resolver(path: Path) -> None:
     text = read_source(path)
     text = add_includes_after(
         text, BLINK_STYLE_RESOLVER_INCLUDE, BLINK_RECREATION_STYLE_INCLUDES, path
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        ((STAGE_1A_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),),
+        path,
     )
     text = insert_before_once(
         text,
@@ -6645,6 +6702,7 @@ BLINK_RECREATION_INSPECTOR_INCLUDES = (
     BLINK_BRIDGE_INCLUDE,
     '#include "third_party/blink/renderer/core/css/css_property_value_set.h"',
     '#include "third_party/blink/renderer/core/css/parser/css_parser.h"',
+    '#include "third_party/blink/renderer/core/dom/shadow_root.h"',
     '#include "third_party/blink/renderer/core/inspector/'
     'inspector_style_sheet.h"',
 )
@@ -6709,6 +6767,83 @@ static std::unique_ptr<protocol::CSS::RuleMatch> RecorderRecordedStyleMatch(
       .build();
 }
 """
+BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER_MARKER = "RecorderNoLayoutObjectMatch(\n"
+BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER = """
+// Windows A11y Recorder recreation mode: the display the recreation inferred
+// for an element recorded without a layout object at the frame, as style
+// resolution imposes it, reported to DevTools as a matched rule named "No
+// layout object recorded", so that it is not shown as a recorded value. It is
+// reported after the recorded style, so DevTools shows it first. Returns null
+// outside the recreation mode and for any other element.
+static std::unique_ptr<protocol::CSS::RuleMatch> RecorderNoLayoutObjectMatch(
+    Element* element) {
+  if (!a11y_recorder::IsRecreationMode() || !element ||
+      !element->IsStyledElement() || element->IsInUserAgentShadowRoot()) {
+    return nullptr;
+  }
+  const AtomicString& recorder_value = element->getAttribute(
+      AtomicString("data-a11y-recorded-no-layout-object"));
+  const char* recorder_text =
+      recorder_value == "none"       ? "display: none"
+      : recorder_value == "contents" ? "display: contents"
+                                     : nullptr;
+  if (!recorder_text) {
+    return nullptr;
+  }
+  const ImmutableCSSPropertyValueSet* recorder_parsed =
+      CSSParser::ParseInlineStyleDeclaration(recorder_text, element);
+  auto* recorder_declarations =
+      MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+  for (unsigned recorder_index = 0;
+       recorder_index < recorder_parsed->PropertyCount(); ++recorder_index) {
+    const CSSPropertyValue& recorder_property =
+        recorder_parsed->PropertyAt(recorder_index);
+    recorder_declarations->SetProperty(recorder_property.Name(),
+                                       recorder_property.Value(),
+                                       /*important=*/true);
+  }
+  if (!recorder_declarations->PropertyCount()) {
+    return nullptr;
+  }
+  InspectorStyle* recorder_style = MakeGarbageCollected<InspectorStyle>(
+      recorder_declarations->EnsureCSSStyleDeclaration(
+          element->GetExecutionContext()),
+      nullptr, nullptr);
+  auto recorder_selectors =
+      std::make_unique<protocol::Array<protocol::CSS::Value>>();
+  recorder_selectors->emplace_back(protocol::CSS::Value::create()
+                                       .setText("No layout object recorded")
+                                       .build());
+  auto recorder_matching = std::make_unique<protocol::Array<int>>();
+  recorder_matching->push_back(0);
+  return protocol::CSS::RuleMatch::create()
+      .setRule(protocol::CSS::CSSRule::create()
+                   .setSelectorList(
+                       protocol::CSS::SelectorList::create()
+                           .setSelectors(std::move(recorder_selectors))
+                           .setText("No layout object recorded")
+                           .build())
+                   .setOrigin(protocol::CSS::StyleSheetOriginEnum::Regular)
+                   .setStyle(recorder_style->BuildObjectForStyle())
+                   .build())
+      .setMatchingSelectors(std::move(recorder_matching))
+      .build();
+}
+"""
+BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_MARKER = (
+    "RecorderNoLayoutObjectMatch(element)"
+)
+BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_HOOK = """\
+  // Windows A11y Recorder recreation mode: the display inferred for an
+  // element recorded without a layout object.
+  if (element_pseudo_id == kPseudoIdNone) {
+    if (std::unique_ptr<protocol::CSS::RuleMatch> recorder_inferred =
+            RecorderNoLayoutObjectMatch(element)) {
+      (*matched_css_rules)->emplace_back(std::move(recorder_inferred));
+    }
+  }
+
+"""
 BLINK_RECREATION_INSPECTOR_MATCHED_ANCHOR = (
     "  // Inherited styles.\n  *inherited_entries =\n"
 )
@@ -6761,6 +6896,22 @@ def patch_blink_inspector_css_agent(path: Path) -> None:
         BLINK_RECREATION_INSPECTOR_MATCHED_ANCHOR,
         BLINK_RECREATION_INSPECTOR_MATCHED_HOOK,
         BLINK_RECREATION_INSPECTOR_MATCHED_MARKER,
+        path,
+    )
+    # Inserted after the recorded style's helper and rule, nearer their
+    # anchors, so the inferred display is reported after the recorded style.
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_HELPER_ANCHOR,
+        BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER,
+        BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_MATCHED_ANCHOR,
+        BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_HOOK,
+        BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_MARKER,
         path,
     )
     text = insert_before_once(

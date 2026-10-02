@@ -98,6 +98,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (node.recordedLayout !== null && node.recordedLayout !== undefined) {
           element.setAttribute("data-a11y-recorded-layout", node.recordedLayout);
         }
+        if (node.noLayoutObject !== null && node.noLayoutObject !== undefined) {
+          element.setAttribute("data-a11y-recorded-no-layout-object", node.noLayoutObject);
+        }
         if (node.shadowRoot) {
           attachShadow(element, node.shadowRoot, namespace);
         }

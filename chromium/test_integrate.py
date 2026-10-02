@@ -6437,6 +6437,43 @@ class RecreationIntegrationTests(unittest.TestCase):
             INTEGRATE.describe_signature_mismatches("patched", first, signatures),
         )
 
+    def test_upgrades_the_stage_1a_style_hook_to_the_inferred_display(self):
+        self.assertNotIn(
+            INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK,
+            INTEGRATE.BLINK_RECREATION_STYLE_HOOK,
+        )
+        source = self.STYLE_RESOLVER_SOURCE.replace(
+            INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK
+            + INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            1,
+        )
+        self.assertIn(INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK, source)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_STYLE_HOOK))
+        hook = INTEGRATE.BLINK_RECREATION_STYLE_HOOK
+        # Only the two inferred values are accepted, and the inferred display
+        # is set after the recorded style, so it replaces a recorded display.
+        self.assertIn('"data-a11y-recorded-no-layout-object"', hook)
+        self.assertIn('recorder_no_layout_object == "none"     ? "display: none"', hook)
+        self.assertIn("element.IsInUserAgentShadowRoot()         ? nullptr", hook)
+        self.assertIn('recorder_no_layout_object == "contents" ? "display: contents"', hook)
+        self.assertLess(
+            hook.index("recorder_impose(recorder_recorded_style);"),
+            hook.index("recorder_impose(recorder_inferred_display);"),
+        )
+        self.assertIn("/*important=*/true", hook)
+        # Blink's String names its prefix test starts_with; the hook uses no
+        # such call, and no Node type.
+        self.assertNotIn("StartsWith", hook)
+
     def test_the_switch_is_passed_to_renderers_without_a_recorder(self):
         bridge = MODULE_PATH.parent / "recorder_bridge"
         switches = (bridge / "recorder_switches.h").read_text(encoding="utf-8")
@@ -6502,8 +6539,31 @@ class RecreationIntegrationTests(unittest.TestCase):
             INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER,
             INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK,
             INTEGRATE.BLINK_RECREATION_INSPECTOR_INHERITED_HOOK,
+            INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER,
+            INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_HOOK,
         ):
             self.assertEqual(1, first.count(hook))
+        # The inferred display is a rule of its own, defined after the
+        # recorded style's helper and reported after its rule, so DevTools
+        # shows it first; it is not reported for ancestors.
+        inferred_helper = first.index(INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER)
+        inferred_rule = first.index(INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_HOOK)
+        self.assertLess(first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER), inferred_helper)
+        self.assertLess(inferred_helper, first.index("InspectorCSSAgent::getMatchedStylesForNode("))
+        self.assertLess(first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK), inferred_rule)
+        self.assertLess(inferred_rule, first.index("  // Inherited styles."))
+        self.assertIn(
+            '.setText("No layout object recorded")',
+            INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER,
+        )
+        self.assertIn(
+            "element->IsInUserAgentShadowRoot()",
+            INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER,
+        )
+        self.assertNotIn(
+            "RecorderNoLayoutObjectMatch(match->element)",
+            first,
+        )
         for include in INTEGRATE.BLINK_RECREATION_INSPECTOR_INCLUDES:
             self.assertEqual(1, first.count(include + "\n"))
         # The helper is defined before its use; the element's block follows
