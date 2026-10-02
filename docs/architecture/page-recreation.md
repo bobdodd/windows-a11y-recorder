@@ -2760,6 +2760,10 @@ As built:
   with the instrumented build, now also checks that such an element takes
   no box; it runs on the target machine.
 
+On the target machine, reported by the owner on 2026-10-02 for revision
+55e3125: the instrumented Chromium built and the recreation ran, and fewer
+elements that were not rendered at the frame appeared on the page.
+
 #### Required tests
 
 - Unit tests: the font-file, font-face, and image records against the
