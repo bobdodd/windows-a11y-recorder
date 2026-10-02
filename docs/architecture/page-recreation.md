@@ -3056,6 +3056,33 @@ recording's five faces were read and answered in the development
 environment with the type `Fetch`. Revision after e12b61b answers either
 type at the font address.
 
+With the fonts answered (revision cf9fa2d), the owner reported the page
+as close to the recording when nothing animates and no select is open,
+with one difference: the text "Reset" of a button shown only while the
+preferences panel is open is drawn over the "Show" of the "Show
+Preferences" button.
+
+The button (`button#reset`) has `style="display: none;"` at the frame.
+Read from the recording in the development environment, at each frame of
+the two documents of the page: the button and its `span` have a latest
+layout record stating no layout object (change sets 53 and 120), and its
+text node "Reset" has a latest record stating one (change sets 44 and
+118), from before the button was hidden. The recreation therefore gave
+the button `display: contents`, as an element with no layout object over
+a node that had one ("Elements without a layout object"), and drew its
+text.
+
+The recording is at fault, not the inference: a node's change record is
+written only when the node is noted, and a text node was noted only when
+its layout object's style was set, not when its layout object was
+destroyed. When the button became `display: none`, Blink destroyed the
+text node's layout object in `Node::DetachLayoutTree`
+(`third_party/blink/renderer/core/dom/node.cc`), and nothing noted it.
+From the revision after cf9fa2d, `Node::DetachLayoutTree` notes every
+element and text node whose layout object it destroys, so the next
+change set records it with no layout object. A recording made before it
+keeps the stale record.
+
 #### Required tests
 
 - Unit tests: the font-file, font-face, and image records against the

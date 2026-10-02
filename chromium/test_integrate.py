@@ -5322,6 +5322,11 @@ class LayoutIntegrationTests(unittest.TestCase):
                 INTEGRATE.BLINK_TEXT_LAYOUT_CHANGE_HOOKS,
             ),
             (
+                "node.cc",
+                INTEGRATE.BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+                INTEGRATE.BLINK_NODE_LAYOUT_CHANGE_HOOKS,
+            ),
+            (
                 "style_engine.cc",
                 INTEGRATE.BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
                 INTEGRATE.BLINK_STYLE_ENGINE_LAYOUT_CHANGE_HOOKS,

@@ -11906,6 +11906,22 @@ BLINK_TEXT_LAYOUT_CHANGE_HOOKS = (
         "      RecorderNoteLayoutChange(this, 1);\n",
     ),
 )
+# A node whose layout object is destroyed is noted, so that its change record
+# states it has none. Without it, a text node under an element that became
+# display: none kept its last record, which stated a layout object.
+BLINK_NODE_LAYOUT_CHANGE_HOOKS = (
+    (
+        "  if (GetLayoutObject()) {\n"
+        "    GetLayoutObject()->DestroyAndCleanupAnonymousWrappers(performing_reattach);\n"
+        "  }\n"
+        "  SetLayoutObject(nullptr);\n",
+        "  if (GetLayoutObject()) {\n"
+        "    RecorderNoteLayoutChange(this, 1);\n"
+        "    GetLayoutObject()->DestroyAndCleanupAnonymousWrappers(performing_reattach);\n"
+        "  }\n"
+        "  SetLayoutObject(nullptr);\n",
+    ),
+)
 BLINK_LAYOUT_OBJECT_LAYOUT_CHANGE_HOOKS = (
     (
         "    element->SetComputedStyle(&style);\n",
@@ -14274,6 +14290,11 @@ def main() -> int:
             blink_core / "dom" / "text.cc",
             BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
             BLINK_TEXT_LAYOUT_CHANGE_HOOKS,
+        ),
+        (
+            blink_core / "dom" / "node.cc",
+            BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+            BLINK_NODE_LAYOUT_CHANGE_HOOKS,
         ),
         (
             blink_core / "css" / "style_engine.cc",
