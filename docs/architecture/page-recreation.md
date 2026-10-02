@@ -26,6 +26,54 @@ tools auditors already use. The recorder is an evidence logger, not an
 analyzer. A recreation is a view of recorded evidence, and it must not be
 presented as the page itself.
 
+## Requirement: the page exactly as drawn at the frame
+
+Stated by the owner on 2026-10-02:
+
+> When I open a frame in the recording, I expect to see a pixel-perfect
+> rendering of that frame's whole page. If there is animation, I will see
+> the page at that point in the animation. If a select is open and the
+> second item in the select is selected, that is exactly what I will see.
+> It needs to be precise and specific because it impacts visual
+> accessibility testing
+
+This governs every slice below. A recreation shows the whole page, not only
+the part in the viewport, drawn as it was drawn at the frame, with every
+transient state the frame shows. Nothing in the recreation moves on from
+the frame: animations, transitions, animated images, video, and carets
+show the state they had when the frame was drawn, and stay there. A
+difference from the frame is a defect of the recording or the recreation,
+not an accepted limit.
+
+What does not yet meet it (proposed 2026-10-02, to be agreed before work
+on it starts). Each item says what the recording would need; none is yet
+verified against Chromium's source.
+
+- Animated images. Sub-step 3 answers an animated image with its bytes,
+  and it then animates in the recreation from its first frame. The
+  recording does not hold which frame of each animated image was drawn at
+  each frame, and the recreation does not hold an image at a frame.
+- CSS animations and transitions. The recorded computed style is that of
+  the latest layout walk at or before the frame, which is not necessarily
+  the style drawn at the frame while an animation runs. Animations that
+  run on the compositor may not change the style the walk reads at all.
+  The recreation must also not run the recorded page's own animations
+  from the time it opens.
+- An open select. The recording does not hold whether a select's list was
+  open, which item was highlighted, or where the list was drawn.
+- Other transient states: hover (the pointer's position), active and focus
+  rings, the text caret and its blink phase, selection highlight, and
+  scrollbar state. Focus, selection, and scroll offsets are recorded and
+  applied; whether they are drawn as at the frame is not checked.
+- Style sheets, which are not recorded. Pseudo-elements take no recorded
+  style, and rules that depend on state (such as `:hover`) are lost.
+- Iframes, canvas, video, and other media, which are not recorded or not
+  built.
+- Drawing differences between the recording machine and the playback
+  machine, such as font smoothing settings and the graphics device.
+- Checking. The recorded screen frame is the reference for the viewport;
+  nothing compares the recreation with it yet.
+
 ## Decision
 
 This decision is revised by "Slice 3 design": the rebuilt page opens in the
@@ -2968,8 +3016,9 @@ Differences from the design above:
 - Images and font files are matched across the whole recording, not only
   within the document, since their records name no document (sub-step 2).
 - An animated image is answered with its recorded bytes and animates in
-  the recreation, from its first frame; it is not held at its first frame
-  as the design states. Holding it is not done in this sub-step.
+  the recreation, from its first frame. This does not meet the
+  requirement: the image must show the frame drawn at the recorded frame.
+  See "Requirement: the page exactly as drawn at the frame".
 
 Tests at this sub-step:
 
