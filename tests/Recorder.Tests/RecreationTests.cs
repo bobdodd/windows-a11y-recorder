@@ -104,6 +104,12 @@ public sealed class RecreationTests : IDisposable
             Assert.Equal("fixed", json.RootElement.GetProperty("recreation").GetProperty("source").GetString());
         }
 
+        // Stage 3: the times of the steps of opening the recreation.
+        server.AddTiming("Writing the page", TimeSpan.FromMilliseconds(12.34));
+        Assert.Equal(
+            """[{"step":"Writing the page","milliseconds":12.3}]""",
+            await client.GetStringAsync(server.BaseAddress + "timings.json", token));
+
         var other = RecreationServer.NewToken();
         foreach (var address in new[]
         {
@@ -182,9 +188,11 @@ public sealed class RecreationTests : IDisposable
         // the browser chooses on the loopback interface.
         Assert.Equal("about:blank", arguments[^1]);
         Assert.Contains("--remote-debugging-port=0", arguments);
+        // Stage 3: the renderers impose the recorded values.
+        Assert.Contains("--a11y-recorder-recreation", arguments);
         Assert.DoesNotContain(arguments, argument => argument.StartsWith("--remote-debugging-address", StringComparison.Ordinal));
         // Without the bootstrap switch the instrumented browser records nothing.
-        Assert.DoesNotContain(arguments, argument => argument.StartsWith("--a11y-recorder", StringComparison.Ordinal));
+        Assert.DoesNotContain(arguments, argument => argument.StartsWith("--a11y-recorder-bootstrap", StringComparison.Ordinal));
     }
 
     [Fact]

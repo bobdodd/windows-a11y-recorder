@@ -74,6 +74,10 @@ public static class RecordedPage
         {
             notes.Add("No layout checkpoint of the page was recorded at or before the frame, so the viewport is the browser window's.");
         }
+        var elements = tree.Nodes.Values.Where(node => node.NodeType == "element").ToList();
+        var withLayout = elements.Count(node => state.Layout.Nodes.ContainsKey(node.Id));
+        notes.Add($"{withLayout.ToString(CultureInfo.InvariantCulture)} of the {elements.Count.ToString(CultureInfo.InvariantCulture)} recorded elements have a layout record, whose recorded style and box fragments the recreation imposes. They are written on each element in its data-a11y-recorded-style and data-a11y-recorded-layout attributes, which are shown in the Elements pane but were not attributes of the recorded page. Pseudo-elements, such as ::before, take no recorded style: they appear only as far as the page's recorded style elements make them.");
+        notes.Add("A box or block whose recorded layout could not be imposed, as when Blink lays out different children or text from those recorded, keeps Blink's layout, and is listed in DevTools' Console with the reason. Images draw nothing, and text in a font that is not on this machine keeps Blink's shaping in a fallback font.");
         notes.Add("Element namespaces are not recorded: an element named in capitals is built in the HTML namespace, and any other in the namespace of an svg or math ancestor.");
         var evidence = RecordedEvidence.Create(
             state,
@@ -146,7 +150,7 @@ public static class RecordedPage
         {
             writer.WriteStartObject();
             writer.WritePropertyName("document");
-            WriteNode(writer, tree, documentId, documentId, manualSlots, manual: false);
+            WriteNode(writer, tree, state.Layout, documentId, documentId, manualSlots, manual: false);
 
             writer.WriteStartArray("manualSlots");
             foreach (var (slot, assigned) in manualSlots)
@@ -213,6 +217,7 @@ public static class RecordedPage
     private static void WriteNode(
         Utf8JsonWriter writer,
         DomDocumentTree tree,
+        LayoutDocumentChangeState layout,
         long id,
         long documentId,
         List<(long Slot, long[] Assigned)> manualSlots,
@@ -250,6 +255,11 @@ public static class RecordedPage
         }
         writer.WriteEndArray();
         WriteText(writer, "data", node.Data == DomTreeRebuilder.Cut ? null : node.Data);
+        // Stage 3: an element's recorded style and box fragments, from its
+        // latest layout record, which the recreation mode imposes.
+        JsonElement? record = node.NodeType == "element" && layout.Nodes.TryGetValue(id, out var found) ? found : null;
+        WriteText(writer, "recordedStyle", record is { } styled ? RecordedStyle(styled) : null);
+        WriteText(writer, "recordedLayout", record is { } laidOut ? RecordedLayout(laidOut) : null);
         if (node.NodeName == "SLOT" && manual && node.AssignedNodes is { } assigned && assigned != DomTreeRebuilder.Cut)
         {
             manualSlots.Add((id, JsonSerializer.Deserialize<long[]>(assigned) ?? []));
@@ -275,16 +285,17 @@ public static class RecordedPage
             writer.WriteBoolean("serializable", fields[5].GetBoolean());
             writer.WritePropertyName("referenceTarget");
             fields[8].WriteTo(writer);
-            WriteChildren(writer, tree, shadow, documentId, manualSlots, fields[3].GetString() == "manual");
+            WriteChildren(writer, tree, layout, shadow, documentId, manualSlots, fields[3].GetString() == "manual");
             writer.WriteEndObject();
         }
-        WriteChildren(writer, tree, node, documentId, manualSlots, manual);
+        WriteChildren(writer, tree, layout, node, documentId, manualSlots, manual);
         writer.WriteEndObject();
     }
 
     private static void WriteChildren(
         Utf8JsonWriter writer,
         DomDocumentTree tree,
+        LayoutDocumentChangeState layout,
         DomNode node,
         long documentId,
         List<(long Slot, long[] Assigned)> manualSlots,
@@ -295,11 +306,50 @@ public static class RecordedPage
         {
             if (tree.Nodes.ContainsKey(child))
             {
-                WriteNode(writer, tree, child, documentId, manualSlots, manual);
+                WriteNode(writer, tree, layout, child, documentId, manualSlots, manual);
             }
         }
         writer.WriteEndArray();
     }
+
+    // The recorded computed style and custom properties of a layout record,
+    // as CSS declarations, for the data-a11y-recorded-style attribute. A
+    // property Blink gave no value is left out. Returns null for a record
+    // without a computed style.
+    public static string? RecordedStyle(JsonElement record)
+    {
+        if (!record.TryGetProperty("computedStyle", out var style) || style.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        var declarations = new StringBuilder();
+        foreach (var property in style.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                declarations.Append(property.Name).Append(": ").Append(property.Value.GetString()).Append("; ");
+            }
+        }
+        if (record.TryGetProperty("customProperties", out var custom) && custom.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in custom.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String)
+                {
+                    declarations.Append(property.Name).Append(": ").Append(property.Value.GetString()).Append("; ");
+                }
+            }
+        }
+        return declarations.Length == 0 ? null : declarations.ToString(0, declarations.Length - 1);
+    }
+
+    // The recorded box fragments of a layout record, its boxFragments object
+    // as recorded, for the data-a11y-recorded-layout attribute. Returns null
+    // for a record without one.
+    public static string? RecordedLayout(JsonElement record) =>
+        record.TryGetProperty("boxFragments", out var fragments) && fragments.ValueKind == JsonValueKind.Object
+            ? fragments.GetRawText()
+            : null;
 
     private static void WriteText(Utf8JsonWriter writer, string name, string? value)
     {

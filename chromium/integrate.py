@@ -6778,7 +6778,7 @@ def patch_blink_inspector_css_agent(path: Path) -> None:
 BLINK_BOX_FRAGMENT_BUILDER_INCLUDE = (
     '#include "third_party/blink/renderer/core/layout/box_fragment_builder.h"'
 )
-BLINK_RECREATION_FRAGMENT_INCLUDES = (
+LEGACY_FEASIBILITY_FRAGMENT_INCLUDES = (
     "#include <cmath>",
     BLINK_BRIDGE_INCLUDE,
     '#include "third_party/blink/renderer/core/dom/element.h"',
@@ -6791,8 +6791,8 @@ BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR = (
     "\nconst LayoutResult* BoxFragmentBuilder::ToBoxFragment(\n"
     "    WritingMode block_or_line_writing_mode) {\n"
 )
-BLINK_RECREATION_FRAGMENT_HELPER_MARKER = "RecorderRecordedFragment("
-BLINK_RECREATION_FRAGMENT_HELPER = """
+LEGACY_FEASIBILITY_FRAGMENT_HELPER_MARKER = "RecorderRecordedFragment("
+LEGACY_FEASIBILITY_FRAGMENT_HELPER = """
 namespace {
 
 // Windows A11y Recorder recreation mode: the recorded box fragment of a node,
@@ -6844,8 +6844,8 @@ BLINK_RECREATION_FRAGMENT_ANCHOR = (
     "  Finalize();\n\n"
     "  if (box_type_ == PhysicalFragment::kNormalBox && node_ &&\n"
 )
-BLINK_RECREATION_FRAGMENT_MARKER = "recorder_own_fragment"
-BLINK_RECREATION_FRAGMENT_HOOK = """\
+LEGACY_FEASIBILITY_FRAGMENT_MARKER = "recorder_own_fragment"
+LEGACY_FEASIBILITY_FRAGMENT_HOOK = """\
   // Windows A11y Recorder recreation mode: the box's recorded size and its
   // children's recorded offsets replace those its layout algorithm produced.
   // Only a fragment that is the whole of its box takes a recorded fragment,
@@ -6890,6 +6890,17 @@ def patch_blink_box_fragment_builder(path: Path) -> None:
         BLINK_RECREATION_FRAGMENT_INCLUDES,
         path,
     )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (LEGACY_FEASIBILITY_FRAGMENT_HELPER, BLINK_RECREATION_FRAGMENT_HELPER),
+            (LEGACY_FEASIBILITY_FRAGMENT_HOOK, BLINK_RECREATION_FRAGMENT_HOOK),
+        ),
+        path,
+    )
+    require_no_feasibility_text(
+        text, ('"data-a11y-recorded-fragment"',), path
+    )
     text = insert_before_once(
         text,
         BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
@@ -6925,8 +6936,8 @@ BLINK_RECREATION_ITEM_SETTERS = """\
 BLINK_RECREATION_SHAPE_DECLARATION_ANCHOR = (
     "  static const ShapeResult* CreateForStretchyMathOperator(const Font*,\n"
 )
-BLINK_RECREATION_SHAPE_DECLARATION_MARKER = "CreateFromRecordedGlyphs("
-BLINK_RECREATION_SHAPE_DECLARATION = """\
+LEGACY_FEASIBILITY_SHAPE_DECLARATION_MARKER = "CreateFromRecordedGlyphs("
+LEGACY_FEASIBILITY_SHAPE_DECLARATION = """\
   // Windows A11y Recorder recreation mode: a left to right shaping result of
   // one glyph for each character from `start_index`, drawn with the primary
   // font of `font`. Each glyph is the font's glyph for a code point, and its
@@ -6946,10 +6957,10 @@ BLINK_RECREATION_SHAPE_DEFINITION_ANCHOR = (
     "    TextDirection direction,\n"
     "    Glyph glyph_variant,\n"
 )
-BLINK_RECREATION_SHAPE_DEFINITION_MARKER = (
+LEGACY_FEASIBILITY_SHAPE_DEFINITION_MARKER = (
     "const ShapeResult* ShapeResult::CreateFromRecordedGlyphs("
 )
-BLINK_RECREATION_SHAPE_DEFINITION = """
+LEGACY_FEASIBILITY_SHAPE_DEFINITION = """
 // Windows A11y Recorder recreation mode. After the pattern of
 // CreateForSpaces.
 const ShapeResult* ShapeResult::CreateFromRecordedGlyphs(
@@ -6987,7 +6998,7 @@ BLINK_FRAGMENT_ITEMS_BUILDER_INCLUDE = (
     '#include "third_party/blink/renderer/core/layout/inline/'
     'fragment_items_builder.h"'
 )
-BLINK_RECREATION_ITEMS_INCLUDES = (
+LEGACY_FEASIBILITY_ITEMS_INCLUDES = (
     "#include <cmath>",
     BLINK_BRIDGE_INCLUDE,
     '#include "third_party/blink/renderer/core/dom/element.h"',
@@ -7002,8 +7013,8 @@ BLINK_RECREATION_ITEMS_HELPER_ANCHOR = (
     "\nvoid FragmentItemsBuilder::ConvertToPhysical("
     "const PhysicalSize& outer_size) {\n"
 )
-BLINK_RECREATION_ITEMS_HELPER_MARKER = "RecorderRecordedEntries("
-BLINK_RECREATION_ITEMS_HELPER = """
+LEGACY_FEASIBILITY_ITEMS_HELPER_MARKER = "RecorderRecordedEntries("
+LEGACY_FEASIBILITY_ITEMS_HELPER = """
 namespace {
 
 // Windows A11y Recorder recreation mode, feasibility step 1c: the recorded
@@ -7103,8 +7114,8 @@ BLINK_RECREATION_ITEMS_ANCHOR = (
     "  is_converted_to_physical_ = true;\n}\n\n"
     "void FragmentItemsBuilder::MoveChildrenInDirection("
 )
-BLINK_RECREATION_ITEMS_MARKER = "recorder_line_index"
-BLINK_RECREATION_ITEMS_HOOK = """\
+LEGACY_FEASIBILITY_ITEMS_MARKER = "recorder_line_index"
+LEGACY_FEASIBILITY_ITEMS_HOOK = """\
   // Windows A11y Recorder recreation mode: the block's recorded line, text,
   // and inline box rectangles, and its recorded glyphs, replace those of its
   // layout, in a horizontal, left to right writing mode. Lines are matched by
@@ -7197,7 +7208,7 @@ BLINK_RECREATION_ITEMS_HOOK = """\
 # The hook as written by revision f23a582, which did not compile: WTF's
 # Vector::push_back cannot take a braced initializer list. A checkout that
 # holds it is upgraded to the current hook.
-INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK = BLINK_RECREATION_ITEMS_HOOK.replace(
+INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK = LEGACY_FEASIBILITY_ITEMS_HOOK.replace(
     """              recorder_run.push_back(ShapeResult::RecorderGlyph{
                   *recorder_code_point,
                   static_cast<float>(*recorder_advance * recorder_zoom)});""",
@@ -7205,6 +7216,545 @@ INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK = BLINK_RECREATION_ITEMS_HOOK.replace(
                   {*recorder_code_point,
                    static_cast<float>(*recorder_advance * recorder_zoom)});""",
 )
+
+
+# Recreation mode, stage 3: the recorded values as recorded. The builder
+# writes each element's recorded box fragments, the boxFragments object of its
+# latest layout record, as JSON in its data-a11y-recorded-layout attribute,
+# and the hooks read them in place of the feasibility steps' attributes. See
+# docs/architecture/page-recreation.md, "Stage 3: a recorded frame rendered
+# from recorded values". A checkout patched with a feasibility step's helper
+# or hook is upgraded to the stage 3 one.
+BLINK_RECREATION_LAYOUT_HELPERS = """\
+// Windows A11y Recorder recreation mode: the recorded box fragments of a
+// node, the boxFragments object of its latest recorded layout record, read
+// from its element's data-a11y-recorded-layout attribute. Returns null for a
+// node without one, or with one that is not a JSON object.
+std::unique_ptr<JSONObject> RecorderRecordedLayout(const Node* node) {
+  const auto* recorder_element = DynamicTo<Element>(node);
+  if (!recorder_element) {
+    return nullptr;
+  }
+  const AtomicString& recorder_text = recorder_element->getAttribute(
+      AtomicString("data-a11y-recorded-layout"));
+  if (recorder_text.IsNull()) {
+    return nullptr;
+  }
+  return JSONObject::From(ParseJSON(recorder_text.GetString()));
+}
+
+// Windows A11y Recorder recreation mode: says in the console of the node's
+// document that the node's recorded layout was not imposed, and why, naming
+// the node so that DevTools can reveal it. A message repeated by a later
+// layout is not shown again.
+void RecorderReportNotImposed(const Node* node, const char* reason) {
+  if (!node) {
+    return;
+  }
+  Node* recorder_node = const_cast<Node*>(node);
+  const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_node);
+  StringBuilder recorder_text;
+  recorder_text.Append("Recorded layout not imposed on ");
+  recorder_text.Append(node->nodeName());
+  if (const auto* recorder_element = DynamicTo<Element>(node);
+      recorder_element && recorder_element->HasID()) {
+    recorder_text.Append('#');
+    recorder_text.Append(recorder_element->GetIdAttribute());
+  }
+  recorder_text.Append(" (node ");
+  recorder_text.AppendNumber(recorder_id);
+  recorder_text.Append("): ");
+  recorder_text.Append(reason);
+  recorder_text.Append('.');
+  auto* recorder_message = MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kRendering,
+      mojom::blink::ConsoleMessageLevel::kWarning,
+      recorder_text.ToString());
+  Document& recorder_document = recorder_node->GetDocument();
+  if (LocalFrame* recorder_frame = recorder_document.GetFrame()) {
+    recorder_message->SetNodes(recorder_frame, {recorder_id});
+  }
+  recorder_document.AddConsoleMessage(recorder_message,
+                                      /*discard_duplicates=*/true);
+}
+"""
+BLINK_RECREATION_LAYOUT_INCLUDES = (
+    '#include "third_party/blink/public/mojom/devtools/'
+    'console_message.mojom-blink.h"',
+    '#include "third_party/blink/renderer/core/dom/document.h"',
+    '#include "third_party/blink/renderer/core/dom/dom_node_ids.h"',
+    '#include "third_party/blink/renderer/core/frame/local_frame.h"',
+    '#include "third_party/blink/renderer/core/inspector/console_message.h"',
+    '#include "third_party/blink/renderer/platform/json/json_parser.h"',
+    '#include "third_party/blink/renderer/platform/json/json_values.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_builder.h"',
+)
+BLINK_RECREATION_FRAGMENT_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    *BLINK_RECREATION_LAYOUT_INCLUDES,
+)
+BLINK_RECREATION_FRAGMENT_HELPER_MARKER = "RecorderRecordedLayout("
+BLINK_RECREATION_FRAGMENT_HELPER = f"""
+namespace {{
+
+{BLINK_RECREATION_LAYOUT_HELPERS}
+}}  // namespace
+"""
+BLINK_RECREATION_FRAGMENT_MARKER = "recorder_recorded_fragment"
+BLINK_RECREATION_FRAGMENT_HOOK = """\
+  // Windows A11y Recorder recreation mode: the box's recorded border-box
+  // size, and its children's recorded offsets, replace those its layout
+  // algorithm produced, in a horizontal, left to right writing mode, in which
+  // the builder's logical offsets equal the recorded physical ones. Only a
+  // box laid out in one fragment and recorded in one takes them, and its
+  // children take the offsets of the recorded child links at their indexes
+  // only when it holds as many children as the recorded fragment links.
+  if (a11y_recorder::IsRecreationMode() && node_ &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    const Node* recorder_node = node_.GetDOMNode();
+    if (std::unique_ptr<JSONObject> recorder_layout =
+            RecorderRecordedLayout(recorder_node)) {
+      const JSONArray* recorder_fragments =
+          recorder_layout->GetArray("fragments");
+      const JSONObject* recorder_recorded_fragment =
+          recorder_fragments && recorder_fragments->size() == 1u
+              ? JSONObject::Cast(recorder_fragments->at(0))
+              : nullptr;
+      double recorder_width = 0;
+      double recorder_height = 0;
+      if (GetConstraintSpace().HasBlockFragmentation() ||
+          IsFragmentainerBoxType() || PreviousBreakToken()) {
+        RecorderReportNotImposed(recorder_node,
+                                 "the box is laid out in more than one "
+                                 "fragment");
+      } else if (!recorder_recorded_fragment ||
+                 !recorder_recorded_fragment->GetDouble("width",
+                                                        &recorder_width) ||
+                 !recorder_recorded_fragment->GetDouble("height",
+                                                        &recorder_height)) {
+        RecorderReportNotImposed(recorder_node,
+                                 "the box was not recorded in one fragment");
+      } else {
+        size_.inline_size = LayoutUnit::FromDoubleRound(recorder_width);
+        size_.block_size = LayoutUnit::FromDoubleRound(recorder_height);
+        const JSONArray* recorder_links =
+            recorder_recorded_fragment->GetArray("children");
+        const wtf_size_t recorder_recorded_count =
+            recorder_links ? recorder_links->size() : 0u;
+        if (recorder_recorded_count != children_.size()) {
+          RecorderReportNotImposed(recorder_node,
+                                   "the box holds a different number of "
+                                   "children from its recorded fragment, so "
+                                   "its children keep their offsets");
+        } else {
+          for (wtf_size_t recorder_index = 0;
+               recorder_index < recorder_recorded_count; ++recorder_index) {
+            const JSONObject* recorder_link =
+                JSONObject::Cast(recorder_links->at(recorder_index));
+            double recorder_x = 0;
+            double recorder_y = 0;
+            if (recorder_link && recorder_link->GetDouble("x", &recorder_x) &&
+                recorder_link->GetDouble("y", &recorder_y)) {
+              SetChildOffset(recorder_index,
+                             LogicalOffset(
+                                 LayoutUnit::FromDoubleRound(recorder_x),
+                                 LayoutUnit::FromDoubleRound(recorder_y)));
+            }
+          }
+        }
+      }
+    }
+  }
+
+"""
+
+BLINK_RECREATION_SHAPE_DECLARATION_MARKER = (
+    "unsigned num_characters,\n      base::span<const RecorderGlyph> glyphs);"
+)
+BLINK_RECREATION_SHAPE_DECLARATION = """\
+  // Windows A11y Recorder recreation mode: a left to right shaping result of
+  // `num_characters` characters from `start_index`, drawn with the primary
+  // font of `font` from recorded glyphs. Each glyph names the character it
+  // starts from, relative to `start_index`, and its advance in layout
+  // pixels. Returns null for no glyphs, too many, or glyphs out of order.
+  struct RecorderGlyph {
+    Glyph glyph;
+    unsigned character_index;
+    float advance;
+  };
+  static const ShapeResult* CreateFromRecordedGlyphs(
+      const Font* font,
+      unsigned start_index,
+      unsigned num_characters,
+      base::span<const RecorderGlyph> glyphs);
+"""
+BLINK_RECREATION_SHAPE_DEFINITION_MARKER = (
+    "run_glyphs[i] = {glyphs[i].glyph, glyphs[i].character_index,"
+)
+BLINK_RECREATION_SHAPE_DEFINITION = """
+// Windows A11y Recorder recreation mode. After the pattern of
+// CreateForSpaces.
+const ShapeResult* ShapeResult::CreateFromRecordedGlyphs(
+    const Font* font,
+    unsigned start_index,
+    unsigned num_characters,
+    base::span<const RecorderGlyph> glyphs) {
+  const SimpleFontData* font_data = font ? font->PrimaryFont() : nullptr;
+  if (!font_data || !num_characters || glyphs.empty() ||
+      glyphs.size() > HarfBuzzRunGlyphData::kMaxGlyphs) {
+    return nullptr;
+  }
+  unsigned previous_index = 0;
+  for (const RecorderGlyph& glyph : glyphs) {
+    if (glyph.character_index >= num_characters ||
+        glyph.character_index < previous_index) {
+      return nullptr;
+    }
+    previous_index = glyph.character_index;
+  }
+  const unsigned num_glyphs = static_cast<unsigned>(glyphs.size());
+  ShapeResult* result = MakeGarbageCollected<ShapeResult>(
+      start_index, num_characters, TextDirection::kLtr);
+  result->has_vertical_offsets_ =
+      font_data->PlatformData().IsVerticalAnyUpright();
+  ShapeResultRun* run = MakeGarbageCollected<ShapeResultRun>(
+      font_data, HB_DIRECTION_LTR, CanvasRotationInVertical::kRegular,
+      HB_SCRIPT_COMMON, start_index, num_glyphs, num_characters);
+  auto& run_glyphs = run->glyph_data_.MutableGlyphs();
+  float width = 0;
+  for (unsigned i = 0; i < num_glyphs; ++i) {
+    const TextRunLayoutUnit advance =
+        TextRunLayoutUnit::FromFloatRound(glyphs[i].advance);
+    run_glyphs[i] = {glyphs[i].glyph, glyphs[i].character_index,
+                     SafeToBreak::kSafe, advance};
+    width += advance.ToFloat();
+  }
+  result->width_ = run->width_ = width;
+  result->runs_.push_back(run);
+  return result;
+}
+"""
+
+BLINK_RECREATION_ITEMS_INCLUDES = (
+    "#include <cmath>",
+    BLINK_BRIDGE_INCLUDE,
+    '#include "base/containers/span.h"',
+    '#include "base/numerics/byte_conversions.h"',
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/layout/layout_box.h"',
+    *BLINK_RECREATION_LAYOUT_INCLUDES,
+    '#include "third_party/blink/renderer/platform/fonts/font_platform_data.h"',
+    '#include "third_party/blink/renderer/platform/fonts/shaping/'
+    'shape_result.h"',
+    '#include "third_party/blink/renderer/platform/fonts/shaping/'
+    'shape_result_view.h"',
+    '#include "third_party/blink/renderer/platform/fonts/simple_font_data.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/base64.h"',
+    '#include "third_party/skia/include/core/SkString.h"',
+    '#include "third_party/skia/include/core/SkTypeface.h"',
+)
+BLINK_RECREATION_ITEMS_HELPER_MARKER = "RecorderRecordedItemsFragment("
+BLINK_RECREATION_ITEMS_HELPER = f"""
+namespace {{
+
+{BLINK_RECREATION_LAYOUT_HELPERS}
+// Windows A11y Recorder recreation mode: the recorded fragment that holds a
+// block's items, and the recorded text they index. For a block with an
+// element, it is the element's only recorded fragment; for an anonymous
+// block, the fragment held by the first anonymous child link of its parent's
+// only recorded fragment whose text is the block's text. `layout` holds the
+// parsed record the result points into, and `node` is set to the node a
+// report names: the element, or the anonymous block's parent.
+const JSONObject* RecorderRecordedItemsFragment(
+    const LayoutBox* box,
+    const String& text_content,
+    std::unique_ptr<JSONObject>& layout,
+    String& recorded_text,
+    const Node*& node) {{
+  node = nullptr;
+  if (!box) {{
+    return nullptr;
+  }}
+  const bool recorder_anonymous = !box->GetNode();
+  const LayoutObject* recorder_parent = box->Parent();
+  node = recorder_anonymous
+             ? (recorder_parent ? recorder_parent->GetNode() : nullptr)
+             : box->GetNode();
+  layout = RecorderRecordedLayout(node);
+  if (!layout) {{
+    return nullptr;
+  }}
+  const JSONArray* recorder_fragments = layout->GetArray("fragments");
+  if (!recorder_fragments || recorder_fragments->size() != 1u) {{
+    return nullptr;
+  }}
+  const JSONObject* recorder_fragment =
+      JSONObject::Cast(recorder_fragments->at(0));
+  if (!recorder_fragment) {{
+    return nullptr;
+  }}
+  if (!recorder_anonymous) {{
+    if (!layout->GetString("textContent", &recorded_text)) {{
+      recorded_text = String();
+    }}
+    return recorder_fragment;
+  }}
+  const JSONArray* recorder_links = recorder_fragment->GetArray("children");
+  if (!recorder_links) {{
+    return nullptr;
+  }}
+  for (wtf_size_t recorder_index = 0; recorder_index < recorder_links->size();
+       ++recorder_index) {{
+    const JSONObject* recorder_link =
+        JSONObject::Cast(recorder_links->at(recorder_index));
+    String recorder_kind;
+    if (!recorder_link || !recorder_link->GetString("kind", &recorder_kind) ||
+        recorder_kind != "anonymous") {{
+      continue;
+    }}
+    const JSONObject* recorder_nested =
+        recorder_link->GetJSONObject("fragment");
+    String recorder_text;
+    if (recorder_nested &&
+        recorder_nested->GetString("textContent", &recorder_text) &&
+        recorder_text == text_content) {{
+      recorded_text = recorder_text;
+      return recorder_nested;
+    }}
+  }}
+  return nullptr;
+}}
+
+// The recorded type name of an item, as protocol 0.39 writes it.
+const char* RecorderItemType(const FragmentItem& item) {{
+  switch (item.Type()) {{
+    case FragmentItem::kText:
+      return "text";
+    case FragmentItem::kGeneratedText:
+      return "generated-text";
+    case FragmentItem::kLine:
+      return "line";
+    case FragmentItem::kBox:
+      return "box";
+    default:
+      return "invalid";
+  }}
+}}
+
+// The shaping result of a text item drawn from its recorded glyphs, when the
+// item was recorded with one horizontal, unrotated glyph run whose font has
+// the PostScript name and size of the primary font Blink chose for the item.
+// A glyph's advance is the distance to the next glyph's recorded position,
+// and the last glyph's is the rest of the recorded item width. Returns null
+// otherwise.
+const ShapeResult* RecorderShapeFromRecordedGlyphs(const FragmentItem& item,
+                                                   const JSONObject& recorded,
+                                                   double width) {{
+  const JSONArray* recorder_runs = recorded.GetArray("glyphRuns");
+  if (!recorder_runs || recorder_runs->size() != 1u) {{
+    return nullptr;
+  }}
+  const JSONObject* recorder_run = JSONObject::Cast(recorder_runs->at(0));
+  const JSONObject* recorder_font =
+      recorder_run ? recorder_run->GetJSONObject("font") : nullptr;
+  String recorder_name;
+  double recorder_size = 0;
+  bool recorder_horizontal = false;
+  int recorder_rotation = -1;
+  String recorder_packed;
+  if (!recorder_font ||
+      !recorder_font->GetString("postScriptName", &recorder_name) ||
+      !recorder_font->GetDouble("size", &recorder_size) ||
+      !recorder_run->GetBoolean("horizontal", &recorder_horizontal) ||
+      !recorder_horizontal ||
+      !recorder_run->GetInteger("rotation", &recorder_rotation) ||
+      recorder_rotation != 0 ||
+      !recorder_run->GetString("glyphs", &recorder_packed)) {{
+    return nullptr;
+  }}
+  const SimpleFontData* recorder_font_data = item.ScaledFont().PrimaryFont();
+  if (!recorder_font_data) {{
+    return nullptr;
+  }}
+  const FontPlatformData& recorder_platform =
+      recorder_font_data->PlatformData();
+  const SkTypeface* recorder_typeface = recorder_platform.Typeface();
+  SkString recorder_typeface_name;
+  if (!recorder_typeface ||
+      !recorder_typeface->getPostScriptName(&recorder_typeface_name) ||
+      String::FromUTF8(recorder_typeface_name.c_str()) != recorder_name ||
+      std::abs(recorder_platform.size() - recorder_size) > 0.001) {{
+    return nullptr;
+  }}
+  Vector<uint8_t> recorder_bytes;
+  constexpr size_t kRecorderPackedGlyphBytes = 18u;
+  if (!Base64Decode(recorder_packed, recorder_bytes) ||
+      recorder_bytes.empty() ||
+      recorder_bytes.size() % kRecorderPackedGlyphBytes) {{
+    return nullptr;
+  }}
+  const TextOffsetRange recorder_range = item.TextOffset();
+  const base::span<const uint8_t> recorder_all(recorder_bytes);
+  const wtf_size_t recorder_count = static_cast<wtf_size_t>(
+      recorder_bytes.size() / kRecorderPackedGlyphBytes);
+  Vector<ShapeResult::RecorderGlyph> recorder_glyphs;
+  Vector<float> recorder_positions;
+  recorder_glyphs.reserve(recorder_count);
+  recorder_positions.reserve(recorder_count);
+  for (wtf_size_t recorder_index = 0; recorder_index < recorder_count;
+       ++recorder_index) {{
+    const base::span<const uint8_t> recorder_glyph = recorder_all.subspan(
+        recorder_index * kRecorderPackedGlyphBytes, kRecorderPackedGlyphBytes);
+    const uint32_t recorder_character =
+        base::U32FromLittleEndian(recorder_glyph.subspan<2, 4>());
+    if (recorder_character < recorder_range.start ||
+        recorder_character >= recorder_range.end) {{
+      return nullptr;
+    }}
+    ShapeResult::RecorderGlyph recorder_value;
+    recorder_value.glyph =
+        base::U16FromLittleEndian(recorder_glyph.subspan<0, 2>());
+    recorder_value.character_index =
+        recorder_character - recorder_range.start;
+    recorder_value.advance = 0;
+    recorder_glyphs.push_back(recorder_value);
+    recorder_positions.push_back(
+        base::FloatFromLittleEndian(recorder_glyph.subspan<6, 4>()));
+  }}
+  for (wtf_size_t recorder_index = 0; recorder_index < recorder_count;
+       ++recorder_index) {{
+    const double recorder_next = recorder_index + 1 < recorder_count
+                                     ? recorder_positions[recorder_index + 1]
+                                     : width;
+    recorder_glyphs[recorder_index].advance = static_cast<float>(
+        recorder_next - recorder_positions[recorder_index]);
+  }}
+  return ShapeResult::CreateFromRecordedGlyphs(
+      &item.ScaledFont(), recorder_range.start, recorder_range.Length(),
+      recorder_glyphs);
+}}
+
+}}  // namespace
+"""
+BLINK_RECREATION_ITEMS_MARKER = "recorder_recorded_items"
+BLINK_RECREATION_ITEMS_HOOK = """\
+  // Windows A11y Recorder recreation mode: the block's recorded fragment
+  // items replace those of its layout, in a horizontal, left to right writing
+  // mode. Each item takes the rectangle of the recorded item at its index,
+  // when the block's items have the recorded types, in the recorded order,
+  // with the recorded text ranges, and its text is the recorded text; a text
+  // item recorded with one glyph run in the font Blink chose for it is drawn
+  // from the recorded glyphs. A block that does not match keeps its own
+  // items, and the console says so.
+  if (a11y_recorder::IsRecreationMode() &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    std::unique_ptr<JSONObject> recorder_layout;
+    String recorder_text;
+    const Node* recorder_node = nullptr;
+    const JSONObject* recorder_fragment = RecorderRecordedItemsFragment(
+        node_.GetLayoutBox(), text_content_, recorder_layout, recorder_text,
+        recorder_node);
+    const JSONArray* recorder_recorded_items =
+        recorder_fragment ? recorder_fragment->GetArray("items") : nullptr;
+    if (!recorder_recorded_items) {
+      if (recorder_layout) {
+        RecorderReportNotImposed(recorder_node,
+                                 "no recorded items were found for a block "
+                                 "it lays out");
+      }
+    } else {
+      bool recorder_matches =
+          recorder_recorded_items->size() == items_.size() &&
+          recorder_text == text_content_;
+      for (wtf_size_t recorder_index = 0;
+           recorder_matches && recorder_index < items_.size();
+           ++recorder_index) {
+        const FragmentItem& recorder_item = items_[recorder_index].item;
+        const JSONObject* recorder_recorded =
+            JSONObject::Cast(recorder_recorded_items->at(recorder_index));
+        String recorder_type;
+        recorder_matches =
+            recorder_recorded &&
+            recorder_recorded->GetString("type", &recorder_type) &&
+            recorder_type == RecorderItemType(recorder_item);
+        if (recorder_matches && recorder_item.Type() == FragmentItem::kText) {
+          int recorder_start = 0;
+          int recorder_end = 0;
+          recorder_matches =
+              recorder_recorded->GetInteger("start", &recorder_start) &&
+              recorder_recorded->GetInteger("end", &recorder_end) &&
+              recorder_start >= 0 && recorder_end >= 0 &&
+              static_cast<wtf_size_t>(recorder_start) ==
+                  recorder_item.StartOffset() &&
+              static_cast<wtf_size_t>(recorder_end) ==
+                  recorder_item.EndOffset();
+        }
+      }
+      if (!recorder_matches) {
+        RecorderReportNotImposed(recorder_node,
+                                 "a block it lays out has items or text that "
+                                 "differ from those recorded, so the block "
+                                 "keeps its own items");
+      } else {
+        wtf_size_t recorder_reshaped = 0;
+        for (wtf_size_t recorder_index = 0; recorder_index < items_.size();
+             ++recorder_index) {
+          FragmentItem& recorder_item = items_[recorder_index].item;
+          const JSONObject* recorder_recorded =
+              JSONObject::Cast(recorder_recorded_items->at(recorder_index));
+          double recorder_x = 0;
+          double recorder_y = 0;
+          double recorder_width = 0;
+          double recorder_height = 0;
+          if (!recorder_recorded->GetDouble("x", &recorder_x) ||
+              !recorder_recorded->GetDouble("y", &recorder_y) ||
+              !recorder_recorded->GetDouble("width", &recorder_width) ||
+              !recorder_recorded->GetDouble("height", &recorder_height)) {
+            continue;
+          }
+          recorder_item.RecorderSetRect(
+              PhysicalRect(LayoutUnit::FromDoubleRound(recorder_x),
+                           LayoutUnit::FromDoubleRound(recorder_y),
+                           LayoutUnit::FromDoubleRound(recorder_width),
+                           LayoutUnit::FromDoubleRound(recorder_height)));
+          if (recorder_item.Type() != FragmentItem::kText) {
+            continue;
+          }
+          if (const ShapeResult* recorder_shaped =
+                  RecorderShapeFromRecordedGlyphs(
+                      recorder_item, *recorder_recorded, recorder_width)) {
+            recorder_item.RecorderSetTextShapeResult(
+                ShapeResultView::Create(recorder_shaped));
+          } else {
+            ++recorder_reshaped;
+          }
+        }
+        if (recorder_reshaped) {
+          RecorderReportNotImposed(recorder_node,
+                                   "some text it lays out keeps Blink's "
+                                   "shaping, being recorded in another font "
+                                   "or in more than one glyph run");
+        }
+      }
+    }
+  }
+
+"""
+
+
+def require_no_feasibility_text(
+    text: str, fragments: tuple[str, ...], path: Path
+) -> None:
+    """Fails when a feasibility step's text is left after its upgrade."""
+    for fragment in fragments:
+        if fragment in text:
+            raise RuntimeError(
+                f"{path}: a feasibility step's recreation hook was not "
+                f"upgraded to stage 3: {fragment!r} remains"
+            )
+
 
 def patch_blink_fragment_item_header(path: Path) -> None:
     """Adds the recreation mode's setters to FragmentItem."""
@@ -7222,6 +7772,12 @@ def patch_blink_fragment_item_header(path: Path) -> None:
 def patch_blink_shape_result_header(path: Path) -> None:
     """Declares the recreation mode's shaping result from recorded glyphs."""
     text = read_source(path)
+    text = upgrade_legacy_hooks(
+        text,
+        ((LEGACY_FEASIBILITY_SHAPE_DECLARATION, BLINK_RECREATION_SHAPE_DECLARATION),),
+        path,
+    )
+    require_no_feasibility_text(text, ("UChar32 code_point;",), path)
     text = insert_before_once(
         text,
         BLINK_RECREATION_SHAPE_DECLARATION_ANCHOR,
@@ -7235,6 +7791,12 @@ def patch_blink_shape_result_header(path: Path) -> None:
 def patch_blink_shape_result(path: Path) -> None:
     """Defines the recreation mode's shaping result from recorded glyphs."""
     text = read_source(path)
+    text = upgrade_legacy_hooks(
+        text,
+        ((LEGACY_FEASIBILITY_SHAPE_DEFINITION, BLINK_RECREATION_SHAPE_DEFINITION),),
+        path,
+    )
+    require_no_feasibility_text(text, ("GlyphForCharacter(glyphs[i].code_point)",), path)
     text = insert_before_once(
         text,
         BLINK_RECREATION_SHAPE_DEFINITION_ANCHOR,
@@ -7254,6 +7816,20 @@ def patch_blink_fragment_items_builder(path: Path) -> None:
         BLINK_RECREATION_ITEMS_INCLUDES,
         path,
     )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (LEGACY_FEASIBILITY_ITEMS_HELPER, BLINK_RECREATION_ITEMS_HELPER),
+            (INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK),
+            (LEGACY_FEASIBILITY_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK),
+        ),
+        path,
+    )
+    require_no_feasibility_text(
+        text,
+        ('"data-a11y-recorded-lines"', "RecorderRecordedEntries("),
+        path,
+    )
     text = insert_before_once(
         text,
         BLINK_RECREATION_ITEMS_HELPER_ANCHOR,
@@ -7261,10 +7837,6 @@ def patch_blink_fragment_items_builder(path: Path) -> None:
         BLINK_RECREATION_ITEMS_HELPER_MARKER,
         path,
     )
-    if INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK in text:
-        text = text.replace(
-            INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK
-        )
     text = insert_before_once(
         text,
         BLINK_RECREATION_ITEMS_ANCHOR,

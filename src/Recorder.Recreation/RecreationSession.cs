@@ -30,15 +30,24 @@ public sealed class RecreationSession : IAsyncDisposable
         string directory,
         RecreationContent content,
         CancellationToken cancellationToken,
-        IEnumerable<string>? extraArguments = null)
+        IEnumerable<string>? extraArguments = null,
+        IEnumerable<RecreationTiming>? earlierTimings = null)
     {
         var server = await RecreationServer.StartAsync(content, cancellationToken);
+        foreach (var timing in earlierTimings ?? [])
+        {
+            server.AddTiming(timing.Step, TimeSpan.FromMilliseconds(timing.Milliseconds));
+        }
         RecreationBrowser? browser = null;
         try
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             browser = RecreationBrowser.Open(executablePath, directory, server, extraArguments);
             var address = await browser.DevToolsAddressAsync(cancellationToken);
+            server.AddTiming("Starting the recreation browser, to its DevTools port", clock.Elapsed);
+            clock.Restart();
             var control = await RecreationControl.StartAsync(address, server.PageAddress, content.Viewport, server.AddBlocked, cancellationToken);
+            server.AddTiming("Attaching to the tab and asking it to load the page", clock.Elapsed);
             return new RecreationSession(server, browser, control) { DevToolsAddress = address };
         }
         catch

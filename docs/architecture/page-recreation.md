@@ -2286,9 +2286,9 @@ The blank cells are those not computed for the 2b check recording.
 - The extended change check on recordings from the target machine, as the
   system test.
 
-### Stage 3: a recorded frame rendered from recorded values (proposed)
+### Stage 3: a recorded frame rendered from recorded values (agreed; built)
 
-Proposed on 2026-10-01, for agreement before it is built. The owner, on
+Proposed on 2026-10-01 and agreed by the owner the same day ("yes I do"). The owner, on
 2026-10-01: "I would prefer to experience the rendering of a frame rather
 than worry about optimization. Let's build the tool, at least to the point
 where I can make qualitative judgments on responsiveness." Stage 3 is
@@ -2381,6 +2381,73 @@ Required tests:
   ones.
 - System, on the target machine: a frame of the cnib recording opened from
   the player, judged by the owner, with the panel's timings and counts.
+
+#### Stage 3 as built
+
+Built on 2026-10-01, not yet run on the target machine.
+
+- The page writer (`RecordedPage`) gives each element of the tree data a
+  `recordedStyle` and a `recordedLayout`, from the element's record in the
+  document's layout change state, or null without one. The style is each
+  computed style property with a value, then each custom property, written
+  `name: value;`; the layout is the record's `boxFragments` JSON unchanged.
+  The builder sets them as `data-a11y-recorded-style` and
+  `data-a11y-recorded-layout` before the element is inserted.
+- The recreation browser passes `--a11y-recorder-recreation`. It still has
+  no recorder bootstrap, so it records nothing.
+- The 1a style hook is unchanged. The 1b and 1c helpers and hooks, and
+  `ShapeResult::CreateFromRecordedGlyphs`, are replaced; the integration
+  script upgrades a checkout that holds the feasibility versions, and stops
+  with an error if feasibility text is left after the upgrade. The
+  feasibility attributes `data-a11y-recorded-fragment`, `-lines`, `-text`,
+  and `-glyphs` are no longer read, so the spike pages `boxes.html` and
+  `lines.html` no longer show recorded values.
+- The hooks parse the attribute with Blink's JSON parser
+  (`platform/json`) each time they run for a box or block.
+- Box fragments: the box takes the size of its only recorded fragment, and
+  child link `i` gives the offset of builder child `i` when the counts are
+  equal.
+- Items: a block with an element reads its element's record; an anonymous
+  block reads the fragment of the first anonymous child link of its
+  parent's record whose `textContent` equals the block's text. The items
+  are imposed when their count, types in order, text ranges, and the text
+  match.
+- Glyphs: the packed glyphs are decoded with Blink's `Base64Decode`. A
+  glyph's advance is the next glyph's recorded position less its own, and
+  the last glyph's is the recorded item width less its position. Each glyph
+  keeps its recorded character index, so a glyph may stand for more than
+  one character. The PostScript name is compared as Skia reports it for the
+  typeface, and the size within 0.001.
+- A box or block whose recorded values were not imposed is reported by a
+  warning in the document's console, naming the node so that DevTools can
+  reveal it. Repeated messages are not shown again. The panel does not
+  count them; its notes say where they are.
+- Timings: the recorder times closing the previous recreation, reading the
+  state, writing the page, starting the browser to its DevTools port, and
+  attaching to the tab, and serves them as `timings.json`. The builder
+  records, from the page's time origin, when it started, read the tree,
+  built the DOM, finished the first style and layout, which it forces once
+  for the measure, finished, and when a task posted from the next animation
+  frame ran, after that frame's paint. The panel shows both under "Time to
+  open the recreation". The recorder has no log of its own, so the times
+  are not written to one.
+
+Tests at this stage:
+
+- Unit: the tree data's recorded style and layout, after a record of
+  changes is merged, and none for a text node or an element without a
+  record; the notes; the browser's switch; the server's `timings.json`;
+  the integration script's hooks, their upgrade from the feasibility
+  versions, and the refusal of a feasibility hook it cannot upgrade. The
+  integration script's 169 tests and the bridge's C++ test pass; the .NET
+  tests pass except those that need Windows or a database. One snapshot
+  test, `AFileCutShortIsReadFromItsSnapshotsBeforeTheCut`, failed once in
+  the full run and passed when run alone twice; it does not touch the
+  recreation.
+- Integration: `TheRecreationModeImposesTheRecordedBoxFragmentsAndItems`
+  runs when `RECORDER_RECREATION_CHROMIUM` names the instrumented Chromium;
+  it has not been run yet.
+- System: not yet run.
 
 ### To be settled
 

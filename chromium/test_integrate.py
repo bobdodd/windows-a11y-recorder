@@ -6586,13 +6586,15 @@ class RecreationIntegrationTests(unittest.TestCase):
         hook_text = INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK
         self.assertIn("a11y_recorder::IsRecreationMode()", hook_text)
         self.assertIn("GetWritingDirection().IsHorizontalLtr()", hook_text)
-        self.assertIn("!GetConstraintSpace().HasBlockFragmentation()", hook_text)
-        self.assertIn("recorder_child->IsOnlyForNode()", hook_text)
+        self.assertIn("GetConstraintSpace().HasBlockFragmentation()", hook_text)
+        self.assertIn("recorder_recorded_count != children_.size()", hook_text)
         self.assertIn("SetChildOffset(recorder_index,", hook_text)
-        self.assertIn(
-            '"data-a11y-recorded-fragment"',
-            INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER,
-        )
+        self.assertIn("RecorderReportNotImposed(", hook_text)
+        helper = INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER
+        self.assertIn('"data-a11y-recorded-layout"', helper)
+        self.assertIn("JSONObject::From(ParseJSON(", helper)
+        self.assertIn("/*discard_duplicates=*/true", helper)
+        self.assertNotIn('"data-a11y-recorded-fragment"', first)
         signatures = INTEGRATE.parse_bridge_signatures(
             (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
             .read_text(encoding="utf-8")
@@ -6655,14 +6657,25 @@ class RecreationIntegrationTests(unittest.TestCase):
         for expected in (
             "a11y_recorder::IsRecreationMode()",
             "GetWritingDirection().IsHorizontalLtr()",
-            '"data-a11y-recorded-lines"',
-            '"data-a11y-recorded-text"',
-            '"data-a11y-recorded-glyphs"',
-            '"data-a11y-recorded-fragment"',
-            "ShapeResult::CreateFromRecordedGlyphs(",
+            "RecorderRecordedItemsFragment(",
+            "recorder_recorded_items->size() == items_.size()",
+            "recorder_text == text_content_",
+            "recorder_type == RecorderItemType(recorder_item)",
+            "RecorderShapeFromRecordedGlyphs(",
             "recorder_item.RecorderSetTextShapeResult(",
+            "RecorderReportNotImposed(",
         ):
             self.assertIn(expected, hook_text)
+        helper = INTEGRATE.BLINK_RECREATION_ITEMS_HELPER
+        for expected in (
+            '"data-a11y-recorded-layout"',
+            'recorder_kind != "anonymous"',
+            '"postScriptName"',
+            "recorder_platform.size() - recorder_size",
+            "Base64Decode(recorder_packed, recorder_bytes)",
+            "ShapeResult::CreateFromRecordedGlyphs(",
+        ):
+            self.assertIn(expected, helper)
         signatures = INTEGRATE.parse_bridge_signatures(
             (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
             .read_text(encoding="utf-8")
@@ -6706,18 +6719,94 @@ class RecreationIntegrationTests(unittest.TestCase):
             1, definition.count(INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION)
         )
         self.assertIn(
-            "font_data->GlyphForCharacter(glyphs[i].code_point)",
+            "run_glyphs[i] = {glyphs[i].glyph, glyphs[i].character_index,",
             INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION,
         )
+        self.assertIn(
+            "start_index, num_glyphs, num_characters",
+            INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION,
+        )
+
+    def test_upgrades_the_feasibility_hooks_to_stage_3(self):
+        box = self.patch_source_twice(
+            "box_fragment_builder.cc",
+            self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+                INTEGRATE.LEGACY_FEASIBILITY_FRAGMENT_HELPER
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+            ).replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                INTEGRATE.LEGACY_FEASIBILITY_FRAGMENT_HOOK
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_box_fragment_builder,
+        )
+        self.assertNotIn(INTEGRATE.LEGACY_FEASIBILITY_FRAGMENT_HELPER, box)
+        self.assertNotIn(INTEGRATE.LEGACY_FEASIBILITY_FRAGMENT_HOOK, box)
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER))
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+        items = self.patch_source_twice(
+            "fragment_items_builder.cc",
+            '#include "third_party/blink/renderer/core/layout/inline/'
+            'fragment_items_builder.h"\n'
+            + INTEGRATE.LEGACY_FEASIBILITY_ITEMS_HELPER
+            + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER_ANCHOR
+            + INTEGRATE.LEGACY_FEASIBILITY_ITEMS_HOOK
+            + INTEGRATE.BLINK_RECREATION_ITEMS_ANCHOR
+            + "LayoutUnit offset, bool b) {}\n",
+            INTEGRATE.patch_blink_fragment_items_builder,
+        )
+        self.assertNotIn("RecorderRecordedEntries(", items)
+        self.assertEqual(1, items.count(INTEGRATE.BLINK_RECREATION_ITEMS_HELPER))
+        self.assertEqual(1, items.count(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK))
+        declaration = self.patch_source_twice(
+            "shape_result.h",
+            "class ShapeResult {\n public:\n"
+            + INTEGRATE.LEGACY_FEASIBILITY_SHAPE_DECLARATION
+            + INTEGRATE.BLINK_RECREATION_SHAPE_DECLARATION_ANCHOR
+            + "};\n",
+            INTEGRATE.patch_blink_shape_result_header,
+        )
+        self.assertNotIn("UChar32 code_point;", declaration)
+        self.assertEqual(
+            1, declaration.count(INTEGRATE.BLINK_RECREATION_SHAPE_DECLARATION)
+        )
+        definition = self.patch_source_twice(
+            "shape_result.cc",
+            "namespace blink {\n"
+            + INTEGRATE.LEGACY_FEASIBILITY_SHAPE_DEFINITION
+            + INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION_ANCHOR
+            + "}\n",
+            INTEGRATE.patch_blink_shape_result,
+        )
+        self.assertNotIn("code_point", definition)
+        self.assertEqual(
+            1, definition.count(INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION)
+        )
+
+    def test_refuses_a_feasibility_hook_it_cannot_upgrade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box_fragment_builder.cc"
+            path.write_text(
+                self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                    INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                    '  // edited "data-a11y-recorded-fragment"\n'
+                    + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "not upgraded to stage 3"):
+                INTEGRATE.patch_blink_box_fragment_builder(path)
 
     def test_upgrades_the_items_hook_that_did_not_compile(self):
         self.assertNotEqual(
             INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK,
-            INTEGRATE.BLINK_RECREATION_ITEMS_HOOK,
+            INTEGRATE.LEGACY_FEASIBILITY_ITEMS_HOOK,
         )
         source = (
             '#include "third_party/blink/renderer/core/layout/inline/'
             'fragment_items_builder.h"\n'
+            + INTEGRATE.LEGACY_FEASIBILITY_ITEMS_HELPER
             + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER_ANCHOR
             + INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK
             + INTEGRATE.BLINK_RECREATION_ITEMS_ANCHOR

@@ -16,8 +16,12 @@
   const XLINK = "http://www.w3.org/1999/xlink";
   const XML = "http://www.w3.org/XML/1998/namespace";
 
+  // Stage 3: the times, from the page's time origin, at which the builder
+  // started and finished each part of its work, read by the evidence panel.
+  const times = { builderStarted: performance.now() };
   const block = document.getElementById("recorder-recreation-tree");
   const data = JSON.parse(block.textContent);
+  times.treeRead = performance.now();
   const notes = [];
   const nodes = new Map();
   const note = (id, property, reason) => notes.push({ nodeId: id, property, reason });
@@ -81,6 +85,15 @@
         nodes.set(node.id, element);
         for (const attribute of node.attributes) {
           setAttribute(element, node, attribute);
+        }
+        // Stage 3: the recorded values the recreation mode imposes, set
+        // before the element is inserted, so that its first style and layout
+        // use them.
+        if (node.recordedStyle !== null && node.recordedStyle !== undefined) {
+          element.setAttribute("data-a11y-recorded-style", node.recordedStyle);
+        }
+        if (node.recordedLayout !== null && node.recordedLayout !== undefined) {
+          element.setAttribute("data-a11y-recorded-layout", node.recordedLayout);
         }
         if (node.shadowRoot) {
           attachShadow(element, node.shadowRoot, namespace);
@@ -166,6 +179,8 @@
     served.remove();
   }
 
+  times.domBuilt = performance.now();
+
   for (const [slotId, assigned] of data.manualSlots) {
     const slot = nodes.get(slotId);
     const targets = assigned.map((id) => nodes.get(id)).filter((node) => node);
@@ -194,6 +209,11 @@
       }
     }
   }
+
+  // The page's first style and layout, forced here so that its time is
+  // measured apart from the rest; scrolling would force it in any case.
+  document.documentElement.getBoundingClientRect();
+  times.styleAndLayout = performance.now();
 
   for (const scroll of data.scrollOffsets) {
     const target = scroll.nodeId === data.document.id ? null : nodes.get(scroll.nodeId);
@@ -225,8 +245,16 @@
     }
   }
 
+  times.builderFinished = performance.now();
   // Read by the recorder over its protocol connection, and by the panel.
   Object.defineProperty(window, "__recorderRecreation", {
-    value: Object.freeze({ built: true, notes: Object.freeze(notes) }),
+    value: Object.freeze({ built: true, notes: Object.freeze(notes), times }),
+  });
+  // The first frame after the build: the next animation frame's callback
+  // runs before that frame is painted, and a task posted from it runs after.
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      times.firstPaint = performance.now();
+    }, 0);
   });
 })();

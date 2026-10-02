@@ -11,6 +11,10 @@ public sealed record RecreationContent(string Html, RecreationEvidence Evidence,
     public RecreationViewport? Viewport { get; init; }
 }
 
+// How long one step of opening a recreation took, in milliseconds, measured
+// by the recorder (stage 3).
+public sealed record RecreationTiming(string Step, double Milliseconds);
+
 // What the evidence panel shows. Every value is a recorded value, or, for
 // the fixed content of slice 3a, a value written in code and stated as such.
 public sealed record RecreationEvidence(

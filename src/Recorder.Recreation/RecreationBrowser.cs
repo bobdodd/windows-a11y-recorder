@@ -18,6 +18,10 @@ public sealed class RecreationBrowser : IAsyncDisposable
     public const string ExtensionFolder = "evidence-panel";
     public const string ProfileFolder = "profile";
 
+    // The switch of chromium/recorder_bridge/recorder_switches.h,
+    // kRecreationSwitch.
+    public const string RecreationSwitch = "a11y-recorder-recreation";
+
     public static readonly IReadOnlyList<string> PanelFiles =
         ["manifest.json", "devtools.html", "devtools.js", "panel.html", "panel.js", "panel.css"];
 
@@ -96,6 +100,10 @@ public sealed class RecreationBrowser : IAsyncDisposable
         // Port 0 lets the browser choose a free port, which it writes to the
         // profile. It listens on the loopback interface only.
         result.ArgumentList.Add("--remote-debugging-port=0");
+        // Stage 3: the instrumented Chromium's recreation mode, in which its
+        // renderers impose the recorded values the builder writes on each
+        // element. Without the recorder bootstrap it still records nothing.
+        result.ArgumentList.Add("--" + RecreationSwitch);
         foreach (var argument in extraArguments ?? [])
         {
             result.ArgumentList.Add(argument);

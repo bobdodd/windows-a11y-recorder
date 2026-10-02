@@ -208,6 +208,154 @@ public sealed class RecordedPageTests : IDisposable
         Assert.DoesNotContain("unsafe-inline'; img", RecreationServer.RecordedPageContentSecurityPolicy("n0nce").Split("script-src")[1].Split(';')[0]);
     }
 
+    // Stage 3: an element with a layout record carries its recorded style, as
+    // declarations, and its recorded box fragments, as recorded; a text node
+    // and an element without a record carry neither.
+    [Fact]
+    public void TheTreeDataCarriesEachElementsRecordedStyleAndBoxFragments()
+    {
+        var state = State();
+        state.Layout.ApplyNode(J("""
+            {"nodeId":16,"computedStyle":{"display":"block","color":"rgb(0, 0, 0)","quotes":null},
+             "customProperties":{"--gap":"4px"},
+             "boxFragments":{"effectiveZoom":1,"fragments":[{"width":300,"height":20,"breakToken":null,"scrollableOverflow":null,
+               "children":[{"kind":"line","x":0,"y":0,"nodeId":null,"fragmentIndex":null,"fragment":null}],
+               "items":[{"type":"line","x":0,"y":0,"width":300,"height":20}]}],"naturalSize":null,"textContent":"Hello"}}
+            """));
+        // A record of changes is merged into the node's last record.
+        state.Layout.ApplyNode(J("""
+            {"nodeId":16,"computedStyleComplete":false,"computedStyle":{"color":"rgb(255, 0, 0)"},"customProperties":{},"removedCustomProperties":[],
+             "boxFragments":{"effectiveZoom":1,"fragments":[{"width":310,"height":20,"breakToken":null,"scrollableOverflow":null,"children":[]}],
+               "naturalSize":null,"textContent":null,"textContentUnchanged":true}}
+            """));
+        var record = state.Layout.Nodes[16];
+        Assert.Equal("display: block; color: rgb(255, 0, 0); --gap: 4px;", RecordedPage.RecordedStyle(record));
+        using (var layout = JsonDocument.Parse(RecordedPage.RecordedLayout(record)!))
+        {
+            Assert.Equal(310, layout.RootElement.GetProperty("fragments")[0].GetProperty("width").GetDouble());
+            Assert.Equal("Hello", layout.RootElement.GetProperty("textContent").GetString());
+        }
+        Assert.Null(RecordedPage.RecordedStyle(J("""{"nodeId":3,"computedStyle":null}""")));
+        Assert.Null(RecordedPage.RecordedLayout(J("""{"nodeId":3,"boxFragments":null}""")));
+
+        using var json = JsonDocument.Parse(RecordedPage.Tree(state));
+        JsonElement Find(JsonElement node, long id)
+        {
+            if (node.GetProperty("id").GetInt64() == id)
+            {
+                return node;
+            }
+            foreach (var child in node.GetProperty("children").EnumerateArray())
+            {
+                if (Find(child, id) is { ValueKind: JsonValueKind.Object } found)
+                {
+                    return found;
+                }
+            }
+            return default;
+        }
+        var paragraph = Find(json.RootElement.GetProperty("document"), 16);
+        Assert.Equal("display: block; color: rgb(255, 0, 0); --gap: 4px;", paragraph.GetProperty("recordedStyle").GetString());
+        Assert.Contains("\"width\":310", paragraph.GetProperty("recordedLayout").GetString());
+        var inner = Find(json.RootElement.GetProperty("document"), 17);
+        Assert.Equal(JsonValueKind.Null, inner.GetProperty("recordedStyle").ValueKind);
+        Assert.Equal(JsonValueKind.Null, inner.GetProperty("recordedLayout").ValueKind);
+        var text = Find(json.RootElement.GetProperty("document"), 18);
+        Assert.Equal(JsonValueKind.Null, text.GetProperty("recordedLayout").ValueKind);
+
+        var content = RecordedPage.Content(state, "https://example.test/", 4_000_000_000, 4_000_000_000, "presented");
+        Assert.Contains(content.Evidence.Notes, note => note.StartsWith("1 of the ", StringComparison.Ordinal) && note.Contains("data-a11y-recorded-layout", StringComparison.Ordinal));
+        Assert.Contains(content.Evidence.Notes, note => note.Contains("DevTools' Console", StringComparison.Ordinal));
+    }
+
+    // Stage 3, with RECORDER_RECREATION_CHROMIUM set to the instrumented
+    // Chromium: a page whose recorded box sizes, child offsets, and item
+    // rectangles differ from those Blink would lay out is drawn with the
+    // recorded ones, read back over the DevTools protocol.
+    [Fact]
+    public async Task TheRecreationModeImposesTheRecordedBoxFragmentsAndItems()
+    {
+        if (Environment.GetEnvironmentVariable("RECORDER_RECREATION_CHROMIUM") is not { } chromium)
+        {
+            return;
+        }
+        var token = TestContext.Current.CancellationToken;
+        var tree = new DomDocumentTree();
+        void Add(long id, long? parent, string type, string name, string? data = null)
+        {
+            tree.Nodes.Add(id, new DomNode(id) { ParentId = parent, NodeType = type, NodeName = name, Data = data });
+            if (parent is { } parentId)
+            {
+                tree.Nodes[parentId].Children.Add(id);
+            }
+        }
+        Add(1, null, "document", "#document");
+        Add(2, 1, "other", "html");
+        Add(3, 1, "element", "HTML");
+        Add(4, 3, "element", "HEAD");
+        Add(5, 3, "element", "BODY");
+        Add(6, 5, "element", "DIV");
+        Add(7, 6, "text", "#text", "Hello");
+        var state = new BrowserDocumentState("token-a dom-document-1") { Dom = tree, DomCompleteness = BrowserStateCompleteness.Complete };
+        state.Layout.ApplyNode(J("""
+            {"nodeId":5,"computedStyle":null,"boxFragments":{"effectiveZoom":1,"fragments":[{"width":784,"height":300,"breakToken":null,"scrollableOverflow":null,
+              "children":[{"kind":"box","x":30,"y":40,"nodeId":6,"fragmentIndex":0,"fragment":null}]}],"naturalSize":null}}
+            """));
+        state.Layout.ApplyNode(J("""
+            {"nodeId":6,"computedStyle":null,"boxFragments":{"effectiveZoom":1,"fragments":[{"width":250,"height":123,"breakToken":null,"scrollableOverflow":null,
+              "children":[{"kind":"line","x":0,"y":0,"nodeId":null,"fragmentIndex":null,"fragment":null}],
+              "items":[{"type":"line","x":0,"y":0,"width":250,"height":30,"descendantsCount":2},
+                       {"type":"text","x":5,"y":7,"width":60,"height":18,"start":0,"end":5,"glyphRuns":null}]}],
+              "naturalSize":null,"textContent":"Hello"}}
+            """));
+        var content = RecordedPage.Content(state, "https://example.test/", 4_000_000_000, 4_000_000_000, "presented") with
+        {
+            Viewport = new RecreationViewport(800, 600, 1, 1),
+        };
+        await using var session = await RecreationSession.OpenAsync(
+            chromium, Path.Combine(_directory, "imposed"), content, token, ["--headless=new"]);
+
+        using var http = new HttpClient();
+        var list = $"http://127.0.0.1:{session.DevToolsAddress.Port}/json/list";
+        string? address = null;
+        for (var attempt = 0; attempt < 100 && address is null; attempt++)
+        {
+            using var targets = JsonDocument.Parse(await http.GetStringAsync(list, token));
+            address = targets.RootElement.EnumerateArray()
+                .Where(item => item.GetProperty("type").GetString() == "page" &&
+                               item.GetProperty("url").GetString() == session.PageAddress)
+                .Select(item => item.GetProperty("webSocketDebuggerUrl").GetString())
+                .FirstOrDefault();
+            if (address is null)
+            {
+                await Task.Delay(100, token);
+            }
+        }
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(new Uri(address!), token);
+        var client = new TestDevToolsClient(socket);
+        async Task<string> Evaluate(string expression)
+        {
+            using var answer = await client.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, token);
+            return answer.RootElement.GetProperty("result").GetProperty("result").GetProperty("value").ToString();
+        }
+        for (var attempt = 0; attempt < 100 && await Evaluate("Boolean(window.__recorderRecreation)") != "True"; attempt++)
+        {
+            await Task.Delay(100, token);
+        }
+        using var measured = JsonDocument.Parse(await Evaluate("""
+            JSON.stringify((() => {
+              const body = document.body.getBoundingClientRect();
+              const div = document.querySelector("div").getBoundingClientRect();
+              const range = document.createRange();
+              range.selectNodeContents(document.querySelector("div").firstChild);
+              const text = range.getBoundingClientRect();
+              return [body.height, div.x - body.x, div.y - body.y, div.width, div.height, text.x - div.x, text.y - div.y, text.width];
+            })())
+            """));
+        Assert.Equal([300, 30, 40, 250, 123, 5, 7, 60], measured.RootElement.EnumerateArray().Select(value => value.GetDouble()).ToArray());
+    }
+
     [Fact]
     public void TheEvidenceIsReadFromTheRecordedState()
     {

@@ -47,6 +47,7 @@ public sealed class RecreationServer : IAsyncDisposable
     private readonly string _policy;
     private readonly byte[]? _builder;
     private readonly List<BlockedNavigation> _blocked = [];
+    private readonly List<RecreationTiming> _timings = [];
 
     private RecreationServer(WebApplication application, string token, RecreationContent content)
     {
@@ -77,6 +78,26 @@ public sealed class RecreationServer : IAsyncDisposable
         lock (_blocked)
         {
             _blocked.Add(navigation);
+        }
+    }
+
+    // Records how long a step of opening the recreation took, for the panel.
+    public void AddTiming(string step, TimeSpan duration)
+    {
+        lock (_timings)
+        {
+            _timings.Add(new RecreationTiming(step, Math.Round(duration.TotalMilliseconds, 1)));
+        }
+    }
+
+    public IReadOnlyList<RecreationTiming> Timings
+    {
+        get
+        {
+            lock (_timings)
+            {
+                return [.. _timings];
+            }
         }
     }
 
@@ -155,6 +176,10 @@ public sealed class RecreationServer : IAsyncDisposable
             case "blocked.json":
                 response.ContentType = "application/json; charset=utf-8";
                 body = JsonSerializer.SerializeToUtf8Bytes(Blocked, EvidenceJson);
+                break;
+            case "timings.json":
+                response.ContentType = "application/json; charset=utf-8";
+                body = JsonSerializer.SerializeToUtf8Bytes(Timings, EvidenceJson);
                 break;
             default:
                 response.StatusCode = StatusCodes.Status404NotFound;

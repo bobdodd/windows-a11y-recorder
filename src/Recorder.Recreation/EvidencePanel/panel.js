@@ -345,6 +345,67 @@ async function watchBlocked(address) {
   setTimeout(() => watchBlocked(address), 1000);
 }
 
+// Stage 3: how long opening the recreation took. The recorder's steps are
+// read from the recorder, and the builder's from the page, which records the
+// times at which it finished each part from the page's time origin. Read
+// every second until the page has painted its first frame.
+let timingsList = null;
+
+function showTimings(steps, times) {
+  if (!timingsList) {
+    content.appendChild(element("h2", "Time to open the recreation"));
+    content.appendChild(element("p",
+      "Measured on this machine as the recreation was opened. The recorder's steps are in milliseconds each; the page's are in milliseconds from the start of its load."));
+    timingsList = element("ul");
+    content.appendChild(timingsList);
+  }
+  timingsList.replaceChildren();
+  for (const step of steps) {
+    timingsList.appendChild(element("li", `${step.step}: ${step.milliseconds.toFixed(1)} ms`));
+  }
+  if (times) {
+    const names = [
+      ["builderStarted", "The builder started"],
+      ["treeRead", "The recorded tree was read"],
+      ["domBuilt", "The DOM was built"],
+      ["styleAndLayout", "The first style and layout, with the recorded values, finished"],
+      ["builderFinished", "The builder finished"],
+      ["firstPaint", "The first frame after the build was painted"],
+    ];
+    for (const [key, label] of names) {
+      if (typeof times[key] === "number") {
+        timingsList.appendChild(element("li", `${label} at ${times[key].toFixed(1)} ms`));
+      }
+    }
+    if (typeof times.domBuilt === "number" && typeof times.styleAndLayout === "number") {
+      timingsList.appendChild(element("li",
+        `The first style and layout took ${(times.styleAndLayout - times.domBuilt).toFixed(1)} ms`));
+    }
+  }
+}
+
+function watchTimings(address) {
+  chrome.devtools.inspectedWindow.eval(
+    "window.__recorderRecreation ? JSON.stringify(window.__recorderRecreation.times) : null",
+    async (result) => {
+      let steps = [];
+      try {
+        const response = await fetch(address, { cache: "no-store" });
+        if (response.ok) {
+          steps = await response.json();
+        }
+      } catch (error) {
+        // The recorder has closed this recreation; the panel stops asking.
+        return;
+      }
+      const times = typeof result === "string" ? JSON.parse(result) : null;
+      showTimings(steps, times);
+      if (!times || typeof times.firstPaint !== "number") {
+        setTimeout(() => watchTimings(address), 1000);
+      }
+    });
+}
+
 async function load() {
   try {
     const config = await (await fetch(chrome.runtime.getURL("config.json"))).json();
@@ -354,6 +415,7 @@ async function load() {
     }
     describe(await response.json());
     watchBlocked(config.evidenceAddress.replace(/evidence\.json$/, "blocked.json"));
+    watchTimings(config.evidenceAddress.replace(/evidence\.json$/, "timings.json"));
   } catch (error) {
     notice.textContent = `The evidence could not be read from the recorder: ${error.message}. The recorder may have closed this recreation.`;
   }

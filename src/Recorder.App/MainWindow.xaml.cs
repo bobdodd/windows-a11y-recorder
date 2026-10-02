@@ -1650,11 +1650,17 @@ public partial class MainWindow : Window
             }
             using (_busy.Begin("Opening the recreation."))
             {
+                var timings = new List<RecreationTiming>();
+                var clock = System.Diagnostics.Stopwatch.StartNew();
                 await CloseRecreationAsync();
+                timings.Add(new RecreationTiming("Closing the previous recreation", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                 var content = await Task.Run(() =>
                 {
+                    clock.Restart();
                     var found = documents.Document(chosen.Key, frame)
                         ?? throw new InvalidDataException("The page's state at this frame could not be read from the recording.");
+                    timings.Add(new RecreationTiming("Reading the page's state at the frame from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                    clock.Restart();
                     if (found.State!.Dom is null)
                     {
                         throw new InvalidDataException("No DOM walk of this page was recorded at or before this frame, so it cannot be recreated here. A page can be drawn before its first DOM walk; a later frame may have one.");
@@ -1662,14 +1668,16 @@ public partial class MainWindow : Window
                     var basis = found.Basis is { Basis: "presented", PresentedTime: { } presented }
                         ? $"the state after the page's last rendering update drawn at or before the frame, drawn at {FormatTime(presented)}"
                         : "no rendering update of the page was drawn at or before the frame, so this is its state at the frame's composition time";
-                    return RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis);
+                    var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis);
+                    timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                    return written;
                 });
                 var directory = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "Windows A11y Recorder",
                     "recreations",
                     Guid.NewGuid().ToString("N"));
-                _recreation = await RecreationSession.OpenAsync(chromium, directory, content, CancellationToken.None);
+                _recreation = await RecreationSession.OpenAsync(chromium, directory, content, CancellationToken.None, earlierTimings: timings);
             }
         }
         catch (Exception exception)
