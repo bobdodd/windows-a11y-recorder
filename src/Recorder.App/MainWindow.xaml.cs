@@ -1669,9 +1669,20 @@ public partial class MainWindow : Window
                     var basis = found.Basis is { Basis: "presented", PresentedTime: { } presented }
                         ? $"the state after the page's last rendering update drawn at or before the frame, drawn at {FormatTime(presented)}"
                         : "no rendering update of the page was drawn at or before the frame, so this is its state at the frame's composition time";
-                    var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis);
-                    timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
-                    return written;
+                    var resources = documents.Resources(chosen.Key, found.Basis.CutTime);
+                    timings.Add(new RecreationTiming("Reading the page's fonts and images from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                    clock.Restart();
+                    try
+                    {
+                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources);
+                        timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                        return written;
+                    }
+                    catch
+                    {
+                        resources.Dispose();
+                        throw;
+                    }
                 });
                 var directory = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

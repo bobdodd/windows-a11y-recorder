@@ -2877,6 +2877,117 @@ digests a file and queues its bytes, 16 calls, 5.3 ms in all, the largest
 the face records 340 calls, 3.6 ms. Blink's reading of a font file and its
 copy of an image's bytes happen before these calls and are not measured.
 
+#### Sub-step 3 as built
+
+Asked for by the owner on 2026-10-02, after sub-step 2 on the target
+machine.
+
+What the app reads:
+
+- `RecordingFileResources` (`src/Recorder.Database/RecordingFiles/`) reads
+  the `browser.resources` records of the recording file up to the
+  recording time the document's state is read at. It reads only the chunks
+  that hold records of that channel, through each chunk's message index.
+- A face is named by its browser instance, renderer, and face number. It is
+  in the document's set from its `font-face-added` record to its
+  `font-face-removed` record, matched to the document by its state key.
+  Faces are kept in the order they were added. A face in the set is added
+  to the recreation when it has a `font-face-loaded` record at or before
+  the frame, a font file at collection index 0, and a `font-file` record
+  for that digest.
+- An image is the latest `image-resource` record for its URL at or before
+  the frame. It is found by the URL requested or by the response's URL,
+  each without its fragment. A record whose `dataRecorded` is false removes
+  the image for its URL.
+- The bytes of a font file or an image are not decoded until the
+  recreation asks for them. The resources hold a reader of their own on
+  the file, so the recreation can still read bytes after the recording is
+  closed in the player; the recreation's server disposes it. Bytes that do
+  not match their digest are not used.
+- Reading takes a step of its own in "Time to open the recreation":
+  "Reading the page's fonts and images from the recording".
+
+What the recreation does:
+
+- The builder's data gains `fontFaces`. Each entry holds the family, the
+  recorded descriptors, the digest, and the face's address at the
+  recorder: `https://a11y-recorder.invalid/<token>/font/<digest>`, with a
+  token new for each recreation.
+- Before it builds the tree, the builder reads each distinct file once with
+  `fetch`. It then makes each face with
+  `new FontFace(family, bytes, descriptors)` and adds it to
+  `document.fonts`, in the recorded order, and waits for every face to
+  load. A face that fails is listed in the builder's notes and in DevTools'
+  Console. The time is shown in the evidence panel as "The recorded font
+  faces were added and loaded".
+- Requests are answered by resource type:
+  - the page's own address, for a `Document` request, with the page;
+  - an `Image` request, with the image's latest recorded status, MIME
+    type, and bytes;
+  - a `Fetch` request at the font address, for a digest one of the faces
+    names, with the file's bytes and `Access-Control-Allow-Origin: *`.
+    The page's origin is not the recorder's, so the builder's read is a
+    cross-origin request.
+  - Anything else is refused, as before.
+  An answer is made off the thread that reads the DevTools connection,
+  since it may read the recording file.
+- The recorded page's content security policy allows `connect-src` for the
+  font address only. It allows `img-src` for any http or https address, in
+  addition to `'self'` and `data:`, since the recorder answers or refuses
+  every request of the tab and nothing reaches the network. Without it, the
+  policy would stop an image of another origin before the recorder could
+  answer it.
+- In Blink, a text item takes its recorded glyphs when the font Blink chose
+  for it has the recorded size and the recorded font file's digest and
+  collection index. This replaces the PostScript name comparison of stage 3.
+  The recreation mode's bridge digests each typeface's file once, as the
+  recording does (`RecordFontFile` keeps the digest and records nothing
+  when there is no recorder connection in the recreation mode). The
+  integration script upgrades the stage 3 helper to this one.
+
+Found while building:
+
+- A web font's recorded file is the file Blink decoded: the output of the
+  OpenType Sanitizer, after WOFF2 decompression. The recreation's face is
+  sanitized again when it loads, so its digest matches the recorded one
+  only if sanitizing is idempotent for the file. The 8 web font files of
+  recording 20261002-162024 were run through the sanitizer of the Python
+  package `opentype-sanitizer` 9.2.0 in this environment. All 8 came out
+  byte for byte unchanged, with the same digest. The 3 installed font
+  files, which Blink does not sanitize, changed. That package's sanitizer
+  version is not necessarily Chromium's, so the target machine is the
+  check.
+
+Differences from the design above:
+
+- A face whose font file is not the first of a collection is not added,
+  since a `FontFace` made from bytes takes the first font. A face from a
+  `local()` source is not added, since its local name is not recorded.
+  The evidence panel's notes count both, with the faces that had not
+  loaded at the frame and the images recorded without their bytes.
+- Images and font files are matched across the whole recording, not only
+  within the document, since their records name no document (sub-step 2).
+- An animated image is answered with its recorded bytes and animates in
+  the recreation, from its first frame; it is not held at its first frame
+  as the design states. Holding it is not done in this sub-step.
+
+Tests at this sub-step:
+
+- Unit: the faces and images chosen for a frame, from a recording file
+  (removed faces, another document's faces, faces not loaded, faces added
+  after the frame, an image found by its response's URL, and an image
+  without bytes); bytes that do not match their digest; the answers by
+  resource type and the policy; the faces in the builder's data; the
+  integration script's helper, its digest comparison, and its upgrade from
+  the stage 3 helper.
+- Integration, run in this environment with a stock headless Chromium:
+  `TheRecordedImageAndFontFaceAreUsed`. A page served at its recorded
+  address draws a recorded image, and refuses an image that was not
+  recorded. With `RECORDER_RECREATION_FONT_FILE` naming a font file (here
+  DejaVu Sans), the face is loaded before the tree is built. The glyph
+  comparison needs the instrumented Chromium, and is checked on the target
+  machine.
+
 #### Required tests
 
 - Unit tests: the font-file, font-face, and image records against the

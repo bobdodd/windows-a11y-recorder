@@ -35,6 +35,23 @@ public sealed class RecreationServer : IAsyncDisposable
     public static string RecordedPageContentSecurityPolicy(string nonce) =>
         PageContentSecurityPolicy.Replace("script-src 'none'", $"script-src 'nonce-{nonce}'", StringComparison.Ordinal);
 
+    // For a recorded page served at its recorded address (sub-step 3), the
+    // builder may also read the recorded font files, from the recorder's own
+    // address, and images may be asked for at any http or https address,
+    // since the recorder answers every request of the tab itself, from the
+    // recording, or refuses it: nothing reaches the network.
+    public static string RecordedPageContentSecurityPolicy(string nonce, string fontAddress) =>
+        RecordedPageContentSecurityPolicy(nonce)
+            .Replace("img-src 'self' data:", "img-src 'self' data: http: https:", StringComparison.Ordinal)
+            .Replace("connect-src 'none'", $"connect-src {fontAddress}", StringComparison.Ordinal);
+
+    // The recorder's own address for the recorded font files: a name under
+    // the reserved .invalid domain, which never resolves, so a request for
+    // it can only be answered by the recorder.
+    public const string FontHost = "https://a11y-recorder.invalid/";
+
+    public static string FontAddress(string token) => $"{FontHost}{token}/font/";
+
     public static readonly JsonSerializerOptions EvidenceJson = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = false
@@ -46,6 +63,8 @@ public sealed class RecreationServer : IAsyncDisposable
     private readonly byte[] _evidence;
     private readonly string _policy;
     private readonly string? _documentUrl;
+    private readonly string? _fontAddress;
+    private readonly Recorder.Session.RecordedPageResources _resources;
     private readonly List<BlockedNavigation> _blocked = [];
     private readonly List<RecreationTiming> _timings = [];
 
@@ -56,8 +75,14 @@ public sealed class RecreationServer : IAsyncDisposable
         _token = Encoding.ASCII.GetBytes(token);
         _page = Encoding.UTF8.GetBytes(content.Html);
         _evidence = JsonSerializer.SerializeToUtf8Bytes(content.Evidence, EvidenceJson);
-        _policy = content.ScriptNonce is { } nonce ? RecordedPageContentSecurityPolicy(nonce) : PageContentSecurityPolicy;
         _documentUrl = content.DocumentUrl is { } url && IsServableAddress(url) ? url : null;
+        _fontAddress = _documentUrl is not null ? content.FontAddress : null;
+        _resources = content.Resources ?? Recorder.Session.RecordedPageResources.None;
+        _policy = content.ScriptNonce is not { } nonce
+            ? PageContentSecurityPolicy
+            : _fontAddress is { } fonts
+                ? RecordedPageContentSecurityPolicy(nonce, fonts)
+                : RecordedPageContentSecurityPolicy(nonce);
     }
 
     public string Token { get; }
@@ -87,8 +112,18 @@ public sealed class RecreationServer : IAsyncDisposable
     // request's URL holds no fragment, so the recorded address's is left
     // out, and an http address is also answered at https, in case the
     // browser upgrades the navigation.
-    public RecreationAnswer? Answer(string url)
+    public RecreationAnswer? Answer(string url) => Answer(url, "Document");
+
+    // Sub-step 3: with the recording's resources, an image request is
+    // answered with the image's latest recorded status, MIME type, and bytes,
+    // and a request of the builder for a font file at the recorder's own
+    // address with the file's recorded bytes. Anything else is refused.
+    public RecreationAnswer? Answer(string url, string? resourceType)
     {
+        if (resourceType != "Document")
+        {
+            return ResourceAnswer(url, resourceType);
+        }
         if (_documentUrl is null || !SameDocument(url, _documentUrl))
         {
             return null;
@@ -101,6 +136,42 @@ public sealed class RecreationServer : IAsyncDisposable
             new("X-Content-Type-Options", "nosniff"),
             new("Referrer-Policy", "no-referrer"),
         ], _page);
+    }
+
+    private RecreationAnswer? ResourceAnswer(string url, string? resourceType)
+    {
+        if (_documentUrl is null)
+        {
+            return null;
+        }
+        if (_fontAddress is { } fonts && url.StartsWith(fonts, StringComparison.Ordinal))
+        {
+            var digest = url[fonts.Length..];
+            if (resourceType != "Fetch" || digest.Length != 64 || !digest.All(Uri.IsHexDigit) ||
+                !_resources.Faces.Any(face => face.Digest == digest) ||
+                _resources.FontFile(digest) is not { } file)
+            {
+                return null;
+            }
+            return new RecreationAnswer(200,
+            [
+                new("Content-Type", "application/octet-stream"),
+                new("Access-Control-Allow-Origin", "*"),
+                new("Cache-Control", "no-store"),
+                new("X-Content-Type-Options", "nosniff"),
+            ], file);
+        }
+        if (resourceType != "Image" || _resources.Image(url) is not { } image ||
+            _resources.ImageBytes(image.Digest) is not { } bytes)
+        {
+            return null;
+        }
+        return new RecreationAnswer(image.Status,
+        [
+            new("Content-Type", image.MimeType),
+            new("Cache-Control", "no-store"),
+            new("X-Content-Type-Options", "nosniff"),
+        ], bytes);
     }
 
     public static bool SameDocument(string requested, string recorded)
@@ -258,5 +329,6 @@ public sealed class RecreationServer : IAsyncDisposable
     {
         await _application.StopAsync();
         await _application.DisposeAsync();
+        _resources.Dispose();
     }
 }

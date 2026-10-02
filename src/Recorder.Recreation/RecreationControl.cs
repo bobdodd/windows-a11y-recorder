@@ -23,7 +23,7 @@ public sealed class RecreationControl : IAsyncDisposable
     private readonly string _allowed;
     private readonly RecreationViewport? _viewport;
     private readonly Action<BlockedNavigation> _blocked;
-    private readonly Func<string, RecreationAnswer?>? _answer;
+    private readonly Func<string, string?, RecreationAnswer?>? _answer;
     private int _refused;
     private readonly CancellationTokenSource _stop = new();
     private readonly TaskCompletionSource<string> _firstTab = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -36,7 +36,7 @@ public sealed class RecreationControl : IAsyncDisposable
         string allowed,
         RecreationViewport? viewport,
         Action<BlockedNavigation> blocked,
-        Func<string, RecreationAnswer?>? answer)
+        Func<string, string?, RecreationAnswer?>? answer)
     {
         _connection = connection;
         _allowed = allowed;
@@ -60,7 +60,7 @@ public sealed class RecreationControl : IAsyncDisposable
         RecreationViewport? viewport,
         Action<BlockedNavigation> blocked,
         CancellationToken cancellationToken,
-        Func<string, RecreationAnswer?>? answer = null)
+        Func<string, string?, RecreationAnswer?>? answer = null)
     {
         var connection = await DevToolsConnection.ConnectAsync(browserAddress, cancellationToken);
         var control = new RecreationControl(connection, pageAddress, viewport, blocked, answer);
@@ -246,7 +246,10 @@ public sealed class RecreationControl : IAsyncDisposable
         var token = _stop.Token;
         if (_answer is not null)
         {
-            if (_answer(url) is { } answer)
+            var requested = parameters.TryGetProperty("resourceType", out var requestedType) ? requestedType.GetString() : null;
+            // An answer may read bytes from the recording file, so it is not
+            // made on the thread that reads the DevTools connection.
+            if (await Task.Run(() => _answer(url, requested), token) is { } answer)
             {
                 await _connection.SendAsync("Fetch.fulfillRequest", new
                 {

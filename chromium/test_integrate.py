@@ -6741,7 +6741,11 @@ class RecreationIntegrationTests(unittest.TestCase):
         for expected in (
             '"data-a11y-recorded-layout"',
             'recorder_kind != "anonymous"',
-            '"postScriptName"',
+            'GetJSONObject("fontFile")',
+            'GetString("digest", &recorder_digest)',
+            "recorder_typeface.openStream(recorder_index)",
+            "String::FromUtf8(recorder_chosen_digest) != recorder_digest",
+            "recorder_chosen_index != recorder_file_index",
             "recorder_platform.size() - recorder_size",
             "Base64Decode(recorder_packed, recorder_bytes)",
             "ShapeResult::CreateFromRecordedGlyphs(",
@@ -6754,6 +6758,34 @@ class RecreationIntegrationTests(unittest.TestCase):
         self.assertEqual(
             [],
             INTEGRATE.describe_signature_mismatches("patched", patched, signatures),
+        )
+
+    def test_items_helper_upgrades_to_font_file_matching(self):
+        # Sub-step 3: a checkout patched with the stage 3 helper, which
+        # compared PostScript names, is upgraded to the helper that compares
+        # font files by digest.
+        old = INTEGRATE.PRE_FONT_FILE_BLINK_RECREATION_ITEMS_HELPER
+        self.assertIn('"postScriptName"', old)
+        self.assertNotIn('"postScriptName"', INTEGRATE.BLINK_RECREATION_ITEMS_HELPER)
+        upgraded = INTEGRATE.upgrade_legacy_hooks(
+            "before\n" + old + "after\n",
+            (
+                (
+                    INTEGRATE.PRE_FONT_FILE_BLINK_RECREATION_ITEMS_HELPER,
+                    INTEGRATE.BLINK_RECREATION_ITEMS_HELPER,
+                ),
+            ),
+            Path("fragment_items_builder.cc"),
+        )
+        self.assertEqual(
+            "before\n" + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER + "after\n",
+            upgraded,
+        )
+        # Its glyph check also compares the size before reading the file.
+        helper = INTEGRATE.BLINK_RECREATION_ITEMS_HELPER
+        self.assertLess(
+            helper.index("std::abs(recorder_platform.size() - recorder_size)"),
+            helper.index("!RecorderRecreationFontFile(*recorder_typeface"),
         )
 
     def test_glyph_runs_record_their_font_file(self):

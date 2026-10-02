@@ -8019,6 +8019,127 @@ const ShapeResult* RecorderShapeFromRecordedGlyphs(const FragmentItem& item,
 
 }}  // namespace
 """
+# Sub-step 3: a glyph run's recorded glyphs are used when the font Blink chose
+# for the text has the recorded font file's digest and collection index, and
+# the recorded size, in place of the PostScript name the stage 3 helper
+# compared. The recreation mode's bridge keeps each typeface's digest, so each
+# file is read once in a renderer. A checkout patched with the stage 3 helper
+# is upgraded to this one.
+PRE_FONT_FILE_BLINK_RECREATION_ITEMS_HELPER = BLINK_RECREATION_ITEMS_HELPER
+_PRE_FONT_FILE_SHAPE_COMMENT = """\
+// The shaping result of a text item drawn from its recorded glyphs, when the
+// item was recorded with one horizontal, unrotated glyph run whose font has
+// the PostScript name and size of the primary font Blink chose for the item.
+"""
+_FONT_FILE_SHAPE_COMMENT = """\
+// The digest and collection index of a typeface's font file, read once in a
+// renderer through Skia's openStream and digested by the bridge, which keeps
+// the digest by the typeface's unique identifier. Returns false when Skia
+// gives no readable file for the typeface.
+bool RecorderRecreationFontFile(const SkTypeface& recorder_typeface,
+                                std::string* recorder_digest,
+                                int* recorder_index) {
+  if (!a11y_recorder::LookUpFontFile(recorder_typeface.uniqueID(),
+                                     recorder_digest, recorder_index)) {
+    *recorder_index = 0;
+    std::unique_ptr<SkStreamAsset> recorder_stream =
+        recorder_typeface.openStream(recorder_index);
+    std::string recorder_bytes;
+    bool recorder_readable = false;
+    if (recorder_stream) {
+      recorder_bytes.resize(recorder_stream->getLength());
+      recorder_readable =
+          recorder_stream->read(recorder_bytes.data(), recorder_bytes.size()) ==
+          recorder_bytes.size();
+    }
+    if (!recorder_readable) {
+      recorder_bytes.clear();
+    }
+    *recorder_digest = a11y_recorder::RecordFontFile(
+        recorder_typeface.uniqueID(), *recorder_index, recorder_readable,
+        std::move(recorder_bytes));
+  }
+  return !recorder_digest->empty();
+}
+
+// The shaping result of a text item drawn from its recorded glyphs, when the
+// item was recorded with one horizontal, unrotated glyph run whose font file
+// has the digest and collection index of the primary font Blink chose for the
+// item, at the recorded size (sub-step 3).
+"""
+_PRE_FONT_FILE_SHAPE_CHECK = """\
+  const JSONObject* recorder_run = JSONObject::Cast(recorder_runs->at(0));
+  const JSONObject* recorder_font =
+      recorder_run ? recorder_run->GetJSONObject("font") : nullptr;
+  String recorder_name;
+  double recorder_size = 0;
+  bool recorder_horizontal = false;
+  int recorder_rotation = -1;
+  String recorder_packed;
+  if (!recorder_font ||
+      !recorder_font->GetString("postScriptName", &recorder_name) ||
+      !recorder_font->GetDouble("size", &recorder_size) ||
+"""
+_FONT_FILE_SHAPE_CHECK = """\
+  const JSONObject* recorder_run = JSONObject::Cast(recorder_runs->at(0));
+  const JSONObject* recorder_font =
+      recorder_run ? recorder_run->GetJSONObject("font") : nullptr;
+  const JSONObject* recorder_file =
+      recorder_run ? recorder_run->GetJSONObject("fontFile") : nullptr;
+  String recorder_digest;
+  int recorder_file_index = -1;
+  double recorder_size = 0;
+  bool recorder_horizontal = false;
+  int recorder_rotation = -1;
+  String recorder_packed;
+  if (!recorder_font || !recorder_file ||
+      !recorder_file->GetString("digest", &recorder_digest) ||
+      !recorder_file->GetInteger("index", &recorder_file_index) ||
+      !recorder_font->GetDouble("size", &recorder_size) ||
+"""
+_PRE_FONT_FILE_TYPEFACE_CHECK = """\
+  const SkTypeface* recorder_typeface = recorder_platform.Typeface();
+  SkString recorder_typeface_name;
+  if (!recorder_typeface ||
+      !recorder_typeface->getPostScriptName(&recorder_typeface_name) ||
+      String::FromUtf8(recorder_typeface_name.c_str()) != recorder_name ||
+      std::abs(recorder_platform.size() - recorder_size) > 0.001) {
+    return nullptr;
+  }
+"""
+_FONT_FILE_TYPEFACE_CHECK = """\
+  const SkTypeface* recorder_typeface = recorder_platform.Typeface();
+  std::string recorder_chosen_digest;
+  int recorder_chosen_index = 0;
+  if (!recorder_typeface ||
+      std::abs(recorder_platform.size() - recorder_size) > 0.001 ||
+      !RecorderRecreationFontFile(*recorder_typeface, &recorder_chosen_digest,
+                                  &recorder_chosen_index) ||
+      String::FromUtf8(recorder_chosen_digest) != recorder_digest ||
+      recorder_chosen_index != recorder_file_index) {
+    return nullptr;
+  }
+"""
+for _old in (
+    _PRE_FONT_FILE_SHAPE_COMMENT,
+    _PRE_FONT_FILE_SHAPE_CHECK,
+    _PRE_FONT_FILE_TYPEFACE_CHECK,
+):
+    if BLINK_RECREATION_ITEMS_HELPER.count(_old) != 1:
+        raise RuntimeError("a stage 3 glyph run check was not found once")
+BLINK_RECREATION_ITEMS_HELPER = (
+    BLINK_RECREATION_ITEMS_HELPER.replace(
+        _PRE_FONT_FILE_SHAPE_COMMENT, _FONT_FILE_SHAPE_COMMENT, 1
+    )
+    .replace(_PRE_FONT_FILE_SHAPE_CHECK, _FONT_FILE_SHAPE_CHECK, 1)
+    .replace(_PRE_FONT_FILE_TYPEFACE_CHECK, _FONT_FILE_TYPEFACE_CHECK, 1)
+)
+BLINK_RECREATION_ITEMS_INCLUDES = (
+    *BLINK_RECREATION_ITEMS_INCLUDES,
+    "#include <memory>",
+    "#include <string>",
+    '#include "third_party/skia/include/core/SkStream.h"',
+)
 BLINK_RECREATION_ITEMS_MARKER = "recorder_recorded_items"
 BLINK_RECREATION_ITEMS_HOOK = """\
   // Windows A11y Recorder recreation mode: the block's recorded fragment
@@ -8577,6 +8698,10 @@ def patch_blink_fragment_items_builder(path: Path) -> None:
     text = upgrade_legacy_hooks(
         text,
         (
+            (
+                PRE_FONT_FILE_BLINK_RECREATION_ITEMS_HELPER,
+                BLINK_RECREATION_ITEMS_HELPER,
+            ),
             (LEGACY_FEASIBILITY_ITEMS_HELPER, BLINK_RECREATION_ITEMS_HELPER),
             (INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK),
             (LEGACY_FEASIBILITY_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK),

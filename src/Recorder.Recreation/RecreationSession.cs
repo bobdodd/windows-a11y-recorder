@@ -37,7 +37,17 @@ public sealed class RecreationSession : IAsyncDisposable
         IEnumerable<string>? extraArguments = null,
         IEnumerable<RecreationTiming>? earlierTimings = null)
     {
-        var server = await RecreationServer.StartAsync(content, cancellationToken);
+        RecreationServer server;
+        try
+        {
+            server = await RecreationServer.StartAsync(content, cancellationToken);
+        }
+        catch
+        {
+            // The server disposes the content's resources once it holds them.
+            content.Resources?.Dispose();
+            throw;
+        }
         foreach (var timing in earlierTimings ?? [])
         {
             server.AddTiming(timing.Step, TimeSpan.FromMilliseconds(timing.Milliseconds));

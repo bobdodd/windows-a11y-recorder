@@ -17,6 +17,13 @@ public sealed record RecreationContent(string Html, RecreationEvidence Evidence,
     // as recorded and nothing reaches the network. Null serves the page from
     // the loopback server, as for fixed content.
     public string? DocumentUrl { get; init; }
+
+    // Sub-step 3: the recording's fonts and images for the page, and the
+    // recorder's own address the builder reads the font files from. The
+    // server that holds the recreation disposes the resources.
+    public Recorder.Session.RecordedPageResources? Resources { get; init; }
+
+    public string? FontAddress { get; init; }
 }
 
 // The recorder's answer to a request of the recreation's tab: a status, the

@@ -1756,7 +1756,8 @@ bool LookUpFontFile(uint32_t typeface_id,
 
 // Digests a typeface's font file, records a font-file record the first time
 // the renderer meets the digest, and keeps the digest for the typeface.
-// Returns the digest, or an empty string when the file was not readable.
+// Returns the digest, or an empty string when the file was not readable. In
+// the recreation mode, it records nothing and keeps the digest.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 std::string RecordFontFile(uint32_t typeface_id,
                            int collection_index,

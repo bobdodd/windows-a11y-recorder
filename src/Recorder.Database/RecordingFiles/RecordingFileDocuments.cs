@@ -25,13 +25,16 @@ public sealed class RecordingFileDocuments
     private readonly RecordingFileReader _reader;
     private readonly PlaybackIndex _index;
     private readonly List<(long Time, string Token, string Url)> _navigations = [];
+    private readonly string? _filePath;
     private RecordingFileBrowserState? _state;
 
     /// <param name="reader">The open file. It is not disposed.</param>
-    public RecordingFileDocuments(RecordingFileReader reader, PlaybackIndex index)
+    /// <param name="filePath">The file's path, from which a recreation's fonts and images are read with a reader of their own.</param>
+    public RecordingFileDocuments(RecordingFileReader reader, PlaybackIndex index, string? filePath = null)
     {
         _reader = reader ?? throw new ArgumentNullException(nameof(reader));
         _index = index ?? throw new ArgumentNullException(nameof(index));
+        _filePath = filePath;
         foreach (var item in index.Events)
         {
             if (item.EventType != "navigation-completed" || item.Payload.ValueKind != JsonValueKind.Object)
@@ -94,6 +97,17 @@ public sealed class RecordingFileDocuments
         State.AtFrame(frameNanoseconds, new HashSet<string>(StringComparer.Ordinal) { key }, cancellationToken: cancellationToken)
             .Documents
             .FirstOrDefault(document => document.Key == key && document.State is not null);
+
+    /// <summary>
+    /// The fonts and images of a document at the recording time its state
+    /// is read at, read with a reader of their own on the file, which they
+    /// hold until disposed, so that a recreation can read their bytes after
+    /// the recording is closed. None when the file's path is not known.
+    /// </summary>
+    public RecordedPageResources Resources(string key, long cutNanoseconds, CancellationToken cancellationToken = default) =>
+        _filePath is null
+            ? RecordedPageResources.None
+            : RecordingFileResources.Read(_filePath, key, cutNanoseconds, cancellationToken);
 
     /// <summary>
     /// The recording time of the frame's composition, which the state is

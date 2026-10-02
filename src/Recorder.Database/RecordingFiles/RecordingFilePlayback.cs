@@ -88,7 +88,7 @@ public static class RecordingFilePlayback
             };
             return new RecordingFilePlaybackResult(archive, reader.Incomplete, derived)
             {
-                Documents = new RecordingFileDocuments(reader, index)
+                Documents = new RecordingFileDocuments(reader, index, filePath)
             };
         }
         catch

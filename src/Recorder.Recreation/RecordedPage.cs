@@ -56,10 +56,23 @@ public static class RecordedPage
         string? url,
         long frameNanoseconds,
         long recordingNanoseconds,
-        string basis)
+        string basis,
+        RecordedPageResources? resources = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var nonce = RecreationServer.NewToken();
+        var servedAtRecordedAddress = url is not null && RecreationServer.IsServableAddress(url);
+        // The recorded fonts and images are used only when the page is
+        // served at its recorded address, where the recorder answers every
+        // request of the tab.
+        // The content takes the resources, which the recreation's server
+        // disposes; resources it does not use are disposed here.
+        if (!servedAtRecordedAddress)
+        {
+            resources?.Dispose();
+        }
+        var used = servedAtRecordedAddress ? resources ?? RecordedPageResources.None : RecordedPageResources.None;
+        var fontAddress = RecreationServer.FontAddress(RecreationServer.NewToken());
         var notes = new List<string>();
         if (state.DomCompleteness is not BrowserStateCompleteness.Complete)
         {
@@ -96,10 +109,11 @@ public static class RecordedPage
             var contents = withoutLayoutObject.Count - hidden;
             notes.Add($"{withoutLayoutObject.Count.ToString(CultureInfo.InvariantCulture)} elements had no layout object at the frame, so the recording holds no style for them. The recreation gives {hidden.ToString(CultureInfo.InvariantCulture)} of them display: none, as no node below them had a layout object, and {contents.ToString(CultureInfo.InvariantCulture)} display: contents, as a node below them had one. These values are inferred, not recorded: they are written in each element's data-a11y-recorded-no-layout-object attribute, and DevTools' Styles pane shows them as \"No layout object recorded\".");
         }
-        notes.Add("A box or block whose recorded layout could not be imposed, as when Blink lays out different children or text from those recorded, keeps Blink's layout, and is listed in DevTools' Console with the reason. Images draw nothing, and text in a font that is not on this machine keeps Blink's shaping in a fallback font.");
-        if (url is not null && RecreationServer.IsServableAddress(url))
+        notes.Add("A box or block whose recorded layout could not be imposed, as when Blink lays out different children or text from those recorded, keeps Blink's layout, and is listed in DevTools' Console with the reason. Text is drawn from its recorded glyphs only when the font Blink chose for it is the recorded font file, by digest, at the recorded size; other text keeps Blink's shaping, and the Console lists its block.");
+        if (servedAtRecordedAddress)
         {
-            notes.Add($"The page is served at its recorded address, {url}, so that its relative URLs resolve as they did. The recorder answers that address itself, and refuses every other request of the page, which DevTools' Network panel lists, so nothing reaches the network.");
+            notes.Add($"The page is served at its recorded address, {url}, so that its relative URLs resolve as they did. The recorder answers that address, and the page's images and the builder's font files from the recording; it refuses every other request of the page, such as a style sheet, which DevTools' Network panel lists, so nothing reaches the network.");
+            notes.AddRange(used.Notes);
         }
         else
         {
@@ -115,12 +129,14 @@ public static class RecordedPage
             new RecreationFidelity("not-checked", "The recreation is not yet compared with the recording.", []),
             notes);
         return new RecreationContent(
-            Markup(Tree(state), DocumentTypeName(tree, DocumentNodeId(tree)), nonce),
+            Markup(Tree(state, used.Faces, fontAddress), DocumentTypeName(tree, DocumentNodeId(tree)), nonce),
             evidence,
             nonce)
         {
             Viewport = viewport,
-            DocumentUrl = url is not null && RecreationServer.IsServableAddress(url) ? url : null,
+            DocumentUrl = servedAtRecordedAddress ? url : null,
+            Resources = used,
+            FontAddress = servedAtRecordedAddress ? fontAddress : null,
         };
     }
 
@@ -162,9 +178,14 @@ public static class RecordedPage
 
     // The data the builder reads: the tree from the document node, the
     // manually assigned slots, the text controls, the scroll offsets, the
-    // selection, and the focused node. Characters that could end the data
-    // block, '<' among them, are written as escapes.
-    public static byte[] Tree(BrowserDocumentState state)
+    // selection, the focused node, and the font faces the builder adds before
+    // it builds the tree (sub-step 3), each with the address of its font
+    // file at the recorder. Characters that could end the data block, '<'
+    // among them, are written as escapes.
+    public static byte[] Tree(
+        BrowserDocumentState state,
+        IReadOnlyList<RecordedFontFace>? faces = null,
+        string? fontAddress = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var documentId = DocumentNodeId(tree);
@@ -238,6 +259,23 @@ public static class RecordedPage
                 writer.WriteNullValue();
             }
             WriteNumber(writer, "focusedNodeId", interaction.FocusedNodeId);
+
+            writer.WriteStartArray("fontFaces");
+            foreach (var face in fontAddress is null ? [] : faces ?? [])
+            {
+                writer.WriteStartObject();
+                writer.WriteString("family", face.Family);
+                writer.WriteStartObject("descriptors");
+                foreach (var (name, value) in face.Descriptors)
+                {
+                    writer.WriteString(name, value);
+                }
+                writer.WriteEndObject();
+                writer.WriteString("digest", face.Digest);
+                writer.WriteString("url", fontAddress + face.Digest);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
             writer.WriteEndObject();
         }
         return buffer.ToArray();

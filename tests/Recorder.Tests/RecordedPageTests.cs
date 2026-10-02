@@ -46,7 +46,7 @@ public sealed class RecordedPageTests : IDisposable
     // slot, a closed shadow root, a user agent shadow root, a text control
     // with a recorded value and focus, and an attribute value cut in the
     // recording.
-    private static BrowserDocumentState State()
+    internal static BrowserDocumentState State()
     {
         var tree = new DomDocumentTree();
         DomNode Add(long id, long? parent, string type, string name, string? data = null, params (string Name, string? Value)[] attributes)
@@ -206,7 +206,7 @@ public sealed class RecordedPageTests : IDisposable
         // The builder is written into the page, and waits for the markup to
         // be parsed (slice 4a).
         Assert.Contains("<script nonce=\"n0nce\">// Builds the recorded DOM tree", markup);
-        Assert.Contains("document.addEventListener(\"DOMContentLoaded\", () => {", markup);
+        Assert.Contains("document.addEventListener(\"DOMContentLoaded\", async () => {", markup);
         Assert.EndsWith("}, { once: true });\n</script></head><body></body></html>", markup);
         Assert.Single(markup.Split("<script nonce=")[1..]);
         Assert.Contains("script-src 'nonce-n0nce';", RecreationServer.RecordedPageContentSecurityPolicy("n0nce"));
@@ -988,6 +988,110 @@ public sealed class RecreationControlTests : IDisposable
         Assert.Equal("undefined", await Evaluate("String(window.__reloaded)"));
         Assert.Equal("True", await Evaluate("Boolean(window.__recorderRecreation.built)"));
         Assert.Equal(recorded, await Evaluate("location.href"));
+    }
+
+    // Sub-step 3: the page's image is answered from the recorded bytes, and
+    // the builder adds the recorded face, from its font file at the
+    // recorder's own address, before it builds the tree. Set
+    // RECORDER_RECREATION_CHROMIUM to a Chromium executable, and
+    // RECORDER_RECREATION_FONT_FILE to a TrueType or OpenType file to check
+    // the face as well as the image.
+    [Fact]
+    public async Task TheRecordedImageAndFontFaceAreUsed()
+    {
+        if (Environment.GetEnvironmentVariable("RECORDER_RECREATION_CHROMIUM") is not { } chromium)
+        {
+            return;
+        }
+        var token = TestContext.Current.CancellationToken;
+        var fontPath = Environment.GetEnvironmentVariable("RECORDER_RECREATION_FONT_FILE");
+        var fontBytes = fontPath is null ? null : await File.ReadAllBytesAsync(fontPath, token);
+        var fontDigest = fontBytes is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(fontBytes));
+        var png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+        var pngDigest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(png));
+        var tree = new DomDocumentTree();
+        void Add(long id, long? parent, string type, string name, string? data = null, Dictionary<string, string?>? attributes = null)
+        {
+            var node = new DomNode(id) { ParentId = parent, NodeType = type, NodeName = name, Data = data };
+            foreach (var (key, value) in attributes ?? [])
+            {
+                node.Attributes[key] = value;
+            }
+            tree.Nodes.Add(id, node);
+            if (parent is { } parentId)
+            {
+                tree.Nodes[parentId].Children.Add(id);
+            }
+        }
+        Add(1, null, "document", "#document");
+        Add(2, 1, "other", "html");
+        Add(3, 1, "element", "HTML");
+        Add(4, 3, "element", "HEAD");
+        Add(5, 3, "element", "BODY");
+        Add(6, 5, "element", "IMG", attributes: new() { ["src"] = "images/a.png", ["alt"] = "A" });
+        Add(7, 5, "element", "IMG", attributes: new() { ["src"] = "images/unrecorded.png", ["alt"] = "B" });
+        Add(8, 5, "element", "P", attributes: new() { ["style"] = "font-family: 'Recorded Test'" });
+        Add(9, 8, "text", "#text", "text");
+        var state = new BrowserDocumentState("token-a dom-document-1") { Dom = tree, DomCompleteness = BrowserStateCompleteness.Complete };
+        const string recorded = "https://example.test/dir/page";
+        var image = new RecordedImage("https://example.test/dir/images/a.png", null, 200, "image/png", pngDigest);
+        var faces = fontDigest is null
+            ? Array.Empty<RecordedFontFace>()
+            : [new RecordedFontFace("Recorded Test", [new("weight", "400"), new("style", "normal")], fontDigest, 0, null)];
+        var resources = new RecordedPageResources(
+            faces,
+            new Dictionary<string, RecordedImage> { [image.Url] = image },
+            (kind, digest) => kind == "image-data" && digest == pngDigest ? png
+                : kind == "font-file" && digest == fontDigest ? fontBytes
+                : null,
+            []);
+        var content = RecordedPage.Content(state, recorded, 4_000_000_000, 4_000_000_000, "presented", resources) with
+        {
+            Viewport = new RecreationViewport(800, 600, 1, 1),
+        };
+        await using var session = await RecreationSession.OpenAsync(
+            chromium, Path.Combine(_directory, "recorded-resources"), content, token, ["--headless=new"]);
+
+        using var http = new HttpClient();
+        var list = $"http://127.0.0.1:{session.DevToolsAddress.Port}/json/list";
+        string? address = null;
+        for (var attempt = 0; attempt < 100 && address is null; attempt++)
+        {
+            using var targets = JsonDocument.Parse(await http.GetStringAsync(list, token));
+            address = targets.RootElement.EnumerateArray()
+                .Where(item => item.GetProperty("type").GetString() == "page" &&
+                               item.GetProperty("url").GetString() == recorded)
+                .Select(item => item.GetProperty("webSocketDebuggerUrl").GetString())
+                .FirstOrDefault();
+            if (address is null)
+            {
+                await Task.Delay(100, token);
+            }
+        }
+        Assert.NotNull(address);
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(new Uri(address!), token);
+        var client = new TestDevToolsClient(socket);
+        async Task<string> Evaluate(string expression)
+        {
+            using var answer = await client.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, token);
+            return answer.RootElement.GetProperty("result").GetProperty("result").GetProperty("value").ToString();
+        }
+        for (var attempt = 0; attempt < 100 && await Evaluate("Boolean(window.__recorderRecreation && document.images.length === 2 && document.images[0].complete && document.images[1].complete)") != "True"; attempt++)
+        {
+            await Task.Delay(100, token);
+        }
+        Assert.Equal("1", await Evaluate("document.images[0].naturalWidth"));
+        Assert.Equal("0", await Evaluate("document.images[1].naturalWidth"));
+        Assert.True(session.RefusedRequests >= 1);
+        Assert.Equal("True", await Evaluate("typeof window.__recorderRecreation.times.fontsLoaded === 'number'"));
+        if (fontDigest is not null)
+        {
+            // The face was added before the tree was built, and loaded.
+            Assert.Equal("loaded", await Evaluate("[...document.fonts].find((face) => face.family === 'Recorded Test')?.status ?? 'none'"));
+            Assert.Equal("True", await Evaluate("window.__recorderRecreation.times.fontsLoaded <= window.__recorderRecreation.times.domBuilt"));
+            Assert.Equal("[]", await Evaluate("JSON.stringify(window.__recorderRecreation.notes.filter((item) => item.property.startsWith('font face')))"));
+        }
     }
 
     // A followed link, a link to a new tab, and a form submission are each

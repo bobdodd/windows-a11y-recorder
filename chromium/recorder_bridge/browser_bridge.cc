@@ -6466,12 +6466,19 @@ std::string RecordFontFile(uint32_t typeface_id,
                            std::string bytes) {
   A11Y_RECORDER_COST("RecordFontFile");
   RecorderPipeClient* client = GetProcessRecorderClient();
-  if (!client) {
+  if (!client && !IsRecreationMode()) {
     return std::string();
   }
   std::string digest = readable ? Sha256Hex(bytes) : std::string();
   ResourceStorage& storage = Resources();
   base::AutoLock lock(storage.lock);
+  if (!client) {
+    // The recreation mode (sub-step 3) records nothing: it keeps the digest
+    // of each typeface, so that a glyph run's recorded font file can be
+    // compared with the font Blink chose, and each file is read once.
+    storage.typefaces[typeface_id] = {digest, collection_index};
+    return digest;
+  }
   if (readable &&
       !QueueResourceBytes(client, storage.font_file_digests, "font-file",
                           digest, std::move(bytes))) {

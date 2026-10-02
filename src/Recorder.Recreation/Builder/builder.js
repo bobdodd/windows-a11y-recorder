@@ -7,7 +7,7 @@
 // it is served at its recorded address, and it waits for the markup to be
 // parsed, as a deferred script would. See
 // docs/architecture/page-recreation.md, "Slice 3b design".
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   "use strict";
   const HTML = "http://www.w3.org/1999/xhtml";
   const SVG = "http://www.w3.org/2000/svg";
@@ -28,6 +28,49 @@ document.addEventListener("DOMContentLoaded", () => {
   const notes = [];
   const nodes = new Map();
   const note = (id, property, reason) => notes.push({ nodeId: id, property, reason });
+
+  // Sub-step 3: the faces the document had loaded at the frame are added to
+  // its set of faces before the tree is built, each made from its recorded
+  // family, descriptors, and font file, which the recorder answers at its
+  // own address, so that Blink matches the recorded font-family values to
+  // the same faces as when recorded. Each file is read once. A face that
+  // does not load is left out, and the Console says so.
+  const files = new Map();
+  const fontFile = (face) => {
+    if (!files.has(face.digest)) {
+      files.set(face.digest, fetch(face.url).then((response) => {
+        if (!response.ok) {
+          throw new Error(`the recorder answered ${response.status}`);
+        }
+        return response.arrayBuffer();
+      }));
+    }
+    return files.get(face.digest);
+  };
+  const faces = data.fontFaces ?? [];
+  const read = await Promise.allSettled(faces.map(fontFile));
+  const loading = [];
+  // The faces are added in the order the document added them, since of two
+  // faces with the same descriptors the later one is used.
+  faces.forEach((face, index) => {
+    const failed = (error) => {
+      note(null, `font face ${face.family}`, `not added: ${error.message}`);
+      console.warn(`Windows A11y Recorder: the recorded font face ${face.family} (font file ${face.digest}) was not added: ${error.message}`);
+    };
+    if (read[index].status !== "fulfilled") {
+      failed(read[index].reason);
+      return;
+    }
+    try {
+      const made = new FontFace(face.family, read[index].value, face.descriptors);
+      document.fonts.add(made);
+      loading.push(made.load().catch(failed));
+    } catch (error) {
+      failed(error);
+    }
+  });
+  await Promise.all(loading);
+  times.fontsLoaded = performance.now();
 
   // An element's name is in capitals only for an element in the HTML
   // namespace in an HTML document (DOM standard, "HTML-uppercased qualified

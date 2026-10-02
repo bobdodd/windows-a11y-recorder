@@ -367,6 +367,7 @@ function showTimings(steps, times) {
     const names = [
       ["builderStarted", "The builder started"],
       ["treeRead", "The recorded tree was read"],
+      ["fontsLoaded", "The recorded font faces were added and loaded"],
       ["domBuilt", "The DOM was built"],
       ["styleAndLayout", "The first style and layout, with the recorded values, finished"],
       ["builderFinished", "The builder finished"],
