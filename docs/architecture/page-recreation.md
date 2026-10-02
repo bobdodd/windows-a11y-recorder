@@ -2402,6 +2402,10 @@ Built on 2026-10-01, not yet run on the target machine.
   feasibility attributes `data-a11y-recorded-fragment`, `-lines`, `-text`,
   and `-glyphs` are no longer read, so the spike pages `boxes.html` and
   `lines.html` no longer show recorded values.
+- Revision 44736a8 did not compile: in a `BoxFragmentBuilder` member the
+  `Node` class is hidden by the builder's `Node()` method. The box hook
+  declares the node with `auto`, and the integration script upgrades the
+  44736a8 hook.
 - The hooks parse the attribute with Blink's JSON parser
   (`platform/json`) each time they run for a box or block.
 - Box fragments: the box takes the size of its only recorded fragment, and
@@ -2439,7 +2443,7 @@ Tests at this stage:
   record; the notes; the browser's switch; the server's `timings.json`;
   the integration script's hooks, their upgrade from the feasibility
   versions, and the refusal of a feasibility hook it cannot upgrade. The
-  integration script's 169 tests and the bridge's C++ test pass; the .NET
+  integration script's 170 tests and the bridge's C++ test pass; the .NET
   tests pass except those that need Windows or a database. One snapshot
   test, `AFileCutShortIsReadFromItsSnapshotsBeforeTheCut`, failed once in
   the full run and passed when run alone twice; it does not touch the

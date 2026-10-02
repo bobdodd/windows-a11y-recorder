@@ -6784,6 +6784,33 @@ class RecreationIntegrationTests(unittest.TestCase):
             1, definition.count(INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION)
         )
 
+    def test_upgrades_the_box_hook_that_did_not_compile(self):
+        self.assertNotEqual(
+            INTEGRATE.INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK,
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK,
+        )
+        self.assertIn(
+            "const auto* recorder_node = node_.GetDOMNode();",
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK,
+        )
+        box = self.patch_source_twice(
+            "box_fragment_builder.cc",
+            self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+            ).replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                INTEGRATE.INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_box_fragment_builder,
+        )
+        self.assertNotIn(
+            "    const Node* recorder_node = node_.GetDOMNode();\n", box
+        )
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+
     def test_refuses_a_feasibility_hook_it_cannot_upgrade(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "box_fragment_builder.cc"

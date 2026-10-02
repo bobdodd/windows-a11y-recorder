@@ -6895,11 +6895,20 @@ def patch_blink_box_fragment_builder(path: Path) -> None:
         (
             (LEGACY_FEASIBILITY_FRAGMENT_HELPER, BLINK_RECREATION_FRAGMENT_HELPER),
             (LEGACY_FEASIBILITY_FRAGMENT_HOOK, BLINK_RECREATION_FRAGMENT_HOOK),
+            (
+                INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK,
+                BLINK_RECREATION_FRAGMENT_HOOK,
+            ),
         ),
         path,
     )
     require_no_feasibility_text(
-        text, ('"data-a11y-recorded-fragment"',), path
+        text,
+        (
+            '"data-a11y-recorded-fragment"',
+            "    const Node* recorder_node = node_.GetDOMNode();\n",
+        ),
+        path,
     )
     text = insert_before_once(
         text,
@@ -7313,7 +7322,8 @@ BLINK_RECREATION_FRAGMENT_HOOK = """\
   // only when it holds as many children as the recorded fragment links.
   if (a11y_recorder::IsRecreationMode() && node_ &&
       GetWritingDirection().IsHorizontalLtr()) {
-    const Node* recorder_node = node_.GetDOMNode();
+    // BoxFragmentBuilder::Node() hides the Node class here.
+    const auto* recorder_node = node_.GetDOMNode();
     if (std::unique_ptr<JSONObject> recorder_layout =
             RecorderRecordedLayout(recorder_node)) {
       const JSONArray* recorder_fragments =
@@ -7743,6 +7753,15 @@ BLINK_RECREATION_ITEMS_HOOK = """\
 
 """
 
+
+# The stage 3 box hook as written by revision 44736a8, which did not compile:
+# in a BoxFragmentBuilder member, the Node class is hidden by its Node()
+# method. A checkout that holds it is upgraded to the current hook.
+INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK = BLINK_RECREATION_FRAGMENT_HOOK.replace(
+    "    // BoxFragmentBuilder::Node() hides the Node class here.\n"
+    "    const auto* recorder_node = node_.GetDOMNode();\n",
+    "    const Node* recorder_node = node_.GetDOMNode();\n",
+)
 
 def require_no_feasibility_text(
     text: str, fragments: tuple[str, ...], path: Path
