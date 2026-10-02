@@ -14,7 +14,8 @@ public sealed record BlockedNavigation(string Url, DateTimeOffset Time, bool InR
 // evidence panel; a tab opened by a refused request is closed. Nothing is
 // added to the page. The recreation's tab is also given the recorded
 // viewport, and focus emulation, so the recorded focus holds while DevTools
-// has the keyboard. See docs/architecture/page-recreation.md, "Leaving the
+// has the keyboard, and its window is sized so that its page area is that
+// viewport. See docs/architecture/page-recreation.md, "Leaving the
 // recreation".
 public sealed class RecreationControl : IAsyncDisposable
 {
@@ -63,6 +64,17 @@ public sealed class RecreationControl : IAsyncDisposable
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
             var session = await control._firstTab.Task.WaitAsync(timeout.Token);
+            if (viewport is { Width: > 0, Height: > 0 })
+            {
+                await control.FitWindowAsync(session, viewport, cancellationToken);
+                await connection.SendAsync("Emulation.setDeviceMetricsOverride", new
+                {
+                    width = (int)Math.Round(viewport.Width),
+                    height = (int)Math.Round(viewport.Height),
+                    deviceScaleFactor = viewport.DevicePixelRatio,
+                    mobile = false
+                }, session, cancellationToken);
+            }
             await connection.SendAsync("Page.navigate", new { url = pageAddress }, session, cancellationToken);
             return control;
         }
@@ -72,6 +84,45 @@ public sealed class RecreationControl : IAsyncDisposable
             throw;
         }
     }
+
+    // Sizes the recreation's window so that its page area is the recorded
+    // viewport, so the whole recorded page and its scroll bars show. The
+    // window's frame, its size less the page area, is read from the blank
+    // tab before the viewport is emulated, in CSS pixels, which are the
+    // window's own units at the default zoom. The viewport is still
+    // emulated after, so a window the screen cannot hold keeps the recorded
+    // layout.
+    private async Task FitWindowAsync(string session, RecreationViewport viewport, CancellationToken cancellationToken)
+    {
+        var measured = await _connection.SendAsync("Runtime.evaluate", new
+        {
+            expression = "JSON.stringify([outerWidth - innerWidth, outerHeight - innerHeight])",
+            returnByValue = true
+        }, session, cancellationToken);
+        using var frame = JsonDocument.Parse(measured.GetProperty("result").GetProperty("value").GetString()!);
+        var target = await _connection.SendAsync("Target.getTargetInfo", null, session, cancellationToken);
+        var window = await _connection.SendAsync("Browser.getWindowForTarget", new
+        {
+            targetId = target.GetProperty("targetInfo").GetProperty("targetId").GetString()
+        }, null, cancellationToken);
+        var size = WindowSize(viewport, frame.RootElement[0].GetDouble(), frame.RootElement[1].GetDouble());
+        await _connection.SendAsync("Browser.setWindowBounds", new
+        {
+            windowId = window.GetProperty("windowId").GetInt32(),
+            bounds = new { windowState = "normal" }
+        }, null, cancellationToken);
+        await _connection.SendAsync("Browser.setWindowBounds", new
+        {
+            windowId = window.GetProperty("windowId").GetInt32(),
+            bounds = new { width = size.Width, height = size.Height }
+        }, null, cancellationToken);
+    }
+
+    // The window size whose page area is the recorded viewport, given the
+    // window's frame, in whole pixels, rounded up.
+    public static (int Width, int Height) WindowSize(RecreationViewport viewport, double frameWidth, double frameHeight) =>
+        ((int)Math.Ceiling(viewport.Width + Math.Max(0, frameWidth)),
+         (int)Math.Ceiling(viewport.Height + Math.Max(0, frameHeight)));
 
     // True for an address the recreation may load: its own, or DevTools.
     public static bool IsAllowed(string url, string pageAddress) =>
@@ -140,16 +191,6 @@ public sealed class RecreationControl : IAsyncDisposable
             {
                 _recreationSession = session;
                 commands.Add(_connection.SendAsync("Page.enable", null, session, token));
-                if (_viewport is { Width: > 0, Height: > 0 } viewport)
-                {
-                    commands.Add(_connection.SendAsync("Emulation.setDeviceMetricsOverride", new
-                    {
-                        width = (int)Math.Round(viewport.Width),
-                        height = (int)Math.Round(viewport.Height),
-                        deviceScaleFactor = viewport.DevicePixelRatio,
-                        mobile = false
-                    }, session, token));
-                }
                 commands.Add(_connection.SendAsync("Emulation.setFocusEmulationEnabled", new { enabled = true }, session, token));
             }
         }

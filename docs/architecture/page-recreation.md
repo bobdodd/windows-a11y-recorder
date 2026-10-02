@@ -2436,9 +2436,18 @@ Built on 2026-10-01, not yet run on the target machine.
   open the recreation". The recorder has no log of its own, so the times
   are not written to one.
 
+- The window (added on 2026-10-01, after the owner found the window too
+  narrow to show the page and its scroll bar): before the viewport is
+  emulated, the recorder reads the window's frame from the blank tab as
+  `outerWidth - innerWidth` and `outerHeight - innerHeight`, and sets the
+  window's size to the recorded viewport plus that frame with
+  `Browser.setWindowBounds`. The viewport is still emulated after, so a
+  window the screen cannot hold keeps the recorded layout.
+
 Tests at this stage:
 
-- Unit: the tree data's recorded style and layout, after a record of
+- Unit: the window size for a recorded viewport and frame; the tree data's
+  recorded style and layout, after a record of
   changes is merged, and none for a text node or an element without a
   record; the notes; the browser's switch; the server's `timings.json`;
   the integration script's hooks, their upgrade from the feasibility
