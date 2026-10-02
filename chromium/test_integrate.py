@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.39"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.39"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.40"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.40"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -6754,6 +6754,142 @@ class RecreationIntegrationTests(unittest.TestCase):
         self.assertEqual(
             [],
             INTEGRATE.describe_signature_mismatches("patched", patched, signatures),
+        )
+
+    def test_glyph_runs_record_their_font_file(self):
+        # Protocol 0.40: each glyph run's typeface gives its font file, read
+        # once in the renderer through Skia's openStream, and its variation
+        # position.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        for expected in (
+            "bool RecorderFontFile(const SkTypeface& recorder_typeface,",
+            "a11y_recorder::LookUpFontFile(recorder_typeface.uniqueID(),",
+            "recorder_typeface.openStream(recorder_index)",
+            "a11y_recorder::RecordFontFile(",
+            "RecorderReadRunFontFile(*recorder_typeface, recorder_run);",
+            "getVariationDesignPosition(recorder_coordinates)",
+        ):
+            with self.subTest(expected=expected):
+                self.assertEqual(1, helper.count(expected))
+        self.assertLess(
+            helper.index("void RecorderReadRunFontFile("),
+            helper.index("void RecorderReadGlyph("),
+        )
+        self.assertIn(
+            '#include "third_party/skia/include/core/SkStream.h"',
+            INTEGRATE.BLINK_LAYOUT_CHANGES_INCLUDES,
+        )
+
+    def test_font_faces_record_joining_loading_and_leaving_once(self):
+        header = self.patch_source_twice(
+            "font_custom_platform_data.h",
+            "class FontCustomPlatformData {\n public:\n"
+            + INTEGRATE.BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_ANCHOR
+            + "\n private:\n  sk_sp<SkTypeface> base_typeface_;\n};\n",
+            INTEGRATE.patch_blink_font_custom_platform_data_header,
+        )
+        self.assertEqual(
+            1, header.count(INTEGRATE.BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR)
+        )
+        self.assertLess(
+            header.index("RecorderBaseTypeface()"), header.index(" private:")
+        )
+        face_header = self.patch_source_twice(
+            "font_face.h",
+            "class FontFace {\n public:\n"
+            + INTEGRATE.BLINK_FONT_FACE_PUBLIC_ANCHOR
+            + "\n private:\n"
+            + INTEGRATE.BLINK_FONT_FACE_PRIVATE_ANCHOR
+            + "};\n",
+            INTEGRATE.patch_blink_font_face_header,
+        )
+        self.assertEqual(1, face_header.count(INTEGRATE.BLINK_FONT_FACE_PUBLIC))
+        self.assertLess(
+            face_header.index("void RecorderNoteRemoved();"),
+            face_header.index(" private:"),
+        )
+        self.assertGreater(
+            face_header.index("uint64_t recorder_face_number_ = 0;"),
+            face_header.index(" private:"),
+        )
+        definition = self.patch_source_twice(
+            "font_face.cc",
+            '#include "third_party/blink/renderer/core/css/font_face.h"\n'
+            "\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_FONT_FACE_DEFINITIONS_ANCHOR
+            + "  status_ = status;\n"
+            + INTEGRATE.BLINK_FONT_FACE_LOADED_ANCHOR
+            + "  }\n}\n\n}  // namespace blink\n",
+            INTEGRATE.patch_blink_font_face,
+        )
+        self.assertEqual(1, definition.count(INTEGRATE.BLINK_FONT_FACE_DEFINITIONS))
+        self.assertEqual(1, definition.count(INTEGRATE.BLINK_FONT_FACE_LOADED_HOOK))
+        self.assertLess(
+            definition.index("void FontFace::RecorderNoteLoaded() {"),
+            definition.index("void FontFace::SetLoadStatus("),
+        )
+        for expected in (
+            "css_font_face_->FrontSource()",
+            "recorder_source->GetCustomPlaftormData()",
+            "recorder_data->RecorderBaseTypeface()",
+            "DynamicTo<LocalDOMWindow>(recorder_context)",
+            "a11y_recorder::RecordBlinkFontFaceLoaded(",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, definition)
+        cache = self.patch_source_twice(
+            "font_face_cache.cc",
+            "void FontFaceCache::AddFontFace(FontFace* font_face, bool css_connected) {\n"
+            + INTEGRATE.BLINK_FONT_FACE_CACHE_ADD_ANCHOR
+            + "}\nbool FontFaceCache::RemoveFontFace(FontFace* font_face, bool c) {\n"
+            + INTEGRATE.BLINK_FONT_FACE_CACHE_REMOVE_ANCHOR
+            + "  return true;\n}\nvoid FontFaceCache::ClearAll() {\n"
+            + INTEGRATE.BLINK_FONT_FACE_CACHE_CLEAR_ANCHOR
+            + "}\n",
+            INTEGRATE.patch_blink_font_face_cache,
+        )
+        self.assertEqual(1, cache.count("font_face->RecorderNoteAdded();"))
+        self.assertEqual(1, cache.count("font_face->RecorderNoteRemoved();"))
+        self.assertEqual(1, cache.count("recorder_face->RecorderNoteRemoved();"))
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "font_face.cc", definition, signatures
+            ),
+        )
+
+    def test_image_resources_record_their_bytes_before_they_are_cleared(self):
+        source = self.patch_source_twice(
+            "image_resource.cc",
+            '#include "third_party/blink/renderer/core/loader/resource/'
+            'image_resource.h"\n\nvoid ImageResource::Finish() {\n'
+            "  if (a) {\n"
+            + INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR
+            + "    ClearData();\n  }\n}\n",
+            INTEGRATE.patch_blink_image_resource,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK))
+        self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, source)
+        self.assertLess(
+            source.index("a11y_recorder::RecordBlinkImageResource("),
+            source.index("UpdateImage(Data()"),
+        )
+        self.assertLess(
+            source.index("UpdateImage(Data()"), source.index("ClearData();")
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "image_resource.cc", source, signatures
+            ),
         )
 
     def test_adds_the_item_setters_and_the_recorded_shaping_result_once(self):

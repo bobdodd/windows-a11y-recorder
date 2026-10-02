@@ -334,6 +334,24 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.NetworkWebTransportClosed) =>
                 payload.Deserialize<BrowserNetworkWebTransportClosedPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.FontFile or
+                BrowserEvidenceEventTypes.ImageData) =>
+                payload.Deserialize<BrowserResourceBytesPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.FontFaceAdded or
+                BrowserEvidenceEventTypes.FontFaceRemoved) =>
+                payload.Deserialize<BrowserFontFacePayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.FontFaceLoaded) =>
+                payload.Deserialize<BrowserFontFaceLoadedPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.ImageResource) =>
+                payload.Deserialize<BrowserImageResourcePayload>(JsonOptions)
+                    as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or
                 BrowserEvidenceChannels.Dispatch or
@@ -346,7 +364,8 @@ internal static class BrowserProtocol
                 BrowserEvidenceChannels.Interaction or
                 BrowserEvidenceChannels.Layout or
                 BrowserEvidenceChannels.Presentation or
-                BrowserEvidenceChannels.Network,
+                BrowserEvidenceChannels.Network or
+                BrowserEvidenceChannels.Resources,
                 BrowserEvidenceEventTypes.Omission) =>
                 payload.Deserialize<BrowserOmissionPayload>(JsonOptions)
                     as object,

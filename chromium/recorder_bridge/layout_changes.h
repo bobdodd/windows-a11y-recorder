@@ -45,6 +45,13 @@ struct LayoutGlyph {
 // One run of glyphs of a text item with the same font, orientation, and
 // rotation (protocol 0.39). The bridge records the glyphs packed
 // little-endian, 18 bytes each, by PackGlyphs.
+// One axis of a typeface's variation position (protocol 0.40): the axis tag,
+// four characters packed big-endian as Skia's SkFourByteTag, and its value.
+struct LayoutFontVariation {
+  uint32_t axis = 0;
+  float value = 0;
+};
+
 struct LayoutGlyphRun {
   LayoutGlyphRun();
   LayoutGlyphRun(const LayoutGlyphRun&);
@@ -58,6 +65,13 @@ struct LayoutGlyphRun {
   double size = 0;
   bool synthetic_bold = false;
   bool synthetic_italic = false;
+  // The run's font file (protocol 0.40): the digest of the file's bytes, its
+  // index in a font collection, and the typeface's variation position. The
+  // file is absent when Skia gives no stream for the typeface.
+  bool font_file_present = false;
+  std::string font_file_digest;
+  int font_file_index = 0;
+  std::vector<LayoutFontVariation> font_variations;
   bool horizontal = true;
   int rotation = 0;
   std::vector<LayoutGlyph> glyphs;

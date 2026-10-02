@@ -4612,6 +4612,103 @@ public sealed class EventRecordValidatorTests
         return result.Issues.ToList();
     }
 
+    [Theory]
+    [InlineData("font-file")]
+    [InlineData("image-data")]
+    [InlineData("font-face-added")]
+    [InlineData("font-face-removed")]
+    [InlineData("font-face-loaded")]
+    [InlineData("image-resource")]
+    public void AcceptsResourceRecords(string eventType)
+    {
+        Assert.Empty(ValidateResourceRecord(eventType, ResourcePayload(eventType)));
+    }
+
+    [Theory]
+    [InlineData("font-file", "digest", "\"ABC\"", "payload-property-invalid")]
+    [InlineData("font-file", "size", "\"6\"", "browser-resource-bytes-invalid")]
+    [InlineData("font-file", "bytes", "\"SGVsbG8\"", "browser-resource-bytes-invalid")]
+    [InlineData("font-face-added", "faceNumber", "\"0\"", "payload-property-invalid")]
+    [InlineData("font-face-loaded", "descriptors/weight", "null", "payload-property-invalid")]
+    [InlineData("font-face-loaded", "source/kind", "\"file\"", "payload-property-invalid")]
+    [InlineData("font-face-loaded", "source/url", "null", "browser-font-face-source-url")]
+    [InlineData("font-face-loaded", "fontFile/index", "-1", "payload-property-invalid")]
+    [InlineData("image-resource", "url", "7", "payload-property-invalid")]
+    [InlineData("image-resource", "dataRecorded", "null", "payload-property-invalid")]
+    public void RejectsMalformedResourceRecords(
+        string eventType, string path, string value, string code)
+    {
+        var payload = ResourcePayload(eventType);
+        var parts = path.Split('/');
+        var target = payload;
+        for (var index = 0; index < parts.Length - 1; index++)
+        {
+            target = target[parts[index]]!;
+        }
+        target[parts[^1]] = JsonNode.Parse(value);
+
+        Assert.Contains(
+            ValidateResourceRecord(eventType, payload),
+            issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void AFaceRecordNamesItsDocument()
+    {
+        var payload = ResourcePayload("font-face-added");
+        payload["context"]!["documentId"] = null;
+
+        Assert.Contains(
+            ValidateResourceRecord("font-face-added", payload),
+            issue => issue.Code == "browser-dom-context-invalid");
+    }
+
+    [Fact]
+    public void AcceptsAGlyphRunsFontFile()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedTextBlockNode)!;
+        var run = payload["boxFragments"]!["fragments"]![0]!["items"]![1]!["glyphRuns"]![0]!;
+        run["fontFile"] = JsonNode.Parse($$"""
+            {
+              "digest": "{{BrowserResourcePayloads.Digest}}", "index": 0,
+              "variations": [{ "axis": "wght", "value": 400 }]
+            }
+            """);
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", payload));
+
+        run["fontFile"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", payload));
+
+        run["fontFile"] = JsonNode.Parse("""{ "digest": "ab", "index": 0, "variations": [] }""");
+        Assert.Contains(
+            ValidateLayoutRecord("layout-node-changed", payload),
+            issue => issue.Code == "payload-property-invalid");
+    }
+
+    private static JsonNode ResourcePayload(string eventType) =>
+        JsonNode.Parse(eventType switch
+        {
+            "font-file" or "image-data" => BrowserResourcePayloads.FontFile,
+            "font-face-added" or "font-face-removed" => BrowserResourcePayloads.FaceAdded,
+            "font-face-loaded" => BrowserResourcePayloads.FaceLoaded,
+            _ => BrowserResourcePayloads.ImageResource
+        })!;
+
+    private static IReadOnlyList<EventValidationIssue> ValidateResourceRecord(string eventType, JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Resources,
+            eventType,
+            document.RootElement.Clone());
+        IReadOnlyList<RecorderEvent> events = ([record]);
+
+        var result = Validate(events);
+        return result.Issues.ToList();
+    }
+
     private static IReadOnlyList<EventValidationIssue> ValidatePresentationRecord(string eventType, JsonNode payload)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());

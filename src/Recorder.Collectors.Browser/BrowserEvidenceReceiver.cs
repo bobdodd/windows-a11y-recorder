@@ -49,7 +49,8 @@ public sealed class BrowserEvidenceReceiver : ICaptureCollector
                 BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceChannels.Layout,
                 BrowserEvidenceChannels.Presentation,
-                BrowserEvidenceChannels.Network
+                BrowserEvidenceChannels.Network,
+                BrowserEvidenceChannels.Resources
             ],
             "instrumented-chromium-local-ipc");
         ConnectionInfo = new BrowserEvidenceConnectionInfo(

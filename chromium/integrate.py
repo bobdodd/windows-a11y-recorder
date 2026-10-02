@@ -8146,6 +8146,374 @@ def require_no_feasibility_text(
             )
 
 
+# Page resources (protocol 0.40). A font file is read from the typeface Blink
+# draws with, through Skia's openStream, and digested by the bridge, which
+# keeps the digest by the typeface's unique identifier, so each file is read
+# once in a renderer. Both the glyph reader and the font face hook use it.
+BLINK_RECORDER_FONT_FILE_READER = """\
+
+// The font file of a typeface (protocol 0.40): the digest of the bytes Skia's
+// openStream gives, and the index of the typeface in a font collection. The
+// bridge records the bytes the first time the renderer meets the digest.
+// Returns false when Skia gives no readable file for the typeface.
+bool RecorderFontFile(const SkTypeface& recorder_typeface,
+                      std::string* recorder_digest,
+                      int* recorder_index) {
+  if (!a11y_recorder::LookUpFontFile(recorder_typeface.uniqueID(),
+                                     recorder_digest, recorder_index)) {
+    *recorder_index = 0;
+    std::unique_ptr<SkStreamAsset> recorder_stream =
+        recorder_typeface.openStream(recorder_index);
+    std::string recorder_bytes;
+    bool recorder_readable = false;
+    if (recorder_stream) {
+      recorder_bytes.resize(recorder_stream->getLength());
+      recorder_readable =
+          recorder_stream->read(recorder_bytes.data(), recorder_bytes.size()) ==
+          recorder_bytes.size();
+    }
+    if (!recorder_readable) {
+      recorder_bytes.clear();
+    }
+    *recorder_digest = a11y_recorder::RecordFontFile(
+        recorder_typeface.uniqueID(), *recorder_index, recorder_readable,
+        std::move(recorder_bytes));
+  }
+  return !recorder_digest->empty();
+}
+"""
+
+# Page resources (protocol 0.40): font faces and images. See
+# docs/architecture/page-recreation.md, "Slice 4a". A FontFace records when it
+# joins and leaves its document's set of faces, which FontFaceCache keeps, and
+# when it loads, with its descriptors and the font file of its source. An
+# image resource records its encoded bytes before Blink clears them.
+BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_ANCHOR = """\
+  size_t DataSize() const { return data_size_; }
+"""
+BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR = """\
+
+  // Windows A11y Recorder (protocol 0.40): the typeface the font file was
+  // decoded to, from which the recorder reads the file Blink draws with.
+  const SkTypeface* RecorderBaseTypeface() const {
+    return base_typeface_.get();
+  }
+"""
+BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_MARKER = "RecorderBaseTypeface()"
+
+BLINK_FONT_FACE_PUBLIC_ANCHOR = """\
+  CSSFontFace* CssFontFace() { return css_font_face_.Get(); }
+"""
+BLINK_FONT_FACE_PUBLIC = """\
+  // Windows A11y Recorder (protocol 0.40): records that this face joined or
+  // left its document's set of faces.
+  void RecorderNoteAdded();
+  void RecorderNoteRemoved();
+"""
+BLINK_FONT_FACE_PRIVATE_ANCHOR = """\
+  Member<CSSFontFace> css_font_face_;
+"""
+BLINK_FONT_FACE_PRIVATE = """\
+  // Windows A11y Recorder (protocol 0.40): the face's number in the
+  // renderer's records, assigned when it is first recorded, and the record of
+  // its loading.
+  uint64_t recorder_face_number_ = 0;
+  void RecorderNoteLoaded();
+"""
+BLINK_FONT_FACE_MARKER = "void RecorderNoteAdded();"
+
+BLINK_FONT_FACE_INCLUDES = (
+    "#include <memory>",
+    "#include <string>",
+    '#include "base/strings/string_util.h"',
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/css/css_font_face_source.h"',
+    '#include "third_party/blink/renderer/platform/fonts/font_custom_platform_data.h"',
+    '#include "third_party/skia/include/core/SkStream.h"',
+    '#include "third_party/skia/include/core/SkTypeface.h"',
+)
+BLINK_FONT_FACE_DEFINITIONS_ANCHOR = """\
+void FontFace::SetLoadStatus(LoadStatusType status) {
+"""
+BLINK_FONT_FACE_DEFINITIONS_MARKER = "void FontFace::RecorderNoteAdded() {"
+BLINK_FONT_FACE_DEFINITIONS = (
+    """\
+namespace {
+"""
+    + BLINK_RECORDER_FONT_FILE_READER
+    + """\
+
+// The document of a face's execution context, when that is a window. A face
+// of a worker has none, and is not recorded.
+Document* RecorderFontFaceDocument(ExecutionContext* recorder_context) {
+  auto* recorder_window = DynamicTo<LocalDOMWindow>(recorder_context);
+  return recorder_window ? recorder_window->document() : nullptr;
+}
+
+}  // namespace
+
+void FontFace::RecorderNoteAdded() {
+  if (!a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  Document* recorder_document = RecorderFontFaceDocument(GetExecutionContext());
+  if (!recorder_document) {
+    return;
+  }
+  if (!recorder_face_number_) {
+    recorder_face_number_ = a11y_recorder::AssignFontFaceNumber();
+  }
+  a11y_recorder::RecordBlinkFontFaceAdded(
+      recorder_document->GetDomNodeId(), recorder_document->Token().ToString(),
+      recorder_face_number_);
+}
+
+void FontFace::RecorderNoteRemoved() {
+  if (!recorder_face_number_ || !a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  Document* recorder_document = RecorderFontFaceDocument(GetExecutionContext());
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkFontFaceRemoved(
+      recorder_document->GetDomNodeId(), recorder_document->Token().ToString(),
+      recorder_face_number_);
+}
+
+// A loaded face's family and descriptors as its getters serialize them, the
+// source it loaded from, and the font file of that source when Blink holds
+// one, which a local() source does not.
+void FontFace::RecorderNoteLoaded() {
+  if (!a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  Document* recorder_document = RecorderFontFaceDocument(GetExecutionContext());
+  if (!recorder_document) {
+    return;
+  }
+  if (!recorder_face_number_) {
+    recorder_face_number_ = a11y_recorder::AssignFontFaceNumber();
+  }
+  a11y_recorder::FontFaceFacts recorder_face;
+  recorder_face.family = family().Utf8();
+  recorder_face.style = style().Utf8();
+  recorder_face.weight = weight().Utf8();
+  recorder_face.stretch = stretch().Utf8();
+  recorder_face.unicode_range = unicodeRange().Utf8();
+  recorder_face.variant = variant().Utf8();
+  recorder_face.feature_settings = featureSettings().Utf8();
+  recorder_face.display = display().Utf8();
+  recorder_face.ascent_override = ascentOverride().Utf8();
+  recorder_face.descent_override = descentOverride().Utf8();
+  recorder_face.line_gap_override = lineGapOverride().Utf8();
+  recorder_face.size_adjust = sizeAdjust().Utf8();
+  const CSSFontFaceSource* recorder_source =
+      css_font_face_ ? css_font_face_->FrontSource() : nullptr;
+  if (recorder_source) {
+    const String recorder_url = recorder_source->GetURL();
+    const FontCustomPlatformData* recorder_data =
+        recorder_source->GetCustomPlaftormData();
+    if (!recorder_url.IsNull()) {
+      std::string recorder_url_text = recorder_url.Utf8();
+      if (base::StartsWith(recorder_url_text, "data:",
+                           base::CompareCase::INSENSITIVE_ASCII)) {
+        // A data URL's file is the font file the face records.
+        recorder_face.source_kind = "data-url";
+      } else {
+        recorder_face.source_kind = "url";
+        recorder_face.source_url = std::move(recorder_url_text);
+      }
+    } else if (recorder_data) {
+      recorder_face.source_kind = "binary";
+    } else {
+      recorder_face.source_kind = "local";
+    }
+    if (recorder_data && recorder_data->RecorderBaseTypeface()) {
+      std::string recorder_digest;
+      int recorder_index = 0;
+      if (RecorderFontFile(*recorder_data->RecorderBaseTypeface(),
+                           &recorder_digest, &recorder_index)) {
+        recorder_face.font_file_digest = std::move(recorder_digest);
+        recorder_face.font_file_index = recorder_index;
+      }
+    }
+  }
+  a11y_recorder::RecordBlinkFontFaceLoaded(
+      recorder_document->GetDomNodeId(), recorder_document->Token().ToString(),
+      recorder_face_number_, std::move(recorder_face));
+}
+
+"""
+)
+BLINK_FONT_FACE_LOADED_ANCHOR = """\
+  if (!GetExecutionContext()) {
+    return;
+  }
+
+  if (status_ == kLoaded || status_ == kError) {
+"""
+BLINK_FONT_FACE_LOADED_HOOK = """\
+  if (!GetExecutionContext()) {
+    return;
+  }
+
+  // Windows A11y Recorder (protocol 0.40).
+  if (status_ == kLoaded) {
+    RecorderNoteLoaded();
+  }
+
+  if (status_ == kLoaded || status_ == kError) {
+"""
+
+BLINK_FONT_FACE_CACHE_ADD_ANCHOR = """\
+  segmented_faces_.AddFontFace(font_face, css_connected);
+"""
+BLINK_FONT_FACE_CACHE_ADD_HOOK = """\
+  segmented_faces_.AddFontFace(font_face, css_connected);
+  // Windows A11y Recorder (protocol 0.40).
+  font_face->RecorderNoteAdded();
+"""
+BLINK_FONT_FACE_CACHE_REMOVE_ANCHOR = """\
+  if (!segmented_faces_.RemoveFontFace(font_face)) {
+    return false;
+  }
+"""
+BLINK_FONT_FACE_CACHE_REMOVE_HOOK = """\
+  if (!segmented_faces_.RemoveFontFace(font_face)) {
+    return false;
+  }
+  // Windows A11y Recorder (protocol 0.40).
+  font_face->RecorderNoteRemoved();
+"""
+BLINK_FONT_FACE_CACHE_CLEAR_ANCHOR = """\
+  segmented_faces_.Clear();
+  font_selection_query_cache_.Clear();
+"""
+BLINK_FONT_FACE_CACHE_CLEAR_HOOK = """\
+  // Windows A11y Recorder (protocol 0.40): the faces of style sheets leave
+  // the set. A face added by script leaves it too, unrecorded, since the
+  // cache keeps no list of those faces apart from the families.
+  for (FontFace* recorder_face : css_connected_font_faces_) {
+    recorder_face->RecorderNoteRemoved();
+  }
+  segmented_faces_.Clear();
+  font_selection_query_cache_.Clear();
+"""
+
+BLINK_IMAGE_RESOURCE_ANCHOR = """\
+  } else {
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+"""
+BLINK_IMAGE_RESOURCE_HOOK = """\
+  } else {
+    // Windows A11y Recorder (protocol 0.40): the encoded bytes, before they
+    // are cleared, with the URL requested and the response. A data URL's
+    // bytes are its URL, which the DOM already holds.
+    if (Data() && a11y_recorder::IsRecorderActive() &&
+        !Url().ProtocolIsData()) {
+      a11y_recorder::ImageResourceFacts recorder_image;
+      recorder_image.url = Url().GetString().Utf8();
+      recorder_image.response_url =
+          GetResponse().ResponseUrl().GetString().Utf8();
+      recorder_image.status = GetResponse().HttpStatusCode();
+      recorder_image.mime_type = GetResponse().MimeType().Utf8();
+      recorder_image.bytes.reserve(Data()->size());
+      for (const base::span<const char>& recorder_segment : *Data()) {
+        recorder_image.bytes.append(recorder_segment.begin(),
+                                    recorder_segment.end());
+      }
+      a11y_recorder::RecordBlinkImageResource(std::move(recorder_image));
+    }
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+"""
+
+
+def patch_blink_font_custom_platform_data_header(path: Path) -> None:
+    """Gives the recorder the typeface a web font was decoded to."""
+    text = read_source(path)
+    if BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_MARKER not in text:
+        text = replace_once(
+            text,
+            BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_ANCHOR,
+            BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_ANCHOR
+            + BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_blink_font_face_header(path: Path) -> None:
+    """Declares the FontFace members that record a face."""
+    text = read_source(path)
+    if BLINK_FONT_FACE_MARKER not in text:
+        text = replace_once(
+            text,
+            BLINK_FONT_FACE_PUBLIC_ANCHOR,
+            BLINK_FONT_FACE_PUBLIC_ANCHOR + BLINK_FONT_FACE_PUBLIC,
+            path,
+        )
+        text = replace_once(
+            text,
+            BLINK_FONT_FACE_PRIVATE_ANCHOR,
+            BLINK_FONT_FACE_PRIVATE_ANCHOR + BLINK_FONT_FACE_PRIVATE,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_blink_font_face(path: Path) -> None:
+    """Defines the FontFace recording members and the loaded hook."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/css/font_face.h"',
+        BLINK_FONT_FACE_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_FONT_FACE_DEFINITIONS_ANCHOR,
+        BLINK_FONT_FACE_DEFINITIONS,
+        BLINK_FONT_FACE_DEFINITIONS_MARKER,
+        path,
+    )
+    if BLINK_FONT_FACE_LOADED_HOOK not in text:
+        text = replace_once(
+            text, BLINK_FONT_FACE_LOADED_ANCHOR, BLINK_FONT_FACE_LOADED_HOOK, path
+        )
+    write_patched(path, text)
+
+
+def patch_blink_font_face_cache(path: Path) -> None:
+    """Records faces joining and leaving a document's set of faces."""
+    text = read_source(path)
+    for anchor, hook in (
+        (BLINK_FONT_FACE_CACHE_ADD_ANCHOR, BLINK_FONT_FACE_CACHE_ADD_HOOK),
+        (BLINK_FONT_FACE_CACHE_REMOVE_ANCHOR, BLINK_FONT_FACE_CACHE_REMOVE_HOOK),
+        (BLINK_FONT_FACE_CACHE_CLEAR_ANCHOR, BLINK_FONT_FACE_CACHE_CLEAR_HOOK),
+    ):
+        if hook not in text:
+            text = replace_once(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_blink_image_resource(path: Path) -> None:
+    """Records an image resource's encoded bytes before Blink clears them."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/loader/resource/image_resource.h"',
+        (BLINK_BRIDGE_INCLUDE,),
+        path,
+    )
+    if BLINK_IMAGE_RESOURCE_HOOK not in text:
+        text = replace_once(
+            text, BLINK_IMAGE_RESOURCE_ANCHOR, BLINK_IMAGE_RESOURCE_HOOK, path
+        )
+    write_patched(path, text)
+
+
 def patch_blink_fragment_item_header(path: Path) -> None:
     """Adds the recreation mode's setters to FragmentItem."""
     text = read_source(path)
@@ -10861,6 +11229,34 @@ struct RecorderGlyphReading {
   int rotation = 0;
 };
 
+// A run's font file and its typeface's variation position (protocol 0.40).
+void RecorderReadRunFontFile(const SkTypeface& recorder_typeface,
+                             a11y_recorder::LayoutGlyphRun& recorder_run) {
+  std::string recorder_digest;
+  int recorder_index = 0;
+  if (!RecorderFontFile(recorder_typeface, &recorder_digest,
+                        &recorder_index)) {
+    return;
+  }
+  recorder_run.font_file_present = true;
+  recorder_run.font_file_digest = std::move(recorder_digest);
+  recorder_run.font_file_index = recorder_index;
+  const int recorder_axes = recorder_typeface.getVariationDesignPosition({});
+  if (recorder_axes <= 0) {
+    return;
+  }
+  std::vector<SkFontArguments::VariationPosition::Coordinate>
+      recorder_coordinates(static_cast<size_t>(recorder_axes));
+  if (recorder_typeface.getVariationDesignPosition(recorder_coordinates) !=
+      recorder_axes) {
+    return;
+  }
+  for (const auto& recorder_coordinate : recorder_coordinates) {
+    recorder_run.font_variations.push_back(
+        {recorder_coordinate.axis, recorder_coordinate.value});
+  }
+}
+
 void RecorderReadGlyph(void* recorder_context,
                        unsigned recorder_character_index,
                        Glyph recorder_glyph,
@@ -10895,6 +11291,7 @@ void RecorderReadGlyph(void* recorder_context,
         if (recorder_typeface->getPostScriptName(&recorder_name)) {
           recorder_run.post_script_name = recorder_name.c_str();
         }
+        RecorderReadRunFontFile(*recorder_typeface, recorder_run);
       }
       recorder_run.size = recorder_platform.size();
       recorder_run.synthetic_bold = recorder_platform.SyntheticBold();
@@ -11120,6 +11517,9 @@ BLINK_LAYOUT_CHECKPOINT_BOX_FRAGMENTS_ANCHOR = """\
     }
     recorder_cost.node_fields_nanoseconds +=
 """
+BLINK_LAYOUT_BOX_FRAGMENTS_READER = (
+    BLINK_RECORDER_FONT_FILE_READER + BLINK_LAYOUT_BOX_FRAGMENTS_READER
+)
 for _anchor in (
     BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR,
     BLINK_LAYOUT_CHECKPOINT_BOX_FRAGMENTS_ANCHOR,
@@ -11184,6 +11584,7 @@ BLINK_LAYOUT_CHANGES_INCLUDES = (
     '#include "third_party/blink/renderer/platform/fonts/simple_font_data.h"',
     '#include "third_party/skia/include/core/SkString.h"',
     '#include "third_party/skia/include/core/SkTypeface.h"',
+    '#include "third_party/skia/include/core/SkStream.h"',
     '#include "third_party/blink/renderer/core/paint/fragment_data.h"',
     '#include "third_party/blink/renderer/core/paint/object_paint_properties.h"',
     '#include "third_party/blink/renderer/core/paint/'
@@ -13820,6 +14221,18 @@ def main() -> int:
         / "core"
         / "layout"
         / "box_fragment_builder.cc"
+    )
+    blink_renderer = source / "third_party" / "blink" / "renderer"
+    patch_blink_font_custom_platform_data_header(
+        blink_renderer / "platform" / "fonts" / "font_custom_platform_data.h"
+    )
+    patch_blink_font_face_header(blink_renderer / "core" / "css" / "font_face.h")
+    patch_blink_font_face(blink_renderer / "core" / "css" / "font_face.cc")
+    patch_blink_font_face_cache(
+        blink_renderer / "core" / "css" / "font_face_cache.cc"
+    )
+    patch_blink_image_resource(
+        blink_renderer / "core" / "loader" / "resource" / "image_resource.cc"
     )
     blink_inline = (
         source / "third_party" / "blink" / "renderer" / "core" / "layout"

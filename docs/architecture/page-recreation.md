@@ -2764,6 +2764,86 @@ On the target machine, reported by the owner on 2026-10-02 for revision
 55e3125: the instrumented Chromium built and the recreation ran, and fewer
 elements that were not rendered at the frame appeared on the page.
 
+#### Sub-step 2 as built
+
+Asked for by the owner on 2026-10-02: "We should probably move on to fonts
+and images". Protocol 0.40, on the topic `browser.resources`.
+
+Records:
+
+| Record | Holds |
+| --- | --- |
+| `font-file` | the digest, the size, and the bytes in base64 |
+| `font-face-added` | the document and the face number |
+| `font-face-loaded` | the document, the face number, the family, the descriptors, the source, and the face's font file by digest and index |
+| `font-face-removed` | the document and the face number |
+| `image-resource` | the URL requested, the response's URL, status, and MIME type, the size and digest of the bytes, and `dataRecorded` |
+| `image-data` | the digest, the size, and the bytes in base64 |
+
+Each glyph run gains `fontFile`: the digest, the collection index, and the
+variation position as a list of axis tags and values, or null when Skia
+gives no readable file for the typeface. A digest is the SHA-256 of the
+bytes in lowercase hexadecimal, from `crypto::hash::Sha256`.
+
+How it is read:
+
+- Font files are read in Blink with `SkTypeface::openStream`, once for each
+  typeface in a renderer. The bridge keeps each typeface's digest and index
+  by `SkTypeface::uniqueID()`, which Skia does not reuse within a process,
+  and records a `font-file` record the first time the renderer meets a
+  digest. A typeface whose record could not be queued is left unmet, so its
+  file is read again the next time a run uses it.
+- The bytes of a `font-file` or `image-data` record are copied on the main
+  thread and encoded to base64 on the writer thread, through the queue the
+  layout records use.
+- A face's records come from `FontFace`. `FontFace::SetLoadStatus` records
+  `font-face-loaded` when the status becomes loaded. `FontFaceCache`, which
+  holds a document's set of faces, records `font-face-added` in
+  `AddFontFace`, and `font-face-removed` in `RemoveFontFace`, which also
+  serves `ClearCSSConnected`, and in `ClearAll` for the faces of style
+  sheets. The face number is a member patched into `FontFace`, assigned
+  from a counter in the bridge when the face is first recorded.
+- The descriptors are the strings of `FontFace`'s getters. The source is
+  `CSSFontFace::FrontSource()`, the source the face loaded from: `url` with
+  its URL, `data-url`, `binary` from script, or `local`. The face's font
+  file is read from the typeface its `FontCustomPlatformData` decoded,
+  through an accessor patched into that class, since the member is private.
+  A `local` source has no such data, and its `fontFile` is null.
+- Images are recorded in `ImageResource::Finish`, before `ClearData`, when
+  the resource is neither multipart nor failed its integrity check, and its
+  URL is not a `data:` URL.
+
+Differences from the design above:
+
+- `font-face-added` is added. A face that script loads and never adds to
+  `document.fonts` loads without joining the document's set, so the loaded
+  record alone does not say which faces the document had. A face is in the
+  set from its added record to its removed record; the loaded record holds
+  what it is.
+- A `local` source does not record the local font name: Blink keeps it in a
+  private member with no accessor, and the glyph runs that use the face
+  hold the installed font's file by digest.
+- `ClearAll` records the removal of the faces of style sheets only, since
+  the cache keeps no list of the faces script added, apart from their
+  families.
+- `image-resource` states `dataRecorded`, false when the image's bytes
+  could not be queued, so a missing `image-data` record is stated rather
+  than inferred.
+- Records of images and font files name no document: Blink shares image
+  resources between the documents of a renderer through its memory cache,
+  and font files between faces.
+
+Not done in this sub-step: the instrumented Chromium integration test of a
+generated page with a web font and an image, in "Required tests" below.
+What is recorded is checked on the target machine with a recording of the
+page of recording 20261002-005927, with its cost.
+
+Tests: the bridge's change hash covers the font file, index, and variation
+position; the integration script's tests cover the font file reader, the
+face and cache hooks, the image hook, and their call shapes against the
+bridge; the .NET tests cover each record against the record contract and
+the typed contracts, and a glyph run's font file.
+
 #### Required tests
 
 - Unit tests: the font-file, font-face, and image records against the

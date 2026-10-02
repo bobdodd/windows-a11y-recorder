@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.39";
+    public const string CurrentVersion = "0.40";
 }
 
 public static class BrowserEvidenceChannels
@@ -20,6 +20,7 @@ public static class BrowserEvidenceChannels
     public const string Layout = "browser.layout";
     public const string Presentation = "browser.presentation";
     public const string Network = "browser.network";
+    public const string Resources = "browser.resources";
 }
 
 public static class BrowserEvidenceEventTypes
@@ -95,6 +96,12 @@ public static class BrowserEvidenceEventTypes
     public const string PresentationNotSwapped = "presentation-not-swapped";
     public const string PresentationSwapped = "presentation-swapped";
     public const string PresentationFeedback = "presentation-feedback";
+    public const string FontFile = "font-file";
+    public const string FontFaceAdded = "font-face-added";
+    public const string FontFaceLoaded = "font-face-loaded";
+    public const string FontFaceRemoved = "font-face-removed";
+    public const string ImageResource = "image-resource";
+    public const string ImageData = "image-data";
     public const string NetworkRequestWillBeSent = "request-will-be-sent";
     public const string NetworkResponseReceived = "response-received";
     public const string NetworkRequestFinished = "request-finished";
@@ -928,7 +935,21 @@ public sealed record BrowserLayoutGlyphRun(
     BrowserLayoutFont Font,
     bool Horizontal,
     int Rotation,
-    string Glyphs);
+    string Glyphs,
+    BrowserLayoutFontFile? FontFile = null);
+
+// The font file of a glyph run's typeface (protocol 0.40): the SHA-256 digest
+// of the file's bytes in lowercase hexadecimal, which a font-file record of the
+// same renderer holds, the typeface's index in a font collection, and its
+// variation position. Null when Skia gave no readable file for the typeface.
+public sealed record BrowserLayoutFontFile(
+    string Digest,
+    int Index,
+    IReadOnlyList<BrowserLayoutFontVariation> Variations);
+
+// One variation axis: its four-character OpenType tag, or the tag's number in
+// decimal when it is not four printable ASCII characters, and its value.
+public sealed record BrowserLayoutFontVariation(string Axis, double Value);
 
 // One glyph of a glyph run, as Blink's shaping reports it.
 public readonly record struct BrowserLayoutGlyph(
@@ -1226,6 +1247,67 @@ public sealed record BrowserPresentationFeedbackPayload(
     string? SwapEndTicks,
     bool HighResolutionTicks,
     int NotSwappedCount);
+
+// Page resource records (protocol 0.40), on browser.resources. A font file or
+// an image is identified by the SHA-256 digest of its bytes, in lowercase
+// hexadecimal, and a renderer records the bytes once for each digest, in a
+// font-file or image-data record. Size is the byte count as a decimal string,
+// and Bytes the bytes in base64. These records carry no document.
+public sealed record BrowserResourceBytesPayload(
+    BrowserContext Context,
+    string Digest,
+    string Size,
+    string Bytes);
+
+// A FontFace joining or leaving its document's set of faces. FaceNumber is
+// unique in the renderer, as a decimal string.
+public sealed record BrowserFontFacePayload(
+    BrowserContext Context,
+    string FaceNumber);
+
+// A face's descriptors as Blink's FontFace getters serialize them.
+public sealed record BrowserFontFaceDescriptors(
+    string Style,
+    string Weight,
+    string Stretch,
+    string UnicodeRange,
+    string Variant,
+    string FeatureSettings,
+    string Display,
+    string AscentOverride,
+    string DescentOverride,
+    string LineGapOverride,
+    string SizeAdjust);
+
+// The source a face loaded from: "url", with its URL; "data-url", whose bytes
+// are the face's font file; "binary", from script; or "local", an installed
+// font, for which Blink holds no file.
+public sealed record BrowserFontFaceSource(string Kind, string? Url);
+
+// The font file a face loaded, by digest, and its collection index.
+public sealed record BrowserFontFaceFontFile(string Digest, int Index);
+
+// A FontFace of a document that finished loading.
+public sealed record BrowserFontFaceLoadedPayload(
+    BrowserContext Context,
+    string FaceNumber,
+    string Family,
+    BrowserFontFaceDescriptors Descriptors,
+    BrowserFontFaceSource? Source,
+    BrowserFontFaceFontFile? FontFile);
+
+// An image resource that finished loading: the URL requested, the response's
+// URL, status, and MIME type, and the size and digest of its encoded bytes.
+// DataRecorded is false when the bytes' image-data record could not be queued.
+public sealed record BrowserImageResourcePayload(
+    BrowserContext Context,
+    string Url,
+    string? ResponseUrl,
+    int Status,
+    string MimeType,
+    string Size,
+    string Digest,
+    bool DataRecorded);
 
 // Network records report request and response metadata as the Blink loader and
 // the browser's network service observer already hold it. No record carries a

@@ -37,6 +37,7 @@
 #include "chromium/recorder_bridge/recorder_protocol.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
 #include "components/version_info/version_info.h"
+#include "crypto/hash.h"
 
 namespace a11y_recorder {
 namespace {
@@ -4147,6 +4148,21 @@ uint64_t BeginBlinkLayoutCheckpoint(
 
 namespace {
 
+// A variation axis tag, four characters packed big-endian as SkFourByteTag.
+// A tag that is not four printable ASCII characters, which OpenType does not
+// allow, is stated as its number in decimal.
+std::string FontAxisTag(uint32_t axis) {
+  std::string tag(4, ' ');
+  for (int index = 0; index < 4; ++index) {
+    const uint32_t character = (axis >> (24 - 8 * index)) & 0xff;
+    if (character < 0x20 || character > 0x7e) {
+      return base::NumberToString(axis);
+    }
+    tag[index] = static_cast<char>(character);
+  }
+  return tag;
+}
+
 base::DictValue BoxFragmentValue(LayoutBoxFragment& fragment);
 
 // One fragment item (protocol 0.39). Every member is stated, null where it
@@ -4184,6 +4200,22 @@ base::DictValue FragmentItemValue(LayoutFragmentItem& item) {
       font.Set("syntheticBold", run.synthetic_bold);
       font.Set("syntheticItalic", run.synthetic_italic);
       run_value.Set("font", std::move(font));
+      if (run.font_file_present) {
+        base::DictValue font_file;
+        font_file.Set("digest", std::move(run.font_file_digest));
+        font_file.Set("index", run.font_file_index);
+        base::ListValue variations;
+        for (const LayoutFontVariation& variation : run.font_variations) {
+          base::DictValue axis;
+          axis.Set("axis", FontAxisTag(variation.axis));
+          axis.Set("value", static_cast<double>(variation.value));
+          variations.Append(std::move(axis));
+        }
+        font_file.Set("variations", std::move(variations));
+        run_value.Set("fontFile", std::move(font_file));
+      } else {
+        run_value.Set("fontFile", base::Value());
+      }
       run_value.Set("horizontal", run.horizontal);
       run_value.Set("rotation", run.rotation);
       run_value.Set("glyphs", base::Base64Encode(PackGlyphs(run.glyphs)));
@@ -4333,6 +4365,9 @@ size_t EstimateBoxFragmentBytes(const LayoutBoxFragment& fragment) {
   for (const LayoutFragmentItem& item : fragment.items) {
     bytes += kItemBytes + item.generated_text.size();
     for (const LayoutGlyphRun& run : item.glyph_runs) {
+      // The font file's digest, index, and variation axes, with their names.
+      bytes += 120 + run.font_file_digest.size() +
+               run.font_variations.size() * 40;
       bytes += kRunBytes + run.family.size() + run.post_script_name.size() +
                (run.glyphs.size() * kPackedGlyphBytes + 2) / 3 * 4;
     }
@@ -6309,6 +6344,259 @@ void RecordBlinkWebTransportClosed(NetworkScope scope,
                                : base::Value(CreateMessageText(reason)));
   SendBlinkEvidence("browser.network", "web-transport-closed",
                     std::move(payload));
+}
+
+// Page resources (protocol 0.40).
+FontFaceFacts::FontFaceFacts() = default;
+FontFaceFacts::FontFaceFacts(FontFaceFacts&&) = default;
+FontFaceFacts& FontFaceFacts::operator=(FontFaceFacts&&) = default;
+FontFaceFacts::~FontFaceFacts() = default;
+
+ImageResourceFacts::ImageResourceFacts() = default;
+ImageResourceFacts::ImageResourceFacts(ImageResourceFacts&&) = default;
+ImageResourceFacts& ImageResourceFacts::operator=(ImageResourceFacts&&) =
+    default;
+ImageResourceFacts::~ImageResourceFacts() = default;
+
+namespace {
+
+constexpr char kResourcesChannel[] = "browser.resources";
+
+// What the renderer has recorded of its resources: the digest of each font
+// file and image whose bytes were queued, and the font file of each typeface.
+struct RecordedFontFile {
+  std::string digest;
+  int collection_index = 0;
+};
+
+struct ResourceStorage {
+  base::Lock lock;
+  std::unordered_map<uint32_t, RecordedFontFile> typefaces;
+  std::unordered_map<std::string, bool> font_file_digests;
+  std::unordered_map<std::string, bool> image_digests;
+  uint64_t next_face_number = 0;
+};
+
+ResourceStorage& Resources() {
+  static base::NoDestructor<ResourceStorage> storage;
+  return *storage;
+}
+
+std::string Sha256Hex(const std::string& bytes) {
+  return base::HexEncodeLower(crypto::hash::Sha256(std::string_view(bytes)));
+}
+
+// The bytes of a font file or an image, base64 encoded on the writer thread so
+// the observing thread only copies them.
+struct ResourceBytesEvidence : PendingEvidence {
+  raw_ptr<const RecorderPipeClient> client = nullptr;
+  std::string digest;
+  std::string data;
+
+  base::DictValue TakePayload() override {
+    base::DictValue payload;
+    payload.Set("context", CreateContext(*client, 0));
+    payload.Set("digest", std::move(digest));
+    payload.Set("size", base::NumberToString(data.size()));
+    payload.Set("bytes", base::Base64Encode(data));
+    return payload;
+  }
+};
+
+// Queues the bytes of a digest the renderer has not met. Returns true when the
+// record was queued or had been already, so the digest counts as recorded only
+// when its bytes are on their way.
+bool QueueResourceBytes(RecorderPipeClient* client,
+                        std::unordered_map<std::string, bool>& recorded,
+                        const char* event_type,
+                        const std::string& digest,
+                        std::string bytes) {
+  if (recorded.contains(digest)) {
+    return true;
+  }
+  auto evidence = std::make_unique<ResourceBytesEvidence>();
+  evidence->channel = kResourcesChannel;
+  evidence->event_type = event_type;
+  // The context and members with their names, and the base64 of the bytes.
+  evidence->bytes = 400 + digest.size() + (bytes.size() + 2) / 3 * 4;
+  evidence->client = client;
+  evidence->digest = digest;
+  evidence->data = std::move(bytes);
+  ReportOmittedEvidence(client, kResourcesChannel);
+  std::string error;
+  if (!client->QueueEvidence(std::move(evidence), &error)) {
+    HoldOmittedEvidence(kResourcesChannel, 1);
+    WriteDiagnosticLine("Blink evidence write failed: " + error);
+    return false;
+  }
+  recorded.emplace(digest, true);
+  return true;
+}
+
+base::DictValue CreateFontFacePayload(const RecorderPipeClient& client,
+                                      int document_node_id,
+                                      std::string document_token,
+                                      uint64_t face_number) {
+  base::DictValue payload;
+  payload.Set("context",
+              CreateContext(client, document_node_id, std::move(document_token)));
+  payload.Set("faceNumber", base::NumberToString(face_number));
+  return payload;
+}
+
+}  // namespace
+
+bool LookUpFontFile(uint32_t typeface_id,
+                    std::string* digest,
+                    int* collection_index) {
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  auto found = storage.typefaces.find(typeface_id);
+  if (found == storage.typefaces.end()) {
+    return false;
+  }
+  *digest = found->second.digest;
+  *collection_index = found->second.collection_index;
+  return true;
+}
+
+std::string RecordFontFile(uint32_t typeface_id,
+                           int collection_index,
+                           bool readable,
+                           std::string bytes) {
+  A11Y_RECORDER_COST("RecordFontFile");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return std::string();
+  }
+  std::string digest = readable ? Sha256Hex(bytes) : std::string();
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  if (readable &&
+      !QueueResourceBytes(client, storage.font_file_digests, "font-file",
+                          digest, std::move(bytes))) {
+    // The typeface is left unmet, so its file is read again the next time a
+    // glyph run uses it.
+    return digest;
+  }
+  storage.typefaces[typeface_id] = {digest, collection_index};
+  return digest;
+}
+
+uint64_t AssignFontFaceNumber() {
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  return ++storage.next_face_number;
+}
+
+void RecordBlinkFontFaceAdded(int document_node_id,
+                              std::string document_token,
+                              uint64_t face_number) {
+  A11Y_RECORDER_COST("RecordBlinkFontFaceAdded");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      face_number == 0) {
+    return;
+  }
+  SendBlinkEvidence(kResourcesChannel, "font-face-added",
+                    CreateFontFacePayload(*client, document_node_id,
+                                          std::move(document_token),
+                                          face_number));
+}
+
+void RecordBlinkFontFaceLoaded(int document_node_id,
+                               std::string document_token,
+                               uint64_t face_number,
+                               FontFaceFacts face) {
+  A11Y_RECORDER_COST("RecordBlinkFontFaceLoaded");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      face_number == 0) {
+    return;
+  }
+  base::DictValue payload = CreateFontFacePayload(
+      *client, document_node_id, std::move(document_token), face_number);
+  payload.Set("family", std::move(face.family));
+  base::DictValue descriptors;
+  descriptors.Set("style", std::move(face.style));
+  descriptors.Set("weight", std::move(face.weight));
+  descriptors.Set("stretch", std::move(face.stretch));
+  descriptors.Set("unicodeRange", std::move(face.unicode_range));
+  descriptors.Set("variant", std::move(face.variant));
+  descriptors.Set("featureSettings", std::move(face.feature_settings));
+  descriptors.Set("display", std::move(face.display));
+  descriptors.Set("ascentOverride", std::move(face.ascent_override));
+  descriptors.Set("descentOverride", std::move(face.descent_override));
+  descriptors.Set("lineGapOverride", std::move(face.line_gap_override));
+  descriptors.Set("sizeAdjust", std::move(face.size_adjust));
+  payload.Set("descriptors", std::move(descriptors));
+  if (face.source_kind.empty()) {
+    payload.Set("source", base::Value());
+  } else {
+    base::DictValue source;
+    source.Set("kind", std::move(face.source_kind));
+    if (face.source_url.empty()) {
+      source.Set("url", base::Value());
+    } else {
+      source.Set("url", std::move(face.source_url));
+    }
+    payload.Set("source", std::move(source));
+  }
+  if (face.font_file_digest.empty()) {
+    payload.Set("fontFile", base::Value());
+  } else {
+    base::DictValue font_file;
+    font_file.Set("digest", std::move(face.font_file_digest));
+    font_file.Set("index", face.font_file_index);
+    payload.Set("fontFile", std::move(font_file));
+  }
+  SendBlinkEvidence(kResourcesChannel, "font-face-loaded", std::move(payload));
+}
+
+void RecordBlinkFontFaceRemoved(int document_node_id,
+                                std::string document_token,
+                                uint64_t face_number) {
+  A11Y_RECORDER_COST("RecordBlinkFontFaceRemoved");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      face_number == 0) {
+    return;
+  }
+  SendBlinkEvidence(kResourcesChannel, "font-face-removed",
+                    CreateFontFacePayload(*client, document_node_id,
+                                          std::move(document_token),
+                                          face_number));
+}
+
+void RecordBlinkImageResource(ImageResourceFacts image) {
+  A11Y_RECORDER_COST("RecordBlinkImageResource");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || image.url.empty()) {
+    return;
+  }
+  const size_t size = image.bytes.size();
+  const std::string digest = Sha256Hex(image.bytes);
+  bool recorded = false;
+  {
+    ResourceStorage& storage = Resources();
+    base::AutoLock lock(storage.lock);
+    recorded = QueueResourceBytes(client, storage.image_digests, "image-data",
+                                  digest, std::move(image.bytes));
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("url", std::move(image.url));
+  if (image.response_url.empty()) {
+    payload.Set("responseUrl", base::Value());
+  } else {
+    payload.Set("responseUrl", std::move(image.response_url));
+  }
+  payload.Set("status", image.status);
+  payload.Set("mimeType", std::move(image.mime_type));
+  payload.Set("size", base::NumberToString(size));
+  payload.Set("digest", digest);
+  payload.Set("dataRecorded", recorded);
+  SendBlinkEvidence(kResourcesChannel, "image-resource", std::move(payload));
 }
 
 }  // namespace a11y_recorder

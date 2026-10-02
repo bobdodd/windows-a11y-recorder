@@ -371,6 +371,13 @@ record is left out when it is unchanged. Its cost and check on the target
 Windows machine are in "2c results". See "2c as built" in
 [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.40 records the page's resources on `browser.resources`: the font
+file of each typeface a glyph run uses, each web font face as it joins,
+loads, and leaves its document, and the encoded bytes of each image
+resource, each file or image once for each SHA-256 digest in a renderer.
+See "Sub-step 2 as built" under "Slice 4a" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

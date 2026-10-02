@@ -1741,6 +1741,101 @@ void RecordBlinkWebTransportClosed(NetworkScope scope,
                                    int64_t code,
                                    std::string reason);
 
+// Page resources (protocol 0.40), on browser.resources. A font file or an
+// image is identified by the SHA-256 digest of its bytes, and a renderer
+// records the bytes once for each digest.
+
+// Reports the font file recorded for a Skia typeface, by the typeface's
+// unique identifier, which Skia does not reuse within a process. Returns false
+// when the typeface has not been met; a met typeface whose file could not be
+// read has an empty digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool LookUpFontFile(uint32_t typeface_id,
+                    std::string* digest,
+                    int* collection_index);
+
+// Digests a typeface's font file, records a font-file record the first time
+// the renderer meets the digest, and keeps the digest for the typeface.
+// Returns the digest, or an empty string when the file was not readable.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::string RecordFontFile(uint32_t typeface_id,
+                           int collection_index,
+                           bool readable,
+                           std::string bytes);
+
+// A number for a FontFace, unique in the renderer, so the face's records
+// refer to the same face.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t AssignFontFaceNumber();
+
+// A FontFace's descriptors as Blink serializes them, and its source.
+struct FontFaceFacts {
+  FontFaceFacts();
+  FontFaceFacts(FontFaceFacts&&);
+  FontFaceFacts& operator=(FontFaceFacts&&);
+  ~FontFaceFacts();
+
+  std::string family;
+  std::string style;
+  std::string weight;
+  std::string stretch;
+  std::string unicode_range;
+  std::string variant;
+  std::string feature_settings;
+  std::string display;
+  std::string ascent_override;
+  std::string descent_override;
+  std::string line_gap_override;
+  std::string size_adjust;
+  // "url", "data-url", "binary", or "local"; empty when the face has no
+  // source.
+  std::string source_kind;
+  // The source's URL, for a url source.
+  std::string source_url;
+  // The digest of the font file the face loaded, or empty when Blink holds
+  // no file for it, as for a local source.
+  std::string font_file_digest;
+  int font_file_index = 0;
+};
+
+// Records that a FontFace joined a document's set of faces.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkFontFaceAdded(int document_node_id,
+                              std::string document_token,
+                              uint64_t face_number);
+
+// Records that a FontFace of a document finished loading.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkFontFaceLoaded(int document_node_id,
+                               std::string document_token,
+                               uint64_t face_number,
+                               FontFaceFacts face);
+
+// Records that a FontFace left a document's set of faces.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkFontFaceRemoved(int document_node_id,
+                                std::string document_token,
+                                uint64_t face_number);
+
+// An image resource that finished loading, with its encoded bytes.
+struct ImageResourceFacts {
+  ImageResourceFacts();
+  ImageResourceFacts(ImageResourceFacts&&);
+  ImageResourceFacts& operator=(ImageResourceFacts&&);
+  ~ImageResourceFacts();
+
+  std::string url;
+  std::string response_url;
+  int status = 0;
+  std::string mime_type;
+  std::string bytes;
+};
+
+// Records an image-resource record, and an image-data record the first time
+// the renderer meets the bytes' digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkImageResource(ImageResourceFacts image);
+
 }  // namespace a11y_recorder
 
 #endif  // WINDOWS_A11Y_RECORDER_CHROMIUM_RECORDER_BRIDGE_BROWSER_BRIDGE_H_

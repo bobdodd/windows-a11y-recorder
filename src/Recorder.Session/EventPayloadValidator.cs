@@ -27,7 +27,8 @@ internal static class EventPayloadValidator
         "browser.interaction",
         "browser.layout",
         "browser.presentation",
-        "browser.network"
+        "browser.network",
+        "browser.resources"
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -344,6 +345,20 @@ internal static class EventPayloadValidator
             case ("browser.presentation", "presentation-feedback"):
                 ValidateBrowserPresentationFeedback(payload, issues);
                 break;
+            case ("browser.resources", "font-file"):
+            case ("browser.resources", "image-data"):
+                ValidateBrowserResourceBytes(payload, issues);
+                break;
+            case ("browser.resources", "font-face-added"):
+            case ("browser.resources", "font-face-removed"):
+                ValidateBrowserFontFace(payload, issues);
+                break;
+            case ("browser.resources", "font-face-loaded"):
+                ValidateBrowserFontFaceLoaded(payload, issues);
+                break;
+            case ("browser.resources", "image-resource"):
+                ValidateBrowserImageResource(payload, issues);
+                break;
             case ("browser.network", "request-will-be-sent"):
                 ValidateBrowserNetworkRequestWillBeSent(payload, issues);
                 break;
@@ -406,6 +421,7 @@ internal static class EventPayloadValidator
             case ("browser.layout", "collector-omission"):
             case ("browser.presentation", "collector-omission"):
             case ("browser.network", "collector-omission"):
+            case ("browser.resources", "collector-omission"):
                 ValidateBrowserOmission(payload, issues);
                 break;
             default:
@@ -3209,10 +3225,41 @@ internal static class EventPayloadValidator
                 RequiredObject("font"),
                 RequiredBoolean("horizontal"),
                 RequiredInteger("rotation", nonnegative: true),
-                RequiredText("glyphs")
+                RequiredText("glyphs"),
+                OptionalNullableObject("fontFile")
             ],
             issues,
             pointer);
+        if (run.TryGetProperty("fontFile", out var fontFile) &&
+            fontFile.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                fontFile,
+                [
+                    DigestRule("digest"),
+                    RequiredInteger("index", nonnegative: true),
+                    RequiredObjectArray("variations")
+                ],
+                issues,
+                $"{pointer}/fontFile");
+            if (fontFile.TryGetProperty("variations", out var variations) &&
+                variations.ValueKind == JsonValueKind.Array)
+            {
+                var index = 0;
+                foreach (var variation in variations.EnumerateArray())
+                {
+                    if (variation.ValueKind == JsonValueKind.Object)
+                    {
+                        ValidateShape(
+                            variation,
+                            [RequiredText("axis"), RequiredNumber("value")],
+                            issues,
+                            $"{pointer}/fontFile/variations/{index}");
+                    }
+                    index++;
+                }
+            }
+        }
         if (run.TryGetProperty("font", out var font) && font.ValueKind == JsonValueKind.Object)
         {
             ValidateShape(
@@ -3895,6 +3942,174 @@ internal static class EventPayloadValidator
                 "A counter value is derived from Chromium's time, so it cannot " +
                     "appear without it.");
         }
+    }
+
+    // Page resource records (protocol 0.40).
+    private static PropertyRule DigestRule(string name) =>
+        new(
+            name,
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsSha256Digest(value.GetString()),
+            "must be a SHA-256 digest in lowercase hexadecimal");
+
+    private static PropertyRule FaceNumberRule() =>
+        new(
+            "faceNumber",
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsPositiveDecimal(value.GetString(), ulong.MaxValue),
+            "must be a positive decimal integer string");
+
+    private static bool IsSha256Digest(string? value) =>
+        value is { Length: 64 } &&
+        value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static void ValidateBrowserResourceBytes(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                DigestRule("digest"),
+                RequiredDecimalText("size"),
+                RequiredString("bytes")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        var bytes = ReadString(payload, "bytes");
+        var size = ReadString(payload, "size");
+        if (bytes is null || size is null ||
+            !long.TryParse(size, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var count))
+        {
+            return;
+        }
+        // The size of what the base64 decodes to, from its length and padding,
+        // without decoding what may be many megabytes.
+        var padding = bytes.EndsWith("==", StringComparison.Ordinal) ? 2 :
+            bytes.EndsWith('=') ? 1 : 0;
+        if (bytes.Length % 4 != 0 || (long)bytes.Length / 4 * 3 - padding != count)
+        {
+            AddError(
+                issues,
+                "browser-resource-bytes-invalid",
+                "#/payload/bytes",
+                "Bytes must be base64 of exactly size bytes.");
+        }
+    }
+
+    private static void ValidateBrowserFontFace(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                FaceNumberRule()
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+    }
+
+    private static void ValidateBrowserFontFaceLoaded(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                FaceNumberRule(),
+                RequiredString("family"),
+                RequiredObject("descriptors"),
+                NullableObject("source"),
+                NullableObject("fontFile")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        if (payload.TryGetProperty("descriptors", out var descriptors) &&
+            descriptors.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                descriptors,
+                [
+                    RequiredString("style"),
+                    RequiredString("weight"),
+                    RequiredString("stretch"),
+                    RequiredString("unicodeRange"),
+                    RequiredString("variant"),
+                    RequiredString("featureSettings"),
+                    RequiredString("display"),
+                    RequiredString("ascentOverride"),
+                    RequiredString("descentOverride"),
+                    RequiredString("lineGapOverride"),
+                    RequiredString("sizeAdjust")
+                ],
+                issues,
+                "#/payload/descriptors");
+        }
+        if (payload.TryGetProperty("source", out var source) &&
+            source.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                source,
+                [
+                    RequiredEnum("kind", "url", "data-url", "binary", "local"),
+                    NullableText("url")
+                ],
+                issues,
+                "#/payload/source");
+            var kind = ReadString(source, "kind");
+            if (kind is not null &&
+                (kind == "url") != HasNonnullProperty(source, "url"))
+            {
+                AddError(
+                    issues,
+                    "browser-font-face-source-url",
+                    "#/payload/source/url",
+                    "A url source carries its URL, and no other source does.");
+            }
+        }
+        if (payload.TryGetProperty("fontFile", out var fontFile) &&
+            fontFile.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                fontFile,
+                [
+                    DigestRule("digest"),
+                    RequiredInteger("index", nonnegative: true)
+                ],
+                issues,
+                "#/payload/fontFile");
+        }
+    }
+
+    private static void ValidateBrowserImageResource(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredText("url"),
+                NullableString("responseUrl"),
+                RequiredInteger("status", nonnegative: true),
+                RequiredString("mimeType"),
+                RequiredDecimalText("size"),
+                DigestRule("digest"),
+                RequiredBoolean("dataRecorded")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
     }
 
     private static void ValidateBrowserPresentationSwapped(

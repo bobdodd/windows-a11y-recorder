@@ -69,6 +69,14 @@ void HashFragmentItem(Hasher& hasher, const LayoutFragmentItem& item) {
     hasher.Number(run.size);
     hasher.Boolean(run.synthetic_bold);
     hasher.Boolean(run.synthetic_italic);
+    hasher.Boolean(run.font_file_present);
+    hasher.Text(run.font_file_digest);
+    hasher.Integer(static_cast<uint64_t>(run.font_file_index));
+    hasher.Integer(run.font_variations.size());
+    for (const LayoutFontVariation& variation : run.font_variations) {
+      hasher.Integer(variation.axis);
+      hasher.Integer(std::bit_cast<uint32_t>(variation.value));
+    }
     hasher.Boolean(run.horizontal);
     hasher.Integer(static_cast<uint64_t>(run.rotation));
     hasher.Integer(run.glyphs.size());

@@ -291,6 +291,19 @@ void TestItemsTextAndGlyphsChangeTheNodeHash() {
          }),
          "run font");
   Expect(differs([](auto& f) {
+           f.fragments[0].items[1].glyph_runs[0].font_file_digest = "ab";
+         }),
+         "run font file");
+  Expect(differs([](auto& f) {
+           f.fragments[0].items[1].glyph_runs[0].font_file_index = 1;
+         }),
+         "run font file index");
+  Expect(differs([](auto& f) {
+           f.fragments[0].items[1].glyph_runs[0].font_variations.push_back(
+               {0x77676874, 700.0f});
+         }),
+         "run font variation");
+  Expect(differs([](auto& f) {
            f.fragments[0].items[1].glyph_runs[0].glyphs[0].total_advance =
                0.25f;
          }),

@@ -36,5 +36,6 @@ component("recorder_bridge") {
   deps = [
     "//base",
     "//components/version_info",
+    "//crypto",
   ]
 }

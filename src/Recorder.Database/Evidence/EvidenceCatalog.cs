@@ -1275,7 +1275,8 @@ internal static class EvidenceCatalog
                      "audio.microphone", "audio.system", "browser.lifecycle", "browser.accessibility",
                      "browser.listener", "browser.dispatch", "browser.timer", "browser.scheduler",
                      "browser.navigation", "browser.dom", "browser.cookie", "browser.interaction",
-                     "browser.layout", "browser.presentation", "browser.network"
+                     "browser.layout", "browser.presentation", "browser.network",
+                     "browser.resources"
                  })
         {
             map[(channel, "collector-omission")] = CollectorOmissions;

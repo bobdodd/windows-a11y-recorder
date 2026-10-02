@@ -988,7 +988,16 @@ when it holds lines, with each text item's `glyphRuns`, and the node's
 by a child link records its own text. The design is in
 [page recreation](page-recreation.md), "2c design" and "2c as built".
 
-Live 0.39 connections require an exact protocol-version match.
+Protocol version 0.40 adds the topic `browser.resources`: each font file a
+glyph run uses and each image resource a renderer finished loading, by the
+SHA-256 digest of its bytes, with the bytes recorded once for each digest
+in a renderer; and each `FontFace` of a document as it joins, loads, and
+leaves the document's set of faces. Each glyph run gains `fontFile`, the
+digest, collection index, and variation position of its typeface's file.
+The design is in [page recreation](page-recreation.md), "Slice 4a" and
+"Sub-step 2 as built".
+
+Live 0.40 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and
