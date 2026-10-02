@@ -6850,6 +6850,32 @@ class RecreationIntegrationTests(unittest.TestCase):
         self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER))
         self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
 
+    def test_upgrades_the_node_id_helper_that_did_not_compile(self):
+        self.assertNotEqual(
+            INTEGRATE.INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HELPER,
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER,
+        )
+        self.assertIn(
+            "recorder_text.starts_with(kRecorderPrefix)",
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER,
+        )
+        box = self.patch_source_twice(
+            "box_fragment_builder.cc",
+            self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+                INTEGRATE.INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HELPER
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+            ).replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_box_fragment_builder,
+        )
+        self.assertNotIn(".GetString().StartsWith(", box)
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER))
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+
     def test_refuses_a_feasibility_hook_it_cannot_upgrade(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "box_fragment_builder.cc"

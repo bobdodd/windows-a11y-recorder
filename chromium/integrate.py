@@ -6898,6 +6898,10 @@ def patch_blink_box_fragment_builder(path: Path) -> None:
                 STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER,
                 BLINK_RECREATION_FRAGMENT_HELPER,
             ),
+            (
+                INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HELPER,
+                BLINK_RECREATION_FRAGMENT_HELPER,
+            ),
             (LEGACY_FEASIBILITY_FRAGMENT_HOOK, BLINK_RECREATION_FRAGMENT_HOOK),
             (
                 INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK,
@@ -6916,6 +6920,7 @@ def patch_blink_box_fragment_builder(path: Path) -> None:
             '"data-a11y-recorded-fragment"',
             "    const Node* recorder_node = node_.GetDOMNode();\n",
             "children from its recorded fragment, so its children keep",
+            ".GetString().StartsWith(kRecorderPrefix)",
         ),
         path,
     )
@@ -7336,8 +7341,7 @@ int RecorderRecordedNodeId(const Node* node) {
       AtomicString("data-a11y-recorded-layout"));
   constexpr char kRecorderPrefix[] = "{\\"node\\":";
   constexpr wtf_size_t kRecorderPrefixLength = sizeof(kRecorderPrefix) - 1;
-  if (recorder_text.IsNull() ||
-      !recorder_text.GetString().StartsWith(kRecorderPrefix)) {
+  if (recorder_text.IsNull() || !recorder_text.starts_with(kRecorderPrefix)) {
     return 0;
   }
   int recorder_id = 0;
@@ -7359,6 +7363,14 @@ namespace {{
 {BLINK_RECREATION_LAYOUT_HELPERS}
 {BLINK_RECREATION_NODE_ID_HELPER}}}  // namespace
 """
+# The slice 4a helper as written by revision dcdb84c, which did not compile:
+# Blink's String names the method starts_with. A checkout that holds it is
+# upgraded to the current helper.
+INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HELPER = BLINK_RECREATION_FRAGMENT_HELPER.replace(
+    "  if (recorder_text.IsNull() || !recorder_text.starts_with(kRecorderPrefix)) {\n",
+    "  if (recorder_text.IsNull() ||\n"
+    "      !recorder_text.GetString().StartsWith(kRecorderPrefix)) {\n",
+)
 BLINK_RECREATION_FRAGMENT_MARKER = "recorder_recorded_fragment"
 STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK = """\
   // Windows A11y Recorder recreation mode: the box's recorded border-box

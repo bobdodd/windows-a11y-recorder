@@ -2628,6 +2628,9 @@ Children matched by node:
 - The integration script upgrades the stage 3 box hook and its helper, and
   the 44736a8 hook, to these, and refuses a checkout that still holds the
   stage 3 text.
+- Revision dcdb84c did not compile: Blink's `String` names the method
+  `starts_with`, not `StartsWith`. The helper calls `starts_with` on the
+  attribute, and the integration script upgrades the dcdb84c helper.
 
 The page served at its recorded address:
 
@@ -2660,7 +2663,7 @@ Tests at this sub-step:
   policy of the answer; the builder written into the page; the box hook's
   matching, its upgrade from the stage 3 hook, and the check that it names
   no `Node` type, which `BoxFragmentBuilder::Node()` hides. The
-  integration script's 171 tests pass; the .NET tests pass except the four
+  integration script's 172 tests pass; the .NET tests pass except the four
   that need Windows.
 - Integration, run in this environment with a stock headless Chromium:
   `TheRecordedPageIsServedAtItsRecordedAddress` (the tab shows the
