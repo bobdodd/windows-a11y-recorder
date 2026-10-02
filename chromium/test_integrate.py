@@ -5805,6 +5805,12 @@ class LayoutIntegrationTests(unittest.TestCase):
         ):
             with self.subTest(reading=reading):
                 self.assertIn(reading, helper)
+        # The glyph reading holds a garbage-collected font by a raw pointer,
+        # which Blink's garbage-collection plugin allows only on the stack.
+        self.assertIn(
+            "struct RecorderGlyphReading {\n  STACK_ALLOCATED();\n\n public:\n",
+            helper,
+        )
         # Only a text item, not generated text, has a range of the text.
         self.assertIn(
             "    if (recorder_item.Type() == FragmentItem::kText) {\n"

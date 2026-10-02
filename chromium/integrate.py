@@ -9887,8 +9887,12 @@ BLINK_LAYOUT_BOX_FRAGMENTS_READER = """\
 
 // The glyph runs of one text item as ForEachGlyph reports its glyphs: a new
 // run starts at each change of font, orientation, or rotation (protocol
-// 0.39).
+// 0.39). It lives on the stack for one ForEachGlyph call, so it may hold the
+// garbage-collected font of the current run by a raw pointer.
 struct RecorderGlyphReading {
+  STACK_ALLOCATED();
+
+ public:
   std::vector<a11y_recorder::LayoutGlyphRun>* runs = nullptr;
   const SimpleFontData* font = nullptr;
   bool horizontal = true;
