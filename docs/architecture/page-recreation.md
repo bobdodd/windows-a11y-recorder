@@ -3056,6 +3056,144 @@ Tests at this sub-step:
   and images is inspected, and the Console's list of boxes not imposed is
   compared with that of stage 3.
 
+### Slice 4b: the frame's moment, held (proposed)
+
+Proposed 2026-10-02, after the owner agreed to start the work in
+"Requirement: the page exactly as drawn at the frame" with time held in
+the recreation and the animation state recorded. Nothing below is built.
+
+#### What Chromium does that the recording misses
+
+Read in the Chromium checkout on the target machine.
+
+- An animation running on the compositor is not ticked on Blink's main
+  thread at each frame. `Animation::TimeToEffectChange`
+  (`third_party/blink/renderer/core/animation/animation.cc`) returns zero,
+  which asks for service at the next frame, only for an animation that is
+  not on the compositor. For one on the compositor, it returns the time to
+  its next change of phase. The style the layout walk reads for an element
+  so animated is therefore not the value drawn while the animation runs.
+- The compositor applies each animated value on its own thread, in
+  `cc::ElementAnimations`: `OnTransformAnimated`, `OnOpacityAnimated`,
+  `OnFilterAnimated`, `OnBackdropFilterAnimated`,
+  `OnCustomPropertyAnimated`, and `OnScrollOffsetAnimated`
+  (`cc/animation/element_animations.h`). Each receives the value and the
+  list it applies to, pending or active.
+- An animated image's frame is chosen by the compositor, not by Blink.
+  `cc::ImageAnimationController` (`cc/trees/image_animation_controller.h`)
+  advances each animated image to its frame when a sync tree is made
+  (`AnimateForSyncTree`), keeps it for that tree's lifetime, and gives it
+  by `PaintImage::Id` (`GetFrameIndexForImage`). Blink makes the image's
+  `PaintImage` in `BitmapImage::CreatePaintImage`
+  (`third_party/blink/renderer/platform/graphics/bitmap_image.cc`).
+- A frame the compositor draws for these changes alone has no rendering
+  update on the main thread, so it has no presentation record: the
+  presentation records follow rendering updates (protocol 0.35).
+
+So at a captured frame, the recording holds the main thread's state after
+its last presented rendering update, which already includes the values of
+animations Blink ticks on the main thread (subject to the check in
+"Required tests" below), but not the compositor's values drawn after it.
+
+#### What is recorded (protocol 0.41)
+
+On a new topic, `browser.compositor`:
+
+| Record | Where | Holds |
+| --- | --- | --- |
+| `compositor-animation-started` | Blink, main thread, when an animation starts on the compositor | the document, the target node, the compositor element ID, the animated properties, and the compositor animation ID |
+| `compositor-animation-ended` | Blink, main thread, when it is cancelled or finishes there | the compositor animation ID |
+| `compositor-frame` | cc, compositor thread, for each compositor frame in which an animated value, an image's frame, or a scroll offset changed on the active tree | the frame sink and frame token, the begin frame's time, and each change: element ID, property, and value |
+| `compositor-frame-presented` | cc, when viz reports the frame's presentation | the frame sink, the frame token, and the presentation time, on the clock of the existing presentation records |
+| `image-paint-image` | Blink, when an image resource's Blink image gets its paint image ID | the image's URL and digest (as `image-resource`) and its `PaintImage::Id` |
+
+Values are written as the compositor holds them: a transform as its 16
+matrix entries, an opacity as a number, filters as their operations and
+numbers, a scroll offset as x and y, an image's frame as its index, and a
+paint worklet animation as its progress value. Nothing is rounded. A frame
+with no change is not recorded, so a page with nothing moving adds no
+records.
+
+#### Which state a captured frame shows
+
+For each document, the frame shows the main thread's state after the
+last presented rendering update at or before the frame's composition, as
+now, and then the compositor's values of the last `compositor-frame` of
+the same frame sink presented at or before the composition, together with
+every earlier compositor frame's values not yet replaced. A value is
+dropped when its animation ends and a later rendering update was
+presented. The basis line in the evidence panel names both the rendering
+update and the compositor frame.
+
+#### What the recreation does
+
+- Nothing moves. In the recreation mode Blink starts no CSS animation or
+  transition: the recorded computed style holds the animation and
+  transition properties, and they are not run. No page script runs, so no
+  Web Animation is made. SVG animation elements are not run either; the
+  recorded style and box fragments hold their effect on style and
+  geometry, and whether they hold all of it (an animated `transform`
+  attribute, for one) is checked in the required tests. The text caret, video, and other transient states are not part
+  of this slice; see the requirement's list.
+- An element with a recorded compositor value at the frame takes it in
+  place of the recorded style value of that property: the transform as a
+  `matrix3d()` of the recorded entries, the opacity, the filter, or the
+  scroll offset. A paint worklet progress value is to be settled (below).
+- An animated image is held at its recorded frame. The recorder answers
+  the image with its bytes and, in a response header of its own, the frame
+  index at the frame. In the recreation mode Blink puts the index in the
+  bridge by the image's paint image ID, and `ImageAnimationController`
+  gives that index for the image and never advances it. An image whose
+  frame was not recorded is held at its first frame, and the Console says
+  so.
+
+#### Limits
+
+- An animation that is not on the compositor and does not cause a
+  rendering update at each frame would be missed. Whether one exists is
+  checked in the required tests.
+- A frame sink other than the tab's, such as an out of process iframe's,
+  is recorded the same way but not shown until iframes are recreated.
+
+#### To be settled
+
+- A paint worklet animation (background color or clip path run on the
+  compositor) gives only a progress value; its drawn value is
+  interpolated by Blink's paint worklet. Either record the paint worklet's
+  input, or record the drawn value in Blink when it paints.
+- Whether `compositor-frame` is written from the active tree's activation
+  or from frame submission, so that its frame token is that of the frame
+  drawn.
+- The cost on the target machine, measured as for stage 2, on a page with
+  a running composited animation and an animated image.
+
+#### Sub-steps
+
+1. Record (protocol 0.41), with its cost measured on the target machine.
+2. The recreation holds time: no animation or transition run, compositor
+   values imposed, animated images held at their recorded frame.
+
+Each sub-step is tested on the target machine before the next.
+
+#### Required tests
+
+- Unit tests: each new record against the record contract; the values the
+  app chooses for a frame from a sequence of compositor frames and their
+  presentations; the image frame header; the integration script's hooks
+  and their call shapes against the bridge.
+- Integration tests in the instrumented Chromium, on a generated page with
+  a composited transform animation, a main-thread animation of a
+  non-composited property (width), and an animated image: the main-thread
+  animation causes a recorded rendering update at each frame it changes;
+  the recording holds the compositor values and image frames, joined to
+  their presentations; the recreation at a chosen frame imposes the values
+  recorded for it; and two screenshots of the recreation taken a second
+  apart are identical. The page also has an SVG `animateTransform`, to
+  check that its effect is held.
+- System test on the target machine: a recording of a page with running
+  animations and an animated image is opened at several frames, and each
+  recreation is compared with the captured frame.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
