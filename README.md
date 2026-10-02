@@ -367,8 +367,8 @@ Protocol 0.39 adds, for each fragment that holds lines, its fragment items
 in Blink's order, the block's text as laid out, and each text item's glyph
 runs: the font by name, and each glyph's identifier, character index,
 position, and offset, packed in base64. A block's text after its first
-record is left out when it is unchanged. It is not yet tested on the target
-Windows machine. See "2c as built" in
+record is left out when it is unchanged. Its cost and check on the target
+Windows machine are in "2c results". See "2c as built" in
 [page recreation](docs/architecture/page-recreation.md).
 
 Each captured monitor image is the newest frame that reached the Windows

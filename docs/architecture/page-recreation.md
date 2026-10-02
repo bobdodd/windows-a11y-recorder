@@ -1640,7 +1640,7 @@ With 1c, the feasibility step is complete: recorded styles, box fragments,
 lines, text items, and glyphs can each be imposed in Blink under the
 switch, and DevTools shows the recorded styles as their source.
 
-### Stage 2: recording for the recreation (agreed; 2a, 2b, and 2c built)
+### Stage 2: recording for the recreation (agreed; 2a, 2b, and 2c built and measured)
 
 Proposed on 2026-09-30 and agreed by the user the same day, with changed
 style values only and packed glyph arrays. 2a is built and not yet tested
@@ -2179,8 +2179,8 @@ Required tests:
 
 #### 2c as built
 
-Built on 2026-10-01 at protocol 0.39, and not yet tested on the target
-machine. As designed, with these additions and details:
+Built on 2026-10-01 at protocol 0.39 and tested on the target machine the
+same day; see "2c results". As designed, with these additions and details:
 
 - Text of an anonymous block. A block's loose text beside its child blocks,
   as in `<div>text<p>para</p></div>`, is laid out in an anonymous block,
@@ -2219,6 +2219,60 @@ machine. As designed, with these additions and details:
 - The layout change check notes `text-content-incomplete` instead of
   comparing the box fragments when the rebuilt record still marks its text
   unchanged.
+- Blink's garbage-collection plugin refuses a raw pointer to a font in an
+  ordinary structure, so the glyph reading, which keeps the current run's
+  font, is marked `STACK_ALLOCATED()`; it lives only for one
+  `ForEachGlyph` call.
+
+#### 2c results
+
+Recorded by the owner on 2026-10-01 on the target machine with ff1a2a2, on
+the same pages as 2b: one recording without the check setting
+(20261002-005805) and one with it at every 10 updates (20261002-005927).
+The 2b recordings without the check (20261001-200852) and with it at every
+10 updates (20261001-202215) are the baselines. Bytes are those of the
+records before chunk compression.
+
+| | 2b | 2c | 2b, check | 2c, check |
+| --- | --- | --- | --- | --- |
+| Minutes recorded | 0.99 | 1.08 | 1.12 | 1.04 |
+| Change sets | 229 | 262 | 288 | 244 |
+| Bytes per change set | 388,515 | 397,691 | | 407,847 |
+| Bytes per `layout-node-changed` record | 5,343 | 5,234 | 5,214 | 5,504 |
+| Bytes per checkpoint node record | 9,368 | 9,730 | 9,658 | 9,938 |
+| Bridge change-set time, mean | 1,767 µs | 1,968 µs | | 2,001 µs |
+| Bridge change-set time, largest | 158.4 ms | 166.5 ms | | 166.6 ms |
+| Walk field reading, mean per walk | 83 µs | 236 µs | | 2,405 µs |
+| Walk field reading, largest | 620 µs | 1,580 µs | | 21.3 ms |
+
+The blank cells are those not computed for the 2b check recording.
+
+- Size. In the 2c recording without the check, the change records held
+  15,827 items in 102.7 MB: their JSON without glyph runs was 3.50 M
+  characters, and their 6,004 glyph runs 4.31 M, of which the base64 of
+  142,344 glyphs was 3.42 M. Text took 38 K characters; 3,157 records left
+  their text out as unchanged. Items and runs together are about 7.6% of
+  the change-record bytes. The bytes per change set rose 2.4% over 2b; the
+  recordings differ in length and in their change sets, so this is not a
+  rate.
+- Time. The bridge's mean time per change set rose from 1,767 to
+  1,968 µs, which includes packing and encoding the glyphs; Blink's reading
+  of items and glyphs in a change set is not timed. In a walk, reading them
+  is part of the node-fields phase. Its mean rose from 83 to 236 µs per
+  walk over first walks, and in the check recording, whose 14 check walks
+  read whole documents, to 2,405 µs, with a largest walk of 21.3 ms. The
+  check walks run only with the check setting.
+- Layout check. Every compared checkpoint node matched in every field,
+  items, glyphs, and text included: 1,412 of 1,412 nodes over 20 first
+  walks without the check, and 18,632 of 18,632 over 20 first and 14 check
+  walks with it, 15,253 of them with box fragments compared (null ones
+  included). There was no `text-content-incomplete` note, and the 2,868
+  records in the check recording that left their text out had it put back
+  from earlier records. The largest rectangle difference was
+  2.5 × 10⁻⁴ CSS px.
+- Limits. The pages are those of 2b only. The glyph runs were checked as
+  equal between the change records and the walks, not against what was
+  painted, which stage 3 does by rendering them.
 
 
 #### Required tests

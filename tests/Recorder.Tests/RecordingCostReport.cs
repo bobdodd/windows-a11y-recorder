@@ -28,6 +28,7 @@ public sealed class RecordingCostReport
         var walkReasons = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var changeSetsByDocument = new Dictionary<string, int>(StringComparer.Ordinal);
         var fragmentTotals = new SortedDictionary<string, (long Records, long Bytes, long Fragments, long Children)>(StringComparer.Ordinal);
+        var textTotals = new SortedDictionary<string, TextTotals>(StringComparer.Ordinal);
         var urls = new SortedSet<string>(StringComparer.Ordinal);
         long first = long.MaxValue;
         long last = long.MinValue;
@@ -76,6 +77,18 @@ public sealed class RecordingCostReport
                         fragmentTotals.GetValueOrDefault(type).Bytes + boxFragments.GetRawText().Length,
                         fragmentTotals.GetValueOrDefault(type).Fragments + fragmentCount,
                         fragmentTotals.GetValueOrDefault(type).Children + childCount);
+                    // Protocol 0.39: text, items, and glyphs.
+                    var text = textTotals.TryGetValue(type, out var found) ? found : textTotals[type] = new TextTotals();
+                    if (boxFragments.TryGetProperty("textContentUnchanged", out var unchanged) &&
+                        unchanged.ValueKind == System.Text.Json.JsonValueKind.True)
+                    {
+                        text.Unchanged++;
+                    }
+                    text.TextCharacters += TextLength(boxFragments);
+                    foreach (var fragment in boxFragments.GetProperty("fragments").EnumerateArray())
+                    {
+                        CountItems(fragment, text);
+                    }
                 }
                 if (type == "layout-node-changed")
                 {
@@ -152,6 +165,12 @@ public sealed class RecordingCostReport
                 $"  {kind}: {totals.Count}, {(double)totals.Bytes / totals.Count:F0}, {(totals.Styled > 0 ? (double)totals.Values / totals.Styled : 0):F1}, {(totals.Styled > 0 ? (double)totals.Custom / totals.Styled : 0):F1}");
         }
 
+        report.AppendLine("text and items by record type: records with text left out as unchanged, characters of text JSON, items, characters of items JSON without glyph runs, glyph runs, characters of their JSON, glyphs, characters of glyphs base64");
+        foreach (var (type, totals) in textTotals)
+        {
+            report.AppendLine(CultureInfo.InvariantCulture,
+                $"  {type}: {totals.Unchanged}, {totals.TextCharacters}, {totals.Items}, {totals.ItemCharacters - totals.RunCharacters}, {totals.Runs}, {totals.RunCharacters}, {totals.Glyphs}, {totals.GlyphCharacters}");
+        }
         report.AppendLine("box fragments by record type: records with them, characters of their JSON, fragments, child links");
         foreach (var (type, totals) in fragmentTotals)
         {
@@ -195,6 +214,63 @@ public sealed class RecordingCostReport
             }
         }
         return (fragmentCount, childCount);
+    }
+
+    private sealed class TextTotals
+    {
+        public long Unchanged;
+        public long TextCharacters;
+        public long Items;
+        public long ItemCharacters;
+        public long RunCharacters;
+        public long Runs;
+        public long Glyphs;
+        public long GlyphCharacters;
+    }
+
+    private static long TextLength(System.Text.Json.JsonElement value)
+    {
+        long length = 0;
+        foreach (var name in new[] { "textContent", "firstLineText" })
+        {
+            if (value.TryGetProperty(name, out var text) && text.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                length += text.GetRawText().Length;
+            }
+        }
+        return length;
+    }
+
+    private static void CountItems(System.Text.Json.JsonElement fragment, TextTotals totals)
+    {
+        totals.TextCharacters += TextLength(fragment);
+        if (fragment.TryGetProperty("items", out var items) && items.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            totals.ItemCharacters += items.GetRawText().Length;
+            foreach (var item in items.EnumerateArray())
+            {
+                totals.Items++;
+                if (item.TryGetProperty("glyphRuns", out var runs) && runs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    totals.RunCharacters += runs.GetRawText().Length;
+                    foreach (var run in runs.EnumerateArray())
+                    {
+                        totals.Runs++;
+                        var glyphs = run.GetProperty("glyphs").GetString()!;
+                        totals.GlyphCharacters += glyphs.Length;
+                        totals.Glyphs += glyphs.Length / 4 * 3 / 18;
+                    }
+                }
+            }
+        }
+        foreach (var child in fragment.GetProperty("children").EnumerateArray())
+        {
+            if (child.TryGetProperty("fragment", out var nested) &&
+                nested.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                CountItems(nested, totals);
+            }
+        }
     }
 
     private sealed record StyleTotals(long Count, long Bytes, long Styled, long Values, long Custom);
