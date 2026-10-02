@@ -2972,8 +2972,12 @@ What the recreation does:
   - the page's own address, for a `Document` request, with the page;
   - an `Image` request, with the image's latest recorded status, MIME
     type, and bytes;
-  - a `Fetch` request at the font address, for a digest one of the faces
-    names, with the file's bytes and `Access-Control-Allow-Origin: *`.
+  - a `Fetch` or `XHR` request at the font address, for a digest one of
+    the faces names, with the file's bytes and
+    `Access-Control-Allow-Origin: *`. The instrumented Chromium on the
+    target machine reports the builder's `fetch()` as `XHR` in
+    `Fetch.requestPaused`; the stock Chromium of the integration tests
+    reports it as `Fetch`.
     The page's origin is not the recorder's, so the builder's read is a
     cross-origin request.
   - Anything else is refused, as before.
@@ -3036,6 +3040,21 @@ Tests at this sub-step:
   DejaVu Sans), the face is loaded before the tree is built. The glyph
   comparison needs the instrumented Chromium, and is checked on the target
   machine.
+
+#### Sub-step 3 on the target machine
+
+Recording 20261002-162024, on the CNIB events page at revision e12b61b,
+reported by the owner 2026-10-02: the images are drawn, and the web fonts
+are not; the headings, in Stag Sans Web, are drawn in a fallback font.
+
+Read in the open recreation through its DevTools port: `document.fonts`
+was empty, and the builder's notes held "not added: Failed to fetch" for
+each of the five faces. Each font request was refused by the recorder
+(`net::ERR_BLOCKED_BY_CLIENT`), and `Fetch.requestPaused` gave its
+resource type as `XHR`, not the `Fetch` the server required. The same
+recording's five faces were read and answered in the development
+environment with the type `Fetch`. Revision after e12b61b answers either
+type at the font address.
 
 #### Required tests
 

@@ -147,7 +147,10 @@ public sealed class RecreationServer : IAsyncDisposable
         if (_fontAddress is { } fonts && url.StartsWith(fonts, StringComparison.Ordinal))
         {
             var digest = url[fonts.Length..];
-            if (resourceType != "Fetch" || digest.Length != 64 || !digest.All(Uri.IsHexDigit) ||
+            // The builder's fetch() is reported as "Fetch" by some Chromium
+            // builds and as "XHR" by the instrumented Chromium on the target
+            // machine (2026-10-02), so either is answered.
+            if (resourceType is not ("Fetch" or "XHR") || digest.Length != 64 || !digest.All(Uri.IsHexDigit) ||
                 !_resources.Faces.Any(face => face.Digest == digest) ||
                 _resources.FontFile(digest) is not { } file)
             {

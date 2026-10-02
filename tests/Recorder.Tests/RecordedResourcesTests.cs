@@ -165,6 +165,8 @@ public sealed class RecordedResourcesTests : IDisposable
         Assert.Equal(200, font.Status);
         Assert.Equal(FontBytes, font.Body);
         Assert.Contains(new KeyValuePair<string, string>("Access-Control-Allow-Origin", "*"), font.Headers);
+        // The instrumented Chromium reports the builder's fetch() as XHR.
+        Assert.Equal(FontBytes, server.Answer(fonts + Digest(FontBytes), "XHR")!.Body);
         // Only the builder's fetch of a face's file is answered.
         Assert.Null(server.Answer(fonts + Digest(FontBytes), "Font"));
         Assert.Null(server.Answer(fonts + Digest(ImageBytes), "Fetch"));
