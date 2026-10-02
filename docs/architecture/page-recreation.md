@@ -3257,9 +3257,9 @@ Each sub-step is tested on the target machine before the next.
   animations and an animated image is opened at several frames, and each
   recreation is compared with the captured frame.
 
-### Slice 4c: the DOM from the start of parsing (proposed)
+### Slice 4c: the DOM from the start of parsing (agreed)
 
-Proposed 2026-10-02, to be agreed before work on it starts.
+Proposed and agreed 2026-10-02.
 
 #### Found on the target machine
 
@@ -3349,10 +3349,12 @@ the `started-parsing` walk is the earliest.
 - A frame drawn before the document's `started-parsing` walk (none is
   expected for a document that is parsed) still cannot be recreated, and
   the player still says so.
-- Style sheets, fonts, and images that were not yet loaded at the frame
-  are a separate matter: the recreation must draw the page without what
-  had not loaded. That is checked in the system test below and not
-  designed here.
+- Fonts and images are taken as they were at the frame's basis: an
+  image's latest image-resource record at or before it, and the faces the
+  document had loaded and not removed. An image Blink drew is decoded from
+  loaded bytes, so an image the screen shows should have its record by
+  then. Two cases may not hold, and are settled below rather than
+  accepted.
 
 #### To be settled
 
@@ -3363,6 +3365,19 @@ the `started-parsing` walk is the earliest.
 - Whether the document's token and its navigation's correlation are
   available at `ImplicitOpen`, so the walk is joined to the committed
   navigation as the finished-parsing walk is.
+- An image drawn while its bytes are still arriving. Blink can decode and
+  draw part of an image before it finishes loading; the recording holds
+  an image only once it has finished, so the recreation would draw
+  nothing where the screen shows part of it. Settled by reading how Blink
+  paints a partly loaded image, and what of it the recording would need.
+- Text whose web font has not loaded. During a face's block or swap
+  period Blink draws the text invisible or in a fallback font. Whether the
+  recorded glyph runs, imposed in the recreation, give what the screen
+  showed is settled by reading Blink's font loading and checked on the
+  target machine.
+
+Agreed by the owner on 2026-10-02, with these two cases added and the
+recreation compared with the screen image in the system test.
 
 #### Required tests
 
@@ -3380,8 +3395,11 @@ the `started-parsing` walk is the earliest.
   no difference.
 - System test on the target machine: the recording of the CNIB events
   page is opened at frames between the document's first presentation and
-  its finished-parsing walk, each recreation is compared with the captured
-  frame, and the finished-parsing check reports no difference.
+  its finished-parsing walk, and the finished-parsing check reports no
+  difference. Each recreation is compared with the captured screen image
+  of its frame, including which images are drawn, and how far, and the
+  font of each heading; a difference is reported as a defect, not
+  accepted.
 
 ### To be settled
 
