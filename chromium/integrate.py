@@ -7584,7 +7584,7 @@ const ShapeResult* RecorderShapeFromRecordedGlyphs(const FragmentItem& item,
   SkString recorder_typeface_name;
   if (!recorder_typeface ||
       !recorder_typeface->getPostScriptName(&recorder_typeface_name) ||
-      String::FromUTF8(recorder_typeface_name.c_str()) != recorder_name ||
+      String::FromUtf8(recorder_typeface_name.c_str()) != recorder_name ||
       std::abs(recorder_platform.size() - recorder_size) > 0.001) {{
     return nullptr;
   }}
