@@ -2844,6 +2844,39 @@ face and cache hooks, the image hook, and their call shapes against the
 bridge; the .NET tests cover each record against the record contract and
 the typed contracts, and a glyph run's font file.
 
+#### Sub-step 2 on the target machine
+
+Recording 20261002-162024 at revision 881c098, made by the owner on
+2026-10-02 of the same pages as recording 20261002-005927, with the same
+values entered.
+
+- `browser.resources` holds 602 records, 20,481 KB before chunk
+  compression: 13 `font-file`, 199 `font-face-added`, 46
+  `font-face-loaded`, 199 `font-face-removed`, 89 `image-resource`, and 56
+  `image-data`.
+- Every `font-file` and `image-data` record's bytes decode to its stated
+  size and digest. The 13 font files are 11 distinct files, since each
+  renderer records its own; 4,192 KB in all, each an OpenType file (10 with
+  TrueType outlines, 1 with CFF outlines). The 56 images are 8,609 KB.
+- All 5,291 glyph runs in the recording's layout records carry a
+  `fontFile`, naming 10 digests, each of which has a `font-file` record.
+- All 46 loaded faces have a `url` source and a font file with a
+  `font-file` record. Their families are Stag Sans Web (30), OpenSans (8),
+  Plakkaat (4), PrefsFramework-Icons (3), and Google Sans (1).
+- All 89 images loaded with status 200 and had their bytes recorded: 34
+  JPEG, 32 GIF, 16 PNG, and 7 SVG, from 89 URLs.
+- A document's faces are removed and added again when its style sheets
+  change: in one document, 19 faces were added at 9.05 s, all 19 removed
+  at 22.5 s and 19 new faces added, which loaded within 0.06 s. Every face
+  is removed when its document closes.
+
+Cost, from the bridge's "Recorder evidence cost" lines, which cover only
+part of the recording (95 of the 199 removals): `RecordFontFile`, which
+digests a file and queues its bytes, 16 calls, 5.3 ms in all, the largest
+0.79 ms; `RecordBlinkImageResource` 89 calls, 6.4 ms, the largest 2.8 ms;
+the face records 340 calls, 3.6 ms. Blink's reading of a font file and its
+copy of an image's bytes happen before these calls and are not measured.
+
 #### Required tests
 
 - Unit tests: the font-file, font-face, and image records against the
