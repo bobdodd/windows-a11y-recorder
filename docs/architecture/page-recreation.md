@@ -2462,6 +2462,166 @@ Tests at this stage:
   it has not been run yet.
 - System: not yet run.
 
+### Slice 4a: fonts, images, and children matched by node (proposed)
+
+Asked for by the owner on 2026-10-01, after the first stage 3 recreation of
+the recording 20261002-005927. Its Console listed 918 boxes and blocks that
+kept Blink's layout: 580 text items in another font, 190 boxes whose number
+of children differed from the recording, 89 blocks whose items differed,
+and 59 blocks with no recorded items. Of about 13,200 glyph runs in that
+recording, 12,741 name the family "." with no PostScript name: the page's
+web fonts, whose names Blink's typefaces do not give. A recreation without
+them falls back to another font, breaks lines elsewhere, and so holds a
+different number of line boxes, which undoes the recorded offsets of every
+child of the box. This step records the fonts and images, uses them in the
+recreation, and matches children to the recording one by one.
+
+#### What is recorded (protocol 0.40)
+
+1. Font files. Each typeface a glyph run uses, web font or installed, is
+   identified by the SHA-256 digest of its font file as Blink holds it: the
+   bytes Skia's `SkTypeface::openStream` returns, which for a web font are
+   the file after Blink's sanitizer, as Blink draws with it, since Blink
+   discards the downloaded bytes once decoded (`FontResource::ClearData`).
+   Each glyph run gains `fontFile`: the digest, the collection index
+   `openStream` returns, and the typeface's variation position, axis tag
+   and value. A renderer records a `font-file` record, the digest and the
+   bytes, the first time it meets a digest. The digest is kept for each
+   typeface, so a file is read and digested once in a renderer.
+2. Font faces. When a `FontFace` of a document finishes loading, from an
+   `@font-face` rule or from script, a `font-face-loaded` record holds the
+   document, a face number unique in the renderer, its family and its
+   descriptors as Blink serializes them (style, weight, stretch,
+   unicode-range, feature settings, display, ascent, descent and line-gap
+   overrides, size adjust), its source's URL when it has one or its local
+   font name, and the digest of the font file of the source it loaded
+   from. A face leaving the document's set of faces, as when its style
+   sheet is removed, records `font-face-removed` with the face number.
+3. Images. When an image resource finishes loading, before Blink clears
+   its encoded bytes (`ImageResource::Finish`), an `image-resource` record
+   holds the URL requested, the response's URL, status, and MIME type, and
+   the digest of the encoded bytes. A renderer records an `image-data`
+   record, the digest and the bytes, the first time it meets a digest. This
+   covers `img`, `picture`, `input type=image`, SVG `image`, video posters,
+   and CSS images, which all load through image resources. Multipart images
+   and images that fail their integrity check are not recorded.
+4. The records go on a new topic, `browser.resources`. A record is as large
+   as what it holds; the protocol's frames already allow 2 GB.
+
+The digest uses the SHA-256 of `//crypto`, which the bridge gains as a
+dependency. Reading, digesting, and copying run on the renderer's main
+thread, once for each file or image in a renderer; what they cost is
+measured on the target machine with the recordings of this step.
+
+#### What the recreation does with them
+
+1. The page is served at its recorded address. The recorder navigates the
+   recreation's tab to the recorded document URL, and answers that
+   document's request itself through `Fetch.fulfillRequest`
+   ([Fetch domain](https://chromedevtools.github.io/devtools-protocol/tot/Fetch/)),
+   with the page it writes now and its content security policy. Every
+   relative URL of the page then resolves as it did when recorded. The
+   builder and the tree data are written into the page, the builder with
+   the policy's nonce, so nothing else is fetched to build it. Reloading
+   asks for the same document, and is answered the same way.
+2. Every other request of the tab is paused at the request stage and
+   answered from the recording or refused, so nothing reaches the network:
+   - an image at a URL the recording holds, loaded at or before the frame,
+     is answered with its last recorded status, MIME type, and bytes;
+   - a font file is answered by its digest, at an address of the recorder's
+     own (`https://a11y-recorder.invalid/<token>/font/<digest>`), which the
+     policy's `connect-src` allows;
+   - anything else, such as a style sheet, which is not recorded until a
+     later step, is refused. DevTools' Network panel lists what was
+     answered and what was refused.
+3. Before it builds the DOM, the builder adds to the document's set of
+   faces each face the document had loaded at the frame and not removed,
+   as a `FontFace` made from the recorded family, descriptors, and the
+   bytes of its font file
+   ([FontFace constructor](https://developer.mozilla.org/en-US/docs/Web/API/FontFace/FontFace)),
+   and waits for them to load. Blink then matches the recorded
+   `font-family` values to the same faces as when recorded, so line
+   breaks, line heights, and baselines come from the recorded fonts, not
+   only the glyphs. The time this takes is a step of "Time to open the
+   recreation".
+4. A glyph run's recorded glyphs are used when the font Blink chose for
+   the text has the recorded font file's digest and size. The recreation
+   digests a typeface once, as the recording does. Installed fonts are
+   matched the same way, so a playback machine with a different version of
+   a font reports the text as in another font, not drawn with wrong glyphs.
+5. Images draw from their recorded bytes, from the first frame of an
+   animated image. Image boxes already take their recorded size.
+
+#### Children matched by node
+
+The box hook gives each child of a box the offset of the recorded child
+link that is the same child, not the link at the same index:
+
+1. A child box with an element takes the offset of the link of kind "box"
+   whose node is that element's recorded node. The builder adds the
+   recorded node to `data-a11y-recorded-layout`, as `node`.
+2. Line boxes take the offsets of the recorded line links in order, when
+   the box holds as many lines as recorded.
+3. Anonymous boxes take the offsets of the recorded anonymous links in
+   order, when the box holds as many as recorded.
+4. A child that matches no link keeps the offset Blink gave it, and is
+   reported once, naming the reason: no recorded link for its node, or a
+   different number of lines or of anonymous boxes. The box's own size is
+   imposed in every case, as now.
+
+So an extra line, or an image showing its alternative text, no longer
+undoes the offsets of the box's other children.
+
+#### Limits
+
+- Style sheets are still not recorded, so a face that the page declared
+  but had not loaded at the frame is not added, and DevTools' Styles pane
+  still shows no rules. Faces load in the recreation from recorded bytes,
+  so a face that was still loading when recorded is shown loaded if its
+  file had been recorded by the frame.
+- A font installed on the recording machine and not the playback machine
+  is not added to the recreation: installed fonts are matched by digest
+  and reported when they differ. Their files are recorded, so adding them
+  is possible later.
+- Images not recorded: multipart images, images that failed their
+  integrity check, and images loaded before recording started in a
+  renderer that kept them in its memory cache. `data:` URLs are not
+  requests, so they draw from the recorded attribute.
+- Media other than images (video, audio) is not recorded.
+- The `font-face-removed` record covers faces removed from a document's
+  set; a face whose family or descriptors script changes after loading is
+  recorded as it was when it loaded.
+
+#### Sub-steps
+
+1. Children matched by node (no new recording needed), and the recreation
+   served at its recorded address, with every request answered or refused.
+2. Protocol 0.40: font files, font faces, and images recorded, with their
+   cost measured on the target machine, as for stage 2.
+3. The recreation uses them: faces added before the build, images answered
+   from the recording, glyphs matched by digest.
+
+Each sub-step is tested on the target Windows machine before the next.
+
+#### Required tests
+
+- Unit tests: the font-file, font-face, and image records against the
+  record contract, including the once-per-digest rule; the resources the
+  app chooses for a frame (last image record for a URL at or before the
+  frame, faces loaded and not removed); the answer chosen for a paused
+  request; the tree data's recorded node; the integration script's new
+  hooks and their upgrade from those of stage 3.
+- Integration tests in the instrumented Chromium: a generated page with a
+  web font and an image is recorded, and its records hold the font file
+  and image bytes with matching digests; the recreation of that page draws
+  its text with the recorded glyphs and the recorded font, and its image
+  from the recorded bytes; a box whose child count differs keeps the
+  recorded offsets of the children that match; no request of the
+  recreation reaches the network.
+- System test on the target machine: a recording of a page with web fonts
+  and images is inspected, and the Console's list of boxes not imposed is
+  compared with that of stage 3.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
