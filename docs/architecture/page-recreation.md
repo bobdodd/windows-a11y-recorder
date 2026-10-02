@@ -2286,11 +2286,108 @@ The blank cells are those not computed for the 2b check recording.
 - The extended change check on recordings from the target machine, as the
   system test.
 
+### Stage 3: a recorded frame rendered from recorded values (proposed)
+
+Proposed on 2026-10-01, for agreement before it is built. The owner, on
+2026-10-01: "I would prefer to experience the rendering of a frame rather
+than worry about optimization. Let's build the tool, at least to the point
+where I can make qualitative judgments on responsiveness." Stage 3 is
+therefore the shortest path from the player to a recorded frame drawn by
+Blink from the recorded values, on the paths built already, with the
+recorded styles, box fragments, items, and glyphs all imposed. It takes
+slices 3 and 4 of "Slices" above together, and leaves building the DOM in
+the renderer for later.
+
+What the owner does. In the player, at a frame, "Inspect page at this
+frame" lists the pages and opens the one chosen, as in slice 3b. The
+recreation browser now starts the instrumented Chromium with
+`--a11y-recorder-recreation`, so the page is drawn from the recorded
+values, with DevTools open on it.
+
+How it is built:
+
+- The DOM is built by the builder script of slice 3b, unchanged, with the
+  recorded text control values, selection, focus, and scroll offsets.
+- The values come from the document's layout change state at the frame
+  (`LayoutDocumentChangeState`), which holds each node's latest record
+  with its style changes and unchanged text merged in, as the change check
+  uses it.
+- They reach Blink as in the feasibility step, in attributes the builder
+  sets on each element before it is inserted, read only under the switch:
+  `data-a11y-recorded-style`, the recorded computed style and custom
+  properties as CSS declarations, read by the 1a hook unchanged; and
+  `data-a11y-recorded-layout`, the node's recorded `boxFragments` JSON as
+  recorded, replacing the attributes of 1b and 1c. Text nodes carry
+  nothing: a text's items are in its block's record.
+- The 1b hook, at the start of `BoxFragmentBuilder::ToBoxFragment`, takes
+  the box's size from its recorded fragment, and each child's offset from
+  the recorded child link at the same index, when the builder holds as
+  many children as the record holds links. The fragment is the record's
+  first for a box that is not fragmented; a fragmented box keeps Blink's
+  sizes, as in 1b.
+- The 1c hook, at the end of `FragmentItemsBuilder::ConvertToPhysical`,
+  takes each item's rectangle from the recorded item at the same index,
+  when Blink's items have the recorded types in the recorded order and the
+  block's text content equals the recorded text; otherwise the block keeps
+  Blink's items.
+- Glyphs: a text item with one recorded run whose font has the PostScript
+  name and size of the item's primary font is drawn from the recorded glyph
+  identifiers and the advances between their recorded positions, with
+  `ShapeResult::CreateFromRecordedGlyphs` changed to take glyph
+  identifiers rather than code points. Any other item keeps Blink's
+  shaping inside its recorded rectangle.
+- Blink then paints from these with its own code.
+
+How responsiveness is shown. The player times each part of opening a
+frame: reading the state at the frame, writing the page, starting or
+reusing the recreation browser, building the DOM, and the first paint
+after it, read from the page's `requestAnimationFrame` after the build.
+The times are listed in the evidence panel's notes and written to the
+app's log, beside the owner's own judgment.
+
+What the owner can judge: the time from choosing the page to seeing it,
+scrolling and DevTools on the recreated page, and how closely the drawing
+matches the frame's screenshot.
+
+Limits of this stage:
+
+- The recorded values are visible as two attributes on each element in
+  DevTools' Elements pane, and attribute selectors see them. Moving them
+  off the DOM is the later step that builds the DOM in the renderer.
+- Images draw nothing, and web fonts are not available, so text in a web
+  font keeps Blink's shaping with a fallback font in its recorded
+  rectangle; fonts and images come with slice 4 of the plan. On the
+  machine the recording was made on, system fonts are those recorded.
+- Glyph offsets are not imposed, and text drawn with several fonts, as
+  with font fallback, keeps Blink's shaping.
+- Only horizontal, left to right writing modes take recorded fragments and
+  items, as in 1b and 1c.
+- A block whose recorded items or text do not match Blink's, and a box
+  whose children do not match its record, keep Blink's layout; how many do
+  is counted by the hooks and listed in the panel, so a mismatch is seen,
+  not hidden.
+- The fidelity guard stays as designed, after slice 4.
+
+Required tests:
+
+- Unit: the attributes the page writer produces from a layout change
+  state, including merged style changes and a node without a record; the
+  recreation browser's switch; the integration script's tests of the
+  changed hooks, including the matching rules and the font test for
+  glyphs; the timing notes.
+- Integration, with `RECORDER_RECREATION_CHROMIUM` set: a generated page
+  with recorded values is opened, and the box sizes, child offsets, and
+  item rectangles read back over the DevTools protocol equal the recorded
+  ones.
+- System, on the target machine: a frame of the cnib recording opened from
+  the player, judged by the owner, with the panel's timings and counts.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
   recorder's own connection to the bridge, or served on the loopback
-  interface and read by the browser process. Settled in the first step.
+  interface and read by the browser process. Settled in the first step;
+  stage 3 above uses attributes on the built DOM for now.
 - The recreation mode is a switch of the instrumented Chromium that also
   records, so that one build is kept (agreed 2026-09-30).
 
