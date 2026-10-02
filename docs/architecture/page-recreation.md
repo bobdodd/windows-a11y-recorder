@@ -3083,6 +3083,19 @@ element and text node whose layout object it destroys, so the next
 change set records it with no layout object. A recording made before it
 keeps the stale record.
 
+That revision (00c20cc) was not enough. In a recording made with it on
+the target machine (20261002-194407), the text node "Reset" still had a
+latest record stating a layout object, at each frame of three documents
+of the site. Noting the node was not the fault: the change set left out
+any noted text node without a layout object, as the checkpoint does, and
+the bridge refused a text node change record without one. A checkpoint
+is a full walk, so a text node it leaves out has no layout object; a
+change set states only what changed, so leaving the node out kept its
+earlier record. Protocol 0.41 records, in a change set, a noted text node
+without a layout object, stating that it has none; the bridge and the
+recorder's validation accept such a record for a change set and still
+refuse it in a checkpoint.
+
 #### Required tests
 
 - Unit tests: the font-file, font-face, and image records against the
@@ -3141,7 +3154,7 @@ its last presented rendering update, which already includes the values of
 animations Blink ticks on the main thread (subject to the check in
 "Required tests" below), but not the compositor's values drawn after it.
 
-#### What is recorded (protocol 0.41)
+#### What is recorded (protocol 0.42)
 
 On a new topic, `browser.compositor`:
 
@@ -3215,7 +3228,7 @@ update and the compositor frame.
 
 #### Sub-steps
 
-1. Record (protocol 0.41), with its cost measured on the target machine.
+1. Record (protocol 0.42), with its cost measured on the target machine.
 2. The recreation holds time: no animation or transition run, compositor
    values imposed, animated images held at their recorded frame.
 

@@ -378,6 +378,11 @@ resource, each file or image once for each SHA-256 digest in a renderer.
 See "Sub-step 2 as built" under "Slice 4a" in
 [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.41 records, in a layout change set, a text node whose layout
+object was destroyed, stating that it has none; a checkpoint still leaves
+such a node out. See "Sub-step 3 on the target machine" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

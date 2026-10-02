@@ -11781,7 +11781,38 @@ BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS = """\
             Vector<gfx::QuadF> recorder_quads;
             recorder_layout_object->AbsoluteQuads(recorder_quads);
 """
+# Protocol 0.41: a noted text node without a layout object is recorded, with
+# no layout object, so that a change set states that a text node's layout
+# object was destroyed; the checkpoint still leaves such a node out, as its
+# absence from a full walk states it. Before, a change set left it out too,
+# and the text node's last record, which stated a layout object, stood.
+BLINK_LAYOUT_CHANGES_TEXT_SKIP = """\
+    // A removed node is recorded by slice 4, and a text node without a layout
+    // object is not recorded, as in the checkpoint.
+    if (!recorder_node.isConnected() ||
+        (recorder_node.IsTextNode() && !recorder_node.GetLayoutObject())) {
+      continue;
+    }
+"""
+BLINK_LAYOUT_CHANGES_TEXT_RECORDED = """\
+    // A removed node is recorded by slice 4. A text node without a layout
+    // object is recorded (protocol 0.41): it was noted when its layout object
+    // was destroyed, and its record states that it has none.
+    if (!recorder_node.isConnected()) {
+      continue;
+    }
+"""
+if BLINK_LAYOUT_CHANGES_DEFINITION.count(BLINK_LAYOUT_CHANGES_TEXT_SKIP) != 1:
+    raise RuntimeError("the layout change set's text node skip was not found once")
+LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION = (
+    BLINK_LAYOUT_CHANGES_DEFINITION
+)
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_TEXT_SKIP, BLINK_LAYOUT_CHANGES_TEXT_RECORDED, 1
+)
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.41 recorded a text node without a layout object.
+    LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.38 recorded box fragments.
     LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.37 read every computable property.

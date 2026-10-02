@@ -4699,7 +4699,11 @@ base::DictValue CreateLayoutChangesBasePayload(const RecorderPipeClient& client,
   return payload;
 }
 
-bool IsValidLayoutNode(const LayoutCheckpointNode& node) {
+// A checkpoint records a text node only when it has a layout object. A
+// change set also records a text node whose layout object was destroyed
+// (protocol 0.41), with none.
+bool IsValidLayoutNode(const LayoutCheckpointNode& node,
+                       bool text_without_layout_object = false) {
   if (node.node_id <= 0 || node.node_name.empty() ||
       (node.node_type != 1 && node.node_type != 3)) {
     return false;
@@ -4710,7 +4714,8 @@ bool IsValidLayoutNode(const LayoutCheckpointNode& node) {
     return false;
   }
   if (node.node_type == 3 &&
-      (!node.layout_object_present || node.computed_style_present)) {
+      ((!node.layout_object_present && !text_without_layout_object) ||
+       node.computed_style_present)) {
     return false;
   }
   if (node.computed_style_present) {
@@ -4724,7 +4729,8 @@ bool IsValidLayoutNode(const LayoutCheckpointNode& node) {
 }
 
 bool IsValidLayoutChangedNode(const LayoutChangedNode& changed) {
-  if (!IsValidLayoutNode(changed.node) || changed.reasons == 0 ||
+  if (!IsValidLayoutNode(changed.node, /*text_without_layout_object=*/true) ||
+      changed.reasons == 0 ||
       (changed.reasons & ~(kLayoutChangeStyle | kLayoutChangeLayout |
                            kLayoutChangePaintProperties)) != 0) {
     return false;

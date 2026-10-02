@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.40"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.40"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.41"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.41"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -5762,7 +5762,7 @@ class LayoutIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION,
-            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[0],
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[1],
         )
         for include in (
             "layout/block_break_token.h",
@@ -5848,7 +5848,7 @@ class LayoutIntegrationTests(unittest.TestCase):
         # The definition a 0.37 checkout holds is the first one recognised,
         # and only the node reader's end differs from the current one.
         legacy = INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION
-        current = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION
         self.assertNotIn(legacy, current)
         self.assertEqual(
             current,
@@ -5861,6 +5861,25 @@ class LayoutIntegrationTests(unittest.TestCase):
                 ),
             ),
         )
+
+    def test_a_change_set_records_a_text_node_without_a_layout_object(self):
+        # Protocol 0.41: a checkout at 0.40 holds the definition that left
+        # such a node out, and is upgraded; only the skip differs.
+        legacy = INTEGRATE.LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertEqual(
+            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[0]
+        )
+        self.assertIn(INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP, legacy)
+        self.assertNotIn(INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP, current)
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP,
+                INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_RECORDED,
+            ),
+        )
+        self.assertNotIn("IsTextNode() && !recorder_node.GetLayoutObject()", current)
 
     def test_the_fixed_list_before_protocol_0_37_stays_documented(self):
         # The list recorded before protocol 0.37 is kept to recognise the

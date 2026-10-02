@@ -3587,17 +3587,16 @@ internal static class EventPayloadValidator
         {
             var hasStyle = payload.TryGetProperty("computedStyle", out var style) &&
                 style.ValueKind != JsonValueKind.Null;
-            var hasLayoutObject =
-                payload.TryGetProperty("layoutObjectPresent", out var textLayout) &&
-                IsBoolean(textLayout) && textLayout.GetBoolean();
-            if (hasStyle || !hasLayoutObject)
+            // From protocol 0.41 a text node whose layout object was
+            // destroyed is recorded with none, so a text node change record
+            // need not state a layout object.
+            if (hasStyle)
             {
                 AddError(
                     issues,
                     "browser-layout-text-node-inconsistent",
                     "#/payload/nodeType",
-                    "A text node record must have a layout object and no " +
-                        "computed style.");
+                    "A text node record must have no computed style.");
             }
         }
     }

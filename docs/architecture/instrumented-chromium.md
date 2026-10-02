@@ -997,7 +997,14 @@ digest, collection index, and variation position of its typeface's file.
 The design is in [page recreation](page-recreation.md), "Slice 4a" and
 "Sub-step 2 as built".
 
-Live 0.40 connections require an exact protocol-version match.
+Protocol version 0.41 records, in a layout change set, an element or text
+node whose layout object Blink destroyed in `Node::DetachLayoutTree`, so
+that a text node under an element that became `display: none` states that
+it has no layout object. A `layout-node-changed` record of a text node may
+state no layout object; a checkpoint still leaves such a text node out. See
+"Sub-step 3 on the target machine" in [page recreation](page-recreation.md).
+
+Live 0.41 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

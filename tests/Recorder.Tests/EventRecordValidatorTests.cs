@@ -3463,6 +3463,25 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void AcceptsAChangedTextNodeWhoseLayoutObjectWasDestroyed()
+    {
+        // Protocol 0.41: a change set records a text node whose layout object
+        // was destroyed, with none and no geometry; a checkpoint leaves such a
+        // node out.
+        var changed = JsonNode.Parse(BrowserLayoutPayloads.ChangedEmptyTextNode)!;
+        changed["layoutObjectPresent"] = false;
+        changed["geometry"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", changed));
+
+        var checkpoint = JsonNode.Parse(BrowserLayoutPayloads.TextNode)!;
+        checkpoint["layoutObjectPresent"] = false;
+        checkpoint["boundingClientRect"] = null;
+        Assert.Contains(
+            ValidateLayoutRecord("layout-checkpoint-node", checkpoint),
+            issue => issue.Code == "browser-layout-text-node-inconsistent");
+    }
+
+    [Fact]
     public void RejectsATextNodeWithAComputedStyle()
     {
         var payload = JsonNode.Parse(BrowserLayoutPayloads.TextNode)!;
