@@ -71,6 +71,10 @@ verified against Chromium's source.
   built.
 - Drawing differences between the recording machine and the playback
   machine, such as font smoothing settings and the graphics device.
+- A page drawn before its first DOM walk. The DOM is recorded from the
+  finished-parsing walk, but the page is drawn while it parses, so a frame
+  before that walk cannot be recreated. Slice 4c proposes recording the
+  DOM from the start of parsing.
 - Checking. The recorded screen frame is the reference for the viewport;
   nothing compares the recreation with it yet.
 
@@ -3154,7 +3158,7 @@ its last presented rendering update, which already includes the values of
 animations Blink ticks on the main thread (subject to the check in
 "Required tests" below), but not the compositor's values drawn after it.
 
-#### What is recorded (protocol 0.42)
+#### What is recorded (protocol 0.43)
 
 On a new topic, `browser.compositor`:
 
@@ -3228,7 +3232,7 @@ update and the compositor frame.
 
 #### Sub-steps
 
-1. Record (protocol 0.42), with its cost measured on the target machine.
+1. Record (protocol 0.43), with its cost measured on the target machine.
 2. The recreation holds time: no animation or transition run, compositor
    values imposed, animated images held at their recorded frame.
 
@@ -3252,6 +3256,132 @@ Each sub-step is tested on the target machine before the next.
 - System test on the target machine: a recording of a page with running
   animations and an animated image is opened at several frames, and each
   recreation is compared with the captured frame.
+
+### Slice 4c: the DOM from the start of parsing (proposed)
+
+Proposed 2026-10-02, to be agreed before work on it starts.
+
+#### Found on the target machine
+
+In the recording 20261002-204153, the document of
+`https://www.cnib.ca/en/event` was first recorded at 19.742 s. Its first
+DOM walk is the finished-parsing walk, at 22.630 s, of 6900 nodes. Read in
+steps of 5 ms, the frames from 20.170 s to 23.745 s take as their basis a
+presentation of the document's state at 20.072 s to 22.305 s (ten
+presentations), all before that walk; the next presentation, of its state
+at 23.722 s, is the basis from 23.750 s. Its layout records begin at
+20.350 s. At those frames the player says the page cannot be recreated.
+The owner opened the frame at 23.026 s and received that message. This is
+the gap found on 2026-09-29 ("Found while building" under "Slice 3b
+implementation"), and it breaks the requirement at the top of this
+document: the page was drawn, so it must be recreated.
+
+#### Why it happens
+
+The DOM is recorded only from the finished-parsing walk:
+`RecorderRecordsDomChanges` in the integration script is false while
+`Document::Parsing()`, so no structural change made during parsing is
+recorded, and a parser change to character data is recorded only once the
+document is no longer parsing ("Insertions and removals" in
+[change-driven recording](change-driven-recording.md)). The mutation
+delivery hook also queues a post-mutation checkpoint only for a document
+that `HasFinishedParsing()`. Layout and presentation are recorded from the
+document's first rendering update, which Blink makes while it parses, so
+the page is drawn, and its layout recorded, before its DOM is.
+
+#### What is recorded (protocol 0.42)
+
+Read against Chromium's main branch at 65f3c73 (2026-10-02); line numbers
+in the checkout on the target machine may differ.
+
+- A DOM walk when parsing starts. `Document::ImplicitOpen` creates the
+  parser and sets the parsing state to `kParsing`
+  ([document.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/document.cc;l=4131)). A hook after that call
+  requests a DOM checkpoint with `reason` `started-parsing`, which the
+  bridge always walks, as it walks `finished-parsing`. For a navigation the
+  document then holds no children, so the walk records the document node
+  alone; for `document.open()` it records what the document holds.
+- Every change made while the document parses, as after parsing. The
+  parser's insertions reach the existing hook:
+  `ContainerNode::ParserAppendChild` and `ParserInsertBefore` call
+  `NotifyNodeInserted` with `ChildrenChangeSource::kParser`
+  ([container_node.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/container_node.cc;l=1282),
+  [line 683](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/container_node.cc;l=683)), `ParserRemoveChild` calls
+  `ChildrenChanged` with a removal
+  ([line 1111](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/container_node.cc;l=1111)), and `ChildrenChanged`
+  calls `Document::NotifyChangeChildren`
+  ([line 1474](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/container_node.cc;l=1474)), where the recorder's hook
+  is. `RecorderRecordsDomChanges` drops its `!Parsing()` condition, so they
+  are recorded as `dom-node-inserted` and `dom-node-removed` with the
+  inserted subtree, as now. A node the parser builds outside the document,
+  such as a fragment, is still recorded when it is inserted.
+- Parser text appended to a connected node during parsing.
+  `CharacterData::ParserAppendData` sets the whole new value with
+  `kUpdateFromParser`
+  ([character_data.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/character_data.cc;l=77)). The character data
+  hook records it as `dom-character-data-changed` while the document parses
+  too; a node that is not connected is still skipped.
+- Post-mutation checkpoints while parsing. The mutation delivery hook
+  queues the document while it parses, so the transitions of a parse are
+  closed by checkpoints as later ones are. The document already has a walk,
+  so the bridge does not walk them, except after a loss or at the check
+  interval, as now.
+- The finished-parsing walk stays and is always walked. When the document
+  has a `started-parsing` walk, the app's check compares it with the state
+  rebuilt from that walk and the changes after it, which it does not do
+  now (`DomTreeRebuilder` takes a finished-parsing checkpoint as the state
+  without comparing it). A difference is reported as for any other walk.
+
+The recorder's validation accepts `started-parsing` as a DOM checkpoint
+`reason`. The state reader needs no new rule: the state at a frame is
+rebuilt from the latest walk at or before it and the changes after it, and
+the `started-parsing` walk is the earliest.
+
+#### Limits
+
+- Each parser append records the whole value of the text node, so a text
+  node the parser appends to n times is recorded n times. Whether that
+  matters on real pages is measured on the target machine.
+- The records made during parsing add main-thread work while the page
+  loads, about one record set for each parsed node in addition to the
+  finished-parsing walk. The cost is measured as for stage 2; optimizing it
+  stays deferred, as agreed.
+- A frame drawn before the document's `started-parsing` walk (none is
+  expected for a document that is parsed) still cannot be recreated, and
+  the player still says so.
+- Style sheets, fonts, and images that were not yet loaded at the frame
+  are a separate matter: the recreation must draw the page without what
+  had not loaded. That is checked in the system test below and not
+  designed here.
+
+#### To be settled
+
+- Whether `ImplicitOpen` is reached for every document that is parsed,
+  including the XML parser and the initial empty document, or whether the
+  walk is better made at the document's first change. Settled by reading
+  the source on the target machine before the hook is written.
+- Whether the document's token and its navigation's correlation are
+  available at `ImplicitOpen`, so the walk is joined to the committed
+  navigation as the finished-parsing walk is.
+
+#### Required tests
+
+- Unit tests: the integration script's new hook and changed conditions,
+  and the upgrade of each changed definition from the one a checkout at
+  protocol 0.41 holds; the bridge's walk schedule for `started-parsing`
+  and for post-mutation requests during parsing; the validation of the new
+  reason; the state at a time between a `started-parsing` walk and the
+  finished-parsing walk, rebuilt from parser insertions, removals, and
+  appends; the check of a finished-parsing walk against that state.
+- Integration test in the instrumented Chromium: a generated page served
+  slowly in parts, so that it is presented before parsing finishes; at a
+  presentation before the finished-parsing walk, the rebuilt DOM equals
+  the DOM Blink held, and the check of the finished-parsing walk reports
+  no difference.
+- System test on the target machine: the recording of the CNIB events
+  page is opened at frames between the document's first presentation and
+  its finished-parsing walk, each recreation is compared with the captured
+  frame, and the finished-parsing check reports no difference.
 
 ### To be settled
 
