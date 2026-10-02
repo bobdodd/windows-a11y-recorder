@@ -2675,6 +2675,68 @@ Tests at this sub-step:
   pass. The box hook needs the instrumented Chromium and is checked on the
   target machine.
 
+#### Sub-step 1 on the target machine
+
+Reported by the owner on 2026-10-02 for recording
+20261002-005927-d604cba519d04477ad353f0b9cf5f287, page
+`https://www.cnib.ca/en/event`, built from revision f23b5d0:
+
+- The address bar showed the recorded address, and DevTools' Network panel
+  listed the page's images as blocked.
+- No improvement in the page's appearance was seen.
+- The Console listed 580 text items in another font or in more than one
+  glyph run, 124 boxes with a different number of line boxes, 89 blocks
+  whose items differed, 62 children with no recorded node, 59 blocks with
+  no recorded items, and 2 boxes with a different number of anonymous
+  boxes.
+
+Measured in the running recreation through its DevTools port:
+
+- All 1623 elements with a layout record had their recorded border box
+  size, and every child box with a recorded node was at its recorded
+  offset from its parent, within 0.5 pixels. The box layout is the
+  recorded one.
+- 357 elements in the body had no recorded style and were drawn, in 56
+  subtrees. Among them are `#header-collapsible`, which holds a second
+  search form and menu, `#block-octheme-search`, a `div.hidden`, and a
+  `div.col-12.col-md-10` in each event listing. The recording holds a
+  layout record for these elements with `layoutObjectPresent` false and no
+  computed style: they were not rendered at the frame. The recreation
+  writes no recorded style for them, so the user agent's style applies and
+  they are drawn over the recorded content.
+
+The remaining differences seen are text in another font, which wraps
+differently, and images, which slice 4a's later sub-steps address.
+
+#### Elements without a layout object (proposed)
+
+Proposed on 2026-10-02 for the owner's agreement.
+
+- An element whose layout record at the frame has `layoutObjectPresent`
+  false is written with a `data-a11y-recorded-no-layout-object` attribute.
+  Its value is `none` when no element or text below it in the flat tree had
+  a layout object at the frame, and `contents` otherwise, as for an element
+  styled `display: contents`. The value is an inference from the recorded
+  layout objects, not a recorded style; the recording holds no computed
+  style for such an element.
+- In the recreation mode, style resolution adds `display` with that value
+  as an important declaration, after the recorded style, so the element
+  takes no box, as at the frame.
+- DevTools' Styles pane lists the declaration as a rule of its own named
+  "No layout object recorded", separate from "Recorded style", so that the
+  inference is not shown as a recorded value.
+- The evidence panel states how many elements were given each value, and
+  why.
+- An element with no layout record at all at the frame is unchanged.
+- This needs a Chromium build, and is tested on the target machine with
+  the same recording.
+
+Required tests: unit tests of the attribute and its value for an element
+with and without a rendered descendant, through a shadow root, and for an
+element with no layout record; integration script tests of the style and
+inspector hooks; a browser integration test that such an element takes no
+box in the instrumented build.
+
 #### Required tests
 
 - Unit tests: the font-file, font-face, and image records against the
