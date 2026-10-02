@@ -2699,6 +2699,19 @@ public sealed class EventRecordValidatorTests
             issue => issue.Code == "browser-interaction-checkpoint-reason-inconsistent");
     }
 
+    [Fact]
+    public void AcceptsAnInteractionCheckpointAfterTheWalkWhenParsingStarted()
+    {
+        // Protocol 0.42.
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
+        payload["sourceChannel"] = "browser.dom";
+        payload["reason"] = "started-parsing";
+        payload["sourceCheckpointId"] = "dom-checkpoint-3";
+        payload["sourceChangeSetId"] = null;
+
+        Assert.Empty(ValidateInteractionRecord("interaction-checkpoint-started", payload));
+    }
+
     [Theory]
     [InlineData("browser.layout", "rendering-update", null, "layout-changes-7")]
     [InlineData("browser.dom", "post-mutation", null, null)]
@@ -2721,6 +2734,7 @@ public sealed class EventRecordValidatorTests
     [InlineData("browser.layout", "rendering-update", null, null, "browser-interaction-checkpoint-source-inconsistent")]
     [InlineData("browser.layout", "rendering-update", "layout-checkpoint-12", "layout-changes-7", "browser-interaction-checkpoint-source-inconsistent")]
     [InlineData("browser.dom", "finished-parsing", null, null, "browser-interaction-checkpoint-source-inconsistent")]
+    [InlineData("browser.dom", "started-parsing", null, null, "browser-interaction-checkpoint-source-inconsistent")]
     [InlineData("browser.dom", "post-mutation", null, "layout-changes-7", "browser-interaction-checkpoint-source-inconsistent")]
     [InlineData("browser.layout", "rendering-update", null, "layout-checkpoint-7", "browser-interaction-checkpoint-change-set-invalid")]
     public void RejectsAnInteractionCheckpointWithSourcesItsChannelDoesNotName(
@@ -3346,6 +3360,11 @@ public sealed class EventRecordValidatorTests
     [InlineData("post-mutation", "check", false)]
     [InlineData("finished-parsing", "finished-parsing", false)]
     [InlineData("finished-parsing", "after-loss", false)]
+    [InlineData("started-parsing", "first", false)]
+    [InlineData("started-parsing", "started-parsing", false)]
+    [InlineData("started-parsing", "finished-parsing", true)]
+    [InlineData("finished-parsing", "started-parsing", true)]
+    [InlineData("post-mutation", "started-parsing", true)]
     public void ChecksTheWalkReasonOfADomCheckpoint(string reason, string walkReason, bool rejected)
     {
         var payload = new JsonObject

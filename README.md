@@ -383,6 +383,11 @@ object was destroyed, stating that it has none; a checkpoint still leaves
 such a node out. See "Sub-step 3 on the target machine" in
 [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.42 walks a document's DOM when its parser is created and records
+the parser's changes while it parses, so a page drawn before it finished
+parsing can be recreated. See "Slice 4c" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

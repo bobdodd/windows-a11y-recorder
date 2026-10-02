@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.41";
+    public const string CurrentVersion = "0.42";
 }
 
 public static class BrowserEvidenceChannels
@@ -306,8 +306,10 @@ public sealed record BrowserNavigationPayload(
 
 // WalkReason (protocol 0.35) says why the document was walked: "first" when it
 // had no walk yet, "after-loss" when a DOM record was lost since its last
-// walk, "check" at the recording's full walk interval, or "finished-parsing"
-// for a finished parse, which is always walked.
+// walk, "check" at the recording's full walk interval, or "started-parsing"
+// (protocol 0.42) or "finished-parsing" for the start or the end of a parse,
+// which is always walked. Reason is "started-parsing", "finished-parsing", or
+// "post-mutation".
 public sealed record BrowserDomCheckpointStartedPayload(
     BrowserContext Context,
     string CheckpointId,
@@ -428,7 +430,8 @@ public sealed record BrowserDomCharacterDataChangedPayload(
 
 // Structural DOM changes (protocol 0.34), recorded as DOM transitions in the
 // order Blink makes them, from the time a document's finished-parsing
-// checkpoint is recorded. An insertion names its container, the inserted node,
+// checkpoint is recorded, and from protocol 0.42 from its started-parsing
+// checkpoint, the parser's changes included. An insertion names its container, the inserted node,
 // and the node's previous sibling when it was recorded, or null for none.
 // InsertionKind is "child", or "shadow-root" for a shadow root attached to a
 // connected host, which has no previous sibling. The inserted subtree follows

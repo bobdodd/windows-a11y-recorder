@@ -38,7 +38,7 @@ public sealed class DomDocumentTree
 }
 
 /// <summary>A DOM checkpoint of one document, as its records were read.</summary>
-public sealed class DomCheckpointTree(string id, bool afterLoss, bool finishedParsing)
+public sealed class DomCheckpointTree(string id, bool afterLoss, bool finishedParsing, bool startedParsing = false)
 {
     public string Id { get; } = id;
 
@@ -47,6 +47,12 @@ public sealed class DomCheckpointTree(string id, bool afterLoss, bool finishedPa
 
     /// <summary>The walk was requested at a finished parse.</summary>
     public bool FinishedParsing { get; } = finishedParsing;
+
+    /// <summary>
+    /// The walk was requested when the document's parser was created
+    /// (protocol 0.42), so the parser's changes after it are recorded.
+    /// </summary>
+    public bool StartedParsing { get; } = startedParsing;
 
     public DomDocumentTree Tree { get; } = new();
 }
@@ -194,7 +200,9 @@ public sealed class DomTreeRebuilder
                         walkReason.GetString() == "after-loss",
                     payload.TryGetProperty("reason", out var reason) &&
                         reason.ValueKind == JsonValueKind.String &&
-                        reason.GetString() == "finished-parsing");
+                        reason.GetString() == "finished-parsing",
+                    reason.ValueKind == JsonValueKind.String &&
+                        reason.GetString() == "started-parsing");
                 break;
             case "dom-checkpoint-node":
                 if (_open.TryGetValue(key, out var open))

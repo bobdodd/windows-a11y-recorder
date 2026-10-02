@@ -3257,7 +3257,7 @@ Each sub-step is tested on the target machine before the next.
   animations and an animated image is opened at several frames, and each
   recreation is compared with the captured frame.
 
-### Slice 4c: the DOM from the start of parsing (agreed)
+### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
 
@@ -3400,6 +3400,60 @@ recreation compared with the screen image in the system test.
   of its frame, including which images are drawn, and how far, and the
   font of each heading; a difference is reported as a defect, not
   accepted.
+
+#### Settled before building
+
+- `ImplicitOpen` is reached for every parsed document. On the target
+  machine's checkout, `DocumentLoader::CreateParserPostCommit` calls
+  `Document::OpenForNavigation` (`core/loader/document_loader.cc`, line
+  3535), which calls `ImplicitOpen` (`core/dom/document.cc`, lines 4069 to
+  4105); `document.open()` calls it too
+  ([document.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/document.cc;l=4047)). `ImplicitOpen` creates the
+  parser with `Document::CreateParser`, an HTML parser for an HTML
+  document and an XML parser otherwise
+  ([document.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/document.cc;l=3697)), so both start with the walk.
+- The parser is created after the navigation commits:
+  `DocumentLoader::StartLoadingResponse` checks that the loader's state is
+  at least `kCommitted` before it calls `CreateParserPostCommit`
+  (`core/loader/document_loader.cc`, lines 2189 to 2215 on the target
+  machine's checkout). The walk names the document's token, as every DOM
+  checkpoint does; whether the app joins it to its navigation is checked
+  on the target machine.
+- The exception: with `kStreamlineRendererInit`, the initial empty
+  document of a main frame is given its `html`, `head`, and `body`
+  elements without a parser (the same function, lines 2197 to 2209). It
+  has no `started-parsing` walk; its first change is walked as `first` at
+  the next mutation delivery, as before.
+- `Document::Parsing()` is true only in the state `kParsing`, and
+  `HasFinishedParsing()` only in `kFinishedParsing`; the state between
+  them is `kInDOMContentLoaded` (`core/dom/document.h`, lines 1142 to 1145
+  on the target machine's checkout). The mutation hooks no longer test
+  either.
+
+#### As built (protocol 0.42)
+
+- `patch_blink_document_started_parsing` in the integration script adds
+  the walk after `SetParsingState(kParsing)` in `ImplicitOpen`, for an
+  active document, with a declaration of the walk before `ImplicitOpen`.
+- `RecorderRecordsDomChanges` is true for an active document while the
+  recorder is connected, in every parsing state; the character data hook
+  skips a parser update only for a node that is not connected; the
+  document's change hook queues a mutation delivery in every parsing
+  state, and the delivery skips only an inactive document. A checkout
+  patched at protocol 0.41 is upgraded by replacing each changed condition.
+- `FullWalkSchedule` always walks `started-parsing`, as `finished-parsing`,
+  and names the request as its `walkReason` when it is not the document's
+  first walk, after a loss, or a check.
+- The recorder accepts `started-parsing` as the reason of a DOM checkpoint
+  and of an interaction checkpoint that follows one, and as a `walkReason`
+  only for that request. A document walked when its parser was created is
+  complete while it parses (`ParserChangesRecorded`), where before it was
+  marked as parsing, with nodes missing. `DomChangeCheck` compares a
+  finished-parsing checkpoint with the tree rebuilt from a
+  `started-parsing` walk and the changes after it.
+- Not yet done: the integration test in the instrumented Chromium, which
+  needs a Chromium build; it is replaced, for this sub-step, by the system
+  test on the target machine and by the change check run on its recording.
 
 ### To be settled
 

@@ -1511,8 +1511,8 @@ internal static class EventPayloadValidator
                 NullableString("sourceChangeSetId"),
                 RequiredEnum("sourceChannel", "browser.dom", "browser.layout"),
                 RequiredEnum(
-                    "reason", "finished-parsing", "post-mutation",
-                    "rendering-update"),
+                    "reason", "started-parsing", "finished-parsing",
+                    "post-mutation", "rendering-update"),
                 RequiredBoolean("documentHasFocus"),
                 NullableInteger("focusedNodeId", positive: true),
                 RequiredBoolean("focusVisible"),
@@ -1538,7 +1538,7 @@ internal static class EventPayloadValidator
         var (sourcePrefix, sourceReasons) = sourceChannel switch
         {
             "browser.dom" =>
-                ("dom-checkpoint-", new[] { "finished-parsing", "post-mutation" }),
+                ("dom-checkpoint-", new[] { "started-parsing", "finished-parsing", "post-mutation" }),
             "browser.layout" =>
                 ("layout-checkpoint-", new[] { "rendering-update" }),
             _ => ((string?)null, Array.Empty<string>())
@@ -4801,25 +4801,28 @@ internal static class EventPayloadValidator
             [
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
-                RequiredEnum("reason", "finished-parsing", "post-mutation"),
+                RequiredEnum("reason", "started-parsing", "finished-parsing", "post-mutation"),
                 RequiredEnum(
                     "walkReason", "first", "after-loss", "check",
-                    "finished-parsing"),
+                    "started-parsing", "finished-parsing"),
                 RequiredInteger("maximumNodes", positive: true)
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererDocumentContext(payload, issues);
         // From protocol 0.35 a document is walked at a mutation delivery only
-        // for a reason of its own; only a finished parse is always walked.
-        if (ReadString(payload, "reason") == "post-mutation" &&
-            ReadString(payload, "walkReason") == "finished-parsing")
+        // for a reason of its own; only a finished parse, and from protocol
+        // 0.42 the start of a parse, is always walked, and names itself.
+        var walkReason = ReadString(payload, "walkReason");
+        if (walkReason is "started-parsing" or "finished-parsing" &&
+            ReadString(payload, "reason") is { } requested &&
+            requested != walkReason)
         {
             AddError(
                 issues,
                 "browser-dom-checkpoint-walk-reason-inconsistent",
                 "#/payload/walkReason",
-                "A post-mutation checkpoint is walked for a first walk, a loss, or a check.");
+                "A checkpoint is walked for the start or the end of parsing only when it was requested for it; otherwise for a first walk, a loss, or a check.");
         }
     }
 
@@ -5165,7 +5168,7 @@ internal static class EventPayloadValidator
             [
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
-                RequiredEnum("reason", "finished-parsing", "post-mutation"),
+                RequiredEnum("reason", "started-parsing", "finished-parsing", "post-mutation"),
                 RequiredInteger("nodeCount", nonnegative: true),
                 RequiredBoolean("truncated"),
                 RequiredInteger("maximumNodes", positive: true),

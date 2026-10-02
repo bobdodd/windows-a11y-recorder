@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.41"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.41"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.42"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.42"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -2180,11 +2180,13 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn("Token().ToString()", first)
             for include in INTEGRATE.BLINK_DOM_CHECKPOINT_INCLUDES:
                 self.assertIn(include, first)
+            # Protocol 0.42: a change queues a delivery in every parsing state.
             self.assertIn(
-                "if (HasFinishedParsing())\n"
-                "    MutationObserver::EnqueueRecorderDomCheckpoint(*this)",
+                "    const ContainerNode::ChildrenChange& change) {\n"
+                "  MutationObserver::EnqueueRecorderDomCheckpoint(*this);\n",
                 first,
             )
+            self.assertNotIn("if (HasFinishedParsing())", first)
             self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, first)
 
     def test_patches_mutation_delivery_idempotently(self):
@@ -2283,7 +2285,8 @@ class IntegrateTests(unittest.TestCase):
                 "recorder_mutated_documents_.empty()",
                 first,
             )
-            self.assertIn("recorder_document->HasFinishedParsing()", first)
+            # Protocol 0.42: a document that parses is delivered too.
+            self.assertNotIn("recorder_document->HasFinishedParsing()", first)
             self.assertIn("recorder_document->IsActive()", first)
             self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, first)
 
@@ -2828,10 +2831,114 @@ class IntegrateTests(unittest.TestCase):
             first.index("void Document::FinishedParsing() {"),
         )
 
+    def test_upgrades_hooks_that_skip_a_document_while_it_parses(self):
+        # Protocol 0.42: a checkout patched at 0.41 records nothing while a
+        # document parses; each of its hooks is upgraded.
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "document.cc"
+            document.write_text(
+                '#include "third_party/blink/renderer/core/dom/document.h"\n'
+                '#include "third_party/blink/renderer/core/dom/element.h"\n'
+                '#include "third_party/blink/renderer/core/dom/node_traversal.h"\n'
+                "\n"
+                "void Document::FinishedParsing() {\n"
+                "  SetParsingState(kInDOMContentLoaded);\n"
+                "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+                "\n"
+                "  DispatchEvent();\n"
+                "}\n"
+                "\n"
+                "void Document::NotifyChangeChildren(\n"
+                "    const ContainerNode& container,\n"
+                "    const ContainerNode::ChildrenChange& change) {\n"
+                "  NotifySelection();\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_document(document)
+            current = document.read_text(encoding="utf-8")
+            legacy = current.replace(
+                INTEGRATE.BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+                + INTEGRATE.BLINK_DOCUMENT_MUTATION_HOOK,
+                INTEGRATE.BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+                + INTEGRATE.LEGACY_FINISHED_ONLY_BLINK_DOCUMENT_MUTATION_HOOK,
+            ).replace(
+                INTEGRATE.BLINK_DOM_CHANGE_HELPER_PARSING_INCLUDED,
+                INTEGRATE.BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED,
+            )
+            self.assertNotEqual(current, legacy)
+            self.assertIn(
+                INTEGRATE.LEGACY_PARSING_EXCLUDED_BLINK_DOM_CHANGE_HELPER, legacy
+            )
+            document.write_text(legacy, encoding="utf-8")
+            INTEGRATE.patch_blink_document(document)
+            self.assertEqual(current, document.read_text(encoding="utf-8"))
+
+            character_data = Path(directory) / "character_data.cc"
+            character_data.write_text(
+                '#include "third_party/blink/renderer/core/dom/character_data.h"\n'
+                "\n"
+                "void CharacterData::SetDataAndUpdate() {\n"
+                "  String old_data = this->data();\n"
+                "  data_ = new_data;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_character_data(character_data)
+            current = character_data.read_text(encoding="utf-8")
+            legacy = current.replace(
+                INTEGRATE.BLINK_CHARACTER_DATA_MUTATION_HOOK,
+                INTEGRATE.LEGACY_PARSE_TIME_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK,
+            )
+            self.assertNotEqual(current, legacy)
+            character_data.write_text(legacy, encoding="utf-8")
+            INTEGRATE.patch_blink_character_data(character_data)
+            self.assertEqual(current, character_data.read_text(encoding="utf-8"))
+
+    def test_walks_the_dom_when_the_parser_is_created(self):
+        # Protocol 0.42: Document::ImplicitOpen walks the DOM once it has
+        # created the parser, after its declaration of the walk.
+        source = (
+            "void Document::open() {\n"
+            "  ImplicitOpen(kForceSynchronousParsing);\n"
+            "}\n"
+            "\n"
+            "DocumentParser* Document::ImplicitOpen(\n"
+            "    ParserSynchronizationPolicy parser_sync_policy) {\n"
+            "  RemoveChildren();\n"
+            "  parser_ = CreateParser();\n"
+            "  DocumentParserTiming::From(*this).MarkParserStart();\n"
+            "  SetParsingState(kParsing);\n"
+            "  SetReadyState(kLoading);\n"
+            "  return parser_.Get();\n"
+            "}\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_document_started_parsing(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document_started_parsing(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertIn(
+                "  SetParsingState(kParsing);\n"
+                "  // Windows A11y Recorder (protocol 0.42): the DOM when the parser is\n"
+                "  // created, the state the parser's changes apply to.\n"
+                "  if (IsActive())\n"
+                '    RecorderRecordDomCheckpoint(*this, "started-parsing");\n'
+                "  SetReadyState(kLoading);\n",
+                first,
+            )
+            self.assertLess(
+                first.index("void RecorderRecordDomCheckpoint("),
+                first.index("DocumentParser* Document::ImplicitOpen("),
+            )
+            self.assertEqual(1, first.count("void RecorderRecordDomCheckpoint("))
+
     def test_dom_change_helper_records_what_the_design_states(self):
         helper = INTEGRATE.BLINK_DOM_CHANGE_HELPER
-        # Changes are recorded once the document stops parsing.
-        self.assertIn("!recorder_document.Parsing()", helper)
+        # Protocol 0.42: changes are recorded while the document parses too.
+        self.assertNotIn("Parsing()", helper)
         self.assertNotIn("HasFinishedParsing()", helper)
         # Every child list change type is handled explicitly.
         for change_type in (
@@ -3250,8 +3357,7 @@ class IntegrateTests(unittest.TestCase):
                 1, first.count("RecordBlinkDomCharacterDataChanged(")
             )
             self.assertIn(
-                "  if (source != kUpdateFromParser ||\n"
-                "      (isConnected() && !GetDocument().Parsing())) {\n",
+                "  if (source != kUpdateFromParser || isConnected()) {\n",
                 first,
             )
             self.assertIn("kRecorderMaximumDomValueLength = 2147483647", first)

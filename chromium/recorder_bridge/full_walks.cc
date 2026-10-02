@@ -27,7 +27,7 @@ FullWalkSchedule::Document& FullWalkSchedule::Find(
 
 std::string FullWalkSchedule::Decide(Document& document,
                                      uint64_t losses,
-                                     bool always) {
+                                     const std::string& always) {
   std::string reason;
   if (!document.walked) {
     reason = "first";
@@ -35,8 +35,8 @@ std::string FullWalkSchedule::Decide(Document& document,
     reason = "after-loss";
   } else if (interval_ > 0 && ++document.requests_since_walk >= interval_) {
     reason = "check";
-  } else if (always) {
-    reason = "finished-parsing";
+  } else if (!always.empty()) {
+    reason = always;
   } else {
     return std::string();
   }
@@ -49,16 +49,21 @@ std::string FullWalkSchedule::Decide(Document& document,
 std::string FullWalkSchedule::DomWalkReason(int document_node_id,
                                             const std::string& requested,
                                             uint64_t losses) {
-  if (requested != "finished-parsing" && requested != "post-mutation") {
+  // A walk at the start or the end of parsing is always made (protocol 0.42
+  // for the start).
+  const bool always =
+      requested == "started-parsing" || requested == "finished-parsing";
+  if (!always && requested != "post-mutation") {
     return std::string();
   }
   return Decide(Find(dom_documents_, document_node_id), losses,
-                requested == "finished-parsing");
+                always ? requested : std::string());
 }
 
 std::string FullWalkSchedule::LayoutWalkReason(int document_node_id,
                                                uint64_t losses) {
-  return Decide(Find(layout_documents_, document_node_id), losses, false);
+  return Decide(Find(layout_documents_, document_node_id), losses,
+                std::string());
 }
 
 }  // namespace a11y_recorder

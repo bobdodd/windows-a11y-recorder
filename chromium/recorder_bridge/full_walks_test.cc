@@ -53,6 +53,24 @@ void TestAChangeBeforeAnyWalkIsWalkedFirst() {
          "an unknown request is not walked");
 }
 
+void TestTheStartOfParsingIsAlwaysWalked() {
+  // Protocol 0.42: the walk when parsing starts is the document's first, and
+  // a later one, as after document.open(), names its own reason.
+  a11y_recorder::FullWalkSchedule schedule(0);
+  Expect(schedule.DomWalkReason(3, "started-parsing", 0) == "first",
+         "the start of parsing is the first walk");
+  Expect(schedule.DomWalkReason(3, "post-mutation", 0).empty(),
+         "a mutation delivery while parsing is not walked");
+  Expect(schedule.DomWalkReason(3, "finished-parsing", 0) ==
+             "finished-parsing",
+         "finished parsing is still walked");
+  Expect(schedule.DomWalkReason(3, "started-parsing", 0) ==
+             "started-parsing",
+         "a later start of parsing is walked as one");
+  Expect(schedule.DomWalkReason(3, "started-parsing", 2) == "after-loss",
+         "and names a loss before it");
+}
+
 void TestALossWalksEachDocumentAgainOnce() {
   a11y_recorder::FullWalkSchedule schedule(0);
   schedule.DomWalkReason(1, "finished-parsing", 0);
@@ -128,6 +146,7 @@ void TestTheChangeSetSourceIsDistinct() {
 int main() {
   TestWithoutChecksOnlyTheFirstRequestsAreWalked();
   TestAChangeBeforeAnyWalkIsWalkedFirst();
+  TestTheStartOfParsingIsAlwaysWalked();
   TestALossWalksEachDocumentAgainOnce();
   TestChecksWalkEveryNthRequest();
   TestAForgottenDocumentIsWalkedAgain();

@@ -1004,7 +1004,15 @@ it has no layout object. A `layout-node-changed` record of a text node may
 state no layout object; a checkpoint still leaves such a text node out. See
 "Sub-step 3 on the target machine" in [page recreation](page-recreation.md).
 
-Live 0.41 connections require an exact protocol-version match.
+Protocol version 0.42 requests a DOM checkpoint with `reason`
+`started-parsing` when `Document::ImplicitOpen` creates the parser, which
+the bridge always walks (its `walkReason` is `first`, `after-loss`, `check`,
+or `started-parsing`), and records the document's structural changes,
+parser text appends to connected nodes, and mutation deliveries while it
+parses, as it does after parsing. The design is in
+[page recreation](page-recreation.md), "Slice 4c".
+
+Live 0.42 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

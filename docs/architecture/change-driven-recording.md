@@ -634,7 +634,9 @@ it in the range of transitions it covers.
 
 Change records are made for a document that is active and no longer parsing
 (`!Document::Parsing()`, `core/dom/document.h`, line 1144), while the
-recorder is connected. The finished-parsing checkpoint is recorded when the
+recorder is connected. From protocol 0.42 they are made while it parses
+too, from a walk when its parser is created; see "Slice 4c" in
+[page recreation](page-recreation.md). The finished-parsing checkpoint is recorded when the
 parsing state becomes `kInDOMContentLoaded` (`core/dom/document.cc`, near
 line 8573), before the `DOMContentLoaded` handlers run, so a change made by
 a handler follows the checkpoint and is recorded. `HasFinishedParsing()`,

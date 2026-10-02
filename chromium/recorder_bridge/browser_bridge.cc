@@ -5357,7 +5357,8 @@ uint64_t BeginBlinkInteractionCheckpoint(int document_node_id,
   base::Value source_checkpoint_id;
   base::Value source_change_set_id;
   if (source_channel == "browser.dom" &&
-      IsOneOf(reason, {"finished-parsing", "post-mutation"}) &&
+      IsOneOf(reason,
+              {"started-parsing", "finished-parsing", "post-mutation"}) &&
       !change_set_source) {
     if (source_sequence != 0) {
       source_checkpoint_id = base::Value(DomCheckpointId(source_sequence));

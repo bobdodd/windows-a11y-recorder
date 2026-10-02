@@ -246,6 +246,44 @@ public sealed class DomChangeCheckTests
     }
 
     [Fact]
+    public void ComparesAFinishedParseWithTheTreeRebuiltFromTheStartOfParsing()
+    {
+        // Protocol 0.42: the document is walked when its parser is created,
+        // the parser's insertions and text appends are recorded, and the
+        // finished-parsing checkpoint is compared with the rebuilt tree.
+        var text = new TreeNode(11, 10, "text", "#text", Data: "Hel");
+        var appended = text with { Data = "Hello" };
+        var check = Check(
+            Rewritten(Checkpoint(1, "first", Document), "\"post-mutation\"", "\"started-parsing\""),
+            Insert(1, null, Html),
+            Insert(2, null, Head),
+            Insert(2, 3, Body),
+            Insert(10, null, text),
+            One(SetText(11, "Hello")),
+            Rewritten(Checkpoint(2, "finished-parsing", Document, Html, Head, Body, appended), "\"post-mutation\"", "\"finished-parsing\""));
+
+        Assert.Empty(check.Differences);
+        Assert.Equal(0, check.CheckpointsAtFinishedParse);
+        Assert.Equal(1, check.CheckpointsCompared);
+        Assert.Equal(5, check.NodesMatched);
+    }
+
+    [Fact]
+    public void ReportsAParserInsertionThatWasNotRecorded()
+    {
+        // A node the finished-parsing walk holds that no record inserted is a
+        // difference once the parse was recorded from its start.
+        var check = Check(
+            Rewritten(Checkpoint(1, "first", Document), "\"post-mutation\"", "\"started-parsing\""),
+            Insert(1, null, Html),
+            Insert(2, null, Head),
+            Rewritten(Checkpoint(2, "finished-parsing", Document, Html, Head, Body), "\"post-mutation\"", "\"finished-parsing\""));
+
+        Assert.NotEmpty(check.Differences);
+        Assert.Equal(1, check.CheckpointsCompared);
+    }
+
+    [Fact]
     public void KeepsTwoDocumentsOfOneTokenApart()
     {
         var other = new TreeNode(30, null, "document", "#document");

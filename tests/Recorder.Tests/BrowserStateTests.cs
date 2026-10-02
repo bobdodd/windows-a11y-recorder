@@ -333,6 +333,22 @@ public sealed class BrowserStateTests : IDisposable
             .Walk("post-mutation", "check", false, Page).Items).Documents.Values);
         Assert.Equal(BrowserStateCompleteness.Complete, parsed.DomCompleteness);
 
+        // Protocol 0.42: walked when its parser was created, the document's
+        // DOM is complete while it parses, with the parser's insertions and
+        // text appends.
+        var started = Assert.Single(Build(new Records("token-a")
+            .Walk("started-parsing", "first", false, Page[..1])
+            .Insert(1, null, 2, "HTML")
+            .Insert(2, null, 3, "BODY")
+            .Insert(3, null, 4, "#text", "Hel")
+            .Text(4, "Hello").Items).Documents.Values);
+        Assert.Equal(BrowserStateCompleteness.Complete, started.DomCompleteness);
+        Assert.True(started.ParserChangesRecorded);
+        Assert.False(started.FinishedParsing);
+        Assert.Equal([2], started.Dom!.Nodes[1].Children);
+        Assert.Equal([3], started.Dom.Nodes[2].Children);
+        Assert.Equal("Hello", started.Dom.Nodes[4].Data);
+
         var cut = Assert.Single(Build(new Records("token-a")
             .Walk("finished-parsing", "first", false, Page)
             .Walk("post-mutation", "check", true, Page).Items).Documents.Values);

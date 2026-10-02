@@ -17,10 +17,14 @@ namespace Recorder.Session;
 /// interval between the two checkpoints where it arose. A checkpoint walked
 /// after a lost DOM record (protocol 0.35, walk reason "after-loss") is not
 /// compared, since the rebuilt tree lacks the lost change; the tree is taken
-/// from it. A checkpoint at a finished parse is not compared either: the
-/// parser's insertions while a document parses are not recorded, and a
-/// document parsed again after <c>document.open()</c> removed its children
-/// has only its finished-parsing checkpoint as its state.
+/// from it. A checkpoint at a finished parse is not compared either, unless
+/// the document was walked when its parser was created (protocol 0.42):
+/// before, the parser's insertions while a document parses were not
+/// recorded, and a document parsed again after <c>document.open()</c>
+/// removed its children had only its finished-parsing checkpoint as its
+/// state. From protocol 0.42 the parser's changes are recorded from that
+/// walk, so the finished-parsing checkpoint is compared with the tree
+/// rebuilt from it.
 ///
 /// Each scroll offset record is compared with the last record of its scroll
 /// translation node at the end of its change set, whose translation is the
@@ -39,6 +43,7 @@ public sealed class DomChangeCheck
     private readonly Dictionary<string, List<JsonElement>> _scrolls = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _differences = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<string>> _examples = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _parsedFromStart = new(StringComparer.Ordinal);
 
     public DomChangeCheck()
     {
@@ -172,21 +177,29 @@ public sealed class DomChangeCheck
 
     private void CompleteCheckpoint(string key, DomCheckpointTree checkpoint, DomDocumentTree? rebuilt, bool truncated)
     {
+        var parsedFromStart = _parsedFromStart.Remove(key);
         if (truncated)
         {
             CheckpointsTruncated++;
+            parsedFromStart = false;
         }
         else if (checkpoint.AfterLoss)
         {
             CheckpointsAfterLoss++;
         }
-        else if (checkpoint.FinishedParsing)
+        else if (checkpoint.FinishedParsing && !(parsedFromStart && rebuilt is not null))
         {
             CheckpointsAtFinishedParse++;
         }
         else if (rebuilt is not null)
         {
             Compare(checkpoint, rebuilt);
+        }
+        // The parser's changes are recorded from a walk when the parser was
+        // created until the parse finishes.
+        if (!truncated && (checkpoint.StartedParsing || (parsedFromStart && !checkpoint.FinishedParsing)))
+        {
+            _parsedFromStart.Add(key);
         }
     }
 

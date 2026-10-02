@@ -39,11 +39,12 @@ class FullWalkSchedule {
   // not: "first" when the document has no walk yet, "after-loss" when a
   // record of the checkpoint's channel was lost since the document's last
   // walk, "check" at every Nth request when the recording checks its change
-  // records, and, for a DOM checkpoint requested as "finished-parsing", which
-  // is always walked, "finished-parsing" otherwise. `losses` is the count of
-  // lost records of the channel so far.
+  // records, and, for a DOM checkpoint requested as "started-parsing" or
+  // "finished-parsing", which is always walked, the requested reason
+  // otherwise. `losses` is the count of lost records of the channel so far.
   //
-  // A DOM checkpoint is requested as "finished-parsing", or as
+  // A DOM checkpoint is requested as "started-parsing" when the document
+  // creates its parser (protocol 0.42), as "finished-parsing", or as
   // "post-mutation" at each mutation delivery. A layout checkpoint is
   // requested at each rendering update in which the document's style or
   // layout was recalculated.
@@ -65,7 +66,10 @@ class FullWalkSchedule {
   };
   Document& Find(std::unordered_map<int, Document>& documents,
                  int document_node_id);
-  std::string Decide(Document& document, uint64_t losses, bool always);
+  // `always` is the reason of a request that is always walked, or empty.
+  std::string Decide(Document& document,
+                     uint64_t losses,
+                     const std::string& always);
 
   int interval_;
   uint64_t use_clock_ = 0;

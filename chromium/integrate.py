@@ -1481,6 +1481,35 @@ void RecorderRecordDomSlotAssignments(
 }
 
 """
+# Protocol 0.42 records a document's structural changes while it parses too,
+# from the walk made when its parser is created; before, they were recorded
+# only from its finished-parsing checkpoint.
+LEGACY_PARSING_EXCLUDED_BLINK_DOM_CHANGE_HELPER = BLINK_DOM_CHANGE_HELPER
+BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED = """\
+// Whether the structural changes of a document are recorded: from the time
+// its finished-parsing checkpoint is recorded, while it is active and the
+// recorder is connected. The checkpoint is the state the changes apply to.
+bool RecorderRecordsDomChanges(const Document& recorder_document) {
+  return a11y_recorder::IsRecorderActive() && !recorder_document.Parsing() &&
+         recorder_document.IsActive();
+}
+"""
+BLINK_DOM_CHANGE_HELPER_PARSING_INCLUDED = """\
+// Whether the structural changes of a document are recorded: while it is
+// active and the recorder is connected, including while it parses (protocol
+// 0.42). The walk made when its parser is created, and each later walk, is
+// the state the changes apply to.
+bool RecorderRecordsDomChanges(const Document& recorder_document) {
+  return a11y_recorder::IsRecorderActive() && recorder_document.IsActive();
+}
+"""
+if BLINK_DOM_CHANGE_HELPER.count(BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED) != 1:
+    raise RuntimeError("the DOM change condition was not found once")
+BLINK_DOM_CHANGE_HELPER = BLINK_DOM_CHANGE_HELPER.replace(
+    BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED,
+    BLINK_DOM_CHANGE_HELPER_PARSING_INCLUDED,
+    1,
+)
 BLINK_DOCUMENT_DOM_CHANGE_DECLARATION = BLINK_DOM_CHANGE_DECLARATION.replace(
     "    const HeapVector<Member<HTMLSlotElement>>& recorder_slots);\n",
     "    const HeapVector<Member<HTMLSlotElement>>& recorder_slots);\n"
@@ -1910,10 +1939,19 @@ void RecorderRecordDomCheckpoint(Document& recorder_document,
 BLINK_DOM_CHECKPOINT_HOOK = """\
   RecorderRecordDomCheckpoint(*this, "finished-parsing");
 """
-BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+LEGACY_FINISHED_ONLY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
     for (const auto& recorder_document : recorder_mutated_documents) {
       if (!recorder_document->HasFinishedParsing() ||
           !recorder_document->IsActive())
+        continue;
+      RecorderRecordDomCheckpoint(*recorder_document, "post-mutation");
+    }
+"""
+# Protocol 0.42: a mutation delivery is requested while the document parses
+# too, as its changes are then recorded.
+BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+    for (const auto& recorder_document : recorder_mutated_documents) {
+      if (!recorder_document->IsActive())
         continue;
       RecorderRecordDomCheckpoint(*recorder_document, "post-mutation");
     }
@@ -2449,6 +2487,39 @@ BLINK_CHARACTER_DATA_MUTATION_HOOK = (
         1,
     )
 )
+# Protocol 0.42 records a parser change to a connected node while the
+# document parses too, as its structural changes are then recorded.
+LEGACY_PARSE_TIME_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK = (
+    BLINK_CHARACTER_DATA_MUTATION_HOOK
+)
+BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED = """\
+  // Parser-driven text updates are excluded while the document is parsed and
+  // for a node that is not connected. The text a document was parsed with is
+  // reported by the finished-parsing checkpoint, recording every parse-time
+  // chunk would queue a checkpoint per chunk during load, and a fragment the
+  // parser builds is recorded when it is inserted.
+  if (source != kUpdateFromParser ||
+      (isConnected() && !GetDocument().Parsing())) {
+"""
+BLINK_CHARACTER_DATA_PARSE_TIME_INCLUDED = """\
+  // Parser-driven text updates are excluded only for a node that is not
+  // connected: a fragment the parser builds is recorded when it is inserted.
+  // From protocol 0.42 a parser update while the document parses is recorded,
+  // as the parser's insertions are.
+  if (source != kUpdateFromParser || isConnected()) {
+"""
+if (
+    BLINK_CHARACTER_DATA_MUTATION_HOOK.count(
+        BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED
+    )
+    != 1
+):
+    raise RuntimeError("the character data condition was not found once")
+BLINK_CHARACTER_DATA_MUTATION_HOOK = BLINK_CHARACTER_DATA_MUTATION_HOOK.replace(
+    BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED,
+    BLINK_CHARACTER_DATA_PARSE_TIME_INCLUDED,
+    1,
+)
 
 
 BLINK_MUTATION_OBSERVER_METHOD = """\
@@ -2459,9 +2530,35 @@ void MutationObserver::EnqueueRecorderDomCheckpoint(Document& document) {
 }
 
 """
-BLINK_DOCUMENT_MUTATION_HOOK = """\
+LEGACY_FINISHED_ONLY_BLINK_DOCUMENT_MUTATION_HOOK = """\
   if (HasFinishedParsing())
     MutationObserver::EnqueueRecorderDomCheckpoint(*this);
+"""
+# Protocol 0.42: a change while the document parses queues a mutation
+# delivery too.
+BLINK_DOCUMENT_MUTATION_HOOK = """\
+  MutationObserver::EnqueueRecorderDomCheckpoint(*this);
+"""
+# Protocol 0.42: the document's DOM is walked when its parser is created, so
+# that the parser's changes, now recorded, apply to it. Document::ImplicitOpen
+# creates the parser for a navigation (OpenForNavigation) and for
+# document.open().
+BLINK_DOCUMENT_STARTED_PARSING_ANCHOR = """\
+  DocumentParserTiming::From(*this).MarkParserStart();
+  SetParsingState(kParsing);
+"""
+BLINK_DOCUMENT_STARTED_PARSING_HOOK = """\
+  // Windows A11y Recorder (protocol 0.42): the DOM when the parser is
+  // created, the state the parser's changes apply to.
+  if (IsActive())
+    RecorderRecordDomCheckpoint(*this, "started-parsing");
+"""
+BLINK_DOCUMENT_STARTED_PARSING_DECLARATION = """\
+// Windows A11y Recorder: defined further down this file; records a DOM
+// checkpoint (protocol 0.42 adds the walk when parsing starts).
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason);
+
 """
 BLINK_EVENT_LISTENER_INCLUDE = (
     '#include "third_party/blink/renderer/core/dom/events/event_listener.h"'
@@ -4409,6 +4506,15 @@ def patch_blink_character_data(path: Path) -> None:
             BLINK_CHARACTER_DATA_MUTATION_HOOK,
             path,
         )
+    # A checkout patched before protocol 0.42 excludes parser updates while
+    # the document parses.
+    if BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED in text:
+        text = replace_once(
+            text,
+            BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED,
+            BLINK_CHARACTER_DATA_PARSE_TIME_INCLUDED,
+            path,
+        )
     # A checkout patched before protocol 0.34 excludes every parser update.
     if LEGACY_PARSER_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK in text:
         text = replace_once(
@@ -5051,6 +5157,27 @@ def patch_blink_document(path: Path) -> None:
             anchor + BLINK_DOM_CHECKPOINT_HOOK + "\n",
             path,
         )
+    # A checkout patched before protocol 0.42 queues a delivery only once the
+    # document has finished parsing, and records no change while it parses.
+    legacy_mutation_hook = (
+        BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+        + LEGACY_FINISHED_ONLY_BLINK_DOCUMENT_MUTATION_HOOK
+    )
+    if legacy_mutation_hook in text:
+        text = replace_once(
+            text,
+            legacy_mutation_hook,
+            BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+            + BLINK_DOCUMENT_MUTATION_HOOK,
+            path,
+        )
+    if BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED in text:
+        text = replace_once(
+            text,
+            BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED,
+            BLINK_DOM_CHANGE_HELPER_PARSING_INCLUDED,
+            path,
+        )
     if "EnqueueRecorderDomCheckpoint(*this)" not in text:
         anchor = (
             "void Document::NotifyChangeChildren(\n"
@@ -5088,6 +5215,28 @@ def patch_blink_document(path: Path) -> None:
         path,
     )
     text = remove_earlier_node_limits(text)
+    write_patched(path, text)
+
+
+def patch_blink_document_started_parsing(path: Path) -> None:
+    """Protocol 0.42: walks the DOM when Document::ImplicitOpen creates the
+    parser. See docs/architecture/page-recreation.md, "Slice 4c"."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        "DocumentParser* Document::ImplicitOpen(\n",
+        BLINK_DOCUMENT_STARTED_PARSING_DECLARATION,
+        BLINK_DOCUMENT_STARTED_PARSING_DECLARATION,
+        path,
+    )
+    if BLINK_DOCUMENT_STARTED_PARSING_HOOK not in text:
+        text = replace_once(
+            text,
+            BLINK_DOCUMENT_STARTED_PARSING_ANCHOR,
+            BLINK_DOCUMENT_STARTED_PARSING_ANCHOR
+            + BLINK_DOCUMENT_STARTED_PARSING_HOOK,
+            path,
+        )
     write_patched(path, text)
 
 
@@ -5129,6 +5278,14 @@ def patch_blink_mutation_observer(path: Path) -> None:
             path,
         )
     text = ensure_checkpoint_attribute_includes(text, path)
+    # A checkout patched before protocol 0.42 skips a document that parses.
+    if LEGACY_FINISHED_ONLY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK in text:
+        text = replace_once(
+            text,
+            LEGACY_FINISHED_ONLY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+            BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+            path,
+        )
     if ORIGINAL_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK in text:
         text = replace_once(
             text,
@@ -14285,6 +14442,15 @@ def main() -> int:
         ((BLINK_SLOT_ASSIGNMENT_ANCHOR, BLINK_SLOT_ASSIGNMENT_HOOK),),
     )
     patch_blink_document(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "document.cc"
+    )
+    patch_blink_document_started_parsing(
         source
         / "third_party"
         / "blink"

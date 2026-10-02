@@ -11,7 +11,8 @@ public enum BrowserStateCompleteness
     /// <summary>
     /// The document has not finished parsing, and the parser's insertions are
     /// not recorded, so nodes the parser added since the last walk are
-    /// missing. DOM only.
+    /// missing: a recording before protocol 0.42, or a document with no walk
+    /// when its parser was created. DOM only.
     /// </summary>
     Parsing,
 
@@ -239,6 +240,13 @@ public sealed class BrowserDocumentState(string key)
 
     /// <summary>True once a DOM walk at a finished parse was recorded.</summary>
     public bool FinishedParsing { get; internal set; }
+
+    /// <summary>
+    /// True once a DOM walk when the document's parser was created was
+    /// recorded (protocol 0.42): the parser's changes after it are recorded,
+    /// so the DOM is complete while the document parses.
+    /// </summary>
+    public bool ParserChangesRecorded { get; internal set; }
 
     /// <summary>The event key and session time of the document's first and last records.</summary>
     public long FirstEventKey { get; internal set; } = -1;

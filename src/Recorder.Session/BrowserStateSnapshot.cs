@@ -57,6 +57,7 @@ public static class BrowserStateSnapshot
         writer.WriteStartObject("dom");
         writer.WriteString("completeness", Name(document.DomCompleteness));
         writer.WriteBoolean("finishedParsing", document.FinishedParsing);
+        writer.WriteBoolean("parserChangesRecorded", document.ParserChangesRecorded);
         writer.WriteNumber("eventKey", document.DomEventKey);
         writer.WriteNumber("time", document.DomTime);
         if (document.Dom is { } tree)
@@ -195,6 +196,10 @@ public static class BrowserStateSnapshot
         var dom = root.GetProperty("dom");
         document.DomCompleteness = Parse(dom.GetProperty("completeness").GetString());
         document.FinishedParsing = dom.GetProperty("finishedParsing").GetBoolean();
+        // Protocol 0.42; a snapshot written before it has none.
+        document.ParserChangesRecorded =
+            dom.TryGetProperty("parserChangesRecorded", out var parserChanges) &&
+            parserChanges.GetBoolean();
         document.DomEventKey = dom.GetProperty("eventKey").GetInt64();
         document.DomTime = dom.GetProperty("time").GetInt64();
         if (dom.GetProperty("nodes") is { ValueKind: JsonValueKind.Array } nodes)

@@ -502,7 +502,11 @@ public sealed class BrowserStateBuilder
         {
             document.FinishedParsing = true;
         }
-        document.DomCompleteness = document.FinishedParsing
+        if (checkpoint.StartedParsing)
+        {
+            document.ParserChangesRecorded = true;
+        }
+        document.DomCompleteness = document.FinishedParsing || document.ParserChangesRecorded
             ? BrowserStateCompleteness.Complete
             : BrowserStateCompleteness.Parsing;
     }
