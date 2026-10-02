@@ -2442,7 +2442,9 @@ Built on 2026-10-01, not yet run on the target machine.
   `outerWidth - innerWidth` and `outerHeight - innerHeight`, and sets the
   window's size to the recorded viewport plus that frame with
   `Browser.setWindowBounds`. The viewport is still emulated after, so a
-  window the screen cannot hold keeps the recorded layout.
+  window the screen cannot hold keeps the recorded layout. The owner
+  reported on 2026-10-01 that with revision 2fa7988 the window shows the
+  whole page.
 
 Tests at this stage:
 
