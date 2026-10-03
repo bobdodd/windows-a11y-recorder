@@ -4330,10 +4330,16 @@ browser page is one whose URL scheme is `devtools`, `chrome`,
   a browser page's parser is created (`Document::ImplicitOpen`, the place
   of protocol 0.42's walk), before the page can be drawn or take input.
   The compositor hook drops events only in a process without the flag.
-  This rests on Chromium putting browser pages and extensions in processes
-  of their own, apart from web content; that is to be confirmed in the
-  Chromium source before the patch is written, and the design revised if
-  it does not hold.
+  This rests on Chromium keeping browser pages and extensions out of web
+  content's processes. Read in the checkout on the target machine:
+  `RenderProcessHostImpl::IsSuitableHost`
+  (`content/browser/renderer_host/render_process_host_impl.cc`, line 4927)
+  refuses a process with WebUI bindings for a URL that is not WebUI ("has
+  WebUI bindings, url is non-WebUI") and a used process without them for a
+  WebUI URL, and refuses a process locked to one site for another site
+  ("locked, site should not lock"), which keeps an extension's origin out
+  of a web page's process. Whether every DevTools front end process is
+  covered by these is checked in the system test.
 - Recreation, evidence panel, and recording: unchanged.
 
 Limits:
