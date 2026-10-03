@@ -3160,7 +3160,11 @@ its last presented rendering update, which already includes the values of
 animations Blink ticks on the main thread (subject to the check in
 "Required tests" below), but not the compositor's values drawn after it.
 
-#### What is recorded (protocol 0.44)
+#### What is recorded (protocol 0.45)
+
+Slice 4b takes protocol 0.45, since slice 4d's sub-step 1b takes 0.44. A
+page popup's frame sink is named by the browser record of sub-step 1b, so
+a popup's compositor frames are joined as a page's are.
 
 On a new topic, `browser.compositor`:
 
@@ -3234,7 +3238,7 @@ update and the compositor frame.
 
 #### Sub-steps
 
-1. Record (protocol 0.44), with its cost measured on the target machine.
+1. Record (protocol 0.45), with its cost measured on the target machine.
 2. The recreation holds time: no animation or transition run, compositor
    values imposed, animated images held at their recorded frame.
 
@@ -3472,7 +3476,8 @@ with a running animation or an open select, which are drawn without them
 
 Proposed 2026-10-02, after the owner's report that frames with an open
 select show it closed, and agreed the same day. Slice 4d is built before slice 4b, so it takes
-protocol 0.43 and slice 4b moves to protocol 0.44. Nothing below is built.
+protocol 0.43 and slice 4b moves to protocol 0.44. Sub-step 1b, agreed on
+2026-10-03, takes protocol 0.44, and slice 4b moves to protocol 0.45.
 
 #### What Chromium does
 
@@ -3637,10 +3642,19 @@ Read in the same checkout, 2026-10-02.
 
 1. Record (protocol 0.43): the four records and the popup's
    presentations, with the cost measured on the target machine.
+1b. Record (protocol 0.44): the popup window's bounds as the browser set
+   them, and its frame sink, from the browser process.
 2. The recreation imposes option selectedness and draws an open popup at
    its recorded place.
 
 Each sub-step is tested on the target machine before the next.
+
+The order and scope agreed by the owner on 2026-10-03 ("Yes, I agree let's
+follow that plan"): sub-step 1b, then sub-step 2, then slice 4b, with 4b
+designed for page widgets and popup widgets alike. Anything else that the
+comparison of sub-step 2 with the captured screen finds is recorded here as
+a defect against that comparison, not added as a further step, unless it
+blocks slice 4b.
 
 #### Sub-step 1 on the target machine
 
@@ -3695,6 +3709,99 @@ The presentation request count in the cost lines (409) is below the
 recorded count (413), as are the swap and feedback counts (376 against
 380): the last interval of each renderer is not logged before it exits. As
 before, the lines do not time Blink's work before each call.
+
+#### Sub-step 1b design (proposed)
+
+The owner, on 2026-10-03: "I want us to be as precise as we can be because
+real tests will inspect the rendered frames."
+
+What the browser does with a popup's rectangle. Read in the Chromium
+checkout on the target machine, under `content/browser/` unless named:
+
+- The renderer asks to show the popup with `ShowPopup`, and to move it
+  with `SetPopupBounds`. `RenderWidgetHostImpl::ShowPopup`
+  (`renderer_host/render_widget_host_impl.cc`, lines 2990 to 3002) passes
+  the rectangle through `ClampPopupBoundsToDisplay` (lines 383 to 413),
+  which limits its width and height to the display's work area;
+  `SetPopupBounds` (lines 2806 to 2818) does the same after
+  `ConstrainPopupBounds`, and ignores the request while a screen rectangle
+  update is unacknowledged.
+- `WebContentsImpl::ShowCreatedWidget`
+  (`web_contents/web_contents_impl.cc`, lines 6114 to 6203) transforms the
+  rectangle for nested web contents, applies `ConstrainPopupBounds`
+  (lines 6096 to 6112), which moves a popup whose top is above the top of
+  the main frame's view down to it when `kLimitPopupWidgetHostPosition` is
+  enabled, may refuse the popup, and calls
+  `RenderWidgetHostViewAura::InitAsPopup`.
+- `InitAsPopup` (`renderer_host/render_widget_host_view_aura.cc`, lines
+  454 to 530) makes a menu window, sets an owned window anchor that flips
+  in y, and parents it with `ParentWindowWithContext`. On Windows a menu
+  window gets a top-level widget of its own
+  (`ui/views/widget/desktop_aura/desktop_native_widget_aura.cc`, lines
+  257 to 269 and 108 to 160), without a standard frame but with the
+  system's drop shadow (lines 126 to 132).
+- `RenderWidgetHostImpl::SendScreenRects` (lines 700 to 736) reads the
+  view's bounds and its top-level window's bounds in screen and sends them
+  to the renderer's widget, one update at a time; the renderer's
+  `WidgetBase::UpdateScreenRects` stores them
+  (`third_party/blink/renderer/platform/widget/widget_base.cc`, lines 571
+  to 580).
+- The browser allocates the popup widget's routing ID, which the renderer
+  does not receive (`renderer_host/render_frame_host_impl.cc`, lines
+  11622 to 11629); the widget's frame sink is made from it. A web view
+  holds one page popup at a time: `WebViewImpl::OpenPagePopup` cancels the
+  open one first (`third_party/blink/renderer/core/exported/web_view_impl.cc`,
+  lines 1079 to 1087).
+
+So the browser can change the popup's size and position, and Windows draws
+a shadow outside it; only the browser process holds the result.
+
+What is recorded (protocol 0.44), from the browser process, on
+`browser.interaction`:
+
+| Record | Where | Holds |
+| --- | --- | --- |
+| `popup-widget-created` | `RenderFrameHostImpl::CreateNewPopupWidget`, after the widget is made | the renderer's process ID, the opener frame's token, and the popup widget's frame sink |
+| `popup-widget-shown` | `WebContentsImpl::ShowCreatedWidget`, after `InitAsPopup`, or where it refuses the popup | the frame sink; the rectangle and anchor as received, after the transform, and after `ConstrainPopupBounds`; whether it was refused and why |
+| `popup-widget-bounds-requested` | `RenderWidgetHostImpl::SetPopupBounds` | the frame sink, the rectangle requested, the rectangle set, or that it was ignored |
+| `popup-widget-screen-rects` | `RenderWidgetHostImpl::SendScreenRects`, for a popup widget, when it sends | the frame sink; the view and window bounds in screen, in DIPs; the native window's rectangle from `GetWindowRect`, in physical pixels; and the device scale factor |
+
+`page-popup-opened` gains `ownerFrameToken`, the token of the owner's
+frame, which the browser knows as the opener frame's token. A popup is
+joined to its widget by the renderer's process, the owner's frame token,
+and order: the opener frame's next `popup-widget-created` after the
+renderer's `page-popup-opened`, since a web view holds one popup at a
+time. A popup whose join is not one to one is reported, not guessed.
+
+The renderer's `page-popup-window-rect` record with `source` `placed`, from
+`WebPagePopupImpl::SetScreenRects`, is removed with its hook: Chromium does
+not call it on this path (see "Sub-step 1 on the target machine"), and the
+browser's record replaces it.
+
+What it gives:
+
+- The popup's place on screen is the window's bounds as the browser set
+  them, and in physical pixels as Windows holds them, which is what the
+  captured screen images are in.
+- The popup's frame sink, which its presentation records leave null, is
+  named, so slice 4b joins a popup's compositor frames as a page's are.
+
+Limits of 1b:
+
+- The system's drop shadow is drawn by Windows outside the window; it is
+  not drawn by Blink, so the recreation does not draw it. Its presence in
+  the captured image is noted in the comparison, as a difference that is
+  not the page's.
+- A popup moved by Windows after `SendScreenRects` without a bounds change
+  reaching the view would not be recorded; none is expected, and the
+  native rectangle at each send would show a difference.
+
+Required tests for 1b: unit tests of each new record against the record
+contract and of the join, including a popup without a widget and a widget
+without a popup; the integration script's tests of the browser hooks and
+of the removed hook's upgrade; and, on the target machine, a recording of
+the CNIB events page with the selects opened, in which each popup joins to
+one widget, with its screen rectangles and its cost.
 
 #### Sub-step 2 design (proposed)
 
@@ -3759,9 +3866,8 @@ Limits of sub-step 2:
 - With a zoom factor other than 1, the popup is laid out in its own zoom;
   the size mapping is then checked against the capture before it is
   relied on. The recording of 2026-10-03 has zoom 1 throughout.
-- Where the browser put the popup's window on screen is not recorded (see
-  "Sub-step 1 on the target machine"); the requested rectangle is used,
-  and compared with the captured screen image.
+- The popup is placed at its window's bounds as the browser set them
+  (sub-step 1b), not at the rectangle it asked for.
 - Inspecting the popup's document shows the recorded document in an
   iframe, not in a popup window: that is the one difference DevTools
   shows from the page as it was.
