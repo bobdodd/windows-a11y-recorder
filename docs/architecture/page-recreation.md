@@ -4304,6 +4304,58 @@ Tests as built:
   and the recreated popup's iframe are left to the system test, as the
   test's DevTools client does not read protocol events.
 
+#### Input refused only in the recreation (proposed)
+
+Reported by the owner on 2026-10-03: "You have stopped user interaction on
+devtools".
+
+Cause, read in the bridge and the hooks. The recreation switch is passed
+to every renderer process (`AppendRecorderBootstrapToChildProcess`), and
+`IsRecreationMode()` is true in all of them. Both input hooks of "Input
+refused as built" test only `IsRecreationMode()`, so they refuse input in
+every renderer: the recreated page's, and also the DevTools front end's
+(a `devtools://` page), the evidence panel's (a `chrome-extension://` page
+inside DevTools), and any browser page drawn by a renderer (`chrome://`).
+
+Proposed fix: input is refused only in a widget showing recorded content,
+that is, a widget whose local root document is not a browser page. A
+browser page is one whose URL scheme is `devtools`, `chrome`,
+`chrome-untrusted`, or `chrome-extension`.
+
+- Main thread: the hook in `WebFrameWidgetImpl::HandleInputEvent` refuses
+  only when the widget's local root document is not a browser page; for a
+  browser page the event is handled as in any Chromium.
+- Compositor thread: `InputHandlerProxy` cannot read a document, so the
+  bridge keeps one flag per renderer process, set on the main thread when
+  a browser page's parser is created (`Document::ImplicitOpen`, the place
+  of protocol 0.42's walk), before the page can be drawn or take input.
+  The compositor hook drops events only in a process without the flag.
+  This rests on Chromium putting browser pages and extensions in processes
+  of their own, apart from web content; that is to be confirmed in the
+  Chromium source before the patch is written, and the design revised if
+  it does not hold.
+- Recreation, evidence panel, and recording: unchanged.
+
+Limits:
+
+- Recorded content at a browser page's address (a recording of a
+  `chrome://` page) would take input in its recreation. Recordings are of
+  web pages, so this is stated, not handled.
+
+Required tests:
+
+- Unit tests (`chromium/test_integrate.py`): the main-thread hook tests
+  the local root's scheme; the compositor hook tests the process flag; the
+  parser hook sets it only for the four schemes; each hook is written once
+  and a missing anchor fails the run.
+- Unit test of the bridge's scheme decision, without a Chromium build.
+- Integration test (run with the instrumented Chromium, as
+  `TheRecreationTakesNoInput`): the recreated page still takes no input
+  but the right-click, as now.
+- System test on the target machine: in a recreation, DevTools' panels
+  take clicks, typing, and scrolling, the evidence panel scrolls, and the
+  page itself still takes only the right-click for Inspect.
+
 #### Popup on screen (agreed)
 
 Reported by the owner on 2026-10-03, with d9461fc, on recording
