@@ -4612,8 +4612,8 @@ fields required, a string rejected, null accepted) and of `PagePopups`
 without a shown record): 977 passed, with the 4 known
 ChromiumLauncherTests failures that need Windows, and 199 Python tests.
 Not done: the integration test in the instrumented Chromium, for the
-reason given under "Popup on screen as built"; what is recorded is checked on the target machine with a new
-recording.
+reason given under "Popup on screen as built"; what is recorded is
+checked on the target machine with a new recording.
 
 ### To be settled
 
