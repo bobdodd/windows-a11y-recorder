@@ -4499,6 +4499,86 @@ integration test in the instrumented Chromium,
 for the reason given under "Popup on screen as built"; what is recorded is
 checked on the target machine with a new recording.
 
+#### Window fade of a popup (proposed)
+
+Reported by the owner on 2026-10-03, with 93e31d6, on recording
+20261003-203229: at 38.684 s the captured image shows the open list
+slightly translucent, with the page visible through it, and the
+recreation shows the list opaque.
+
+What the recording shows. The list's document is dom-document-10975. Its
+window was shown at 38.530 s (`popup-widget-shown`) and its first update
+was presented at 38.605 s. Opacity is among the 480 recorded style
+properties, and it is 1 in every node record of the document. The
+captured image of the frame at 38.694 s (frames/desktop/0000000183.png,
+captured in about 60 ms from about 38.66 s) shows the page's text through
+the list; the next, at 38.901 s (0000000184.png), shows the list opaque.
+
+Where the translucency comes from (read from the Chromium source, not
+measured). The list's window is a top-level Windows popup window of its
+own (`DesktopNativeWidgetTopLevelHandler::CreateParentWindow`, type menu).
+Chromium's own fade of a menu window (`wm::VisibilityController`, 150 ms
+by default for menus in `window_animations.cc`) is installed only for a
+widget created translucent (`DesktopNativeWidgetAura::InitNativeWidget`),
+which a list with an opaque background is not. Chromium leaves the
+window's DWM transitions enabled: it sets
+`DWMWA_TRANSITIONS_FORCEDISABLED` only when a widget's visibility
+animations are turned off (`HWNDMessageHandler::SetVisibilityChangedAnimationsEnabled`).
+The fade is therefore most likely a transition of the Windows desktop
+compositor, applied after Chromium presents the window. The window's
+opacity during a DWM transition is not reported to the application, and
+DWM documents the attribute only as enabling or disabling transitions
+([DWMWINDOWATTRIBUTE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)).
+
+Agreed approach (option 2, 2026-10-03): the browser under test is not
+changed, the recreation keeps drawing the list as recorded, opaque, and
+the recording and the evidence panel state what is known.
+
+- Recording (protocol 0.47): `popup-widget-shown` gains
+  `windowsAnimationSettings`, read with `SystemParametersInfo` in the
+  browser process as the window is shown: `clientAreaAnimation`
+  (`SPI_GETCLIENTAREAANIMATION`, the "Animation effects" setting),
+  `uiEffects` (`SPI_GETUIEFFECTS`), `menuAnimation`
+  (`SPI_GETMENUANIMATION`), `menuFade` (`SPI_GETMENUFADE`), and
+  `comboBoxAnimation` (`SPI_GETCOMBOBOXANIMATION`), each true, false, or
+  null when the call fails
+  ([SystemParametersInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow)).
+  Which of these governs a DWM transition is not documented, so all are
+  recorded and none is interpreted.
+- Evidence panel: for each popup drawn at a frame, the note gains how
+  long before the frame's composition its window was shown, the recorded
+  settings, and that the window's opacity at the capture is not recorded,
+  so the captured image may show the window part way through a fade that
+  the recreation, which draws the popup opaque as its recorded styles
+  state, does not show.
+- Recreation: unchanged.
+
+Limits:
+
+- No duration of the fade is recorded, so the panel cannot say which
+  frames the fade reaches; it states the interval since the window was
+  shown on every frame of an open popup, and the reader compares it with
+  the captured image.
+- A fade when the window is hidden, if there is one, is not marked; the
+  recreation stops drawing the popup at its hidden record ("Popup on
+  screen").
+- A setting changed while a popup is open is not recorded until the next
+  popup is shown.
+- Recording 20261003-203229 has no settings field; its panel states that
+  the settings were not recorded.
+
+Required tests:
+
+- Unit tests: the bridge's settings value from given call results,
+  including a failed call; the contract and the validator; the panel note
+  with settings, with the interval since showing, and for a recording
+  without the field.
+- Integration test in the instrumented Chromium: opening a list records
+  `popup-widget-shown` with the five settings.
+- System test on the target machine: in a new recording, the settings in
+  the panel match the Windows settings, and the panel note appears on the
+  frame just after a list opens.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
