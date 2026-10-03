@@ -4007,6 +4007,139 @@ void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
                     std::move(payload));
 }
 
+namespace {
+
+base::DictValue PagePopupRectValue(const PagePopupRect& rect) {
+  base::DictValue value;
+  value.Set("x", rect.x);
+  value.Set("y", rect.y);
+  value.Set("width", rect.width);
+  value.Set("height", rect.height);
+  return value;
+}
+
+bool IsValidPagePopupRect(const PagePopupRect& rect) {
+  return rect.width >= 0 && rect.height >= 0;
+}
+
+}  // namespace
+
+void RecordBlinkPagePopupOpened(int document_node_id,
+                                std::string document_token,
+                                std::string kind,
+                                int owner_document_node_id,
+                                std::string owner_document_token,
+                                int owner_node_id,
+                                PagePopupRect owner_visible_bounds_in_local_root,
+                                PagePopupRect owner_local_root_rect_in_screen,
+                                PagePopupRect anchor_rect_in_screen,
+                                PagePopupRect initial_window_rect,
+                                double zoom_factor) {
+  A11Y_RECORDER_COST("RecordBlinkPagePopupOpened");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      !IsOneOf(kind, {"select-list", "date-time", "color", "other"}) ||
+      owner_document_node_id <= 0 || owner_document_token.empty() ||
+      owner_node_id <= 0 ||
+      !IsValidPagePopupRect(owner_visible_bounds_in_local_root) ||
+      !IsValidPagePopupRect(owner_local_root_rect_in_screen) ||
+      !IsValidPagePopupRect(anchor_rect_in_screen) ||
+      !IsValidPagePopupRect(initial_window_rect) ||
+      !std::isfinite(zoom_factor) || zoom_factor <= 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("kind", std::move(kind));
+  payload.Set("ownerDocumentId", DocumentId(owner_document_node_id));
+  payload.Set("ownerDocumentToken", std::move(owner_document_token));
+  payload.Set("ownerNodeId", owner_node_id);
+  payload.Set("ownerVisibleBoundsInLocalRoot",
+              PagePopupRectValue(owner_visible_bounds_in_local_root));
+  payload.Set("ownerLocalRootRectInScreen",
+              PagePopupRectValue(owner_local_root_rect_in_screen));
+  payload.Set("anchorRectInScreen", PagePopupRectValue(anchor_rect_in_screen));
+  payload.Set("initialWindowRect", PagePopupRectValue(initial_window_rect));
+  payload.Set("zoomFactor", zoom_factor);
+  SendBlinkEvidence("browser.interaction", "page-popup-opened",
+                    std::move(payload));
+}
+
+void RecordBlinkPagePopupWindowRect(int document_node_id,
+                                    std::string document_token,
+                                    std::string source,
+                                    bool deferred,
+                                    PagePopupRect window_rect,
+                                    bool has_widget_rect,
+                                    PagePopupRect widget_rect) {
+  A11Y_RECORDER_COST("RecordBlinkPagePopupWindowRect");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  // A requested rectangle has no widget rectangle and may be deferred; a
+  // placed one has both rectangles and is never deferred.
+  const bool requested = source == "requested";
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      !IsOneOf(source, {"requested", "placed"}) ||
+      has_widget_rect == requested || (deferred && !requested) ||
+      !IsValidPagePopupRect(window_rect) ||
+      (has_widget_rect && !IsValidPagePopupRect(widget_rect))) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("source", std::move(source));
+  payload.Set("deferred", deferred);
+  payload.Set("windowRect", PagePopupRectValue(window_rect));
+  payload.Set("widgetRect", has_widget_rect
+                                ? base::Value(PagePopupRectValue(widget_rect))
+                                : base::Value());
+  SendBlinkEvidence("browser.interaction", "page-popup-window-rect",
+                    std::move(payload));
+}
+
+void RecordBlinkPagePopupClosed(int document_node_id,
+                                std::string document_token,
+                                std::string closed_by) {
+  A11Y_RECORDER_COST("RecordBlinkPagePopupClosed");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      !IsOneOf(closed_by, {"renderer", "browser"})) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("closedBy", std::move(closed_by));
+  SendBlinkEvidence("browser.interaction", "page-popup-closed",
+                    std::move(payload));
+}
+
+void RecordBlinkOptionSelectednessChanged(int document_node_id,
+                                          std::string document_token,
+                                          int node_id,
+                                          int select_node_id,
+                                          bool selected,
+                                          CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkOptionSelectednessChanged");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || select_node_id < 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("nodeId", node_id);
+  payload.Set("selectNodeId",
+              select_node_id > 0 ? base::Value(select_node_id) : base::Value());
+  payload.Set("selected", selected);
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.interaction", "option-selectedness-changed",
+                    std::move(payload));
+}
+
 
 namespace {
 
@@ -5097,7 +5230,8 @@ base::Value OptionalMicroseconds(int64_t microseconds) {
 }
 
 bool IsValidPresentationWidget(const PresentationWidgetIdentity& widget) {
-  return !widget.present || !widget.local_root_frame_token.empty();
+  return widget.present ? !widget.local_root_frame_token.empty()
+                        : !widget.page_popup;
 }
 
 base::DictValue CreatePresentationBasePayload(
@@ -5111,11 +5245,16 @@ base::DictValue CreatePresentationBasePayload(
                                        std::move(document_token)));
   payload.Set("requestId", PresentationRequestId(request_sequence));
   if (widget.present) {
+    payload.Set("widgetKind", widget.page_popup ? "page-popup" : "frame");
     payload.Set("frameSinkId",
-                base::NumberToString(widget.frame_sink_client_id) + ":" +
-                    base::NumberToString(widget.frame_sink_id));
+                widget.page_popup
+                    ? base::Value()
+                    : base::Value(
+                          base::NumberToString(widget.frame_sink_client_id) +
+                          ":" + base::NumberToString(widget.frame_sink_id)));
     payload.Set("localRootFrameToken", widget.local_root_frame_token);
   } else {
+    payload.Set("widgetKind", base::Value());
     payload.Set("frameSinkId", base::Value());
     payload.Set("localRootFrameToken", base::Value());
   }

@@ -190,6 +190,77 @@ internal static class BrowserInteractionPayloads
         }
         """;
 
+    // Protocol 0.43: a select's list opened in a page popup. The context
+    // names the popup's own document.
+    private const string PopupContextJson = """
+        {
+          "browserInstanceId": "browser-1",
+          "processId": 3440,
+          "processType": "renderer",
+          "profileId": null,
+          "browserContextId": null,
+          "pageId": null,
+          "frameId": null,
+          "documentId": "dom-document-10394",
+          "executionWorldId": null,
+          "documentToken": "0B1C2D3E4F5A46B7C8D9E0F1A2B3C4D5"
+        }
+        """;
+
+    public static readonly string PagePopupOpened = $$"""
+        {
+          "context": {{PopupContextJson}},
+          "kind": "select-list",
+          "ownerDocumentId": "dom-document-2486",
+          "ownerDocumentToken": "970C31312F7139126377C8D77F4167A7",
+          "ownerNodeId": 418,
+          "ownerVisibleBoundsInLocalRoot": { "x": 508, "y": 360, "width": 262, "height": 48 },
+          "ownerLocalRootRectInScreen": { "x": 8, "y": 111, "width": 1904, "height": 921 },
+          "anchorRectInScreen": { "x": 516, "y": 471, "width": 262, "height": 48 },
+          "initialWindowRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "zoomFactor": 1
+        }
+        """;
+
+    public static readonly string PagePopupRequestedRect = $$"""
+        {
+          "context": {{PopupContextJson}},
+          "source": "requested",
+          "deferred": true,
+          "windowRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "widgetRect": null
+        }
+        """;
+
+    public static readonly string PagePopupPlacedRect = $$"""
+        {
+          "context": {{PopupContextJson}},
+          "source": "placed",
+          "deferred": false,
+          "windowRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "widgetRect": { "x": 516, "y": 519, "width": 262, "height": 340 }
+        }
+        """;
+
+    public static readonly string PagePopupClosed = $$"""
+        {
+          "context": {{PopupContextJson}},
+          "closedBy": "renderer"
+        }
+        """;
+
+    // The highlight moved by an arrow key: no script made the change.
+    public static readonly string OptionSelected = $$"""
+        {
+          "context": {{UserContextJson}},
+          "nodeId": 61,
+          "selectNodeId": 58,
+          "selected": true,
+          "location": null,
+          "world": null
+        }
+        """;
+
     // A snapshot taken after a layout checkpoint while a listbox holds focus
     // and names an active descendant.
     public static readonly string LayoutCheckpointStarted = $$"""
@@ -281,5 +352,10 @@ internal static class BrowserInteractionPayloads
         yield return ("text-control-value-changed", UserEditedValue);
         yield return ("text-control-value-changed", ScriptSetValue);
         yield return ("active-descendant-reference-set", ActiveDescendantReferenceSet);
+        yield return ("page-popup-opened", PagePopupOpened);
+        yield return ("page-popup-window-rect", PagePopupRequestedRect);
+        yield return ("page-popup-window-rect", PagePopupPlacedRect);
+        yield return ("page-popup-closed", PagePopupClosed);
+        yield return ("option-selectedness-changed", OptionSelected);
     }
 }

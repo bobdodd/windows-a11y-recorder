@@ -2640,6 +2640,71 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void RejectsARequestedPopupWindowRectThatNamesAWidgetRect()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupRequestedRect)!;
+        payload["widgetRect"] = JsonNode.Parse("""{ "x": 0, "y": 0, "width": 1, "height": 1 }""");
+
+        var issues = ValidateInteractionRecord("page-popup-window-rect", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-page-popup-window-rect-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsADeferredPlacedPopupWindowRect()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupPlacedRect)!;
+        payload["deferred"] = true;
+
+        var issues = ValidateInteractionRecord("page-popup-window-rect", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-page-popup-window-rect-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("width", "-1")]
+    [InlineData("x", "1.5")]
+    [InlineData("depth", "0")]
+    public void RejectsAMalformedPopupRectangle(string property, string value)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupOpened)!;
+        payload["anchorRectInScreen"]![property] = JsonNode.Parse(value);
+
+        var issues = ValidateInteractionRecord("page-popup-opened", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Path.StartsWith("#/payload/anchorRectInScreen/", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("ownerDocumentId", "document-2486", "browser-page-popup-owner-document-invalid")]
+    [InlineData("ownerDocumentToken", " ", "browser-page-popup-owner-token-empty")]
+    [InlineData("kind", "listbox", "payload-property-invalid")]
+    public void RejectsAnInvalidPopupOpening(string property, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupOpened)!;
+        payload[property] = value;
+
+        var issues = ValidateInteractionRecord("page-popup-opened", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void RejectsAPopupZoomFactorThatIsNotPositive()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupOpened)!;
+        payload["zoomFactor"] = 0;
+
+        var issues = ValidateInteractionRecord("page-popup-opened", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "payload-property-invalid");
+    }
+
+    [Fact]
     public void RejectsAReversedTextControlValueSelection()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.UserEditedValue)!;
@@ -4089,6 +4154,38 @@ public sealed class EventRecordValidatorTests
 
         Assert.Contains(
             issues, issue => issue.Code == "browser-presentation-request-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("frame", null)]
+    [InlineData("page-popup", "3:2")]
+    [InlineData(null, "3:2")]
+    public void RejectsAWidgetKindThatDisagreesWithItsFrameSink(
+        string? kind,
+        string? frameSinkId)
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.QueuedRequest)!;
+        payload["widgetKind"] = kind;
+        payload["frameSinkId"] = frameSinkId;
+
+        var issues = ValidatePresentationRecord("presentation-requested", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-presentation-widget-inconsistent" ||
+                issue.Code == "browser-presentation-request-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsAPopupFeedbackWithoutAWidgetKind()
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.PagePopupFeedback)!;
+        payload["widgetKind"] = null;
+
+        var issues = ValidatePresentationRecord("presentation-feedback", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "payload-property-invalid" ||
+            issue.Code == "payload-property-missing" ||
+            issue.Code == "browser-presentation-widget-inconsistent");
     }
 
     [Theory]

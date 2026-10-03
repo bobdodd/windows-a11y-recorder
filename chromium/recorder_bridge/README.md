@@ -413,6 +413,14 @@ every enumerated value, and drops a call it cannot represent. Script origin is
 read with the same helper the cookie records use. The record types and their
 limits are described in `docs/architecture/instrumented-chromium.md`.
 
+Protocol 0.43 adds the page popup records. The hooks in
+`web_page_popup_impl.cc` call `RecordBlinkPagePopupOpened`,
+`RecordBlinkPagePopupWindowRect`, and `RecordBlinkPagePopupClosed`, and the
+hook in `html_option_element.cc` calls `RecordBlinkOptionSelectednessChanged`.
+A presentation widget identity with `page_popup` set names a page popup's
+widget, which has no frame sink the renderer knows, so the bridge writes its
+`frameSinkId` as null and its `widgetKind` as `page-popup`.
+
 Protocol 0.25 records layout geometry and computed styles on the
 `browser.layout` channel. The Blink hook in `local_frame_view.cc` runs after
 the lifecycle observers are told that a paint-clean update finished, and calls

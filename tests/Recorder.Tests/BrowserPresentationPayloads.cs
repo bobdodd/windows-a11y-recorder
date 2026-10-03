@@ -23,6 +23,7 @@ internal static class BrowserPresentationPayloads
         {
           "context": {{ContextJson}},
           "requestId": "presentation-request-7",
+          "widgetKind": "frame",
           "frameSinkId": "3:2",
           "localRootFrameToken": "5C1D2A0E8F6B4E3A9D7C1B2A3F4E5D6C",
           "layoutCheckpointId": "layout-checkpoint-12",
@@ -40,6 +41,7 @@ internal static class BrowserPresentationPayloads
         {
           "context": {{ContextJson}},
           "requestId": "presentation-request-8",
+          "widgetKind": null,
           "frameSinkId": null,
           "localRootFrameToken": null,
           "layoutCheckpointId": "layout-checkpoint-13",
@@ -57,6 +59,7 @@ internal static class BrowserPresentationPayloads
         {
           "context": {{ContextJson}},
           "requestId": "presentation-request-9",
+          "widgetKind": "frame",
           "frameSinkId": "3:2",
           "localRootFrameToken": "5C1D2A0E8F6B4E3A9D7C1B2A3F4E5D6C",
           "layoutCheckpointId": "layout-checkpoint-14",
@@ -74,6 +77,7 @@ internal static class BrowserPresentationPayloads
         {
           "context": {{ContextJson}},
           "requestId": "presentation-request-7",
+          "widgetKind": "frame",
           "frameSinkId": "3:2",
           "localRootFrameToken": "5C1D2A0E8F6B4E3A9D7C1B2A3F4E5D6C",
           "reason": "commit-fails",
@@ -89,6 +93,7 @@ internal static class BrowserPresentationPayloads
         {
           "context": {{ContextJson}},
           "requestId": "presentation-request-7",
+          "widgetKind": "frame",
           "frameSinkId": "3:2",
           "localRootFrameToken": "5C1D2A0E8F6B4E3A9D7C1B2A3F4E5D6C",
           "reason": "commit-no-update",
@@ -104,6 +109,7 @@ internal static class BrowserPresentationPayloads
         {
           "context": {{ContextJson}},
           "requestId": "presentation-request-7",
+          "widgetKind": "frame",
           "frameSinkId": "3:2",
           "localRootFrameToken": "5C1D2A0E8F6B4E3A9D7C1B2A3F4E5D6C",
           "frameToken": "4294967295",
@@ -115,6 +121,7 @@ internal static class BrowserPresentationPayloads
         {
           "context": {{ContextJson}},
           "requestId": "presentation-request-7",
+          "widgetKind": "frame",
           "frameSinkId": "3:2",
           "localRootFrameToken": "5C1D2A0E8F6B4E3A9D7C1B2A3F4E5D6C",
           "frameToken": "4294967295",
@@ -131,8 +138,50 @@ internal static class BrowserPresentationPayloads
         }
         """;
 
+    // Protocol 0.43: a page popup's widget names its frame but no frame sink.
+    public static readonly string PagePopupRequest = $$"""
+        {
+          "context": {{ContextJson}},
+          "requestId": "presentation-request-21",
+          "widgetKind": "page-popup",
+          "frameSinkId": null,
+          "localRootFrameToken": "7A2B3C4D5E6F40718293A4B5C6D7E8F9",
+          "layoutCheckpointId": null,
+          "layoutChangeSetId": "layout-changes-30",
+          "queued": true,
+          "notQueuedReason": null,
+          "sourceFrameNumber": 3,
+          "isMainFrameWidget": false,
+          "highResolutionTicks": true,
+          "maximumNotSwappedRecords": 16
+        }
+        """;
+
+    public static readonly string PagePopupFeedback = $$"""
+        {
+          "context": {{ContextJson}},
+          "requestId": "presentation-request-21",
+          "widgetKind": "page-popup",
+          "frameSinkId": null,
+          "localRootFrameToken": "7A2B3C4D5E6F40718293A4B5C6D7E8F9",
+          "frameToken": "4",
+          "presentedTicks": "123457989012",
+          "presentedTimeTicksMicroseconds": "12345798901",
+          "intervalMicroseconds": "16666",
+          "flags": ["vsync"],
+          "receivedCompositorFrameTicks": null,
+          "drawStartTicks": null,
+          "swapStartTicks": null,
+          "swapEndTicks": null,
+          "highResolutionTicks": true,
+          "notSwappedCount": 0
+        }
+        """;
+
     public static IEnumerable<(string EventType, string Json)> All()
     {
+        yield return ("presentation-requested", PagePopupRequest);
+        yield return ("presentation-feedback", PagePopupFeedback);
         yield return ("presentation-requested", QueuedRequest);
         yield return ("presentation-requested", RequestWithoutWidget);
         yield return ("presentation-requested", RequestNotCompositing);

@@ -297,6 +297,18 @@ internal static class EventPayloadValidator
                 ValidateBrowserActiveDescendantReferenceSet(
                     payload, issues);
                 break;
+            case ("browser.interaction", "page-popup-opened"):
+                ValidateBrowserPagePopupOpened(payload, issues);
+                break;
+            case ("browser.interaction", "page-popup-window-rect"):
+                ValidateBrowserPagePopupWindowRect(payload, issues);
+                break;
+            case ("browser.interaction", "page-popup-closed"):
+                ValidateBrowserPagePopupClosed(payload, issues);
+                break;
+            case ("browser.interaction", "option-selectedness-changed"):
+                ValidateBrowserOptionSelectednessChanged(payload, issues);
+                break;
             case ("browser.interaction", "interaction-checkpoint-started"):
                 ValidateBrowserInteractionCheckpointStarted(
                     payload, issues);
@@ -1466,6 +1478,153 @@ internal static class EventPayloadValidator
                 RequiredObject("context"),
                 RequiredInteger("nodeId", positive: true),
                 RequiredInteger("referencedNodeId", positive: true),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues);
+        ValidateInteractionCommon(payload, issues);
+    }
+
+    // Page popups (protocol 0.43). A popup record names the popup's own
+    // document in its context; the rectangles are in screen DIPs, or in the
+    // owner's local root, as Blink's gfx::Rect holds them.
+    private static readonly PropertyRule[] PagePopupRectRules =
+    [
+        RequiredInteger("x"),
+        RequiredInteger("y"),
+        RequiredInteger("width", nonnegative: true),
+        RequiredInteger("height", nonnegative: true)
+    ];
+
+    private static void ValidatePagePopupRect(
+        JsonElement payload,
+        string name,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (payload.TryGetProperty(name, out var rect) &&
+            rect.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(rect, PagePopupRectRules, issues, $"#/payload/{name}");
+        }
+    }
+
+    private static void ValidateBrowserPagePopupOpened(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("kind", "select-list", "date-time", "color", "other"),
+                RequiredString("ownerDocumentId"),
+                RequiredString("ownerDocumentToken"),
+                RequiredInteger("ownerNodeId", positive: true),
+                RequiredObject("ownerVisibleBoundsInLocalRoot"),
+                RequiredObject("ownerLocalRootRectInScreen"),
+                RequiredObject("anchorRectInScreen"),
+                RequiredObject("initialWindowRect"),
+                RequiredNumber("zoomFactor", positive: true)
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        foreach (var name in new[]
+                 {
+                     "ownerVisibleBoundsInLocalRoot", "ownerLocalRootRectInScreen",
+                     "anchorRectInScreen", "initialWindowRect"
+                 })
+        {
+            ValidatePagePopupRect(payload, name, issues);
+        }
+
+        var ownerDocument = ReadString(payload, "ownerDocumentId");
+        if (ownerDocument is not null &&
+            !IsCheckpointIdentity(ownerDocument, "dom-document-"))
+        {
+            AddError(
+                issues,
+                "browser-page-popup-owner-document-invalid",
+                "#/payload/ownerDocumentId",
+                $"'{ownerDocument}' is not a DOM document identity.");
+        }
+
+        if (ReadString(payload, "ownerDocumentToken") is { } token &&
+            string.IsNullOrWhiteSpace(token))
+        {
+            AddError(
+                issues,
+                "browser-page-popup-owner-token-empty",
+                "#/payload/ownerDocumentToken",
+                "A popup's owner document must carry a nonempty token.");
+        }
+    }
+
+    private static void ValidateBrowserPagePopupWindowRect(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("source", "requested", "placed"),
+                RequiredBoolean("deferred"),
+                RequiredObject("windowRect"),
+                NullableObject("widgetRect")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidatePagePopupRect(payload, "windowRect", issues);
+        ValidatePagePopupRect(payload, "widgetRect", issues);
+        var source = ReadString(payload, "source");
+        var hasWidget = HasNonnullProperty(payload, "widgetRect");
+        var deferred = payload.TryGetProperty("deferred", out var value) &&
+            value.ValueKind == JsonValueKind.True;
+        var consistent = source switch
+        {
+            "requested" => !hasWidget,
+            "placed" => hasWidget && !deferred,
+            _ => true
+        };
+        if (!consistent)
+        {
+            AddError(
+                issues,
+                "browser-page-popup-window-rect-inconsistent",
+                "#/payload",
+                "A requested window rectangle has no widget rectangle; a " +
+                    "placed one has a widget rectangle and is never deferred.");
+        }
+    }
+
+    private static void ValidateBrowserPagePopupClosed(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("closedBy", "renderer", "browser")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+    }
+
+    private static void ValidateBrowserOptionSelectednessChanged(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("nodeId", positive: true),
+                NullableInteger("selectNodeId", positive: true),
+                RequiredBoolean("selected"),
                 NullableObject("location"),
                 NullableObject("world")
             ],
@@ -3761,13 +3920,16 @@ internal static class EventPayloadValidator
                 IsPositiveDecimal(value.GetString(), long.MaxValue),
             "must be a positive decimal integer string or null");
 
+    // From protocol 0.43 a widget is a frame widget, named by its frame sink,
+    // or a page popup's widget, which is not told its frame sink.
     private static PropertyRule[] PresentationBaseRules(bool widgetRequired) =>
     [
         RequiredObject("context"),
         RequiredString("requestId"),
         widgetRequired
-            ? RequiredFrameSinkId("frameSinkId")
-            : NullableFrameSinkId("frameSinkId"),
+            ? RequiredEnum("widgetKind", "frame", "page-popup")
+            : NullableEnum("widgetKind", "frame", "page-popup"),
+        NullableFrameSinkId("frameSinkId"),
         widgetRequired
             ? RequiredString("localRootFrameToken")
             : NullableString("localRootFrameToken")
@@ -3798,6 +3960,27 @@ internal static class EventPayloadValidator
                 "browser-presentation-frame-token-empty",
                 "#/payload/localRootFrameToken",
                 "A named local root must carry a nonempty frame token.");
+        }
+
+        var kind = ReadString(payload, "widgetKind");
+        var hasSink = HasNonnullProperty(payload, "frameSinkId");
+        var hasToken = HasNonnullProperty(payload, "localRootFrameToken");
+        var widgetConsistent = kind switch
+        {
+            "frame" => hasSink && hasToken,
+            "page-popup" => !hasSink && hasToken,
+            null => !hasSink && !hasToken,
+            _ => true
+        };
+        if (!widgetConsistent)
+        {
+            AddError(
+                issues,
+                "browser-presentation-widget-inconsistent",
+                "#/payload/widgetKind",
+                "A frame widget names its frame sink and local root; a page " +
+                    "popup's widget names its local root only; a request " +
+                    "without a widget names neither.");
         }
     }
 
@@ -3857,7 +4040,7 @@ internal static class EventPayloadValidator
         }
         var queued = queuedValue.GetBoolean();
         var reason = ReadString(payload, "notQueuedReason");
-        var hasWidget = HasNonnullProperty(payload, "frameSinkId");
+        var hasWidget = HasNonnullProperty(payload, "widgetKind");
         var hasToken = HasNonnullProperty(payload, "localRootFrameToken");
         var hasFrameNumber = HasNonnullProperty(payload, "sourceFrameNumber");
         var hasMainFrame = HasNonnullProperty(payload, "isMainFrameWidget");

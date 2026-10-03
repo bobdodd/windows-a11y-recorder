@@ -191,6 +191,22 @@ internal static class BrowserProtocol
                 payload.Deserialize<BrowserActiveDescendantReferenceSetPayload>(
                     JsonOptions) as object,
             (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PagePopupOpened) =>
+                payload.Deserialize<BrowserPagePopupOpenedPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PagePopupWindowRect) =>
+                payload.Deserialize<BrowserPagePopupWindowRectPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PagePopupClosed) =>
+                payload.Deserialize<BrowserPagePopupClosedPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.OptionSelectednessChanged) =>
+                payload.Deserialize<BrowserOptionSelectednessChangedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceEventTypes.InteractionCheckpointStarted) =>
                 payload.Deserialize<BrowserInteractionCheckpointStartedPayload>(
                     JsonOptions) as object,

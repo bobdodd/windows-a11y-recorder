@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.42";
+    public const string CurrentVersion = "0.43";
 }
 
 public static class BrowserEvidenceChannels
@@ -78,6 +78,10 @@ public static class BrowserEvidenceEventTypes
     public const string TextControlValueChanged = "text-control-value-changed";
     public const string ActiveDescendantReferenceSet =
         "active-descendant-reference-set";
+    public const string PagePopupOpened = "page-popup-opened";
+    public const string PagePopupWindowRect = "page-popup-window-rect";
+    public const string PagePopupClosed = "page-popup-closed";
+    public const string OptionSelectednessChanged = "option-selectedness-changed";
     public const string InteractionCheckpointStarted =
         "interaction-checkpoint-started";
     public const string InteractionCheckpointTextControl =
@@ -801,6 +805,53 @@ public sealed record BrowserActiveDescendantReferenceSetPayload(
     BrowserScriptLocation? Location,
     BrowserExecutionWorld? World);
 
+// Page popup records (protocol 0.43). A select drawn as a menu list, and a
+// date, time, or colour picker, opens a page popup: a page of its own, with its
+// own document and widget. The context names the popup's document. Rectangles
+// are in screen DIPs, except the owner's visible bounds, which are in its local
+// root.
+public sealed record BrowserPagePopupRect(int X, int Y, int Width, int Height);
+
+// Kind is "select-list", "date-time", "color", or "other", from the owner
+// element. The anchor and the first window rectangle are those the popup was
+// shown with.
+public sealed record BrowserPagePopupOpenedPayload(
+    BrowserContext Context,
+    string Kind,
+    string OwnerDocumentId,
+    string OwnerDocumentToken,
+    int OwnerNodeId,
+    BrowserPagePopupRect OwnerVisibleBoundsInLocalRoot,
+    BrowserPagePopupRect OwnerLocalRootRectInScreen,
+    BrowserPagePopupRect AnchorRectInScreen,
+    BrowserPagePopupRect InitialWindowRect,
+    double ZoomFactor);
+
+// Source is "requested", a rectangle the popup asked for, deferred when asked
+// for before the popup was shown, or "placed", the rectangles the browser gave
+// the popup's widget.
+public sealed record BrowserPagePopupWindowRectPayload(
+    BrowserContext Context,
+    string Source,
+    bool Deferred,
+    BrowserPagePopupRect WindowRect,
+    BrowserPagePopupRect? WidgetRect);
+
+// ClosedBy is "renderer" or "browser".
+public sealed record BrowserPagePopupClosedPayload(
+    BrowserContext Context,
+    string ClosedBy);
+
+// A change of an option's selectedness, which sets no attribute. In an open
+// select list the highlighted item is the popup listbox's selected option.
+public sealed record BrowserOptionSelectednessChangedPayload(
+    BrowserContext Context,
+    int NodeId,
+    int? SelectNodeId,
+    bool Selected,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
 // Interaction checkpoint records report the interaction state Blink held for a
 // document immediately after a DOM or layout checkpoint completed, read
 // without requesting any lifecycle update. SourceCheckpointId names that
@@ -1196,13 +1247,16 @@ public sealed record BrowserLayoutScrollOffsetChangedPayload(
 // follows: a not-swapped record whose action is "broken", or a swapped record
 // and then, when viz reports it, feedback for the same frame token. Frame
 // tokens are unsigned 32-bit decimal strings numbered per frame sink, and the
-// frame sink is written "clientId:sinkId". Every tick field is a decimal
+// frame sink is written "clientId:sinkId". From protocol 0.43 WidgetKind is
+// "frame" for a frame widget or "page-popup" for a page popup's widget, whose
+// frame sink the renderer is not told, so its FrameSinkId is null. Every tick field is a decimal
 // QueryPerformanceCounter value, the clock the record envelope's native
 // timestamp uses, or null when Chromium reported no time or its clock was not
 // high resolution.
 public sealed record BrowserPresentationRequestedPayload(
     BrowserContext Context,
     string RequestId,
+    string? WidgetKind,
     string? FrameSinkId,
     string? LocalRootFrameToken,
     string? LayoutCheckpointId,
@@ -1217,7 +1271,8 @@ public sealed record BrowserPresentationRequestedPayload(
 public sealed record BrowserPresentationNotSwappedPayload(
     BrowserContext Context,
     string RequestId,
-    string FrameSinkId,
+    string WidgetKind,
+    string? FrameSinkId,
     string LocalRootFrameToken,
     string Reason,
     string Action,
@@ -1229,7 +1284,8 @@ public sealed record BrowserPresentationNotSwappedPayload(
 public sealed record BrowserPresentationSwappedPayload(
     BrowserContext Context,
     string RequestId,
-    string FrameSinkId,
+    string WidgetKind,
+    string? FrameSinkId,
     string LocalRootFrameToken,
     string FrameToken,
     int NotSwappedCount);
@@ -1237,7 +1293,8 @@ public sealed record BrowserPresentationSwappedPayload(
 public sealed record BrowserPresentationFeedbackPayload(
     BrowserContext Context,
     string RequestId,
-    string FrameSinkId,
+    string WidgetKind,
+    string? FrameSinkId,
     string LocalRootFrameToken,
     string FrameToken,
     string? PresentedTicks,

@@ -619,6 +619,27 @@ Four record types are emitted:
   attribute state that the DOM records report, so this record is the only
   account of the reference. It carries the element's node and the referenced
   node.
+- `page-popup-opened` (protocol 0.43): a page popup, such as the list of an
+  open select or a date, time, or colour picker, once `WebPagePopupImpl` has
+  installed its document. Its context names the popup's own document. It
+  carries the kind (`select-list`, `date-time`, `color`, or `other`), the
+  owner element's node and document, the owner's visible bounds in its local
+  root, the owner's local root view and the anchor in screen DIPs, the first
+  window rectangle, and the zoom factor.
+- `page-popup-window-rect` (protocol 0.43): a window rectangle the popup asked
+  for in `WebPagePopupImpl::SetWindowRect` (`requested`, with `deferred` true
+  when asked for before the popup was shown), or the widget and window
+  rectangles the browser gave its widget in `WebPagePopupImpl::SetScreenRects`
+  (`placed`).
+- `page-popup-closed` (protocol 0.43): the popup closing, by the `renderer` or
+  the `browser`, written from `WebPagePopupImpl::ClosePopup`, or from
+  `WebPagePopupImpl::Close` when the popup client's cancel did not reach
+  `ClosePopup`.
+- `option-selectedness-changed` (protocol 0.43): an option's selectedness
+  after `HTMLOptionElement::SetSelectedState` changed it, with its select's
+  node when it has one. Selectedness sets no attribute, so no DOM record
+  reports it. In an open select list the highlighted item is the popup
+  listbox's selected option.
 
 The recorded facts are bounded as follows:
 
@@ -1012,7 +1033,18 @@ parser text appends to connected nodes, and mutation deliveries while it
 parses, as it does after parsing. The design is in
 [page recreation](page-recreation.md), "Slice 4c".
 
-Live 0.42 connections require an exact protocol-version match.
+Protocol version 0.43 adds four `browser.interaction` records, written from
+`WebPagePopupImpl` and `HTMLOptionElement::SetSelectedState`:
+`page-popup-opened`, `page-popup-window-rect`, `page-popup-closed`, and
+`option-selectedness-changed`. A layout checkpoint or change set of a page
+popup's document requests its presentation from the popup's `WidgetBase`
+rather than recording `no-widget`. Every presentation record names its
+widget's kind, `frame` or `page-popup`, in `widgetKind`; a page popup's
+widget is not told its frame sink, so its `frameSinkId` is null and its
+`isMainFrameWidget` is false. The design is in
+[page recreation](page-recreation.md), "Slice 4d".
+
+Live 0.43 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

@@ -3564,7 +3564,8 @@ are. The widget identity names the popup's frame and has the new
 is null: the browser assigns a popup's frame sink, and the renderer is not
 told it (`WebPagePopupImpl` and `WidgetBase` hold no frame sink ID). The
 join to captured frames uses the request identity and presentation time,
-not the frame sink.
+not the frame sink. A popup's widget is not a frame widget, so its request records
+`isMainFrameWidget` false.
 
 #### Which state a captured frame shows
 

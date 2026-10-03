@@ -9553,6 +9553,319 @@ def patch_blink_element_active_descendant(path: Path) -> None:
     )
 
 
+# Page popups and option selectedness (protocol 0.43). A select drawn as a
+# menu list opens its list in a page popup with its own page, document, and
+# widget. The popup's opening, owner, window rectangles, and closing are
+# recorded from WebPagePopupImpl, and its rendering updates request their
+# presentation from the popup's widget. Every change of an option's
+# selectedness, which sets no attribute, is recorded from
+# HTMLOptionElement::SetSelectedState. See docs/architecture/page-recreation.md,
+# "Slice 4d".
+BLINK_PAGE_POPUP_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/exported/web_page_popup_impl.h"'
+)
+BLINK_PAGE_POPUP_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    "#include <string>",
+    '#include "third_party/blink/renderer/core/html/forms/html_input_element.h"',
+    '#include "third_party/blink/renderer/core/html/forms/'
+    'html_select_element.h"',
+)
+BLINK_PAGE_POPUP_HELPER_ANCHOR = (
+    "class PagePopupChromeClient final : public EmptyChromeClient {\n"
+)
+BLINK_PAGE_POPUP_HELPER_MARKER = "Document* RecorderPagePopupDocument("
+BLINK_PAGE_POPUP_HELPER = """\
+namespace {
+
+// The document of a page popup's page, or null once the page is destroyed.
+Document* RecorderPagePopupDocument(Page* recorder_page) {
+  if (!recorder_page) {
+    return nullptr;
+  }
+  auto* recorder_frame = DynamicTo<LocalFrame>(recorder_page->MainFrame());
+  return recorder_frame ? recorder_frame->GetDocument() : nullptr;
+}
+
+a11y_recorder::PagePopupRect RecorderPagePopupRect(const gfx::Rect& rect) {
+  a11y_recorder::PagePopupRect recorder_rect;
+  recorder_rect.x = rect.x();
+  recorder_rect.y = rect.y();
+  recorder_rect.width = rect.width();
+  recorder_rect.height = rect.height();
+  return recorder_rect;
+}
+
+// The kind of popup, from the element that opened it.
+const char* RecorderPagePopupKind(Element& recorder_owner) {
+  if (IsA<HTMLSelectElement>(recorder_owner)) {
+    return "select-list";
+  }
+  if (auto* recorder_input = DynamicTo<HTMLInputElement>(recorder_owner)) {
+    const String recorder_type = recorder_input->FormControlTypeAsString();
+    if (recorder_type == "color") {
+      return "color";
+    }
+    if (recorder_type == "date" || recorder_type == "datetime-local" ||
+        recorder_type == "month" || recorder_type == "time" ||
+        recorder_type == "week") {
+      return "date-time";
+    }
+  }
+  return "other";
+}
+
+void RecorderRecordPagePopupOpened(Page* recorder_page,
+                                   Element& recorder_owner,
+                                   const gfx::Rect& recorder_owner_window,
+                                   const gfx::Rect& recorder_anchor,
+                                   const gfx::Rect& recorder_initial_rect,
+                                   float recorder_zoom_factor) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  Document& recorder_owner_document = recorder_owner.GetDocument();
+  a11y_recorder::RecordBlinkPagePopupOpened(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(),
+      RecorderPagePopupKind(recorder_owner),
+      static_cast<int>(recorder_owner_document.GetDomNodeId()),
+      recorder_owner_document.Token().ToString(),
+      static_cast<int>(recorder_owner.GetDomNodeId()),
+      RecorderPagePopupRect(recorder_owner.VisibleBoundsInLocalRoot()),
+      RecorderPagePopupRect(recorder_owner_window),
+      RecorderPagePopupRect(recorder_anchor),
+      RecorderPagePopupRect(recorder_initial_rect), recorder_zoom_factor);
+}
+
+void RecorderRecordPagePopupWindowRect(Page* recorder_page,
+                                       const char* recorder_source,
+                                       bool recorder_deferred,
+                                       const gfx::Rect& recorder_window_rect,
+                                       const gfx::Rect* recorder_widget_rect) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupWindowRect(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(), recorder_source,
+      recorder_deferred, RecorderPagePopupRect(recorder_window_rect),
+      recorder_widget_rect != nullptr,
+      recorder_widget_rect ? RecorderPagePopupRect(*recorder_widget_rect)
+                           : a11y_recorder::PagePopupRect{});
+}
+
+void RecorderRecordPagePopupClosed(Page* recorder_page,
+                                   const char* recorder_closed_by) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupClosed(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(), recorder_closed_by);
+}
+
+}  // namespace
+
+"""
+BLINK_PAGE_POPUP_CLIENT_ANCHOR = """\
+  bool IsPopup() override { return true; }
+"""
+BLINK_PAGE_POPUP_CLIENT_HOOK = """\
+  bool IsPopup() override { return true; }
+
+  // Recorder evidence: requests a rendering update's presentation from this
+  // popup's widget. A popup that is closing, or whose widget is gone, is
+  // recorded as having no widget.
+  void RecorderRequestPresentation(LocalFrame& recorder_frame,
+                                   uint64_t recorder_checkpoint_sequence,
+                                   int recorder_document_node_id,
+                                   const std::string& recorder_document_token) {
+    WebPagePopupImpl* recorder_popup = popup_;
+    const bool recorder_has_widget = recorder_popup &&
+                                     !recorder_popup->closing_ &&
+                                     recorder_popup->widget_base_;
+    RecorderRequestWidgetPresentation(
+        recorder_has_widget ? recorder_popup->widget_base_.get() : nullptr,
+        recorder_has_widget, true, 0, 0,
+        recorder_has_widget
+            ? recorder_frame.LocalFrameRoot().GetLocalFrameToken().ToString()
+            : std::string(),
+        true, false, recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token);
+  }
+"""
+BLINK_PAGE_POPUP_REQUEST_ANCHOR = "void WebPagePopupImpl::DidShowPopup() {\n"
+BLINK_PAGE_POPUP_REQUEST_MARKER = "bool RecorderRequestPagePopupPresentation("
+BLINK_PAGE_POPUP_REQUEST = """\
+bool RecorderRequestPagePopupPresentation(
+    LocalFrame& recorder_frame,
+    uint64_t recorder_checkpoint_sequence,
+    int recorder_document_node_id,
+    const std::string& recorder_document_token) {
+  Page* recorder_page = recorder_frame.GetPage();
+  // PagePopupChromeClient is the only chrome client in core that is a popup.
+  if (!recorder_page || !recorder_page->GetChromeClient().IsPopup()) {
+    return false;
+  }
+  static_cast<PagePopupChromeClient&>(recorder_page->GetChromeClient())
+      .RecorderRequestPresentation(recorder_frame,
+                                   recorder_checkpoint_sequence,
+                                   recorder_document_node_id,
+                                   recorder_document_token);
+  return true;
+}
+
+"""
+BLINK_PAGE_POPUP_OPENED_ANCHOR = """\
+  popup_owner_client_rect_ =
+      popup_client_->OwnerElement().GetBoundingClientRect();
+"""
+BLINK_PAGE_POPUP_OPENED_HOOK = """\
+  popup_owner_client_rect_ =
+      popup_client_->OwnerElement().GetBoundingClientRect();
+  RecorderRecordPagePopupOpened(page_.Get(), popup_client_->OwnerElement(),
+                                OwnerWindowRectInScreen(),
+                                GetAnchorRectInScreen(), initial_rect_,
+                                popup_client_->ZoomFactor());
+"""
+BLINK_PAGE_POPUP_WINDOW_RECT_ANCHOR = """\
+  if (!should_defer_setting_window_rect_) {
+"""
+BLINK_PAGE_POPUP_WINDOW_RECT_HOOK = """\
+  RecorderRecordPagePopupWindowRect(page_.Get(), "requested",
+                                    should_defer_setting_window_rect_,
+                                    window_rect, nullptr);
+  if (!should_defer_setting_window_rect_) {
+"""
+BLINK_PAGE_POPUP_SCREEN_RECTS_ANCHOR = """\
+  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
+"""
+BLINK_PAGE_POPUP_SCREEN_RECTS_HOOK = """\
+  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
+  RecorderRecordPagePopupWindowRect(page_.Get(), "placed", false,
+                                    window_screen_rect, &widget_screen_rect);
+"""
+BLINK_PAGE_POPUP_CLOSE_ANCHOR = """\
+  const bool running_inside_close = closing_;
+"""
+BLINK_PAGE_POPUP_CLOSE_HOOK = """\
+  const bool running_inside_close = closing_;
+  RecorderRecordPagePopupClosed(page_.Get(),
+                                running_inside_close ? "browser" : "renderer");
+"""
+BLINK_PAGE_POPUP_BROWSER_CLOSE_ANCHOR = """\
+        controller->ClearPagePopupClient();
+      }
+      DestroyPage();
+"""
+BLINK_PAGE_POPUP_BROWSER_CLOSE_HOOK = """\
+        controller->ClearPagePopupClient();
+      }
+      RecorderRecordPagePopupClosed(page_.Get(), "browser");
+      DestroyPage();
+"""
+BLINK_PAGE_POPUP_HOOKS = (
+    (BLINK_PAGE_POPUP_CLIENT_ANCHOR, BLINK_PAGE_POPUP_CLIENT_HOOK),
+    (BLINK_PAGE_POPUP_OPENED_ANCHOR, BLINK_PAGE_POPUP_OPENED_HOOK),
+    (BLINK_PAGE_POPUP_WINDOW_RECT_ANCHOR, BLINK_PAGE_POPUP_WINDOW_RECT_HOOK),
+    (BLINK_PAGE_POPUP_SCREEN_RECTS_ANCHOR, BLINK_PAGE_POPUP_SCREEN_RECTS_HOOK),
+    (BLINK_PAGE_POPUP_CLOSE_ANCHOR, BLINK_PAGE_POPUP_CLOSE_HOOK),
+    (
+        BLINK_PAGE_POPUP_BROWSER_CLOSE_ANCHOR,
+        BLINK_PAGE_POPUP_BROWSER_CLOSE_HOOK,
+    ),
+)
+
+
+def patch_blink_page_popup(path: Path) -> None:
+    """Adds the page popup records and the popup presentation request."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_PAGE_POPUP_OWN_INCLUDE, BLINK_PAGE_POPUP_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PAGE_POPUP_HELPER_ANCHOR,
+        BLINK_PAGE_POPUP_HELPER,
+        BLINK_PAGE_POPUP_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+        BLINK_PAGE_POPUP_REQUEST,
+        BLINK_PAGE_POPUP_REQUEST_MARKER,
+        path,
+    )
+    for anchor, hook in BLINK_PAGE_POPUP_HOOKS:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+BLINK_OPTION_SELECTEDNESS_HELPER = """\
+namespace {
+
+// Records a change of an option's selectedness. Selectedness sets no
+// attribute, so no DOM record reports it; the highlighted item of an open
+// select list is its popup listbox's selected option.
+void RecorderRecordOptionSelectedness(HTMLOptionElement& option,
+                                      bool selected) {
+  Document& document = option.GetDocument();
+  const int document_node_id = static_cast<int>(document.GetDomNodeId());
+  if (document_node_id <= 0) {
+    return;
+  }
+  HTMLSelectElement* select = option.OwnerSelectElement();
+  a11y_recorder::RecordBlinkOptionSelectednessChanged(
+      document_node_id, document.Token().ToString(),
+      static_cast<int>(option.GetDomNodeId()),
+      select ? static_cast<int>(select->GetDomNodeId()) : 0, selected,
+      RecorderCookieCallOrigin(document.GetExecutionContext()));
+}
+
+}  // namespace
+
+"""
+BLINK_OPTION_SELECTEDNESS_HELPER_MARKER = "void RecorderRecordOptionSelectedness("
+BLINK_OPTION_SELECTEDNESS_HELPER_ANCHOR = (
+    "void HTMLOptionElement::SetSelectedState(bool selected,\n"
+)
+BLINK_OPTION_SELECTEDNESS_ANCHOR = """\
+  is_selected_ = selected;
+  PseudoStateChanged(CSSSelector::kPseudoChecked);
+"""
+BLINK_OPTION_SELECTEDNESS_HOOK = """\
+  is_selected_ = selected;
+  PseudoStateChanged(CSSSelector::kPseudoChecked);
+  RecorderRecordOptionSelectedness(*this, selected);
+"""
+
+
+def patch_blink_option_element(path: Path) -> None:
+    patch_blink_interaction_source(
+        path,
+        '#include "third_party/blink/renderer/core/html/forms/'
+        'html_option_element.h"',
+        (
+            (
+                BLINK_OPTION_SELECTEDNESS_HELPER_ANCHOR,
+                BLINK_COOKIE_ORIGIN_HELPER,
+                BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+            ),
+            (
+                BLINK_OPTION_SELECTEDNESS_HELPER_ANCHOR,
+                BLINK_OPTION_SELECTEDNESS_HELPER,
+                BLINK_OPTION_SELECTEDNESS_HELPER_MARKER,
+            ),
+        ),
+        ((BLINK_OPTION_SELECTEDNESS_ANCHOR, BLINK_OPTION_SELECTEDNESS_HOOK),),
+    )
+
+
 # The computed-style properties a layout checkpoint records, in the order the
 # checkpoint lists them. The list and its rationale are documented in
 # docs/architecture/layout-and-style-checkpoint-evidence-model.md, and the
@@ -10004,13 +10317,19 @@ void RecorderReadGeneratedText(
 
 // Asks the local-root widget of a frame to report what happens to the
 // compositor frame that carries a layout checkpoint's rendering update. A
-// frame with no widget is recorded as such, so every completed layout
-// checkpoint has exactly one presentation request.
+// frame in a page popup asks the popup's widget. A frame with no widget is
+// recorded as such, so every completed layout checkpoint has exactly one
+// presentation request.
 void RecorderRequestLayoutPresentation(
     LocalFrame& recorder_frame,
     uint64_t recorder_checkpoint_sequence,
     int recorder_document_node_id,
     const std::string& recorder_document_token) {
+  if (RecorderRequestPagePopupPresentation(
+          recorder_frame, recorder_checkpoint_sequence,
+          recorder_document_node_id, recorder_document_token)) {
+    return;
+  }
   WebLocalFrameImpl* recorder_local_root =
       WebLocalFrameImpl::FromFrame(recorder_frame.LocalFrameRoot());
   WebFrameWidgetImpl* recorder_widget =
@@ -12191,6 +12510,7 @@ BLINK_PRESENTATION_WIDGET_INCLUDES = (
     "#include <atomic>",
     "#include <string>",
     '#include "base/memory/ref_counted.h"',
+    '#include "base/memory/weak_ptr.h"',
     '#include "cc/trees/swap_promise.h"',
     '#include "components/viz/common/frame_timing_details.h"',
     '#include "components/viz/common/quads/compositor_frame_metadata.h"',
@@ -12200,6 +12520,234 @@ BLINK_PRESENTATION_WIDGET_ANCHOR = """\
 void WebFrameWidgetImpl::WaitForDebuggerWhenShown() {
 """
 BLINK_PRESENTATION_WIDGET_BLOCK = """\
+// Recorder evidence: the facts every record of one presentation request
+// repeats. The swap promise and the presentation callback share them across
+// the main and compositor threads, so they never change once made.
+class RecorderPresentationRequestFacts
+    : public base::RefCountedThreadSafe<RecorderPresentationRequestFacts> {
+ public:
+  RecorderPresentationRequestFacts(
+      uint64_t request_sequence,
+      int document_node_id,
+      std::string document_token,
+      a11y_recorder::PresentationWidgetIdentity widget,
+      bool high_resolution_ticks)
+      : request_sequence(request_sequence),
+        document_node_id(document_node_id),
+        document_token(std::move(document_token)),
+        widget(std::move(widget)),
+        high_resolution_ticks(high_resolution_ticks) {}
+
+  const uint64_t request_sequence;
+  const int document_node_id;
+  const std::string document_token;
+  const a11y_recorder::PresentationWidgetIdentity widget;
+  const bool high_resolution_ticks;
+
+ private:
+  friend class base::RefCountedThreadSafe<RecorderPresentationRequestFacts>;
+  ~RecorderPresentationRequestFacts() = default;
+};
+
+static int64_t RecorderTimeTicksMicroseconds(base::TimeTicks recorder_time) {
+  return recorder_time.is_null()
+             ? 0
+             : (recorder_time - base::TimeTicks()).InMicroseconds();
+}
+
+static const char* RecorderDidNotSwapReasonName(
+    cc::SwapPromise::DidNotSwapReason recorder_reason) {
+  switch (recorder_reason) {
+    case cc::SwapPromise::SWAP_FAILS:
+      return "swap-fails";
+    case cc::SwapPromise::COMMIT_FAILS:
+      return "commit-fails";
+    case cc::SwapPromise::COMMIT_NO_UPDATE:
+      return "commit-no-update";
+    case cc::SwapPromise::ACTIVATION_FAILS:
+      return "activation-fails";
+  }
+  return "unknown";
+}
+
+// Follows the compositor frame that carries one layout checkpoint's rendering
+// update. The promise breaks on the reasons ReportTimeSwapPromise treats as
+// failures, a swap that fails or a commit with no update, and otherwise stays
+// active for a later frame. DidNotSwap may run on either thread, so the count
+// of calls is atomic.
+class RecorderPresentationSwapPromise : public cc::SwapPromise {
+ public:
+  RecorderPresentationSwapPromise(
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      base::WeakPtr<WidgetBase> widget_base)
+      : facts_(std::move(facts)),
+        task_runner_(std::move(task_runner)),
+        widget_base_(std::move(widget_base)) {}
+
+  RecorderPresentationSwapPromise(const RecorderPresentationSwapPromise&) =
+      delete;
+  RecorderPresentationSwapPromise& operator=(
+      const RecorderPresentationSwapPromise&) = delete;
+
+  ~RecorderPresentationSwapPromise() override = default;
+
+  void DidActivate() override {}
+
+  void WillSwap(viz::CompositorFrameMetadata* metadata) override {
+    frame_token_ = metadata->frame_token;
+  }
+
+  void DidSwap() override {
+    const int recorder_not_swapped_count = not_swapped_count_.load();
+    a11y_recorder::RecordBlinkPresentationSwapped(
+        facts_->request_sequence, facts_->document_node_id,
+        facts_->document_token, facts_->widget, frame_token_,
+        recorder_not_swapped_count);
+    PostCrossThreadTask(
+        *task_runner_, FROM_HERE,
+        CrossThreadBindOnce(&AddFeedbackCallback, widget_base_, facts_,
+                            frame_token_, recorder_not_swapped_count));
+  }
+
+  DidNotSwapAction DidNotSwap(DidNotSwapReason reason,
+                              base::TimeTicks timestamp) override {
+    const bool recorder_kept_active =
+        reason != DidNotSwapReason::SWAP_FAILS &&
+        reason != DidNotSwapReason::COMMIT_NO_UPDATE;
+    const int recorder_index = not_swapped_count_.fetch_add(1);
+    a11y_recorder::RecordBlinkPresentationNotSwapped(
+        facts_->request_sequence, facts_->document_node_id,
+        facts_->document_token, facts_->widget,
+        RecorderDidNotSwapReasonName(reason), recorder_kept_active,
+        recorder_index, RecorderTimeTicksMicroseconds(timestamp),
+        facts_->high_resolution_ticks);
+    return recorder_kept_active ? DidNotSwapAction::KEEP_ACTIVE
+                                : DidNotSwapAction::BREAK_PROMISE;
+  }
+
+  int64_t GetTraceId() const override { return 0; }
+
+ private:
+  // Runs on the main thread, where the widget's weak pointer is bound. A
+  // widget that was closed before the task ran registers nothing, so the
+  // request ends without feedback. The widget is reached through its
+  // WidgetBase because a page popup's widget is not garbage collected.
+  static void AddFeedbackCallback(
+      base::WeakPtr<WidgetBase> widget_base,
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      uint32_t frame_token,
+      int not_swapped_count) {
+    if (!widget_base) {
+      return;
+    }
+    widget_base->AddPresentationCallback(
+        frame_token, blink::BindOnce(&RecordFeedback, std::move(facts),
+                                     frame_token, not_swapped_count));
+  }
+
+  static void RecordFeedback(
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      uint32_t frame_token,
+      int not_swapped_count,
+      const viz::FrameTimingDetails& details) {
+    a11y_recorder::PresentationFeedbackTiming recorder_timing;
+    recorder_timing.presented_microseconds = RecorderTimeTicksMicroseconds(
+        details.presentation_feedback.timestamp);
+    recorder_timing.interval_microseconds =
+        details.presentation_feedback.interval.InMicroseconds();
+    recorder_timing.flags = details.presentation_feedback.flags;
+    recorder_timing.received_compositor_frame_microseconds =
+        RecorderTimeTicksMicroseconds(
+            details.received_compositor_frame_timestamp);
+    recorder_timing.draw_start_microseconds =
+        RecorderTimeTicksMicroseconds(details.draw_start_timestamp);
+    recorder_timing.swap_start_microseconds =
+        RecorderTimeTicksMicroseconds(details.swap_timings.swap_start);
+    recorder_timing.swap_end_microseconds =
+        RecorderTimeTicksMicroseconds(details.swap_timings.swap_end);
+    a11y_recorder::RecordBlinkPresentationFeedback(
+        facts->request_sequence, facts->document_node_id,
+        facts->document_token, facts->widget, frame_token, recorder_timing,
+        not_swapped_count, facts->high_resolution_ticks);
+  }
+
+  const scoped_refptr<RecorderPresentationRequestFacts> facts_;
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  // Copied on the compositor thread and dereferenced only on the main thread.
+  const base::WeakPtr<WidgetBase> widget_base_;
+  uint32_t frame_token_ = 0;
+  std::atomic<int> not_swapped_count_{0};
+};
+
+void RecorderRequestWidgetPresentation(WidgetBase* widget_base,
+                                       bool has_widget,
+                                       bool page_popup,
+                                       uint32_t frame_sink_client_id,
+                                       uint32_t frame_sink_id,
+                                       std::string local_root_frame_token,
+                                       bool view_composites,
+                                       bool is_main_frame_widget,
+                                       uint64_t layout_checkpoint_sequence,
+                                       int document_node_id,
+                                       std::string document_token) {
+  const bool recorder_high_resolution = base::TimeTicks::IsHighResolution();
+  if (!has_widget) {
+    a11y_recorder::BeginBlinkPresentationRequest(
+        document_node_id, std::move(document_token),
+        layout_checkpoint_sequence,
+        a11y_recorder::PresentationWidgetIdentity{}, "no-widget", -1, false,
+        recorder_high_resolution);
+    return;
+  }
+  a11y_recorder::PresentationWidgetIdentity recorder_widget;
+  recorder_widget.present = true;
+  recorder_widget.page_popup = page_popup;
+  recorder_widget.frame_sink_client_id = frame_sink_client_id;
+  recorder_widget.frame_sink_id = frame_sink_id;
+  recorder_widget.local_root_frame_token = std::move(local_root_frame_token);
+  cc::LayerTreeHost* recorder_host =
+      widget_base ? widget_base->LayerTreeHost() : nullptr;
+  const bool recorder_composites = view_composites && recorder_host;
+  const uint64_t recorder_request_sequence =
+      a11y_recorder::BeginBlinkPresentationRequest(
+          document_node_id, document_token, layout_checkpoint_sequence,
+          recorder_widget, recorder_composites ? "" : "not-compositing",
+          recorder_composites ? recorder_host->SourceFrameNumber() : -1,
+          is_main_frame_widget, recorder_high_resolution);
+  if (recorder_request_sequence == 0) {
+    return;
+  }
+  recorder_host->QueueSwapPromise(
+      std::make_unique<RecorderPresentationSwapPromise>(
+          base::MakeRefCounted<RecorderPresentationRequestFacts>(
+              recorder_request_sequence, document_node_id,
+              std::move(document_token), std::move(recorder_widget),
+              recorder_high_resolution),
+          recorder_host->GetTaskRunnerProvider()->MainThreadTaskRunner(),
+          widget_base->GetWeakPtr()));
+}
+
+void WebFrameWidgetImpl::RecorderRequestPresentationEvidence(
+    uint64_t layout_checkpoint_sequence,
+    int document_node_id,
+    std::string document_token) {
+  WebLocalFrameImpl* recorder_local_root = LocalRootImpl();
+  const bool recorder_has_root =
+      recorder_local_root && recorder_local_root->GetFrame();
+  RecorderRequestWidgetPresentation(
+      widget_base_.get(), recorder_has_root, false,
+      frame_sink_id_.client_id(), frame_sink_id_.sink_id(),
+      recorder_has_root
+          ? recorder_local_root->GetFrame()->GetLocalFrameToken().ToString()
+          : std::string(),
+      recorder_has_root && View()->does_composite(), ForMainFrame(),
+      layout_checkpoint_sequence,
+      document_node_id, std::move(document_token));
+}
+
+"""
+STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK = """\
 // Recorder evidence: the facts every record of one presentation request
 // repeats. The swap promise and the presentation callback share them across
 // the main and compositor threads, so they never change once made.
@@ -12403,12 +12951,55 @@ void WebFrameWidgetImpl::RecorderRequestPresentationEvidence(
 """
 
 
+BLINK_PRESENTATION_FREE_DECLARATION_ANCHOR = (
+    "\nclass CORE_EXPORT WebFrameWidgetImpl\n"
+)
+BLINK_PRESENTATION_FREE_DECLARATION = """
+// Recorder evidence: records a presentation request for the compositor frame
+// that carries a layout checkpoint's or change set's rendering update, and
+// queues a swap promise that follows that frame when the widget composites. A
+// frame widget's request names its frame sink; a page popup's widget is not
+// told its frame sink, so its request names only its frame. Defined in
+// web_frame_widget_impl.cc.
+CORE_EXPORT void RecorderRequestWidgetPresentation(
+    WidgetBase* widget_base,
+    bool has_widget,
+    bool page_popup,
+    uint32_t frame_sink_client_id,
+    uint32_t frame_sink_id,
+    std::string local_root_frame_token,
+    bool view_composites,
+    bool is_main_frame_widget,
+    uint64_t layout_checkpoint_sequence,
+    int document_node_id,
+    std::string document_token);
+
+// Recorder evidence: when the frame is in a page popup, such as the list of an
+// open select, requests the presentation from the popup's widget and returns
+// true; otherwise returns false. Defined in web_page_popup_impl.cc.
+CORE_EXPORT bool RecorderRequestPagePopupPresentation(
+    LocalFrame& frame,
+    uint64_t layout_checkpoint_sequence,
+    int document_node_id,
+    const std::string& document_token);
+"""
+
+
 def patch_blink_web_frame_widget_header(path: Path) -> None:
     """Declares the presentation request and befriends its swap promise."""
     text = read_source(path)
     text = add_includes_after(
         text, '#include "base/time/time.h"', ("#include <string>",), path
     )
+    # Protocol 0.43: the widget-level request a page popup shares.
+    if BLINK_PRESENTATION_FREE_DECLARATION not in text:
+        text = replace_once(
+            text,
+            BLINK_PRESENTATION_FREE_DECLARATION_ANCHOR,
+            BLINK_PRESENTATION_FREE_DECLARATION
+            + BLINK_PRESENTATION_FREE_DECLARATION_ANCHOR,
+            path,
+        )
     if BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION not in text:
         text = replace_once(
             text,
@@ -12438,6 +13029,25 @@ def patch_blink_web_frame_widget(path: Path) -> None:
         BLINK_PRESENTATION_WIDGET_INCLUDES,
         path,
     )
+    # A tree patched before protocol 0.43 holds the swap promise that reaches
+    # its widget as a WebFrameWidgetImpl; it is replaced whole.
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK,
+                BLINK_PRESENTATION_WIDGET_BLOCK,
+            ),
+        ),
+        path,
+    )
+    if (
+        BLINK_PRESENTATION_WIDGET_MARKER in text
+        and BLINK_PRESENTATION_WIDGET_BLOCK not in text
+    ):
+        raise RuntimeError(
+            f"{path}: the presentation swap promise is not recognised"
+        )
     text = insert_before_once(
         text,
         BLINK_PRESENTATION_WIDGET_ANCHOR,
@@ -14476,6 +15086,8 @@ def main() -> int:
     patch_blink_input_element(forms / "html_input_element.cc")
     patch_blink_text_field_input_type(forms / "text_field_input_type.cc")
     patch_blink_text_area_element(forms / "html_text_area_element.cc")
+    patch_blink_option_element(forms / "html_option_element.cc")
+    patch_blink_page_popup(blink_core / "exported" / "web_page_popup_impl.cc")
     patch_blink_local_frame_view(blink_core / "frame" / "local_frame_view.cc")
     for recorder_path, recorder_declaration, recorder_hooks in (
         (

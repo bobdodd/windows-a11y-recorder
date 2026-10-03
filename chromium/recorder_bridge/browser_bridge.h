@@ -1070,6 +1070,64 @@ void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
                                              int referenced_node_id,
                                              CookieCallOrigin origin);
 
+// A rectangle in screen DIPs, or in a frame's local root, as Blink's
+// gfx::Rect holds it.
+struct PagePopupRect {
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+};
+
+// Records a page popup, such as the list of an open select, once its
+// document is installed. The document named is the popup's own; the owner is
+// the element that opened it, in the owner document. The kind is
+// "select-list", "date-time", "color", or "other". The rectangles are those
+// WebPagePopupImpl computes: the owner's visible bounds in its local root, the
+// owner's local root view and the anchor in screen DIPs, and the popup's first
+// window rectangle.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPagePopupOpened(int document_node_id,
+                                std::string document_token,
+                                std::string kind,
+                                int owner_document_node_id,
+                                std::string owner_document_token,
+                                int owner_node_id,
+                                PagePopupRect owner_visible_bounds_in_local_root,
+                                PagePopupRect owner_local_root_rect_in_screen,
+                                PagePopupRect anchor_rect_in_screen,
+                                PagePopupRect initial_window_rect,
+                                double zoom_factor);
+
+// Records a page popup's window rectangle. The source "requested" is a
+// rectangle the popup asked for, after the emulation is reversed, deferred when
+// it was asked for before the popup was shown; "placed" is the widget and
+// window rectangles the browser gave the popup's widget.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPagePopupWindowRect(int document_node_id,
+                                    std::string document_token,
+                                    std::string source,
+                                    bool deferred,
+                                    PagePopupRect window_rect,
+                                    bool has_widget_rect,
+                                    PagePopupRect widget_rect);
+
+// Records a page popup closing, by "renderer" or "browser".
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPagePopupClosed(int document_node_id,
+                                std::string document_token,
+                                std::string closed_by);
+
+// Records a change of an option's selectedness, which sets no attribute. The
+// select node is zero for an option with no owner select.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkOptionSelectednessChanged(int document_node_id,
+                                          std::string document_token,
+                                          int node_id,
+                                          int select_node_id,
+                                          bool selected,
+                                          CookieCallOrigin origin);
+
 // The document-level interaction state read for one interaction checkpoint.
 // Node identifiers are Blink DOM node ids, and zero means no node. The focus
 // type is Blink's record of how focus last moved in the document, named as in
@@ -1267,9 +1325,11 @@ uint64_t RecordBlinkLayoutChanges(
 // The local-root widget a presentation request was queued on. The frame sink
 // is the viz::FrameSinkId whose compositor frames the frame tokens number, and
 // the frame token is the LocalFrameToken of the widget's local root. A request
-// made without a widget carries no identity.
+// made without a widget carries no identity. A page popup's widget is not
+// told its frame sink, so its identity names only its frame.
 struct PresentationWidgetIdentity {
   bool present = false;
+  bool page_popup = false;
   uint32_t frame_sink_client_id = 0;
   uint32_t frame_sink_id = 0;
   std::string local_root_frame_token;

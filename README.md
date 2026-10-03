@@ -388,6 +388,12 @@ the parser's changes while it parses, so a page drawn before it finished
 parsing can be recreated. See "Slice 4c" in
 [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.43 records page popups, such as the list of an open select: their
+opening, owner, window rectangles, and closing, and each change of an
+option's selectedness. A popup's rendering updates request their
+presentation from the popup's own widget. See "Slice 4d" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

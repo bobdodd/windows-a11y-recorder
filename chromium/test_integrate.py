@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.42"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.42"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.43"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.43"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -5273,6 +5273,104 @@ class InteractionIntegrationTests(unittest.TestCase):
             ),
         )
 
+    def test_patches_option_selectedness_idempotently(self):
+        patched = self.assert_patched(
+            "html_option_element.cc",
+            '#include "third_party/blink/renderer/core/html/forms/'
+            'html_option_element.h"\n',
+            (
+                INTEGRATE.BLINK_OPTION_SELECTEDNESS_HELPER_ANCHOR,
+                INTEGRATE.BLINK_OPTION_SELECTEDNESS_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_option_element,
+            (INTEGRATE.BLINK_OPTION_SELECTEDNESS_HOOK,),
+            (
+                INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+                INTEGRATE.BLINK_OPTION_SELECTEDNESS_HELPER_MARKER,
+            ),
+        )
+        # The record follows the state change, after the early return for an
+        # unchanged state.
+        hook = INTEGRATE.BLINK_OPTION_SELECTEDNESS_HOOK
+        self.assertLess(
+            hook.index("is_selected_ = selected;"),
+            hook.index("RecorderRecordOptionSelectedness("),
+        )
+
+    def test_patches_the_page_popup_idempotently(self):
+        # In the order Chromium's file holds them.
+        hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
+        anchors = [INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR, hooks[0],
+                   hooks[1], INTEGRATE.BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+                   *hooks[2:]]
+        source = cookie_source(
+            INTEGRATE.BLINK_PAGE_POPUP_OWN_INCLUDE + "\n", *anchors
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "web_page_popup_impl.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_page_popup(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_page_popup(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        for _, hook in INTEGRATE.BLINK_PAGE_POPUP_HOOKS:
+            with self.subTest(hook=hook.splitlines()[0]):
+                self.assertEqual(1, first.count(hook))
+        for include_line in INTEGRATE.BLINK_PAGE_POPUP_INCLUDES:
+            with self.subTest(include=include_line):
+                self.assertEqual(1, first.count(include_line + "\n"))
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_PAGE_POPUP_HELPER_MARKER)
+        )
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_PAGE_POPUP_REQUEST_MARKER)
+        )
+        self.assert_bridge_calls_match(first)
+        # The helpers come before the chrome client that uses them, and the
+        # request after it.
+        self.assertLess(
+            first.index(INTEGRATE.BLINK_PAGE_POPUP_HELPER_MARKER),
+            first.index(INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR),
+        )
+        self.assertLess(
+            first.index(INTEGRATE.BLINK_PAGE_POPUP_CLIENT_HOOK),
+            first.index(INTEGRATE.BLINK_PAGE_POPUP_REQUEST_MARKER),
+        )
+
+    def test_the_page_popup_patch_fails_when_an_anchor_is_absent(self):
+        # In the order Chromium's file holds them.
+        hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
+        anchors = [INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR, hooks[0],
+                   hooks[1], INTEGRATE.BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+                   *hooks[2:]]
+        for missing in range(len(anchors)):
+            kept = anchors[:missing] + anchors[missing + 1:]
+            with self.subTest(missing=anchors[missing].splitlines()[0]):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "web_page_popup_impl.cc"
+                    path.write_text(
+                        cookie_source(
+                            INTEGRATE.BLINK_PAGE_POPUP_OWN_INCLUDE + "\n",
+                            *kept,
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaises(RuntimeError):
+                        INTEGRATE.patch_blink_page_popup(path)
+
+    def test_a_popup_is_closed_once_whichever_path_runs(self):
+        # Close records only when its cancel left the page in place, which is
+        # when ClosePopup, and so its record, did not run.
+        hook = INTEGRATE.BLINK_PAGE_POPUP_BROWSER_CLOSE_HOOK
+        self.assertLess(
+            hook.index("ClearPagePopupClient();"),
+            hook.index('RecorderRecordPagePopupClosed(page_.Get(), "browser");'),
+        )
+        self.assertIn(
+            'running_inside_close ? "browser" : "renderer"',
+            INTEGRATE.BLINK_PAGE_POPUP_CLOSE_HOOK,
+        )
+
     def test_an_interaction_hook_fails_when_its_anchor_is_absent(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "frame_selection.cc"
@@ -6032,6 +6130,7 @@ class PresentationIntegrationTests(unittest.TestCase):
     def header_source(self):
         return cookie_source(
             '#include "base/time/time.h"\n',
+            INTEGRATE.BLINK_PRESENTATION_FREE_DECLARATION_ANCHOR,
             INTEGRATE.BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION_ANCHOR,
             INTEGRATE.BLINK_PRESENTATION_WIDGET_HEADER_FRIEND_ANCHOR,
         )
@@ -6061,6 +6160,15 @@ class PresentationIntegrationTests(unittest.TestCase):
             patched.index("friend class ReportTimeSwapPromise;"),
             patched.index("friend class RecorderPresentationSwapPromise;"),
         )
+        # Protocol 0.43: the widget-level request is declared once, at
+        # namespace scope, before the widget class.
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_PRESENTATION_FREE_DECLARATION)
+        )
+        self.assertLess(
+            patched.index("void RecorderRequestWidgetPresentation("),
+            patched.index("class CORE_EXPORT WebFrameWidgetImpl"),
+        )
 
     def test_patches_the_widget_idempotently(self):
         patched = self.patch_twice(
@@ -6081,6 +6189,57 @@ class PresentationIntegrationTests(unittest.TestCase):
         for include_line in INTEGRATE.BLINK_PRESENTATION_WIDGET_INCLUDES:
             with self.subTest(include=include_line):
                 self.assertEqual(1, patched.count(include_line + "\n"))
+
+    def test_a_042_swap_promise_is_upgraded_whole(self):
+        source = cookie_source(
+            self.WIDGET_INCLUDE + "\n",
+            INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+        ).replace(
+            INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+            INTEGRATE.STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK
+            + INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+        )
+        patched = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            source,
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK)
+        )
+        self.assertNotIn(
+            INTEGRATE.STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK, patched
+        )
+        self.assertNotIn("MakeCrossThreadWeakHandle(widget)", patched)
+
+    def test_an_unrecognised_swap_promise_is_refused(self):
+        source = cookie_source(
+            self.WIDGET_INCLUDE + "\n",
+            "class RecorderPresentationSwapPromise : public cc::SwapPromise {};\n"
+            + INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "web_frame_widget_impl.cc"
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                INTEGRATE.patch_blink_web_frame_widget(path)
+
+    def test_a_page_popup_shares_the_widget_request(self):
+        block = INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK
+        # The promise reaches its widget through a weak WidgetBase pointer,
+        # so a page popup, which is not garbage collected, can use it.
+        self.assertIn("base::WeakPtr<WidgetBase> widget_base", block)
+        self.assertIn("widget_base->GetWeakPtr()", block)
+        self.assertIn("void RecorderRequestWidgetPresentation(", block)
+        self.assertIn(
+            "RecorderRequestPagePopupPresentation(",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER,
+        )
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertLess(
+            helper.index("RecorderRequestPagePopupPresentation("),
+            helper.index("FrameWidgetImpl() : nullptr;"),
+        )
 
     def test_the_widget_patches_fail_when_an_anchor_is_absent(self):
         cases = (

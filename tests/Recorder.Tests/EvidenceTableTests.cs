@@ -822,11 +822,13 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     // The tables of version 8 have no computed style key on layout nodes and
     // hold a dispatch path scope's visible indexes as rows, so a sample with
     // either cannot be written into them.
-    // Migration 0014 added the protocol 0.35 walk and change set columns.
+    // Migration 0014 added the protocol 0.35 walk and change set columns, and
+    // 0015 the protocol 0.43 widget kind.
     private static bool WritableAtVersion8(RecorderEvent record) =>
         record.EventType is not ("layout-checkpoint-node" or "dom-checkpoint-started" or
             "layout-checkpoint-started" or "interaction-checkpoint-started" or
-            "presentation-requested") &&
+            "presentation-requested" or "presentation-not-swapped" or
+            "presentation-swapped" or "presentation-feedback") &&
         !(record.Payload.TryGetProperty("pathScopes", out var scopes) &&
           scopes.ValueKind == JsonValueKind.Array &&
           scopes.GetArrayLength() > 0);
