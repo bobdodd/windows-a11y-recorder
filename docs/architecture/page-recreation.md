@@ -3780,7 +3780,10 @@ Limits of sub-step 2:
   each opening, window rectangle, selectedness change, presentation, and
   closing, joined to the select; the recreation at each chosen frame
   shows the list open or closed, with the highlighted option, at the
-  recorded place.
+  recorded place. Over the DevTools protocol, the popup's items are found in
+  the Elements tree under the added iframe, an item hit at its drawn
+  position is the recorded item, and the page's recorded boxes are
+  unchanged by the added iframe.
 - System test on the target machine: the CNIB events page is recorded
   with each of its selects opened and the highlight moved, and the
   recreation at frames with the list open, after the highlight moves, and
