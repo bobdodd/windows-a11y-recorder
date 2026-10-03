@@ -1262,6 +1262,9 @@ fixed.
 
 ### A read-only snapshot
 
+Replaced on 2026-10-03 by "Input refused (proposed)" under slice 4d:
+the recreation takes no input except the right-click for Inspect.
+
 The owner, on 2026-09-30: "the page is a read-only snapshot, I didn't think
 there was anything to edit except the user typing in a text field or text
 area." This replaces requirement 12 of the slice 3 design. In the recreation
