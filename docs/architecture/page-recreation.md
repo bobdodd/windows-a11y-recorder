@@ -4251,6 +4251,85 @@ Tests as built:
   and the recreated popup's iframe are left to the system test, as the
   test's DevTools client does not read protocol events.
 
+#### Popup on screen (proposed)
+
+Reported by the owner on 2026-10-03, with d9461fc, on recording
+20261003-143108: three of the four selects show their lists in the
+recreation, and the day-of-week select at 38.653 s does not.
+
+What the recording shows. The day-of-week list (popup document
+dom-document-11093) was opened by a mouse press at 37.849 s; its
+`page-popup-opened` record is at 37.919 s, the browser's
+`popup-widget-shown` at 37.930 s, and its first presented rendering update
+at 38.095 s. A mouse press outside the list at 38.529 s closed it:
+`page-popup-closed`, closed by the renderer, at 38.531 s. The browser
+records nothing of the popup's window after that. The captured frames
+around it:
+
+| Frame | Composed | List in the captured image | Open by the current rule |
+| --- | --- | --- | --- |
+| 180, 37.910 s | 37.929 s | no | yes |
+| 181, 38.112 s | 38.129 s | yes | yes |
+| 182, 38.316 s | 38.345 s | yes | yes |
+| 183, 38.519 s | 38.545 s | yes | no |
+| 184, 38.723 s | 38.745 s | no | no |
+
+So the current rule, an open record at or before the frame's composition
+and no close record by then (sub-step 2 as built), is wrong at both ends.
+The renderer's records are not the times the list is on the screen: the
+list is drawn after it is opened, and its window leaves the screen after
+the renderer closes it. Frame 183 was composed 14 ms after the close
+record and still shows the list; frame 180 was composed before the
+browser showed the window and does not. The position near the window's
+right edge plays no part: the list's window rectangle, (1369, 519, 263,
+242), lies inside the page's local root, (449, 87, 1240, 925). The same
+holds at the reopening: frame 187, 39.321 s, composed at 39.345 s, is
+open by the current rule with no presented rendering update of the
+popup yet.
+
+Proposed rule: a popup is shown at a captured frame when it has a
+presented rendering update at or before the frame's composition (its
+first frame on the screen) and its window had not left the screen by the
+composition.
+
+What is recorded (protocol 0.45): on `browser.interaction`, a new
+`popup-widget-hidden` record in the browser process when the popup's
+window is hidden or destroyed, with the popup's frame sink ID, so that it
+joins the widget records as `popup-widget-shown` does, and which of the
+two happened. The place is found by name in the Chromium checkout on the
+target machine before the patch is written (the popup's
+`RenderWidgetHostViewAura`, where its window is hidden or destroyed), and
+its line is recorded here then. A recording without the record, such as
+20261003-143108, closes a popup at its `page-popup-closed` record, as now,
+and the evidence panel says so.
+
+What the recreation does: unchanged, at the frames the rule chooses. The
+evidence panel's popup line names the presented update and the window
+record the choice rests on.
+
+Limits:
+
+- The Windows compositor composes on its own schedule, so a frame
+  composed within a few milliseconds of the window's removal may show
+  either state. Where the hidden record and the composition are within
+  one display interval of each other, the evidence panel says that the
+  frame is at the edge.
+
+Required tests:
+
+- Unit tests: the rule at each end (no presented update, so not shown; a
+  presented update at or before the composition, shown; hidden before the
+  composition, not shown; no hidden record, closed at the close record);
+  the new record parsed and joined on frame sink ID; the integration
+  hook written once, unchanged when applied twice, failing when its
+  anchor is absent.
+- Integration test in the instrumented Chromium: a select's list opened
+  and closed records one `popup-widget-hidden` after its
+  `page-popup-closed`, with the frame sink ID of its `popup-widget-shown`.
+- System test on the target machine: in a new recording, each frame
+  either side of a list's opening and closing shows the list in the
+  recreation when, and only when, the captured image does.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
