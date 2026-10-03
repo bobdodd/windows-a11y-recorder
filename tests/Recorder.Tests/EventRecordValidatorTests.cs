@@ -3235,6 +3235,27 @@ public sealed class EventRecordValidatorTests
         Assert.Contains(issues, issue => issue.Code == code);
     }
 
+    [Fact]
+    public void RejectsAChangeSetOfACheckpointsUpdateWithoutTheCheckpoint()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!;
+        payload["layoutCheckpointId"] = null;
+
+        var issues = ValidateLayoutRecord("layout-changes-started", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-layout-change-checkpoint-update-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsAChangeSetWithoutTheCheckpointUpdateFlag()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!.AsObject();
+        payload.Remove("checkpointUpdate");
+
+        Assert.NotEmpty(ValidateLayoutRecord("layout-changes-started", payload));
+    }
+
     [Theory]
     [InlineData("[]")]
     [InlineData("[\"style\", \"style\"]")]

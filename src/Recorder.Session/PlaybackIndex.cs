@@ -101,6 +101,11 @@ public sealed class PlaybackIndexBuilder
     private readonly Dictionary<(long Segment, int Key), int> _segmentCounts = [];
     private readonly List<CapturedFrameComposition> _compositions = [];
     private readonly List<LayoutCompletion> _completions = [];
+    // Protocol 0.46: a change set read for the rendering update its named
+    // checkpoint recorded, by browser instance, process, and change set,
+    // and the completion time of each, by its checkpoint.
+    private readonly Dictionary<(string?, long?, string), string> _checkpointUpdateChangeSets = [];
+    private readonly Dictionary<(string?, long?, string), long> _checkpointUpdateCompletions = [];
     private readonly List<PresentationRequest> _requests = [];
     private readonly List<PresentationFeedback> _feedback = [];
     private readonly List<ClockSynchronization> _synchronizations = [];
@@ -357,8 +362,28 @@ public sealed class PlaybackIndexBuilder
             // From protocol 0.35 a rendering update that was not walked is
             // presented after its layout change set, which takes the
             // checkpoint's place. The two identities never share a value.
+            case ("browser.layout", "layout-changes-started"):
+                if (ReadBoolean(payload, "checkpointUpdate") == true &&
+                    ReadString(payload, "changeSetId") is { } updateChangeSet &&
+                    ReadString(payload, "layoutCheckpointId") is { } updateCheckpoint)
+                {
+                    _checkpointUpdateChangeSets[(ReadString(context, "browserInstanceId"), ReadInt64(context, "processId"), updateChangeSet)] =
+                        updateCheckpoint;
+                }
+
+                break;
             case ("browser.layout", "layout-checkpoint-completed"):
             case ("browser.layout", "layout-changes-completed"):
+                if (record.EventType == "layout-changes-completed" &&
+                    ReadString(payload, "changeSetId") is { } completedChangeSet &&
+                    _checkpointUpdateChangeSets.TryGetValue(
+                        (ReadString(context, "browserInstanceId"), ReadInt64(context, "processId"), completedChangeSet),
+                        out var ofCheckpoint))
+                {
+                    _checkpointUpdateCompletions[(ReadString(context, "browserInstanceId"), ReadInt64(context, "processId"), ofCheckpoint)] =
+                        record.MonotonicNanoseconds;
+                }
+
                 if (ReadString(context, "documentToken") is { } token &&
                     (record.EventType == "layout-checkpoint-completed"
                         ? ReadString(payload, "checkpointId")
@@ -453,10 +478,18 @@ public sealed class PlaybackIndexBuilder
                     var offset = decimal.Round(
                         (item.PresentedTicks - item.NativeValue) * 1_000_000_000m / frequency,
                         MidpointRounding.AwayFromZero);
+                    // A walked update is presented through its checkpoint,
+                    // and its own change set follows the checkpoint, so the
+                    // update's state is cut after that change set.
+                    var cut = _checkpointUpdateCompletions.TryGetValue(
+                        (completion.BrowserInstanceId, completion.ProcessId, completion.CheckpointId),
+                        out var updateCompleted)
+                        ? updateCompleted
+                        : completion.Time;
                     result.Add(new BrowserPresentedCheckpoint(
                         completion.BrowserInstanceId,
                         completion.DocumentToken,
-                        completion.Time,
+                        cut,
                         item.Time + (long)offset));
                 }
             }

@@ -3697,6 +3697,7 @@ internal static class EventPayloadValidator
                 RequiredObject("context"),
                 RequiredString("changeSetId"),
                 NullableString("layoutCheckpointId"),
+                RequiredBoolean("checkpointUpdate"),
                 RequiredString("viewTransformNodeId"),
                 RequiredObject("viewPaintOffset"),
                 RequiredNumber("layoutZoomFactor", positive: true)
@@ -3709,6 +3710,16 @@ internal static class EventPayloadValidator
             "layout-checkpoint-",
             "browser-layout-change-checkpoint-id-invalid",
             issues);
+        if (payload.TryGetProperty("checkpointUpdate", out var update) &&
+            update.ValueKind == JsonValueKind.True &&
+            !HasNonnullProperty(payload, "layoutCheckpointId"))
+        {
+            AddError(
+                issues,
+                "browser-layout-change-checkpoint-update-inconsistent",
+                "#/payload/checkpointUpdate",
+                "A change set of a checkpoint's update names that checkpoint.");
+        }
         ValidateLayoutIdentity(
             payload,
             "viewTransformNodeId",

@@ -5275,6 +5275,10 @@ uint64_t RecordBlinkLayoutChanges(
               named_checkpoint_sequence == 0
                   ? base::Value()
                   : base::Value(LayoutCheckpointId(named_checkpoint_sequence)));
+  started.Set("checkpointUpdate",
+              IsCheckpointUpdateChangeSet(
+                  update == LayoutCheckpointStorage::Update::kWalked,
+                  named_checkpoint_sequence));
   started.Set("viewTransformNodeId",
               LayoutTransformNodeId(frame.view_transform_node_id));
   base::DictValue offset;

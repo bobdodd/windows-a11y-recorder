@@ -143,6 +143,17 @@ void TestTheChangeSetSourceIsDistinct() {
 
 }  // namespace
 
+void TestOnlyTheChangeSetOfACheckpointsOwnUpdateIsMarked() {
+  Expect(a11y_recorder::IsCheckpointUpdateChangeSet(true, 12),
+         "the change set reading the checkpoint's update is marked");
+  Expect(!a11y_recorder::IsCheckpointUpdateChangeSet(false, 12),
+         "a later change set that names the checkpoint is not marked");
+  Expect(!a11y_recorder::IsCheckpointUpdateChangeSet(true, 0),
+         "a change set naming no checkpoint is not marked");
+  Expect(!a11y_recorder::IsCheckpointUpdateChangeSet(false, 0),
+         "a change set of an update that was not walked is not marked");
+}
+
 int main() {
   TestWithoutChecksOnlyTheFirstRequestsAreWalked();
   TestAChangeBeforeAnyWalkIsWalkedFirst();
@@ -151,6 +162,7 @@ int main() {
   TestChecksWalkEveryNthRequest();
   TestAForgottenDocumentIsWalkedAgain();
   TestTheChangeSetSourceIsDistinct();
+  TestOnlyTheChangeSetOfACheckpointsOwnUpdateIsMarked();
   if (failures == 0) {
     std::printf("full walk tests passed\n");
   }

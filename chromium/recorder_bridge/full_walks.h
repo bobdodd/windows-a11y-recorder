@@ -27,6 +27,16 @@ inline uint64_t LayoutChangeSetSource(uint64_t change_set_sequence) {
              : (change_set_sequence | kLayoutChangeSetSourceBit);
 }
 
+// Whether a layout change set is read for the rendering update its named
+// checkpoint recorded (protocol 0.46): the checkpoint's update had not yet
+// been read by a change set, and the change set names that checkpoint. Such
+// a change set is part of the walked update, which is presented through its
+// checkpoint, so the presented state includes it.
+inline bool IsCheckpointUpdateChangeSet(bool checkpoint_update_unread,
+                                        uint64_t named_checkpoint_sequence) {
+  return checkpoint_update_unread && named_checkpoint_sequence != 0;
+}
+
 class FullWalkSchedule {
  public:
   // An interval of 0 walks no document to check its change records.

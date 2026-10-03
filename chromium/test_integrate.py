@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.45"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.45"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.46"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.46"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent

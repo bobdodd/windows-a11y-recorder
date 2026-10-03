@@ -1089,7 +1089,13 @@ record on `browser.interaction`, named by the popup widget's frame sink, so
 that a popup is matched to the time its window left the screen. The design
 is in [page recreation](page-recreation.md), "Popup on screen".
 
-Live 0.45 connections require an exact protocol-version match.
+Protocol version 0.46 adds `checkpointUpdate` to `layout-changes-started`:
+true when the change set was read for the rendering update its named
+checkpoint recorded, which is presented through that checkpoint, and false
+otherwise. The design is in [page recreation](page-recreation.md), "Layout
+of a walked rendering update".
+
+Live 0.46 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

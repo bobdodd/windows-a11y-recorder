@@ -433,6 +433,12 @@ token, and `RecordBlinkPagePopupWindowRect` records only a requested
 rectangle; the integration script removes the 0.43 hook in
 `WebPagePopupImpl::SetScreenRects` from a checkout it patched before.
 
+Protocol 0.46 adds `checkpointUpdate` to `layout-changes-started`.
+`RecordBlinkLayoutChanges` sets it with `IsCheckpointUpdateChangeSet` in
+`full_walks.h`: true when the update state the named checkpoint left had
+not yet been read by a change set, the same condition under which it makes
+no presentation request for the change set.
+
 Protocol 0.45 adds `RecordBrowserPopupWidgetHidden`, called from the hooks in
 `render_widget_host_view_aura.cc` in `RenderWidgetHostViewAura::Hide` and
 `RenderWidgetHostViewAura::CleanUpHostObservers`, after the popup view's

@@ -197,6 +197,7 @@ internal static class BrowserLayoutPayloads
           "context": {{ContextJson}},
           "changeSetId": "layout-changes-1",
           "layoutCheckpointId": "layout-checkpoint-1",
+          "checkpointUpdate": true,
           "viewTransformNodeId": "layout-transform-1",
           "viewPaintOffset": { "x": 0, "y": 0 },
           "layoutZoomFactor": 1.25
@@ -208,6 +209,7 @@ internal static class BrowserLayoutPayloads
           "context": {{ContextJson}},
           "changeSetId": "layout-changes-2",
           "layoutCheckpointId": null,
+          "checkpointUpdate": false,
           "viewTransformNodeId": "layout-transform-1",
           "viewPaintOffset": { "x": 2, "y": 2 },
           "layoutZoomFactor": 1.25

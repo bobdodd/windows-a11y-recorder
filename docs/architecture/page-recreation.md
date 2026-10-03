@@ -4399,7 +4399,7 @@ Chromium, which needs a recording run of it, as the earlier recording
 additions did; what is recorded is checked on the target machine with a
 new recording, alongside the system test.
 
-#### Layout of a walked rendering update (proposed)
+#### Layout of a walked rendering update (agreed)
 
 Reported by the owner on 2026-10-03, with 9d22e68, on recording
 20261003-193544: each list is shown, but in some frames just after a list
@@ -4467,6 +4467,35 @@ Required tests:
 - System test on the target machine: in a new recording, each frame just
   after a list opens shows its highlighted option in the colour the
   captured image shows.
+
+#### Layout of a walked rendering update as built
+
+Agreed by the owner on 2026-10-03 ("yes please").
+
+- Bridge: `RecordBlinkLayoutChanges` writes `checkpointUpdate` on
+  `layout-changes-started` from `IsCheckpointUpdateChangeSet` in
+  `full_walks.h`, given whether the document's last update was walked and
+  not yet read by a change set (`Update::kWalked`) and the checkpoint the
+  change set names. It is the condition under which the function returns 0
+  and so makes no presentation request for the change set.
+- Contract and validator: `BrowserLayoutChangesStartedPayload` gains
+  `CheckpointUpdate`; the validator requires the field and, when it is
+  true, a named checkpoint.
+- Playback: the playback index keeps the completion time of each change
+  set marked `checkpointUpdate`, by browser instance, process, and the
+  checkpoint it names, and a presented checkpoint with one is cut at that
+  time rather than at the checkpoint's completion. Its presented time is
+  unchanged. The database playback reader, which the recreation does not
+  use, is not changed.
+
+Tests run: the C++ test of `IsCheckpointUpdateChangeSet` (true only with
+an unread walked update and a named checkpoint); .NET unit tests of the
+playback index (`WalkedUpdateLayoutTests`: cut at the change set's
+completion with the presented time unchanged; cut at the checkpoint with
+the field false, absent, or naming another checkpoint) and of the
+validator. Not done: the integration test in the instrumented Chromium,
+for the reason given under "Popup on screen as built"; what is recorded is
+checked on the target machine with a new recording.
 
 ### To be settled
 

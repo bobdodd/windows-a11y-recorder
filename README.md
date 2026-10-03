@@ -408,6 +408,11 @@ from its first presented rendering update until its window left the screen.
 See "Popup on screen" in
 [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.46 marks the layout change set of a walked rendering update
+(`checkpointUpdate`), so the state of a frame presented by that update
+includes the update's own layout and styles. See "Layout of a walked
+rendering update" in [page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

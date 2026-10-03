@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.45";
+    public const string CurrentVersion = "0.46";
 }
 
 public static class BrowserEvidenceChannels
@@ -1214,10 +1214,14 @@ public sealed record BrowserLayoutCheckpointCompletedPayload(
 // previous change set, if any. ViewTransformNodeId is the transform node of
 // the layout view's local border box, and ViewPaintOffset the view's paint
 // offset in it, in physical pixels.
+// CheckpointUpdate (protocol 0.46) is true when the change set was read for
+// the rendering update its named checkpoint recorded, and so is part of the
+// walked update presented through that checkpoint.
 public sealed record BrowserLayoutChangesStartedPayload(
     BrowserContext Context,
     string ChangeSetId,
     string? LayoutCheckpointId,
+    bool CheckpointUpdate,
     string ViewTransformNodeId,
     BrowserLayoutPoint ViewPaintOffset,
     double LayoutZoomFactor);
