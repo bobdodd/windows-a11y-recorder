@@ -3124,15 +3124,15 @@ refuse it in a checkpoint.
   and images is inspected, and the Console's list of boxes not imposed is
   compared with that of stage 3.
 
-### Slice 4b: the frame's moment, held (proposed)
+### Slice 4b: the frame's moment, held (agreed)
 
 Proposed 2026-10-02, after the owner agreed to start the work in
 "Requirement: the page exactly as drawn at the frame" with time held in
 the recreation and the animation state recorded. Revised 2026-10-03, at
 the owner's request, after slice 4d: the protocol is renumbered (0.45 to
 0.47 were taken by slice 4d's defects), popup widgets are included, and the
-two questions it left open are settled from the Chromium source. Nothing
-below is built.
+two questions it left open are settled from the Chromium source. Agreed
+by the owner on 2026-10-03 ("start on 4b"). Nothing below is built yet.
 
 #### What Chromium does that the recording misses
 
@@ -4396,6 +4396,9 @@ and build hold the new names (202 passed). The .NET suite is not changed
 by this step. Not done: the integration test was not rerun here, as it
 needs the instrumented Chromium; it and the system test are for the
 target machine.
+
+On the target machine, with 0172bbd, as the owner reported on 2026-10-03:
+"That worked".
 
 #### Popup on screen (agreed)
 
