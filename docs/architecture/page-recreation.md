@@ -60,7 +60,9 @@ verified against Chromium's source.
   The recreation must also not run the recorded page's own animations
   from the time it opens.
 - An open select. The recording does not hold whether a select's list was
-  open, which item was highlighted, or where the list was drawn.
+  open, which item was highlighted, or where the list was drawn. See
+  "Slice 4d" below: on Windows the list is a page popup whose document is
+  recorded, but not joined to its select, placed, or presented.
 - Other transient states: hover (the pointer's position), active and focus
   rings, the text caret and its blink phase, selection highlight, and
   scrollbar state. Focus, selection, and scroll offsets are recorded and
@@ -3158,7 +3160,7 @@ its last presented rendering update, which already includes the values of
 animations Blink ticks on the main thread (subject to the check in
 "Required tests" below), but not the compositor's values drawn after it.
 
-#### What is recorded (protocol 0.43)
+#### What is recorded (protocol 0.44)
 
 On a new topic, `browser.compositor`:
 
@@ -3232,7 +3234,7 @@ update and the compositor frame.
 
 #### Sub-steps
 
-1. Record (protocol 0.43), with its cost measured on the target machine.
+1. Record (protocol 0.44), with its cost measured on the target machine.
 2. The recreation holds time: no animation or transition run, compositor
    values imposed, animated images held at their recorded frame.
 
@@ -3454,6 +3456,181 @@ recreation compared with the screen image in the system test.
 - Not yet done: the integration test in the instrumented Chromium, which
   needs a Chromium build; it is replaced, for this sub-step, by the system
   test on the target machine and by the change check run on its recording.
+
+#### On the target machine (c5bc790)
+
+The recording of 2026-10-03 02:35 UTC holds 35 `started-parsing` walks,
+and the change check compared each of the 35 finished-parsing walks with
+the tree rebuilt from its document's `started-parsing` walk: 13,642 nodes
+compared, all equal in every field. The CNIB events page has a complete
+DOM at every frame from 15.2 seconds, its first walk at 15.182 seconds.
+The owner reported that the recreated frames look correct, except those
+with a running animation or an open select, which are drawn without them
+(slices 4b and 4d).
+
+### Slice 4d: open select lists and other page popups (proposed)
+
+Proposed 2026-10-02, after the owner's report that frames with an open
+select show it closed. Slice 4d is built before slice 4b, so it takes
+protocol 0.43 and slice 4b moves to protocol 0.44. Nothing below is built.
+
+#### What Chromium does
+
+Read in the Chromium checkout on the target machine; line numbers are
+those of that checkout, under `third_party/blink/renderer/`.
+
+- A select drawn as a menu list opens its list in a page popup, not in
+  its own document. `ChromeClientImpl::OpenPopupMenu` makes an
+  `InternalPopupMenu` unless external popup menus are used
+  (`core/page/chrome_client_impl.cc`, lines 1022 to 1031), and
+  `InternalPopupMenu::Show` opens a page popup for it
+  (`core/html/forms/internal_popup_menu.cc`, lines 711 to 714). Date,
+  time, and colour pickers are page popups too.
+- The page popup is a page of its own, with its own frame and document,
+  and its own widget. `WebPagePopupImpl` makes its frame (line 431 of
+  `core/exported/web_page_popup_impl.cc`), has its client write the
+  document (line 473), and installs it synchronously (line 475). Its
+  compositing is made on its own `WidgetBase`, with no frame widget input
+  handler (lines 508 to 522).
+- `InternalPopupMenu::WriteDocument` writes the list as a script
+  configuration: the options and their labels and styles, the selected
+  index, the select's base style, the anchor rectangle in screen
+  coordinates from the select's visible bounds in its local root, the zoom
+  factor, and the scale factor (`internal_popup_menu.cc`, from line 323).
+  The list itself is a listbox `select` of size 20 made by
+  `list_picker.js` (`core/html/forms/resources/list_picker.js`, from line
+  61).
+- The popup places its own window: `PagePopupController::setWindowRect`
+  (`core/page/page_popup_controller.cc`, line 120) reaches
+  `WebPagePopupImpl::SetWindowRect`, which sets the widget's pending window
+  rectangle and asks the browser for the popup's bounds (lines 688 to
+  721). The rectangle may extend beyond the owner's window.
+- The highlighted item is the selected option of the popup's listbox.
+  Pointer hover sets `selected` on an option (`list_picker.js`, lines 160
+  to 162 and 231 to 239), and the arrow keys move the listbox's selection; a change is
+  sent to the owner with `setValue`, which calls
+  `HTMLSelectElement::ProvisionalSelectionChanged`
+  (`internal_popup_menu.cc`, lines 672 to 678). Every change of an
+  option's selectedness, in the popup or in the page, passes through
+  `HTMLOptionElement::SetSelectedState`
+  (`core/html/forms/html_option_element.cc`, line 386), which sets no
+  attribute, so no DOM transition records it.
+- The popup is closed by `WebPagePopupImpl::ClosePopup` (line 1101), from
+  the renderer, or by `Close` (line 1069), from the browser; the owner is
+  told by `InternalPopupMenu::DidClosePopup` (`internal_popup_menu.cc`,
+  lines 680 to 685).
+
+#### What the recording already holds
+
+From the recording of 2026-10-03 02:35 UTC on the target machine, read in
+the sandbox: four popup documents, at 20.861, 22.439, 23.099, and 40.954
+seconds. Each has its DOM from a `started-parsing` walk, including the
+configuration above (for the list at 23.099 seconds: 15 options, selected
+index 0, anchor rectangle x 516, y 471, width 262, height 48, zoom and
+scale factor 1), its listeners, its input dispatches, and its focus. The
+popup open from 23.093 to 25.698 seconds also has a layout checkpoint and
+13 layout change sets. Every presentation request of a popup document is
+recorded as `no-widget`: the presentation request looks for the frame
+widget of the frame's local root (`RecorderRequestLayoutPresentation` in
+`chromium/integrate.py`), and a popup has none.
+
+So the recording holds what the popup drew, but not which select owns
+it, where its window was, which option was highlighted after it opened,
+or which captured frame shows which state.
+
+#### What is recorded (protocol 0.43)
+
+On `browser.interaction`:
+
+| Record | Where | Holds |
+| --- | --- | --- |
+| `page-popup-opened` | `WebPagePopupImpl`, after the popup document is installed | the popup's document identity, its kind (select list, date or time, colour, other), the owner element's node ID and its document's identity, the owner's visible bounds in its local root and the anchor rectangle in screen coordinates as written to the popup, the zoom and scale factors, and the popup widget's frame sink ID |
+| `page-popup-window-rect` | `WebPagePopupImpl::SetWindowRect`, at each call | the popup, and the window rectangle in screen coordinates as given to the widget, after the emulation is reversed |
+| `page-popup-closed` | `WebPagePopupImpl::ClosePopup` or `Close`, whichever runs first | the popup, and whether the renderer or the browser closed it |
+| `option-selectedness-changed` | `HTMLOptionElement::SetSelectedState`, when the state changes | the option's node ID, its select's node ID, and the new state, for every document, popup or page |
+
+The selectedness record also covers a closed select in the page, whose
+drawn text is its selected option's label, and a listbox select in the
+page.
+
+On `browser.presentation`: a layout checkpoint or change set of a popup
+document requests its presentation from the popup's own `WidgetBase`
+layer tree host, with the same swap promise as a frame widget, so the
+popup's frames are joined to captured frames as the page's are. The
+widget identity names the popup's frame sink.
+
+#### Which state a captured frame shows
+
+A popup is open at a captured frame when its `page-popup-opened` record is
+at or before the frame's composition and no `page-popup-closed` record
+is. Its state is chosen as a document's state is now: the last presented
+rendering update of the popup's widget at or before the composition. Its
+window is the last `page-popup-window-rect` at or before that update.
+
+#### What the recreation does
+
+- The page is recreated as now, with each option's recorded selectedness
+  imposed.
+- An open popup is drawn over the recreated page at its recorded window
+  rectangle, mapped into the recreation's coordinates by the owner's
+  recorded visible bounds and anchor rectangle. Its document is built
+  from the recorded DOM with recorded values imposed, as a page's is, and
+  its scripts are not run, so nothing in it changes.
+- The basis line in the evidence panel names the popup and its rendering
+  update.
+
+#### Limits
+
+- A select drawn with `appearance: base-select` puts its list in the
+  page's own top layer, not in a page popup. Whether its open state is
+  recorded is checked in the required tests.
+- With external popup menus (macOS, and Android), the list is drawn by
+  the platform; not covered. The recorder runs on Windows.
+- Part of a popup window outside the captured screen area cannot be
+  compared with the capture.
+
+#### To be settled
+
+- How the popup is drawn in the recreation: as a page popup of the
+  recreation's own, opened at the mapped rectangle, which draws it with
+  the same code as at recording, or as a layer of the recreated page,
+  which keeps the whole frame in one document that DevTools can inspect.
+- How the presentation request reaches the popup's widget from its frame:
+  the popup's `ChromeClient` is made by `WebPagePopupImpl`, and the way to
+  reach its `WidgetBase` from a `LocalFrame` is read in the checkout
+  before building.
+- Whether the date, time, and colour pickers need anything beyond the
+  records above.
+
+#### Sub-steps
+
+1. Record (protocol 0.43): the four records and the popup's
+   presentations, with the cost measured on the target machine.
+2. The recreation imposes option selectedness and draws an open popup at
+   its recorded place.
+
+Each sub-step is tested on the target machine before the next.
+
+#### Required tests
+
+- Unit tests: each new record against the record contract; the
+  integration script's hooks and their upgrades; the choice of popup
+  state and window for a frame from a sequence of records; the mapping of
+  the window rectangle into the recreation's coordinates; selectedness
+  imposed on the rebuilt state.
+- Integration tests in the instrumented Chromium, on a generated page
+  with a select: the select is opened by keyboard and by pointer, the
+  highlight is moved by the arrow keys and by hover, and the list is
+  closed by Escape, by Enter, and by a click outside; the recording holds
+  each opening, window rectangle, selectedness change, presentation, and
+  closing, joined to the select; the recreation at each chosen frame
+  shows the list open or closed, with the highlighted option, at the
+  recorded place.
+- System test on the target machine: the CNIB events page is recorded
+  with each of its selects opened and the highlight moved, and the
+  recreation at frames with the list open, after the highlight moves, and
+  after it closes with a new value, is compared with the captured screen
+  image of each frame; a difference is reported as a defect.
 
 ### To be settled
 
