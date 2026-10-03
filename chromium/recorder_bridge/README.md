@@ -433,6 +433,13 @@ token, and `RecordBlinkPagePopupWindowRect` records only a requested
 rectangle; the integration script removes the 0.43 hook in
 `WebPagePopupImpl::SetScreenRects` from a checkout it patched before.
 
+Protocol 0.45 adds `RecordBrowserPopupWidgetHidden`, called from the hooks in
+`render_widget_host_view_aura.cc` in `RenderWidgetHostViewAura::Hide` and
+`RenderWidgetHostViewAura::CleanUpHostObservers`, after the popup view's
+window is hidden and only when it had been shown. The hooks pass the popup's
+HWND, read from its window tree host, and the bridge asks `IsWindowVisible`
+whether Windows still shows it.
+
 Protocol 0.25 records layout geometry and computed styles on the
 `browser.layout` channel. The Blink hook in `local_frame_view.cc` runs after
 the lifecycle observers are told that a paint-clean update finished, and calls

@@ -4238,6 +4238,33 @@ void RecordBrowserPopupWidgetScreenRects(PopupWidgetSink sink,
                     std::move(payload));
 }
 
+void RecordBrowserPopupWidgetHidden(PopupWidgetSink sink,
+                                    std::string cause,
+                                    uintptr_t native_window) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetHidden");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !IsValidPopupWidgetSink(sink) ||
+      !IsOneOf(cause, {"hidden", "destroyed"})) {
+    return;
+  }
+  // Whether Windows still shows the popup's window now, or absent when
+  // there is no window or Windows does not know it.
+  base::Value native_visible;
+  if (native_window != 0) {
+    const HWND hwnd = reinterpret_cast<HWND>(native_window);
+    if (::IsWindow(hwnd)) {
+      native_visible = base::Value(::IsWindowVisible(hwnd) != FALSE);
+    }
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("frameSinkId", PopupWidgetSinkId(sink));
+  payload.Set("cause", std::move(cause));
+  payload.Set("nativeWindowVisible", std::move(native_visible));
+  SendBlinkEvidence("browser.interaction", "popup-widget-hidden",
+                    std::move(payload));
+}
+
 void RecordBlinkPagePopupClosed(int document_node_id,
                                 std::string document_token,
                                 std::string closed_by) {

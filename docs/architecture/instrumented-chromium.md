@@ -665,6 +665,13 @@ Four record types are emitted:
   widget, the native window's rectangle and client area in screen pixels as
   Windows returned them when the record was made, or null when it did not
   answer, and the view's device scale factor.
+- `popup-widget-hidden` (protocol 0.45): the popup widget's view hiding its
+  window, written from `RenderWidgetHostViewAura::Hide` (`cause` `hidden`)
+  or from `RenderWidgetHostViewAura::CleanUpHostObservers` before the view
+  is destroyed (`cause` `destroyed`), just after the window is hidden and
+  only when it had been shown. It carries the frame sink and
+  `nativeWindowVisible`, whether Windows still showed the popup's native
+  window when the record was made, or null when there was none.
 
 The recorded facts are bounded as follows:
 
@@ -1077,7 +1084,12 @@ name the popup widget's frame sink. `page-popup-opened` gains
 `page-popup-window-rect` records only requested rectangles. The design is in
 [page recreation](page-recreation.md), "Sub-step 1b".
 
-Live 0.44 connections require an exact protocol-version match.
+Protocol version 0.45 adds the browser process's `popup-widget-hidden`
+record on `browser.interaction`, named by the popup widget's frame sink, so
+that a popup is matched to the time its window left the screen. The design
+is in [page recreation](page-recreation.md), "Popup on screen".
+
+Live 0.45 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

@@ -402,6 +402,12 @@ in screen pixels. A page popup names its owner frame's token, which joins it
 to its widget. See "Sub-step 1b" in
 [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.45 records, from the browser process, each popup widget's window
+being hidden, with its frame sink, so that a recreated frame shows a popup
+from its first presented rendering update until its window left the screen.
+See "Popup on screen" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

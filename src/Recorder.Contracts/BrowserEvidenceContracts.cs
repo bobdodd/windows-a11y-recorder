@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.44";
+    public const string CurrentVersion = "0.45";
 }
 
 public static class BrowserEvidenceChannels
@@ -86,6 +86,7 @@ public static class BrowserEvidenceEventTypes
     public const string PopupWidgetBoundsRequested =
         "popup-widget-bounds-requested";
     public const string PopupWidgetScreenRects = "popup-widget-screen-rects";
+    public const string PopupWidgetHidden = "popup-widget-hidden";
     public const string OptionSelectednessChanged = "option-selectedness-changed";
     public const string InteractionCheckpointStarted =
         "interaction-checkpoint-started";
@@ -895,6 +896,18 @@ public sealed record BrowserPopupWidgetScreenRectsPayload(
     BrowserPagePopupRect? NativeWindowRect,
     BrowserPagePopupRect? NativeClientRect,
     double DeviceScaleFactor);
+
+// A popup widget's view hiding its window (protocol 0.45). Cause is
+// "hidden", RenderWidgetHostViewAura::Hide, or "destroyed", the view's
+// clean-up before it is destroyed; each is recorded just after the view's
+// window was hidden, and only when it had been shown. NativeWindowVisible is
+// whether Windows still showed the popup's native window then, or null when
+// it has none or Windows did not know it.
+public sealed record BrowserPopupWidgetHiddenPayload(
+    BrowserContext Context,
+    string FrameSinkId,
+    string Cause,
+    bool? NativeWindowVisible);
 
 // A change of an option's selectedness, which sets no attribute. In an open
 // select list the highlighted item is the popup listbox's selected option.

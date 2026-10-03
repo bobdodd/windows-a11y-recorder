@@ -4251,7 +4251,7 @@ Tests as built:
   and the recreated popup's iframe are left to the system test, as the
   test's DevTools client does not read protocol events.
 
-#### Popup on screen (proposed)
+#### Popup on screen (agreed)
 
 Reported by the owner on 2026-10-03, with d9461fc, on recording
 20261003-143108: three of the four selects show their lists in the
@@ -4329,6 +4329,75 @@ Required tests:
 - System test on the target machine: in a new recording, each frame
   either side of a list's opening and closing shows the list in the
   recreation when, and only when, the captured image does.
+
+#### Popup on screen as built
+
+Agreed by the owner on 2026-10-03 ("yes build it").
+
+Where the record is made. In the target machine's checkout,
+`content/browser/renderer_host/render_widget_host_view_aura.cc` hides a
+popup view's window in two places: `RenderWidgetHostViewAura::Hide`, line
+533 (`window_->Hide();`), and `RenderWidgetHostViewAura::CleanUpHostObservers`,
+line 3015, which `RenderWidgetHostViewBase::DestroyOrDefer`
+(`render_widget_host_view_base.cc`, line 845) calls before the view is
+destroyed, the path a closed popup takes. `InitAsPopup`, line 454, makes
+the window with `WINDOW_TYPE_MENU`. The integration script's
+`patch_content_render_widget_host_view` adds the bridge include, a helper
+that reads the popup's HWND from its window tree host, and a hook at each
+place: when the view is a popup (`WidgetType::kPopup`) and its window was
+shown (`TargetVisibility`), it records after `window_->Hide()`, with the
+cause `hidden` or `destroyed`. A view already hidden records nothing, so a
+popup hidden and then destroyed has one record, and the destructor's
+second clean-up, which finds no window, has none.
+
+The record (protocol 0.45): `popup-widget-hidden` on `browser.interaction`,
+with the browser process's context, `frameSinkId` written `clientId:sinkId`
+as the other popup widget records are, `cause`, and `nativeWindowVisible`,
+which `RecordBrowserPopupWidgetHidden` reads with `IsWindowVisible` on the
+HWND when the record is made, or null when there is no window. It states
+whether the native window was off the screen when the record was made,
+rather than assuming that hiding the Aura window hides it at once. The
+recorder's contract is `BrowserPopupWidgetHiddenPayload`, and its
+validator requires the browser process's context and one of the two
+causes.
+
+The rule, in the recorder:
+
+- `PagePopups.OpenAt` closes a popup at the first `popup-widget-hidden`
+  of its joined widget's frame sink after it opened; a recording without
+  one closes it at its `page-popup-closed`, as before. It keeps both times
+  and the frame's composition time with the popup.
+- `RecordingFileDocuments.Popups` keeps only the popups whose document
+  state at the frame is the one after a presented rendering update
+  (`IsDrawn`), so a popup opened but not yet drawn by the composition is
+  not shown.
+- The evidence panel's popup line adds, after the joined widget, either
+  the time the window was hidden and the composition, or that the
+  recording holds no hidden record and the popup is taken as open until
+  its close record. It still names the presented update its state follows.
+  Where the hidden record follows the composition by at most one 60 Hz
+  display interval (16.667 ms), it says that the frame is at the edge and
+  the captured image may show either state.
+
+Limits as built:
+
+- The edge interval is fixed at one 60 Hz display interval, not read from
+  the display of the recording.
+- A popup hidden shortly before a composition is not shown, and so has no
+  line in the evidence panel; the edge is stated only for a shown popup.
+- Recording 20261003-143108 has no hidden records, so its frame 183 still
+  does not show the day-of-week list; a new recording is needed.
+
+Tests run: Python unit tests of the integration script (the hooks written
+once, unchanged when applied twice, failing when an anchor is absent, the
+shown check before the hide and the record after it), 197 in all; the
+patch was also applied to a copy of the target machine's file and checked
+against the bridge's signatures. .NET unit tests (970 passed, with the 4 known ChromiumLauncherTests failures that need Windows): the rule at each end
+(`PagePopupTests`), the edge text, the drawn check, and the record's
+contract and validator. Not done: the integration test in the instrumented
+Chromium, which needs a recording run of it, as the earlier recording
+additions did; what is recorded is checked on the target machine with a
+new recording, alongside the system test.
 
 ### To be settled
 

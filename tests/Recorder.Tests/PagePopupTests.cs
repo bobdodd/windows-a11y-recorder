@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Recorder.Contracts;
+using Recorder.Database.RecordingFiles;
 using Recorder.Recreation;
 using Recorder.Session;
 
@@ -61,6 +62,11 @@ public sealed class PagePopupTests
             {"context":{{BrowserContext}},"frameSinkId":"{{sink}}","viewRect":{{view}},"windowRect":{{view}},"deviceScaleFactor":1}
             """));
 
+    private static PopupRecord Hidden(long key, long time, string sink, string cause = "destroyed") =>
+        new(key, time, "popup-widget-hidden", J($$"""
+            {"context":{{BrowserContext}},"frameSinkId":"{{sink}}","cause":"{{cause}}","nativeWindowVisible":false}
+            """));
+
     private static PopupRecord Requested(long key, long time, string token, long openedKey, string rect) =>
         new(key, time, "page-popup-window-rect", J($$"""
             {"context":{{Renderer(token, "dom-document-" + openedKey)}},"deferred":false,"windowRect":{{rect}}}
@@ -85,6 +91,79 @@ public sealed class PagePopupTests
         Assert.Empty(PagePopups.OpenAt(records, Page, 200));
         // Only the popups the page's document owns.
         Assert.Empty(PagePopups.OpenAt(records, "OTHER-PAGE", 150));
+    }
+
+    // "Popup on screen" (protocol 0.45): a popup's window leaves the screen
+    // when the browser hides it, after the renderer closes it, so a frame
+    // composed between the two shows the popup.
+    [Fact]
+    public void APopupIsOpenUntilItsWidgetsWindowIsHiddenWhenTheRecordingHoldsIt()
+    {
+        PopupRecord[] records =
+        [
+            Created(1, 90, "6:18"),
+            Opened(2, 100, "POPUP-A"),
+            Closed(3, 200, "POPUP-A", 2),
+            Hidden(4, 205, "6:99"),
+            Hidden(5, 240, "6:18"),
+            Hidden(6, 300, "6:18", "hidden"),
+        ];
+
+        var between = Assert.Single(PagePopups.OpenAt(records, Page, 220));
+        Assert.Equal(240, between.WindowHiddenTime);
+        Assert.Equal(200, between.ClosedTime);
+        Assert.Equal(220, between.CompositionTime);
+        Assert.Single(PagePopups.OpenAt(records, Page, 239));
+        // The first hidden record of the joined widget closes it; another
+        // widget's record does not.
+        Assert.Empty(PagePopups.OpenAt(records, Page, 240));
+        Assert.Empty(PagePopups.OpenAt(records, Page, 250));
+    }
+
+    [Fact]
+    public void WithoutAHiddenRecordAPopupClosesAtItsCloseRecord()
+    {
+        PopupRecord[] records =
+        [
+            Created(1, 90, "6:18"),
+            Opened(2, 100, "POPUP-A"),
+            Closed(3, 200, "POPUP-A", 2),
+        ];
+
+        var open = Assert.Single(PagePopups.OpenAt(records, Page, 150));
+        Assert.Null(open.WindowHiddenTime);
+        Assert.Equal(200, open.ClosedTime);
+        Assert.Contains("no record of its window being hidden", open.OnScreenBasis, StringComparison.Ordinal);
+        Assert.Empty(PagePopups.OpenAt(records, Page, 200));
+    }
+
+    [Fact]
+    public void AFrameComposedWithinOneDisplayIntervalOfTheHiddenRecordIsAtTheEdge()
+    {
+        PopupRecord[] records =
+        [
+            Created(1, 90, "6:18"),
+            Opened(2, 100, "POPUP-A"),
+            Closed(3, 38_531_000_000, "POPUP-A", 2),
+            Hidden(4, 38_550_000_000, "6:18"),
+        ];
+
+        var edge = Assert.Single(PagePopups.OpenAt(records, Page, 38_545_000_000));
+        Assert.Equal(
+            "its window was hidden at 38.550 s, after the frame's composition at 38.545 s, within one 60 Hz display interval of it, so the frame is at the edge and the captured image may show either state",
+            edge.OnScreenBasis);
+        var clear = Assert.Single(PagePopups.OpenAt(records, Page, 38_500_000_000));
+        Assert.Equal("its window was hidden at 38.550 s, after the frame's composition at 38.500 s", clear.OnScreenBasis);
+    }
+
+    [Fact]
+    public void APopupIsDrawnOnlyFromAPresentedRenderingUpdate()
+    {
+        var state = new BrowserDocumentState("k");
+        Assert.False(RecordingFileDocuments.IsDrawn(null));
+        Assert.False(RecordingFileDocuments.IsDrawn(new BrowserDocumentAt("k", state, new BrowserStateBasis("by-time", 10, null))));
+        Assert.False(RecordingFileDocuments.IsDrawn(new BrowserDocumentAt("k", null, new BrowserStateBasis("presented", 10, 12))));
+        Assert.True(RecordingFileDocuments.IsDrawn(new BrowserDocumentAt("k", state, new BrowserStateBasis("presented", 10, 12))));
     }
 
     [Fact]

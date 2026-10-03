@@ -338,6 +338,16 @@ internal static class BrowserInteractionPayloads
         }
         """;
 
+    // Protocol 0.45: the popup's view hid its window before it was destroyed.
+    public static readonly string PopupWidgetHidden = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "cause": "destroyed",
+          "nativeWindowVisible": false
+        }
+        """;
+
     // The highlight moved by an arrow key: no script made the change.
     public static readonly string OptionSelected = $$"""
         {
@@ -450,6 +460,7 @@ internal static class BrowserInteractionPayloads
         yield return ("popup-widget-bounds-requested", PopupWidgetBoundsRequested);
         yield return ("popup-widget-bounds-requested", PopupWidgetBoundsIgnored);
         yield return ("popup-widget-screen-rects", PopupWidgetScreenRects);
+        yield return ("popup-widget-hidden", PopupWidgetHidden);
         yield return ("option-selectedness-changed", OptionSelected);
     }
 }

@@ -10247,6 +10247,106 @@ def patch_content_render_widget_host(path: Path) -> None:
     write_patched(path, text)
 
 
+# Protocol 0.45 (docs/architecture/page-recreation.md, "Popup on screen"):
+# the popup widget's view records when it hides its window, so that a
+# captured frame is matched to the popup's window leaving the screen rather
+# than to the renderer's close. RenderWidgetHostViewAura::Hide hides the
+# window of a popup that is hidden; CleanUpHostObservers hides it before the
+# view is destroyed, which is the path a closed popup takes. Each records
+# only a window that was shown, so a second clean-up records nothing.
+CONTENT_WIDGET_VIEW_OWN_INCLUDE = (
+    '#include "content/browser/renderer_host/render_widget_host_view_aura.h"'
+)
+CONTENT_WIDGET_VIEW_HELPER_ANCHOR = "void RenderWidgetHostViewAura::Hide() {\n"
+CONTENT_WIDGET_VIEW_HELPER_MARKER = "void RecorderRecordPopupWidgetHidden("
+CONTENT_WIDGET_VIEW_HELPER = """\
+namespace {
+
+// The popup's native window: its window tree host's HWND on Windows.
+uintptr_t RecorderPopupNativeWindow(aura::Window* recorder_window) {
+#if BUILDFLAG(IS_WIN)
+  if (recorder_window && recorder_window->GetHost()) {
+    return reinterpret_cast<uintptr_t>(
+        recorder_window->GetHost()->GetAcceleratedWidget());
+  }
+#endif
+  return 0;
+}
+
+// Records a popup widget's view hiding its window.
+void RecorderRecordPopupWidgetHidden(
+    const viz::FrameSinkId& recorder_frame_sink_id,
+    uintptr_t recorder_native_window,
+    const char* recorder_cause) {
+  a11y_recorder::PopupWidgetSink recorder_sink;
+  recorder_sink.client_id = recorder_frame_sink_id.client_id();
+  recorder_sink.sink_id = recorder_frame_sink_id.sink_id();
+  a11y_recorder::RecordBrowserPopupWidgetHidden(
+      recorder_sink, recorder_cause, recorder_native_window);
+}
+
+}  // namespace
+
+"""
+CONTENT_WIDGET_VIEW_HIDE_ANCHOR = """\
+void RenderWidgetHostViewAura::Hide() {
+  window_->Hide();
+"""
+CONTENT_WIDGET_VIEW_HIDE_HOOK = """\
+void RenderWidgetHostViewAura::Hide() {
+  const bool recorder_popup_was_shown =
+      widget_type_ == WidgetType::kPopup && window_->TargetVisibility();
+  window_->Hide();
+  if (recorder_popup_was_shown) {
+    RecorderRecordPopupWidgetHidden(GetFrameSinkId(),
+                                    RecorderPopupNativeWindow(window_),
+                                    "hidden");
+  }
+"""
+CONTENT_WIDGET_VIEW_CLEAN_UP_ANCHOR = """\
+  if (window_) {
+    aura::client::SetFocusChangeObserver(window_, nullptr);
+    window_->Hide();
+"""
+CONTENT_WIDGET_VIEW_CLEAN_UP_HOOK = """\
+  if (window_) {
+    aura::client::SetFocusChangeObserver(window_, nullptr);
+    const bool recorder_popup_was_shown =
+        widget_type_ == WidgetType::kPopup && window_->TargetVisibility();
+    window_->Hide();
+    if (recorder_popup_was_shown) {
+      RecorderRecordPopupWidgetHidden(GetFrameSinkId(),
+                                      RecorderPopupNativeWindow(window_),
+                                      "destroyed");
+    }
+"""
+CONTENT_WIDGET_VIEW_HOOKS = (
+    (CONTENT_WIDGET_VIEW_HIDE_ANCHOR, CONTENT_WIDGET_VIEW_HIDE_HOOK),
+    (CONTENT_WIDGET_VIEW_CLEAN_UP_ANCHOR, CONTENT_WIDGET_VIEW_CLEAN_UP_HOOK),
+)
+
+
+def patch_content_render_widget_host_view(path: Path) -> None:
+    """Records a popup widget's view hiding its window."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CONTENT_WIDGET_VIEW_OWN_INCLUDE,
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_WIDGET_VIEW_HELPER_ANCHOR,
+        CONTENT_WIDGET_VIEW_HELPER,
+        CONTENT_WIDGET_VIEW_HELPER_MARKER,
+        path,
+    )
+    for anchor, hook in CONTENT_WIDGET_VIEW_HOOKS:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
 BLINK_OPTION_SELECTEDNESS_HELPER = """\
 namespace {
 
@@ -15760,6 +15860,9 @@ def main() -> int:
     )
     patch_content_render_widget_host(
         renderer_host / "render_widget_host_impl.cc"
+    )
+    patch_content_render_widget_host_view(
+        renderer_host / "render_widget_host_view_aura.cc"
     )
     patch_content_popup_widget_shown(
         source / "content" / "browser" / "web_contents"

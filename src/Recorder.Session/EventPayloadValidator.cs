@@ -318,6 +318,9 @@ internal static class EventPayloadValidator
             case ("browser.interaction", "popup-widget-screen-rects"):
                 ValidateBrowserPopupWidgetScreenRects(payload, issues);
                 break;
+            case ("browser.interaction", "popup-widget-hidden"):
+                ValidateBrowserPopupWidgetHidden(payload, issues);
+                break;
             case ("browser.interaction", "option-selectedness-changed"):
                 ValidateBrowserOptionSelectednessChanged(payload, issues);
                 break;
@@ -1769,6 +1772,23 @@ internal static class EventPayloadValidator
                 "The native window rectangle and client area are recorded " +
                     "together or not at all.");
         }
+    }
+
+    private static void ValidateBrowserPopupWidgetHidden(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredFrameSinkId("frameSinkId"),
+                RequiredEnum("cause", "hidden", "destroyed"),
+                NullableBoolean("nativeWindowVisible")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues);
     }
 
     private static void ValidateBrowserPagePopupClosed(

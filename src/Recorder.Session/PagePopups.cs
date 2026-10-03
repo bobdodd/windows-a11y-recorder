@@ -45,6 +45,52 @@ public sealed record PagePopupAtFrame(
     string WindowSource,
     long WindowTime)
 {
+    /// <summary>The composition time of the frame the popup was found open at.</summary>
+    public long CompositionTime { get; init; }
+
+    /// <summary>
+    /// The time of the browser's first popup-widget-hidden record of the
+    /// joined widget after the popup opened (protocol 0.45), or null when
+    /// the recording holds none.
+    /// </summary>
+    public long? WindowHiddenTime { get; init; }
+
+    /// <summary>The time of the popup's page-popup-closed record, or null when the recording holds none.</summary>
+    public long? ClosedTime { get; init; }
+
+    /// <summary>
+    /// The longest interval between the popup window's hidden record and a
+    /// later composition at which the frame is said to be at the edge: one
+    /// interval of a 60 Hz display, which the Windows compositor composes
+    /// on its own schedule.
+    /// </summary>
+    public const long EdgeNanoseconds = 16_666_667;
+
+    /// <summary>
+    /// What the popup's showing at the frame rests on, for the evidence
+    /// panel: the window's hidden record when the recording holds one, and
+    /// otherwise the renderer's close record.
+    /// </summary>
+    public string OnScreenBasis
+    {
+        get
+        {
+            if (WindowHiddenTime is { } hidden)
+            {
+                var text = $"its window was hidden at {Seconds(hidden)} s, after the frame's composition at {Seconds(CompositionTime)} s";
+                return hidden - CompositionTime <= EdgeNanoseconds
+                    ? text + ", within one 60 Hz display interval of it, so the frame is at the edge and the captured image may show either state"
+                    : text;
+            }
+            return ClosedTime is { } closed
+                ? $"the recording holds no record of its window being hidden, so it is taken as open until its page-popup-closed record at {Seconds(closed)} s, after the frame's composition at {Seconds(CompositionTime)} s"
+                : $"the recording holds no record of its window being hidden or of its closing after the frame's composition at {Seconds(CompositionTime)} s";
+        }
+    }
+
+    private static string Seconds(long nanoseconds) =>
+        (nanoseconds / 1e9).ToString("F3", CultureInfo.InvariantCulture);
+
     /// <summary>
     /// True when the owner's visible bounds plus its local root's origin are
     /// the anchor rectangle, as the popup was opened with (a check reported,
@@ -74,7 +120,10 @@ public static class PagePopups
 {
     /// <summary>
     /// The popups opened at or before <paramref name="compositionTime"/> and
-    /// not closed by then, whose owner document has the given token. Each
+    /// not closed by then, whose owner document has the given token. A popup
+    /// is closed by the browser's first popup-widget-hidden record of its
+    /// joined widget after it opened, when the recording holds one, and
+    /// otherwise by its page-popup-closed record. Each
     /// is joined to the opener frame's last popup-widget-created record at
     /// or before its opening, on renderer process and owner frame token,
     /// that no earlier popup joined.
@@ -107,14 +156,23 @@ public static class PagePopups
             {
                 continue;
             }
-            var closed = ordered.Any(record => record.EventType == "page-popup-closed" &&
-                record.Time >= opened.Time && record.Time <= compositionTime &&
-                DomTreeRebuilder.DocumentKey(record.Payload) == key);
+            var sink = widget is null ? null : Text(widget.Payload, "frameSinkId");
+            // Protocol 0.45: the popup's window leaves the screen when the
+            // browser hides it, which is after the renderer closes it. A
+            // recording without the record closes it at the renderer's close.
+            var hidden = sink is null
+                ? null
+                : ordered.FirstOrDefault(record => record.EventType == "popup-widget-hidden" &&
+                    record.Time >= opened.Time && Text(record.Payload, "frameSinkId") == sink);
+            var closedRecord = ordered.FirstOrDefault(record => record.EventType == "page-popup-closed" &&
+                record.Time >= opened.Time && DomTreeRebuilder.DocumentKey(record.Payload) == key);
+            var closed = hidden is not null
+                ? hidden.Time <= compositionTime
+                : closedRecord is not null && closedRecord.Time <= compositionTime;
             if (closed)
             {
                 continue;
             }
-            var sink = widget is null ? null : Text(widget.Payload, "frameSinkId");
             result.Add(new PagePopupAtFrame(
                 key,
                 process,
@@ -129,7 +187,12 @@ public static class PagePopups
                 sink,
                 Rect(payload, "initialWindowRect")!,
                 "page-popup-opened initialWindowRect",
-                opened.Time));
+                opened.Time)
+            {
+                CompositionTime = compositionTime,
+                WindowHiddenTime = hidden?.Time,
+                ClosedTime = closedRecord?.Time,
+            });
         }
         return result;
     }

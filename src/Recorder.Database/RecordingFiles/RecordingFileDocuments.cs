@@ -100,11 +100,13 @@ public sealed class RecordingFileDocuments
             .FirstOrDefault(document => document.Key == key && document.State is not null);
 
     /// <summary>
-    /// The page popups of a page open at the frame (slice 4d sub-step 2):
-    /// those its document owns, opened at or before the frame's composition
-    /// and not closed by then, each with its document's state at the frame,
-    /// null when not read, and its window rectangle as last set at or before
-    /// the time that state is read at.
+    /// The page popups of a page on the screen at the frame (slice 4d
+    /// sub-step 2, and "Popup on screen"): those its document owns, opened
+    /// at or before the frame's composition, with a presented rendering
+    /// update at or before it, and whose window was not hidden by then (or,
+    /// in a recording without the browser's hidden record, not closed by
+    /// then), each with its document's state at the frame and its window
+    /// rectangle as last set at or before the time that state is read at.
     /// </summary>
     public IReadOnlyList<(PagePopupAtFrame Popup, BrowserDocumentAt? State)> Popups(
         string pageKey,
@@ -117,13 +119,22 @@ public sealed class RecordingFileDocuments
             return [];
         }
         var open = PagePopups.OpenAt(records, pageKey.Split(' ', 2)[0], CompositionTime(frameNanoseconds));
-        return [.. open.Select(popup =>
-        {
-            var state = Document(popup.DocumentKey, frameNanoseconds, cancellationToken);
-            var at = state?.Basis.CutTime ?? CompositionTime(frameNanoseconds);
-            return (PagePopups.WithWindowAt(popup, records, at), state);
-        })];
+        // A popup is on the screen from its first presented rendering
+        // update: one with none at or before the composition is not yet
+        // drawn, though it is open.
+        return [.. open
+            .Select(popup => (popup, state: Document(popup.DocumentKey, frameNanoseconds, cancellationToken)))
+            .Where(item => IsDrawn(item.state))
+            .Select(item => (PagePopups.WithWindowAt(item.popup, records, item.state!.Basis.CutTime), item.state))];
     }
+
+    /// <summary>
+    /// True when a popup document's state at a frame is the one after a
+    /// presented rendering update, so that the popup was drawn at or before
+    /// the frame's composition.
+    /// </summary>
+    public static bool IsDrawn(BrowserDocumentAt? state) =>
+        state?.State is not null && state.Basis is { Basis: "presented", PresentedTime: not null };
 
     /// <summary>
     /// The fonts and images of a document at the recording time its state

@@ -2702,6 +2702,7 @@ public sealed class EventRecordValidatorTests
     [InlineData("popup-widget-shown")]
     [InlineData("popup-widget-bounds-requested")]
     [InlineData("popup-widget-screen-rects")]
+    [InlineData("popup-widget-hidden")]
     public void RejectsAPopupWidgetRecordFromARenderer(string eventType)
     {
         var json = eventType switch
@@ -2710,6 +2711,7 @@ public sealed class EventRecordValidatorTests
             "popup-widget-shown" => BrowserInteractionPayloads.PopupWidgetShown,
             "popup-widget-bounds-requested" =>
                 BrowserInteractionPayloads.PopupWidgetBoundsRequested,
+            "popup-widget-hidden" => BrowserInteractionPayloads.PopupWidgetHidden,
             _ => BrowserInteractionPayloads.PopupWidgetScreenRects
         };
         var payload = JsonNode.Parse(json)!;
@@ -2744,6 +2746,30 @@ public sealed class EventRecordValidatorTests
         var issues = ValidateInteractionRecord("popup-widget-screen-rects", payload);
 
         Assert.NotEmpty(issues);
+    }
+
+    [Theory]
+    [InlineData("frameSinkId", "\"4-12\"")]
+    [InlineData("cause", "\"closed\"")]
+    [InlineData("nativeWindowVisible", "1")]
+    public void RejectsAMalformedPopupWidgetHiddenRecord(string property, string value)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetHidden)!;
+        payload[property] = JsonNode.Parse(value);
+
+        var issues = ValidateInteractionRecord("popup-widget-hidden", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void AcceptsAPopupWidgetHiddenRecordWithoutANativeWindow()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetHidden)!;
+        payload["nativeWindowVisible"] = null;
+        payload["cause"] = "hidden";
+
+        Assert.Empty(ValidateInteractionRecord("popup-widget-hidden", payload));
     }
 
     [Fact]

@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.44"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.44"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.45"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.45"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -5456,6 +5456,31 @@ class InteractionIntegrationTests(unittest.TestCase):
                 ),
                 INTEGRATE.patch_content_render_widget_host,
             ),
+            (
+                "render_widget_host_view_aura.cc",
+                INTEGRATE.CONTENT_WIDGET_VIEW_OWN_INCLUDE + "\n",
+                tuple(a for a, _ in INTEGRATE.CONTENT_WIDGET_VIEW_HOOKS),
+                INTEGRATE.patch_content_render_widget_host_view,
+            ),
+        )
+
+    def test_a_popup_window_is_recorded_hidden_only_when_it_was_shown(self):
+        # Protocol 0.45: each hook reads whether the window was shown before
+        # hiding it, and records after it is hidden.
+        for anchor, hook in INTEGRATE.CONTENT_WIDGET_VIEW_HOOKS:
+            with self.subTest(hook=hook[:40]):
+                self.assertLess(
+                    hook.index("window_->TargetVisibility()"),
+                    hook.index("window_->Hide();"),
+                )
+                self.assertLess(
+                    hook.index("window_->Hide();"),
+                    hook.index("RecorderRecordPopupWidgetHidden("),
+                )
+                self.assertIn("widget_type_ == WidgetType::kPopup", hook)
+        self.assertIn('"hidden");', INTEGRATE.CONTENT_WIDGET_VIEW_HIDE_HOOK)
+        self.assertIn(
+            '"destroyed");', INTEGRATE.CONTENT_WIDGET_VIEW_CLEAN_UP_HOOK
         )
 
     def test_the_browser_popup_widget_hooks_are_written_once(self):

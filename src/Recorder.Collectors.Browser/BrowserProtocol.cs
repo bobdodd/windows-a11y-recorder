@@ -219,6 +219,10 @@ internal static class BrowserProtocol
                 payload.Deserialize<BrowserPopupWidgetScreenRectsPayload>(
                     JsonOptions) as object,
             (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetHidden) =>
+                payload.Deserialize<BrowserPopupWidgetHiddenPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceEventTypes.OptionSelectednessChanged) =>
                 payload.Deserialize<BrowserOptionSelectednessChangedPayload>(
                     JsonOptions) as object,

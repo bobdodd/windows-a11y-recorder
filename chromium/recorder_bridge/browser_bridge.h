@@ -1182,6 +1182,17 @@ void RecordBrowserPopupWidgetScreenRects(PopupWidgetSink sink,
                                          uintptr_t native_window,
                                          double device_scale_factor);
 
+// Records a popup widget's view hiding its window (protocol 0.45):
+// RenderWidgetHostViewAura::Hide, cause "hidden", or the view's clean-up
+// before it is destroyed, cause "destroyed", each just after the view's
+// window was hidden and only when it had been shown. The native window is
+// the popup's HWND, or zero for none; the bridge asks Windows whether it is
+// still visible when the record is made.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetHidden(PopupWidgetSink sink,
+                                    std::string cause,
+                                    uintptr_t native_window);
+
 // Records a change of an option's selectedness, which sets no attribute. The
 // select node is zero for an option with no owner select.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
