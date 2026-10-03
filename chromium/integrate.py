@@ -9602,7 +9602,11 @@ const char* RecorderPagePopupKind(Element& recorder_owner) {
     return "select-list";
   }
   if (auto* recorder_input = DynamicTo<HTMLInputElement>(recorder_owner)) {
-    const String recorder_type = recorder_input->FormControlTypeAsString();
+    // HTMLInputElement overrides the type name privately, so it is read
+    // through the text control base, as the text control records read it.
+    const String recorder_type =
+        static_cast<const TextControlElement&>(*recorder_input)
+            .FormControlTypeAsString();
     if (recorder_type == "color") {
       return "color";
     }
@@ -9781,11 +9785,30 @@ BLINK_PAGE_POPUP_HOOKS = (
 )
 
 
+STAGE_2A3939B_PAGE_POPUP_TYPE_READ = (
+    "    const String recorder_type = "
+    "recorder_input->FormControlTypeAsString();\n"
+)
+STAGE_2A3939B_PAGE_POPUP_TYPE_FIX = """    // HTMLInputElement overrides the type name privately, so it is read
+    // through the text control base, as the text control records read it.
+    const String recorder_type =
+        static_cast<const TextControlElement&>(*recorder_input)
+            .FormControlTypeAsString();
+"""
+
+
 def patch_blink_page_popup(path: Path) -> None:
     """Adds the page popup records and the popup presentation request."""
     text = read_source(path)
     text = add_includes_after(
         text, BLINK_PAGE_POPUP_OWN_INCLUDE, BLINK_PAGE_POPUP_INCLUDES, path
+    )
+    # The first 0.43 package, 2a3939b, read the type name through
+    # HTMLInputElement, where it is private; that helper line is replaced.
+    text = upgrade_legacy_hooks(
+        text,
+        ((STAGE_2A3939B_PAGE_POPUP_TYPE_READ, STAGE_2A3939B_PAGE_POPUP_TYPE_FIX),),
+        path,
     )
     text = insert_before_once(
         text,

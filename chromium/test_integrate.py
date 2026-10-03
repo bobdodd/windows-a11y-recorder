@@ -5337,6 +5337,30 @@ class InteractionIntegrationTests(unittest.TestCase):
             first.index(INTEGRATE.BLINK_PAGE_POPUP_REQUEST_MARKER),
         )
 
+    def test_a_2a3939b_popup_type_read_is_upgraded(self):
+        hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
+        anchors = [INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR, hooks[0],
+                   hooks[1], INTEGRATE.BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+                   *hooks[2:]]
+        legacy_helper = INTEGRATE.BLINK_PAGE_POPUP_HELPER.replace(
+            INTEGRATE.STAGE_2A3939B_PAGE_POPUP_TYPE_FIX,
+            INTEGRATE.STAGE_2A3939B_PAGE_POPUP_TYPE_READ,
+        )
+        self.assertNotEqual(legacy_helper, INTEGRATE.BLINK_PAGE_POPUP_HELPER)
+        source = cookie_source(
+            INTEGRATE.BLINK_PAGE_POPUP_OWN_INCLUDE + "\n", *anchors
+        ).replace(
+            INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR,
+            legacy_helper + INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "web_page_popup_impl.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_page_popup(path)
+            patched = path.read_text(encoding="utf-8")
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PAGE_POPUP_HELPER))
+        self.assertNotIn("recorder_input->FormControlTypeAsString()", patched)
+
     def test_the_page_popup_patch_fails_when_an_anchor_is_absent(self):
         # In the order Chromium's file holds them.
         hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
