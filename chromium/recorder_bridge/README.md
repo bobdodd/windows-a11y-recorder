@@ -421,6 +421,18 @@ A presentation widget identity with `page_popup` set names a page popup's
 widget, which has no frame sink the renderer knows, so the bridge writes its
 `frameSinkId` as null and its `widgetKind` as `page-popup`.
 
+Protocol 0.44 adds the browser's popup widget records. The hook in
+`render_frame_host_impl.cc` calls `RecordBrowserPopupWidgetCreated`, the hooks
+in `web_contents_impl.cc` call `RecordBrowserPopupWidgetShown`, and the hooks
+in `render_widget_host_impl.cc` call `RecordBrowserPopupWidgetBoundsRequested`
+and `RecordBrowserPopupWidgetScreenRects`. The last is passed the popup's
+HWND and reads its window rectangle and client area with `GetWindowRect`,
+`GetClientRect`, and `ClientToScreen`, so `render_widget_host_impl.cc` does not
+include `windows.h`. `RecordBlinkPagePopupOpened` gains the owner frame's
+token, and `RecordBlinkPagePopupWindowRect` records only a requested
+rectangle; the integration script removes the 0.43 hook in
+`WebPagePopupImpl::SetScreenRects` from a checkout it patched before.
+
 Protocol 0.25 records layout geometry and computed styles on the
 `browser.layout` channel. The Blink hook in `local_frame_view.cc` runs after
 the lifecycle observers are told that a paint-clean update finished, and calls

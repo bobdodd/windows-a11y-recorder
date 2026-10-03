@@ -203,6 +203,22 @@ internal static class BrowserProtocol
                 payload.Deserialize<BrowserPagePopupClosedPayload>(JsonOptions)
                     as object,
             (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetCreated) =>
+                payload.Deserialize<BrowserPopupWidgetCreatedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetShown) =>
+                payload.Deserialize<BrowserPopupWidgetShownPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetBoundsRequested) =>
+                payload.Deserialize<BrowserPopupWidgetBoundsRequestedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetScreenRects) =>
+                payload.Deserialize<BrowserPopupWidgetScreenRectsPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceEventTypes.OptionSelectednessChanged) =>
                 payload.Deserialize<BrowserOptionSelectednessChangedPayload>(
                     JsonOptions) as object,

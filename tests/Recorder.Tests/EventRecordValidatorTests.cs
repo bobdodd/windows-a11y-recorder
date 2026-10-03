@@ -2639,28 +2639,123 @@ public sealed class EventRecordValidatorTests
             issue => issue.Code == "browser-selection-text-control-inconsistent");
     }
 
-    [Fact]
-    public void RejectsARequestedPopupWindowRectThatNamesAWidgetRect()
+    [Theory]
+    [InlineData("source", "\"placed\"")]
+    [InlineData("widgetRect", "null")]
+    public void RejectsA043PopupWindowRectProperty(string property, string value)
     {
+        // Protocol 0.44 records only the requested rectangle.
         var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupRequestedRect)!;
-        payload["widgetRect"] = JsonNode.Parse("""{ "x": 0, "y": 0, "width": 1, "height": 1 }""");
+        payload[property] = JsonNode.Parse(value);
 
         var issues = ValidateInteractionRecord("page-popup-window-rect", payload);
 
-        Assert.Contains(
-            issues, issue => issue.Code == "browser-page-popup-window-rect-inconsistent");
+        Assert.NotEmpty(issues);
     }
 
     [Fact]
-    public void RejectsADeferredPlacedPopupWindowRect()
+    public void RejectsAPopupOpenedWithoutAnOwnerFrameToken()
     {
-        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupPlacedRect)!;
-        payload["deferred"] = true;
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupOpened)!;
+        payload["ownerFrameToken"] = " ";
 
-        var issues = ValidateInteractionRecord("page-popup-window-rect", payload);
+        var issues = ValidateInteractionRecord("page-popup-opened", payload);
 
         Assert.Contains(
-            issues, issue => issue.Code == "browser-page-popup-window-rect-inconsistent");
+            issues, issue => issue.Code == "browser-page-popup-owner-frame-token-empty");
+    }
+
+    [Theory]
+    [InlineData("shown", "viewBounds")]
+    [InlineData("not-visible", "constrainedRect")]
+    [InlineData("permission-exclusion", "transformedAnchorRect")]
+    public void RejectsAShownPopupWidgetMissingARectangle(string outcome, string missing)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetShown)!;
+        payload["outcome"] = outcome;
+        if (outcome != "shown")
+        {
+            payload["viewBounds"] = null;
+        }
+        payload[missing] = null;
+
+        var issues = ValidateInteractionRecord("popup-widget-shown", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-shown-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsAnInactiveWindowRefusalWithATransformedRectangle()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetRefused)!;
+        payload["transformedRect"] = JsonNode.Parse("""{ "x": 0, "y": 0, "width": 1, "height": 1 }""");
+
+        var issues = ValidateInteractionRecord("popup-widget-shown", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-shown-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("popup-widget-created")]
+    [InlineData("popup-widget-shown")]
+    [InlineData("popup-widget-bounds-requested")]
+    [InlineData("popup-widget-screen-rects")]
+    public void RejectsAPopupWidgetRecordFromARenderer(string eventType)
+    {
+        var json = eventType switch
+        {
+            "popup-widget-created" => BrowserInteractionPayloads.PopupWidgetCreated,
+            "popup-widget-shown" => BrowserInteractionPayloads.PopupWidgetShown,
+            "popup-widget-bounds-requested" =>
+                BrowserInteractionPayloads.PopupWidgetBoundsRequested,
+            _ => BrowserInteractionPayloads.PopupWidgetScreenRects
+        };
+        var payload = JsonNode.Parse(json)!;
+        payload["context"]!["processType"] = "renderer";
+
+        var issues = ValidateInteractionRecord(eventType, payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-context-invalid");
+    }
+
+    [Fact]
+    public void RejectsACreatedPopupWidgetWithoutItsOpenerFrame()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetCreated)!;
+        payload["context"]!["frameId"] = null;
+
+        var issues = ValidateInteractionRecord("popup-widget-created", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-context-invalid");
+    }
+
+    [Theory]
+    [InlineData("frameSinkId", "\"4-12\"")]
+    [InlineData("deviceScaleFactor", "0")]
+    public void RejectsMalformedPopupWidgetScreenRects(string property, string value)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetScreenRects)!;
+        payload[property] = JsonNode.Parse(value);
+
+        var issues = ValidateInteractionRecord("popup-widget-screen-rects", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void RejectsANativeWindowRectangleWithoutItsClientArea()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetScreenRects)!;
+        payload["nativeClientRect"] = null;
+
+        var issues = ValidateInteractionRecord("popup-widget-screen-rects", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-native-rects-inconsistent");
     }
 
     [Theory]

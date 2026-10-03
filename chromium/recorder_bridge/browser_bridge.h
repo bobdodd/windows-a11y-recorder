@@ -1081,7 +1081,8 @@ struct PagePopupRect {
 
 // Records a page popup, such as the list of an open select, once its
 // document is installed. The document named is the popup's own; the owner is
-// the element that opened it, in the owner document. The kind is
+// the element that opened it, in the owner document, whose frame's token is
+// the owner frame token (protocol 0.44). The kind is
 // "select-list", "date-time", "color", or "other". The rectangles are those
 // WebPagePopupImpl computes: the owner's visible bounds in its local root, the
 // owner's local root view and the anchor in screen DIPs, and the popup's first
@@ -1092,6 +1093,7 @@ void RecordBlinkPagePopupOpened(int document_node_id,
                                 std::string kind,
                                 int owner_document_node_id,
                                 std::string owner_document_token,
+                                std::string owner_frame_token,
                                 int owner_node_id,
                                 PagePopupRect owner_visible_bounds_in_local_root,
                                 PagePopupRect owner_local_root_rect_in_screen,
@@ -1099,24 +1101,86 @@ void RecordBlinkPagePopupOpened(int document_node_id,
                                 PagePopupRect initial_window_rect,
                                 double zoom_factor);
 
-// Records a page popup's window rectangle. The source "requested" is a
-// rectangle the popup asked for, after the emulation is reversed, deferred when
-// it was asked for before the popup was shown; "placed" is the widget and
-// window rectangles the browser gave the popup's widget.
+// Records a window rectangle a page popup asked for, after the emulation is
+// reversed, deferred when it was asked for before the popup was shown. Where
+// the browser put the window is recorded by the browser's popup widget
+// records (protocol 0.44).
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkPagePopupWindowRect(int document_node_id,
                                     std::string document_token,
-                                    std::string source,
                                     bool deferred,
-                                    PagePopupRect window_rect,
-                                    bool has_widget_rect,
-                                    PagePopupRect widget_rect);
+                                    PagePopupRect window_rect);
 
 // Records a page popup closing, by "renderer" or "browser".
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkPagePopupClosed(int document_node_id,
                                 std::string document_token,
                                 std::string closed_by);
+
+// The browser's records of a renderer's popup widget (protocol 0.44). A popup
+// widget is named by its frame sink, which the browser makes from the routing
+// ID it allocates and the renderer never receives.
+struct PopupWidgetSink {
+  uint32_t client_id = 0;
+  uint32_t sink_id = 0;
+};
+
+// Records a popup widget made for a frame's request, after
+// RenderFrameHostImpl::CreateNewPopupWidget makes it. The context names the
+// opener frame's document; the opener frame token is the renderer's local
+// frame token of the frame that asked.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetCreated(int page_frame_tree_node_id,
+                                     int frame_tree_node_id,
+                                     int64_t document_navigation_id,
+                                     std::string document_token,
+                                     int renderer_process_id,
+                                     std::string opener_frame_token,
+                                     PopupWidgetSink sink);
+
+// Records WebContentsImpl::ShowCreatedWidget for a popup widget: the
+// rectangle and anchor as received, the rectangle after the transform for
+// nested web contents and after ConstrainPopupBounds, and the outcome,
+// "shown" with the view's bounds after InitAsPopup, or the reason the popup
+// was refused: "window-not-active", "not-visible", or
+// "permission-exclusion". A rectangle not reached before a refusal is
+// absent.
+struct PopupWidgetShown {
+  PopupWidgetSink sink;
+  std::string outcome;
+  PagePopupRect received_rect;
+  PagePopupRect received_anchor_rect;
+  bool has_transformed = false;
+  PagePopupRect transformed_rect;
+  PagePopupRect transformed_anchor_rect;
+  bool has_constrained = false;
+  PagePopupRect constrained_rect;
+  bool has_view_bounds = false;
+  PagePopupRect view_bounds;
+};
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetShown(PopupWidgetShown shown);
+
+// Records RenderWidgetHostImpl::SetPopupBounds: the rectangle the renderer
+// asked for, and the rectangle set on the view after ConstrainPopupBounds and
+// the display clamp, or none when the request was ignored.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetBoundsRequested(PopupWidgetSink sink,
+                                             PagePopupRect requested_rect,
+                                             bool has_set_rect,
+                                             PagePopupRect set_rect);
+
+// Records the screen rectangles RenderWidgetHostImpl::SendScreenRects sends to
+// a popup widget: the view and window bounds in screen DIPs and the view's
+// device scale factor. The native window is the popup's HWND, or zero for
+// none; the bridge reads its window rectangle and client area in screen
+// pixels from Windows when the record is made.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetScreenRects(PopupWidgetSink sink,
+                                         PagePopupRect view_rect,
+                                         PagePopupRect window_rect,
+                                         uintptr_t native_window,
+                                         double device_scale_factor);
 
 // Records a change of an option's selectedness, which sets no attribute. The
 // select node is zero for an option with no owner select.

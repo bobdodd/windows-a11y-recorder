@@ -394,6 +394,14 @@ option's selectedness. A popup's rendering updates request their
 presentation from the popup's own widget. See "Slice 4d" in
 [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.44 records, from the browser process, each popup widget a frame
+asks for: its frame sink, the rectangles the browser received, transformed,
+constrained, and set, whether it showed the popup or why it refused, and the
+screen rectangles it sent, with the native window's rectangle and client area
+in screen pixels. A page popup names its owner frame's token, which joins it
+to its widget. See "Sub-step 1b" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

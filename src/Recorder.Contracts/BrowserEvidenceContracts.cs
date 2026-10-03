@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.43";
+    public const string CurrentVersion = "0.44";
 }
 
 public static class BrowserEvidenceChannels
@@ -81,6 +81,11 @@ public static class BrowserEvidenceEventTypes
     public const string PagePopupOpened = "page-popup-opened";
     public const string PagePopupWindowRect = "page-popup-window-rect";
     public const string PagePopupClosed = "page-popup-closed";
+    public const string PopupWidgetCreated = "popup-widget-created";
+    public const string PopupWidgetShown = "popup-widget-shown";
+    public const string PopupWidgetBoundsRequested =
+        "popup-widget-bounds-requested";
+    public const string PopupWidgetScreenRects = "popup-widget-screen-rects";
     public const string OptionSelectednessChanged = "option-selectedness-changed";
     public const string InteractionCheckpointStarted =
         "interaction-checkpoint-started";
@@ -814,12 +819,15 @@ public sealed record BrowserPagePopupRect(int X, int Y, int Width, int Height);
 
 // Kind is "select-list", "date-time", "color", or "other", from the owner
 // element. The anchor and the first window rectangle are those the popup was
-// shown with.
+// shown with. The owner frame token (protocol 0.44) is the local frame token
+// of the owner document's frame, which the browser's popup-widget-created
+// record names as its opener.
 public sealed record BrowserPagePopupOpenedPayload(
     BrowserContext Context,
     string Kind,
     string OwnerDocumentId,
     string OwnerDocumentToken,
+    string OwnerFrameToken,
     int OwnerNodeId,
     BrowserPagePopupRect OwnerVisibleBoundsInLocalRoot,
     BrowserPagePopupRect OwnerLocalRootRectInScreen,
@@ -827,20 +835,66 @@ public sealed record BrowserPagePopupOpenedPayload(
     BrowserPagePopupRect InitialWindowRect,
     double ZoomFactor);
 
-// Source is "requested", a rectangle the popup asked for, deferred when asked
-// for before the popup was shown, or "placed", the rectangles the browser gave
-// the popup's widget.
+// A window rectangle the popup asked for, deferred when asked for before the
+// popup was shown. Where the browser put the window is recorded by the popup
+// widget records (protocol 0.44).
 public sealed record BrowserPagePopupWindowRectPayload(
     BrowserContext Context,
-    string Source,
     bool Deferred,
-    BrowserPagePopupRect WindowRect,
-    BrowserPagePopupRect? WidgetRect);
+    BrowserPagePopupRect WindowRect);
 
 // ClosedBy is "renderer" or "browser".
 public sealed record BrowserPagePopupClosedPayload(
     BrowserContext Context,
     string ClosedBy);
+
+// Popup widget records (protocol 0.44), made by the browser process. A popup
+// widget is named by its frame sink, written clientId:sinkId. The created
+// record's context names the opener frame's document, and its opener frame
+// token is the page popup's owner frame token; the other records carry the
+// browser process's context and join to it by the frame sink. Rectangles are
+// in screen DIPs, except the native window's rectangles, which are in screen
+// pixels as Windows holds them.
+public sealed record BrowserPopupWidgetCreatedPayload(
+    BrowserContext Context,
+    int? RendererProcessId,
+    string OpenerFrameToken,
+    string FrameSinkId);
+
+// Outcome is "shown", or the reason WebContentsImpl::ShowCreatedWidget refused
+// the popup: "window-not-active", "not-visible", or "permission-exclusion". A
+// rectangle not reached before a refusal is null; the view's bounds are
+// present only for a shown popup.
+public sealed record BrowserPopupWidgetShownPayload(
+    BrowserContext Context,
+    string FrameSinkId,
+    string Outcome,
+    BrowserPagePopupRect ReceivedRect,
+    BrowserPagePopupRect ReceivedAnchorRect,
+    BrowserPagePopupRect? TransformedRect,
+    BrowserPagePopupRect? TransformedAnchorRect,
+    BrowserPagePopupRect? ConstrainedRect,
+    BrowserPagePopupRect? ViewBounds);
+
+// A bounds request from the renderer. The set rectangle is the one given to
+// the view after ConstrainPopupBounds and the display clamp, or null when the
+// request was ignored while a screen rectangle update was unacknowledged.
+public sealed record BrowserPopupWidgetBoundsRequestedPayload(
+    BrowserContext Context,
+    string FrameSinkId,
+    BrowserPagePopupRect RequestedRect,
+    BrowserPagePopupRect? SetRect);
+
+// The screen rectangles sent to a popup widget, the native window's rectangle
+// and client area when Windows answered, and the view's device scale factor.
+public sealed record BrowserPopupWidgetScreenRectsPayload(
+    BrowserContext Context,
+    string FrameSinkId,
+    BrowserPagePopupRect ViewRect,
+    BrowserPagePopupRect WindowRect,
+    BrowserPagePopupRect? NativeWindowRect,
+    BrowserPagePopupRect? NativeClientRect,
+    double DeviceScaleFactor);
 
 // A change of an option's selectedness, which sets no attribute. In an open
 // select list the highlighted item is the popup listbox's selected option.

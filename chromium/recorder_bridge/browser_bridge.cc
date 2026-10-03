@@ -4029,6 +4029,7 @@ void RecordBlinkPagePopupOpened(int document_node_id,
                                 std::string kind,
                                 int owner_document_node_id,
                                 std::string owner_document_token,
+                                std::string owner_frame_token,
                                 int owner_node_id,
                                 PagePopupRect owner_visible_bounds_in_local_root,
                                 PagePopupRect owner_local_root_rect_in_screen,
@@ -4040,7 +4041,7 @@ void RecordBlinkPagePopupOpened(int document_node_id,
   if (!client || document_node_id <= 0 || document_token.empty() ||
       !IsOneOf(kind, {"select-list", "date-time", "color", "other"}) ||
       owner_document_node_id <= 0 || owner_document_token.empty() ||
-      owner_node_id <= 0 ||
+      owner_frame_token.empty() || owner_node_id <= 0 ||
       !IsValidPagePopupRect(owner_visible_bounds_in_local_root) ||
       !IsValidPagePopupRect(owner_local_root_rect_in_screen) ||
       !IsValidPagePopupRect(anchor_rect_in_screen) ||
@@ -4054,6 +4055,7 @@ void RecordBlinkPagePopupOpened(int document_node_id,
   payload.Set("kind", std::move(kind));
   payload.Set("ownerDocumentId", DocumentId(owner_document_node_id));
   payload.Set("ownerDocumentToken", std::move(owner_document_token));
+  payload.Set("ownerFrameToken", std::move(owner_frame_token));
   payload.Set("ownerNodeId", owner_node_id);
   payload.Set("ownerVisibleBoundsInLocalRoot",
               PagePopupRectValue(owner_visible_bounds_in_local_root));
@@ -4068,33 +4070,171 @@ void RecordBlinkPagePopupOpened(int document_node_id,
 
 void RecordBlinkPagePopupWindowRect(int document_node_id,
                                     std::string document_token,
-                                    std::string source,
                                     bool deferred,
-                                    PagePopupRect window_rect,
-                                    bool has_widget_rect,
-                                    PagePopupRect widget_rect) {
+                                    PagePopupRect window_rect) {
   A11Y_RECORDER_COST("RecordBlinkPagePopupWindowRect");
   RecorderPipeClient* client = GetProcessRecorderClient();
-  // A requested rectangle has no widget rectangle and may be deferred; a
-  // placed one has both rectangles and is never deferred.
-  const bool requested = source == "requested";
   if (!client || document_node_id <= 0 || document_token.empty() ||
-      !IsOneOf(source, {"requested", "placed"}) ||
-      has_widget_rect == requested || (deferred && !requested) ||
-      !IsValidPagePopupRect(window_rect) ||
-      (has_widget_rect && !IsValidPagePopupRect(widget_rect))) {
+      !IsValidPagePopupRect(window_rect)) {
     return;
   }
   base::DictValue payload;
   payload.Set("context", CreateContext(*client, document_node_id,
                                        std::move(document_token)));
-  payload.Set("source", std::move(source));
   payload.Set("deferred", deferred);
   payload.Set("windowRect", PagePopupRectValue(window_rect));
-  payload.Set("widgetRect", has_widget_rect
-                                ? base::Value(PagePopupRectValue(widget_rect))
-                                : base::Value());
   SendBlinkEvidence("browser.interaction", "page-popup-window-rect",
+                    std::move(payload));
+}
+
+namespace {
+
+bool IsValidPopupWidgetSink(const PopupWidgetSink& sink) {
+  return sink.client_id != 0 || sink.sink_id != 0;
+}
+
+std::string PopupWidgetSinkId(const PopupWidgetSink& sink) {
+  return base::NumberToString(sink.client_id) + ":" +
+         base::NumberToString(sink.sink_id);
+}
+
+base::Value OptionalScreenRect(bool present, const PagePopupRect& rect) {
+  return present ? base::Value(PagePopupRectValue(rect)) : base::Value();
+}
+
+}  // namespace
+
+void RecordBrowserPopupWidgetCreated(int page_frame_tree_node_id,
+                                     int frame_tree_node_id,
+                                     int64_t document_navigation_id,
+                                     std::string document_token,
+                                     int renderer_process_id,
+                                     std::string opener_frame_token,
+                                     PopupWidgetSink sink) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetCreated");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || page_frame_tree_node_id < 0 || frame_tree_node_id < 0 ||
+      opener_frame_token.empty() || !IsValidPopupWidgetSink(sink)) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateNavigationContext(*client, page_frame_tree_node_id,
+                                      frame_tree_node_id,
+                                      document_navigation_id,
+                                      std::move(document_token)));
+  payload.Set("rendererProcessId", renderer_process_id > 0
+                                       ? base::Value(renderer_process_id)
+                                       : base::Value());
+  payload.Set("openerFrameToken", std::move(opener_frame_token));
+  payload.Set("frameSinkId", PopupWidgetSinkId(sink));
+  SendBlinkEvidence("browser.interaction", "popup-widget-created",
+                    std::move(payload));
+}
+
+void RecordBrowserPopupWidgetShown(PopupWidgetShown shown) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetShown");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  const bool is_shown = shown.outcome == "shown";
+  if (!client || !IsValidPopupWidgetSink(shown.sink) ||
+      !IsOneOf(shown.outcome, {"shown", "window-not-active", "not-visible",
+                               "permission-exclusion"}) ||
+      is_shown != shown.has_view_bounds ||
+      (shown.has_constrained && !shown.has_transformed) ||
+      !IsValidPagePopupRect(shown.received_rect) ||
+      !IsValidPagePopupRect(shown.received_anchor_rect) ||
+      (shown.has_transformed &&
+       (!IsValidPagePopupRect(shown.transformed_rect) ||
+        !IsValidPagePopupRect(shown.transformed_anchor_rect))) ||
+      (shown.has_constrained && !IsValidPagePopupRect(shown.constrained_rect)) ||
+      (shown.has_view_bounds && !IsValidPagePopupRect(shown.view_bounds))) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("frameSinkId", PopupWidgetSinkId(shown.sink));
+  payload.Set("outcome", std::move(shown.outcome));
+  payload.Set("receivedRect", PagePopupRectValue(shown.received_rect));
+  payload.Set("receivedAnchorRect",
+              PagePopupRectValue(shown.received_anchor_rect));
+  payload.Set("transformedRect",
+              OptionalScreenRect(shown.has_transformed, shown.transformed_rect));
+  payload.Set("transformedAnchorRect",
+              OptionalScreenRect(shown.has_transformed,
+                                 shown.transformed_anchor_rect));
+  payload.Set("constrainedRect", OptionalScreenRect(shown.has_constrained,
+                                                    shown.constrained_rect));
+  payload.Set("viewBounds",
+              OptionalScreenRect(shown.has_view_bounds, shown.view_bounds));
+  SendBlinkEvidence("browser.interaction", "popup-widget-shown",
+                    std::move(payload));
+}
+
+void RecordBrowserPopupWidgetBoundsRequested(PopupWidgetSink sink,
+                                             PagePopupRect requested_rect,
+                                             bool has_set_rect,
+                                             PagePopupRect set_rect) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetBoundsRequested");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !IsValidPopupWidgetSink(sink) ||
+      !IsValidPagePopupRect(requested_rect) ||
+      (has_set_rect && !IsValidPagePopupRect(set_rect))) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("frameSinkId", PopupWidgetSinkId(sink));
+  payload.Set("requestedRect", PagePopupRectValue(requested_rect));
+  payload.Set("setRect", OptionalScreenRect(has_set_rect, set_rect));
+  SendBlinkEvidence("browser.interaction", "popup-widget-bounds-requested",
+                    std::move(payload));
+}
+
+void RecordBrowserPopupWidgetScreenRects(PopupWidgetSink sink,
+                                         PagePopupRect view_rect,
+                                         PagePopupRect window_rect,
+                                         uintptr_t native_window,
+                                         double device_scale_factor) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetScreenRects");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !IsValidPopupWidgetSink(sink) ||
+      !IsValidPagePopupRect(view_rect) || !IsValidPagePopupRect(window_rect) ||
+      !std::isfinite(device_scale_factor) || device_scale_factor <= 0) {
+    return;
+  }
+  // The window rectangle and the client area in screen pixels, as Windows
+  // holds them now. Either is absent when Windows does not answer.
+  PagePopupRect native_window_rect;
+  PagePopupRect native_client_rect;
+  bool has_native_rects = false;
+  if (native_window != 0) {
+    const HWND hwnd = reinterpret_cast<HWND>(native_window);
+    RECT window = {};
+    RECT client_area = {};
+    POINT client_origin = {0, 0};
+    if (::GetWindowRect(hwnd, &window) &&
+        ::GetClientRect(hwnd, &client_area) &&
+        ::ClientToScreen(hwnd, &client_origin)) {
+      has_native_rects = true;
+      native_window_rect = {window.left, window.top,
+                            window.right - window.left,
+                            window.bottom - window.top};
+      native_client_rect = {client_origin.x, client_origin.y,
+                            client_area.right - client_area.left,
+                            client_area.bottom - client_area.top};
+    }
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("frameSinkId", PopupWidgetSinkId(sink));
+  payload.Set("viewRect", PagePopupRectValue(view_rect));
+  payload.Set("windowRect", PagePopupRectValue(window_rect));
+  payload.Set("nativeWindowRect",
+              OptionalScreenRect(has_native_rects, native_window_rect));
+  payload.Set("nativeClientRect",
+              OptionalScreenRect(has_native_rects, native_client_rect));
+  payload.Set("deviceScaleFactor", device_scale_factor);
+  SendBlinkEvidence("browser.interaction", "popup-widget-screen-rects",
                     std::move(payload));
 }
 

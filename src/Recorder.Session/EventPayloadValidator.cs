@@ -306,6 +306,18 @@ internal static class EventPayloadValidator
             case ("browser.interaction", "page-popup-closed"):
                 ValidateBrowserPagePopupClosed(payload, issues);
                 break;
+            case ("browser.interaction", "popup-widget-created"):
+                ValidateBrowserPopupWidgetCreated(payload, issues);
+                break;
+            case ("browser.interaction", "popup-widget-shown"):
+                ValidateBrowserPopupWidgetShown(payload, issues);
+                break;
+            case ("browser.interaction", "popup-widget-bounds-requested"):
+                ValidateBrowserPopupWidgetBoundsRequested(payload, issues);
+                break;
+            case ("browser.interaction", "popup-widget-screen-rects"):
+                ValidateBrowserPopupWidgetScreenRects(payload, issues);
+                break;
             case ("browser.interaction", "option-selectedness-changed"):
                 ValidateBrowserOptionSelectednessChanged(payload, issues);
                 break;
@@ -1519,6 +1531,7 @@ internal static class EventPayloadValidator
                 RequiredEnum("kind", "select-list", "date-time", "color", "other"),
                 RequiredString("ownerDocumentId"),
                 RequiredString("ownerDocumentToken"),
+                RequiredString("ownerFrameToken"),
                 RequiredInteger("ownerNodeId", positive: true),
                 RequiredObject("ownerVisibleBoundsInLocalRoot"),
                 RequiredObject("ownerLocalRootRectInScreen"),
@@ -1558,6 +1571,16 @@ internal static class EventPayloadValidator
                 "#/payload/ownerDocumentToken",
                 "A popup's owner document must carry a nonempty token.");
         }
+
+        if (ReadString(payload, "ownerFrameToken") is { } frameToken &&
+            string.IsNullOrWhiteSpace(frameToken))
+        {
+            AddError(
+                issues,
+                "browser-page-popup-owner-frame-token-empty",
+                "#/payload/ownerFrameToken",
+                "A popup's owner frame must carry a nonempty token.");
+        }
     }
 
     private static void ValidateBrowserPagePopupWindowRect(
@@ -1568,34 +1591,183 @@ internal static class EventPayloadValidator
             payload,
             [
                 RequiredObject("context"),
-                RequiredEnum("source", "requested", "placed"),
                 RequiredBoolean("deferred"),
-                RequiredObject("windowRect"),
-                NullableObject("widgetRect")
+                RequiredObject("windowRect")
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererDocumentContext(payload, issues);
         ValidatePagePopupRect(payload, "windowRect", issues);
-        ValidatePagePopupRect(payload, "widgetRect", issues);
-        var source = ReadString(payload, "source");
-        var hasWidget = HasNonnullProperty(payload, "widgetRect");
-        var deferred = payload.TryGetProperty("deferred", out var value) &&
-            value.ValueKind == JsonValueKind.True;
-        var consistent = source switch
+    }
+
+    // Popup widget records (protocol 0.44) are made by the browser process.
+    private static void ValidateBrowserProcessContext(
+        JsonElement payload,
+        bool requiresFrame,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (!payload.TryGetProperty("context", out var context) ||
+            context.ValueKind != JsonValueKind.Object)
         {
-            "requested" => !hasWidget,
-            "placed" => hasWidget && !deferred,
+            return;
+        }
+        if (ReadString(context, "processType") != "browser" ||
+            (requiresFrame && (ReadString(context, "pageId") is null ||
+                               ReadString(context, "frameId") is null)))
+        {
+            AddError(
+                issues,
+                "browser-popup-widget-context-invalid",
+                "#/payload/context",
+                requiresFrame
+                    ? "A created popup widget must have browser-process " +
+                        "provenance and name its opener's page and frame."
+                    : "Popup widget evidence must have browser-process " +
+                        "provenance.");
+        }
+    }
+
+    private static void ValidateBrowserPopupWidgetCreated(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableInteger("rendererProcessId", positive: true),
+                RequiredString("openerFrameToken"),
+                RequiredFrameSinkId("frameSinkId")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, true, issues);
+        if (ReadString(payload, "openerFrameToken") is { } token &&
+            string.IsNullOrWhiteSpace(token))
+        {
+            AddError(
+                issues,
+                "browser-popup-widget-opener-token-empty",
+                "#/payload/openerFrameToken",
+                "A created popup widget must name its opener frame's token.");
+        }
+    }
+
+    private static void ValidateBrowserPopupWidgetShown(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredFrameSinkId("frameSinkId"),
+                RequiredEnum(
+                    "outcome", "shown", "window-not-active", "not-visible",
+                    "permission-exclusion"),
+                RequiredObject("receivedRect"),
+                RequiredObject("receivedAnchorRect"),
+                NullableObject("transformedRect"),
+                NullableObject("transformedAnchorRect"),
+                NullableObject("constrainedRect"),
+                NullableObject("viewBounds")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues);
+        foreach (var name in new[]
+                 {
+                     "receivedRect", "receivedAnchorRect", "transformedRect",
+                     "transformedAnchorRect", "constrainedRect", "viewBounds"
+                 })
+        {
+            ValidatePagePopupRect(payload, name, issues);
+        }
+
+        // A popup refused because its window was not active is refused before
+        // the transform; the others after the transform and the constraint.
+        var outcome = ReadString(payload, "outcome");
+        var transformed = HasNonnullProperty(payload, "transformedRect");
+        var transformedAnchor =
+            HasNonnullProperty(payload, "transformedAnchorRect");
+        var constrained = HasNonnullProperty(payload, "constrainedRect");
+        var viewBounds = HasNonnullProperty(payload, "viewBounds");
+        var consistent = outcome switch
+        {
+            "window-not-active" =>
+                !transformed && !transformedAnchor && !constrained && !viewBounds,
+            "not-visible" or "permission-exclusion" =>
+                transformed && transformedAnchor && constrained && !viewBounds,
+            "shown" => transformed && transformedAnchor && constrained && viewBounds,
             _ => true
         };
         if (!consistent)
         {
             AddError(
                 issues,
-                "browser-page-popup-window-rect-inconsistent",
+                "browser-popup-widget-shown-inconsistent",
                 "#/payload",
-                "A requested window rectangle has no widget rectangle; a " +
-                    "placed one has a widget rectangle and is never deferred.");
+                "A popup refused for an inactive window has no transformed, " +
+                    "constrained, or view rectangle; one refused later has " +
+                    "the transformed and constrained rectangles; a shown " +
+                    "popup has all of them.");
+        }
+    }
+
+    private static void ValidateBrowserPopupWidgetBoundsRequested(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredFrameSinkId("frameSinkId"),
+                RequiredObject("requestedRect"),
+                NullableObject("setRect")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues);
+        ValidatePagePopupRect(payload, "requestedRect", issues);
+        ValidatePagePopupRect(payload, "setRect", issues);
+    }
+
+    private static void ValidateBrowserPopupWidgetScreenRects(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredFrameSinkId("frameSinkId"),
+                RequiredObject("viewRect"),
+                RequiredObject("windowRect"),
+                NullableObject("nativeWindowRect"),
+                NullableObject("nativeClientRect"),
+                RequiredNumber("deviceScaleFactor", positive: true)
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues);
+        foreach (var name in new[]
+                 {
+                     "viewRect", "windowRect", "nativeWindowRect",
+                     "nativeClientRect"
+                 })
+        {
+            ValidatePagePopupRect(payload, name, issues);
+        }
+        if (HasNonnullProperty(payload, "nativeWindowRect") !=
+            HasNonnullProperty(payload, "nativeClientRect"))
+        {
+            AddError(
+                issues,
+                "browser-popup-widget-native-rects-inconsistent",
+                "#/payload",
+                "The native window rectangle and client area are recorded " +
+                    "together or not at all.");
         }
     }
 

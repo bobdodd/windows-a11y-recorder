@@ -213,6 +213,7 @@ internal static class BrowserInteractionPayloads
           "kind": "select-list",
           "ownerDocumentId": "dom-document-2486",
           "ownerDocumentToken": "970C31312F7139126377C8D77F4167A7",
+          "ownerFrameToken": "2C6A0F9B4E1D47A8B3C5D7E9F1A3B5C7",
           "ownerNodeId": 418,
           "ownerVisibleBoundsInLocalRoot": { "x": 508, "y": 360, "width": 262, "height": 48 },
           "ownerLocalRootRectInScreen": { "x": 8, "y": 111, "width": 1904, "height": 921 },
@@ -225,20 +226,8 @@ internal static class BrowserInteractionPayloads
     public static readonly string PagePopupRequestedRect = $$"""
         {
           "context": {{PopupContextJson}},
-          "source": "requested",
           "deferred": true,
-          "windowRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
-          "widgetRect": null
-        }
-        """;
-
-    public static readonly string PagePopupPlacedRect = $$"""
-        {
-          "context": {{PopupContextJson}},
-          "source": "placed",
-          "deferred": false,
-          "windowRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
-          "widgetRect": { "x": 516, "y": 519, "width": 262, "height": 340 }
+          "windowRect": { "x": 516, "y": 519, "width": 262, "height": 340 }
         }
         """;
 
@@ -246,6 +235,106 @@ internal static class BrowserInteractionPayloads
         {
           "context": {{PopupContextJson}},
           "closedBy": "renderer"
+        }
+        """;
+
+    // Protocol 0.44: the browser's popup widget records. The created record
+    // names the opener frame's document; the others carry the browser
+    // process's context and join to it by the frame sink.
+    private const string OpenerContextJson = """
+        {
+          "browserInstanceId": "browser-1",
+          "processId": 1200,
+          "processType": "browser",
+          "profileId": null,
+          "browserContextId": null,
+          "pageId": "frame-1",
+          "frameId": "frame-1",
+          "documentId": "document-navigation-3",
+          "executionWorldId": null,
+          "documentToken": "970C31312F7139126377C8D77F4167A7"
+        }
+        """;
+
+    private const string BrowserProcessContextJson = """
+        {
+          "browserInstanceId": "browser-1",
+          "processId": 1200,
+          "processType": "browser",
+          "profileId": null,
+          "browserContextId": null,
+          "pageId": null,
+          "frameId": null,
+          "documentId": null,
+          "executionWorldId": null,
+          "documentToken": null
+        }
+        """;
+
+    public static readonly string PopupWidgetCreated = $$"""
+        {
+          "context": {{OpenerContextJson}},
+          "rendererProcessId": 3440,
+          "openerFrameToken": "2C6A0F9B4E1D47A8B3C5D7E9F1A3B5C7",
+          "frameSinkId": "4:12"
+        }
+        """;
+
+    public static readonly string PopupWidgetShown = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "outcome": "shown",
+          "receivedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "receivedAnchorRect": { "x": 516, "y": 471, "width": 262, "height": 48 },
+          "transformedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "transformedAnchorRect": { "x": 516, "y": 471, "width": 262, "height": 48 },
+          "constrainedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "viewBounds": { "x": 516, "y": 519, "width": 262, "height": 340 }
+        }
+        """;
+
+    public static readonly string PopupWidgetRefused = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:13",
+          "outcome": "window-not-active",
+          "receivedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "receivedAnchorRect": { "x": 516, "y": 471, "width": 262, "height": 48 },
+          "transformedRect": null,
+          "transformedAnchorRect": null,
+          "constrainedRect": null,
+          "viewBounds": null
+        }
+        """;
+
+    public static readonly string PopupWidgetBoundsRequested = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "requestedRect": { "x": 516, "y": 519, "width": 262, "height": 300 },
+          "setRect": { "x": 516, "y": 519, "width": 262, "height": 300 }
+        }
+        """;
+
+    public static readonly string PopupWidgetBoundsIgnored = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "requestedRect": { "x": 516, "y": 519, "width": 262, "height": 300 },
+          "setRect": null
+        }
+        """;
+
+    public static readonly string PopupWidgetScreenRects = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "viewRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "windowRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "nativeWindowRect": { "x": 774, "y": 778, "width": 393, "height": 510 },
+          "nativeClientRect": { "x": 774, "y": 778, "width": 393, "height": 510 },
+          "deviceScaleFactor": 1.5
         }
         """;
 
@@ -354,8 +443,13 @@ internal static class BrowserInteractionPayloads
         yield return ("active-descendant-reference-set", ActiveDescendantReferenceSet);
         yield return ("page-popup-opened", PagePopupOpened);
         yield return ("page-popup-window-rect", PagePopupRequestedRect);
-        yield return ("page-popup-window-rect", PagePopupPlacedRect);
         yield return ("page-popup-closed", PagePopupClosed);
+        yield return ("popup-widget-created", PopupWidgetCreated);
+        yield return ("popup-widget-shown", PopupWidgetShown);
+        yield return ("popup-widget-shown", PopupWidgetRefused);
+        yield return ("popup-widget-bounds-requested", PopupWidgetBoundsRequested);
+        yield return ("popup-widget-bounds-requested", PopupWidgetBoundsIgnored);
+        yield return ("popup-widget-screen-rects", PopupWidgetScreenRects);
         yield return ("option-selectedness-changed", OptionSelected);
     }
 }

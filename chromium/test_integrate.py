@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.43"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.43"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.44"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.44"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -5381,6 +5381,126 @@ class InteractionIntegrationTests(unittest.TestCase):
                     )
                     with self.assertRaises(RuntimeError):
                         INTEGRATE.patch_blink_page_popup(path)
+
+    def test_a_043_page_popup_is_upgraded_to_044(self):
+        # A checkout patched by protocol 0.43 has the owner record without the
+        # owner frame token, the requested rectangle with its source, and the
+        # placed hook in SetScreenRects, which 0.44 removes.
+        hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
+        anchors = [INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR, hooks[0],
+                   hooks[1], INTEGRATE.BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+                   *hooks[2:]]
+        legacy_helper = INTEGRATE.BLINK_PAGE_POPUP_HELPER.replace(
+            INTEGRATE.STAGE_044_PAGE_POPUP_OPENED_FN,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_OPENED_FN,
+        ).replace(
+            INTEGRATE.STAGE_044_PAGE_POPUP_WINDOW_RECT_FN,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_WINDOW_RECT_FN,
+        )
+        self.assertNotIn("GetLocalFrameToken", legacy_helper)
+        source = cookie_source(
+            INTEGRATE.BLINK_PAGE_POPUP_OWN_INCLUDE + "\n",
+            *anchors,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL,
+        ).replace(
+            INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR,
+            legacy_helper + INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR,
+        ).replace(
+            INTEGRATE.BLINK_PAGE_POPUP_WINDOW_RECT_ANCHOR,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_WINDOW_RECT_HOOK,
+        ).replace(
+            INTEGRATE.LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_SCREEN_RECTS_HOOK,
+        )
+        patched = self.patch_twice(
+            "web_page_popup_impl.cc", source, INTEGRATE.patch_blink_page_popup
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PAGE_POPUP_HELPER))
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_PAGE_POPUP_WINDOW_RECT_HOOK)
+        )
+        self.assertNotIn('"placed"', patched)
+        self.assertNotIn('"requested"', patched)
+        self.assertEqual(
+            1,
+            patched.count(
+                INTEGRATE.LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL
+            ),
+        )
+        self.assert_bridge_calls_match(patched)
+
+    def browser_popup_widget_cases(self):
+        return (
+            (
+                "render_frame_host_impl.cc",
+                '#include "content/browser/renderer_host/'
+                'render_frame_host_impl.h"\n',
+                (INTEGRATE.CONTENT_POPUP_WIDGET_CREATED_ANCHOR,),
+                INTEGRATE.patch_content_popup_widget_created,
+            ),
+            (
+                "web_contents_impl.cc",
+                '#include "content/browser/web_contents/web_contents_impl.h"\n',
+                (
+                    INTEGRATE.CONTENT_POPUP_WIDGET_SHOWN_HELPER_ANCHOR,
+                    *(a for a, _ in INTEGRATE.CONTENT_POPUP_WIDGET_SHOWN_HOOKS),
+                ),
+                INTEGRATE.patch_content_popup_widget_shown,
+            ),
+            (
+                "render_widget_host_impl.cc",
+                INTEGRATE.CONTENT_WIDGET_HOST_OWN_INCLUDE + "\n",
+                (
+                    INTEGRATE.CONTENT_WIDGET_HOST_HELPER_ANCHOR,
+                    *(a for a, _ in INTEGRATE.CONTENT_WIDGET_HOST_HOOKS),
+                ),
+                INTEGRATE.patch_content_render_widget_host,
+            ),
+        )
+
+    def test_the_browser_popup_widget_hooks_are_written_once(self):
+        for name, include, anchors, patch in self.browser_popup_widget_cases():
+            with self.subTest(name=name):
+                patched = self.patch_twice(
+                    name, cookie_source(include, *anchors), patch
+                )
+                self.assertEqual(
+                    1, patched.count(INTEGRATE.CONTENT_NAVIGATION_INCLUDE)
+                )
+                self.assert_bridge_calls_match(patched)
+
+    def test_the_browser_popup_widget_patch_fails_when_an_anchor_is_absent(
+        self,
+    ):
+        for name, include, anchors, patch in self.browser_popup_widget_cases():
+            for missing in range(len(anchors)):
+                kept = anchors[:missing] + anchors[missing + 1:]
+                with self.subTest(name=name, missing=missing):
+                    with tempfile.TemporaryDirectory() as directory:
+                        path = Path(directory) / name
+                        path.write_text(
+                            cookie_source(include, *kept), encoding="utf-8"
+                        )
+                        with self.assertRaises(RuntimeError):
+                            patch(path)
+
+    def test_a_refused_popup_is_recorded_before_it_is_destroyed(self):
+        for hook in (
+            INTEGRATE.CONTENT_POPUP_WIDGET_INACTIVE_HOOK,
+            INTEGRATE.CONTENT_POPUP_WIDGET_NOT_VISIBLE_HOOK,
+            INTEGRATE.CONTENT_POPUP_WIDGET_EXCLUSION_HOOK,
+        ):
+            self.assertLess(
+                hook.index("RecorderRecordPopupWidgetShown("),
+                hook.index("ShutdownAndDestroyWidget(true);"),
+            )
+        # The transformed rectangle is kept before ConstrainPopupBounds
+        # replaces it.
+        constrain = INTEGRATE.CONTENT_POPUP_WIDGET_CONSTRAIN_HOOK
+        self.assertLess(
+            constrain.index("recorder_transformed_rect = transformed_rect;"),
+            constrain.index("ConstrainPopupBounds(transformed_rect)"),
+        )
 
     def test_a_popup_is_closed_once_whichever_path_runs(self):
         # Close records only when its cancel left the page in place, which is

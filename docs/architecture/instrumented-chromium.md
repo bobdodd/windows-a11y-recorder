@@ -623,14 +623,17 @@ Four record types are emitted:
   open select or a date, time, or colour picker, once `WebPagePopupImpl` has
   installed its document. Its context names the popup's own document. It
   carries the kind (`select-list`, `date-time`, `color`, or `other`), the
-  owner element's node and document, the owner's visible bounds in its local
+  owner element's node and document, the owner frame's local frame token
+  (protocol 0.44), the owner's visible bounds in its local
   root, the owner's local root view and the anchor in screen DIPs, the first
   window rectangle, and the zoom factor.
 - `page-popup-window-rect` (protocol 0.43): a window rectangle the popup asked
-  for in `WebPagePopupImpl::SetWindowRect` (`requested`, with `deferred` true
-  when asked for before the popup was shown), or the widget and window
-  rectangles the browser gave its widget in `WebPagePopupImpl::SetScreenRects`
-  (`placed`).
+  for in `WebPagePopupImpl::SetWindowRect`, with `deferred` true when asked
+  for before the popup was shown. Protocol 0.44 removed its `source` and
+  `widgetRect` and the `placed` record from
+  `WebPagePopupImpl::SetScreenRects`, which Chromium does not call on the
+  browser's path; the popup widget records below hold where the window was
+  put.
 - `page-popup-closed` (protocol 0.43): the popup closing, by the `renderer` or
   the `browser`, written from `WebPagePopupImpl::ClosePopup`, or from
   `WebPagePopupImpl::Close` when the popup client's cancel did not reach
@@ -640,6 +643,28 @@ Four record types are emitted:
   node when it has one. Selectedness sets no attribute, so no DOM record
   reports it. In an open select list the highlighted item is the popup
   listbox's selected option.
+- `popup-widget-created` (protocol 0.44): a popup widget the browser made for
+  a frame's request, written from `RenderFrameHostImpl::CreateNewPopupWidget`.
+  Its context is the opener frame's navigation context. It carries the
+  renderer's process ID, the opener frame's local frame token, and the
+  widget's frame sink, written `clientId:sinkId`.
+- `popup-widget-shown` (protocol 0.44): `WebContentsImpl::ShowCreatedWidget`
+  for a popup widget, with the browser process's context and the frame sink.
+  It carries the rectangle and anchor as received, after the transform for
+  nested web contents, and the rectangle after `ConstrainPopupBounds`, and
+  its `outcome`: `shown`, with the view's bounds after `InitAsPopup`, or the
+  reason it refused the popup, `window-not-active` (before the transform, so
+  the later rectangles are null), `not-visible`, or `permission-exclusion`.
+- `popup-widget-bounds-requested` (protocol 0.44):
+  `RenderWidgetHostImpl::SetPopupBounds`, with the rectangle requested and the
+  rectangle set on the view after `ConstrainPopupBounds` and the display
+  clamp, or null when the request was ignored while a screen rectangle update
+  was unacknowledged.
+- `popup-widget-screen-rects` (protocol 0.44): the view and window bounds in
+  screen DIPs that `RenderWidgetHostImpl::SendScreenRects` sent to a popup
+  widget, the native window's rectangle and client area in screen pixels as
+  Windows returned them when the record was made, or null when it did not
+  answer, and the view's device scale factor.
 
 The recorded facts are bounded as follows:
 
@@ -1044,7 +1069,15 @@ widget is not told its frame sink, so its `frameSinkId` is null and its
 `isMainFrameWidget` is false. The design is in
 [page recreation](page-recreation.md), "Slice 4d".
 
-Live 0.43 connections require an exact protocol-version match.
+Protocol version 0.44 adds four `browser.interaction` records written by the
+browser process: `popup-widget-created`, `popup-widget-shown`,
+`popup-widget-bounds-requested`, and `popup-widget-screen-rects`. All four
+name the popup widget's frame sink. `page-popup-opened` gains
+`ownerFrameToken`, which matches the created record's `openerFrameToken`, and
+`page-popup-window-rect` records only requested rectangles. The design is in
+[page recreation](page-recreation.md), "Sub-step 1b".
+
+Live 0.44 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

@@ -3710,7 +3710,7 @@ recorded count (413), as are the swap and feedback counts (376 against
 380): the last interval of each renderer is not logged before it exits. As
 before, the lines do not time Blink's work before each call.
 
-#### Sub-step 1b design (proposed)
+#### Sub-step 1b design (agreed)
 
 The owner, on 2026-10-03: "I want us to be as precise as we can be because
 real tests will inspect the rendered frames."
@@ -3802,6 +3802,47 @@ without a popup; the integration script's tests of the browser hooks and
 of the removed hook's upgrade; and, on the target machine, a recording of
 the CNIB events page with the selects opened, in which each popup joins to
 one widget, with its screen rectangles and its cost.
+
+The owner agreed the design on 2026-10-03 ("yes please").
+
+#### Sub-step 1b as built
+
+Built as designed, with these details settled in the code:
+
+- `popup-widget-created` carries the opener frame's navigation context, as
+  the frame cookie records do. The other three records carry the browser
+  process's context, with no page, frame, or document, and are joined to the
+  created record by `frameSinkId`.
+- `popup-widget-shown` names its `outcome`: `shown`, `window-not-active`,
+  `not-visible`, or `permission-exclusion`. `ShowCreatedWidget` refuses for
+  an inactive window before it transforms the rectangle, so that refusal
+  carries only the received rectangle and anchor. It returns without a
+  record when it has no view for the widget, since there is then no widget
+  to name. The transformed rectangle is kept before `ConstrainPopupBounds`
+  replaces it, so both are recorded.
+- `popup-widget-screen-rects` records the native window's client area as
+  well as its rectangle (`nativeWindowRect`, `nativeClientRect`), both in
+  screen pixels, or both null when Windows does not answer. The bridge reads
+  them from the HWND of the view's window tree host with `GetWindowRect`,
+  `GetClientRect`, and `ClientToScreen`, when the record is made, after the
+  screen rectangles are sent. Reading them in the bridge keeps `windows.h`
+  out of `render_widget_host_impl.cc`.
+- `page-popup-window-rect` loses `source` and `widgetRect`; it is always a
+  requested rectangle. The integration script rewrites a checkout patched by
+  0.43: the owner record's helper, the requested rectangle's helper and hook,
+  and the removal of the `SetScreenRects` hook.
+
+Tests run in the sandbox: the integration script's tests, including the
+browser hooks written once, failing when an anchor is absent, recording a
+refusal before the widget is destroyed, and the 0.43 upgrade; the hooks
+applied twice to copies of the three browser files and of the 0.43-patched
+`web_page_popup_impl.cc` from the target machine, with no change on the
+second run and every bridge call matching the header; and the record
+contract tests for each new record and the changed ones. The join is not
+yet product code: it is checked by hand against the recording made on the
+target machine, which is still to be made, and its required unit tests,
+including a popup without a widget and a widget without a popup, come with
+the code that first uses it, in sub-step 2.
 
 #### Sub-step 2 design (proposed)
 

@@ -9630,12 +9630,17 @@ void RecorderRecordPagePopupOpened(Page* recorder_page,
     return;
   }
   Document& recorder_owner_document = recorder_owner.GetDocument();
+  LocalFrame* recorder_owner_frame = recorder_owner_document.GetFrame();
+  if (!recorder_owner_frame) {
+    return;
+  }
   a11y_recorder::RecordBlinkPagePopupOpened(
       static_cast<int>(recorder_document->GetDomNodeId()),
       recorder_document->Token().ToString(),
       RecorderPagePopupKind(recorder_owner),
       static_cast<int>(recorder_owner_document.GetDomNodeId()),
       recorder_owner_document.Token().ToString(),
+      recorder_owner_frame->GetLocalFrameToken().ToString(),
       static_cast<int>(recorder_owner.GetDomNodeId()),
       RecorderPagePopupRect(recorder_owner.VisibleBoundsInLocalRoot()),
       RecorderPagePopupRect(recorder_owner_window),
@@ -9644,21 +9649,16 @@ void RecorderRecordPagePopupOpened(Page* recorder_page,
 }
 
 void RecorderRecordPagePopupWindowRect(Page* recorder_page,
-                                       const char* recorder_source,
                                        bool recorder_deferred,
-                                       const gfx::Rect& recorder_window_rect,
-                                       const gfx::Rect* recorder_widget_rect) {
+                                       const gfx::Rect& recorder_window_rect) {
   Document* recorder_document = RecorderPagePopupDocument(recorder_page);
   if (!recorder_document) {
     return;
   }
   a11y_recorder::RecordBlinkPagePopupWindowRect(
       static_cast<int>(recorder_document->GetDomNodeId()),
-      recorder_document->Token().ToString(), recorder_source,
-      recorder_deferred, RecorderPagePopupRect(recorder_window_rect),
-      recorder_widget_rect != nullptr,
-      recorder_widget_rect ? RecorderPagePopupRect(*recorder_widget_rect)
-                           : a11y_recorder::PagePopupRect{});
+      recorder_document->Token().ToString(), recorder_deferred,
+      RecorderPagePopupRect(recorder_window_rect));
 }
 
 void RecorderRecordPagePopupClosed(Page* recorder_page,
@@ -9740,18 +9740,10 @@ BLINK_PAGE_POPUP_WINDOW_RECT_ANCHOR = """\
   if (!should_defer_setting_window_rect_) {
 """
 BLINK_PAGE_POPUP_WINDOW_RECT_HOOK = """\
-  RecorderRecordPagePopupWindowRect(page_.Get(), "requested",
+  RecorderRecordPagePopupWindowRect(page_.Get(),
                                     should_defer_setting_window_rect_,
-                                    window_rect, nullptr);
+                                    window_rect);
   if (!should_defer_setting_window_rect_) {
-"""
-BLINK_PAGE_POPUP_SCREEN_RECTS_ANCHOR = """\
-  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
-"""
-BLINK_PAGE_POPUP_SCREEN_RECTS_HOOK = """\
-  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
-  RecorderRecordPagePopupWindowRect(page_.Get(), "placed", false,
-                                    window_screen_rect, &widget_screen_rect);
 """
 BLINK_PAGE_POPUP_CLOSE_ANCHOR = """\
   const bool running_inside_close = closing_;
@@ -9776,7 +9768,6 @@ BLINK_PAGE_POPUP_HOOKS = (
     (BLINK_PAGE_POPUP_CLIENT_ANCHOR, BLINK_PAGE_POPUP_CLIENT_HOOK),
     (BLINK_PAGE_POPUP_OPENED_ANCHOR, BLINK_PAGE_POPUP_OPENED_HOOK),
     (BLINK_PAGE_POPUP_WINDOW_RECT_ANCHOR, BLINK_PAGE_POPUP_WINDOW_RECT_HOOK),
-    (BLINK_PAGE_POPUP_SCREEN_RECTS_ANCHOR, BLINK_PAGE_POPUP_SCREEN_RECTS_HOOK),
     (BLINK_PAGE_POPUP_CLOSE_ANCHOR, BLINK_PAGE_POPUP_CLOSE_HOOK),
     (
         BLINK_PAGE_POPUP_BROWSER_CLOSE_ANCHOR,
@@ -9784,6 +9775,81 @@ BLINK_PAGE_POPUP_HOOKS = (
     ),
 )
 
+
+# Protocol 0.43 recorded the owner without its frame token, a requested
+# window rectangle with its source, and a "placed" rectangle from
+# WebPagePopupImpl::SetScreenRects, which Chromium does not call on the
+# browser's path; 0.44 records the owner frame's token, drops the source, and
+# removes the placed hook, since the browser's popup widget records hold
+# where the window was put.
+LEGACY_043_PAGE_POPUP_OPENED_FN = """  Document& recorder_owner_document = recorder_owner.GetDocument();
+  a11y_recorder::RecordBlinkPagePopupOpened(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(),
+      RecorderPagePopupKind(recorder_owner),
+      static_cast<int>(recorder_owner_document.GetDomNodeId()),
+      recorder_owner_document.Token().ToString(),
+      static_cast<int>(recorder_owner.GetDomNodeId()),
+"""
+STAGE_044_PAGE_POPUP_OPENED_FN = """  Document& recorder_owner_document = recorder_owner.GetDocument();
+  LocalFrame* recorder_owner_frame = recorder_owner_document.GetFrame();
+  if (!recorder_owner_frame) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupOpened(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(),
+      RecorderPagePopupKind(recorder_owner),
+      static_cast<int>(recorder_owner_document.GetDomNodeId()),
+      recorder_owner_document.Token().ToString(),
+      recorder_owner_frame->GetLocalFrameToken().ToString(),
+      static_cast<int>(recorder_owner.GetDomNodeId()),
+"""
+LEGACY_043_PAGE_POPUP_WINDOW_RECT_FN = """void RecorderRecordPagePopupWindowRect(Page* recorder_page,
+                                       const char* recorder_source,
+                                       bool recorder_deferred,
+                                       const gfx::Rect& recorder_window_rect,
+                                       const gfx::Rect* recorder_widget_rect) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupWindowRect(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(), recorder_source,
+      recorder_deferred, RecorderPagePopupRect(recorder_window_rect),
+      recorder_widget_rect != nullptr,
+      recorder_widget_rect ? RecorderPagePopupRect(*recorder_widget_rect)
+                           : a11y_recorder::PagePopupRect{});
+}
+"""
+STAGE_044_PAGE_POPUP_WINDOW_RECT_FN = """void RecorderRecordPagePopupWindowRect(Page* recorder_page,
+                                       bool recorder_deferred,
+                                       const gfx::Rect& recorder_window_rect) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupWindowRect(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(), recorder_deferred,
+      RecorderPagePopupRect(recorder_window_rect));
+}
+"""
+LEGACY_043_PAGE_POPUP_WINDOW_RECT_HOOK = """\
+  RecorderRecordPagePopupWindowRect(page_.Get(), "requested",
+                                    should_defer_setting_window_rect_,
+                                    window_rect, nullptr);
+  if (!should_defer_setting_window_rect_) {
+"""
+LEGACY_043_PAGE_POPUP_SCREEN_RECTS_HOOK = """\
+  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
+  RecorderRecordPagePopupWindowRect(page_.Get(), "placed", false,
+                                    window_screen_rect, &widget_screen_rect);
+"""
+LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL = """\
+  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
+"""
 
 STAGE_2A3939B_PAGE_POPUP_TYPE_READ = (
     "    const String recorder_type = "
@@ -9807,7 +9873,25 @@ def patch_blink_page_popup(path: Path) -> None:
     # HTMLInputElement, where it is private; that helper line is replaced.
     text = upgrade_legacy_hooks(
         text,
-        ((STAGE_2A3939B_PAGE_POPUP_TYPE_READ, STAGE_2A3939B_PAGE_POPUP_TYPE_FIX),),
+        (
+            (
+                STAGE_2A3939B_PAGE_POPUP_TYPE_READ,
+                STAGE_2A3939B_PAGE_POPUP_TYPE_FIX,
+            ),
+            (LEGACY_043_PAGE_POPUP_OPENED_FN, STAGE_044_PAGE_POPUP_OPENED_FN),
+            (
+                LEGACY_043_PAGE_POPUP_WINDOW_RECT_FN,
+                STAGE_044_PAGE_POPUP_WINDOW_RECT_FN,
+            ),
+            (
+                LEGACY_043_PAGE_POPUP_WINDOW_RECT_HOOK,
+                BLINK_PAGE_POPUP_WINDOW_RECT_HOOK,
+            ),
+            (
+                LEGACY_043_PAGE_POPUP_SCREEN_RECTS_HOOK,
+                LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL,
+            ),
+        ),
         path,
     )
     text = insert_before_once(
@@ -9825,6 +9909,340 @@ def patch_blink_page_popup(path: Path) -> None:
         path,
     )
     for anchor, hook in BLINK_PAGE_POPUP_HOOKS:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+# Slice 4d sub-step 1b (protocol 0.44): the browser's records of a renderer's
+# popup widget. RenderFrameHostImpl::CreateNewPopupWidget records the widget
+# and its frame sink with the opener frame's token, which the renderer's
+# page-popup-opened record also names. WebContentsImpl::ShowCreatedWidget
+# records the rectangles it receives, transforms and constrains, and whether
+# it showed the popup or why it refused. RenderWidgetHostImpl records each
+# bounds request from the renderer and the screen rectangles sent to a popup
+# widget, with the native window's rectangles in pixels. See
+# docs/architecture/page-recreation.md, "Sub-step 1b".
+CONTENT_POPUP_WIDGET_CREATED_ANCHOR = """\
+  // The renderer-owned widget was created before sending the IPC received here.
+  widget->RendererWidgetCreated(/*for_frame_widget=*/false);
+"""
+CONTENT_POPUP_WIDGET_CREATED_HOOK = """\
+  // The renderer-owned widget was created before sending the IPC received here.
+  widget->RendererWidgetCreated(/*for_frame_widget=*/false);
+  {
+    const base::Process& recorder_process = GetProcess()->GetProcess();
+    a11y_recorder::PopupWidgetSink recorder_sink;
+    recorder_sink.client_id = widget->GetFrameSinkId().client_id();
+    recorder_sink.sink_id = widget->GetFrameSinkId().sink_id();
+    a11y_recorder::RecordBrowserPopupWidgetCreated(
+        GetMainFrame()->GetFrameTreeNodeId().GetUnsafeValue(),
+        GetFrameTreeNodeId().GetUnsafeValue(), GetNavigationId(),
+        GetDocumentToken().ToString(),
+        recorder_process.IsValid() ? static_cast<int>(recorder_process.Pid())
+                                   : 0,
+        GetFrameToken().ToString(), recorder_sink);
+  }
+"""
+
+
+def patch_content_popup_widget_created(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "content/browser/renderer_host/render_frame_host_impl.h"',
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_POPUP_WIDGET_CREATED_ANCHOR,
+        CONTENT_POPUP_WIDGET_CREATED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+CONTENT_POPUP_WIDGET_SHOWN_HELPER_ANCHOR = (
+    "void WebContentsImpl::ShowCreatedWidget(ChildProcessId process_id,\n"
+)
+CONTENT_POPUP_WIDGET_SHOWN_HELPER_MARKER = "void RecorderRecordPopupWidgetShown("
+CONTENT_POPUP_WIDGET_SHOWN_HELPER = """\
+namespace {
+
+a11y_recorder::PagePopupRect RecorderPopupWidgetShownRect(
+    const gfx::Rect& rect) {
+  a11y_recorder::PagePopupRect recorder_rect;
+  recorder_rect.x = rect.x();
+  recorder_rect.y = rect.y();
+  recorder_rect.width = rect.width();
+  recorder_rect.height = rect.height();
+  return recorder_rect;
+}
+
+// Records ShowCreatedWidget's handling of a popup widget. A rectangle not yet
+// computed when the popup is refused is passed as null; the view's bounds are
+// passed only when the popup is shown.
+void RecorderRecordPopupWidgetShown(RenderWidgetHostImpl* recorder_host,
+                                    const char* recorder_outcome,
+                                    const gfx::Rect& recorder_received,
+                                    const gfx::Rect& recorder_received_anchor,
+                                    const gfx::Rect* recorder_transformed,
+                                    const gfx::Rect* recorder_transformed_anchor,
+                                    const gfx::Rect* recorder_constrained,
+                                    const gfx::Rect* recorder_view_bounds) {
+  if (!recorder_host) {
+    return;
+  }
+  a11y_recorder::PopupWidgetShown recorder_shown;
+  recorder_shown.sink.client_id = recorder_host->GetFrameSinkId().client_id();
+  recorder_shown.sink.sink_id = recorder_host->GetFrameSinkId().sink_id();
+  recorder_shown.outcome = recorder_outcome;
+  recorder_shown.received_rect = RecorderPopupWidgetShownRect(recorder_received);
+  recorder_shown.received_anchor_rect =
+      RecorderPopupWidgetShownRect(recorder_received_anchor);
+  if (recorder_transformed && recorder_transformed_anchor) {
+    recorder_shown.has_transformed = true;
+    recorder_shown.transformed_rect =
+        RecorderPopupWidgetShownRect(*recorder_transformed);
+    recorder_shown.transformed_anchor_rect =
+        RecorderPopupWidgetShownRect(*recorder_transformed_anchor);
+  }
+  if (recorder_constrained) {
+    recorder_shown.has_constrained = true;
+    recorder_shown.constrained_rect =
+        RecorderPopupWidgetShownRect(*recorder_constrained);
+  }
+  if (recorder_view_bounds) {
+    recorder_shown.has_view_bounds = true;
+    recorder_shown.view_bounds =
+        RecorderPopupWidgetShownRect(*recorder_view_bounds);
+  }
+  a11y_recorder::RecordBrowserPopupWidgetShown(std::move(recorder_shown));
+}
+
+}  // namespace
+
+"""
+CONTENT_POPUP_WIDGET_INACTIVE_ANCHOR = """\
+    // it: https://issues.chromium.org/issues/365089001
+    widget_host_view->host()->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_INACTIVE_HOOK = """\
+    // it: https://issues.chromium.org/issues/365089001
+    RecorderRecordPopupWidgetShown(widget_host_view->host(),
+                                   "window-not-active", initial_rect,
+                                   initial_anchor_rect, nullptr, nullptr,
+                                   nullptr, nullptr);
+    widget_host_view->host()->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_CONSTRAIN_ANCHOR = """\
+  transformed_rect = ConstrainPopupBounds(transformed_rect);
+"""
+CONTENT_POPUP_WIDGET_CONSTRAIN_HOOK = """\
+  const gfx::Rect recorder_transformed_rect = transformed_rect;
+  transformed_rect = ConstrainPopupBounds(transformed_rect);
+"""
+CONTENT_POPUP_WIDGET_NOT_VISIBLE_ANCHOR = """\
+  if (GetVisibility() != Visibility::VISIBLE) {
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_NOT_VISIBLE_HOOK = """\
+  if (GetVisibility() != Visibility::VISIBLE) {
+    RecorderRecordPopupWidgetShown(render_widget_host_impl, "not-visible",
+                                   initial_rect, initial_anchor_rect,
+                                   &recorder_transformed_rect,
+                                   &transformed_anchor_rect, &transformed_rect,
+                                   nullptr);
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_EXCLUSION_ANCHOR = """\
+      permission_exclusion_area_bounds->Intersects(transformed_rect)) {
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_EXCLUSION_HOOK = """\
+      permission_exclusion_area_bounds->Intersects(transformed_rect)) {
+    RecorderRecordPopupWidgetShown(render_widget_host_impl,
+                                   "permission-exclusion", initial_rect,
+                                   initial_anchor_rect,
+                                   &recorder_transformed_rect,
+                                   &transformed_anchor_rect, &transformed_rect,
+                                   nullptr);
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_INIT_ANCHOR = """\
+  widget_host_view->InitAsPopup(view, transformed_rect,
+                                transformed_anchor_rect);
+"""
+CONTENT_POPUP_WIDGET_INIT_HOOK = """\
+  widget_host_view->InitAsPopup(view, transformed_rect,
+                                transformed_anchor_rect);
+  {
+    const gfx::Rect recorder_view_bounds = widget_host_view->GetViewBounds();
+    RecorderRecordPopupWidgetShown(render_widget_host_impl, "shown",
+                                   initial_rect, initial_anchor_rect,
+                                   &recorder_transformed_rect,
+                                   &transformed_anchor_rect, &transformed_rect,
+                                   &recorder_view_bounds);
+  }
+"""
+CONTENT_POPUP_WIDGET_SHOWN_HOOKS = (
+    (CONTENT_POPUP_WIDGET_INACTIVE_ANCHOR, CONTENT_POPUP_WIDGET_INACTIVE_HOOK),
+    (CONTENT_POPUP_WIDGET_CONSTRAIN_ANCHOR, CONTENT_POPUP_WIDGET_CONSTRAIN_HOOK),
+    (
+        CONTENT_POPUP_WIDGET_NOT_VISIBLE_ANCHOR,
+        CONTENT_POPUP_WIDGET_NOT_VISIBLE_HOOK,
+    ),
+    (CONTENT_POPUP_WIDGET_EXCLUSION_ANCHOR, CONTENT_POPUP_WIDGET_EXCLUSION_HOOK),
+    (CONTENT_POPUP_WIDGET_INIT_ANCHOR, CONTENT_POPUP_WIDGET_INIT_HOOK),
+)
+
+
+def patch_content_popup_widget_shown(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "content/browser/web_contents/web_contents_impl.h"',
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_POPUP_WIDGET_SHOWN_HELPER_ANCHOR,
+        CONTENT_POPUP_WIDGET_SHOWN_HELPER,
+        CONTENT_POPUP_WIDGET_SHOWN_HELPER_MARKER,
+        path,
+    )
+    for anchor, hook in CONTENT_POPUP_WIDGET_SHOWN_HOOKS:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+CONTENT_WIDGET_HOST_OWN_INCLUDE = (
+    '#include "content/browser/renderer_host/render_widget_host_impl.h"'
+)
+CONTENT_WIDGET_HOST_HELPER_ANCHOR = "void RenderWidgetHostImpl::SendScreenRects() {\n"
+CONTENT_WIDGET_HOST_HELPER_MARKER = "void RecorderRecordPopupWidgetScreenRects("
+CONTENT_WIDGET_HOST_HELPER = """\
+namespace {
+
+a11y_recorder::PagePopupRect RecorderPopupWidgetRect(const gfx::Rect& rect) {
+  a11y_recorder::PagePopupRect recorder_rect;
+  recorder_rect.x = rect.x();
+  recorder_rect.y = rect.y();
+  recorder_rect.width = rect.width();
+  recorder_rect.height = rect.height();
+  return recorder_rect;
+}
+
+a11y_recorder::PopupWidgetSink RecorderPopupWidgetSink(
+    const viz::FrameSinkId& recorder_frame_sink_id) {
+  a11y_recorder::PopupWidgetSink recorder_sink;
+  recorder_sink.client_id = recorder_frame_sink_id.client_id();
+  recorder_sink.sink_id = recorder_frame_sink_id.sink_id();
+  return recorder_sink;
+}
+
+// Records the screen rectangles sent to a popup widget.
+void RecorderRecordPopupWidgetScreenRects(
+    RenderWidgetHostViewBase* recorder_view,
+    const viz::FrameSinkId& recorder_frame_sink_id,
+    const gfx::Rect& recorder_view_rect,
+    const gfx::Rect& recorder_window_rect) {
+  if (!recorder_view ||
+      recorder_view->GetWidgetType() != WidgetType::kPopup) {
+    return;
+  }
+  // The popup's native window, read by the bridge, is its window tree host's
+  // HWND on Windows.
+  uintptr_t recorder_native_window = 0;
+#if BUILDFLAG(IS_WIN)
+  gfx::NativeView recorder_native_view = recorder_view->GetNativeView();
+  if (recorder_native_view && recorder_native_view->GetHost()) {
+    recorder_native_window = reinterpret_cast<uintptr_t>(
+        recorder_native_view->GetHost()->GetAcceleratedWidget());
+  }
+#endif
+  a11y_recorder::RecordBrowserPopupWidgetScreenRects(
+      RecorderPopupWidgetSink(recorder_frame_sink_id),
+      RecorderPopupWidgetRect(recorder_view_rect),
+      RecorderPopupWidgetRect(recorder_window_rect), recorder_native_window,
+      recorder_view->GetDeviceScaleFactor());
+}
+
+}  // namespace
+
+"""
+CONTENT_WIDGET_HOST_SCREEN_RECTS_ANCHOR = """\
+  blink_widget_->UpdateScreenRects(
+      last_view_screen_rect_, last_window_screen_rect_,
+      base::BindOnce(&RenderWidgetHostImpl::OnUpdateScreenRectsAck,
+                     weak_factory_.GetWeakPtr()));
+  waiting_for_screen_rects_ack_ = true;
+"""
+CONTENT_WIDGET_HOST_SCREEN_RECTS_HOOK = """\
+  blink_widget_->UpdateScreenRects(
+      last_view_screen_rect_, last_window_screen_rect_,
+      base::BindOnce(&RenderWidgetHostImpl::OnUpdateScreenRectsAck,
+                     weak_factory_.GetWeakPtr()));
+  waiting_for_screen_rects_ack_ = true;
+  RecorderRecordPopupWidgetScreenRects(view_.get(), GetFrameSinkId(),
+                                       last_view_screen_rect_,
+                                       last_window_screen_rect_);
+"""
+CONTENT_WIDGET_HOST_POPUP_BOUNDS_ANCHOR = """\
+  if (view_ && !waiting_for_screen_rects_ack_) {
+    gfx::Rect constrained_bounds =
+        delegate_ ? delegate_->ConstrainPopupBounds(bounds) : bounds;
+    view_->SetBounds(
+        ClampPopupBoundsToDisplay(constrained_bounds, view_.get()));
+  }
+  std::move(callback).Run();
+"""
+CONTENT_WIDGET_HOST_POPUP_BOUNDS_HOOK = """\
+  bool recorder_has_set_rect = false;
+  gfx::Rect recorder_set_rect;
+  if (view_ && !waiting_for_screen_rects_ack_) {
+    gfx::Rect constrained_bounds =
+        delegate_ ? delegate_->ConstrainPopupBounds(bounds) : bounds;
+    recorder_set_rect =
+        ClampPopupBoundsToDisplay(constrained_bounds, view_.get());
+    recorder_has_set_rect = true;
+    view_->SetBounds(recorder_set_rect);
+  }
+  a11y_recorder::RecordBrowserPopupWidgetBoundsRequested(
+      RecorderPopupWidgetSink(GetFrameSinkId()),
+      RecorderPopupWidgetRect(bounds), recorder_has_set_rect,
+      RecorderPopupWidgetRect(recorder_set_rect));
+  std::move(callback).Run();
+"""
+CONTENT_WIDGET_HOST_HOOKS = (
+    (
+        CONTENT_WIDGET_HOST_SCREEN_RECTS_ANCHOR,
+        CONTENT_WIDGET_HOST_SCREEN_RECTS_HOOK,
+    ),
+    (
+        CONTENT_WIDGET_HOST_POPUP_BOUNDS_ANCHOR,
+        CONTENT_WIDGET_HOST_POPUP_BOUNDS_HOOK,
+    ),
+)
+
+
+def patch_content_render_widget_host(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CONTENT_WIDGET_HOST_OWN_INCLUDE,
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_WIDGET_HOST_HELPER_ANCHOR,
+        CONTENT_WIDGET_HOST_HELPER,
+        CONTENT_WIDGET_HOST_HELPER_MARKER,
+        path,
+    )
+    for anchor, hook in CONTENT_WIDGET_HOST_HOOKS:
         text = apply_cookie_hook(text, anchor, hook, path)
     write_patched(path, text)
 
@@ -15235,6 +15653,16 @@ def main() -> int:
     renderer_host = source / "content" / "browser" / "renderer_host"
     patch_content_frame_cookie_access(
         renderer_host / "render_frame_host_impl.cc"
+    )
+    patch_content_popup_widget_created(
+        renderer_host / "render_frame_host_impl.cc"
+    )
+    patch_content_render_widget_host(
+        renderer_host / "render_widget_host_impl.cc"
+    )
+    patch_content_popup_widget_shown(
+        source / "content" / "browser" / "web_contents"
+        / "web_contents_impl.cc"
     )
     patch_content_navigation_cookie_access(
         renderer_host / "navigation_request.cc"
