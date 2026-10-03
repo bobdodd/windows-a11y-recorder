@@ -1262,7 +1262,7 @@ fixed.
 
 ### A read-only snapshot
 
-Replaced on 2026-10-03 by "Input refused (proposed)" under slice 4d:
+Replaced on 2026-10-03 by "Input refused (agreed)" under slice 4d:
 the recreation takes no input except the right-click for Inspect.
 
 The owner, on 2026-09-30: "the page is a read-only snapshot, I didn't think
@@ -4095,7 +4095,7 @@ controls, but only navigation is refused so far (slice 3b, "Leaving the
 recreation"). A click on an option in the popup's iframe selects it, as it
 would in any listbox.
 
-#### Input refused (proposed)
+#### Input refused (agreed)
 
 The owner, on 2026-10-03, replacing the read-only snapshot of 2026-09-30:
 "The point of this rendering is that it is a snapshot in time, including
@@ -4179,6 +4179,77 @@ Required tests:
   page with a list open, clicks, keys, and the wheel change nothing, the
   recorded focus outline stays, and right-click and Inspect select the
   element clicked.
+
+#### Input refused as built
+
+Agreed by the owner on 2026-10-03 ("yes please"). The places were read in
+the Chromium checkout on the target machine before the patch was written.
+
+Compositor thread. `InputHandlerProxy::RouteToTypeSpecificHandler`
+(`third_party/blink/renderer/platform/widget/input/input_handler_proxy.cc`,
+line 837 in the checkout) is where every event the browser sends to a
+frame widget is handled on the compositor thread, queued scroll gestures
+included, before the wheel, scroll, pinch, and touch handlers run (line
+878 onward). Under the recreation switch it now returns, before any of
+them: `DID_NOT_HANDLE` for a mouse event, so that the event goes to the
+main thread and no scrollbar is dragged on the compositor thread; and
+`DROP_EVENT` for every other event, so that keys, the wheel, touch, and
+gestures reach neither the compositor's scrolling nor the page. The
+platform component, `component("platform")` in
+`third_party/blink/renderer/platform/BUILD.gn`, which lists that file,
+gains the recorder bridge as a dependency.
+
+Main thread. `WebFrameWidgetImpl::HandleInputEvent`
+(`third_party/blink/renderer/core/frame/web_frame_widget_impl.cc`, line
+3482) first gives the event to the DevTools agent (lines 3511 to 3516),
+which takes the element picker's events and returns. The hook follows the
+point where the current input event is set (line 3530), before pointer
+lock, the mouse-down handling, and `WidgetEventHandler::HandleInputEvent`
+(line 3588). Under the recreation switch, a right-button mouse event of the
+type that shows a context menu (mouse up when the page setting
+`ShowContextMenuOnMouseUp` is true, as on Windows, otherwise mouse down,
+the rule of `HandleMouseDown` at line 1209 and `HandleMouseUp` at line
+1272) is passed to `MouseContextMenu` (line 1229), and the widget returns
+the event as handled; every other event is returned as suppressed. The
+page therefore receives no mouse down, mouse up, or mouse move: no focus,
+selection, hover, or control change.
+
+What the context menu does. `MouseContextMenu` calls
+`EventHandler::SendContextMenuEvent` (`core/input/event_handler.cc`, line
+2177), which performs an active hit test and dispatches the `contextmenu`
+event to the element under the pointer; no page script runs to see it. It
+changes no selection. The hit test can set Blink's hover and active state
+on the element under the pointer; whether that state changes what is drawn,
+under the imposed recorded style, is to be seen in the system test.
+
+Found while reading, not part of this step: text committed by an input
+method (`ImeCommitText` and `ImeSetComposition` on the frame widget)
+reaches Blink through the widget's input method interface, not as an
+input event, so these hooks do not refuse it. It inserts text only into a
+focused editable element; whether to refuse it is for the owner to decide.
+
+Tests as built:
+
+- Unit tests (`RecreationInputIntegrationTests` in
+  `chromium/test_integrate.py`): each hook is written once, a second run
+  leaves the file unchanged, and a missing anchor fails the run; the
+  compositor check precedes the scroll handling, and the main-thread check
+  follows the DevTools agent and precedes the widget's own handling. The
+  three patches were also run against copies of the target machine's files
+  and checked against the bridge's signatures.
+- Unit test: the evidence notes say the recreation takes no input except
+  the right-click.
+- Integration test (`TheRecreationTakesNoInput`, run only with the
+  instrumented Chromium): on a generated page, trusted left clicks on a
+  link, a link within the page, a check box, a select, a list box, a
+  summary, and a text field, a typed key, and the wheel over the page and
+  over a scrollable area leave the address, the DOM, every control's state,
+  the selection, the focus, and every scroll offset as built; a right click
+  dispatches the context menu event once. The navigation test,
+  `TheRecreationDoesNotLeaveThePage`, now starts its navigations by script
+  with a user gesture, since clicks are refused. The DevTools element picker
+  and the recreated popup's iframe are left to the system test, as the
+  test's DevTools client does not read protocol events.
 
 ### To be settled
 

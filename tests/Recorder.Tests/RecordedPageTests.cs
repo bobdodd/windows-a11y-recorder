@@ -277,6 +277,8 @@ public sealed class RecordedPageTests : IDisposable
         var content = RecordedPage.Content(state, "https://example.test/", 4_000_000_000, 4_000_000_000, "presented");
         Assert.Contains(content.Evidence.Notes, note => note.StartsWith("1 of the ", StringComparison.Ordinal) && note.Contains("data-a11y-recorded-layout", StringComparison.Ordinal));
         Assert.Contains(content.Evidence.Notes, note => note.Contains("DevTools' Console", StringComparison.Ordinal));
+        // The notes say the recreation takes no input but the right-click.
+        Assert.Contains(content.Evidence.Notes, note => note.StartsWith("The recreation is a snapshot in time and takes no input except the right-click", StringComparison.Ordinal));
     }
 
     // An element recorded without a layout object takes display: none, or
@@ -1096,7 +1098,8 @@ public sealed class RecreationControlTests : IDisposable
 
     // A followed link, a link to a new tab, and a form submission are each
     // refused; the page stays, its DOM unchanged, the new tab is closed, and
-    // the recorded viewport is emulated.
+    // the recorded viewport is emulated. The recreation takes no click, so
+    // each is started by script with a user gesture.
     [Fact]
     public async Task TheRecreationDoesNotLeaveThePage()
     {
@@ -1147,14 +1150,8 @@ public sealed class RecreationControlTests : IDisposable
         }
         async Task Click(string id)
         {
-            using var rectangle = JsonDocument.Parse(await Evaluate(
-                $"JSON.stringify((r => [r.x + r.width / 2, r.y + r.height / 2])(document.getElementById('{id}').getBoundingClientRect()))"));
-            var x = rectangle.RootElement[0].GetDouble();
-            var y = rectangle.RootElement[1].GetDouble();
-            foreach (var type in new[] { "mousePressed", "mouseReleased" })
-            {
-                using var _ = await client.CallAsync("Input.dispatchMouseEvent", new { type, x, y, button = "left", clickCount = 1 }, token);
-            }
+            using var _ = await client.CallAsync(
+                "Runtime.evaluate", new { expression = $"document.getElementById('{id}').click()", userGesture = true }, token);
         }
         async Task WaitForBlocked(int count)
         {
@@ -1199,5 +1196,118 @@ public sealed class RecreationControlTests : IDisposable
             await Task.Delay(100, token);
         }
         Assert.Fail("The tab opened by the link was not closed.");
+    }
+
+    // The recreation is a snapshot in time: a left click on a link, a click
+    // and typing in a text field, the wheel, and a right click leave the page
+    // as built, with no navigation, focus, value, or scroll change.
+    [Fact]
+    public async Task TheRecreationTakesNoInput()
+    {
+        if (Environment.GetEnvironmentVariable("RECORDER_RECREATION_CHROMIUM") is not { } chromium)
+        {
+            return;
+        }
+        var token = TestContext.Current.CancellationToken;
+        var content = new RecreationContent(
+            """
+            <!DOCTYPE html><html><head><title>Held</title></head><body style="height: 3000px">
+            <p><a id="away" href="https://example.test/away">away</a> <a id="within" href="#end">within</a></p>
+            <p><input id="field" value="recorded"> <input id="check" type="checkbox"></p>
+            <p><select id="list"><option>first</option><option>second</option></select>
+            <select id="box" size="3"><option>one</option><option>two</option><option>three</option></select></p>
+            <details id="more"><summary id="summary">more</summary>hidden</details>
+            <div id="area" style="height: 100px; overflow: auto"><div style="height: 1000px">area</div></div>
+            <p id="end">end</p>
+            </body></html>
+            """,
+            FixedRecreation.Create().Evidence)
+        {
+            Viewport = new RecreationViewport(800, 600, 1, 1),
+        };
+        await using var session = await RecreationSession.OpenAsync(
+            chromium, Path.Combine(_directory, "recreation"), content, token, ["--headless=new"]);
+
+        using var http = new HttpClient();
+        var list = $"http://127.0.0.1:{session.DevToolsAddress.Port}/json/list";
+        string? address = null;
+        for (var attempt = 0; attempt < 100 && address is null; attempt++)
+        {
+            using var targets = JsonDocument.Parse(await http.GetStringAsync(list, token));
+            address = targets.RootElement.EnumerateArray()
+                .Where(item => item.GetProperty("type").GetString() == "page" &&
+                               item.GetProperty("url").GetString() == session.PageAddress)
+                .Select(item => item.GetProperty("webSocketDebuggerUrl").GetString())
+                .FirstOrDefault();
+            if (address is null)
+            {
+                await Task.Delay(100, token);
+            }
+        }
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(new Uri(address!), token);
+        var client = new TestDevToolsClient(socket);
+
+        async Task<string> Evaluate(string expression)
+        {
+            using var answer = await client.CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, token);
+            return answer.RootElement.GetProperty("result").GetProperty("result").GetProperty("value").ToString();
+        }
+        async Task<(double X, double Y)> Centre(string id)
+        {
+            using var rectangle = JsonDocument.Parse(await Evaluate(
+                $"JSON.stringify((r => [r.x + r.width / 2, r.y + r.height / 2])(document.getElementById('{id}').getBoundingClientRect()))"));
+            return (rectangle.RootElement[0].GetDouble(), rectangle.RootElement[1].GetDouble());
+        }
+        async Task Click(string id, string button)
+        {
+            var (x, y) = await Centre(id);
+            foreach (var type in new[] { "mouseMoved", "mousePressed", "mouseReleased" })
+            {
+                using var _ = await client.CallAsync("Input.dispatchMouseEvent", new { type, x, y, button, clickCount = 1 }, token);
+            }
+        }
+
+        var before = await Evaluate("document.documentElement.outerHTML");
+        await Click("away", "left");
+        await Click("within", "left");
+        await Click("check", "left");
+        await Click("list", "left");
+        await Click("box", "left");
+        await Click("summary", "left");
+        var (ax, ay) = await Centre("area");
+        using (var _ = await client.CallAsync("Input.dispatchMouseEvent", new { type = "mouseWheel", x = ax, y = ay, deltaX = 0, deltaY = 400 }, token))
+        {
+        }
+        await Click("field", "left");
+        foreach (var type in new[] { "keyDown", "keyUp" })
+        {
+            using var _ = await client.CallAsync("Input.dispatchKeyEvent", new { type, key = "x", code = "KeyX", text = "x" }, token);
+        }
+        var (wx, wy) = await Centre("field");
+        using (var _ = await client.CallAsync("Input.dispatchMouseEvent", new { type = "mouseWheel", x = wx, y = wy, deltaX = 0, deltaY = 400 }, token))
+        {
+        }
+        // The test, not the page, listens for the context menu event, which
+        // the menu's showing dispatches; it is removed before the DOM is read.
+        await Evaluate("window.__menu = 0; window.__count = () => window.__menu++; document.addEventListener('contextmenu', window.__count); 'ok'");
+        await Click("field", "right");
+        await Task.Delay(1000, token);
+        Assert.Equal("1", await Evaluate("String(window.__menu)"));
+        await Evaluate("document.removeEventListener('contextmenu', window.__count); 'ok'");
+
+        Assert.Empty(session.Blocked);
+        Assert.Equal(session.PageAddress, await Evaluate("location.href"));
+        Assert.Equal("recorded", await Evaluate("document.getElementById('field').value"));
+        Assert.Equal("BODY", await Evaluate("document.activeElement.tagName"));
+        Assert.Equal("0", await Evaluate("String(scrollY)"));
+        Assert.Equal("0", await Evaluate("String(document.getElementById('area').scrollTop)"));
+        Assert.Equal("false", await Evaluate("String(document.getElementById('check').checked)"));
+        Assert.Equal("0", await Evaluate("String(document.getElementById('list').selectedIndex)"));
+        Assert.Equal("-1", await Evaluate("String(document.getElementById('box').selectedIndex)"));
+        Assert.Equal("false", await Evaluate("String(document.getElementById('more').open)"));
+        Assert.Equal("", await Evaluate("location.hash"));
+        Assert.Equal("", await Evaluate("getSelection().toString()"));
+        Assert.Equal(before, await Evaluate("document.documentElement.outerHTML"));
     }
 }

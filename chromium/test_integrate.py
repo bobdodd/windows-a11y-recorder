@@ -6320,6 +6320,7 @@ class PresentationIntegrationTests(unittest.TestCase):
             cookie_source(
                 self.WIDGET_INCLUDE + "\n",
                 INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                INTEGRATE.BLINK_WIDGET_INPUT_ANCHOR,
             ),
             INTEGRATE.patch_blink_web_frame_widget,
         )
@@ -6338,6 +6339,7 @@ class PresentationIntegrationTests(unittest.TestCase):
         source = cookie_source(
             self.WIDGET_INCLUDE + "\n",
             INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+            INTEGRATE.BLINK_WIDGET_INPUT_ANCHOR,
         ).replace(
             INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
             INTEGRATE.STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK
@@ -6460,6 +6462,114 @@ class PresentationIntegrationTests(unittest.TestCase):
                         label, getattr(INTEGRATE, label), signatures
                     ),
                 )
+
+
+
+class RecreationInputIntegrationTests(unittest.TestCase):
+    """Proves the recreation's input hooks are written once, where they act."""
+
+    WIDGET_INCLUDE = PresentationIntegrationTests.WIDGET_INCLUDE
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def proxy_source(self):
+        return cookie_source(
+            INTEGRATE.BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE + "\n",
+            "EventDisposition InputHandlerProxy::RouteToTypeSpecificHandler(\n"
+            + INTEGRATE.BLINK_INPUT_HANDLER_PROXY_ANCHOR,
+        )
+
+    def test_the_compositor_thread_drops_all_but_mouse_events_once(self):
+        patched = self.patch_twice(
+            "input_handler_proxy.cc",
+            self.proxy_source(),
+            INTEGRATE.patch_blink_input_handler_proxy,
+        )
+        self.assertEqual(1, patched.count("a11y_recorder::IsRecreationMode()"))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        # The check comes before any scroll handling of the event.
+        self.assertLess(
+            patched.index("a11y_recorder::IsRecreationMode()"),
+            patched.index("if (event.IsGestureScroll() &&"),
+        )
+        self.assertIn("IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE", patched)
+        self.assertIn(": DROP_EVENT;", patched)
+
+    def test_the_main_thread_shows_only_the_context_menu_once(self):
+        patched = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                "devtools->HandleInputEvent(input_event);\n"
+                + INTEGRATE.BLINK_WIDGET_INPUT_ANCHOR
+                + "  return WidgetEventHandler::HandleInputEvent(coalesced_event,\n",
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
+        hook = patched.index("a11y_recorder::IsRecreationMode()")
+        # After the DevTools overlay has had the event, before the page does.
+        self.assertLess(patched.index("devtools->HandleInputEvent(input_event);"), hook)
+        self.assertLess(hook, patched.index("WidgetEventHandler::HandleInputEvent("))
+        block = INTEGRATE.BLINK_WIDGET_INPUT_HOOK
+        self.assertIn("WebMouseEvent::Button::kRight", block)
+        self.assertIn("GetShowContextMenuOnMouseUp()", block)
+        self.assertIn("MouseContextMenu(recorder_mouse);", block)
+        self.assertIn("return WebInputEventResult::kHandledSuppressed;", block)
+
+    def test_the_platform_component_gains_the_bridge_once(self):
+        source = (
+            'component("other") {\n  deps = [\n    "//base",\n  ]\n}\n'
+            'component("platform") {\n'
+            "  public_deps = [\n    \":platform_export\",\n  ]\n"
+            "  deps = [\n    \"//base\",\n  ]\n}\n"
+        )
+        patched = self.patch_twice(
+            "BUILD.gn", source, INTEGRATE.patch_blink_platform_build
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PLATFORM_DEP))
+        self.assertLess(
+            patched.index('component("platform")'),
+            patched.index(INTEGRATE.BLINK_PLATFORM_DEP),
+        )
+
+    def test_the_input_patches_fail_when_an_anchor_is_absent(self):
+        cases = (
+            (
+                "input_handler_proxy.cc",
+                INTEGRATE.BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE + "\n",
+                INTEGRATE.patch_blink_input_handler_proxy,
+            ),
+            (
+                "web_frame_widget_impl.cc",
+                cookie_source(
+                    self.WIDGET_INCLUDE + "\n",
+                    INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                ),
+                INTEGRATE.patch_blink_web_frame_widget,
+            ),
+            (
+                "BUILD.gn",
+                'component("other") {\n  deps = [\n  ]\n}\n',
+                INTEGRATE.patch_blink_platform_build,
+            ),
+        )
+        for name, source, patch in cases:
+            with self.subTest(file=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / name
+                    path.write_text(source, encoding="utf-8")
+                    with self.assertRaises(RuntimeError):
+                        patch(path)
 
 
 class RealtimeIntegrationTests(unittest.TestCase):

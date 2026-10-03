@@ -130,6 +130,7 @@ public static class RecordedPage
         {
             notes.Add("The recorded address is not an http or https URL, so the page is served from the recorder's loopback address, and its relative URLs do not resolve as they did.");
         }
+        notes.Add("The recreation is a snapshot in time and takes no input except the right-click that opens the context menu with Inspect, and the DevTools element picker: clicks, keys, the wheel, touch, and hovering do nothing, so scrolling, focus, selection, and control state stay as recorded.");
         notes.Add("Element namespaces are not recorded: an element named in capitals is built in the HTML namespace, and any other in the namespace of an svg or math ancestor.");
         var documentId = DocumentNodeId(tree);
         var (scrollX, scrollY) = state.Layout.ScrollOffsets.TryGetValue(documentId, out var rootScroll)

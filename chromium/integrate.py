@@ -13460,6 +13460,99 @@ def patch_blink_web_frame_widget_header(path: Path) -> None:
     write_patched(path, text)
 
 
+# Recreation input (docs/architecture/page-recreation.md, "Input refused"):
+# under the recreation switch the page takes no input but the right-click
+# that opens the context menu with Inspect, and the events DevTools' overlay
+# takes for its element picker. On the compositor thread, every event that
+# is not a mouse event is dropped, before any scroll, pinch, or touch is
+# handled, and mouse events go to the main thread unhandled, so no
+# scrollbar is dragged there. On the main thread, after the DevTools
+# overlay has had the event, the right button's context menu event is shown
+# and every other event is suppressed.
+BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/platform/widget/input/'
+    'input_handler_proxy.h"'
+)
+BLINK_INPUT_HANDLER_PROXY_ANCHOR = """\
+  const WebInputEvent& event = event_with_callback->event();
+  if (event.IsGestureScroll() &&
+"""
+BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+  const WebInputEvent& event = event_with_callback->event();
+  // Windows A11y Recorder: a recreation takes no input on this thread. A
+  // mouse event goes to the main thread, which shows the context menu for
+  // the right button and suppresses the rest; every other event is dropped.
+  if (a11y_recorder::IsRecreationMode()) {
+    return WebInputEvent::IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE
+                                                            : DROP_EVENT;
+  }
+  if (event.IsGestureScroll() &&
+"""
+BLINK_PLATFORM_BUILD_TARGET = 'component("platform") {'
+BLINK_PLATFORM_DEP = '    "//chromium/recorder_bridge",'
+BLINK_WIDGET_INPUT_ANCHOR = """\
+  base::AutoReset<const WebInputEvent*> current_event_change(
+      &CurrentInputEvent::current_input_event_, &input_event);
+  UIEventWithKeyState::ClearNewTabModifierSetFromIsolatedWorld();
+"""
+BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+
+  // Windows A11y Recorder: a recreation is a snapshot in time and takes no
+  // input but the right-click that opens the context menu with Inspect. The
+  // DevTools overlay, for its element picker, has had the event above. The
+  // menu is shown on the button event the page's setting names, as
+  // HandleMouseDown and HandleMouseUp show it. The page receives only the
+  // contextmenu event, which no page script runs to see.
+  if (a11y_recorder::IsRecreationMode()) {
+    if (WebInputEvent::IsMouseEventType(input_event.GetType())) {
+      const auto& recorder_mouse = static_cast<const WebMouseEvent&>(input_event);
+      const WebInputEvent::Type recorder_menu_type =
+          GetPage()->GetSettings().GetShowContextMenuOnMouseUp()
+              ? WebInputEvent::Type::kMouseUp
+              : WebInputEvent::Type::kMouseDown;
+      if (recorder_mouse.button == WebMouseEvent::Button::kRight &&
+          input_event.GetType() == recorder_menu_type) {
+        MouseContextMenu(recorder_mouse);
+        return WebInputEventResult::kHandledSystem;
+      }
+    }
+    return WebInputEventResult::kHandledSuppressed;
+  }
+"""
+
+
+def patch_blink_input_handler_proxy(path: Path) -> None:
+    """Drops a recreation's input on the compositor thread."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_INPUT_HANDLER_PROXY_ANCHOR, BLINK_INPUT_HANDLER_PROXY_HOOK, path
+    )
+    write_patched(path, text)
+
+
+def patch_blink_platform_build(path: Path) -> None:
+    """Lets the Blink platform component include the recorder bridge."""
+    text = read_source(path)
+    target_index = text.find(BLINK_PLATFORM_BUILD_TARGET)
+    if target_index < 0:
+        raise RuntimeError(f"{path}: Blink platform target not found")
+    target_end = text.find("\n}", target_index)
+    deps = text.find("  deps = [\n", target_index)
+    if deps < 0 or (target_end >= 0 and deps > target_end):
+        raise RuntimeError(f"{path}: Blink platform deps list not found")
+    list_end = text.find("\n  ]", deps)
+    if BLINK_PLATFORM_DEP in text[deps:list_end]:
+        return
+    opening = "  deps = [\n"
+    text = text[:deps] + text[deps:].replace(
+        opening, opening + f"{BLINK_PLATFORM_DEP}\n", 1
+    )
+    write_patched(path, text)
+
+
 def patch_blink_web_frame_widget(path: Path) -> None:
     """Adds the presentation swap promise and the request that queues it."""
     text = read_source(path)
@@ -13495,6 +13588,9 @@ def patch_blink_web_frame_widget(path: Path) -> None:
         BLINK_PRESENTATION_WIDGET_BLOCK,
         BLINK_PRESENTATION_WIDGET_MARKER,
         path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_WIDGET_INPUT_ANCHOR, BLINK_WIDGET_INPUT_HOOK, path
     )
     write_patched(path, text)
 
@@ -15581,6 +15677,11 @@ def main() -> int:
     patch_blink_web_frame_widget(
         blink_core / "frame" / "web_frame_widget_impl.cc"
     )
+    blink_platform = source / "third_party" / "blink" / "renderer" / "platform"
+    patch_blink_input_handler_proxy(
+        blink_platform / "widget" / "input" / "input_handler_proxy.cc"
+    )
+    patch_blink_platform_build(blink_platform / "BUILD.gn")
     patch_blink_cookie_jar(
         source
         / "third_party"
