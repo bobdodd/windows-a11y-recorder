@@ -3696,6 +3696,76 @@ recorded count (413), as are the swap and feedback counts (376 against
 380): the last interval of each renderer is not logged before it exits. As
 before, the lines do not time Blink's work before each call.
 
+#### Sub-step 2 design (proposed)
+
+The owner, on 2026-10-03, settling how the popup is drawn: "My requirement
+is that devtools work. within the limitations of a snapshot in time. so
+right-clicking on an element or popup should allow me to inspect it in the
+elements tab. Beyond that requirement you are free to choose the
+implementation".
+
+Why a page popup of the recreation's own cannot meet it. Read in the
+Chromium checkout on the target machine: `WebPagePopupImpl` makes the
+popup's frame with an `EmptyLocalFrameClient` (line 389 of
+`core/exported/web_page_popup_impl.cc`, used at line 431) and gives its
+page a `PagePopupChromeClient`, an `EmptyChromeClient` (line 175). The
+popup's frame is therefore not a `WebLocalFrameImpl`, which is what a
+DevTools agent and a context menu are attached to, so its document is not
+in the Elements tab and a right-click in it offers no Inspect.
+
+So the popup is drawn as part of the recreated page:
+
+- The popup's document is rebuilt, by the builder as the page's is, inside
+  an `iframe` that the builder adds to the recreated page, from the popup
+  document's recorded DOM with its recorded styles, fragments, and glyphs
+  imposed, as for any document. Its scripts are not run. DevTools shows it
+  as the iframe's document, under the iframe, and a right-click on an item
+  inspects that item.
+- The iframe is the one element the recreation adds that the recording
+  does not hold. It is shown with the Popover API (`popover="manual"`,
+  `showPopover()`), so it is drawn in the page's top layer, above the page,
+  and is not a child box of any recorded box; the page's recorded layout
+  and its children matched by node are left as they are. Its inline style
+  removes the popover's user-agent border, padding, margin, and
+  background, and it carries `data-a11y-recorder-popup` with the popup's
+  kind and owner, so it is told apart from recorded nodes in the Elements
+  tab. That a top-layer element leaves the recorded boxes unchanged is
+  checked in the required tests, not assumed.
+- Its place: the recorded window rectangle, less the owner's local root
+  rectangle in screen, is the popup's position in the owner's viewport;
+  adding the root scroll offset at the frame gives its position in the
+  page, where it is set with `position: absolute`, so it stays by its
+  select when the snapshot is scrolled. Its size is the window
+  rectangle's. In the recording of 2026-10-03, the owner's visible bounds
+  plus its local root's origin equal the anchor rectangle for every popup
+  (for the first, 403 + 69 = 472 and 95 + 384 = 479), so the two records
+  agree; a popup where they do not is reported in the panel.
+- Which popup, and which of its states: as in "Which state a captured
+  frame shows". The page list in the player stops listing popup documents
+  as pages of their own; a popup is opened with its owner's page.
+- Selectedness: each option's recorded selectedness at the frame is set
+  by the builder, in the page and in the popup, so the select shows its
+  value at the frame and the popup's listbox its highlighted option.
+- The evidence panel names the popup, its owner, its rendering update,
+  and its window rectangle, and the notes say that the iframe is the
+  recreation's.
+
+Limits of sub-step 2:
+
+- The popup's window may extend beyond the owner's window on screen; in
+  the recreation it lies over the page, and where it extends past the
+  page's end it may enlarge the page's scrollable area. Whether it does is
+  checked.
+- With a zoom factor other than 1, the popup is laid out in its own zoom;
+  the size mapping is then checked against the capture before it is
+  relied on. The recording of 2026-10-03 has zoom 1 throughout.
+- Where the browser put the popup's window on screen is not recorded (see
+  "Sub-step 1 on the target machine"); the requested rectangle is used,
+  and compared with the captured screen image.
+- Inspecting the popup's document shows the recorded document in an
+  iframe, not in a popup window: that is the one difference DevTools
+  shows from the page as it was.
+
 #### Required tests
 
 - Unit tests: each new record against the record contract; the
