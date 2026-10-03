@@ -4419,9 +4419,9 @@ read for it is cut at the checkpoint's completion, before its change set.
 Layout state is built from change sets only, not from checkpoints, so for
 the frames at 22.697 s to 23.285 s the popup's state has its DOM and no
 layout record at all: none of its elements carries a recorded style, the
-recreation's Blink computes the styles itself, and the highlighted option
-takes the colour Blink gives a selected option in a list that is not
-focused. The next presented update, at 23.405 s, follows a change set, and
+recreation's Blink computes the styles itself. The grey is most likely the
+colour Blink gives a selected option in a list that is not focused, as
+the recreated list is not; that is inferred, not checked. The next presented update, at 23.405 s, follows a change set, and
 from there the option is blue. The list opened at 35.510 s,
 dom-document-10762, shows the same at 35.689 s.
 
