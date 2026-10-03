@@ -4399,6 +4399,75 @@ Chromium, which needs a recording run of it, as the earlier recording
 additions did; what is recorded is checked on the target machine with a
 new recording, alongside the system test.
 
+#### Layout of a walked rendering update (proposed)
+
+Reported by the owner on 2026-10-03, with 9d22e68, on recording
+20261003-193544: each list is shown, but in some frames just after a list
+opens its highlighted option is mid grey in the recreation, and it becomes
+blue a few frames later; the captured images show it blue throughout.
+
+What the recording shows. The recorded style of the highlighted option is
+blue, `rgb(25, 103, 210)`, in every record of it. The first list, popup
+document dom-document-9994, had its first rendering update walked in full
+(layout-checkpoint-12, completed at 22.6195 s), and that update's
+presentation request, at 22.6195 s, names the checkpoint. The same update
+then recorded its layout change set, layout-changes-62, from 22.633 s, with
+the list's nodes and their styles. The bridge makes no presentation request
+for a change set in a walked update (`RecordBlinkLayoutChanges` returns 0
+for it), so the update is presented through its checkpoint, and the state
+read for it is cut at the checkpoint's completion, before its change set.
+Layout state is built from change sets only, not from checkpoints, so for
+the frames at 22.697 s to 23.285 s the popup's state has its DOM and no
+layout record at all: none of its elements carries a recorded style, the
+recreation's Blink computes the styles itself, and the highlighted option
+takes the colour Blink gives a selected option in a list that is not
+focused. The next presented update, at 23.405 s, follows a change set, and
+from there the option is blue. The list opened at 35.510 s,
+dom-document-10762, shows the same at 35.689 s.
+
+The same cut applies to every walked update of any document (its first
+update, the end of parsing, an update after a lost record, and the check
+interval): the frame presented by that update is given the layout of the
+change set before it.
+
+Proposed fix. A change set read in the same rendering update as the
+checkpoint it names is part of that update, and the presented state
+includes it:
+
+- Recording (protocol 0.46): `layout-changes-started` gains
+  `checkpointUpdate`, true when the change set is the one the bridge reads
+  for the update its named checkpoint recorded (the update state the
+  checkpoint left had not yet been read by a change set), and false
+  otherwise. The bridge already decides this: it is the condition under
+  which `RecordBlinkLayoutChanges` makes no presentation request.
+- Playback: a presented checkpoint whose update has such a change set is
+  cut at the change set's completion, not the checkpoint's; its presented
+  time is unchanged. A recording without the field is read as now.
+- Evidence panel: unchanged; the basis it states is the presented update.
+
+Limits:
+
+- A walked update whose change set the Blink hook did not record (an
+  early return in `RecorderRecordLayoutChanges`) is still presented through
+  its checkpoint alone, and the frame's state still lacks its layout; the
+  recording shows this by the absence of a change set with
+  `checkpointUpdate` true.
+- Recording 20261003-193544 has no such field, so its frames keep the grey
+  highlight; a new recording is needed.
+
+Required tests:
+
+- Unit tests: the bridge field true only for the change set of the
+  checkpoint's own update; the contract and the validator; the playback
+  index cutting a presented checkpoint at its update's change set, and at
+  the checkpoint when there is none.
+- Integration test in the instrumented Chromium: a generated page's first
+  update records a checkpoint and a change set with `checkpointUpdate`
+  true, and a later update a change set with it false.
+- System test on the target machine: in a new recording, each frame just
+  after a list opens shows its highlighted option in the colour the
+  captured image shows.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
