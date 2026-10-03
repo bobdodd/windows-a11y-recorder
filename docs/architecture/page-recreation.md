@@ -3468,10 +3468,10 @@ The owner reported that the recreated frames look correct, except those
 with a running animation or an open select, which are drawn without them
 (slices 4b and 4d).
 
-### Slice 4d: open select lists and other page popups (proposed)
+### Slice 4d: open select lists and other page popups (agreed)
 
 Proposed 2026-10-02, after the owner's report that frames with an open
-select show it closed. Slice 4d is built before slice 4b, so it takes
+select show it closed, and agreed the same day. Slice 4d is built before slice 4b, so it takes
 protocol 0.43 and slice 4b moves to protocol 0.44. Nothing below is built.
 
 #### What Chromium does
@@ -3544,10 +3544,12 @@ On `browser.interaction`:
 
 | Record | Where | Holds |
 | --- | --- | --- |
-| `page-popup-opened` | `WebPagePopupImpl`, after the popup document is installed | the popup's document identity, its kind (select list, date or time, colour, other), the owner element's node ID and its document's identity, the owner's visible bounds in its local root and the anchor rectangle in screen coordinates as written to the popup, the zoom and scale factors, and the popup widget's frame sink ID |
-| `page-popup-window-rect` | `WebPagePopupImpl::SetWindowRect`, at each call | the popup, and the window rectangle in screen coordinates as given to the widget, after the emulation is reversed |
-| `page-popup-closed` | `WebPagePopupImpl::ClosePopup` or `Close`, whichever runs first | the popup, and whether the renderer or the browser closed it |
-| `option-selectedness-changed` | `HTMLOptionElement::SetSelectedState`, when the state changes | the option's node ID, its select's node ID, and the new state, for every document, popup or page |
+| `page-popup-opened` | `WebPagePopupImpl`'s constructor, after the popup document is installed and its first window rectangle is set | the popup's document identity, its kind (`select-list`, `date-time`, `color`, or `other`, from the owner element), the owner element's node ID and its document's identity, the owner's visible bounds in its local root, the owner's local root view and the anchor rectangle in screen coordinates as `WebPagePopupImpl` computes them, the first window rectangle, and the zoom factor |
+| `page-popup-window-rect` | `WebPagePopupImpl::SetWindowRect`, at each call, and `WebPagePopupImpl::SetScreenRects`, at each call | the popup, and either the window rectangle the popup asked for (`requested`, after the emulation is reversed, and whether it was deferred until the popup was shown) or the widget and window rectangles the browser placed it at (`placed`) |
+| `page-popup-closed` | `WebPagePopupImpl::ClosePopup`, or `WebPagePopupImpl::Close` when its cancel did not reach `ClosePopup` | the popup, and whether the renderer or the browser closed it |
+| `option-selectedness-changed` | `HTMLOptionElement::SetSelectedState`, when the state changes | the option's node ID, its select's node ID when it has one, and the new state, for every document, popup or page |
+
+All rectangles are in screen DIPs, as `WebPagePopupImpl` holds them.
 
 The selectedness record also covers a closed select in the page, whose
 drawn text is its selected option's label, and a listbox select in the
@@ -3555,9 +3557,14 @@ page.
 
 On `browser.presentation`: a layout checkpoint or change set of a popup
 document requests its presentation from the popup's own `WidgetBase`
-layer tree host, with the same swap promise as a frame widget, so the
-popup's frames are joined to captured frames as the page's are. The
-widget identity names the popup's frame sink.
+layer tree host, with a swap promise that records as a frame widget's
+does, so the popup's frames are joined to captured frames as the page's
+are. The widget identity names the popup's frame and has the new
+`widgetKind` `page-popup`; a frame widget's has `frame`. Its frame sink ID
+is null: the browser assigns a popup's frame sink, and the renderer is not
+told it (`WebPagePopupImpl` and `WidgetBase` hold no frame sink ID). The
+join to captured frames uses the request identity and presentation time,
+not the frame sink.
 
 #### Which state a captured frame shows
 
@@ -3595,12 +3602,35 @@ window is the last `page-popup-window-rect` at or before that update.
   recreation's own, opened at the mapped rectangle, which draws it with
   the same code as at recording, or as a layer of the recreated page,
   which keeps the whole frame in one document that DevTools can inspect.
-- How the presentation request reaches the popup's widget from its frame:
-  the popup's `ChromeClient` is made by `WebPagePopupImpl`, and the way to
-  reach its `WidgetBase` from a `LocalFrame` is read in the checkout
-  before building.
 - Whether the date, time, and colour pickers need anything beyond the
   records above.
+
+#### Settled before building
+
+Read in the same checkout, 2026-10-02.
+
+- The presentation request reaches the popup's widget through its page.
+  `ChromeClient::IsPopup` (`core/page/chrome_client.h`, line 137) is
+  overridden in core only by `PagePopupChromeClient`
+  (`core/exported/web_page_popup_impl.cc`, line 203), which holds its
+  `WebPagePopupImpl` until `ChromeDestroyed` clears it. A function in
+  `web_page_popup_impl.cc` checks `IsPopup` on the frame's page, reaches
+  the `WebPagePopupImpl` through that client, and queues the swap promise
+  on its `WidgetBase` layer tree host; the request in
+  `RecorderRequestLayoutPresentation` calls it before recording
+  `no-widget`. A popup that is closing, or whose widget has no layer tree
+  host, is recorded as `no-widget` or `not-compositing` as a frame is.
+- `WebPagePopupImpl` is reference counted rather than garbage collected,
+  so the swap promise reaches the widget for presentation feedback by a
+  weak pointer to the `WidgetBase` (`platform/widget/widget_base.h`, line
+  395), used only on the main thread.
+- The popup's first window rectangle is set while the document is
+  installed, before the popup is shown, and is kept as `initial_rect_`
+  (lines 713 to 721); `page-popup-window-rect` records it with
+  `deferred` true, and `page-popup-opened` repeats it.
+- `Close` from the browser normally reaches `ClosePopup` through the
+  popup client's cancel (lines 1069 to 1099); when it does not, `Close`
+  destroys the page itself, and the closed record is written there.
 
 #### Sub-steps
 
