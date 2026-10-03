@@ -3844,6 +3844,58 @@ target machine, which is still to be made, and its required unit tests,
 including a popup without a widget and a widget without a popup, come with
 the code that first uses it, in sub-step 2.
 
+#### Sub-step 1b on the target machine
+
+Recording `20261003-143108-ab7e18edb49d4a63bace38a455bf5c55`, made by the
+owner on 2026-10-03 with the fdb1bdb package, of the CNIB events page with
+its selects opened ten times. Read from the recording and its diagnostic
+logs:
+
+- Ten `page-popup-opened`, ten `page-popup-closed`, twenty
+  `page-popup-window-rect`, and ten of each of the four popup widget
+  records. Every `popup-widget-shown` has the outcome `shown`; none was
+  refused.
+- The join is one to one. All ten popups have the same renderer process and
+  owner frame token, and the k-th `page-popup-opened` for that pair matches
+  the k-th `popup-widget-created`, each with its own frame sink (`6:18` to
+  `6:27`).
+- The created record comes before the popup's opened record, by 24 to
+  33 ms: the browser makes the widget when the renderer asks for it, and the
+  renderer records the popup once its document is installed. The design's
+  join, "the opener frame's next `popup-widget-created` after the
+  renderer's `page-popup-opened`", has the order backwards. The join is
+  corrected to: the opener frame's last `popup-widget-created` before the
+  `page-popup-opened`, which with one popup per web view at a time is the
+  same pairing as the k-th with the k-th.
+- For every popup the rectangle the browser received, transformed,
+  constrained, and gave the view equals the renderer's first window
+  rectangle, and the received anchor equals the renderer's anchor. The one
+  bounds request per popup was set unchanged. The one screen rectangle send
+  per popup has view, window, native window, and native client rectangles
+  all equal, at a device scale factor of 1.0. On this machine, at this
+  scale, the browser did not move or resize any popup, and the native window
+  has no frame outside its client area.
+- The popups' presentation records still have a null `frameSinkId`, as in
+  0.43; slice 4b joins them through the created record's frame sink.
+
+Cost, from the browser process's lines in `diagnostics/browser-bridge.log`
+(the browser process writes its cost lines there, not to
+`diagnostics/chromium.log`):
+
+| Bridge function | Calls | Mean | Largest |
+| --- | --- | --- | --- |
+| `RecordBrowserPopupWidgetCreated` | 10 | 139.3 us | 407 us |
+| `RecordBrowserPopupWidgetShown` | 10 | 29.8 us | 31 us |
+| `RecordBrowserPopupWidgetBoundsRequested` | 10 | 19.5 us | 22 us |
+| `RecordBrowserPopupWidgetScreenRects` | 10 | 15.7 us | 22 us |
+
+The created record's cost is split: six calls took about 18 to 20 us (two of
+them known only as a sum of 40 us within one report) and four took 270 to
+407 us. The cause of the longer calls is not measured.
+
+Not tested by this recording: a refused popup, a popup the browser moved or
+clamped, a nested web contents, and a device scale factor other than 1.
+
 #### Sub-step 2 design (proposed)
 
 The owner, on 2026-10-03, settling how the popup is drawn: "My requirement
