@@ -2925,8 +2925,12 @@ class IntegrateTests(unittest.TestCase):
                 "  // Windows A11y Recorder (protocol 0.42): the DOM when the parser is\n"
                 "  // created, the state the parser's changes apply to.\n"
                 "  if (IsActive())\n"
-                '    RecorderRecordDomCheckpoint(*this, "started-parsing");\n'
-                "  SetReadyState(kLoading);\n",
+                '    RecorderRecordDomCheckpoint(*this, "started-parsing");\n',
+                first,
+            )
+            # The walk is followed by the recreation's browser page mark.
+            self.assertIn(
+                INTEGRATE.BLINK_DOCUMENT_STARTED_PARSING_HOOK + "  SetReadyState(kLoading);\n",
                 first,
             )
             self.assertLess(
@@ -6562,11 +6566,14 @@ class RecreationInputIntegrationTests(unittest.TestCase):
             self.proxy_source(),
             INTEGRATE.patch_blink_input_handler_proxy,
         )
-        self.assertEqual(1, patched.count("a11y_recorder::IsRecreationMode()"))
+        self.assertEqual(
+            1, patched.count("a11y_recorder::RecreationRefusesCompositorInput()")
+        )
+        self.assertNotIn("a11y_recorder::IsRecreationMode()", patched)
         self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
         # The check comes before any scroll handling of the event.
         self.assertLess(
-            patched.index("a11y_recorder::IsRecreationMode()"),
+            patched.index("a11y_recorder::RecreationRefusesCompositorInput()"),
             patched.index("if (event.IsGestureScroll() &&"),
         )
         self.assertIn("IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE", patched)
@@ -6594,6 +6601,82 @@ class RecreationInputIntegrationTests(unittest.TestCase):
         self.assertIn("GetShowContextMenuOnMouseUp()", block)
         self.assertIn("MouseContextMenu(recorder_mouse);", block)
         self.assertIn("return WebInputEventResult::kHandledSuppressed;", block)
+        # A browser page's widget takes input: the refusal tests the local
+        # root document's scheme.
+        self.assertIn(
+            "a11y_recorder::IsRecreationBrowserPageScheme(\n"
+            "            String(LocalRootImpl()->GetFrame()->GetDocument()->Url().Protocol())",
+            block,
+        )
+
+    def test_hooks_of_the_first_input_refusal_are_upgraded(self):
+        proxy = self.proxy_source().replace(
+            INTEGRATE.BLINK_INPUT_HANDLER_PROXY_ANCHOR,
+            INTEGRATE.STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK,
+        )
+        patched = self.patch_twice(
+            "input_handler_proxy.cc", proxy, INTEGRATE.patch_blink_input_handler_proxy
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK, patched)
+        widget = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                "devtools->HandleInputEvent(input_event);\n"
+                + INTEGRATE.STAGE_045_BLINK_WIDGET_INPUT_HOOK
+                + "  return WidgetEventHandler::HandleInputEvent(coalesced_event,\n",
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(1, widget.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_045_BLINK_WIDGET_INPUT_HOOK, widget)
+
+    def test_a_browser_pages_parser_marks_its_process_once(self):
+        hook = INTEGRATE.BLINK_DOCUMENT_STARTED_PARSING_HOOK
+        self.assertIn("a11y_recorder::MarkRecreationBrowserPageProcess();", hook)
+        self.assertIn("a11y_recorder::IsRecreationBrowserPageScheme(", hook)
+        source = (
+            "DocumentParser* Document::ImplicitOpen(\n"
+            + INTEGRATE.BLINK_DOCUMENT_STARTED_PARSING_ANCHOR
+            + INTEGRATE.STAGE_045_BLINK_DOCUMENT_STARTED_PARSING_HOOK
+        )
+        patched = self.patch_twice(
+            "document.cc", source, INTEGRATE.patch_blink_document_started_parsing
+        )
+        self.assertEqual(1, patched.count(hook))
+        self.assertEqual(1, patched.count("MarkRecreationBrowserPageProcess"))
+
+    def test_the_browser_page_schemes_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_input.h",', build)
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        self.assertIn("return IsBrowserPageScheme(scheme);", source)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_input_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_input_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
 
     def test_the_platform_component_gains_the_bridge_once(self):
         source = (

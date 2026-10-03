@@ -52,6 +52,24 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 bool IsRecreationMode();
 
+// "Input refused only in the recreation": true for a browser page's URL
+// scheme (devtools, chrome, chrome-untrusted, chrome-extension), whose page
+// takes input in the recreation mode as in any Chromium.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool IsRecreationBrowserPageScheme(std::string_view scheme);
+
+// Marks, on the main thread, that this renderer process shows a browser
+// page: called when such a page's parser is created, before it can be drawn
+// or take input. Chromium keeps browser pages out of web content's
+// processes, so the whole process is then a browser page's.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void MarkRecreationBrowserPageProcess();
+
+// True, on any thread, when this process runs in the recreation mode and
+// shows no browser page, so that the compositor thread refuses its input.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool RecreationRefusesCompositorInput();
+
 // Appends a non-secret startup diagnostic when the opt-in bridge log
 // environment variable is present. This works before Chromium logging starts.
 COMPONENT_EXPORT(RECORDER_BRIDGE)

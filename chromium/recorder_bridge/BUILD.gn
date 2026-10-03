@@ -30,6 +30,7 @@ component("recorder_bridge") {
     "network_text.h",
     "recorder_protocol.cc",
     "recorder_protocol.h",
+    "recreation_input.h",
   ]
 
   public_deps = [ ":cookie_names" ]

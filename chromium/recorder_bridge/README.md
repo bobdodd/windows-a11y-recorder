@@ -433,6 +433,15 @@ token, and `RecordBlinkPagePopupWindowRect` records only a requested
 rectangle; the integration script removes the 0.43 hook in
 `WebPagePopupImpl::SetScreenRects` from a checkout it patched before.
 
+In the recreation mode, input is refused only in recorded content.
+`IsRecreationBrowserPageScheme` (from `recreation_input.h`, tested by
+`recreation_input_test.cc`) names the browser page schemes, devtools,
+chrome, chrome-untrusted, and chrome-extension; `Document::ImplicitOpen`
+calls `MarkRecreationBrowserPageProcess` for such a page, and the
+compositor thread's hook refuses input only while
+`RecreationRefusesCompositorInput()` is true. See "Input refused only in
+the recreation" in the page recreation design.
+
 Protocol 0.47 adds `windowsAnimationSettings` to `popup-widget-shown`.
 `RecordBrowserPopupWidgetShown` reads `SPI_GETCLIENTAREAANIMATION`,
 `SPI_GETUIEFFECTS`, `SPI_GETMENUANIMATION`, `SPI_GETMENUFADE`, and

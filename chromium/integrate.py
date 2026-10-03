@@ -2547,11 +2547,25 @@ BLINK_DOCUMENT_STARTED_PARSING_ANCHOR = """\
   DocumentParserTiming::From(*this).MarkParserStart();
   SetParsingState(kParsing);
 """
+STAGE_045_BLINK_DOCUMENT_STARTED_PARSING_HOOK = """\
+  // Windows A11y Recorder (protocol 0.42): the DOM when the parser is
+  // created, the state the parser's changes apply to.
+  if (IsActive())
+    RecorderRecordDomCheckpoint(*this, "started-parsing");
+"""
 BLINK_DOCUMENT_STARTED_PARSING_HOOK = """\
   // Windows A11y Recorder (protocol 0.42): the DOM when the parser is
   // created, the state the parser's changes apply to.
   if (IsActive())
     RecorderRecordDomCheckpoint(*this, "started-parsing");
+  // Windows A11y Recorder: a browser page's process takes input in the
+  // recreation mode ("Input refused only in the recreation"); noted here,
+  // before the page can be drawn or take input.
+  if (a11y_recorder::IsRecreationMode() &&
+      a11y_recorder::IsRecreationBrowserPageScheme(
+          String(Url().Protocol()).Utf8())) {
+    a11y_recorder::MarkRecreationBrowserPageProcess();
+  }
 """
 BLINK_DOCUMENT_STARTED_PARSING_DECLARATION = """\
 // Windows A11y Recorder: defined further down this file; records a DOM
@@ -5229,6 +5243,19 @@ def patch_blink_document_started_parsing(path: Path) -> None:
         BLINK_DOCUMENT_STARTED_PARSING_DECLARATION,
         path,
     )
+    # The current hook extends the one before it, so it is upgraded only
+    # when the current one is absent.
+    if BLINK_DOCUMENT_STARTED_PARSING_HOOK not in text:
+        text = upgrade_legacy_hooks(
+            text,
+            (
+                (
+                    STAGE_045_BLINK_DOCUMENT_STARTED_PARSING_HOOK,
+                    BLINK_DOCUMENT_STARTED_PARSING_HOOK,
+                ),
+            ),
+            path,
+        )
     if BLINK_DOCUMENT_STARTED_PARSING_HOOK not in text:
         text = replace_once(
             text,
@@ -13577,12 +13604,25 @@ BLINK_INPUT_HANDLER_PROXY_ANCHOR = """\
   const WebInputEvent& event = event_with_callback->event();
   if (event.IsGestureScroll() &&
 """
-BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK = """\
   const WebInputEvent& event = event_with_callback->event();
   // Windows A11y Recorder: a recreation takes no input on this thread. A
   // mouse event goes to the main thread, which shows the context menu for
   // the right button and suppresses the rest; every other event is dropped.
   if (a11y_recorder::IsRecreationMode()) {
+    return WebInputEvent::IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE
+                                                            : DROP_EVENT;
+  }
+  if (event.IsGestureScroll() &&
+"""
+BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+  const WebInputEvent& event = event_with_callback->event();
+  // Windows A11y Recorder: a recreation takes no input on this thread. A
+  // mouse event goes to the main thread, which shows the context menu for
+  // the right button and suppresses the rest; every other event is dropped.
+  // A process showing a browser page (DevTools, the evidence panel, the
+  // browser's own pages) takes input as in any Chromium.
+  if (a11y_recorder::RecreationRefusesCompositorInput()) {
     return WebInputEvent::IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE
                                                             : DROP_EVENT;
   }
@@ -13595,7 +13635,7 @@ BLINK_WIDGET_INPUT_ANCHOR = """\
       &CurrentInputEvent::current_input_event_, &input_event);
   UIEventWithKeyState::ClearNewTabModifierSetFromIsolatedWorld();
 """
-BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+STAGE_045_BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
 
   // Windows A11y Recorder: a recreation is a snapshot in time and takes no
   // input but the right-click that opens the context menu with Inspect. The
@@ -13620,12 +13660,49 @@ BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
   }
 """
 
+BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+
+  // Windows A11y Recorder: a recreation is a snapshot in time and takes no
+  // input but the right-click that opens the context menu with Inspect. The
+  // DevTools overlay, for its element picker, has had the event above. The
+  // menu is shown on the button event the page's setting names, as
+  // HandleMouseDown and HandleMouseUp show it. The page receives only the
+  // contextmenu event, which no page script runs to see. A browser page
+  // (DevTools, the evidence panel, the browser's own pages) takes input as
+  // in any Chromium.
+  if (a11y_recorder::IsRecreationMode() &&
+      !(LocalRootImpl()->GetFrame() &&
+        LocalRootImpl()->GetFrame()->GetDocument() &&
+        a11y_recorder::IsRecreationBrowserPageScheme(
+            String(LocalRootImpl()->GetFrame()->GetDocument()->Url().Protocol())
+                .Utf8()))) {
+    if (WebInputEvent::IsMouseEventType(input_event.GetType())) {
+      const auto& recorder_mouse = static_cast<const WebMouseEvent&>(input_event);
+      const WebInputEvent::Type recorder_menu_type =
+          GetPage()->GetSettings().GetShowContextMenuOnMouseUp()
+              ? WebInputEvent::Type::kMouseUp
+              : WebInputEvent::Type::kMouseDown;
+      if (recorder_mouse.button == WebMouseEvent::Button::kRight &&
+          input_event.GetType() == recorder_menu_type) {
+        MouseContextMenu(recorder_mouse);
+        return WebInputEventResult::kHandledSystem;
+      }
+    }
+    return WebInputEventResult::kHandledSuppressed;
+  }
+"""
+
 
 def patch_blink_input_handler_proxy(path: Path) -> None:
     """Drops a recreation's input on the compositor thread."""
     text = read_source(path)
     text = add_includes_after(
         text, BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        ((STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK, BLINK_INPUT_HANDLER_PROXY_HOOK),),
+        path,
     )
     text = apply_cookie_hook(
         text, BLINK_INPUT_HANDLER_PROXY_ANCHOR, BLINK_INPUT_HANDLER_PROXY_HOOK, path
@@ -13688,6 +13765,9 @@ def patch_blink_web_frame_widget(path: Path) -> None:
         BLINK_PRESENTATION_WIDGET_BLOCK,
         BLINK_PRESENTATION_WIDGET_MARKER,
         path,
+    )
+    text = upgrade_legacy_hooks(
+        text, ((STAGE_045_BLINK_WIDGET_INPUT_HOOK, BLINK_WIDGET_INPUT_HOOK),), path
     )
     text = apply_cookie_hook(
         text, BLINK_WIDGET_INPUT_ANCHOR, BLINK_WIDGET_INPUT_HOOK, path

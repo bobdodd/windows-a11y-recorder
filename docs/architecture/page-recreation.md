@@ -4304,7 +4304,7 @@ Tests as built:
   and the recreated popup's iframe are left to the system test, as the
   test's DevTools client does not read protocol events.
 
-#### Input refused only in the recreation (proposed)
+#### Input refused only in the recreation (agreed)
 
 Reported by the owner on 2026-10-03: "You have stopped user interaction on
 devtools".
@@ -4361,6 +4361,41 @@ Required tests:
 - System test on the target machine: in a recreation, DevTools' panels
   take clicks, typing, and scrolling, the evidence panel scrolls, and the
   page itself still takes only the right-click for Inspect.
+
+#### Input refused only in the recreation as built
+
+Agreed by the owner on 2026-10-03 ("yes please build this before we move
+to 4b"). The three places were read in the target machine's checkout,
+already patched by "Input refused as built", and the patches run against
+copies of those files: each is upgraded once and a second run leaves it
+unchanged.
+
+- Bridge: `IsRecreationBrowserPageScheme` (the four schemes, from
+  `IsBrowserPageScheme` in `recreation_input.h`),
+  `MarkRecreationBrowserPageProcess`, which sets a process flag, and
+  `RecreationRefusesCompositorInput`, true in the recreation mode in a
+  process without the flag.
+- Compositor thread: the hook in
+  `InputHandlerProxy::RouteToTypeSpecificHandler` tests
+  `RecreationRefusesCompositorInput()` in place of `IsRecreationMode()`.
+- Main thread: the hook in `WebFrameWidgetImpl::HandleInputEvent` refuses
+  only when the local root document's scheme, `Url().Protocol()`, is not a
+  browser page's.
+- Parser: `Document::ImplicitOpen`, after the protocol 0.42 walk, marks the
+  process when the document's scheme is a browser page's, in the
+  recreation mode.
+- A tree patched by "Input refused as built" has its two input hooks and
+  its parser hook replaced whole (`STAGE_045_*` in `integrate.py`).
+
+Tests run: the C++ test of `IsBrowserPageScheme` (the four schemes; http,
+https, about, file, an empty scheme, a longer scheme, and upper case not);
+Python tests that the compositor hook tests the process flag, the
+main-thread hook the local root's scheme, and the parser hook marks the
+process, that the earlier hooks are upgraded once, and that the bridge
+and build hold the new names (202 passed). The .NET suite is not changed
+by this step. Not done: the integration test was not rerun here, as it
+needs the instrumented Chromium; it and the system test are for the
+target machine.
 
 #### Popup on screen (agreed)
 

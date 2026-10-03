@@ -34,6 +34,7 @@
 #include "chromium/recorder_bridge/evidence_cost.h"
 #include "chromium/recorder_bridge/animation_settings.h"
 #include "chromium/recorder_bridge/full_walks.h"
+#include "chromium/recorder_bridge/recreation_input.h"
 #include "chromium/recorder_bridge/network_text.h"
 #include "chromium/recorder_bridge/recorder_protocol.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
@@ -1870,6 +1871,24 @@ bool IsRecreationMode() {
   static const bool recreation_mode =
       base::CommandLine::ForCurrentProcess()->HasSwitch(kRecreationSwitch);
   return recreation_mode;
+}
+
+namespace {
+// Set once on the main thread, read on the compositor thread.
+std::atomic<bool> g_recreation_browser_page_process{false};
+}  // namespace
+
+bool IsRecreationBrowserPageScheme(std::string_view scheme) {
+  return IsBrowserPageScheme(scheme);
+}
+
+void MarkRecreationBrowserPageProcess() {
+  g_recreation_browser_page_process.store(true, std::memory_order_relaxed);
+}
+
+bool RecreationRefusesCompositorInput() {
+  return IsRecreationMode() &&
+         !g_recreation_browser_page_process.load(std::memory_order_relaxed);
 }
 
 RecorderPipeClient* GetProcessRecorderClient() {
