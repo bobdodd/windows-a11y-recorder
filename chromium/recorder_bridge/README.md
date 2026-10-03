@@ -433,6 +433,14 @@ token, and `RecordBlinkPagePopupWindowRect` records only a requested
 rectangle; the integration script removes the 0.43 hook in
 `WebPagePopupImpl::SetScreenRects` from a checkout it patched before.
 
+Protocol 0.47 adds `windowsAnimationSettings` to `popup-widget-shown`.
+`RecordBrowserPopupWidgetShown` reads `SPI_GETCLIENTAREAANIMATION`,
+`SPI_GETUIEFFECTS`, `SPI_GETMENUANIMATION`, `SPI_GETMENUFADE`, and
+`SPI_GETCOMBOBOXANIMATION` with `SystemParametersInfoW`, through
+`ReadWindowsAnimationSettings` in `animation_settings.h`, which names the
+fields and records a failed call as null; `animation_settings_test.cc`
+checks it without a Chromium build.
+
 Protocol 0.46 adds `checkpointUpdate` to `layout-changes-started`.
 `RecordBlinkLayoutChanges` sets it with `IsCheckpointUpdateChangeSet` in
 `full_walks.h`: true when the update state the named checkpoint left had

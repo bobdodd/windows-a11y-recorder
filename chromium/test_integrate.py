@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.46"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.46"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.47"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.47"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -4676,6 +4676,50 @@ class CookieIntegrationTests(unittest.TestCase):
                 check=True,
             )
             subprocess.run([str(binary)], check=True)
+
+    def test_animation_settings_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "animation_settings_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "animation_settings_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_popup_widget_shown_records_the_windows_animation_settings(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"animation_settings.h",', build)
+        for action in (
+            "SPI_GETCLIENTAREAANIMATION",
+            "SPI_GETUIEFFECTS",
+            "SPI_GETMENUANIMATION",
+            "SPI_GETMENUFADE",
+            "SPI_GETCOMBOBOXANIMATION",
+        ):
+            self.assertIn(action, source)
+        self.assertIn(
+            'payload.Set("windowsAnimationSettings", WindowsAnimationSettingsValue());',
+            source,
+        )
 
     def test_bridge_walks_documents_only_where_the_schedule_asks(self):
         bridge = MODULE_PATH.parent / "recorder_bridge"

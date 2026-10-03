@@ -290,7 +290,8 @@ internal static class BrowserInteractionPayloads
           "transformedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
           "transformedAnchorRect": { "x": 516, "y": 471, "width": 262, "height": 48 },
           "constrainedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
-          "viewBounds": { "x": 516, "y": 519, "width": 262, "height": 340 }
+          "viewBounds": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "windowsAnimationSettings": { "clientAreaAnimation": true, "uiEffects": true, "menuAnimation": true, "menuFade": true, "comboBoxAnimation": true }
         }
         """;
 
@@ -304,7 +305,8 @@ internal static class BrowserInteractionPayloads
           "transformedRect": null,
           "transformedAnchorRect": null,
           "constrainedRect": null,
-          "viewBounds": null
+          "viewBounds": null,
+          "windowsAnimationSettings": { "clientAreaAnimation": null, "uiEffects": false, "menuAnimation": false, "menuFade": false, "comboBoxAnimation": false }
         }
         """;
 

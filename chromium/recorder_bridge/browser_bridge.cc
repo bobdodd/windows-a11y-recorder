@@ -32,6 +32,7 @@
 #include "base/win/windows_handle_util.h"
 #include "chromium/recorder_bridge/cookie_text.h"
 #include "chromium/recorder_bridge/evidence_cost.h"
+#include "chromium/recorder_bridge/animation_settings.h"
 #include "chromium/recorder_bridge/full_walks.h"
 #include "chromium/recorder_bridge/network_text.h"
 #include "chromium/recorder_bridge/recorder_protocol.h"
@@ -4132,6 +4133,45 @@ void RecordBrowserPopupWidgetCreated(int page_frame_tree_node_id,
                     std::move(payload));
 }
 
+// The Windows animation settings now, read with SystemParametersInfo, each
+// null when the call fails (protocol 0.47).
+namespace {
+base::DictValue WindowsAnimationSettingsValue() {
+  base::DictValue settings;
+  ReadWindowsAnimationSettings(
+      [](WindowsAnimationSetting setting) -> std::optional<bool> {
+        UINT action = 0;
+        switch (setting) {
+          case WindowsAnimationSetting::kClientAreaAnimation:
+            action = SPI_GETCLIENTAREAANIMATION;
+            break;
+          case WindowsAnimationSetting::kUiEffects:
+            action = SPI_GETUIEFFECTS;
+            break;
+          case WindowsAnimationSetting::kMenuAnimation:
+            action = SPI_GETMENUANIMATION;
+            break;
+          case WindowsAnimationSetting::kMenuFade:
+            action = SPI_GETMENUFADE;
+            break;
+          case WindowsAnimationSetting::kComboBoxAnimation:
+            action = SPI_GETCOMBOBOXANIMATION;
+            break;
+        }
+        BOOL value = FALSE;
+        if (!::SystemParametersInfoW(action, 0, &value, 0)) {
+          return std::nullopt;
+        }
+        return value != FALSE;
+      },
+      [&settings](std::string_view name, std::optional<bool> value) {
+        settings.Set(name, value.has_value() ? base::Value(*value)
+                                             : base::Value());
+      });
+  return settings;
+}
+}  // namespace
+
 void RecordBrowserPopupWidgetShown(PopupWidgetShown shown) {
   A11Y_RECORDER_COST("RecordBrowserPopupWidgetShown");
   RecorderPipeClient* client = GetProcessRecorderClient();
@@ -4166,6 +4206,7 @@ void RecordBrowserPopupWidgetShown(PopupWidgetShown shown) {
                                                     shown.constrained_rect));
   payload.Set("viewBounds",
               OptionalScreenRect(shown.has_view_bounds, shown.view_bounds));
+  payload.Set("windowsAnimationSettings", WindowsAnimationSettingsValue());
   SendBlinkEvidence("browser.interaction", "popup-widget-shown",
                     std::move(payload));
 }

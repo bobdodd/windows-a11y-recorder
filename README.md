@@ -413,6 +413,13 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.47 records the Windows animation settings with each popup
+window as it is shown, and the evidence panel states, for each popup drawn
+at a frame, how long before the frame its window was shown, those
+settings, and that the window's opacity at the capture is not recorded.
+See "Window fade of a popup" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals
 as they come, states how many it released, and marks an image copied again

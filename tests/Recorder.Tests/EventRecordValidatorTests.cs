@@ -2686,6 +2686,22 @@ public sealed class EventRecordValidatorTests
     }
 
     [Fact]
+    public void RejectsAPopupWidgetShownWithoutOrWithInvalidAnimationSettings()
+    {
+        var missing = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetShown)!.AsObject();
+        missing.Remove("windowsAnimationSettings");
+        Assert.NotEmpty(ValidateInteractionRecord("popup-widget-shown", missing));
+
+        var invalid = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetShown)!;
+        invalid["windowsAnimationSettings"]!["menuFade"] = "on";
+        Assert.NotEmpty(ValidateInteractionRecord("popup-widget-shown", invalid));
+
+        var unread = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetShown)!;
+        unread["windowsAnimationSettings"]!["menuFade"] = null;
+        Assert.Empty(ValidateInteractionRecord("popup-widget-shown", unread));
+    }
+
+    [Fact]
     public void RejectsAnInactiveWindowRefusalWithATransformedRectangle()
     {
         var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetRefused)!;

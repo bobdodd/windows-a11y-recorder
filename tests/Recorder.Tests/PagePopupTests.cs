@@ -46,10 +46,10 @@ public sealed class PagePopupTests
              "rendererProcessId":{{process}},"openerFrameToken":"{{frame}}","frameSinkId":"{{sink}}"}
             """));
 
-    private static PopupRecord Shown(long key, long time, string sink, string bounds) =>
+    private static PopupRecord Shown(long key, long time, string sink, string bounds, string? settings = null) =>
         new(key, time, "popup-widget-shown", J($$"""
             {"context":{{BrowserContext}},"frameSinkId":"{{sink}}","outcome":"shown","receivedRect":{{bounds}},
-             "receivedAnchorRect":{{Rect(492, 471, 262, 48)}},"viewBounds":{{bounds}}}
+             "receivedAnchorRect":{{Rect(492, 471, 262, 48)}},"viewBounds":{{bounds}}{{(settings is null ? "" : ",\"windowsAnimationSettings\":" + settings)}}}
             """));
 
     private static PopupRecord Bounds(long key, long time, string sink, string? set) =>
@@ -154,6 +154,43 @@ public sealed class PagePopupTests
             edge.OnScreenBasis);
         var clear = Assert.Single(PagePopups.OpenAt(records, Page, 38_500_000_000));
         Assert.Equal("its window was hidden at 38.550 s, after the frame's composition at 38.500 s", clear.OnScreenBasis);
+    }
+
+    [Fact]
+    public void TheFadeBasisStatesTheWindowsShowingAndTheRecordedSettings()
+    {
+        const string settings =
+            """{"clientAreaAnimation":true,"uiEffects":false,"menuAnimation":true,"menuFade":null,"comboBoxAnimation":true}""";
+        PopupRecord[] records =
+        [
+            Created(1, 90, "6:18"),
+            Opened(2, 38_521_000_000, "POPUP-A"),
+            Shown(3, 38_530_000_000, "6:18", Rect(420, 519, 307, 452), settings),
+            Hidden(4, 40_127_000_000, "6:18"),
+        ];
+
+        var open = Assert.Single(PagePopups.OpenAt(records, Page, 38_721_000_000));
+        Assert.Equal(38_530_000_000, open.WindowShownTime);
+        Assert.Equal(
+            "its window was shown at 38.530 s, 191.0 ms before the frame's composition at 38.721 s; the Windows animation settings read as it was shown were client area animation on, UI effects off, menu animation on, menu fade not read, combo box animation on; the window's opacity at the capture is not recorded, so the captured image may show the window part way through a fade that the recreation, which draws the popup opaque as its recorded styles state, does not show",
+            open.FadeBasis);
+    }
+
+    [Fact]
+    public void TheFadeBasisOfARecordingWithoutTheSettingsSaysSo()
+    {
+        PopupRecord[] records =
+        [
+            Created(1, 90, "6:18"),
+            Opened(2, 100, "POPUP-A"),
+            Shown(3, 110, "6:18", Rect(420, 519, 307, 452)),
+        ];
+
+        var open = Assert.Single(PagePopups.OpenAt(records, Page, 150));
+        Assert.Contains("the Windows animation settings were not recorded;", open.FadeBasis, StringComparison.Ordinal);
+        var unshown = Assert.Single(PagePopups.OpenAt([Created(1, 90, "6:18"), Opened(2, 100, "POPUP-A")], Page, 150));
+        Assert.Null(unshown.WindowShownTime);
+        Assert.StartsWith("the recording holds no record of its window being shown;", unshown.FadeBasis, StringComparison.Ordinal);
     }
 
     [Fact]

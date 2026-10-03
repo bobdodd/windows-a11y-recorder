@@ -55,6 +55,64 @@ public sealed record PagePopupAtFrame(
     /// </summary>
     public long? WindowHiddenTime { get; init; }
 
+    /// <summary>
+    /// The time of the browser's first popup-widget-shown record of the
+    /// joined widget with the outcome "shown" after the popup opened, or
+    /// null when the recording holds none.
+    /// </summary>
+    public long? WindowShownTime { get; init; }
+
+    /// <summary>
+    /// The Windows animation settings of that record (protocol 0.47), or
+    /// null when it holds none.
+    /// </summary>
+    public JsonElement? WindowsAnimationSettings { get; init; }
+
+    /// <summary>
+    /// The window fade of the popup, for the evidence panel ("Window fade
+    /// of a popup"): when its window was shown relative to the frame's
+    /// composition, the Windows animation settings recorded as it was
+    /// shown, and that the window's opacity at the capture is not recorded.
+    /// </summary>
+    public string FadeBasis
+    {
+        get
+        {
+            const string unrecorded =
+                "the window's opacity at the capture is not recorded, so the captured image may show the window part way through a fade that the recreation, which draws the popup opaque as its recorded styles state, does not show";
+            if (WindowShownTime is not { } shown)
+            {
+                return "the recording holds no record of its window being shown; " + unrecorded;
+            }
+            var interval = (CompositionTime - shown) / 1e6;
+            var when = interval >= 0
+                ? string.Create(CultureInfo.InvariantCulture, $"{interval:F1} ms before")
+                : string.Create(CultureInfo.InvariantCulture, $"{-interval:F1} ms after");
+            var settings = WindowsAnimationSettings is { ValueKind: JsonValueKind.Object } recorded
+                ? "the Windows animation settings read as it was shown were " + string.Join(", ",
+                    new[]
+                    {
+                        ("clientAreaAnimation", "client area animation"),
+                        ("uiEffects", "UI effects"),
+                        ("menuAnimation", "menu animation"),
+                        ("menuFade", "menu fade"),
+                        ("comboBoxAnimation", "combo box animation"),
+                    }.Select(item => $"{item.Item2} {Setting(recorded, item.Item1)}"))
+                : "the Windows animation settings were not recorded";
+            return $"its window was shown at {Seconds(shown)} s, {when} the frame's composition at {Seconds(CompositionTime)} s; {settings}; {unrecorded}";
+        }
+    }
+
+    private static string Setting(JsonElement settings, string name) =>
+        settings.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
+            {
+                JsonValueKind.True => "on",
+                JsonValueKind.False => "off",
+                _ => "not read",
+            }
+            : "not recorded";
+
     /// <summary>The time of the popup's page-popup-closed record, or null when the recording holds none.</summary>
     public long? ClosedTime { get; init; }
 
@@ -164,6 +222,11 @@ public static class PagePopups
                 ? null
                 : ordered.FirstOrDefault(record => record.EventType == "popup-widget-hidden" &&
                     record.Time >= opened.Time && Text(record.Payload, "frameSinkId") == sink);
+            var shownRecord = sink is null
+                ? null
+                : ordered.FirstOrDefault(record => record.EventType == "popup-widget-shown" &&
+                    record.Time >= opened.Time && Text(record.Payload, "frameSinkId") == sink &&
+                    Text(record.Payload, "outcome") == "shown");
             var closedRecord = ordered.FirstOrDefault(record => record.EventType == "page-popup-closed" &&
                 record.Time >= opened.Time && DomTreeRebuilder.DocumentKey(record.Payload) == key);
             var closed = hidden is not null
@@ -191,6 +254,12 @@ public static class PagePopups
             {
                 CompositionTime = compositionTime,
                 WindowHiddenTime = hidden?.Time,
+                WindowShownTime = shownRecord?.Time,
+                WindowsAnimationSettings = shownRecord is not null &&
+                    shownRecord.Payload.TryGetProperty("windowsAnimationSettings", out var animation) &&
+                    animation.ValueKind == JsonValueKind.Object
+                        ? animation.Clone()
+                        : null,
                 ClosedTime = closedRecord?.Time,
             });
         }

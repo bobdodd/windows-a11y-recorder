@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.46";
+    public const string CurrentVersion = "0.47";
 }
 
 public static class BrowserEvidenceChannels
@@ -875,7 +875,19 @@ public sealed record BrowserPopupWidgetShownPayload(
     BrowserPagePopupRect? TransformedRect,
     BrowserPagePopupRect? TransformedAnchorRect,
     BrowserPagePopupRect? ConstrainedRect,
-    BrowserPagePopupRect? ViewBounds);
+    BrowserPagePopupRect? ViewBounds,
+    BrowserWindowsAnimationSettings WindowsAnimationSettings);
+
+// The Windows animation settings read with SystemParametersInfo in the
+// browser process as a popup window is shown (protocol 0.47), each null when
+// the call failed. Which of them governs a desktop compositor transition of
+// the window is not documented; they are recorded, not interpreted.
+public sealed record BrowserWindowsAnimationSettings(
+    bool? ClientAreaAnimation,
+    bool? UiEffects,
+    bool? MenuAnimation,
+    bool? MenuFade,
+    bool? ComboBoxAnimation);
 
 // A bounds request from the renderer. The set rectangle is the one given to
 // the view after ConstrainPopupBounds and the display clamp, or null when the

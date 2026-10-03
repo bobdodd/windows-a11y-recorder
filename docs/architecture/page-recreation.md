@@ -4499,7 +4499,7 @@ integration test in the instrumented Chromium,
 for the reason given under "Popup on screen as built"; what is recorded is
 checked on the target machine with a new recording.
 
-#### Window fade of a popup (proposed)
+#### Window fade of a popup (agreed)
 
 Reported by the owner on 2026-10-03, with 93e31d6, on recording
 20261003-203229: at 38.684 s the captured image shows the open list
@@ -4578,6 +4578,42 @@ Required tests:
 - System test on the target machine: in a new recording, the settings in
   the panel match the Windows settings, and the panel note appears on the
   frame just after a list opens.
+
+#### Window fade of a popup as built
+
+Agreed by the owner on 2026-10-03 ("yes please").
+
+- Bridge: `RecordBrowserPopupWidgetShown` sets `windowsAnimationSettings`
+  from `WindowsAnimationSettingsValue`, which reads the five settings with
+  `SystemParametersInfoW` through `ReadWindowsAnimationSettings` in
+  `animation_settings.h`; a failed call is null. The record is written for
+  every outcome, so a refused popup carries the settings too.
+- Contract and validator: `BrowserPopupWidgetShownPayload` gains
+  `WindowsAnimationSettings` (`BrowserWindowsAnimationSettings`, five
+  nullable booleans); the validator requires the object and each of its
+  fields, a boolean or null.
+- Playback: `PagePopups.OpenAt` joins each popup to the first
+  `popup-widget-shown` record of its widget with the outcome "shown" after
+  its opening, and gives `WindowShownTime`, `WindowsAnimationSettings`,
+  and `FadeBasis`, the panel text. The RecordedPage note of each drawn
+  popup includes `FadeBasis` after `OnScreenBasis`. On recording
+  20261003-203229 the note for the frame at 38.694 s reads "its window was
+  shown at 38.530 s, 191.4 ms before the frame's composition at 38.721 s;
+  the Windows animation settings were not recorded; the window's opacity
+  at the capture is not recorded, ...".
+- Recreation: unchanged.
+
+Tests run: the C++ test of `ReadWindowsAnimationSettings` (each setting
+its own field; a failed read null, the others kept), compiled and run by
+the Python suite with a test that the bridge reads the five settings and
+sets the field; .NET unit tests of the validator (the object and its
+fields required, a string rejected, null accepted) and of `PagePopups`
+(`FadeBasis` with settings and the interval, without settings, and
+without a shown record): 977 passed, with the 4 known
+ChromiumLauncherTests failures that need Windows, and 199 Python tests.
+Not done: the integration test in the instrumented Chromium, for the
+reason given under "Popup on screen as built"; what is recorded is checked on the target machine with a new
+recording.
 
 ### To be settled
 

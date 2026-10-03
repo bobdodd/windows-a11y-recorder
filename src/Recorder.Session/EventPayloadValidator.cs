@@ -1673,9 +1673,26 @@ internal static class EventPayloadValidator
                 NullableObject("transformedRect"),
                 NullableObject("transformedAnchorRect"),
                 NullableObject("constrainedRect"),
-                NullableObject("viewBounds")
+                NullableObject("viewBounds"),
+                RequiredObject("windowsAnimationSettings")
             ],
             issues);
+        if (payload.TryGetProperty("windowsAnimationSettings", out var settings) &&
+            settings.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                settings,
+                [
+                    NullableBoolean("clientAreaAnimation"),
+                    NullableBoolean("uiEffects"),
+                    NullableBoolean("menuAnimation"),
+                    NullableBoolean("menuFade"),
+                    NullableBoolean("comboBoxAnimation")
+                ],
+                issues,
+                "#/payload/windowsAnimationSettings");
+        }
+
         ValidateBrowserContextProperty(payload, issues);
         ValidateBrowserProcessContext(payload, false, issues);
         foreach (var name in new[]

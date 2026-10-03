@@ -1095,7 +1095,14 @@ checkpoint recorded, which is presented through that checkpoint, and false
 otherwise. The design is in [page recreation](page-recreation.md), "Layout
 of a walked rendering update".
 
-Live 0.46 connections require an exact protocol-version match.
+Protocol version 0.47 adds `windowsAnimationSettings` to
+`popup-widget-shown`: five Windows animation settings read with
+`SystemParametersInfo` in the browser process as the popup window is
+shown, each null when the call fails. They are recorded, not interpreted.
+The design is in [page recreation](page-recreation.md), "Window fade of a
+popup".
+
+Live 0.47 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

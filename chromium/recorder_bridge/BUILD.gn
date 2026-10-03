@@ -15,6 +15,7 @@ component("recorder_bridge") {
   defines = [ "IS_RECORDER_BRIDGE_IMPL" ]
 
   sources = [
+    "animation_settings.h",
     "browser_bridge.cc",
     "browser_bridge.h",
     "evidence_cost.cc",
