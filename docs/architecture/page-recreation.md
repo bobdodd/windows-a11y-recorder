@@ -4087,77 +4087,95 @@ elements. Those options are actually selectable, so we should probably
 catch the clicks/selects like we did for the other interactive elements.
 But it works well".
 
-The read-only snapshot of 2026-09-30 refuses changes from the page's own
+The read-only snapshot of 2026-09-30 refused changes from the page's own
 controls, but only navigation is refused so far (slice 3b, "Leaving the
 recreation"). A click on an option in the popup's iframe selects it, as it
 would in any listbox.
 
-#### Read-only controls (proposed)
+#### Input refused (proposed)
 
-The page's controls take no action on user input in the recreation,
-except typing in a text field or text area, which the read-only snapshot
-allows.
+The owner, on 2026-10-03, replacing the read-only snapshot of 2026-09-30:
+"The point of this rendering is that it is a snapshot in time, including
+state (which should be shown including visible focus outlines). The only
+interaction that should be working on that rendering is right click for
+"inspect"".
 
-Where it is done: in Blink, under the recreation switch, at the default
-actions of the controls, as the recorded styles and layout are imposed.
-Not with a listener the builder adds, which DevTools' Event Listeners pane
-would show as though recorded (the reason navigation is refused over the
-DevTools protocol in slice 3b), and not with `pointer-events` or `inert`,
-which would change the imposed style or the accessibility tree and stop
-DevTools' right-click and hit testing.
+So the recreation takes no input except the right-click that opens the
+context menu with Inspect. Typing in a text field, which the read-only
+snapshot of 2026-09-30 allowed, is refused, as are clicks, keys, the wheel,
+touch, and hovering. The recorded focus, with the focus outline the
+recorded style gives, stays where it was recorded.
 
-What is refused, for trusted input events (the user's clicks, taps, and
-keys) only:
+Where it is done: in the recreation's renderer, under the recreation
+switch, where the widget receives each input event from the browser,
+before Blink's compositor-thread scrolling or the page sees it. Not with a
+listener the builder adds, which DevTools' Event Listeners pane would show
+as though recorded (the reason navigation is refused over the DevTools
+protocol in slice 3b); not with `pointer-events` or `inert`, which would
+change the imposed style or the accessibility tree; and not with the
+DevTools protocol's `Input.setIgnoreInputEvents`, which drops every event
+in the browser, the right-click with them, so no context menu opens.
 
-- A `select`: changing its selected options by pointer or keyboard, as a
-  menu list or as a list box, and opening its own popup. A recreated
-  select that opened its popup would build a live list from the
-  recreation's state, not the recorded one. This covers the listbox in a
-  recreated popup's iframe, which is a `select` of the popup's document.
-- A check box or radio button: toggling it by click or by the space key.
-- A `details` element: opening or closing it from its `summary`.
+What passes:
 
-How: each of those default event handlers returns without its action
-when the recreation switch is on and the event is trusted, and marks the
-event as handled, so no other default action runs in its place. The event
-itself is still dispatched; no page script runs to see it. The handlers
-are found by name in the Chromium checkout on the target machine before
-the patch is written (the select types' default event handlers, the
-checkable input types' click handling, and the summary element's default
-event handler); their lines are recorded here then.
+- Mouse events of the right button, and the context menu they open, so
+  that Inspect is offered on the element under the pointer, in the page
+  and in a recreated popup's iframe.
+- While DevTools' element picker is on, the mouse events the DevTools
+  overlay takes before the page, so that picking an element by pointer
+  still works. The overlay consumes them; none reaches the page.
+- The browser's own keys, such as the DevTools shortcuts, which the
+  browser handles before the renderer.
 
-What still works: hovering, which changes no recorded style, since the
-recorded styles are imposed; focus moving on click, with the focus ring
-the page's recorded style gives; scrolling; typing in text fields;
-right-click and Inspect; and links within the page.
+Everything else is dropped: left and middle button events, mouse moves
+outside the picker (so no hover), the wheel, touch, gestures, and keys.
+With them go scrolling, text entry, focus changes, selection changes,
+control state changes, and links within the page. Navigation stays
+refused over the DevTools protocol, as a second guard.
 
-Reporting: each refusal is written to DevTools' Console, as "Windows A11y
-Recorder: a click on select #3023 was not acted on; the recreation is a
-read-only snapshot", naming the input and the element's recorded node.
+What DevTools does is unchanged: it acts on the snapshot as its tools
+allow, such as scrolling a node into view from the Elements tab, and its
+changes are not refused by this step.
 
-Not recorded: no protocol change. The integration script gains the
-hooks, so Chromium is rebuilt.
+How: each place the widget receives an input event, for the main thread
+and the compositor thread, gains a check that returns the event as
+consumed without dispatching it, when the switch is on and the event is not
+one that passes. The places are found by name in the Chromium checkout on
+the target machine before the patch is written (the widget's input handler
+manager, where events from the browser arrive, and the frame widget's input
+handling, after the DevTools overlay); their lines are recorded here then.
+
+Reporting: the evidence panel's notes say that the recreation takes no
+input except the right-click and the DevTools element picker. A dropped
+event is not written to the Console, since mouse moves alone would fill
+it.
+
+Not recorded: no protocol change. The integration script gains the hooks,
+so Chromium is rebuilt.
 
 Limits:
 
-- Script run in DevTools' Console can still change a control, as it can
-  change any node; refusing script changes is not part of this step.
-- A control drawn by a page as a custom widget, with its own script, has
-  no default action and is already inert, since page scripts do not run.
+- With scrolling refused, the window shows the page at its recorded
+  scroll position only; the rest of the page is reached through DevTools.
+- Script run in DevTools' Console can still change the page, as it can
+  change any node; refusing it is not part of this step.
 
 Required tests:
 
 - Unit tests: the integration script's hooks, written once, unchanged when
   applied twice, and failing when an anchor is absent.
 - Integration test in the instrumented Chromium, on a generated page with
-  a select, a list box, a check box, radio buttons, a details element, and
-  a text field, recreated: a trusted click and the keyboard leave every
-  control's state as recorded, and a select's popup does not open; the
-  listbox in a recreated popup's iframe keeps its recorded selection; the
-  text field takes typed text; each refusal is in the Console.
+  a select, a list box, a check box, a details element, a text field, a
+  link within the page, a scrollable area, and a recorded focus,
+  recreated: trusted left clicks, keys, wheel, and mouse moves leave the
+  DOM, every control's state, the selection, the focus, and every scroll
+  offset as recorded, and no `select` popup opens; a right click opens
+  the context menu; the DevTools element picker selects the element under
+  the pointer; the same holds in a recreated popup's iframe.
 - System test on the target machine: in a recreation of the CNIB events
-  page with a list open, a click on another option leaves the highlight
-  where it was recorded, and a click on a closed select opens nothing.
+  page with a list open, clicks, keys, and the wheel change nothing, the
+  recorded focus outline stays, and right-click and Inspect select the
+  element clicked.
 
 ### To be settled
 
