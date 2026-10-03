@@ -4079,6 +4079,86 @@ Not run in the sandbox: the integration tests in the instrumented Chromium
 and the system test, which need Chromium; they are to be run on the target
 machine.
 
+#### Sub-step 2 on the target machine
+
+With revision ff7860a, as the owner reported on 2026-10-03: "The recording
+is rendering well, the selects display and I can inspect the <option>
+elements. Those options are actually selectable, so we should probably
+catch the clicks/selects like we did for the other interactive elements.
+But it works well".
+
+The read-only snapshot of 2026-09-30 refuses changes from the page's own
+controls, but only navigation is refused so far (slice 3b, "Leaving the
+recreation"). A click on an option in the popup's iframe selects it, as it
+would in any listbox.
+
+#### Read-only controls (proposed)
+
+The page's controls take no action on user input in the recreation,
+except typing in a text field or text area, which the read-only snapshot
+allows.
+
+Where it is done: in Blink, under the recreation switch, at the default
+actions of the controls, as the recorded styles and layout are imposed.
+Not with a listener the builder adds, which DevTools' Event Listeners pane
+would show as though recorded (the reason navigation is refused over the
+DevTools protocol in slice 3b), and not with `pointer-events` or `inert`,
+which would change the imposed style or the accessibility tree and stop
+DevTools' right-click and hit testing.
+
+What is refused, for trusted input events (the user's clicks, taps, and
+keys) only:
+
+- A `select`: changing its selected options by pointer or keyboard, as a
+  menu list or as a list box, and opening its own popup. A recreated
+  select that opened its popup would build a live list from the
+  recreation's state, not the recorded one. This covers the listbox in a
+  recreated popup's iframe, which is a `select` of the popup's document.
+- A check box or radio button: toggling it by click or by the space key.
+- A `details` element: opening or closing it from its `summary`.
+
+How: each of those default event handlers returns without its action
+when the recreation switch is on and the event is trusted, and marks the
+event as handled, so no other default action runs in its place. The event
+itself is still dispatched; no page script runs to see it. The handlers
+are found by name in the Chromium checkout on the target machine before
+the patch is written (the select types' default event handlers, the
+checkable input types' click handling, and the summary element's default
+event handler); their lines are recorded here then.
+
+What still works: hovering, which changes no recorded style, since the
+recorded styles are imposed; focus moving on click, with the focus ring
+the page's recorded style gives; scrolling; typing in text fields;
+right-click and Inspect; and links within the page.
+
+Reporting: each refusal is written to DevTools' Console, as "Windows A11y
+Recorder: a click on select #3023 was not acted on; the recreation is a
+read-only snapshot", naming the input and the element's recorded node.
+
+Not recorded: no protocol change. The integration script gains the
+hooks, so Chromium is rebuilt.
+
+Limits:
+
+- Script run in DevTools' Console can still change a control, as it can
+  change any node; refusing script changes is not part of this step.
+- A control drawn by a page as a custom widget, with its own script, has
+  no default action and is already inert, since page scripts do not run.
+
+Required tests:
+
+- Unit tests: the integration script's hooks, written once, unchanged when
+  applied twice, and failing when an anchor is absent.
+- Integration test in the instrumented Chromium, on a generated page with
+  a select, a list box, a check box, radio buttons, a details element, and
+  a text field, recreated: a trusted click and the keyboard leave every
+  control's state as recorded, and a select's popup does not open; the
+  listbox in a recreated popup's iframe keeps its recorded selection; the
+  text field takes typed text; each refusal is in the Console.
+- System test on the target machine: in a recreation of the CNIB events
+  page with a list open, a click on another option leaves the highlight
+  where it was recorded, and a click on a closed select opens nothing.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
