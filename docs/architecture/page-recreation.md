@@ -3319,6 +3319,96 @@ Each sub-step is tested on the target machine before the next.
   animations and an animated image is opened at several frames, and each
   recreation is compared with the captured frame.
 
+#### Sub-step 1 in parts
+
+Sub-step 1 is delivered in three parts, each tested on the target machine
+before the next, as the hooks are in different parts of Chromium:
+
+- 1a: `compositor-animation-started`, `compositor-animation-ended`,
+  `compositor-frame` with transforms, opacities, filters, backdrop
+  filters, and scroll offsets, and `compositor-frame-presented`.
+- 1b: `paint-worklet-painted`, and each paint worklet progress in
+  `compositor-frame`.
+- 1c: `image-paint-image`, and each animated image's frame in
+  `compositor-frame`.
+
+The cost is measured with 1c, on the page "To be settled" names.
+
+#### Sub-step 1a as built
+
+Read in the target machine's checkout before writing the hooks, and the
+patches run against copies of those files: each applies once and a second
+run leaves it unchanged.
+
+- Compositor identity: `LayerTreeHost::CreateLayerTreeHostImpl`
+  (`cc/trees/layer_tree_host.cc`) gives the impl its host's `id_`, which
+  `LayerTreeHost::GetId()` returns, so both threads name a compositor by
+  the same number, unique in its process
+  (`s_layer_tree_host_sequence_number`). Where every presentation request
+  is made, `RecorderRequestWidgetPresentation` calls
+  `RegisterCompositorWidget` with that ID and the widget, and the
+  compositor records carry the widget as the presentation records name it,
+  or null for a frame drawn before its compositor's first request.
+- `compositor-animation-started`: in
+  `CompositorAnimations::StartAnimationOnCompositor`, before the keyframe
+  models are moved to the compositor: the document, the target node, the
+  `cc::Animation` ID (`CcAnimationId`), and each keyframe model's ID,
+  `cc::TargetProperty`, element ID (set in `GetAnimationOnCompositor` from
+  the layout object's unique ID and the property's namespace), and the
+  element ID's namespace (`NamespaceFromCompositorElementId`), which tells
+  a `translate`, `rotate`, `scale`, or `transform` node apart.
+- `compositor-animation-ended`: in
+  `KeyframeEffect::CancelAnimationOnCompositor`, before the keyframe models
+  are removed, with their IDs.
+- `compositor-frame`: in `LayerTreeHostImpl::DrawLayers`, once the
+  compositor frame's token is set and before it is submitted, for a page's
+  compositor (not one with `is_layer_tree_for_ui`). Each of
+  `SetElementTransformMutated`, `SetElementOpacityMutated`,
+  `SetElementFilterMutated`, and `SetElementBackdropFilterMutated`, for
+  either list, adds the element to the compositor's animated set. At each
+  submitted frame the hook reads, from the active tree, the transform
+  node's `local` matrix, the effect node's `opacity`, `filters`, or
+  `backdrop_filters` for each element of the set, and the current scroll
+  offset of every scroll node with an element ID; the bridge writes those
+  that changed since the compositor's last recorded frame. The begin
+  frame's time is `CurrentBeginFrameArgs().frame_time`, and the active
+  tree's `source_frame_number` names the commit drawn.
+- `compositor-frame-presented`: in
+  `LayerTreeHostImpl::DidPresentCompositorFrame`, for a recorded frame
+  only, with the presentation time on the presentation records' clock or
+  the failure. Viz reports each submitted frame once, presented or failed
+  (`CompositorFrameSinkSupport::DidPresentCompositorFrame`, which also
+  reports a rejected frame as failed), so a recorded frame's report is
+  awaited by its token.
+- The records are written on the compositor thread through the bridge's
+  queue (`RecorderPipeClient::QueueEvidence`), which takes a lock and does
+  not wait on the main thread; a push that waits for the writer to free
+  space is measured as `queue.push-waited`.
+- The receiver and the validator take the four records on the new
+  channel (`BrowserCompositor*` contracts in
+  `BrowserEvidenceContracts.cs`; `EventPayloadValidator`), and the channel
+  is added to the recorder's channel lists and its omission records.
+
+Limits of 1a:
+
+- The animated set of a compositor is kept for the compositor's
+  lifetime, and is not emptied when an animation ends, so an element once
+  animated is read at each frame after. Its value is written only when it
+  changes.
+- A value is not a finite number when Chromium holds one that is not;
+  such a record cannot be serialized as JSON (`base::JSONWriter`) and is
+  lost, and is reported to the client's write-failure handler, as any
+  record that cannot be serialized is.
+
+Tests run: Python tests of the hooks, each applied once, in place, and
+upgraded where an earlier hook stood (208 passed); .NET tests of the
+four records against the receiver's contracts and the validator, with
+each value shape (BrowserCompositorRecordTests); the full .NET suite, 1002
+passed, with the four ChromiumLauncherTests that need Windows failing as
+before. Not done here: the
+instrumented Chromium build and the integration and system tests, which
+are for the target machine.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.

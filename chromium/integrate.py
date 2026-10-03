@@ -13755,6 +13755,7 @@ def patch_blink_web_frame_widget(path: Path) -> None:
     if (
         BLINK_PRESENTATION_WIDGET_MARKER in text
         and BLINK_PRESENTATION_WIDGET_BLOCK not in text
+        and blink_registered_presentation_widget_block() not in text
     ):
         raise RuntimeError(
             f"{path}: the presentation swap promise is not recognised"
@@ -13766,6 +13767,10 @@ def patch_blink_web_frame_widget(path: Path) -> None:
         BLINK_PRESENTATION_WIDGET_MARKER,
         path,
     )
+    for recorder_anchor in BLINK_COMPOSITOR_WIDGET_HOOKS:
+        text = apply_cookie_hook(
+            text, recorder_anchor, blink_compositor_widget_hook(recorder_anchor), path
+        )
     text = upgrade_legacy_hooks(
         text, ((STAGE_045_BLINK_WIDGET_INPUT_HOOK, BLINK_WIDGET_INPUT_HOOK),), path
     )
@@ -15667,6 +15672,548 @@ def patch_network_service_build(path: Path) -> None:
     write_patched(path, text)
 
 
+# Protocol 0.48 (slice 4b, "The frame's moment, held", sub-step 1): the
+# compositor's drawn values. See docs/architecture/page-recreation.md.
+CC_LAYER_TREE_HOST_IMPL_OWN_INCLUDE = '#include "cc/trees/layer_tree_host_impl.h"'
+CC_BUILD_DEP = '    "//chromium/recorder_bridge",'
+CC_BUILD_TARGET = 'cc_component("cc") {'
+
+CC_COMPOSITOR_FRAME_HELPERS_ANCHOR = (
+    "std::optional<SubmitInfo> LayerTreeHostImpl::DrawLayers(FrameData* frame) {\n"
+)
+CC_COMPOSITOR_FRAME_HELPERS = """\
+// Windows A11y Recorder (protocol 0.48): the elements each compositor has
+// animated, by property, and the drawn values of the active tree read for
+// them at each submitted frame. Used on the compositor thread alone.
+namespace {
+
+enum RecorderAnimatedProperty {
+  kRecorderAnimatedTransform = 0,
+  kRecorderAnimatedOpacity = 1,
+  kRecorderAnimatedFilter = 2,
+  kRecorderAnimatedBackdropFilter = 3,
+};
+
+std::map<int, std::set<std::pair<ElementId::InternalValue, int>>>&
+RecorderAnimatedElements() {
+  static base::NoDestructor<
+      std::map<int, std::set<std::pair<ElementId::InternalValue, int>>>>
+      elements;
+  return *elements;
+}
+
+void RecorderTrackAnimatedElement(int host_id,
+                                  ElementId element_id,
+                                  int property) {
+  if (!a11y_recorder::GetProcessRecorderClient() || !element_id) {
+    return;
+  }
+  RecorderAnimatedElements()[host_id].insert(
+      {element_id.GetInternalValue(), property});
+}
+
+const char* RecorderFilterTypeName(FilterOperation::FilterType type) {
+  switch (type) {
+    case FilterOperation::GRAYSCALE:
+      return "grayscale";
+    case FilterOperation::SEPIA:
+      return "sepia";
+    case FilterOperation::SATURATE:
+      return "saturate";
+    case FilterOperation::HUE_ROTATE:
+      return "hue-rotate";
+    case FilterOperation::INVERT:
+      return "invert";
+    case FilterOperation::BRIGHTNESS:
+      return "brightness";
+    case FilterOperation::CONTRAST:
+      return "contrast";
+    case FilterOperation::OPACITY:
+      return "opacity";
+    case FilterOperation::BLUR:
+      return "blur";
+    case FilterOperation::DROP_SHADOW:
+      return "drop-shadow";
+    case FilterOperation::COLOR_MATRIX:
+      return "color-matrix";
+    case FilterOperation::ZOOM:
+      return "zoom";
+    case FilterOperation::REFERENCE:
+      return "reference";
+    case FilterOperation::SATURATING_BRIGHTNESS:
+      return "saturating-brightness";
+    case FilterOperation::ALPHA_THRESHOLD:
+      return "alpha-threshold";
+    case FilterOperation::OFFSET:
+      return "offset";
+  }
+  return "unknown";
+}
+
+// Each operation's numbers, as cc holds them: an amount; a drop shadow's
+// standard deviation, offset x and y, and color as four floats; a color
+// matrix's 20 entries; a zoom's amount and inset; an offset's x and y; an
+// alpha threshold's rectangles as x, y, width, and height. A reference
+// filter, an SVG filter, has no numbers here.
+std::vector<a11y_recorder::CompositorFilterOperation> RecorderFilters(
+    const FilterOperations& filters) {
+  std::vector<a11y_recorder::CompositorFilterOperation> operations;
+  for (size_t index = 0; index < filters.size(); ++index) {
+    const FilterOperation& filter = filters.at(index);
+    a11y_recorder::CompositorFilterOperation operation;
+    operation.type = RecorderFilterTypeName(filter.type());
+    switch (filter.type()) {
+      case FilterOperation::DROP_SHADOW: {
+        const SkColor4f color = filter.drop_shadow_color();
+        operation.numbers = {filter.amount(),
+                             static_cast<double>(filter.offset().x()),
+                             static_cast<double>(filter.offset().y()),
+                             color.fR,
+                             color.fG,
+                             color.fB,
+                             color.fA};
+        break;
+      }
+      case FilterOperation::COLOR_MATRIX:
+        for (const float entry : filter.matrix()) {
+          operation.numbers.push_back(entry);
+        }
+        break;
+      case FilterOperation::ZOOM:
+        operation.numbers = {filter.amount(),
+                             static_cast<double>(filter.zoom_inset())};
+        break;
+      case FilterOperation::OFFSET:
+        operation.numbers = {static_cast<double>(filter.offset().x()),
+                             static_cast<double>(filter.offset().y())};
+        break;
+      case FilterOperation::ALPHA_THRESHOLD:
+        for (const gfx::Rect& rect : filter.shape()) {
+          operation.numbers.push_back(rect.x());
+          operation.numbers.push_back(rect.y());
+          operation.numbers.push_back(rect.width());
+          operation.numbers.push_back(rect.height());
+        }
+        break;
+      case FilterOperation::REFERENCE:
+        break;
+      default:
+        operation.numbers = {filter.amount()};
+        break;
+    }
+    operations.push_back(std::move(operation));
+  }
+  return operations;
+}
+
+void RecorderRecordCompositorFrame(int host_id,
+                                   const LayerTreeImpl* tree,
+                                   const viz::BeginFrameArgs& args,
+                                   uint32_t frame_token) {
+  if (!a11y_recorder::GetProcessRecorderClient() || !tree) {
+    return;
+  }
+  const PropertyTrees* trees = tree->property_trees();
+  std::vector<a11y_recorder::CompositorDrawnValue> values;
+  auto animated = RecorderAnimatedElements().find(host_id);
+  if (animated != RecorderAnimatedElements().end()) {
+    for (const auto& [internal_id, property] : animated->second) {
+      const ElementId element_id(internal_id);
+      a11y_recorder::CompositorDrawnValue value;
+      value.element_id = internal_id;
+      if (property == kRecorderAnimatedTransform) {
+        value.property = "transform";
+        const TransformNode* node =
+            trees->transform_tree().FindNodeFromElementId(element_id);
+        value.present = node != nullptr;
+        if (node) {
+          for (unsigned row = 0; row < 4; ++row) {
+            for (unsigned column = 0; column < 4; ++column) {
+              value.numbers.push_back(node->local.rc(row, column));
+            }
+          }
+        }
+      } else {
+        value.property = property == kRecorderAnimatedOpacity ? "opacity"
+                         : property == kRecorderAnimatedFilter
+                             ? "filter"
+                             : "backdrop-filter";
+        const EffectNode* node =
+            trees->effect_tree().FindNodeFromElementId(element_id);
+        value.present = node != nullptr;
+        if (node && property == kRecorderAnimatedOpacity) {
+          value.numbers = {node->opacity};
+        } else if (node && property == kRecorderAnimatedFilter) {
+          value.filters = RecorderFilters(node->filters);
+        } else if (node) {
+          value.filters = RecorderFilters(node->backdrop_filters);
+        }
+      }
+      values.push_back(std::move(value));
+    }
+  }
+  // Every scroll node's offset as drawn, so a scroll the compositor made
+  // itself is recorded; the bridge writes only the offsets that changed.
+  const ScrollTree& scroll_tree = trees->scroll_tree();
+  for (const ScrollNode& node : scroll_tree.nodes()) {
+    if (!node.element_id) {
+      continue;
+    }
+    const gfx::PointF offset = scroll_tree.current_scroll_offset(node.element_id);
+    a11y_recorder::CompositorDrawnValue value;
+    value.element_id = node.element_id.GetInternalValue();
+    value.property = "scroll-offset";
+    value.numbers = {offset.x(), offset.y()};
+    values.push_back(std::move(value));
+  }
+  a11y_recorder::RecordCompositorFrame(
+      host_id, frame_token,
+      args.frame_time.is_null()
+          ? 0
+          : (args.frame_time - base::TimeTicks()).InMicroseconds(),
+      tree->source_frame_number(), base::TimeTicks::IsHighResolution(),
+      std::move(values));
+}
+
+}  // namespace
+
+"""
+
+CC_DRAW_LAYERS_ANCHOR = """\
+  const auto frame_token = compositor_frame.metadata.frame_token;
+  frame->frame_token = frame_token;
+"""
+CC_DRAW_LAYERS_HOOK = CC_DRAW_LAYERS_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the active tree's values as drawn
+  // in the frame about to be submitted, for a page's compositor.
+  if (!settings_.is_layer_tree_for_ui) {
+    RecorderRecordCompositorFrame(id_, active_tree(), CurrentBeginFrameArgs(),
+                                  frame_token);
+  }
+"""
+
+CC_PRESENTED_ANCHOR = """\
+void LayerTreeHostImpl::DidPresentCompositorFrame(
+    uint32_t frame_token,
+    const viz::FrameTimingDetails& details) {
+"""
+CC_PRESENTED_HOOK = CC_PRESENTED_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the presentation of a recorded
+  // compositor frame.
+  if (!settings_.is_layer_tree_for_ui) {
+    const base::TimeTicks recorder_presented =
+        details.presentation_feedback.timestamp;
+    a11y_recorder::RecordCompositorFramePresented(
+        id_, frame_token,
+        recorder_presented.is_null()
+            ? 0
+            : (recorder_presented - base::TimeTicks()).InMicroseconds(),
+        details.presentation_feedback.failed(),
+        base::TimeTicks::IsHighResolution());
+  }
+"""
+
+# Each mutation callback, for either list, names the element animated.
+CC_MUTATED_HOOKS = (
+    (
+        """\
+void LayerTreeHostImpl::SetElementFilterMutated(
+    ElementId element_id,
+    ElementListType list_type,
+    const FilterOperations& filters) {
+""",
+        "kRecorderAnimatedFilter",
+    ),
+    (
+        """\
+void LayerTreeHostImpl::SetElementBackdropFilterMutated(
+    ElementId element_id,
+    ElementListType list_type,
+    const FilterOperations& backdrop_filters) {
+""",
+        "kRecorderAnimatedBackdropFilter",
+    ),
+    (
+        """\
+void LayerTreeHostImpl::SetElementOpacityMutated(ElementId element_id,
+                                                 ElementListType list_type,
+                                                 float opacity) {
+""",
+        "kRecorderAnimatedOpacity",
+    ),
+    (
+        """\
+void LayerTreeHostImpl::SetElementTransformMutated(
+    ElementId element_id,
+    ElementListType list_type,
+    const gfx::Transform& transform) {
+""",
+        "kRecorderAnimatedTransform",
+    ),
+)
+
+
+def cc_mutated_hook(anchor: str, property_name: str) -> str:
+    return anchor + (
+        "  // Windows A11y Recorder (protocol 0.48): an animated element.\n"
+        f"  RecorderTrackAnimatedElement(id_, element_id, {property_name});\n"
+    )
+
+
+def patch_cc_layer_tree_host_impl(path: Path) -> None:
+    """Protocol 0.48: records the compositor's drawn values at each submitted
+    frame and their presentation. See docs/architecture/page-recreation.md,
+    "Slice 4b"."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CC_LAYER_TREE_HOST_IMPL_OWN_INCLUDE,
+        (BLINK_BRIDGE_INCLUDE, '#include "cc/paint/filter_operations.h"'),
+        path,
+    )
+    if "#include <set>\n" not in text:
+        text = replace_once(text, "#include <map>\n", "#include <map>\n#include <set>\n", path)
+    if CC_COMPOSITOR_FRAME_HELPERS not in text:
+        text = insert_before_once(
+            text,
+            CC_COMPOSITOR_FRAME_HELPERS_ANCHOR,
+            CC_COMPOSITOR_FRAME_HELPERS,
+            CC_COMPOSITOR_FRAME_HELPERS,
+            path,
+        )
+    text = apply_cookie_hook(text, CC_DRAW_LAYERS_ANCHOR, CC_DRAW_LAYERS_HOOK, path)
+    text = apply_cookie_hook(text, CC_PRESENTED_ANCHOR, CC_PRESENTED_HOOK, path)
+    for anchor, property_name in CC_MUTATED_HOOKS:
+        text = apply_cookie_hook(
+            text, anchor, cc_mutated_hook(anchor, property_name), path
+        )
+    write_patched(path, text)
+
+
+def patch_cc_build(path: Path) -> None:
+    """Lets the cc component include the recorder bridge."""
+    text = read_source(path)
+    target_index = text.find(CC_BUILD_TARGET)
+    if target_index < 0:
+        raise RuntimeError(f"{path}: cc component target not found")
+    target_end = text.find("\n}", target_index)
+    deps = text.find("  deps = [\n", target_index)
+    if deps < 0 or (target_end >= 0 and deps > target_end):
+        raise RuntimeError(f"{path}: cc component deps list not found")
+    list_end = text.find("\n  ]", deps)
+    if CC_BUILD_DEP in text[deps:list_end]:
+        return
+    opening = "  deps = [\n"
+    text = text[:deps] + text[deps:].replace(
+        opening, opening + f"{CC_BUILD_DEP}\n", 1
+    )
+    write_patched(path, text)
+
+
+BLINK_COMPOSITOR_ANIMATIONS_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/animation/compositor_animations.h"'
+)
+BLINK_COMPOSITOR_ANIMATION_HELPERS_ANCHOR = (
+    "void CompositorAnimations::StartAnimationOnCompositor(\n"
+)
+BLINK_COMPOSITOR_ANIMATION_HELPERS = """\
+// Windows A11y Recorder (protocol 0.48): names for the compositor animation
+// records.
+namespace {
+
+std::string RecorderTargetPropertyName(int target_property) {
+  switch (target_property) {
+    case cc::TargetProperty::TRANSFORM:
+      return "transform";
+    case cc::TargetProperty::SCALE:
+      return "scale";
+    case cc::TargetProperty::ROTATE:
+      return "rotate";
+    case cc::TargetProperty::TRANSLATE:
+      return "translate";
+    case cc::TargetProperty::OPACITY:
+      return "opacity";
+    case cc::TargetProperty::FILTER:
+      return "filter";
+    case cc::TargetProperty::SCROLL_OFFSET:
+      return "scroll-offset";
+    case cc::TargetProperty::BACKGROUND_COLOR:
+      return "background-color";
+    case cc::TargetProperty::BOUNDS:
+      return "bounds";
+    case cc::TargetProperty::CSS_CUSTOM_PROPERTY:
+      return "css-custom-property";
+    case cc::TargetProperty::NATIVE_PROPERTY:
+      return "native-property";
+    case cc::TargetProperty::BACKDROP_FILTER:
+      return "backdrop-filter";
+    default:
+      return "other";
+  }
+}
+
+std::string RecorderElementIdNamespaceName(CompositorElementId element_id) {
+  if (!element_id) {
+    return "none";
+  }
+  switch (NamespaceFromCompositorElementId(element_id)) {
+    case CompositorElementIdNamespace::kPrimaryEffect:
+      return "primary-effect";
+    case CompositorElementIdNamespace::kPrimaryTransform:
+      return "primary-transform";
+    case CompositorElementIdNamespace::kEffectFilter:
+      return "effect-filter";
+    case CompositorElementIdNamespace::kScaleTransform:
+      return "scale-transform";
+    case CompositorElementIdNamespace::kRotateTransform:
+      return "rotate-transform";
+    case CompositorElementIdNamespace::kTranslateTransform:
+      return "translate-transform";
+    case CompositorElementIdNamespace::kScroll:
+      return "scroll";
+    case CompositorElementIdNamespace::kPrimary:
+      return "primary";
+    default:
+      return "other";
+  }
+}
+
+}  // namespace
+
+"""
+BLINK_COMPOSITOR_ANIMATION_STARTED_ANCHOR = """\
+  for (auto& keyframe_model : keyframe_models) {
+    int id = keyframe_model->id();
+    compositor_animation.AddKeyframeModel(std::move(keyframe_model));
+    started_keyframe_model_ids.push_back(id);
+  }
+"""
+BLINK_COMPOSITOR_ANIMATION_STARTED_HOOK = """\
+  // Windows A11y Recorder (protocol 0.48): an animation started on the
+  // compositor, its keyframe models, and the elements they animate.
+  {
+    std::vector<a11y_recorder::CompositorKeyframeModelFacts> recorder_models;
+    for (const auto& keyframe_model : keyframe_models) {
+      a11y_recorder::CompositorKeyframeModelFacts recorder_model;
+      recorder_model.keyframe_model_id = keyframe_model->id();
+      recorder_model.target_property =
+          RecorderTargetPropertyName(keyframe_model->TargetProperty());
+      recorder_model.element_id =
+          keyframe_model->element_id().GetInternalValue();
+      recorder_model.element_id_namespace =
+          RecorderElementIdNamespaceName(keyframe_model->element_id());
+      recorder_models.push_back(std::move(recorder_model));
+    }
+    Element& recorder_element = const_cast<Element&>(element);
+    a11y_recorder::RecordCompositorAnimationStarted(
+        recorder_element.GetDocument().GetDomNodeId(),
+        recorder_element.GetDocument().Token().ToString(),
+        recorder_element.GetDomNodeId(), compositor_animation.CcAnimationId(),
+        std::move(recorder_models));
+  }
+""" + BLINK_COMPOSITOR_ANIMATION_STARTED_ANCHOR
+
+BLINK_KEYFRAME_EFFECT_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/animation/keyframe_effect.h"'
+)
+BLINK_COMPOSITOR_ANIMATION_ENDED_ANCHOR = """\
+  DCHECK(Model());
+  if (compositor_animation) {
+    for (const auto& compositor_keyframe_model_id :
+         compositor_keyframe_model_ids_) {
+"""
+BLINK_COMPOSITOR_ANIMATION_ENDED_HOOK = """\
+  // Windows A11y Recorder (protocol 0.48): the animation's keyframe models
+  // leave the compositor, cancelled or finished.
+  {
+    std::vector<int> recorder_ids(compositor_keyframe_model_ids_.begin(),
+                                  compositor_keyframe_model_ids_.end());
+    Document& recorder_document = effect_target_->GetDocument();
+    a11y_recorder::RecordCompositorAnimationEnded(
+        recorder_document.GetDomNodeId(), recorder_document.Token().ToString(),
+        effect_target_->GetDomNodeId(),
+        compositor_animation ? compositor_animation->CcAnimationId() : 0,
+        std::move(recorder_ids));
+  }
+""" + BLINK_COMPOSITOR_ANIMATION_ENDED_ANCHOR
+
+
+def patch_blink_compositor_animations(path: Path) -> None:
+    """Protocol 0.48: records an animation started on the compositor."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_COMPOSITOR_ANIMATIONS_OWN_INCLUDE,
+        (BLINK_BRIDGE_INCLUDE, '#include "cc/trees/target_property.h"'),
+        path,
+    )
+    if BLINK_COMPOSITOR_ANIMATION_HELPERS not in text:
+        text = insert_before_once(
+            text,
+            BLINK_COMPOSITOR_ANIMATION_HELPERS_ANCHOR,
+            BLINK_COMPOSITOR_ANIMATION_HELPERS,
+            BLINK_COMPOSITOR_ANIMATION_HELPERS,
+            path,
+        )
+    text = apply_cookie_hook(
+        text,
+        BLINK_COMPOSITOR_ANIMATION_STARTED_ANCHOR,
+        BLINK_COMPOSITOR_ANIMATION_STARTED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_keyframe_effect(path: Path) -> None:
+    """Protocol 0.48: records an animation's keyframe models leaving the
+    compositor."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_KEYFRAME_EFFECT_OWN_INCLUDE,
+        (BLINK_BRIDGE_INCLUDE,),
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_COMPOSITOR_ANIMATION_ENDED_ANCHOR,
+        BLINK_COMPOSITOR_ANIMATION_ENDED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+# The widget a compositor draws for, named where every presentation request
+# is made (RecorderRequestWidgetPresentation, for a frame widget and a page
+# popup alike).
+BLINK_COMPOSITOR_WIDGET_HOOKS = (
+    "  const bool recorder_composites = view_composites && recorder_host;\n",
+)
+
+
+def blink_compositor_widget_hook(anchor: str) -> str:
+    return anchor + (
+        "  // Windows A11y Recorder (protocol 0.48): the widget this compositor's\n"
+        "  // frames are drawn for.\n"
+        "  if (recorder_composites) {\n"
+        "    a11y_recorder::RegisterCompositorWidget(recorder_host->GetId(),\n"
+        "                                            recorder_widget);\n"
+        "  }\n"
+    )
+
+
+
+def blink_registered_presentation_widget_block() -> str:
+    """The presentation block once protocol 0.48 names each compositor's
+    widget in it."""
+    block = BLINK_PRESENTATION_WIDGET_BLOCK
+    for anchor in BLINK_COMPOSITOR_WIDGET_HOOKS:
+        if block.count(anchor) != 1:
+            raise RuntimeError("compositor widget anchor not in the presentation block")
+        block = block.replace(anchor, blink_compositor_widget_hook(anchor))
+    return block
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -15862,6 +16409,12 @@ def main() -> int:
         blink_platform / "widget" / "input" / "input_handler_proxy.cc"
     )
     patch_blink_platform_build(blink_platform / "BUILD.gn")
+    patch_blink_compositor_animations(
+        blink_core / "animation" / "compositor_animations.cc"
+    )
+    patch_blink_keyframe_effect(blink_core / "animation" / "keyframe_effect.cc")
+    patch_cc_layer_tree_host_impl(source / "cc" / "trees" / "layer_tree_host_impl.cc")
+    patch_cc_build(source / "cc" / "BUILD.gn")
     patch_blink_cookie_jar(
         source
         / "third_party"

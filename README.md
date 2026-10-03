@@ -413,6 +413,13 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.48 adds the `browser.compositor` channel: each animation
+started on and removed from the compositor, and, for each compositor frame
+a page's compositor submits in which a drawn transform, opacity, filter,
+backdrop filter, or scroll offset changed, the changed values as drawn,
+then the frame's presentation. See "Slice 4b" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Protocol 0.47 records the Windows animation settings with each popup
 window as it is shown, and the evidence panel states, for each popup drawn
 at a frame, how long before the frame its window was shown, those

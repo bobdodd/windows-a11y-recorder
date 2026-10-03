@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -5678,6 +5679,280 @@ void RecordBlinkPresentationFeedback(uint64_t request_sequence,
                     std::move(payload));
 }
 
+
+namespace {
+
+// The compositor's state the bridge keeps between frames, per compositor:
+// the widget its presentation requests name, the values last recorded, and
+// the recorded frames whose presentation has not been reported.
+struct CompositorRecordState {
+  PresentationWidgetIdentity widget;
+  std::map<std::pair<uint64_t, std::string>, CompositorDrawnValue> recorded;
+  std::set<uint32_t> awaiting_presentation;
+};
+
+base::Lock& CompositorRecordLock() {
+  static base::NoDestructor<base::Lock> lock;
+  return *lock;
+}
+
+std::map<int, CompositorRecordState>& CompositorRecordStates() {
+  static base::NoDestructor<std::map<int, CompositorRecordState>> states;
+  return *states;
+}
+
+bool SameCompositorValue(const CompositorDrawnValue& left,
+                         const CompositorDrawnValue& right) {
+  if (left.present != right.present || left.numbers != right.numbers ||
+      left.filters.size() != right.filters.size()) {
+    return false;
+  }
+  for (size_t index = 0; index < left.filters.size(); ++index) {
+    if (left.filters[index].type != right.filters[index].type ||
+        left.filters[index].numbers != right.filters[index].numbers) {
+      return false;
+    }
+  }
+  return true;
+}
+
+base::ListValue CompositorNumbers(const std::vector<double>& numbers) {
+  base::ListValue list;
+  for (const double number : numbers) {
+    list.Append(number);
+  }
+  return list;
+}
+
+base::Value CompositorValueJson(const CompositorDrawnValue& value) {
+  if (!value.present) {
+    return base::Value();
+  }
+  if (value.property == "opacity" && value.numbers.size() == 1) {
+    return base::Value(value.numbers[0]);
+  }
+  if (value.property == "scroll-offset" && value.numbers.size() == 2) {
+    base::DictValue offset;
+    offset.Set("x", value.numbers[0]);
+    offset.Set("y", value.numbers[1]);
+    return base::Value(std::move(offset));
+  }
+  if (value.property == "filter" || value.property == "backdrop-filter") {
+    base::ListValue operations;
+    for (const CompositorFilterOperation& operation : value.filters) {
+      base::DictValue entry;
+      entry.Set("type", operation.type);
+      entry.Set("numbers", CompositorNumbers(operation.numbers));
+      operations.Append(std::move(entry));
+    }
+    return base::Value(std::move(operations));
+  }
+  return base::Value(CompositorNumbers(value.numbers));
+}
+
+base::Value CompositorWidgetJson(const PresentationWidgetIdentity& widget) {
+  if (!widget.present) {
+    return base::Value();
+  }
+  base::DictValue entry;
+  entry.Set("widgetKind", widget.page_popup ? "page-popup" : "frame");
+  entry.Set("frameSinkId",
+            widget.page_popup
+                ? base::Value()
+                : base::Value(
+                      base::NumberToString(widget.frame_sink_client_id) + ":" +
+                      base::NumberToString(widget.frame_sink_id)));
+  entry.Set("localRootFrameToken", widget.local_root_frame_token);
+  return base::Value(std::move(entry));
+}
+
+bool IsCompositorProperty(const std::string& property) {
+  return IsOneOf(property, {"transform", "opacity", "filter",
+                            "backdrop-filter", "scroll-offset"});
+}
+
+}  // namespace
+
+void RegisterCompositorWidget(int layer_tree_host_id,
+                              PresentationWidgetIdentity widget) {
+  if (!GetProcessRecorderClient() || layer_tree_host_id <= 0 ||
+      !widget.present || !IsValidPresentationWidget(widget)) {
+    return;
+  }
+  base::AutoLock lock(CompositorRecordLock());
+  CompositorRecordStates()[layer_tree_host_id].widget = std::move(widget);
+}
+
+void RecordCompositorAnimationStarted(
+    int document_node_id,
+    std::string document_token,
+    int node_id,
+    int compositor_animation_id,
+    std::vector<CompositorKeyframeModelFacts> keyframe_models) {
+  A11Y_RECORDER_COST("RecordCompositorAnimationStarted");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || keyframe_models.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("nodeId", node_id);
+  payload.Set("compositorAnimationId",
+              compositor_animation_id > 0 ? base::Value(compositor_animation_id)
+                                          : base::Value());
+  base::ListValue models;
+  for (CompositorKeyframeModelFacts& model : keyframe_models) {
+    base::DictValue entry;
+    entry.Set("keyframeModelId", model.keyframe_model_id);
+    entry.Set("targetProperty", std::move(model.target_property));
+    entry.Set("elementId", base::NumberToString(model.element_id));
+    entry.Set("elementIdNamespace", std::move(model.element_id_namespace));
+    models.Append(std::move(entry));
+  }
+  payload.Set("keyframeModels", std::move(models));
+  SendBlinkEvidence("browser.compositor", "compositor-animation-started",
+                    std::move(payload));
+}
+
+void RecordCompositorAnimationEnded(int document_node_id,
+                                    std::string document_token,
+                                    int node_id,
+                                    int compositor_animation_id,
+                                    std::vector<int> keyframe_model_ids) {
+  A11Y_RECORDER_COST("RecordCompositorAnimationEnded");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || keyframe_model_ids.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("nodeId", node_id > 0 ? base::Value(node_id) : base::Value());
+  payload.Set("compositorAnimationId",
+              compositor_animation_id > 0 ? base::Value(compositor_animation_id)
+                                          : base::Value());
+  base::ListValue ids;
+  for (const int id : keyframe_model_ids) {
+    ids.Append(id);
+  }
+  payload.Set("keyframeModelIds", std::move(ids));
+  SendBlinkEvidence("browser.compositor", "compositor-animation-ended",
+                    std::move(payload));
+}
+
+void RecordCompositorFrame(int layer_tree_host_id,
+                           uint32_t frame_token,
+                           int64_t begin_frame_microseconds,
+                           int source_frame_number,
+                           bool high_resolution_ticks,
+                           std::vector<CompositorDrawnValue> values) {
+  A11Y_RECORDER_COST("RecordCompositorFrame");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || layer_tree_host_id <= 0 || frame_token == 0) {
+    return;
+  }
+  base::ListValue changes;
+  PresentationWidgetIdentity widget;
+  {
+    base::AutoLock lock(CompositorRecordLock());
+    CompositorRecordState& state = CompositorRecordStates()[layer_tree_host_id];
+    for (CompositorDrawnValue& value : values) {
+      if (!IsCompositorProperty(value.property)) {
+        continue;
+      }
+      const auto key = std::make_pair(value.element_id, value.property);
+      auto recorded = state.recorded.find(key);
+      if (!value.present) {
+        // An element never recorded, or already recorded as gone, is not a
+        // change.
+        if (recorded == state.recorded.end()) {
+          continue;
+        }
+        state.recorded.erase(recorded);
+      } else if (recorded != state.recorded.end() &&
+                 SameCompositorValue(recorded->second, value)) {
+        continue;
+      }
+      base::DictValue change;
+      change.Set("elementId", base::NumberToString(value.element_id));
+      change.Set("property", value.property);
+      change.Set("value", CompositorValueJson(value));
+      changes.Append(std::move(change));
+      if (value.present) {
+        state.recorded[key] = std::move(value);
+      }
+    }
+    if (changes.empty()) {
+      return;
+    }
+    // Viz reports each submitted frame once, presented or failed
+    // (CompositorFrameSinkSupport::DidPresentCompositorFrame). A frame whose
+    // report never came, as when its renderer closed, is not awaited for
+    // ever: the oldest is let go past this bound, which no report is so far
+    // behind.
+    constexpr size_t kMaximumAwaitedCompositorFrames = 1024;
+    state.awaiting_presentation.insert(frame_token);
+    if (state.awaiting_presentation.size() > kMaximumAwaitedCompositorFrames) {
+      state.awaiting_presentation.erase(state.awaiting_presentation.begin());
+    }
+    widget = state.widget;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("layerTreeHostId", layer_tree_host_id);
+  payload.Set("widget", CompositorWidgetJson(widget));
+  payload.Set("frameToken", base::NumberToString(frame_token));
+  payload.Set("sourceFrameNumber", source_frame_number);
+  payload.Set("beginFrameTicks",
+              PresentationCounterTicks(begin_frame_microseconds,
+                                       high_resolution_ticks));
+  payload.Set("beginFrameTimeTicksMicroseconds",
+              OptionalMicroseconds(begin_frame_microseconds));
+  payload.Set("highResolutionTicks", high_resolution_ticks);
+  payload.Set("changes", std::move(changes));
+  SendBlinkEvidence("browser.compositor", "compositor-frame",
+                    std::move(payload));
+}
+
+void RecordCompositorFramePresented(int layer_tree_host_id,
+                                    uint32_t frame_token,
+                                    int64_t presented_microseconds,
+                                    bool failed,
+                                    bool high_resolution_ticks) {
+  A11Y_RECORDER_COST("RecordCompositorFramePresented");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || layer_tree_host_id <= 0 || frame_token == 0) {
+    return;
+  }
+  PresentationWidgetIdentity widget;
+  {
+    base::AutoLock lock(CompositorRecordLock());
+    auto state = CompositorRecordStates().find(layer_tree_host_id);
+    if (state == CompositorRecordStates().end() ||
+        !state->second.awaiting_presentation.erase(frame_token)) {
+      return;
+    }
+    widget = state->second.widget;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("layerTreeHostId", layer_tree_host_id);
+  payload.Set("widget", CompositorWidgetJson(widget));
+  payload.Set("frameToken", base::NumberToString(frame_token));
+  payload.Set("failed", failed);
+  payload.Set("presentedTicks",
+              failed ? base::Value()
+                     : PresentationCounterTicks(presented_microseconds,
+                                                high_resolution_ticks));
+  payload.Set("presentedTimeTicksMicroseconds",
+              failed ? base::Value()
+                     : OptionalMicroseconds(presented_microseconds));
+  payload.Set("highResolutionTicks", high_resolution_ticks);
+  SendBlinkEvidence("browser.compositor", "compositor-frame-presented",
+                    std::move(payload));
+}
 
 namespace {
 

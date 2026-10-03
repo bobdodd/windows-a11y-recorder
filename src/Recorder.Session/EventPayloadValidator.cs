@@ -28,7 +28,8 @@ internal static class EventPayloadValidator
         "browser.layout",
         "browser.presentation",
         "browser.network",
-        "browser.resources"
+        "browser.resources",
+        "browser.compositor"
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -372,6 +373,18 @@ internal static class EventPayloadValidator
             case ("browser.presentation", "presentation-feedback"):
                 ValidateBrowserPresentationFeedback(payload, issues);
                 break;
+            case ("browser.compositor", "compositor-animation-started"):
+                ValidateBrowserCompositorAnimationStarted(payload, issues);
+                break;
+            case ("browser.compositor", "compositor-animation-ended"):
+                ValidateBrowserCompositorAnimationEnded(payload, issues);
+                break;
+            case ("browser.compositor", "compositor-frame"):
+                ValidateBrowserCompositorFrame(payload, issues);
+                break;
+            case ("browser.compositor", "compositor-frame-presented"):
+                ValidateBrowserCompositorFramePresented(payload, issues);
+                break;
             case ("browser.resources", "font-file"):
             case ("browser.resources", "image-data"):
                 ValidateBrowserResourceBytes(payload, issues);
@@ -449,6 +462,7 @@ internal static class EventPayloadValidator
             case ("browser.presentation", "collector-omission"):
             case ("browser.network", "collector-omission"):
             case ("browser.resources", "collector-omission"):
+            case ("browser.compositor", "collector-omission"):
                 ValidateBrowserOmission(payload, issues);
                 break;
             default:
@@ -4527,6 +4541,293 @@ internal static class EventPayloadValidator
             ],
             issues);
         ValidatePresentationBase(payload, issues);
+    }
+
+    // Compositor records (protocol 0.48, slice 4b).
+    private static readonly string[] CompositorTargetProperties =
+    [
+        "transform", "scale", "rotate", "translate", "opacity", "filter",
+        "scroll-offset", "background-color", "bounds", "css-custom-property",
+        "native-property", "backdrop-filter", "other"
+    ];
+
+    private static readonly string[] CompositorElementIdNamespaces =
+    [
+        "primary-effect", "primary-transform", "effect-filter", "scale-transform",
+        "rotate-transform", "translate-transform", "scroll", "primary", "other", "none"
+    ];
+
+    private static readonly string[] CompositorFilterTypes =
+    [
+        "grayscale", "sepia", "saturate", "hue-rotate", "invert", "brightness",
+        "contrast", "opacity", "blur", "drop-shadow", "color-matrix", "zoom",
+        "reference", "saturating-brightness", "alpha-threshold", "offset", "unknown"
+    ];
+
+    private static void ValidateCompositorRendererContext(
+        JsonElement payload,
+        bool requiresDocument,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateBrowserContextProperty(payload, issues);
+        if (requiresDocument)
+        {
+            ValidateRendererDocumentContext(payload, issues);
+            return;
+        }
+        if (payload.TryGetProperty("context", out var context) &&
+            context.ValueKind == JsonValueKind.Object &&
+            ReadString(context, "processType") != "renderer")
+        {
+            AddError(
+                issues,
+                "browser-compositor-context-invalid",
+                "#/payload/context",
+                "Compositor evidence must have renderer-process provenance.");
+        }
+    }
+
+    private static void ValidateCompositorWidget(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (!payload.TryGetProperty("widget", out var widget) ||
+            widget.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        ValidateShape(
+            widget,
+            [
+                RequiredEnum("widgetKind", "frame", "page-popup"),
+                NullableFrameSinkId("frameSinkId"),
+                RequiredString("localRootFrameToken")
+            ],
+            issues,
+            "#/payload/widget");
+    }
+
+    private static void ValidateBrowserCompositorAnimationStarted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("nodeId", positive: true),
+                NullableInteger("compositorAnimationId", positive: true),
+                RequiredObjectArray("keyframeModels")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, true, issues);
+        if (!payload.TryGetProperty("keyframeModels", out var models) ||
+            models.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        if (models.GetArrayLength() == 0)
+        {
+            AddError(
+                issues,
+                "browser-compositor-keyframe-models-empty",
+                "#/payload/keyframeModels",
+                "An animation started on the compositor has at least one keyframe model.");
+        }
+        var index = 0;
+        foreach (var model in models.EnumerateArray())
+        {
+            if (model.ValueKind == JsonValueKind.Object)
+            {
+                ValidateShape(
+                    model,
+                    [
+                        RequiredInteger("keyframeModelId", positive: true),
+                        RequiredEnum("targetProperty", CompositorTargetProperties),
+                        RequiredDecimalText("elementId"),
+                        RequiredEnum("elementIdNamespace", CompositorElementIdNamespaces)
+                    ],
+                    issues,
+                    $"#/payload/keyframeModels/{index}");
+            }
+            index++;
+        }
+    }
+
+    private static void ValidateBrowserCompositorAnimationEnded(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableInteger("nodeId", positive: true),
+                NullableInteger("compositorAnimationId", positive: true),
+                RequiredIntegerArray("keyframeModelIds")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, false, issues);
+        if (payload.TryGetProperty("keyframeModelIds", out var ids) &&
+            ids.ValueKind == JsonValueKind.Array &&
+            (ids.GetArrayLength() == 0 ||
+             ids.EnumerateArray().Any(id => !IsInteger(id) || id.GetInt64() <= 0)))
+        {
+            AddError(
+                issues,
+                "browser-compositor-keyframe-model-ids-invalid",
+                "#/payload/keyframeModelIds",
+                "An ended animation names at least one positive keyframe model ID.");
+        }
+    }
+
+    private static PropertyRule RequiredIntegerArray(string name) =>
+        new(
+            name,
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(IsInteger),
+            "must be an array of integers");
+
+    private static bool IsFiniteNumber(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number &&
+        value.TryGetDouble(out var number) &&
+        double.IsFinite(number);
+
+    private static bool IsFiniteNumberArray(JsonElement value, int? length) =>
+        value.ValueKind == JsonValueKind.Array &&
+        (length is null || value.GetArrayLength() == length) &&
+        value.EnumerateArray().All(IsFiniteNumber);
+
+    private static bool IsCompositorValue(string? property, JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return property is "transform" or "opacity" or "filter" or "backdrop-filter";
+        }
+        switch (property)
+        {
+            case "transform":
+                return IsFiniteNumberArray(value, 16);
+            case "opacity":
+                return IsFiniteNumber(value);
+            case "scroll-offset":
+                return value.ValueKind == JsonValueKind.Object &&
+                    value.TryGetProperty("x", out var x) && IsFiniteNumber(x) &&
+                    value.TryGetProperty("y", out var y) && IsFiniteNumber(y) &&
+                    value.EnumerateObject().Count() == 2;
+            case "filter":
+            case "backdrop-filter":
+                return value.ValueKind == JsonValueKind.Array &&
+                    value.EnumerateArray().All(operation =>
+                        operation.ValueKind == JsonValueKind.Object &&
+                        operation.EnumerateObject().Count() == 2 &&
+                        operation.TryGetProperty("type", out var type) &&
+                        type.ValueKind == JsonValueKind.String &&
+                        CompositorFilterTypes.Contains(type.GetString(), StringComparer.Ordinal) &&
+                        operation.TryGetProperty("numbers", out var numbers) &&
+                        IsFiniteNumberArray(numbers, null));
+            default:
+                return false;
+        }
+    }
+
+    private static void ValidateBrowserCompositorFrame(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("layerTreeHostId", positive: true),
+                NullableObject("widget"),
+                RequiredFrameToken("frameToken"),
+                RequiredInteger("sourceFrameNumber"),
+                NullablePositiveDecimalText("beginFrameTicks"),
+                NullablePositiveDecimalText("beginFrameTimeTicksMicroseconds"),
+                RequiredBoolean("highResolutionTicks"),
+                RequiredObjectArray("changes")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, false, issues);
+        ValidateCompositorWidget(payload, issues);
+        if (!payload.TryGetProperty("changes", out var changes) ||
+            changes.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        if (changes.GetArrayLength() == 0)
+        {
+            AddError(
+                issues,
+                "browser-compositor-frame-empty",
+                "#/payload/changes",
+                "A compositor frame is recorded only when a drawn value changed.");
+        }
+        var index = 0;
+        foreach (var change in changes.EnumerateArray())
+        {
+            if (change.ValueKind != JsonValueKind.Object)
+            {
+                index++;
+                continue;
+            }
+            ValidateShape(
+                change,
+                [
+                    RequiredDecimalText("elementId"),
+                    RequiredEnum("property", "transform", "opacity", "filter",
+                        "backdrop-filter", "scroll-offset"),
+                    new PropertyRule("value", true, true, _ => true, "must be present")
+                ],
+                issues,
+                $"#/payload/changes/{index}");
+            if (change.TryGetProperty("value", out var value) &&
+                !IsCompositorValue(ReadString(change, "property"), value))
+            {
+                AddError(
+                    issues,
+                    "browser-compositor-value-invalid",
+                    $"#/payload/changes/{index}/value",
+                    "A compositor value must have its property's shape: 16 matrix " +
+                        "entries, a number, filter operations, or x and y.");
+            }
+            index++;
+        }
+    }
+
+    private static void ValidateBrowserCompositorFramePresented(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("layerTreeHostId", positive: true),
+                NullableObject("widget"),
+                RequiredFrameToken("frameToken"),
+                RequiredBoolean("failed"),
+                NullablePositiveDecimalText("presentedTicks"),
+                NullablePositiveDecimalText("presentedTimeTicksMicroseconds"),
+                RequiredBoolean("highResolutionTicks")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, false, issues);
+        ValidateCompositorWidget(payload, issues);
+        if (payload.TryGetProperty("failed", out var failed) &&
+            failed.ValueKind == JsonValueKind.True &&
+            (ReadString(payload, "presentedTicks") is not null ||
+             ReadString(payload, "presentedTimeTicksMicroseconds") is not null))
+        {
+            AddError(
+                issues,
+                "browser-compositor-presentation-invalid",
+                "#/payload",
+                "A failed presentation has no presentation time.");
+        }
     }
 
     private static void ValidateBrowserPresentationFeedback(

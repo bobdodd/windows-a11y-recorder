@@ -1280,7 +1280,7 @@ internal static class EvidenceCatalog
                      "browser.listener", "browser.dispatch", "browser.timer", "browser.scheduler",
                      "browser.navigation", "browser.dom", "browser.cookie", "browser.interaction",
                      "browser.layout", "browser.presentation", "browser.network",
-                     "browser.resources"
+                     "browser.resources", "browser.compositor"
                  })
         {
             map[(channel, "collector-omission")] = CollectorOmissions;

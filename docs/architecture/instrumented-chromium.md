@@ -1102,7 +1102,15 @@ shown, each null when the call fails. They are recorded, not interpreted.
 The design is in [page recreation](page-recreation.md), "Window fade of a
 popup".
 
-Live 0.47 connections require an exact protocol-version match.
+Protocol version 0.48 adds the `browser.compositor` channel, with
+`compositor-animation-started` and `compositor-animation-ended` from
+Blink's main thread, and `compositor-frame` and
+`compositor-frame-presented` from the compositor thread. They are
+written by the hooks of slice 4b sub-step 1 in `cc/trees/layer_tree_host_impl.cc`,
+`compositor_animations.cc`, and `keyframe_effect.cc`. The design is in
+[page recreation](page-recreation.md), "Slice 4b".
+
+Live 0.48 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

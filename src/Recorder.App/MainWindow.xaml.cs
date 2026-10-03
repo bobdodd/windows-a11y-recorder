@@ -35,7 +35,8 @@ public partial class MainWindow : Window
         "browser.presentation",
         "browser.network",
         "browser.resources",
-        "browser.accessibility"
+        "browser.accessibility",
+        "browser.compositor"
     ];
     private static readonly HashSet<string> FilteredChannels =
     [

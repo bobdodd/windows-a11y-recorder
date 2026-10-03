@@ -1496,6 +1496,90 @@ void RecordBlinkPresentationFeedback(uint64_t request_sequence,
                                      int not_swapped_count,
                                      bool high_resolution_ticks);
 
+// Protocol 0.48 (slice 4b, "The frame's moment, held"): the compositor's
+// drawn values, on the browser.compositor channel. A compositor is named by
+// its cc::LayerTreeHost ID, which its LayerTreeHostImpl shares, and by the
+// widget its Blink presentation requests name.
+
+// One cc::FilterOperation as the compositor holds it: its type, and its
+// numbers in the order "What is recorded" in the bridge README gives.
+struct CompositorFilterOperation {
+  std::string type;
+  std::vector<double> numbers;
+};
+
+// One property of one element of the active tree as drawn. The property is
+// "transform" (numbers: the 16 matrix entries, row by row), "opacity" (one
+// number), "filter" or "backdrop-filter" (the operations), or
+// "scroll-offset" (x and y). An element whose node is no longer in the tree
+// is given with present false.
+struct CompositorDrawnValue {
+  uint64_t element_id = 0;
+  std::string property;
+  bool present = true;
+  std::vector<double> numbers;
+  std::vector<CompositorFilterOperation> filters;
+};
+
+// One cc::KeyframeModel of an animation started on the compositor: its ID,
+// its cc::TargetProperty, and the compositor element it animates, with the
+// element ID's Blink namespace.
+struct CompositorKeyframeModelFacts {
+  int keyframe_model_id = 0;
+  std::string target_property;
+  uint64_t element_id = 0;
+  std::string element_id_namespace;
+};
+
+// Names, on the main thread, the widget whose compositor has this ID, so
+// that its compositor frames name the widget its presentation records name.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RegisterCompositorWidget(int layer_tree_host_id,
+                              PresentationWidgetIdentity widget);
+
+// Records, on Blink's main thread, an animation started on the compositor
+// (CompositorAnimations::StartAnimationOnCompositor).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordCompositorAnimationStarted(
+    int document_node_id,
+    std::string document_token,
+    int node_id,
+    int compositor_animation_id,
+    std::vector<CompositorKeyframeModelFacts> keyframe_models);
+
+// Records, on Blink's main thread, that an animation's keyframe models were
+// removed from the compositor (KeyframeEffect::CancelAnimationOnCompositor),
+// which is how both a cancelled and a finished animation leave it.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordCompositorAnimationEnded(int document_node_id,
+                                    std::string document_token,
+                                    int node_id,
+                                    int compositor_animation_id,
+                                    std::vector<int> keyframe_model_ids);
+
+// Records, on the compositor thread in LayerTreeHostImpl::DrawLayers, the
+// frame about to be submitted: the values given are those of the active
+// tree as drawn, and only those changed since this compositor's last
+// recorded frame are written. A frame with no change is not recorded. The
+// begin frame time is TimeTicks microseconds.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordCompositorFrame(int layer_tree_host_id,
+                           uint32_t frame_token,
+                           int64_t begin_frame_microseconds,
+                           int source_frame_number,
+                           bool high_resolution_ticks,
+                           std::vector<CompositorDrawnValue> values);
+
+// Records viz's presentation of a recorded compositor frame, from
+// LayerTreeHostImpl::DidPresentCompositorFrame. A frame not recorded is
+// ignored.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordCompositorFramePresented(int layer_tree_host_id,
+                                    uint32_t frame_token,
+                                    int64_t presented_microseconds,
+                                    bool failed,
+                                    bool high_resolution_ticks);
+
 // Network metadata. Every record on the browser.network channel carries
 // request and response metadata only: no request body, no response body, no
 // cookie value, and no value of a header that carries a credential. Header

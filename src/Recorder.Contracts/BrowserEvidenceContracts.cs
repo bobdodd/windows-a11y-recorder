@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.47";
+    public const string CurrentVersion = "0.48";
 }
 
 public static class BrowserEvidenceChannels
@@ -21,6 +21,7 @@ public static class BrowserEvidenceChannels
     public const string Presentation = "browser.presentation";
     public const string Network = "browser.network";
     public const string Resources = "browser.resources";
+    public const string Compositor = "browser.compositor";
 }
 
 public static class BrowserEvidenceEventTypes
@@ -106,6 +107,10 @@ public static class BrowserEvidenceEventTypes
     public const string PresentationNotSwapped = "presentation-not-swapped";
     public const string PresentationSwapped = "presentation-swapped";
     public const string PresentationFeedback = "presentation-feedback";
+    public const string CompositorAnimationStarted = "compositor-animation-started";
+    public const string CompositorAnimationEnded = "compositor-animation-ended";
+    public const string CompositorFrame = "compositor-frame";
+    public const string CompositorFramePresented = "compositor-frame-presented";
     public const string FontFile = "font-file";
     public const string FontFaceAdded = "font-face-added";
     public const string FontFaceLoaded = "font-face-loaded";
@@ -1390,6 +1395,80 @@ public sealed record BrowserPresentationFeedbackPayload(
     string? SwapEndTicks,
     bool HighResolutionTicks,
     int NotSwappedCount);
+
+// Compositor records (protocol 0.48, slice 4b), on browser.compositor. A
+// compositor is named by its cc::LayerTreeHost ID, unique in its renderer
+// process, and by the widget its presentation requests name (null before
+// the first). Element IDs are cc::ElementId values as decimal strings.
+
+// An animation started on the compositor, from Blink's main thread: its
+// target node, cc animation ID, and keyframe models.
+public sealed record BrowserCompositorAnimationStartedPayload(
+    BrowserContext Context,
+    int NodeId,
+    int? CompositorAnimationId,
+    IReadOnlyList<BrowserCompositorKeyframeModel> KeyframeModels);
+
+// One keyframe model: its ID, cc::TargetProperty name, the element ID it
+// animates, and that ID's Blink namespace name.
+public sealed record BrowserCompositorKeyframeModel(
+    int KeyframeModelId,
+    string TargetProperty,
+    string ElementId,
+    string ElementIdNamespace);
+
+// An animation's keyframe models removed from the compositor, cancelled or
+// finished.
+public sealed record BrowserCompositorAnimationEndedPayload(
+    BrowserContext Context,
+    int? NodeId,
+    int? CompositorAnimationId,
+    IReadOnlyList<int> KeyframeModelIds);
+
+// The compositor's widget, as its presentation records name it.
+public sealed record BrowserCompositorWidget(
+    string WidgetKind,
+    string? FrameSinkId,
+    string LocalRootFrameToken);
+
+// A submitted compositor frame, from LayerTreeHostImpl::DrawLayers, with the
+// active tree's values that changed since the compositor's last recorded
+// frame. Value is, by property: transform, the 16 matrix entries row by row;
+// opacity, a number; filter and backdrop-filter, the operations; and
+// scroll-offset, x and y. A null value means the element's node is no longer
+// in the drawn tree.
+public sealed record BrowserCompositorFramePayload(
+    BrowserContext Context,
+    int LayerTreeHostId,
+    BrowserCompositorWidget? Widget,
+    string FrameToken,
+    int SourceFrameNumber,
+    string? BeginFrameTicks,
+    string? BeginFrameTimeTicksMicroseconds,
+    bool HighResolutionTicks,
+    IReadOnlyList<BrowserCompositorChange> Changes);
+
+public sealed record BrowserCompositorChange(
+    string ElementId,
+    string Property,
+    System.Text.Json.JsonElement Value);
+
+// A cc::FilterOperation: its type and numbers, as the bridge README states.
+public sealed record BrowserCompositorFilterOperation(
+    string Type,
+    IReadOnlyList<double> Numbers);
+
+// Viz's presentation of a recorded compositor frame, on the clock of the
+// presentation records, or its failure.
+public sealed record BrowserCompositorFramePresentedPayload(
+    BrowserContext Context,
+    int LayerTreeHostId,
+    BrowserCompositorWidget? Widget,
+    string FrameToken,
+    bool Failed,
+    string? PresentedTicks,
+    string? PresentedTimeTicksMicroseconds,
+    bool HighResolutionTicks);
 
 // Page resource records (protocol 0.40), on browser.resources. A font file or
 // an image is identified by the SHA-256 digest of its bytes, in lowercase

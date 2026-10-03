@@ -442,6 +442,33 @@ compositor thread's hook refuses input only while
 `RecreationRefusesCompositorInput()` is true. See "Input refused only in
 the recreation" in the page recreation design.
 
+Protocol 0.48 adds the `browser.compositor` channel (slice 4b sub-step 1).
+`RegisterCompositorWidget` is called where each presentation request is
+made, and names the widget of the compositor with that `LayerTreeHost` ID.
+`RecordCompositorAnimationStarted` and `RecordCompositorAnimationEnded` are
+called on Blink's main thread. `RecordCompositorFrame` is called in
+`LayerTreeHostImpl::DrawLayers` for each frame of a page's compositor about
+to be submitted, with the active tree's values for each element the
+compositor's animations mutated and for every scroll node; the bridge
+keeps each compositor's last recorded values and writes only those that
+changed, and nothing when none did. `RecordCompositorFramePresented` writes
+the presentation of a recorded frame only. What is recorded, by property:
+
+- transform: the transform node's `local` matrix, its 16 entries row by
+  row, as `gfx::Transform::rc` gives them;
+- opacity: the effect node's `opacity`;
+- filter and backdrop filter: the effect node's `filters` or
+  `backdrop_filters`, each operation as its type and numbers: an amount;
+  for a drop shadow, its standard deviation, offset x and y, and color as
+  four floats; for a color matrix, its 20 entries; for a zoom, its amount
+  and inset; for an offset, x and y; for an alpha threshold, each
+  rectangle as x, y, width, and height; for a reference filter, none;
+- scroll offset: the scroll tree's current offset, x and y.
+
+A transform or effect node no longer in the drawn tree is written once as
+a null value. Values are not rounded. The browser's own compositor
+(`is_layer_tree_for_ui`) is not recorded.
+
 Protocol 0.47 adds `windowsAnimationSettings` to `popup-widget-shown`.
 `RecordBrowserPopupWidgetShown` reads `SPI_GETCLIENTAREAANIMATION`,
 `SPI_GETUIEFFECTS`, `SPI_GETMENUANIMATION`, `SPI_GETMENUFADE`, and

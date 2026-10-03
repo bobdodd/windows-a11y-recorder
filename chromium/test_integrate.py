@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.47"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.47"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.48"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.48"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -6398,10 +6398,10 @@ class PresentationIntegrationTests(unittest.TestCase):
             INTEGRATE.patch_blink_web_frame_widget,
         )
         self.assertEqual(
-            1, patched.count(INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK)
+            1, patched.count(INTEGRATE.blink_registered_presentation_widget_block())
         )
         self.assertLess(
-            patched.index(INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK),
+            patched.index(INTEGRATE.blink_registered_presentation_widget_block()),
             patched.index(INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR),
         )
         for include_line in INTEGRATE.BLINK_PRESENTATION_WIDGET_INCLUDES:
@@ -6424,7 +6424,7 @@ class PresentationIntegrationTests(unittest.TestCase):
             INTEGRATE.patch_blink_web_frame_widget,
         )
         self.assertEqual(
-            1, patched.count(INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK)
+            1, patched.count(INTEGRATE.blink_registered_presentation_widget_block())
         )
         self.assertNotIn(
             INTEGRATE.STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK, patched
@@ -7055,6 +7055,145 @@ class NetworkServiceCookieNameTests(unittest.TestCase):
         self.assertNotIn("deps", target)
         self.assertIn('"cookie_text.cc"', target)
         self.assertIn('public_deps = [ ":cookie_names" ]', build)
+
+
+
+class CompositorRecordIntegrationTests(unittest.TestCase):
+    """Protocol 0.48 (slice 4b sub-step 1): the compositor's drawn values."""
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def host_impl_source(self):
+        return (
+            INTEGRATE.CC_LAYER_TREE_HOST_IMPL_OWN_INCLUDE
+            + "\n\n#include <map>\n\nnamespace cc {\n\n"
+            + INTEGRATE.CC_PRESENTED_ANCHOR
+            + "}\n\n"
+            + INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_ANCHOR
+            + "  auto compositor_frame = GenerateCompositorFrame(frame);\n"
+            + INTEGRATE.CC_DRAW_LAYERS_ANCHOR
+            + "  layer_tree_frame_sink_->SubmitCompositorFrame(\n}\n\n"
+            + "".join(anchor + "}\n\n" for anchor, _ in INTEGRATE.CC_MUTATED_HOOKS)
+            + "}  // namespace cc\n"
+        )
+
+    def test_the_compositor_records_each_submitted_frame_once(self):
+        patched = self.patch_twice(
+            "layer_tree_host_impl.cc",
+            self.host_impl_source(),
+            INTEGRATE.patch_cc_layer_tree_host_impl,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, patched.count("#include <set>\n"))
+        self.assertEqual(1, patched.count(INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS))
+        self.assertEqual(1, patched.count(INTEGRATE.CC_DRAW_LAYERS_HOOK))
+        self.assertEqual(1, patched.count(INTEGRATE.CC_PRESENTED_HOOK))
+        # The helpers come before DrawLayers, and the frame is recorded once
+        # its token is known, before it is submitted.
+        self.assertLess(
+            patched.index("void RecorderRecordCompositorFrame("),
+            patched.index("LayerTreeHostImpl::DrawLayers(FrameData* frame) {"),
+        )
+        self.assertLess(
+            patched.index("frame->frame_token = frame_token;"),
+            patched.index("RecorderRecordCompositorFrame(id_, active_tree()"),
+        )
+        self.assertLess(
+            patched.index("RecorderRecordCompositorFrame(id_, active_tree()"),
+            patched.index("SubmitCompositorFrame("),
+        )
+        for anchor, property_name in INTEGRATE.CC_MUTATED_HOOKS:
+            with self.subTest(property_name=property_name):
+                self.assertEqual(
+                    1, patched.count(INTEGRATE.cc_mutated_hook(anchor, property_name))
+                )
+        helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+        # The browser's own compositor is not recorded.
+        self.assertIn("if (!settings_.is_layer_tree_for_ui) {", INTEGRATE.CC_DRAW_LAYERS_HOOK)
+        self.assertIn("if (!settings_.is_layer_tree_for_ui) {", INTEGRATE.CC_PRESENTED_HOOK)
+        self.assertIn("node->local.rc(row, column)", helpers)
+        self.assertIn("scroll_tree.current_scroll_offset(node.element_id)", helpers)
+        self.assertIn("a11y_recorder::RecordCompositorFrame(", helpers)
+        self.assertIn(
+            "a11y_recorder::RecordCompositorFramePresented(", INTEGRATE.CC_PRESENTED_HOOK
+        )
+
+    def test_the_cc_component_depends_on_the_bridge_once(self):
+        source = (
+            'cc_component("cc") {\n  sources = [\n  ]\n\n'
+            '  deps = [\n    "//base",\n  ]\n}\n'
+        )
+        patched = self.patch_twice("BUILD.gn", source, INTEGRATE.patch_cc_build)
+        self.assertEqual(1, patched.count(INTEGRATE.CC_BUILD_DEP))
+
+    def test_an_animation_started_on_the_compositor_is_recorded_once(self):
+        source = (
+            INTEGRATE.BLINK_COMPOSITOR_ANIMATIONS_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_COMPOSITOR_ANIMATION_HELPERS_ANCHOR
+            + "    const Element& element) {\n"
+            + INTEGRATE.BLINK_COMPOSITOR_ANIMATION_STARTED_ANCHOR
+            + "}\n\n}  // namespace blink\n"
+        )
+        patched = self.patch_twice(
+            "compositor_animations.cc",
+            source,
+            INTEGRATE.patch_blink_compositor_animations,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_COMPOSITOR_ANIMATION_STARTED_HOOK))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_COMPOSITOR_ANIMATION_HELPERS))
+        # The models are read before the loop moves them to the compositor.
+        self.assertLess(
+            patched.index("a11y_recorder::RecordCompositorAnimationStarted("),
+            patched.index("compositor_animation.AddKeyframeModel(std::move(keyframe_model));"),
+        )
+
+    def test_an_animation_leaving_the_compositor_is_recorded_once(self):
+        source = (
+            INTEGRATE.BLINK_KEYFRAME_EFFECT_OWN_INCLUDE
+            + "\n\nbool KeyframeEffect::CancelAnimationOnCompositor(\n"
+            + "    CompositorAnimation* compositor_animation) {\n"
+            + INTEGRATE.BLINK_COMPOSITOR_ANIMATION_ENDED_ANCHOR
+            + "  compositor_keyframe_model_ids_.clear();\n}\n"
+        )
+        patched = self.patch_twice(
+            "keyframe_effect.cc", source, INTEGRATE.patch_blink_keyframe_effect
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_COMPOSITOR_ANIMATION_ENDED_HOOK))
+        self.assertLess(
+            patched.index("a11y_recorder::RecordCompositorAnimationEnded("),
+            patched.index("compositor_keyframe_model_ids_.clear();"),
+        )
+
+    def test_each_presentation_request_names_its_compositors_widget(self):
+        block = INTEGRATE.blink_registered_presentation_widget_block()
+        self.assertEqual(1, block.count("a11y_recorder::RegisterCompositorWidget("))
+        self.assertLess(
+            block.index("a11y_recorder::RegisterCompositorWidget("),
+            block.index("a11y_recorder::BeginBlinkPresentationRequest(\n          document_node_id, document_token"),
+        )
+
+    def test_the_bridge_holds_the_compositor_records(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        for event_type in (
+            "compositor-animation-started",
+            "compositor-animation-ended",
+            "compositor-frame",
+            "compositor-frame-presented",
+        ):
+            with self.subTest(event_type=event_type):
+                self.assertIn(
+                    f'SendBlinkEvidence("browser.compositor", "{event_type}",', source
+                )
 
 
 if __name__ == "__main__":
