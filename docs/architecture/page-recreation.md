@@ -4493,7 +4493,9 @@ an unread walked update and a named checkpoint); .NET unit tests of the
 playback index (`WalkedUpdateLayoutTests`: cut at the change set's
 completion with the presented time unchanged; cut at the checkpoint with
 the field false, absent, or naming another checkpoint) and of the
-validator. Not done: the integration test in the instrumented Chromium,
+validator, 974 passed with the 4 known ChromiumLauncherTests failures that
+need Windows; 197 Python tests of the integration script. Not done: the
+integration test in the instrumented Chromium,
 for the reason given under "Popup on screen as built"; what is recorded is
 checked on the target machine with a new recording.
 
