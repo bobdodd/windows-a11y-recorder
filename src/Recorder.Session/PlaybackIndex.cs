@@ -14,7 +14,9 @@ namespace Recorder.Session;
 /// </summary>
 public sealed record PlaybackIndex
 {
-    public const int CurrentVersion = 1;
+    // Version 2 keeps the page popup and popup widget records (protocol
+    // 0.43 and 0.44) whole.
+    public const int CurrentVersion = 2;
 
     public required int Version { get; init; }
 
@@ -26,8 +28,9 @@ public sealed record PlaybackIndex
     public required PlaybackOccupancy Occupancy { get; init; }
 
     /// <summary>
-    /// The desktop frame, audio stream start, and browser navigation events,
-    /// with the payload properties playback reads.
+    /// The desktop frame, audio stream start, browser navigation, and page
+    /// popup and popup widget events, with the payload properties playback
+    /// reads.
     /// </summary>
     public required IReadOnlyList<PlaybackIndexEvent> Events { get; init; }
 
@@ -126,6 +129,17 @@ public sealed class PlaybackIndexBuilder
     /// Whether an event starts a segment of the browser counts: a navigation
     /// start with a payload.
     /// </summary>
+    /// <summary>
+    /// True for the records that say which page popups were open and where:
+    /// a popup's opening, window requests, and closing, and the browser's
+    /// popup widget records. They are few, and kept with their whole payloads
+    /// for recreation.
+    /// </summary>
+    public static bool IsPopupRecord(string channel, string eventType) =>
+        channel == "browser.interaction" &&
+        (eventType is "page-popup-opened" or "page-popup-window-rect" or "page-popup-closed" ||
+            eventType.StartsWith("popup-widget-", StringComparison.Ordinal));
+
     public static bool IsNavigationStart(RecorderEvent record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -196,6 +210,11 @@ public sealed class PlaybackIndexBuilder
             return;
         }
 
+        if (IsPopupRecord(channel, record.EventType))
+        {
+            Keep(eventKey, record);
+        }
+
         CollectPresentation(eventKey, record);
         var context = payload.TryGetProperty("context", out var value) && value.ValueKind == JsonValueKind.Object
             ? value
@@ -260,7 +279,9 @@ public sealed class PlaybackIndexBuilder
             record.Channel,
             record.EventType,
             record.MonotonicNanoseconds,
-            PlaybackPayload(record.Payload)));
+            IsPopupRecord(record.Channel, record.EventType) && record.Payload.ValueKind == JsonValueKind.Object
+                ? record.Payload.Clone()
+                : PlaybackPayload(record.Payload)));
 
     private void AddBoundary(long time)
     {

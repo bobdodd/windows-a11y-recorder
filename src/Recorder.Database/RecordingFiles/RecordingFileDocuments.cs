@@ -27,6 +27,7 @@ public sealed class RecordingFileDocuments
     private readonly List<(long Time, string Token, string Url)> _navigations = [];
     private readonly string? _filePath;
     private RecordingFileBrowserState? _state;
+    private IReadOnlyList<PopupRecord>? _popupRecords;
 
     /// <param name="reader">The open file. It is not disposed.</param>
     /// <param name="filePath">The file's path, from which a recreation's fonts and images are read with a reader of their own.</param>
@@ -97,6 +98,32 @@ public sealed class RecordingFileDocuments
         State.AtFrame(frameNanoseconds, new HashSet<string>(StringComparer.Ordinal) { key }, cancellationToken: cancellationToken)
             .Documents
             .FirstOrDefault(document => document.Key == key && document.State is not null);
+
+    /// <summary>
+    /// The page popups of a page open at the frame (slice 4d sub-step 2):
+    /// those its document owns, opened at or before the frame's composition
+    /// and not closed by then, each with its document's state at the frame,
+    /// null when not read, and its window rectangle as last set at or before
+    /// the time that state is read at.
+    /// </summary>
+    public IReadOnlyList<(PagePopupAtFrame Popup, BrowserDocumentAt? State)> Popups(
+        string pageKey,
+        long frameNanoseconds,
+        CancellationToken cancellationToken = default)
+    {
+        var records = _popupRecords ??= PagePopups.Records(_index);
+        if (records.Count == 0)
+        {
+            return [];
+        }
+        var open = PagePopups.OpenAt(records, pageKey.Split(' ', 2)[0], CompositionTime(frameNanoseconds));
+        return [.. open.Select(popup =>
+        {
+            var state = Document(popup.DocumentKey, frameNanoseconds, cancellationToken);
+            var at = state?.Basis.CutTime ?? CompositionTime(frameNanoseconds);
+            return (PagePopups.WithWindowAt(popup, records, at), state);
+        })];
+    }
 
     /// <summary>
     /// The fonts and images of a document at the recording time its state

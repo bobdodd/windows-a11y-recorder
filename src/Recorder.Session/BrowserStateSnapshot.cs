@@ -16,7 +16,7 @@ namespace Recorder.Session;
 public static class BrowserStateSnapshot
 {
     /// <summary>The snapshot format's version.</summary>
-    public const int FormatVersion = 2;
+    public const int FormatVersion = 3;
 
     public static byte[] Serialize(BrowserDocumentState document)
     {
@@ -122,6 +122,16 @@ public static class BrowserStateSnapshot
             writer.WritePropertyName("payload");
             writer.WriteRawValue(payload.GetRawText(), skipInputValidation: true);
             writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        // Format 3: each option's latest selectedness, as [node, selected].
+        writer.WriteStartArray("optionSelectedness");
+        foreach (var (node, selected) in document.Interaction.OptionSelectedness.OrderBy(item => item.Key))
+        {
+            writer.WriteStartArray();
+            writer.WriteNumberValue(node);
+            writer.WriteBooleanValue(selected);
+            writer.WriteEndArray();
         }
         writer.WriteEndArray();
         writer.WriteEndObject();
@@ -240,7 +250,9 @@ public static class BrowserStateSnapshot
         document.Interaction.Load(
             interaction.GetProperty("checkpoint").EnumerateArray(),
             interaction.GetProperty("changes").EnumerateArray()
-                .Select(change => (change.GetProperty("eventType").GetString()!, change.GetProperty("payload"))));
+                .Select(change => (change.GetProperty("eventType").GetString()!, change.GetProperty("payload"))),
+            interaction.GetProperty("optionSelectedness").EnumerateArray()
+                .Select(item => new KeyValuePair<long, bool>(item[0].GetInt64(), item[1].GetBoolean())));
 
         var script = root.GetProperty("script");
         document.ScriptCompleteness = Parse(script.GetProperty("completeness").GetString());

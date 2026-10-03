@@ -10,6 +10,16 @@ namespace Recorder.Recreation;
 // script, written into the page, which the page's content security policy
 // allows by a nonce. See
 // docs/architecture/page-recreation.md, "Building the document exactly".
+/// <summary>
+/// A page popup open at the frame, with its document's state at the frame,
+/// null when none was read, and how that state was matched (slice 4d
+/// sub-step 2).
+/// </summary>
+public sealed record RecordedPopup(PagePopupAtFrame Popup, BrowserDocumentState? State, string Basis);
+
+/// <summary>A popup as the builder reads it: its served markup, its place in the page, and its iframe's label.</summary>
+public sealed record PopupData(string Markup, PopupRect Place, string Kind, long OwnerNodeId, string Label);
+
 public static class RecordedPage
 {
     public const string TreeElementId = "recorder-recreation-tree";
@@ -57,7 +67,8 @@ public static class RecordedPage
         long frameNanoseconds,
         long recordingNanoseconds,
         string basis,
-        RecordedPageResources? resources = null)
+        RecordedPageResources? resources = null,
+        IReadOnlyList<RecordedPopup>? popups = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var nonce = RecreationServer.NewToken();
@@ -120,6 +131,41 @@ public static class RecordedPage
             notes.Add("The recorded address is not an http or https URL, so the page is served from the recorder's loopback address, and its relative URLs do not resolve as they did.");
         }
         notes.Add("Element namespaces are not recorded: an element named in capitals is built in the HTML namespace, and any other in the namespace of an svg or math ancestor.");
+        var documentId = DocumentNodeId(tree);
+        var (scrollX, scrollY) = state.Layout.ScrollOffsets.TryGetValue(documentId, out var rootScroll)
+            ? ScrollOffsetOf(rootScroll)
+            : (0, 0);
+        var placed = new List<PopupData>();
+        foreach (var popup in popups ?? [])
+        {
+            var open = popup.Popup;
+            var name = $"The {open.Kind} popup of element {open.OwnerNodeId.ToString(CultureInfo.InvariantCulture)}";
+            if (popup.State?.Dom is null)
+            {
+                notes.Add($"{name} was open at the frame, but no DOM walk of its document was recorded at or before it, so it is not drawn.");
+                continue;
+            }
+            var place = open.InDocument(scrollX, scrollY);
+            var popupTree = popup.State.Dom;
+            placed.Add(new PopupData(
+                Markup(Tree(popup.State), DocumentTypeName(popupTree, DocumentNodeId(popupTree)), nonce),
+                place,
+                open.Kind,
+                open.OwnerNodeId,
+                $"Recreation of the {open.Kind} popup of element {open.OwnerNodeId.ToString(CultureInfo.InvariantCulture)}"));
+            var sink = open.FrameSinkId is { } joined
+                ? $"joined to the browser's popup widget {joined}"
+                : "joined to no popup widget record of the browser, so its window is the one the renderer asked for";
+            notes.Add($"{name} was open at the frame: opened at {Seconds(open.OpenedTime)} s, {sink}. Its document is {open.DocumentKey}; {popup.Basis}. Its window rectangle in screen DIPs is {open.Window}, from the {open.WindowSource} record at {Seconds(open.WindowTime)} s, which puts it at ({Css(place.X)}, {Css(place.Y)}) in the page, {Css(place.Width)} by {Css(place.Height)} CSS pixels: the window rectangle less the owner's local root origin in screen, {open.OwnerLocalRootRectInScreen}, plus the root scroll offset at the frame, ({Css(scrollX)}, {Css(scrollY)}).");
+            notes.Add($"The popup is rebuilt from its recorded DOM, styles, fragments, and glyphs in an iframe the recreation adds to the page and shows in the top layer as a manual popover, marked data-a11y-recorder-popup. The iframe and its attributes are the recreation's, not the recorded page's, and the popup's own scripts are not run.");
+            notes.Add(open.AnchorMatchesOwner
+                ? $"Check: the owner's visible bounds in its local root, {open.OwnerVisibleBoundsInLocalRoot}, plus the local root's origin are the popup's anchor rectangle, {open.AnchorRectInScreen}."
+                : $"Check failed: the owner's visible bounds in its local root, {open.OwnerVisibleBoundsInLocalRoot}, plus the local root's origin, {open.OwnerLocalRootRectInScreen}, are not the popup's anchor rectangle, {open.AnchorRectInScreen}, so the popup's place may be wrong.");
+            if (Math.Abs(open.ZoomFactor - 1) > 1e-6)
+            {
+                notes.Add($"The popup was opened with a zoom factor of {open.ZoomFactor.ToString(CultureInfo.InvariantCulture)}, which the recreation does not apply to its iframe.");
+            }
+        }
         var evidence = RecordedEvidence.Create(
             state,
             url,
@@ -129,7 +175,7 @@ public static class RecordedPage
             new RecreationFidelity("not-checked", "The recreation is not yet compared with the recording.", []),
             notes);
         return new RecreationContent(
-            Markup(Tree(state, used.Faces, fontAddress), DocumentTypeName(tree, DocumentNodeId(tree)), nonce),
+            Markup(Tree(state, used.Faces, fontAddress, placed), DocumentTypeName(tree, documentId), nonce),
             evidence,
             nonce)
         {
@@ -139,6 +185,19 @@ public static class RecordedPage
             FontAddress = servedAtRecordedAddress ? fontAddress : null,
         };
     }
+
+    // A scroll offset record's offset: the web-exposed offset when recorded.
+    private static (double X, double Y) ScrollOffsetOf(JsonElement record)
+    {
+        var offset = record.TryGetProperty("webExposedScrollOffset", out var exposed) && exposed.ValueKind == JsonValueKind.Object
+            ? exposed
+            : record.GetProperty("scrollOffset");
+        return (offset.GetProperty("x").GetDouble(), offset.GetProperty("y").GetDouble());
+    }
+
+    private static string Seconds(long nanoseconds) => (nanoseconds / 1e9).ToString("0.000", CultureInfo.InvariantCulture);
+
+    private static string Css(double value) => value.ToString(CultureInfo.InvariantCulture);
 
     public static byte[] Builder()
     {
@@ -185,7 +244,8 @@ public static class RecordedPage
     public static byte[] Tree(
         BrowserDocumentState state,
         IReadOnlyList<RecordedFontFace>? faces = null,
-        string? fontAddress = null)
+        string? fontAddress = null,
+        IReadOnlyList<PopupData>? popups = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var documentId = DocumentNodeId(tree);
@@ -233,13 +293,11 @@ public static class RecordedPage
             writer.WriteStartArray("scrollOffsets");
             foreach (var (node, record) in state.Layout.ScrollOffsets.OrderBy(item => item.Key))
             {
-                var offset = record.TryGetProperty("webExposedScrollOffset", out var exposed) && exposed.ValueKind == JsonValueKind.Object
-                    ? exposed
-                    : record.GetProperty("scrollOffset");
+                var (x, y) = ScrollOffsetOf(record);
                 writer.WriteStartObject();
                 writer.WriteNumber("nodeId", node);
-                writer.WriteNumber("x", offset.GetProperty("x").GetDouble());
-                writer.WriteNumber("y", offset.GetProperty("y").GetDouble());
+                writer.WriteNumber("x", x);
+                writer.WriteNumber("y", y);
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
@@ -259,6 +317,34 @@ public static class RecordedPage
                 writer.WriteNullValue();
             }
             WriteNumber(writer, "focusedNodeId", interaction.FocusedNodeId);
+
+            // Slice 4d sub-step 2: each option's latest recorded
+            // selectedness, as [node, selected], and the page popups open at
+            // the frame, each with its own served markup and its place.
+            writer.WriteStartArray("optionSelectedness");
+            foreach (var (node, selected) in state.Interaction.OptionSelectedness.OrderBy(item => item.Key))
+            {
+                writer.WriteStartArray();
+                writer.WriteNumberValue(node);
+                writer.WriteBooleanValue(selected);
+                writer.WriteEndArray();
+            }
+            writer.WriteEndArray();
+            writer.WriteStartArray("popups");
+            foreach (var popup in popups ?? [])
+            {
+                writer.WriteStartObject();
+                writer.WriteString("markup", popup.Markup);
+                writer.WriteNumber("left", popup.Place.X);
+                writer.WriteNumber("top", popup.Place.Y);
+                writer.WriteNumber("width", popup.Place.Width);
+                writer.WriteNumber("height", popup.Place.Height);
+                writer.WriteString("kind", popup.Kind);
+                writer.WriteNumber("ownerNodeId", popup.OwnerNodeId);
+                writer.WriteString("label", popup.Label);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
 
             writer.WriteStartArray("fontFaces");
             foreach (var face in fontAddress is null ? [] : faces ?? [])

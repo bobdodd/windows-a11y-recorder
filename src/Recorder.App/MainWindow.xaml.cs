@@ -1669,12 +1669,25 @@ public partial class MainWindow : Window
                     var basis = found.Basis is { Basis: "presented", PresentedTime: { } presented }
                         ? $"the state after the page's last rendering update drawn at or before the frame, drawn at {FormatTime(presented)}"
                         : "no rendering update of the page was drawn at or before the frame, so this is its state at the frame's composition time";
+                    // Slice 4d sub-step 2: the page popups the page owned
+                    // open at the frame, each at its own popup widget's
+                    // last presented rendering update.
+                    var popups = documents.Popups(chosen.Key, frame)
+                        .Select(item => new RecordedPopup(
+                            item.Popup,
+                            item.State?.State,
+                            item.State?.Basis is { Basis: "presented", PresentedTime: { } popupPresented }
+                                ? $"its state is the one after its last rendering update drawn at or before the frame, drawn at {FormatTime(popupPresented)}"
+                                : "no rendering update of it was drawn at or before the frame, so its state is the one at the frame's composition time"))
+                        .ToArray();
+                    timings.Add(new RecreationTiming("Reading the page's popups at the frame from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                    clock.Restart();
                     var resources = documents.Resources(chosen.Key, found.Basis.CutTime);
                     timings.Add(new RecreationTiming("Reading the page's fonts and images from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                     clock.Restart();
                     try
                     {
-                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources);
+                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups);
                         timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                         return written;
                     }

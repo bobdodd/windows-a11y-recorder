@@ -65,12 +65,21 @@ public sealed class InteractionDocumentState
     private List<JsonElement>? _pending;
     private List<JsonElement> _checkpoint = [];
     private readonly List<(string EventType, JsonElement Payload)> _changes = [];
+    private readonly Dictionary<long, bool> _optionSelectedness = [];
 
     /// <summary>The start, text control, and completion records of the latest completed checkpoint.</summary>
     public IReadOnlyList<JsonElement> Checkpoint => _checkpoint;
 
     /// <summary>The focus, selection, value, and active descendant changes after it.</summary>
     public IReadOnlyList<(string EventType, JsonElement Payload)> Changes => _changes;
+
+    /// <summary>
+    /// Each option's latest recorded selectedness (protocol 0.43), by node.
+    /// Selectedness is recorded only as changes, and no checkpoint holds it,
+    /// so it is kept across checkpoints for the life of the document. An
+    /// option with no record keeps the selectedness its attributes give.
+    /// </summary>
+    public IReadOnlyDictionary<long, bool> OptionSelectedness => _optionSelectedness;
 
     /// <summary>True between a checkpoint's start record and its completion.</summary>
     public bool IsOpen => _pending is not null;
@@ -147,12 +156,20 @@ public sealed class InteractionDocumentState
     private static string? Text(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
-    internal void Load(IEnumerable<JsonElement> checkpoint, IEnumerable<(string EventType, JsonElement Payload)> changes)
+    internal void Load(
+        IEnumerable<JsonElement> checkpoint,
+        IEnumerable<(string EventType, JsonElement Payload)> changes,
+        IEnumerable<KeyValuePair<long, bool>> optionSelectedness)
     {
         _pending = null;
         _checkpoint = [.. checkpoint.Select(record => record.Clone())];
         _changes.Clear();
         _changes.AddRange(changes.Select(change => (change.EventType, change.Payload.Clone())));
+        _optionSelectedness.Clear();
+        foreach (var (node, selected) in optionSelectedness)
+        {
+            _optionSelectedness[node] = selected;
+        }
     }
 
     /// <summary>Applies one browser.interaction record of the document. Returns true when it was a state record.</summary>
@@ -181,6 +198,14 @@ public sealed class InteractionDocumentState
             case "text-control-value-changed":
             case "active-descendant-reference-set":
                 _changes.Add((eventType, payload.Clone()));
+                return true;
+            case "option-selectedness-changed":
+                if (Number(payload, "nodeId") is { } option &&
+                    payload.TryGetProperty("selected", out var selected) &&
+                    selected.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                {
+                    _optionSelectedness[option] = selected.ValueKind == JsonValueKind.True;
+                }
                 return true;
             default:
                 return false;

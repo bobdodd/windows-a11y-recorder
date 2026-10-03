@@ -3896,7 +3896,9 @@ them known only as a sum of 40 us within one report) and four took 270 to
 Not tested by this recording: a refused popup, a popup the browser moved or
 clamped, a nested web contents, and a device scale factor other than 1.
 
-#### Sub-step 2 design (proposed)
+#### Sub-step 2 design (agreed)
+
+Agreed by the owner on 2026-10-03: "yes please".
 
 The owner, on 2026-10-03, settling how the popup is drawn: "My requirement
 is that devtools work. within the limitations of a snapshot in time. so
@@ -3988,6 +3990,94 @@ Limits of sub-step 2:
   recreation at frames with the list open, after the highlight moves, and
   after it closes with a new value, is compared with the captured screen
   image of each frame; a difference is reported as a defect.
+
+#### Sub-step 2 as built
+
+Built as designed, with these details settled in the code:
+
+- `PagePopups` (Recorder.Session) finds the popups open at a frame: those
+  whose `page-popup-opened` names the page's document as owner, at or
+  before the frame's composition, with no `page-popup-closed` of the same
+  popup document by then. Each popup is joined to the opener frame's last
+  `popup-widget-created` at or before its opening, on renderer process and
+  owner frame token, that no earlier popup joined. A widget record that no
+  popup joins is unused.
+- The popup document's state is read at the frame as any document's is,
+  so it is the state after the popup's last presented rendering update at
+  or before the frame's composition. Its window rectangle is the browser's
+  latest for the joined widget at or before the time that state is read
+  at: `popup-widget-shown` `viewBounds`, `popup-widget-bounds-requested`
+  `setRect` (an ignored request, with a null `setRect`, sets none), or
+  `popup-widget-screen-rects` `viewRect`. A popup with no joined widget
+  takes its last `page-popup-window-rect`, and before one the rectangle it
+  was opened with; the notes say so.
+- The root scroll offset added to the place is the recorded scroll offset
+  of the page's document node, the same value the builder scrolls to.
+- The playback index keeps the page popup and popup widget records with
+  their whole payloads, and its version is 2, so a recording indexed by an
+  earlier build has its index derived again when opened. The interaction
+  state keeps each option's latest selectedness for the life of the
+  document, since no checkpoint holds it, and the snapshot format is 3, so
+  snapshots of an earlier build are not used and the state is rebuilt from
+  the records.
+- The builder sets recorded unselections before selections, so that in a
+  single select, where a selection unselects the other options, the
+  result is the recorded state. An option with no record keeps the
+  selectedness its attributes give.
+- The popup's markup is served to its iframe as `srcdoc`, with the page's
+  script nonce, so the popup's builder runs under the page's content
+  security policy, which a `srcdoc` document inherits. That the policy's
+  `frame-src 'none'` does not block a `srcdoc` iframe is relied on, and is
+  to be confirmed on the target machine. The popup is given no recorded
+  font faces: its text is drawn from its recorded glyphs only where Blink
+  chooses the recorded font file for it, as for any text.
+- The evidence panel's notes name each popup's kind, owner element,
+  opening time, joined widget, document, how its state was matched, its
+  window rectangle and the record that gave it, and its place in the page.
+  They report whether the owner's visible bounds plus its local root's
+  origin are the anchor rectangle, and say that the iframe is the
+  recreation's. A popup with no DOM walk at or before the frame is named
+  and not drawn.
+
+Not built: the owner select's own drawing while its list is open is left
+as Blink draws a closed select with the recorded value.
+
+Found while building: the browser's `popup-widget-created` record carries
+the opener frame's navigation context, whose document token is the page's,
+so the state builder would have made a document of it, keyed by that
+token and the navigation's document identity, which the page list, matched
+by token, would have offered as a second entry for the page. Popup widget
+records, and any interaction record with a browser process context, now
+make no document. Popup documents themselves were not offered as pages,
+since the list holds only documents committed by a primary main frame's
+navigation.
+
+Also found while building: with the larger snapshots of format 3, the
+existing test that reads a recording file cut at 60 % of its bytes failed,
+because the cut file held a state index record naming a snapshot whose
+chunk was cut off. A file cut short can do this whenever an index chunk is
+written before the snapshot chunk it names. The state reader now uses the
+index only up to the first record that names a snapshot not in the file,
+and reads the documents from the records after it.
+
+Tests run in the sandbox: unit tests of which popups are open at a
+composition time; the join, including a popup without a widget, widgets
+of another frame or process, a widget created after the popup, and a
+second popup taking the next unjoined widget; the choice of window
+rectangle at a state time; the mapping into the page and the anchor
+check; selectedness kept across checkpoints and in snapshots; the tree
+data with selectedness and a popup, whose markup carries the page's
+nonce; a popup without a DOM walk; no document from a popup widget
+record; and the playback index keeping popup records whole. Read against
+the recording made on the target machine on 2026-10-03 with a measurement
+that is not committed, each of the ten popups was found open at a frame
+150 ms after its opening, joined to its own widget (6:18 to 6:27), with a
+DOM walk and a presented state, its window from a
+`popup-widget-bounds-requested` `setRect`, and the anchor check passing.
+
+Not run in the sandbox: the integration tests in the instrumented Chromium
+and the system test, which need Chromium; they are to be run on the target
+machine.
 
 ### To be settled
 

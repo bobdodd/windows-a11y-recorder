@@ -56,6 +56,10 @@ public sealed class BrowserStateBuilder
     /// <summary>The documents the last record applied marked as after a loss, when it was an omission record.</summary>
     public IReadOnlyList<BrowserDocumentState> LastOmissionAffected => _omissionAffected;
 
+    /// <summary>True for a browser process popup widget record (protocol 0.44).</summary>
+    public static bool IsPopupWidgetRecord(string channel, string eventType) =>
+        channel == "browser.interaction" && eventType.StartsWith("popup-widget-", StringComparison.Ordinal);
+
     /// <summary>The channels whose records make up a document's state.</summary>
     public static bool IsStateChannel(string channel) =>
         channel is "browser.dom" or "browser.layout" or "browser.interaction" or "browser.presentation" or
@@ -78,6 +82,9 @@ public sealed class BrowserStateBuilder
                 IdentityOf(payload) is { } identity ? _byIdentity.GetValueOrDefault(identity) : null,
             "browser.accessibility" =>
                 TokenOf(payload) is { } token ? _byToken.GetValueOrDefault(token) : null,
+            "browser.interaction" when payload.TryGetProperty("context", out var context) &&
+                context.ValueKind == JsonValueKind.Object &&
+                Text(context, "processType") == "browser" => null,
             _ => DomTreeRebuilder.DocumentKey(payload),
         };
     }
@@ -145,6 +152,13 @@ public sealed class BrowserStateBuilder
         if (channel is "browser.listener" or "browser.timer" or "browser.accessibility")
         {
             return ApplyByReference(eventKey, time, channel, eventType, payload);
+        }
+        // The browser process's popup widget records (protocol 0.44) are of
+        // no document: the created record's context names the opener frame's
+        // navigation, not a renderer document.
+        if (IsPopupWidgetRecord(channel, eventType))
+        {
+            return null;
         }
         var key = DomTreeRebuilder.DocumentKey(payload);
         if (key is null)

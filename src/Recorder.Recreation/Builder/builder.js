@@ -259,6 +259,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // Slice 4d sub-step 2: each option's recorded selectedness at the frame,
+  // which no attribute holds. Unselections are set first, so that setting a
+  // selection in a single select, which unselects its other options, ends
+  // in the recorded state. An option with no record keeps the selectedness
+  // its attributes give.
+  const selectedness = data.optionSelectedness ?? [];
+  for (const pass of [false, true]) {
+    for (const [optionId, selected] of selectedness) {
+      if (selected !== pass) {
+        continue;
+      }
+      const option = nodes.get(optionId);
+      if (option instanceof HTMLOptionElement) {
+        option.selected = selected;
+      } else {
+        note(optionId, "selectedness", "the option was not built");
+      }
+    }
+  }
+
   // The page's first style and layout, forced here so that its time is
   // measured apart from the rest; scrolling would force it in any case.
   document.documentElement.getBoundingClientRect();
@@ -291,6 +311,42 @@ document.addEventListener("DOMContentLoaded", async () => {
       focused.focus({ preventScroll: true });
     } else {
       note(data.focusedNodeId, "focus", "the focused node was not built");
+    }
+  }
+
+  // Slice 4d sub-step 2: each page popup open at the frame, rebuilt by this
+  // builder in an iframe the recreation adds, from the popup document's
+  // recorded DOM, which it builds as it builds this one. The iframe is shown
+  // in the top layer, as a manual popover, at the popup window's place in
+  // this document: its window rectangle less the owner's local root origin,
+  // plus the root scroll offset, worked out by the recorder. The iframe and
+  // its attributes are the recreation's, not the recorded page's.
+  for (const popup of data.popups ?? []) {
+    const frame = document.createElement("iframe");
+    frame.setAttribute("data-a11y-recorder-popup", `${popup.kind} owner ${popup.ownerNodeId}`);
+    frame.setAttribute("title", popup.label);
+    frame.setAttribute("popover", "manual");
+    frame.setAttribute("scrolling", "no");
+    frame.style.cssText = [
+      "position: absolute",
+      "inset: auto",
+      `left: ${popup.left}px`,
+      `top: ${popup.top}px`,
+      `width: ${popup.width}px`,
+      `height: ${popup.height}px`,
+      "margin: 0",
+      "padding: 0",
+      "border: 0",
+      "background: transparent",
+      "overflow: hidden",
+      "box-sizing: content-box",
+    ].map((item) => `${item} !important`).join("; ");
+    frame.srcdoc = popup.markup;
+    (document.body ?? document.documentElement).appendChild(frame);
+    try {
+      frame.showPopover();
+    } catch (error) {
+      note(popup.ownerNodeId, "popup", `not shown in the top layer: ${error.message}`);
     }
   }
 

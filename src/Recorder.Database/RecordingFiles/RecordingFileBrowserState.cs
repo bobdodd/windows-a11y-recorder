@@ -144,6 +144,33 @@ public sealed class RecordingFileBrowserState
             }
         }
 
+        // In a file cut short, an index record can be in the file while a
+        // snapshot it names, written to another chunk, is not. The index is
+        // used only up to the first record that names a missing snapshot.
+        var usable = _records.Count;
+        foreach (var (key, history) in _history)
+        {
+            foreach (var (record, entry) in history)
+            {
+                if (record < usable && entry.SnapshotLogTime is { } logTime && !_snapshots.ContainsKey(logTime))
+                {
+                    usable = record;
+                }
+            }
+        }
+        if (usable < _records.Count)
+        {
+            _records.RemoveRange(usable, _records.Count - usable);
+            foreach (var history in _history.Values)
+            {
+                history.RemoveAll(item => item.Record >= usable);
+            }
+            foreach (var key in _history.Where(item => item.Value.Count == 0).Select(item => item.Key).ToArray())
+            {
+                _history.Remove(key);
+            }
+        }
+
         foreach (var chunk in reader.Chunks.Where(chunk => chunk.Stream == "recorder"))
         {
             foreach (var message in reader.ReadChunk(chunk))
