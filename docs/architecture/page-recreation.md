@@ -3128,7 +3128,11 @@ refuse it in a checkpoint.
 
 Proposed 2026-10-02, after the owner agreed to start the work in
 "Requirement: the page exactly as drawn at the frame" with time held in
-the recreation and the animation state recorded. Nothing below is built.
+the recreation and the animation state recorded. Revised 2026-10-03, at
+the owner's request, after slice 4d: the protocol is renumbered (0.45 to
+0.47 were taken by slice 4d's defects), popup widgets are included, and the
+two questions it left open are settled from the Chromium source. Nothing
+below is built.
 
 #### What Chromium does that the recording misses
 
@@ -3138,53 +3142,93 @@ Read in the Chromium checkout on the target machine.
   thread at each frame. `Animation::TimeToEffectChange`
   (`third_party/blink/renderer/core/animation/animation.cc`) returns zero,
   which asks for service at the next frame, only for an animation that is
-  not on the compositor. For one on the compositor, it returns the time to
-  its next change of phase. The style the layout walk reads for an element
-  so animated is therefore not the value drawn while the animation runs.
-- The compositor applies each animated value on its own thread, in
-  `cc::ElementAnimations`: `OnTransformAnimated`, `OnOpacityAnimated`,
-  `OnFilterAnimated`, `OnBackdropFilterAnimated`,
-  `OnCustomPropertyAnimated`, and `OnScrollOffsetAnimated`
-  (`cc/animation/element_animations.h`). Each receives the value and the
-  list it applies to, pending or active.
+  not on the compositor (`!HasActiveAnimationsOnCompositor()`). For one on
+  the compositor, it returns the time to its next change of phase. The
+  style the layout walk reads for an element so animated is therefore not
+  the value drawn while the animation runs.
+- The compositor ticks its animations at each begin frame, in
+  `LayerTreeHostImpl::AnimateInternal` (`cc/trees/layer_tree_host_impl.cc`),
+  at the begin frame's time, on the active tree
+  (`AnimateLayers(monotonic_time, /* is_active_tree */ true)`). Each value
+  reaches the trees through `cc::ElementAnimations`
+  (`cc/animation/element_animations.cc`): `OnTransformAnimated`,
+  `OnOpacityAnimated`, `OnFilterAnimated`, `OnBackdropFilterAnimated`, and
+  `OnScrollOffsetAnimated`, each for the active list, the pending list, or
+  both.
+- A scroll the compositor handles itself (a wheel or touch scroll, or a
+  smooth scroll) changes the active tree's scroll offset before the main
+  thread hears of it.
+- A background color or clip path animation run as a native paint
+  worklet is not a property of the trees. Its animation gives only a
+  progress value, kept for the pending tree alone
+  (`ElementAnimations::OnFloatAnimated`, `NATIVE_PROPERTY`: "only
+  dispatched from the pending tree"), and passed to the paint worklet
+  through `LayerTreeHostImpl::OnCustomPropertyMutated`. The drawn color is
+  interpolated from the progress when the worklet paints, in
+  `BackgroundColorPaintDefinition::Paint`
+  (`third_party/blink/renderer/modules/csspaint/nativepaint/background_color_paint_definition.cc`,
+  `Sample`), and the clip path likewise in
+  `clip_path_paint_definition.cc`.
 - An animated image's frame is chosen by the compositor, not by Blink.
   `cc::ImageAnimationController` (`cc/trees/image_animation_controller.h`)
-  advances each animated image to its frame when a sync tree is made
-  (`AnimateForSyncTree`), keeps it for that tree's lifetime, and gives it
-  by `PaintImage::Id` (`GetFrameIndexForImage`). Blink makes the image's
-  `PaintImage` in `BitmapImage::CreatePaintImage`
+  advances each animated image when a sync tree is made
+  (`AnimateForSyncTree`), keeps the frame for that tree's lifetime, makes
+  it the active tree's at `DidActivate`, and gives it by `PaintImage::Id`
+  and tree (`GetFrameIndexForImage`). Blink makes the image's `PaintImage`
+  in `BitmapImage::CreatePaintImage`
   (`third_party/blink/renderer/platform/graphics/bitmap_image.cc`).
+- The frame drawn is the active tree as it is at
+  `LayerTreeHostImpl::DrawLayers`, after the begin frame's animations and
+  any activation. `DrawLayers` makes the compositor frame
+  (`GenerateCompositorFrame`), takes its frame token, and submits it; a
+  draw with no damage submits nothing. Viz reports the frame's
+  presentation by that token, to `LayerTreeHostImpl::DidPresentCompositorFrame`.
 - A frame the compositor draws for these changes alone has no rendering
   update on the main thread, so it has no presentation record: the
-  presentation records follow rendering updates (protocol 0.35).
+  presentation records follow rendering updates (protocol 0.35), and each
+  names the compositor frame token of the frame that carried its update.
 
 So at a captured frame, the recording holds the main thread's state after
 its last presented rendering update, which already includes the values of
 animations Blink ticks on the main thread (subject to the check in
 "Required tests" below), but not the compositor's values drawn after it.
 
-#### What is recorded (protocol 0.45)
+#### Settled from the source
 
-Slice 4b takes protocol 0.45, since slice 4d's sub-step 1b takes 0.44. A
-page popup's frame sink is named by the browser record of sub-step 1b, so
-a popup's compositor frames are joined as a page's are.
+- Where a compositor frame is recorded: at frame submission, in
+  `DrawLayers`, with the token of the frame submitted. Activation is not
+  enough: the begin frame's animations are applied to the active tree
+  after it, and a frame drawn without a new tree has no activation.
+- How a paint worklet animation is recorded: the drawn value where the
+  worklet paints it. `Paint` records the element, the progress it was
+  given, and the value it drew (the color as four floats; the clip path as
+  the path it drew). The compositor frame records the progress of each
+  paint worklet property of the tree it drew, so the drawn value of a
+  frame is the one painted from the same element and progress. Recording
+  the worklet's input and interpolating in the app is not taken: it would
+  repeat Blink's interpolation outside Blink.
 
-On a new topic, `browser.compositor`:
+#### What is recorded (protocol 0.48)
+
+On a new topic, `browser.compositor`, for each compositor: the tab's
+widget, each page popup's widget (named by its frame sink, as in slice 4d
+sub-step 1b), and later each out of process iframe's.
 
 | Record | Where | Holds |
 | --- | --- | --- |
-| `compositor-animation-started` | Blink, main thread, when an animation starts on the compositor | the document, the target node, the compositor element ID, the animated properties, and the compositor animation ID |
+| `compositor-animation-started` | Blink, main thread, when an animation starts on the compositor | the document, the target node, the compositor element ID and namespace, the animated properties, and the compositor animation ID |
 | `compositor-animation-ended` | Blink, main thread, when it is cancelled or finishes there | the compositor animation ID |
-| `compositor-frame` | cc, compositor thread, for each compositor frame in which an animated value, an image's frame, or a scroll offset changed on the active tree | the frame sink and frame token, the begin frame's time, and each change: element ID, property, and value |
-| `compositor-frame-presented` | cc, when viz reports the frame's presentation | the frame sink, the frame token, and the presentation time, on the clock of the existing presentation records |
+| `compositor-frame` | cc, compositor thread, in `DrawLayers`, for each submitted frame in which an animated value, a compositor scroll offset, a paint worklet progress, or an image's frame changed on the active tree since the last recorded frame | the frame sink and frame token, the begin frame's time, and each change: element ID, property, and value |
+| `compositor-frame-presented` | cc, at `DidPresentCompositorFrame`, for a recorded frame | the frame sink, the frame token, and the presentation time, on the clock of the existing presentation records, or the failure flag |
+| `paint-worklet-painted` | Blink, in a native paint definition's `Paint`, on the worklet's thread | the element ID, the property (background color or clip path), the progress given, and the value drawn |
 | `image-paint-image` | Blink, when an image resource's Blink image gets its paint image ID | the image's URL and digest (as `image-resource`) and its `PaintImage::Id` |
 
 Values are written as the compositor holds them: a transform as its 16
 matrix entries, an opacity as a number, filters as their operations and
-numbers, a scroll offset as x and y, an image's frame as its index, and a
-paint worklet animation as its progress value. Nothing is rounded. A frame
-with no change is not recorded, so a page with nothing moving adds no
-records.
+numbers, a scroll offset as x and y, an image's frame as its index, a
+paint worklet's progress as a number, and a painted color as its four
+floats. Nothing is rounded. A frame with no change is not recorded, so a
+page with nothing moving adds no records.
 
 #### Which state a captured frame shows
 
@@ -3194,8 +3238,9 @@ now, and then the compositor's values of the last `compositor-frame` of
 the same frame sink presented at or before the composition, together with
 every earlier compositor frame's values not yet replaced. A value is
 dropped when its animation ends and a later rendering update was
-presented. The basis line in the evidence panel names both the rendering
-update and the compositor frame.
+presented. A popup takes its own frame sink's compositor frames. The basis
+line in the evidence panel names both the rendering update and the
+compositor frame.
 
 #### What the recreation does
 
@@ -3205,12 +3250,15 @@ update and the compositor frame.
   Web Animation is made. SVG animation elements are not run either; the
   recorded style and box fragments hold their effect on style and
   geometry, and whether they hold all of it (an animated `transform`
-  attribute, for one) is checked in the required tests. The text caret, video, and other transient states are not part
-  of this slice; see the requirement's list.
+  attribute, for one) is checked in the required tests. The text caret,
+  video, and other transient states are not part of this slice; see the
+  requirement's list.
 - An element with a recorded compositor value at the frame takes it in
   place of the recorded style value of that property: the transform as a
   `matrix3d()` of the recorded entries, the opacity, the filter, or the
-  scroll offset. A paint worklet progress value is to be settled (below).
+  scroll offset. An element with a paint worklet value takes the painted
+  value: the background color as the recorded color, the clip path as the
+  recorded path.
 - An animated image is held at its recorded frame. The recorder answers
   the image with its bytes and, in a response header of its own, the frame
   index at the frame. In the recreation mode Blink puts the index in the
@@ -3218,32 +3266,35 @@ update and the compositor frame.
   gives that index for the image and never advances it. An image whose
   frame was not recorded is held at its first frame, and the Console says
   so.
+- The evidence panel names, for each imposed value, the compositor frame
+  it came from and its presentation time.
 
 #### Limits
 
 - An animation that is not on the compositor and does not cause a
   rendering update at each frame would be missed. Whether one exists is
   checked in the required tests.
-- A frame sink other than the tab's, such as an out of process iframe's,
-  is recorded the same way but not shown until iframes are recreated.
+- A frame sink other than the tab's and the popups', such as an out of
+  process iframe's, is recorded the same way but not shown until iframes
+  are recreated.
+- The window fade of a popup is the Windows compositor's, not Chromium's,
+  and stays as "Window fade of a popup" states.
+- `compositor-frame` and `paint-worklet-painted` are written off the main
+  thread; the bridge's send from those threads is checked when building,
+  as the records must not wait on the main thread.
 
 #### To be settled
 
-- A paint worklet animation (background color or clip path run on the
-  compositor) gives only a progress value; its drawn value is
-  interpolated by Blink's paint worklet. Either record the paint worklet's
-  input, or record the drawn value in Blink when it paints.
-- Whether `compositor-frame` is written from the active tree's activation
-  or from frame submission, so that its frame token is that of the frame
-  drawn.
 - The cost on the target machine, measured as for stage 2, on a page with
-  a running composited animation and an animated image.
+  a running composited animation, a background color animation, and an
+  animated image.
 
 #### Sub-steps
 
-1. Record (protocol 0.45), with its cost measured on the target machine.
+1. Record (protocol 0.48), with its cost measured on the target machine.
 2. The recreation holds time: no animation or transition run, compositor
-   values imposed, animated images held at their recorded frame.
+   and paint worklet values imposed, animated images held at their
+   recorded frame.
 
 Each sub-step is tested on the target machine before the next.
 
@@ -3251,17 +3302,19 @@ Each sub-step is tested on the target machine before the next.
 
 - Unit tests: each new record against the record contract; the values the
   app chooses for a frame from a sequence of compositor frames and their
-  presentations; the image frame header; the integration script's hooks
-  and their call shapes against the bridge.
+  presentations, including a popup's frame sink and a paint worklet value
+  joined by element and progress; the image frame header; the integration
+  script's hooks and their call shapes against the bridge.
 - Integration tests in the instrumented Chromium, on a generated page with
-  a composited transform animation, a main-thread animation of a
-  non-composited property (width), and an animated image: the main-thread
-  animation causes a recorded rendering update at each frame it changes;
-  the recording holds the compositor values and image frames, joined to
-  their presentations; the recreation at a chosen frame imposes the values
-  recorded for it; and two screenshots of the recreation taken a second
-  apart are identical. The page also has an SVG `animateTransform`, to
-  check that its effect is held.
+  a composited transform animation, a background color animation, a
+  main-thread animation of a non-composited property (width), a smooth
+  scroll, and an animated image: the main-thread animation causes a
+  recorded rendering update at each frame it changes; the recording holds
+  the compositor values, paint worklet values, scroll offsets, and image
+  frames, joined to their presentations; the recreation at a chosen frame
+  imposes the values recorded for it; and two screenshots of the
+  recreation taken a second apart are identical. The page also has an SVG
+  `animateTransform`, to check that its effect is held.
 - System test on the target machine: a recording of a page with running
   animations and an animated image is opened at several frames, and each
   recreation is compared with the captured frame.
