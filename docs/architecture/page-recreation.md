@@ -3642,6 +3642,60 @@ Read in the same checkout, 2026-10-02.
 
 Each sub-step is tested on the target machine before the next.
 
+#### Sub-step 1 on the target machine
+
+Built as 76c4812 (2a3939b, with the owner's input type read through
+`TextControlElement`, since `HTMLInputElement` declares
+`FormControlTypeAsString` private). The owner recorded the CNIB events page
+on 2026-10-03, recording `20261003-130512-129cb663dbd8408b9797344a44fc4a81`
+(113.5 s, 192,866 events accepted, none dropped), opening its selects and
+moving the highlight. What the recording holds:
+
+- Ten popups, each a `select-list` owned by one page document, each with
+  one `page-popup-opened`, two `page-popup-window-rect` records with
+  `source` `requested` (the first `deferred`, the second not, with the same
+  rectangle), and one `page-popup-closed`. All ten were closed by the
+  `renderer`. No `placed` rectangle was recorded (see below).
+- 193 `option-selectedness-changed` records: 154 in the ten popup
+  documents, each with the popup listbox's select, written by the picker's
+  script (`ListPicker`, `update_`, `highlightOption_`), and the rest in page
+  documents, including the owner select's change when the list closed with
+  a new value (`handleMouseUp_`). Fifteen page records state no select:
+  the option was not in a select when its selectedness changed, four with
+  no script location and eleven set by the page's script.
+- Presentations of the popup documents: 98 `presentation-requested`, all
+  queued, with `widgetKind` `page-popup`, a null `frameSinkId`, and
+  `isMainFrameWidget` false; 96 swapped with feedback, and 2 not swapped.
+  Four requests in page documents still record `no-widget`.
+
+No placed rectangle reaches a popup. `WidgetBase::SetPendingWindowRect`
+(`platform/widget/widget_base.cc`, lines 1971 to 1976) stores a popup's
+requested rectangle as its widget and window rectangles, with the comment
+"Popups don't get size updates back from the browser so just store the set
+values". `WidgetBase::UpdateScreenRects` (lines 571 to 580) sets the
+rectangles itself when its client does not handle them, and
+`WebPagePopupImpl::SetScreenRects` is not called on that path. So the
+renderer's own account of a popup's place is the requested rectangle; where
+the browser put the popup's window on screen is not in the renderer.
+Whether it differs from the request is checked against the captured screen
+images in sub-step 2.
+
+The bridge's cost lines in the Chromium log time each new call on the
+renderer's main thread (count, mean, largest):
+
+| Call | Count | Mean | Largest |
+| --- | --- | --- | --- |
+| `RecordBlinkPagePopupOpened` | 10 | 23.0 us | 32 us |
+| `RecordBlinkPagePopupWindowRect` | 20 | 13.2 us | 21 us |
+| `RecordBlinkPagePopupClosed` | 10 | 10.6 us | 19 us |
+| `RecordBlinkOptionSelectednessChanged` | 193 | 18.3 us | 124 us |
+| `BeginBlinkPresentationRequest`, all widgets | 409 | 14.2 us | 89 us |
+
+The presentation request count in the cost lines (409) is below the
+recorded count (413), as are the swap and feedback counts (376 against
+380): the last interval of each renderer is not logged before it exits. As
+before, the lines do not time Blink's work before each call.
+
 #### Required tests
 
 - Unit tests: each new record against the record contract; the
