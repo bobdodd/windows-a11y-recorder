@@ -4105,6 +4105,59 @@ Tests run in the sandbox, 2026-10-04:
 
 Not yet run: the system test on the target machine.
 
+#### Images of a page recorded from a file (proposed)
+
+Reported by the owner on 2026-10-04, with 6a83cf8, on the fixture
+recording 20261004-131014-0d65424b09d04391aab4ef4714aec25c: "THe number
+images don't show at all". The screenshot shows the three images of the
+"Animated images" panel as broken images, with their alternative text.
+
+Cause, read in the recording and the app. The fixture was opened from a
+file, so the recorded address is
+`file:///C:/Users/Public/Downloads/animation-fixture/index.html`, and the
+three `image-resource` records are of `file:///` URLs (`frames.gif`,
+`frames.webp`, and `frames.png` in that folder), with their bytes recorded.
+`RecreationServer.IsServableAddress` accepts only http and https
+addresses, so the page is served from the recorder's loopback address, as
+the evidence panel's note says, the relative `src` of each image resolves
+to a loopback URL, and the recorder answers no image of a page not served
+at its recorded address (sub-step 3). So no image of a page recorded from
+a file has been shown in any recreation; this is not caused by 2a.
+
+Proposed fix: a page recorded at a local `file:///` address is served at a
+stand-in address of the recorder's,
+`https://file.a11y-recorder.invalid/` followed by the rest of the recorded
+address after `file:///` (for the fixture,
+`https://file.a11y-recorder.invalid/C:/Users/Public/Downloads/animation-fixture/index.html`).
+The name is under the reserved `.invalid` domain, as the font address is,
+so a request for it can only be answered by the recorder. Relative URLs
+then resolve as they did, at the same path under the stand-in address, and
+the recorder answers each image request by turning its URL back into the
+recorded `file:///` URL and answering from the recording as for an http
+page, with its held frame. Every other request stays refused, as for any
+recreation served at an address.
+
+What changes:
+
+- The recreation's tab, DevTools, and the document's `URL` show the
+  stand-in address, not the recorded one. The evidence panel says so, and
+  gives the recorded address.
+- A `file://` address naming a host (a network share) is not served this
+  way, and stays on the loopback address, as now; the evidence panel says
+  so.
+- Nothing is recorded differently, and Chromium is not rebuilt.
+
+Required tests:
+
+- Unit (app): the stand-in address of a local file address and back; a
+  file address with a host, and other schemes, not given one; the page
+  answered at its stand-in address; an image request at the stand-in
+  address answered with the recorded file image's bytes and held frame; a
+  request outside the recorded images refused; the panel's notes.
+- System, on the target machine: the fixture recording opened at several
+  frames while the images panel was in view; the three images are shown,
+  and the 2a test of "Sub-step 2a design" is run.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
