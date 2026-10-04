@@ -3494,6 +3494,36 @@ recording:
   run. Why those two failed is not established.
 - 8,820 `paint-worklet-painted` records, as in the first recording.
 
+#### Third recording of the fixture, smooth scroll (target machine, 2026-10-04)
+
+Recording `20261004-034540-f7cbf2fffaf840c78ad8b5cf61063090`, with the
+same build, in which the owner pressed the compositor scroll panel's
+button five times, at 24.02, 27.68, 29.26, 30.51, and 31.91 s
+(recording times are from the first compositor record); each press
+invoked the panel's click listener and was followed by a `scrollend` on
+`#scroller`. Read from the recording's compositor frames, 146 scroll
+offsets for `#scroller`:
+
+- Four of the five smooth scrolls, at 27.68 s and after, were recorded
+  in 26 offsets each, about 18 ms apart over about 0.41 s, between 0 and
+  649 px. 649 px is the top of row 30, the value `offsetTop` gave in the
+  build environment's check of the page.
+- The first, at 24.02 s, from 400 px (where an earlier wheel scroll had
+  left the list) to 649 px, has three offsets: 402.52 px in the frame of
+  24.076 s, then 648.79 px and 649 px. Between 24.076 s and 24.294 s the
+  renderer drew no frame: the begin frames of frame tokens 1063 and 1064
+  are 233.4 ms apart, and no browser record of any channel was written
+  between 24.08 s and 24.28 s. The recording is consistent with the
+  screen: no frame was drawn then. Why the renderer paused is not
+  established; whether the recorder's own work caused it is one of the
+  questions for the cost measurement of sub-step 1c. Shorter pauses of
+  this kind are in the same recording (100 ms at 23.81 s, 83.4 ms at
+  38.15 s, and others at startup).
+- 2,028 `compositor-frame-presented` records; 11 failed: frame tokens 1
+  to 7 and a second token 1 at startup, and 110, 172, and 806 at 2.94,
+  3.98, and 19.73 s. As in the second recording, why those failed is
+  not established.
+
 #### Sub-step 1 in parts
 
 Sub-step 1 is delivered in three parts, each tested on the target machine
