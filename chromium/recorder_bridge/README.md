@@ -465,8 +465,21 @@ the presentation of a recorded frame only. What is recorded, by property:
   rectangle as x, y, width, and height; for a reference filter, none;
 - scroll offset: the scroll tree's current offset, x and y.
 
-A transform or effect node no longer in the drawn tree is written once as
-a null value. Values are not rounded. The browser's own compositor
+- background color progress and clip path progress (part 1b): for each
+  native paint worklet record of the active tree, the compositor progress
+  it was painted with, as `{"progress": p}`, or `{"progress": null}` when
+  it was painted from the main thread's value. Each result is noted by its
+  record's buffer in `ClientLayerTreeHostImpl::OnPaintWorkletResultsReady`.
+
+`RecordPaintWorkletPainted` writes `paint-worklet-painted` on the worklet's
+thread, from `BackgroundColorPaintDefinition::Paint` and
+`ClipPathPaintDefinition::Paint`: the element, the property, the progress
+given, and the color as four floats, or the clip path's fill type, verbs,
+points, conic weights, translation, and whether it was drawn as a rounded
+rectangle.
+
+A transform or effect node, or a paint worklet, no longer in the drawn
+tree is written once as a null value. Values are not rounded. The browser's own compositor
 (`is_layer_tree_for_ui`) is not recorded.
 
 Protocol 0.47 adds `windowsAnimationSettings` to `popup-widget-shown`.

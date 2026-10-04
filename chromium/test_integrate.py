@@ -7126,6 +7126,114 @@ class CompositorRecordIntegrationTests(unittest.TestCase):
             "a11y_recorder::RecordCompositorFramePresented(", INTEGRATE.CC_PRESENTED_HOOK
         )
 
+    def test_a_tree_patched_by_part_1a_is_upgraded_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "layer_tree_host_impl.cc"
+            path.write_text(self.host_impl_source(), encoding="utf-8")
+            helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+            hook = INTEGRATE.CC_DRAW_LAYERS_HOOK
+            try:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = (
+                    INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1A
+                )
+                INTEGRATE.CC_DRAW_LAYERS_HOOK = INTEGRATE.CC_DRAW_LAYERS_HOOK_1A
+                INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            finally:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = helpers
+                INTEGRATE.CC_DRAW_LAYERS_HOOK = hook
+            INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            upgraded = path.read_text(encoding="utf-8")
+        fresh = self.patch_twice(
+            "layer_tree_host_impl.cc",
+            self.host_impl_source(),
+            INTEGRATE.patch_cc_layer_tree_host_impl,
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertNotIn(INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1A, upgraded)
+        self.assertNotIn(INTEGRATE.CC_DRAW_LAYERS_HOOK_1A, upgraded)
+        self.assertEqual(1, upgraded.count("void RecorderRecordCompositorFrame("))
+
+    def test_each_frame_names_the_progress_its_paint_worklet_records_were_painted_with(self):
+        helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+        # The paint worklet helpers come before the frame recorder that
+        # calls them, which reads the active tree and keeps the pending
+        # tree's results.
+        self.assertTrue(helpers.startswith(INTEGRATE.CC_PAINT_WORKLET_HELPERS))
+        self.assertIn(INTEGRATE.CC_FRAME_SIGNATURE, helpers)
+        self.assertNotIn(INTEGRATE.CC_FRAME_SIGNATURE_1A, helpers)
+        self.assertLess(
+            helpers.index("RecorderReadPaintWorkletProgress(host_id, tree, pending_tree, &values);"),
+            helpers.index(INTEGRATE.CC_FRAME_SCROLL_COMMENT),
+        )
+        self.assertIn("pending_tree(),", INTEGRATE.CC_DRAW_LAYERS_HOOK)
+        self.assertIn('"background-color-progress"', helpers)
+        self.assertIn('"clip-path-progress"', helpers)
+        self.assertIn("value.present = false;", helpers)
+        source = (
+            INTEGRATE.CC_CLIENT_OWN_INCLUDE
+            + "\n\nnamespace cc {\n\n"
+            + INTEGRATE.CC_CLIENT_DECLARATION_ANCHOR
+            + "#if DCHECK_IS_ON()\n#endif\n\n"
+            + INTEGRATE.CC_CLIENT_RESULTS_ANCHOR
+            + "    }\n  }\n}\n\n}  // namespace cc\n"
+        )
+        patched = self.patch_twice(
+            "client_layer_tree_host_impl.cc",
+            source,
+            INTEGRATE.patch_cc_client_layer_tree_host_impl,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.CC_CLIENT_DECLARATION))
+        self.assertEqual(1, patched.count(INTEGRATE.CC_CLIENT_RESULTS_HOOK))
+        self.assertLess(
+            patched.index("RecorderNotePaintWorkletResults(id(), results);"),
+            patched.index("FindPendingTreeLayerById"),
+        )
+
+    def test_what_the_native_paint_worklets_painted_is_recorded_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            csspaint = Path(directory) / "csspaint"
+            nativepaint = csspaint / "nativepaint"
+            nativepaint.mkdir(parents=True)
+            (nativepaint / "background_color_paint_definition.cc").write_text(
+                INTEGRATE.BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE
+                + "\n\nPaintRecord BackgroundColorPaintDefinition::Paint() {\n"
+                + INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR
+                + "}\n",
+                encoding="utf-8",
+            )
+            (nativepaint / "clip_path_paint_definition.cc").write_text(
+                INTEGRATE.BLINK_CLIP_PATH_PAINT_OWN_INCLUDE
+                + "\n\nclass ClipPathPaintWorkletInput {\n"
+                + INTEGRATE.BLINK_CLIP_PATH_TRANSLATION_ANCHOR
+                + "};\n\nPaintRecord ClipPathPaintDefinition::Paint() {\n"
+                + INTEGRATE.BLINK_CLIP_PATH_PAINTED_ANCHOR
+                + "}\n",
+                encoding="utf-8",
+            )
+            (csspaint / "BUILD.gn").write_text(
+                'blink_modules_sources("csspaint") {\n  sources = [\n  ]\n\n'
+                + INTEGRATE.BLINK_CSSPAINT_BUILD_ANCHOR,
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_native_paint_definitions(csspaint)
+            files = sorted(path for path in csspaint.rglob("*") if path.is_file())
+            first = [path.read_text(encoding="utf-8") for path in files]
+            INTEGRATE.patch_blink_native_paint_definitions(csspaint)
+            self.assertEqual(first, [path.read_text(encoding="utf-8") for path in files])
+        build, background, clip = first
+        self.assertEqual(1, build.count('"//chromium/recorder_bridge"'))
+        for patched in (background, clip):
+            self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+            self.assertEqual(1, patched.count("a11y_recorder::RecordPaintWorkletPainted("))
+        self.assertEqual(1, background.count(INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_HOOK))
+        self.assertEqual(1, clip.count(INTEGRATE.BLINK_CLIP_PATH_TRANSLATION_HOOK))
+        self.assertEqual(1, clip.count(INTEGRATE.BLINK_CLIP_PATH_PAINTED_HOOK))
+        # The path is recorded as drawn, before it is painted.
+        self.assertLess(
+            clip.index("RecordPaintWorkletPainted("),
+            clip.index("cc::InspectablePaintRecorder paint_recorder;"),
+        )
+
     def test_the_cc_component_depends_on_the_bridge_once(self):
         source = (
             'cc_component("cc") {\n  sources = [\n  ]\n\n'

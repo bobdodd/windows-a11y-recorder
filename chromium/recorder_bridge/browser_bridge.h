@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <limits>
+#include <optional>
 
 #include <string>
 #include <string_view>
@@ -1511,8 +1512,11 @@ struct CompositorFilterOperation {
 // One property of one element of the active tree as drawn. The property is
 // "transform" (numbers: the 16 matrix entries, row by row), "opacity" (one
 // number), "filter" or "backdrop-filter" (the operations), or
-// "scroll-offset" (x and y). An element whose node is no longer in the tree
-// is given with present false.
+// "scroll-offset" (x and y), or "background-color-progress" or
+// "clip-path-progress" (the compositor's progress a native paint worklet's
+// drawn record was painted with, one number, or none when it was painted
+// with no compositor progress). An element whose node or paint worklet is
+// no longer in the tree is given with present false.
 struct CompositorDrawnValue {
   uint64_t element_id = 0;
   std::string property;
@@ -1579,6 +1583,30 @@ void RecordCompositorFramePresented(int layer_tree_host_id,
                                     int64_t presented_microseconds,
                                     bool failed,
                                     bool high_resolution_ticks);
+
+// What a native paint worklet painted, on the worklet's thread
+// (BackgroundColorPaintDefinition::Paint or ClipPathPaintDefinition::Paint):
+// the compositor element and property, the compositor progress it was
+// given, if any, and the value it drew. A background color is its four
+// floats (SkColor4f); a clip path is the path as Skia holds it, its fill
+// type, verbs, points (x, y, ...), and conic weights, with the translation
+// the paint applied and whether it was drawn as a rounded rectangle.
+struct PaintWorkletPaintedFacts {
+  uint64_t element_id = 0;
+  std::string property;
+  std::optional<double> progress;
+  std::vector<double> color;
+  std::string fill_type;
+  std::vector<std::string> verbs;
+  std::vector<double> points;
+  std::vector<double> conic_weights;
+  double translate_x = 0;
+  double translate_y = 0;
+  bool drawn_as_rounded_rect = false;
+};
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordPaintWorkletPainted(PaintWorkletPaintedFacts facts);
 
 // Network metadata. Every record on the browser.network channel carries
 // request and response metadata only: no request body, no response body, no

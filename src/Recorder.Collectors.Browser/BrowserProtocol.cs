@@ -270,6 +270,10 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.CompositorFramePresented) =>
                 payload.Deserialize<BrowserCompositorFramePresentedPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Compositor,
+                BrowserEvidenceEventTypes.PaintWorkletPainted) =>
+                payload.Deserialize<BrowserPaintWorkletPaintedPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Layout,
                 BrowserEvidenceEventTypes.LayoutCheckpointStarted) =>
                 payload.Deserialize<BrowserLayoutCheckpointStartedPayload>(

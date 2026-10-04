@@ -5737,6 +5737,14 @@ base::Value CompositorValueJson(const CompositorDrawnValue& value) {
     offset.Set("y", value.numbers[1]);
     return base::Value(std::move(offset));
   }
+  if (value.property == "background-color-progress" ||
+      value.property == "clip-path-progress") {
+    base::DictValue progress;
+    progress.Set("progress", value.numbers.size() == 1
+                                 ? base::Value(value.numbers[0])
+                                 : base::Value());
+    return base::Value(std::move(progress));
+  }
   if (value.property == "filter" || value.property == "backdrop-filter") {
     base::ListValue operations;
     for (const CompositorFilterOperation& operation : value.filters) {
@@ -5767,8 +5775,10 @@ base::Value CompositorWidgetJson(const PresentationWidgetIdentity& widget) {
 }
 
 bool IsCompositorProperty(const std::string& property) {
-  return IsOneOf(property, {"transform", "opacity", "filter",
-                            "backdrop-filter", "scroll-offset"});
+  return IsOneOf(property,
+                 {"transform", "opacity", "filter", "backdrop-filter",
+                  "scroll-offset", "background-color-progress",
+                  "clip-path-progress"});
 }
 
 }  // namespace
@@ -5951,6 +5961,43 @@ void RecordCompositorFramePresented(int layer_tree_host_id,
                      : OptionalMicroseconds(presented_microseconds));
   payload.Set("highResolutionTicks", high_resolution_ticks);
   SendBlinkEvidence("browser.compositor", "compositor-frame-presented",
+                    std::move(payload));
+}
+
+void RecordPaintWorkletPainted(PaintWorkletPaintedFacts facts) {
+  A11Y_RECORDER_COST("RecordPaintWorkletPainted");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.element_id == 0 ||
+      (facts.property != "background-color" &&
+       facts.property != "clip-path")) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("elementId", base::NumberToString(facts.element_id));
+  payload.Set("property", facts.property);
+  payload.Set("progress", facts.progress ? base::Value(*facts.progress)
+                                         : base::Value());
+  base::DictValue value;
+  if (facts.property == "background-color") {
+    value.Set("color", CompositorNumbers(facts.color));
+  } else {
+    value.Set("fillType", std::move(facts.fill_type));
+    base::ListValue verbs;
+    for (std::string& verb : facts.verbs) {
+      verbs.Append(std::move(verb));
+    }
+    value.Set("verbs", std::move(verbs));
+    value.Set("points", CompositorNumbers(facts.points));
+    value.Set("conicWeights", CompositorNumbers(facts.conic_weights));
+    base::DictValue translation;
+    translation.Set("x", facts.translate_x);
+    translation.Set("y", facts.translate_y);
+    value.Set("translation", std::move(translation));
+    value.Set("drawnAsRoundedRect", facts.drawn_as_rounded_rect);
+  }
+  payload.Set("value", std::move(value));
+  SendBlinkEvidence("browser.compositor", "paint-worklet-painted",
                     std::move(payload));
 }
 

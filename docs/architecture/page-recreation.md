@@ -3426,6 +3426,70 @@ compositor. The recreation does not yet impose the recorded compositor
 values (sub-step 2), so what it drew is from the main thread's records,
 and this recording does not test the replay.
 
+#### Sub-step 1b as built
+
+Read in the target machine's checkout before writing the hooks: both
+native paint worklets in use are on by default there
+(`CompositeBGColorAnimation` and `CompositeClipPathAnimation` have
+status "stable" in `runtime_enabled_features.json5`); the box shadow one
+is not.
+
+- How a paint worklet's progress reaches the screen: the compositor's
+  animation gives the progress to `OnCustomPropertyMutated`, which keeps
+  it in `AnimatedPaintWorkletTracker`; at the next impl-side invalidation
+  the records that depend on it are dropped, and
+  `ClientLayerTreeHostImpl::GatherDirtyPaintWorklets` makes a
+  `PaintWorkletJob` for each, holding the progress at that time. The
+  worklet thread paints the jobs, `OnPaintWorkletResultsReady` puts each
+  painted record on its pending tree layer, and the record is drawn once
+  that tree is activated. So the progress drawn in a frame is the one the
+  active tree's record was painted with, not the tracker's latest.
+- `compositor-frame`: in `OnPaintWorkletResultsReady`, before the records
+  are put on the pending tree, each result's progress is noted by its
+  record's `PaintOpBuffer`, which the record keeps as it is copied to the
+  layer and on activation. At each submitted frame, for each record of
+  the active tree's layers with paint worklets, the frame recorder adds
+  `background-color-progress` or `clip-path-progress` for the record's
+  element: `{"progress": p}`, or `{"progress": null}` when the record was
+  painted with no compositor progress, from the main thread's value. A
+  property no longer drawn is written once as null, as in 1a. A noted
+  result neither tree holds is let go.
+- `paint-worklet-painted`: on the worklet's thread, in
+  `BackgroundColorPaintDefinition::Paint` and
+  `ClipPathPaintDefinition::Paint`, once the value is computed and before
+  it is drawn: the element ID and property of the input, the compositor
+  progress given, or null, and the value. A background color is the four
+  floats of the `SkColor4f` drawn. A clip path is the `SkPath` drawn, as
+  Skia holds it (fill type, verbs, points, and conic weights, from which
+  `SkPath::Raw` builds the same path), the translation the paint applies
+  before drawing, and whether it was drawn as a rounded rectangle
+  (`ReduceToRRectIfPossible`). The value is matched to a frame by element,
+  property, and progress: the last painted at or before the frame.
+
+Limits of 1b:
+
+- A paint worklet of the CSS Painting API, with composited custom
+  properties, is not recorded: its painted output is not one of these
+  two, and its properties are named by custom property, not by native
+  type.
+- Two paints of one element and property with the same progress but
+  different keyframes, as when an animation is replaced, are told apart
+  only by order: the last painted at or before the frame is taken.
+- A record already painted before the recorder's client was connected has
+  no noted progress, and its element is not written until it is painted
+  again.
+
+Tests run: Python tests of the hooks against copies of the target
+machine's files, each applied once, in place, with a tree patched by 1a
+upgraded to the same result as a fresh tree (211 passed); .NET tests of
+the paint worklet progress values and the `paint-worklet-painted`
+records against the receiver's contracts and the validator
+(BrowserCompositorRecordTests, 36 passed); the full .NET suite, 1013
+passed, with the four ChromiumLauncherTests that need Windows failing as
+before. Not done here: the
+instrumented Chromium build and the integration and system tests, which
+are for the target machine.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.

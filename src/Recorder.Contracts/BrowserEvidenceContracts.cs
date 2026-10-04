@@ -111,6 +111,7 @@ public static class BrowserEvidenceEventTypes
     public const string CompositorAnimationEnded = "compositor-animation-ended";
     public const string CompositorFrame = "compositor-frame";
     public const string CompositorFramePresented = "compositor-frame-presented";
+    public const string PaintWorkletPainted = "paint-worklet-painted";
     public const string FontFile = "font-file";
     public const string FontFaceAdded = "font-face-added";
     public const string FontFaceLoaded = "font-face-loaded";
@@ -1434,9 +1435,12 @@ public sealed record BrowserCompositorWidget(
 // A submitted compositor frame, from LayerTreeHostImpl::DrawLayers, with the
 // active tree's values that changed since the compositor's last recorded
 // frame. Value is, by property: transform, the 16 matrix entries row by row;
-// opacity, a number; filter and backdrop-filter, the operations; and
-// scroll-offset, x and y. A null value means the element's node is no longer
-// in the drawn tree.
+// opacity, a number; filter and backdrop-filter, the operations;
+// scroll-offset, x and y; and background-color-progress and
+// clip-path-progress, an object whose progress is the compositor progress the
+// drawn paint worklet record was painted with, or null when it was painted
+// with none. A null value means the element's node or paint worklet is no
+// longer in the drawn tree.
 public sealed record BrowserCompositorFramePayload(
     BrowserContext Context,
     int LayerTreeHostId,
@@ -1457,6 +1461,31 @@ public sealed record BrowserCompositorChange(
 public sealed record BrowserCompositorFilterOperation(
     string Type,
     IReadOnlyList<double> Numbers);
+
+// What a native paint worklet painted, on the worklet's thread: the
+// compositor element and property (background-color or clip-path), the
+// compositor progress it was given, or null, and the value drawn.
+public sealed record BrowserPaintWorkletPaintedPayload(
+    BrowserContext Context,
+    string ElementId,
+    string Property,
+    double? Progress,
+    BrowserPaintWorkletPaintedValue Value);
+
+// A painted background color is Color, four floats (SkColor4f). A painted
+// clip path is the SkPath's fill type, verbs, points (x, y, ...), and conic
+// weights, the translation the paint applied, and whether it was drawn as a
+// rounded rectangle.
+public sealed record BrowserPaintWorkletPaintedValue(
+    IReadOnlyList<double>? Color,
+    string? FillType,
+    IReadOnlyList<string>? Verbs,
+    IReadOnlyList<double>? Points,
+    IReadOnlyList<double>? ConicWeights,
+    BrowserPaintWorkletTranslation? Translation,
+    bool? DrawnAsRoundedRect);
+
+public sealed record BrowserPaintWorkletTranslation(double X, double Y);
 
 // Viz's presentation of a recorded compositor frame, on the clock of the
 // presentation records, or its failure.

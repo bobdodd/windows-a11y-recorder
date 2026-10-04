@@ -15681,7 +15681,8 @@ CC_BUILD_TARGET = 'cc_component("cc") {'
 CC_COMPOSITOR_FRAME_HELPERS_ANCHOR = (
     "std::optional<SubmitInfo> LayerTreeHostImpl::DrawLayers(FrameData* frame) {\n"
 )
-CC_COMPOSITOR_FRAME_HELPERS = """\
+# The helpers as protocol 0.48 part 1a inserted them, replaced in place.
+CC_COMPOSITOR_FRAME_HELPERS_1A = """\
 // Windows A11y Recorder (protocol 0.48): the elements each compositor has
 // animated, by property, and the drawn values of the active tree read for
 // them at each submitted frame. Used on the compositor thread alone.
@@ -15879,16 +15880,197 @@ void RecorderRecordCompositorFrame(int host_id,
 
 """
 
+# Part 1b: the compositor progress each native paint worklet's drawn record
+# was painted with.
+CC_PAINT_WORKLET_HELPERS = """\
+// Windows A11y Recorder (protocol 0.48): the compositor progress each paint
+// worklet result was painted with, by its record's buffer, for each
+// compositor. Noted as the results reach the pending tree
+// (ClientLayerTreeHostImpl::OnPaintWorkletResultsReady), and read for the
+// active tree's records at each submitted frame. Used on the compositor
+// thread alone.
+namespace {
+
+struct RecorderPaintWorkletResult {
+  explicit RecorderPaintWorkletResult(const PaintWorkletJob& job)
+      : record(job.output()), values(job.GetAnimatedPropertyValues()) {}
+  // Holds the buffer, so that its address names no other record while the
+  // result is noted.
+  PaintRecord record;
+  PaintWorkletJob::AnimatedPropertyValues values;
+};
+
+using RecorderPaintWorkletResultMap =
+    std::map<const PaintOpBuffer*, RecorderPaintWorkletResult>;
+
+std::map<int, RecorderPaintWorkletResultMap>& RecorderPaintWorkletResults() {
+  static base::NoDestructor<std::map<int, RecorderPaintWorkletResultMap>>
+      results;
+  return *results;
+}
+
+// The paint worklet properties of each compositor's last recorded frame.
+std::map<int, std::set<std::pair<ElementId::InternalValue, int>>>&
+RecorderPaintWorkletKeys() {
+  static base::NoDestructor<
+      std::map<int, std::set<std::pair<ElementId::InternalValue, int>>>>
+      keys;
+  return *keys;
+}
+
+const char* RecorderPaintWorkletProgressName(int native_property_type) {
+  switch (static_cast<PaintWorkletInput::NativePropertyType>(
+      native_property_type)) {
+    case PaintWorkletInput::NativePropertyType::kBackgroundColor:
+      return "background-color-progress";
+    case PaintWorkletInput::NativePropertyType::kClipPath:
+      return "clip-path-progress";
+    case PaintWorkletInput::NativePropertyType::kInvalid:
+      return nullptr;
+  }
+  return nullptr;
+}
+
+// Adds, for each native paint worklet property of the active tree's
+// records, the compositor progress its record was painted with, and, for
+// each one no longer drawn, its absence. Results no longer held by the
+// active or the pending tree are let go.
+void RecorderReadPaintWorkletProgress(
+    int host_id,
+    const LayerTreeImpl* active_tree,
+    const LayerTreeImpl* pending_tree,
+    std::vector<a11y_recorder::CompositorDrawnValue>* values) {
+  RecorderPaintWorkletResultMap& noted = RecorderPaintWorkletResults()[host_id];
+  std::set<std::pair<ElementId::InternalValue, int>>& recorded =
+      RecorderPaintWorkletKeys()[host_id];
+  std::set<const PaintOpBuffer*> in_use;
+  std::set<std::pair<ElementId::InternalValue, int>> drawn;
+  for (const LayerTreeImpl* tree : {active_tree, pending_tree}) {
+    if (!tree) {
+      continue;
+    }
+    for (const PictureLayerImpl* layer :
+         tree->picture_layers_with_paint_worklets()) {
+      for (const auto& [input, entry] : layer->GetPaintWorkletRecordMap()) {
+        if (!entry.second) {
+          continue;
+        }
+        const PaintOpBuffer* buffer = &entry.second->buffer();
+        in_use.insert(buffer);
+        if (tree != active_tree) {
+          continue;
+        }
+        const auto result = noted.find(buffer);
+        if (result == noted.end()) {
+          continue;
+        }
+        for (const PaintWorkletInput::PropertyKey& key :
+             input->GetPropertyKeys()) {
+          if (!key.native_property_type || !key.element_id) {
+            continue;
+          }
+          const int type = static_cast<int>(*key.native_property_type);
+          const char* name = RecorderPaintWorkletProgressName(type);
+          const auto drawn_key =
+              std::make_pair(key.element_id.GetInternalValue(), type);
+          if (!name || !drawn.insert(drawn_key).second) {
+            continue;
+          }
+          a11y_recorder::CompositorDrawnValue value;
+          value.element_id = drawn_key.first;
+          value.property = name;
+          const auto progress = result->second.values.find(key);
+          if (progress != result->second.values.end() &&
+              progress->second.float_value) {
+            value.numbers = {*progress->second.float_value};
+          }
+          values->push_back(std::move(value));
+        }
+      }
+    }
+  }
+  for (const auto& [element_id, type] : recorded) {
+    if (drawn.contains({element_id, type})) {
+      continue;
+    }
+    a11y_recorder::CompositorDrawnValue value;
+    value.element_id = element_id;
+    value.property = RecorderPaintWorkletProgressName(type);
+    value.present = false;
+    values->push_back(std::move(value));
+  }
+  recorded = std::move(drawn);
+  std::erase_if(noted, [&in_use](const auto& entry) {
+    return !in_use.contains(entry.first);
+  });
+}
+
+}  // namespace
+
+void RecorderNotePaintWorkletResults(int host_id,
+                                     const PaintWorkletJobMap& results);
+
+void RecorderNotePaintWorkletResults(int host_id,
+                                     const PaintWorkletJobMap& results) {
+  if (!a11y_recorder::GetProcessRecorderClient()) {
+    return;
+  }
+  RecorderPaintWorkletResultMap& noted = RecorderPaintWorkletResults()[host_id];
+  for (const auto& entry : results) {
+    for (const PaintWorkletJob& job : entry.second->data) {
+      RecorderPaintWorkletResult result(job);
+      const PaintOpBuffer* buffer = &result.record.buffer();
+      noted.insert_or_assign(buffer, std::move(result));
+    }
+  }
+}
+
+"""
+
+CC_FRAME_SIGNATURE_1A = """\
+void RecorderRecordCompositorFrame(int host_id,
+                                   const LayerTreeImpl* tree,
+                                   const viz::BeginFrameArgs& args,
+                                   uint32_t frame_token) {
+"""
+CC_FRAME_SIGNATURE = """\
+void RecorderRecordCompositorFrame(int host_id,
+                                   const LayerTreeImpl* tree,
+                                   const LayerTreeImpl* pending_tree,
+                                   const viz::BeginFrameArgs& args,
+                                   uint32_t frame_token) {
+"""
+CC_FRAME_SCROLL_COMMENT = """\
+  // Every scroll node's offset as drawn, so a scroll the compositor made
+"""
+CC_COMPOSITOR_FRAME_HELPERS = CC_PAINT_WORKLET_HELPERS + (
+    CC_COMPOSITOR_FRAME_HELPERS_1A.replace(
+        CC_FRAME_SIGNATURE_1A, CC_FRAME_SIGNATURE
+    ).replace(
+        CC_FRAME_SCROLL_COMMENT,
+        "  RecorderReadPaintWorkletProgress(host_id, tree, pending_tree, &values);\n"
+        + CC_FRAME_SCROLL_COMMENT,
+    )
+)
+
 CC_DRAW_LAYERS_ANCHOR = """\
   const auto frame_token = compositor_frame.metadata.frame_token;
   frame->frame_token = frame_token;
 """
-CC_DRAW_LAYERS_HOOK = CC_DRAW_LAYERS_ANCHOR + """\
+CC_DRAW_LAYERS_HOOK_1A = CC_DRAW_LAYERS_ANCHOR + """\
   // Windows A11y Recorder (protocol 0.48): the active tree's values as drawn
   // in the frame about to be submitted, for a page's compositor.
   if (!settings_.is_layer_tree_for_ui) {
     RecorderRecordCompositorFrame(id_, active_tree(), CurrentBeginFrameArgs(),
                                   frame_token);
+  }
+"""
+CC_DRAW_LAYERS_HOOK = CC_DRAW_LAYERS_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the active tree's values as drawn
+  // in the frame about to be submitted, for a page's compositor.
+  if (!settings_.is_layer_tree_for_ui) {
+    RecorderRecordCompositorFrame(id_, active_tree(), pending_tree(),
+                                  CurrentBeginFrameArgs(), frame_token);
   }
 """
 
@@ -15968,11 +16150,23 @@ def patch_cc_layer_tree_host_impl(path: Path) -> None:
     text = add_includes_after(
         text,
         CC_LAYER_TREE_HOST_IMPL_OWN_INCLUDE,
-        (BLINK_BRIDGE_INCLUDE, '#include "cc/paint/filter_operations.h"'),
+        (
+            BLINK_BRIDGE_INCLUDE,
+            '#include "cc/layers/picture_layer_impl.h"',
+            '#include "cc/paint/filter_operations.h"',
+        ),
         path,
     )
     if "#include <set>\n" not in text:
         text = replace_once(text, "#include <map>\n", "#include <map>\n#include <set>\n", path)
+    # A tree patched by part 1a holds its helpers and draw hook; they are
+    # replaced in place.
+    if CC_COMPOSITOR_FRAME_HELPERS_1A in text:
+        text = replace_once(
+            text, CC_COMPOSITOR_FRAME_HELPERS_1A, CC_COMPOSITOR_FRAME_HELPERS, path
+        )
+    if CC_DRAW_LAYERS_HOOK_1A in text:
+        text = replace_once(text, CC_DRAW_LAYERS_HOOK_1A, CC_DRAW_LAYERS_HOOK, path)
     if CC_COMPOSITOR_FRAME_HELPERS not in text:
         text = insert_before_once(
             text,
@@ -16181,6 +16375,211 @@ def patch_blink_keyframe_effect(path: Path) -> None:
         path,
     )
     write_patched(path, text)
+
+
+# Part 1b: the paint worklet results noted as they reach the pending tree,
+# so that each frame names the compositor progress its records were painted
+# with, and what the native paint worklets painted.
+CC_CLIENT_OWN_INCLUDE = '#include "cc/trees/client_layer_tree_host_impl.h"'
+CC_CLIENT_DECLARATION_ANCHOR = """\
+void ClientLayerTreeHostImpl::OnPaintWorkletResultsReady(
+    PaintWorkletJobMap results) {
+"""
+CC_CLIENT_DECLARATION = """\
+// Windows A11y Recorder (protocol 0.48), in layer_tree_host_impl.cc.
+void RecorderNotePaintWorkletResults(int host_id,
+                                     const PaintWorkletJobMap& results);
+
+"""
+CC_CLIENT_RESULTS_ANCHOR = """\
+  for (const auto& entry : results) {
+    for (const PaintWorkletJob& job : entry.second->data) {
+      LayerImpl* layer_impl =
+          pending_tree_->FindPendingTreeLayerById(job.layer_id());
+"""
+CC_CLIENT_RESULTS_HOOK = """\
+  // Windows A11y Recorder (protocol 0.48): the compositor progress each
+  // result was painted with, for a page's compositor.
+  if (!settings_.is_layer_tree_for_ui) {
+    RecorderNotePaintWorkletResults(id(), results);
+  }
+""" + CC_CLIENT_RESULTS_ANCHOR
+
+
+def patch_cc_client_layer_tree_host_impl(path: Path) -> None:
+    """Protocol 0.48: notes each paint worklet result as it reaches the
+    pending tree."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        CC_CLIENT_DECLARATION_ANCHOR,
+        CC_CLIENT_DECLARATION,
+        CC_CLIENT_DECLARATION,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, CC_CLIENT_RESULTS_ANCHOR, CC_CLIENT_RESULTS_HOOK, path
+    )
+    write_patched(path, text)
+
+
+BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/modules/csspaint/nativepaint/'
+    'background_color_paint_definition.h"'
+)
+BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR = """\
+  Color color = Sample(compositor_input, animated_property_values);
+  SkColor4f sk_color = color.toSkColor4f();
+"""
+BLINK_BACKGROUND_COLOR_PAINTED_HOOK = BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the color painted, with the
+  // compositor progress it was painted from.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    a11y_recorder::PaintWorkletPaintedFacts recorder_facts;
+    recorder_facts.property = "background-color";
+    const auto& recorder_keys = compositor_input->GetPropertyKeys();
+    if (!recorder_keys.empty()) {
+      recorder_facts.element_id =
+          recorder_keys.front().element_id.GetInternalValue();
+    }
+    if (!animated_property_values.empty() &&
+        animated_property_values.begin()->second.float_value) {
+      recorder_facts.progress =
+          *animated_property_values.begin()->second.float_value;
+    }
+    recorder_facts.color = {sk_color.fR, sk_color.fG, sk_color.fB,
+                            sk_color.fA};
+    a11y_recorder::RecordPaintWorkletPainted(std::move(recorder_facts));
+  }
+"""
+
+BLINK_CLIP_PATH_PAINT_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/modules/csspaint/nativepaint/'
+    'clip_path_paint_definition.h"'
+)
+BLINK_CLIP_PATH_TRANSLATION_ANCHOR = """\
+  void ApplyTranslation(cc::PaintCanvas* canvas) const {
+    canvas->translate(dx_, dy_);
+  }
+"""
+BLINK_CLIP_PATH_TRANSLATION_HOOK = BLINK_CLIP_PATH_TRANSLATION_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the translation applied.
+  SkScalar RecorderTranslateX() const { return dx_; }
+  SkScalar RecorderTranslateY() const { return dy_; }
+"""
+BLINK_CLIP_PATH_PAINTED_ANCHOR = """\
+  cc::InspectablePaintRecorder paint_recorder;
+  const gfx::Size clip_area_size(
+"""
+BLINK_CLIP_PATH_PAINTED_HOOK = """\
+  // Windows A11y Recorder (protocol 0.48): the path painted, with the
+  // compositor progress it was painted from.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    a11y_recorder::PaintWorkletPaintedFacts recorder_facts;
+    recorder_facts.property = "clip-path";
+    const auto& recorder_keys = compositor_input->GetPropertyKeys();
+    if (!recorder_keys.empty()) {
+      recorder_facts.element_id =
+          recorder_keys.front().element_id.GetInternalValue();
+    }
+    if (!animated_property_values.empty() &&
+        animated_property_values.begin()->second.float_value) {
+      recorder_facts.progress =
+          *animated_property_values.begin()->second.float_value;
+    }
+    switch (cur_path.getFillType()) {
+      case SkPathFillType::kWinding:
+        recorder_facts.fill_type = "winding";
+        break;
+      case SkPathFillType::kEvenOdd:
+        recorder_facts.fill_type = "even-odd";
+        break;
+      case SkPathFillType::kInverseWinding:
+        recorder_facts.fill_type = "inverse-winding";
+        break;
+      case SkPathFillType::kInverseEvenOdd:
+        recorder_facts.fill_type = "inverse-even-odd";
+        break;
+    }
+    for (const SkPathVerb verb : cur_path.verbs()) {
+      switch (verb) {
+        case SkPathVerb::kMove:
+          recorder_facts.verbs.push_back("move");
+          break;
+        case SkPathVerb::kLine:
+          recorder_facts.verbs.push_back("line");
+          break;
+        case SkPathVerb::kQuad:
+          recorder_facts.verbs.push_back("quad");
+          break;
+        case SkPathVerb::kConic:
+          recorder_facts.verbs.push_back("conic");
+          break;
+        case SkPathVerb::kCubic:
+          recorder_facts.verbs.push_back("cubic");
+          break;
+        case SkPathVerb::kClose:
+          recorder_facts.verbs.push_back("close");
+          break;
+      }
+    }
+    for (const SkPoint& point : cur_path.points()) {
+      recorder_facts.points.push_back(point.fX);
+      recorder_facts.points.push_back(point.fY);
+    }
+    for (const float weight : cur_path.conicWeights()) {
+      recorder_facts.conic_weights.push_back(weight);
+    }
+    recorder_facts.translate_x = input->RecorderTranslateX();
+    recorder_facts.translate_y = input->RecorderTranslateY();
+    recorder_facts.drawn_as_rounded_rect =
+        ReduceToRRectIfPossible(cur_path).has_value();
+    a11y_recorder::RecordPaintWorkletPainted(std::move(recorder_facts));
+  }
+
+""" + BLINK_CLIP_PATH_PAINTED_ANCHOR
+
+BLINK_CSSPAINT_BUILD_ANCHOR = """\
+  public_deps = [ "//third_party/blink/renderer/modules/canvas" ]
+}
+"""
+
+
+def patch_blink_native_paint_definitions(csspaint: Path) -> None:
+    """Protocol 0.48: records what the native paint worklets painted."""
+    nativepaint = csspaint / "nativepaint"
+    path = nativepaint / "background_color_paint_definition.cc"
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR,
+        BLINK_BACKGROUND_COLOR_PAINTED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+    path = nativepaint / "clip_path_paint_definition.cc"
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_CLIP_PATH_PAINT_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_CLIP_PATH_TRANSLATION_ANCHOR,
+        BLINK_CLIP_PATH_TRANSLATION_HOOK,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_CLIP_PATH_PAINTED_ANCHOR, BLINK_CLIP_PATH_PAINTED_HOOK, path
+    )
+    write_patched(path, text)
+    patch_blink_module_build(
+        csspaint / "BUILD.gn",
+        BLINK_CSSPAINT_BUILD_ANCHOR,
+        BLINK_CSSPAINT_BUILD_ANCHOR[: -len("}\n")] + BLINK_MODULE_BRIDGE_DEPS,
+    )
 
 
 # The widget a compositor draws for, named where every presentation request
@@ -16414,6 +16813,12 @@ def main() -> int:
     )
     patch_blink_keyframe_effect(blink_core / "animation" / "keyframe_effect.cc")
     patch_cc_layer_tree_host_impl(source / "cc" / "trees" / "layer_tree_host_impl.cc")
+    patch_cc_client_layer_tree_host_impl(
+        source / "cc" / "trees" / "client_layer_tree_host_impl.cc"
+    )
+    patch_blink_native_paint_definitions(
+        source / "third_party" / "blink" / "renderer" / "modules" / "csspaint"
+    )
     patch_cc_build(source / "cc" / "BUILD.gn")
     patch_blink_cookie_jar(
         source

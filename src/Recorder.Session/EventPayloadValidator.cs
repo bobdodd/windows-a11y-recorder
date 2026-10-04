@@ -385,6 +385,9 @@ internal static class EventPayloadValidator
             case ("browser.compositor", "compositor-frame-presented"):
                 ValidateBrowserCompositorFramePresented(payload, issues);
                 break;
+            case ("browser.compositor", "paint-worklet-painted"):
+                ValidateBrowserPaintWorkletPainted(payload, issues);
+                break;
             case ("browser.resources", "font-file"):
             case ("browser.resources", "image-data"):
                 ValidateBrowserResourceBytes(payload, issues);
@@ -4704,7 +4707,8 @@ internal static class EventPayloadValidator
     {
         if (value.ValueKind == JsonValueKind.Null)
         {
-            return property is "transform" or "opacity" or "filter" or "backdrop-filter";
+            return property is "transform" or "opacity" or "filter" or "backdrop-filter" or
+                "background-color-progress" or "clip-path-progress";
         }
         switch (property)
         {
@@ -4717,6 +4721,12 @@ internal static class EventPayloadValidator
                     value.TryGetProperty("x", out var x) && IsFiniteNumber(x) &&
                     value.TryGetProperty("y", out var y) && IsFiniteNumber(y) &&
                     value.EnumerateObject().Count() == 2;
+            case "background-color-progress":
+            case "clip-path-progress":
+                return value.ValueKind == JsonValueKind.Object &&
+                    value.EnumerateObject().Count() == 1 &&
+                    value.TryGetProperty("progress", out var progress) &&
+                    (progress.ValueKind == JsonValueKind.Null || IsFiniteNumber(progress));
             case "filter":
             case "backdrop-filter":
                 return value.ValueKind == JsonValueKind.Array &&
@@ -4779,7 +4789,8 @@ internal static class EventPayloadValidator
                 [
                     RequiredDecimalText("elementId"),
                     RequiredEnum("property", "transform", "opacity", "filter",
-                        "backdrop-filter", "scroll-offset"),
+                        "backdrop-filter", "scroll-offset", "background-color-progress",
+                        "clip-path-progress"),
                     new PropertyRule("value", true, true, _ => true, "must be present")
                 ],
                 issues,
@@ -4792,10 +4803,107 @@ internal static class EventPayloadValidator
                     "browser-compositor-value-invalid",
                     $"#/payload/changes/{index}/value",
                     "A compositor value must have its property's shape: 16 matrix " +
-                        "entries, a number, filter operations, or x and y.");
+                        "entries, a number, filter operations, x and y, or a progress.");
             }
             index++;
         }
+    }
+
+    private static readonly string[] PaintWorkletPathVerbs =
+        ["move", "line", "quad", "conic", "cubic", "close"];
+
+    // Points each Skia path verb takes, as SkPath stores them.
+    private static int PathVerbPoints(string? verb) => verb switch
+    {
+        "move" or "line" => 1,
+        "quad" or "conic" => 2,
+        "cubic" => 3,
+        _ => 0
+    };
+
+    private static void ValidateBrowserPaintWorkletPainted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredDecimalText("elementId"),
+                RequiredEnum("property", "background-color", "clip-path"),
+                new PropertyRule(
+                    "progress",
+                    true,
+                    true,
+                    value => value.ValueKind == JsonValueKind.Null || IsFiniteNumber(value),
+                    "must be a finite number or null"),
+                RequiredObject("value")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, false, issues);
+        if (!payload.TryGetProperty("value", out var value) ||
+            value.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        var valid = ReadString(payload, "property") switch
+        {
+            "background-color" =>
+                value.EnumerateObject().Count() == 1 &&
+                value.TryGetProperty("color", out var color) &&
+                IsFiniteNumberArray(color, 4),
+            "clip-path" => IsPaintedClipPath(value),
+            _ => true
+        };
+        if (!valid)
+        {
+            AddError(
+                issues,
+                "browser-paint-worklet-value-invalid",
+                "#/payload/value",
+                "A painted background color is four floats; a painted clip path is " +
+                    "its fill type, verbs, points, conic weights, translation, and " +
+                    "whether it was drawn as a rounded rectangle.");
+        }
+    }
+
+    private static bool IsPaintedClipPath(JsonElement value)
+    {
+        if (value.EnumerateObject().Count() != 6 ||
+            !value.TryGetProperty("fillType", out var fillType) ||
+            fillType.ValueKind != JsonValueKind.String ||
+            fillType.GetString() is not ("winding" or "even-odd" or "inverse-winding" or
+                "inverse-even-odd") ||
+            !value.TryGetProperty("verbs", out var verbs) ||
+            verbs.ValueKind != JsonValueKind.Array ||
+            !value.TryGetProperty("points", out var points) ||
+            !IsFiniteNumberArray(points, null) ||
+            !value.TryGetProperty("conicWeights", out var weights) ||
+            !IsFiniteNumberArray(weights, null) ||
+            !value.TryGetProperty("translation", out var translation) ||
+            translation.ValueKind != JsonValueKind.Object ||
+            translation.EnumerateObject().Count() != 2 ||
+            !translation.TryGetProperty("x", out var x) || !IsFiniteNumber(x) ||
+            !translation.TryGetProperty("y", out var y) || !IsFiniteNumber(y) ||
+            !value.TryGetProperty("drawnAsRoundedRect", out var rounded) ||
+            rounded.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+        var pointCount = 0;
+        var conicCount = 0;
+        foreach (var verb in verbs.EnumerateArray())
+        {
+            if (verb.ValueKind != JsonValueKind.String ||
+                !PaintWorkletPathVerbs.Contains(verb.GetString(), StringComparer.Ordinal))
+            {
+                return false;
+            }
+            pointCount += PathVerbPoints(verb.GetString());
+            conicCount += verb.GetString() == "conic" ? 1 : 0;
+        }
+        return points.GetArrayLength() == pointCount * 2 &&
+            weights.GetArrayLength() == conicCount;
     }
 
     private static void ValidateBrowserCompositorFramePresented(

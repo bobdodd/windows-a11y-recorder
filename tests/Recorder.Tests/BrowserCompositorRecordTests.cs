@@ -106,7 +106,9 @@ public sealed class BrowserCompositorRecordTests
               ]
             },
             { "elementId": "1048601", "property": "scroll-offset", "value": { "x": 0, "y": 120.5 } },
-            { "elementId": "1048594", "property": "backdrop-filter", "value": null }
+            { "elementId": "1048594", "property": "backdrop-filter", "value": null },
+            { "elementId": "1048620", "property": "background-color-progress", "value": { "progress": 0.375 } },
+            { "elementId": "1048621", "property": "clip-path-progress", "value": { "progress": null } }
           ]
         }
         """;
@@ -124,12 +126,41 @@ public sealed class BrowserCompositorRecordTests
         }
         """;
 
+    internal const string BackgroundColorPainted = $$"""
+        {
+          "context": {{ProcessContextJson}},
+          "elementId": "1048620",
+          "property": "background-color",
+          "progress": 0.375,
+          "value": { "color": [0.25, 0.5, 0.75, 1] }
+        }
+        """;
+
+    internal const string ClipPathPainted = $$"""
+        {
+          "context": {{ProcessContextJson}},
+          "elementId": "1048621",
+          "property": "clip-path",
+          "progress": null,
+          "value": {
+            "fillType": "winding",
+            "verbs": ["move", "line", "conic", "cubic", "quad", "close"],
+            "points": [0, 0, 10, 0, 10, 5, 10, 10, 8, 12, 4, 12, 0, 10, 0, 5, 0, 2],
+            "conicWeights": [0.70710677],
+            "translation": { "x": -8, "y": -16.5 },
+            "drawnAsRoundedRect": false
+          }
+        }
+        """;
+
     public static TheoryData<string, string> CompositorRecords() => new()
     {
         { BrowserEvidenceEventTypes.CompositorAnimationStarted, AnimationStarted },
         { BrowserEvidenceEventTypes.CompositorAnimationEnded, AnimationEnded },
         { BrowserEvidenceEventTypes.CompositorFrame, Frame },
-        { BrowserEvidenceEventTypes.CompositorFramePresented, FramePresented }
+        { BrowserEvidenceEventTypes.CompositorFramePresented, FramePresented },
+        { BrowserEvidenceEventTypes.PaintWorkletPainted, BackgroundColorPainted },
+        { BrowserEvidenceEventTypes.PaintWorkletPainted, ClipPathPainted }
     };
 
     [Theory]
@@ -187,6 +218,9 @@ public sealed class BrowserCompositorRecordTests
     [InlineData("scroll-offset", "null")]
     [InlineData("filter", "[{ \"type\": \"glow\", \"numbers\": [1] }]")]
     [InlineData("filter", "[{ \"type\": \"blur\" }]")]
+    [InlineData("background-color-progress", "0.5")]
+    [InlineData("clip-path-progress", "{ \"progress\": \"0.5\" }")]
+    [InlineData("clip-path-progress", "{ \"progress\": 0.5, \"extra\": 1 }")]
     public void AValueWithoutItsPropertysShapeIsRejected(string property, string value)
     {
         var payload = JsonNode.Parse(Frame)!;
@@ -256,6 +290,52 @@ public sealed class BrowserCompositorRecordTests
     }
 
     [Fact]
+    public void APaintedValueWithoutItsPropertysShapeIsRejected()
+    {
+        var color = JsonNode.Parse(BackgroundColorPainted)!;
+        color["value"]!["color"] = JsonNode.Parse("[0.25, 0.5, 0.75]");
+        Assert.Contains(
+            ValidateRecord(BrowserEvidenceEventTypes.PaintWorkletPainted, color),
+            issue => issue.Code == "browser-paint-worklet-value-invalid");
+
+        var points = JsonNode.Parse(ClipPathPainted)!;
+        points["value"]!["points"] = JsonNode.Parse("[0, 0, 10, 0]");
+        Assert.Contains(
+            ValidateRecord(BrowserEvidenceEventTypes.PaintWorkletPainted, points),
+            issue => issue.Code == "browser-paint-worklet-value-invalid");
+
+        var weights = JsonNode.Parse(ClipPathPainted)!;
+        weights["value"]!["conicWeights"] = new JsonArray();
+        Assert.Contains(
+            ValidateRecord(BrowserEvidenceEventTypes.PaintWorkletPainted, weights),
+            issue => issue.Code == "browser-paint-worklet-value-invalid");
+
+        var verb = JsonNode.Parse(ClipPathPainted)!;
+        verb["value"]!["verbs"]![0] = "arc";
+        Assert.Contains(
+            ValidateRecord(BrowserEvidenceEventTypes.PaintWorkletPainted, verb),
+            issue => issue.Code == "browser-paint-worklet-value-invalid");
+
+        var property = JsonNode.Parse(BackgroundColorPainted)!;
+        property["property"] = "box-shadow";
+        Assert.NotEmpty(ValidateRecord(BrowserEvidenceEventTypes.PaintWorkletPainted, property));
+    }
+
+    [Fact]
+    public void TheReceiverReadsAPaintedClipPathAsWritten()
+    {
+        using var document = JsonDocument.Parse(ClipPathPainted);
+        var painted = BrowserProtocol.Deserialize<BrowserPaintWorkletPaintedPayload>(
+            document.RootElement);
+
+        Assert.Null(painted.Progress);
+        Assert.Equal(6, painted.Value.Verbs!.Count);
+        Assert.Equal(18, painted.Value.Points!.Count);
+        Assert.Equal(-16.5, painted.Value.Translation!.Y);
+        Assert.False(painted.Value.DrawnAsRoundedRect);
+    }
+
+    [Fact]
     public void TheReceiverReadsAFrameAsWritten()
     {
         using var document = JsonDocument.Parse(Frame);
@@ -263,7 +343,8 @@ public sealed class BrowserCompositorRecordTests
 
         Assert.Equal(2, frame.LayerTreeHostId);
         Assert.Equal("3:2", frame.Widget!.FrameSinkId);
-        Assert.Equal(5, frame.Changes.Count);
+        Assert.Equal(7, frame.Changes.Count);
+        Assert.Equal(0.375, frame.Changes[5].Value.GetProperty("progress").GetDouble());
         Assert.Equal(37.25, frame.Changes[0].Value[3].GetDouble());
         Assert.Equal(0.4375, frame.Changes[1].Value.GetDouble());
         Assert.Equal(JsonValueKind.Null, frame.Changes[4].Value.ValueKind);
