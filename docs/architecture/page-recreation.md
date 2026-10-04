@@ -3319,7 +3319,69 @@ Each sub-step is tested on the target machine before the next.
   animations and an animated image is opened at several frames, and each
   recreation is compared with the captured frame.
 
-#### Sub-step 1 in parts
+#### Animation fixture (proposed)
+
+Proposed 2026-10-03, at the owner's request: existing sites do not hold
+each kind of animation this slice records, so a fixture page in the
+repository does, each kind in its own labelled panel. It serves the
+target machine tests of sub-step 1 (each record present, with the values
+the page states) and later of sub-step 2 (each panel recreated as drawn).
+
+Where: `tests/fixtures/animation/index.html`, with its images beside it,
+opened in the instrumented Chromium from the unpacked package as a file
+URL, as `tests/fixtures/blink-listener-dispatch.html` is. Whether a file
+URL's images are recorded as an https page's are is checked in its first
+run; if not, the fixture is served from a local server instead, which is
+proposed then.
+
+How each panel is made checkable:
+
+- Each panel names its element (an `id`), its property, its keyframes,
+  duration, and timing, in visible text, so the value expected at a time
+  is stated on the page. Running animations use `linear` timing and whole
+  second durations.
+- Each running animation has a twin held still at a stated point
+  (`animation-play-state: paused` with a negative `animation-delay`, so
+  the value is exact, for one at 25 percent of its duration). A held twin
+  shows the recreation's value without timing, and shows whether Blink
+  puts a paused animation on the compositor.
+- Animations start when the page loads and repeat, except where a panel
+  starts one with a button, so a recording can begin at any time; a start
+  button records the start as an input event.
+- The page does not test `prefers-reduced-motion`, so the Windows setting
+  does not stop its animations; the page states this.
+- No script runs except where a panel says so.
+
+Panels:
+
+| Panel | Element and property | Expected records |
+| --- | --- | --- |
+| Skip link | a "Skip to content" link moved in with a `transform` transition on focus (Tab from the top of the page) | `compositor-animation-started` for transform; `compositor-frame` transforms |
+| Rotation | `transform: rotate()`, 0 to 360 degrees, 4 s | transforms |
+| Separate transform properties | `translate`, `rotate`, and `scale` on one element, each animated | three keyframe models with the `translate-transform`, `rotate-transform`, and `scale-transform` namespaces |
+| Fade | `opacity`, 1 to 0.2, 2 s, alternate | opacities |
+| Blur | `filter: blur()`, 0 to 6 px, 3 s, alternate | filters |
+| Frosted glass | `backdrop-filter: blur()`, over a striped background, 3 s, alternate | backdrop filters |
+| Compositor scroll | a scroll container with numbered rows, and a button that calls `scrollTo` with `behavior: "smooth"`; also scrolled with the wheel | scroll offsets |
+| Background color | `background-color`, red to blue, 2 s, alternate | `background-color-progress`; `paint-worklet-painted` colors |
+| Clip path, same shape | `clip-path: inset()` to another `inset()`, 3 s, alternate | `clip-path-progress`; `paint-worklet-painted` paths |
+| Clip path, circle | `clip-path: circle()` radius 20 to 50 percent, 3 s, alternate | as above |
+| Clip path, change of shape | `inset()` to `circle()`, which does not interpolate | as above, the shape changing at half way |
+| Animated images | a GIF, an animated WebP, and an animated PNG, each of numbered frames of distinct colors, 250 ms a frame | (sub-step 1c) image frames |
+| Main thread, text color | `color`, 2 s, alternate, not composited | no compositor record; the main thread's style records |
+| Main thread, layout | `width`, 3 s, alternate, which lays out at each frame | no compositor record; layout records |
+| Web Animations | `element.animate()` of a transform, started by a button (script) | as a CSS animation of transform |
+| Focus ring | a button whose `outline-color` has a transition on `:focus-visible` | main thread style records, focus outline at each frame |
+
+The images are made by a script in the repository (`tests/fixtures/animation/make_images.py`),
+so their frames, colors, and timings are stated by it and can be made
+again; the images are committed with it.
+
+Tests: the fixture is a test asset; it is checked by opening it in the
+instrumented Chromium on the target machine and reading the recording for
+the records the table names. No automated test is added for the page
+itself.
+
 
 Sub-step 1 is delivered in three parts, each tested on the target machine
 before the next, as the hooks are in different parts of Chromium:
