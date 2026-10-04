@@ -43,6 +43,7 @@ public sealed class RecordedPageResources : IDisposable
     /// <param name="owner">Disposed with these resources, such as the recording file reader the bytes are read from.</param>
     /// <param name="imageFrames">The frame each animated image is held at (slice 4b sub-step 2a), or none.</param>
     /// <param name="imageFramesMilliseconds">How long choosing the image frames took, or null when they were not read.</param>
+    /// <param name="compositorValues">The compositor values the document's nodes take (slice 4b sub-step 2b-i), or none.</param>
     public RecordedPageResources(
         IReadOnlyList<RecordedFontFace> faces,
         IReadOnlyDictionary<string, RecordedImage> images,
@@ -50,9 +51,11 @@ public sealed class RecordedPageResources : IDisposable
         IReadOnlyList<string> notes,
         IDisposable? owner = null,
         RecordedImageFrames? imageFrames = null,
-        double? imageFramesMilliseconds = null)
+        double? imageFramesMilliseconds = null,
+        RecordedCompositorValues? compositorValues = null)
     {
         ImageFrames = imageFrames ?? RecordedImageFrames.None;
+        CompositorValues = compositorValues ?? RecordedCompositorValues.None;
         ImageFramesMilliseconds = imageFramesMilliseconds;
         Faces = faces ?? throw new ArgumentNullException(nameof(faces));
         _images = images ?? throw new ArgumentNullException(nameof(images));
@@ -67,6 +70,9 @@ public sealed class RecordedPageResources : IDisposable
 
     /// <summary>The frame each animated image is held at in the recreation, by URL.</summary>
     public RecordedImageFrames ImageFrames { get; }
+
+    /// <summary>The compositor values the document's nodes take in the recreation, by node.</summary>
+    public RecordedCompositorValues CompositorValues { get; }
 
     /// <summary>How long choosing the image frames took, or null when they were not read.</summary>
     public double? ImageFramesMilliseconds { get; }

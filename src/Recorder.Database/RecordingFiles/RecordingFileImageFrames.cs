@@ -24,6 +24,19 @@ public static class RecordingFileImageFrames
         string documentKey,
         long cutNanoseconds,
         long compositionNanoseconds,
+        CancellationToken cancellationToken = default) =>
+        ReadWithCompositorValues(reader, documentKey, cutNanoseconds, compositionNanoseconds, cancellationToken).ImageFrames;
+
+    /// <summary>
+    /// Reads the image frames and, from the same records, the compositor
+    /// values the document's nodes take in the recreation (slice 4b,
+    /// "Sub-step 2b-i design: compositor values imposed").
+    /// </summary>
+    public static (RecordedImageFrames ImageFrames, RecordedCompositorValues CompositorValues) ReadWithCompositorValues(
+        RecordingFileReader reader,
+        string documentKey,
+        long cutNanoseconds,
+        long compositionNanoseconds,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
@@ -34,12 +47,13 @@ public static class RecordingFileImageFrames
                 ? value
                 : throw new InvalidDataException("The recording file does not state its clock frequency.");
         var channels = reader.Channels.Values
-            .Where(channel => RecordedImageFrameChooser.Channels.Contains(channel.Topic))
+            .Where(channel => RecordedImageFrameChooser.Channels.Contains(channel.Topic) ||
+                              RecordedCompositorValueChooser.Channels.Contains(channel.Topic))
             .Select(channel => channel.Id)
             .ToArray();
         if (!reader.Channels.Values.Any(channel => channel.Topic == Recorder.Contracts.BrowserEvidenceChannels.Compositor))
         {
-            return RecordedImageFrames.None;
+            return (RecordedImageFrames.None, RecordedCompositorValues.None);
         }
         var end = compositionNanoseconds + PresentationWindowNanoseconds;
         var records = new List<(long Time, ulong Sequence, Recorder.Contracts.RecorderEvent Event)>();
@@ -71,10 +85,12 @@ public static class RecordingFileImageFrames
             }
         }
         var chooser = new RecordedImageFrameChooser(documentKey, frequency);
+        var compositor = new RecordedCompositorValueChooser(documentKey, frequency);
         foreach (var record in records.OrderBy(item => item.Time).ThenBy(item => item.Sequence))
         {
             chooser.Add(record.Event);
+            compositor.Add(record.Event);
         }
-        return chooser.Choose(cutNanoseconds, compositionNanoseconds);
+        return (chooser.Choose(cutNanoseconds, compositionNanoseconds), compositor.Choose(compositionNanoseconds));
     }
 }

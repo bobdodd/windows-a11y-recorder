@@ -14,6 +14,7 @@
 #include "chromium/recorder_bridge/full_walks.h"
 #include "chromium/recorder_bridge/layout_changes.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
+#include "chromium/recorder_bridge/recreation_compositor_values.h"
 #include "chromium/recorder_bridge/recreation_image_frames.h"
 
 namespace base {
@@ -72,6 +73,14 @@ void MarkRecreationBrowserPageProcess();
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 bool RecreationRefusesCompositorInput();
 
+// True, on any thread, when this process runs in the recreation mode and
+// shows no browser page, so that its page is held at the recorded moment:
+// no CSS animation or transition is run, and the recorded compositor values
+// are imposed ("Sub-step 2b-i design: compositor values imposed"). A browser
+// page, such as DevTools, runs its own animations as usual.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool RecreationHoldsTime();
+
 // "Sub-step 2a design: animated images held": in the recreation mode, Blink's
 // main thread gives the value of the X-A11y-Recorder-Image-Frame header of
 // the recorder's answer for an image, and its paint image is held at that
@@ -84,6 +93,13 @@ void HoldRecreationImageFrame(int64_t paint_image_id, std::string frame_header);
 // The frame index a paint image is held at in the recreation mode, or none.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 std::optional<size_t> RecreationHeldImageFrame(int64_t paint_image_id);
+
+// "Sub-step 2b-i design: compositor values imposed": in the recreation mode,
+// the compositor values of an element's data-a11y-recorded-compositor
+// attribute, which Blink imposes on its paint properties and style. Text not
+// of the attribute's form gives none. Gives none outside the recreation mode.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+RecreationCompositorValues RecreationCompositorValuesOf(std::string_view text);
 
 // Appends a non-secret startup diagnostic when the opt-in bridge log
 // environment variable is present. This works before Chromium logging starts.

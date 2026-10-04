@@ -6800,7 +6800,7 @@ STAGE_1A_BLINK_RECREATION_STYLE_HOOK = """
                                           /*is_inline_style=*/true);
     }
   }"""
-BLINK_RECREATION_STYLE_HOOK = """
+STAGE_9915_BLINK_RECREATION_STYLE_HOOK = """
   // Windows A11y Recorder recreation mode: an element's recorded computed
   // style is added as its last author declarations, important and attached
   // to the element, so it wins over every style sheet rule, the element's
@@ -6852,6 +6852,77 @@ BLINK_RECREATION_STYLE_HOOK = """
                                           /*is_inline_style=*/true);
     }
   }"""
+BLINK_RECREATION_STYLE_HOOK = """
+  // Windows A11y Recorder recreation mode: an element's recorded computed
+  // style is added as its last author declarations, important and attached
+  // to the element, so it wins over every style sheet rule, the element's
+  // own style attribute, and animations. The recorded style is read from the
+  // element's data-a11y-recorded-style attribute. An element recorded without
+  // a layout object at the frame then takes the display the recreation
+  // inferred for it, none or contents, from its
+  // data-a11y-recorded-no-layout-object attribute; it is set after the
+  // recorded style, so that it replaces any recorded display. The opacity
+  // the compositor drew at the frame, from the element's
+  // data-a11y-recorded-compositor attribute ("Sub-step 2b-i design:
+  // compositor values imposed"), is set after both, as recorded. A copy of
+  // the element in a user agent shadow tree, as an svg use element makes,
+  // takes none of these: the copy's own layout object was not the one
+  // recorded.
+  if (a11y_recorder::IsRecreationMode() && element.IsStyledElement() &&
+      !state.IsForPseudoElement()) {
+    const AtomicString& recorder_recorded_style =
+        element.getAttribute(AtomicString("data-a11y-recorded-style"));
+    const AtomicString& recorder_no_layout_object = element.getAttribute(
+        AtomicString("data-a11y-recorded-no-layout-object"));
+    const char* recorder_inferred_display =
+        element.IsInUserAgentShadowRoot()         ? nullptr
+        : recorder_no_layout_object == "none"     ? "display: none"
+        : recorder_no_layout_object == "contents" ? "display: contents"
+                                                  : nullptr;
+    const AtomicString& recorder_recorded_compositor = element.getAttribute(
+        AtomicString("data-a11y-recorded-compositor"));
+    std::optional<std::string> recorder_compositor_opacity;
+    if (!recorder_recorded_compositor.IsNull() &&
+        !element.IsInUserAgentShadowRoot()) {
+      recorder_compositor_opacity =
+          a11y_recorder::RecreationCompositorValuesOf(
+              recorder_recorded_compositor.Utf8())
+              .opacity_text;
+    }
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display ||
+        recorder_compositor_opacity) {
+      auto* recorder_imposed =
+          MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+      auto recorder_impose = [&](const String& recorder_text) {
+        const ImmutableCSSPropertyValueSet* recorder_parsed =
+            CSSParser::ParseInlineStyleDeclaration(recorder_text, &element);
+        for (unsigned recorder_index = 0;
+             recorder_index < recorder_parsed->PropertyCount();
+             ++recorder_index) {
+          const CSSPropertyValue& recorder_property =
+              recorder_parsed->PropertyAt(recorder_index);
+          recorder_imposed->SetProperty(recorder_property.Name(),
+                                        recorder_property.Value(),
+                                        /*important=*/true);
+        }
+      };
+      if (!recorder_recorded_style.IsNull()) {
+        recorder_impose(recorder_recorded_style);
+      }
+      if (recorder_inferred_display) {
+        recorder_impose(recorder_inferred_display);
+      }
+      if (recorder_compositor_opacity) {
+        recorder_impose("opacity: " +
+                        String::FromUTF8(*recorder_compositor_opacity));
+      }
+      collector.BeginAddingAuthorRulesForTreeScope(element.GetTreeScope());
+      collector.AddElementStyleProperties(recorder_imposed,
+                                          CascadeOrigin::kAuthor,
+                                          /*is_cacheable=*/false,
+                                          /*is_inline_style=*/true);
+    }
+  }"""
 
 
 def patch_blink_style_resolver(path: Path) -> None:
@@ -6862,7 +6933,10 @@ def patch_blink_style_resolver(path: Path) -> None:
     )
     text = upgrade_legacy_hooks(
         text,
-        ((STAGE_1A_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),),
+        (
+            (STAGE_1A_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
+            (STAGE_9915_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
+        ),
         path,
     )
     text = insert_before_once(
@@ -17121,6 +17195,463 @@ def blink_registered_presentation_widget_block() -> str:
     return block
 
 
+# Slice 4b sub-step 2b-i ("Sub-step 2b-i design: compositor values imposed"
+# in docs/architecture/page-recreation.md): the recreation holds time, and
+# imposes the compositor's recorded transforms, filters, and backdrop
+# filters on Blink's paint property tree. The recorded opacity is imposed
+# through the style, in BLINK_RECREATION_STYLE_HOOK.
+BLINK_CSS_ANIMATIONS_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/animation/css/css_animations.h"'
+)
+BLINK_CSS_ANIMATION_UPDATE_ANCHOR = """\
+void CSSAnimations::CalculateAnimationUpdate(
+    CSSAnimationUpdate& update,
+    Element& animating_element,
+    Element& element,
+    const ComputedStyleBuilder& style_builder,
+    const ComputedStyle* parent_style,
+    StyleResolver* resolver,
+    bool can_trigger_animations) {
+"""
+BLINK_CSS_ANIMATION_UPDATE_HOOK = BLINK_CSS_ANIMATION_UPDATE_ANCHOR + """\
+  // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): the
+  // recreation is a snapshot in time, so no CSS animation is started,
+  // updated, or cancelled in it.
+  if (a11y_recorder::RecreationHoldsTime()) {
+    return;
+  }
+"""
+BLINK_CSS_TRANSITION_UPDATE_ANCHOR = """\
+void CSSAnimations::CalculateTransitionUpdate(
+    CSSAnimationUpdate& update,
+    Element& animating_element,
+    const ComputedStyleBuilder& style_builder,
+    const ComputedStyle* old_style,
+    const StyleRecalcContext& style_recalc_context,
+    bool can_trigger_animations) {
+"""
+BLINK_CSS_TRANSITION_UPDATE_HOOK = BLINK_CSS_TRANSITION_UPDATE_ANCHOR + """\
+  // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): the
+  // recreation is a snapshot in time, so no CSS transition is started,
+  // updated, or cancelled in it.
+  if (a11y_recorder::RecreationHoldsTime()) {
+    return;
+  }
+"""
+
+
+def patch_blink_css_animations(path: Path) -> None:
+    """Sub-step 2b-i: no CSS animation or transition runs in a recreation."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_CSS_ANIMATIONS_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_CSS_ANIMATION_UPDATE_ANCHOR, BLINK_CSS_ANIMATION_UPDATE_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_CSS_TRANSITION_UPDATE_ANCHOR,
+        BLINK_CSS_TRANSITION_UPDATE_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+BLINK_PAINT_PROPERTY_TREE_BUILDER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/paint/'
+    'paint_property_tree_builder.h"'
+)
+BLINK_PAINT_PROPERTY_TREE_BUILDER_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/public/mojom/devtools/'
+    'console_message.mojom-blink.h"',
+    '#include "third_party/blink/renderer/core/dom/document.h"',
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/inspector/console_message.h"',
+    '#include "third_party/blink/renderer/platform/graphics/color.h"',
+    '#include "third_party/blink/renderer/platform/graphics/'
+    'compositor_filter_operations.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_builder.h"',
+)
+BLINK_PAINT_PROPERTY_HELPERS_ANCHOR = """\
+static bool NeedsIndividualTransform(
+    const LayoutObject& object,
+    CompositingReasons relevant_compositing_reasons,
+    bool (*style_test)(const ComputedStyle&)) {
+"""
+BLINK_PAINT_PROPERTY_HELPERS = """\
+// Windows A11y Recorder recreation mode ("Sub-step 2b-i design: compositor
+// values imposed"): the compositor values recorded at the frame for the
+// object's element, from its data-a11y-recorded-compositor attribute, or
+// none. A copy of the element in a user agent shadow tree takes none, as
+// with the recorded style.
+static a11y_recorder::RecreationCompositorValues RecorderCompositorValues(
+    const LayoutObject& object) {
+  if (!a11y_recorder::RecreationHoldsTime() || object.IsAnonymous()) {
+    return {};
+  }
+  const auto* recorder_element = DynamicTo<Element>(object.GetNode());
+  if (!recorder_element || recorder_element->IsInUserAgentShadowRoot()) {
+    return {};
+  }
+  const AtomicString& recorder_text = recorder_element->getAttribute(
+      AtomicString("data-a11y-recorded-compositor"));
+  if (recorder_text.IsNull()) {
+    return {};
+  }
+  return a11y_recorder::RecreationCompositorValuesOf(recorder_text.Utf8());
+}
+
+// Says in the console of the element's document that a recorded compositor
+// value was not imposed, and why, naming the element so that DevTools can
+// reveal it. A message repeated by a later update is not shown again.
+static void RecorderReportCompositorNotImposed(const LayoutObject& object,
+                                               const char* property,
+                                               const char* reason) {
+  Node* recorder_node = object.GetNode();
+  if (!recorder_node) {
+    return;
+  }
+  const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_node);
+  StringBuilder recorder_text;
+  recorder_text.Append("Recorded compositor ");
+  recorder_text.Append(property);
+  recorder_text.Append(" not imposed on ");
+  recorder_text.Append(recorder_node->nodeName());
+  if (const auto* recorder_element = DynamicTo<Element>(recorder_node);
+      recorder_element && recorder_element->HasID()) {
+    recorder_text.Append('#');
+    recorder_text.Append(recorder_element->GetIdAttribute());
+  }
+  recorder_text.Append(" (node ");
+  recorder_text.AppendNumber(recorder_id);
+  recorder_text.Append("): ");
+  recorder_text.Append(reason);
+  recorder_text.Append('.');
+  auto* recorder_message = MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kRendering,
+      mojom::blink::ConsoleMessageLevel::kWarning, recorder_text.ToString());
+  Document& recorder_document = recorder_node->GetDocument();
+  if (LocalFrame* recorder_frame = recorder_document.GetFrame()) {
+    recorder_message->SetNodes(recorder_frame, {recorder_id});
+  }
+  recorder_document.AddConsoleMessage(recorder_message,
+                                      /*discard_duplicates=*/true);
+}
+
+// The name the compositor-frame record gives a filter operation's type.
+static const char* RecorderFilterTypeName(cc::FilterOperation::FilterType type) {
+  switch (type) {
+    case cc::FilterOperation::GRAYSCALE:
+      return "grayscale";
+    case cc::FilterOperation::SEPIA:
+      return "sepia";
+    case cc::FilterOperation::SATURATE:
+      return "saturate";
+    case cc::FilterOperation::HUE_ROTATE:
+      return "hue-rotate";
+    case cc::FilterOperation::INVERT:
+      return "invert";
+    case cc::FilterOperation::BRIGHTNESS:
+      return "brightness";
+    case cc::FilterOperation::CONTRAST:
+      return "contrast";
+    case cc::FilterOperation::OPACITY:
+      return "opacity";
+    case cc::FilterOperation::BLUR:
+      return "blur";
+    case cc::FilterOperation::DROP_SHADOW:
+      return "drop-shadow";
+    case cc::FilterOperation::COLOR_MATRIX:
+      return "color-matrix";
+    case cc::FilterOperation::ZOOM:
+      return "zoom";
+    case cc::FilterOperation::REFERENCE:
+      return "reference";
+    case cc::FilterOperation::SATURATING_BRIGHTNESS:
+      return "saturating-brightness";
+    case cc::FilterOperation::ALPHA_THRESHOLD:
+      return "alpha-threshold";
+    case cc::FilterOperation::OFFSET:
+      return "offset";
+  }
+  return "unknown";
+}
+
+// How many numbers the record holds for an operation of the type Blink can
+// make again, or -1 for a type Blink makes no operation of.
+static int RecorderFilterNumberCount(cc::FilterOperation::FilterType type) {
+  switch (type) {
+    case cc::FilterOperation::DROP_SHADOW:
+      return 7;
+    case cc::FilterOperation::COLOR_MATRIX:
+      return 20;
+    case cc::FilterOperation::ZOOM:
+      return 2;
+    case cc::FilterOperation::REFERENCE:
+      return 0;
+    case cc::FilterOperation::ALPHA_THRESHOLD:
+    case cc::FilterOperation::OFFSET:
+      return -1;
+    default:
+      return 1;
+  }
+}
+
+// Replaces the numbers of the operations Blink made from the recorded style
+// with the recorded ones, when the recorded operations are of the same types
+// in the same order; otherwise leaves them and says so in the console. What
+// the record does not hold, such as a blur's tile mode or a reference
+// filter's image filter, is kept from Blink's own operation.
+static void RecorderImposeFilters(const LayoutObject& object,
+                                  bool backdrop,
+                                  CompositorFilterOperations& operations) {
+  const a11y_recorder::RecreationCompositorValues recorder_values =
+      RecorderCompositorValues(object);
+  const auto& recorder_recorded =
+      backdrop ? recorder_values.backdrop_filter : recorder_values.filter;
+  if (!recorder_recorded) {
+    return;
+  }
+  const char* recorder_property = backdrop ? "backdrop filter" : "filter";
+  const cc::FilterOperations& recorder_current =
+      operations.AsCcFilterOperations();
+  if (recorder_current.size() != recorder_recorded->size()) {
+    RecorderReportCompositorNotImposed(
+        object, recorder_property,
+        "the recorded style's filter has a different number of operations");
+    return;
+  }
+  for (size_t recorder_index = 0; recorder_index < recorder_current.size();
+       ++recorder_index) {
+    const cc::FilterOperation::FilterType recorder_type =
+        recorder_current.at(recorder_index).type();
+    const auto& recorder_operation = (*recorder_recorded)[recorder_index];
+    if (recorder_operation.type != RecorderFilterTypeName(recorder_type)) {
+      RecorderReportCompositorNotImposed(
+          object, recorder_property,
+          "the recorded style's filter has operations of other types");
+      return;
+    }
+    if (RecorderFilterNumberCount(recorder_type) < 0 ||
+        static_cast<int>(recorder_operation.numbers.size()) !=
+            RecorderFilterNumberCount(recorder_type)) {
+      RecorderReportCompositorNotImposed(
+          object, recorder_property,
+          "an operation is of a type or form Blink does not make");
+      return;
+    }
+  }
+  const cc::FilterOperations recorder_blink =
+      operations.ReleaseCcFilterOperations();
+  operations.Clear();
+  for (size_t recorder_index = 0; recorder_index < recorder_blink.size();
+       ++recorder_index) {
+    const cc::FilterOperation& recorder_own = recorder_blink.at(recorder_index);
+    const std::vector<double>& recorder_numbers =
+        (*recorder_recorded)[recorder_index].numbers;
+    switch (recorder_own.type()) {
+      case cc::FilterOperation::GRAYSCALE:
+        operations.AppendGrayscaleFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::SEPIA:
+        operations.AppendSepiaFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::SATURATE:
+        operations.AppendSaturateFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::HUE_ROTATE:
+        operations.AppendHueRotateFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::INVERT:
+        operations.AppendInvertFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::BRIGHTNESS:
+        operations.AppendBrightnessFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::CONTRAST:
+        operations.AppendContrastFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::OPACITY:
+        operations.AppendOpacityFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::SATURATING_BRIGHTNESS:
+        operations.AppendSaturatingBrightnessFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::BLUR:
+        operations.AppendBlurFilter(static_cast<float>(recorder_numbers[0]),
+                                    recorder_own.blur_tile_mode());
+        break;
+      case cc::FilterOperation::DROP_SHADOW:
+        operations.AppendDropShadowFilter(
+            gfx::Vector2d(static_cast<int>(recorder_numbers[1]),
+                          static_cast<int>(recorder_numbers[2])),
+            static_cast<float>(recorder_numbers[0]),
+            Color::FromSkColor4f(SkColor4f{
+                static_cast<float>(recorder_numbers[3]),
+                static_cast<float>(recorder_numbers[4]),
+                static_cast<float>(recorder_numbers[5]),
+                static_cast<float>(recorder_numbers[6])}));
+        break;
+      case cc::FilterOperation::COLOR_MATRIX: {
+        cc::FilterOperation::Matrix recorder_matrix;
+        for (size_t recorder_entry = 0; recorder_entry < 20; ++recorder_entry) {
+          recorder_matrix[recorder_entry] =
+              static_cast<float>(recorder_numbers[recorder_entry]);
+        }
+        operations.AppendColorMatrixFilter(recorder_matrix);
+        break;
+      }
+      case cc::FilterOperation::ZOOM:
+        operations.AppendZoomFilter(static_cast<float>(recorder_numbers[0]),
+                                    static_cast<int>(recorder_numbers[1]));
+        break;
+      case cc::FilterOperation::REFERENCE:
+        operations.AppendReferenceFilter(recorder_own.image_filter());
+        break;
+      case cc::FilterOperation::ALPHA_THRESHOLD:
+      case cc::FilterOperation::OFFSET:
+        break;
+    }
+  }
+}
+
+// The namespace name of an element ID namespace whose transform the
+// compositor animates, or null.
+static const char* RecorderTransformNamespace(
+    CompositorElementIdNamespace compositor_namespace) {
+  switch (compositor_namespace) {
+    case CompositorElementIdNamespace::kTranslateTransform:
+      return "translate-transform";
+    case CompositorElementIdNamespace::kRotateTransform:
+      return "rotate-transform";
+    case CompositorElementIdNamespace::kScaleTransform:
+      return "scale-transform";
+    case CompositorElementIdNamespace::kPrimaryTransform:
+      return "primary-transform";
+    default:
+      return nullptr;
+  }
+}
+
+"""
+BLINK_PAINT_PROPERTY_TRANSFORM_ANCHOR = """\
+        state.transform_and_origin =
+            TransformAndOriginState(box, reference_box, compute_matrix);
+"""
+BLINK_PAINT_PROPERTY_TRANSFORM_HOOK = BLINK_PAINT_PROPERTY_TRANSFORM_ANCHOR + """\
+        // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"):
+        // the matrix the compositor drew for this namespace at the frame
+        // replaces the one computed from the recorded style; the origin is
+        // kept, as the compositor's animations do not change it.
+        if (const char* recorder_namespace =
+                RecorderTransformNamespace(compositor_namespace)) {
+          const a11y_recorder::RecreationCompositorValues recorder_values =
+              RecorderCompositorValues(object_);
+          if (const auto recorder_found =
+                  recorder_values.transforms.find(recorder_namespace);
+              recorder_found != recorder_values.transforms.end()) {
+            const auto& recorder_m = recorder_found->second;
+            state.transform_and_origin.matrix = gfx::Transform::RowMajor(
+                recorder_m[0], recorder_m[1], recorder_m[2], recorder_m[3],
+                recorder_m[4], recorder_m[5], recorder_m[6], recorder_m[7],
+                recorder_m[8], recorder_m[9], recorder_m[10], recorder_m[11],
+                recorder_m[12], recorder_m[13], recorder_m[14],
+                recorder_m[15]);
+          }
+        }
+"""
+BLINK_PAINT_PROPERTY_NO_TRANSFORM_ANCHOR = """\
+    } else {
+      OnClearTransform((properties_->*clearer)());
+    }
+"""
+BLINK_PAINT_PROPERTY_NO_TRANSFORM_HOOK = """\
+    } else {
+      OnClearTransform((properties_->*clearer)());
+      // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): a
+      // recorded transform of a namespace the element has no node of is
+      // not imposed.
+      if (const char* recorder_namespace =
+              RecorderTransformNamespace(compositor_namespace);
+          recorder_namespace && RecorderCompositorValues(object_)
+                                    .transforms.count(recorder_namespace)) {
+        RecorderReportCompositorNotImposed(
+            object_, recorder_namespace,
+            "the recorded style gives the element no transform of this kind");
+      }
+    }
+"""
+BLINK_PAINT_PROPERTY_FILTER_ANCHOR = """\
+    layer->UpdateCompositorFilterOperationsForFilter(filter_info.operations);
+"""
+BLINK_PAINT_PROPERTY_FILTER_HOOK = BLINK_PAINT_PROPERTY_FILTER_ANCHOR + """\
+    // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): the
+    // filter the compositor drew at the frame.
+    RecorderImposeFilters(object, /*backdrop=*/false, filter_info.operations);
+"""
+BLINK_PAINT_PROPERTY_NO_FILTER_ANCHOR = """\
+    } else {
+      OnClearEffect(properties_->ClearFilter());
+      OnClearClip(properties_->ClearPixelMovingFilterClipExpander());
+    }
+"""
+BLINK_PAINT_PROPERTY_NO_FILTER_HOOK = """\
+    } else {
+      OnClearEffect(properties_->ClearFilter());
+      OnClearClip(properties_->ClearPixelMovingFilterClipExpander());
+      // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): a
+      // recorded filter of an element with no filter node is not imposed.
+      if (RecorderCompositorValues(object_).filter) {
+        RecorderReportCompositorNotImposed(
+            object_, "filter", "the recorded style gives the element no filter");
+      }
+    }
+"""
+BLINK_PAINT_PROPERTY_BACKDROP_ANCHOR = """\
+      layer->UpdateCompositorFilterOperationsForBackdropFilter(operations,
+                                                               bounds);
+"""
+BLINK_PAINT_PROPERTY_BACKDROP_HOOK = BLINK_PAINT_PROPERTY_BACKDROP_ANCHOR + """\
+      // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): the
+      // backdrop filter the compositor drew at the frame.
+      RecorderImposeFilters(object_, /*backdrop=*/true, operations);
+"""
+
+
+def patch_blink_paint_property_tree_builder(path: Path) -> None:
+    """Sub-step 2b-i: the recorded compositor transforms, filters, and
+    backdrop filters are imposed on the recreation's paint property tree."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_PAINT_PROPERTY_TREE_BUILDER_OWN_INCLUDE,
+        BLINK_PAINT_PROPERTY_TREE_BUILDER_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PAINT_PROPERTY_HELPERS_ANCHOR,
+        BLINK_PAINT_PROPERTY_HELPERS,
+        "RecorderCompositorValues(\n    const LayoutObject& object) {",
+        path,
+    )
+    for anchor, hook in (
+        (BLINK_PAINT_PROPERTY_TRANSFORM_ANCHOR, BLINK_PAINT_PROPERTY_TRANSFORM_HOOK),
+        (
+            BLINK_PAINT_PROPERTY_NO_TRANSFORM_ANCHOR,
+            BLINK_PAINT_PROPERTY_NO_TRANSFORM_HOOK,
+        ),
+        (BLINK_PAINT_PROPERTY_FILTER_ANCHOR, BLINK_PAINT_PROPERTY_FILTER_HOOK),
+        (BLINK_PAINT_PROPERTY_NO_FILTER_ANCHOR, BLINK_PAINT_PROPERTY_NO_FILTER_HOOK),
+        (BLINK_PAINT_PROPERTY_BACKDROP_ANCHOR, BLINK_PAINT_PROPERTY_BACKDROP_HOOK),
+    ):
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -17352,6 +17883,25 @@ def main() -> int:
         / "css"
         / "resolver"
         / "style_resolver.cc"
+    )
+    patch_blink_css_animations(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "animation"
+        / "css"
+        / "css_animations.cc"
+    )
+    patch_blink_paint_property_tree_builder(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "paint"
+        / "paint_property_tree_builder.cc"
     )
     patch_blink_inspector_css_agent(
         source

@@ -1,0 +1,420 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
+using Recorder.Contracts;
+
+namespace Recorder.Session;
+
+/// <summary>
+/// One compositor value a recreation imposes on a node: the element ID's
+/// namespace or the property it is written under in the node's
+/// data-a11y-recorded-compositor attribute, its text there, and the
+/// compositor frame that last changed it.
+/// </summary>
+public sealed record RecordedCompositorValue(
+    string Key,
+    string Text,
+    string FrameToken);
+
+/// <summary>
+/// The compositor values a document's nodes take in the recreation at a
+/// frame (slice 4b, "Sub-step 2b-i design: compositor values imposed"), by
+/// node, with the compositor frame they were chosen at and what the evidence
+/// panel says of them.
+/// </summary>
+public sealed record RecordedCompositorValues(
+    IReadOnlyDictionary<long, IReadOnlyList<RecordedCompositorValue>> ByNode,
+    IReadOnlyList<string> Notes)
+{
+    public static RecordedCompositorValues None { get; } =
+        new(new Dictionary<long, IReadOnlyList<RecordedCompositorValue>>(), []);
+
+    /// <summary>
+    /// The node's data-a11y-recorded-compositor attribute, or null: its values
+    /// in the order of their keys, separated by "; ", each the key and its
+    /// numbers separated by single spaces, as the recorder bridge's
+    /// ParseRecreationCompositorValues reads them.
+    /// </summary>
+    public string? Attribute(long nodeId) =>
+        ByNode.TryGetValue(nodeId, out var values) && values.Count > 0
+            ? string.Join("; ", values.Select(value => value.Text))
+            : null;
+}
+
+/// <summary>
+/// Chooses the compositor values each node of a document takes in the
+/// recreation (slice 4b, "Sub-step 2b-i design: compositor values imposed"),
+/// from the records it is given: the document's presentation records, the
+/// browser's clock synchronizations, and the compositor-animation-started,
+/// compositor-animation-ended, compositor-frame, and
+/// compositor-frame-presented records (protocol 0.48). Transforms,
+/// opacities, filters, and backdrop filters are chosen; scroll offsets, paint
+/// worklet progress, and image frames are not.
+/// </summary>
+public sealed class RecordedCompositorValueChooser
+{
+    private static readonly HashSet<string> TransformNamespaces = new(StringComparer.Ordinal)
+    {
+        "translate-transform",
+        "rotate-transform",
+        "scale-transform",
+        "primary-transform",
+    };
+
+    private static readonly HashSet<string> Properties = new(StringComparer.Ordinal)
+    {
+        "transform",
+        "opacity",
+        "filter",
+        "backdrop-filter",
+    };
+
+    private readonly string _documentToken;
+    private readonly long _recordingFrequency;
+    private readonly List<(long Time, string? Instance, long? Process, string FrameSink)> _presentations = [];
+    private readonly Dictionary<(string? Instance, long? Process), decimal> _frequencies = [];
+    private readonly List<Started> _started = [];
+    private readonly Dictionary<(string? Instance, long? Process, long KeyframeModel), long> _ended = [];
+    private readonly List<CompositorFrame> _frames = [];
+    private readonly Dictionary<(string? Instance, long? Process, long Host, string Token), long> _presented = [];
+
+    private sealed record Started(
+        long Time,
+        string? Instance,
+        long? Process,
+        string ElementId,
+        string Namespace,
+        long NodeId,
+        long KeyframeModel);
+
+    private sealed record CompositorFrame(
+        string? Instance,
+        long? Process,
+        string FrameSink,
+        long Host,
+        string Token,
+        IReadOnlyList<(string ElementId, string Property, string? Text)> Values);
+
+    /// <param name="documentKey">The document's state key, its token and identity.</param>
+    /// <param name="recordingFrequency">The recording's clock frequency, for a process with no clock synchronization record.</param>
+    public RecordedCompositorValueChooser(string documentKey, long recordingFrequency)
+    {
+        ArgumentNullException.ThrowIfNull(documentKey);
+        ArgumentOutOfRangeException.ThrowIfLessThan(recordingFrequency, 1);
+        _documentToken = documentKey.Split(' ', 2)[0];
+        _recordingFrequency = recordingFrequency;
+    }
+
+    /// <summary>The channels whose records the chooser reads.</summary>
+    public static IReadOnlySet<string> Channels { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "browser.presentation",
+        "browser.lifecycle",
+        BrowserEvidenceChannels.Compositor,
+    };
+
+    /// <summary>Takes one record, in the order recorded.</summary>
+    public void Add(RecorderEvent record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        var payload = record.Payload;
+        if (payload.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        var context = payload.TryGetProperty("context", out var value) && value.ValueKind == JsonValueKind.Object
+            ? value
+            : default;
+        var instance = Text(context, "browserInstanceId");
+        var process = Int64(context, "processId");
+        switch ((record.Channel, record.EventType))
+        {
+            case ("browser.presentation", "presentation-feedback"):
+            case ("browser.presentation", "presentation-swapped"):
+                if (Text(context, "documentToken") == _documentToken && Text(payload, "frameSinkId") is { } sink)
+                {
+                    _presentations.Add((record.MonotonicNanoseconds, instance, process, sink));
+                }
+                break;
+            case ("browser.lifecycle", "browser-clock-synchronized"):
+                if (Text(payload, "monotonicFrequency") is { } frequencyText &&
+                    decimal.TryParse(frequencyText, NumberStyles.Number, CultureInfo.InvariantCulture, out var frequency) &&
+                    frequency > 0)
+                {
+                    _frequencies.TryAdd((Text(payload, "browserInstanceId"), Int64(payload, "processId")), frequency);
+                }
+                break;
+            case (BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorAnimationStarted):
+                if (Text(context, "documentToken") == _documentToken &&
+                    Int64(payload, "nodeId") is { } node &&
+                    payload.TryGetProperty("keyframeModels", out var models) &&
+                    models.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var model in models.EnumerateArray())
+                    {
+                        if (Text(model, "elementId") is { } element &&
+                            Text(model, "elementIdNamespace") is { } elementNamespace &&
+                            Int64(model, "keyframeModelId") is { } keyframeModel)
+                        {
+                            _started.Add(new Started(record.MonotonicNanoseconds, instance, process, element, elementNamespace, node, keyframeModel));
+                        }
+                    }
+                }
+                break;
+            case (BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorAnimationEnded):
+                if (payload.TryGetProperty("keyframeModelIds", out var ended) && ended.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var id in ended.EnumerateArray())
+                    {
+                        if (id.ValueKind == JsonValueKind.Number && id.TryGetInt64(out var keyframeModel))
+                        {
+                            _ended[(instance, process, keyframeModel)] = record.MonotonicNanoseconds;
+                        }
+                    }
+                }
+                break;
+            case (BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFrame):
+                if (Int64(payload, "layerTreeHostId") is { } host &&
+                    Text(payload, "frameToken") is { } token &&
+                    payload.TryGetProperty("widget", out var widget) &&
+                    Text(widget, "frameSinkId") is { } frameSink &&
+                    payload.TryGetProperty("changes", out var changes) &&
+                    changes.ValueKind == JsonValueKind.Array)
+                {
+                    var values = new List<(string, string, string?)>();
+                    foreach (var change in changes.EnumerateArray())
+                    {
+                        if (Text(change, "property") is { } property && Properties.Contains(property) &&
+                            Text(change, "elementId") is { } element)
+                        {
+                            values.Add((element, property, change.TryGetProperty("value", out var changed) ? ValueText(property, changed) : null));
+                        }
+                    }
+                    if (values.Count > 0)
+                    {
+                        _frames.Add(new CompositorFrame(instance, process, frameSink, host, token, values));
+                    }
+                }
+                break;
+            case (BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFramePresented):
+                if (payload.TryGetProperty("failed", out var failed) && failed.ValueKind == JsonValueKind.False &&
+                    Int64(payload, "layerTreeHostId") is { } presentedHost &&
+                    Text(payload, "frameToken") is { } presentedToken &&
+                    Text(payload, "presentedTicks") is { } ticksText &&
+                    decimal.TryParse(ticksText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ticks) &&
+                    record.NativeTimestamp is { } native)
+                {
+                    var key = (instance, process);
+                    var processFrequency = _frequencies.TryGetValue(key, out var recorded) ? recorded : _recordingFrequency;
+                    var offset = decimal.Round(
+                        (ticks - native.Value) * 1_000_000_000m / processFrequency,
+                        MidpointRounding.AwayFromZero);
+                    _presented[(instance, process, presentedHost, presentedToken)] = record.MonotonicNanoseconds + (long)offset;
+                }
+                break;
+        }
+    }
+
+    /// <param name="compositionNanoseconds">The recording time of the frame's composition.</param>
+    public RecordedCompositorValues Choose(long compositionNanoseconds)
+    {
+        var presentation = _presentations.LastOrDefault(item => item.Time <= compositionNanoseconds);
+        if (presentation.FrameSink is null)
+        {
+            return RecordedCompositorValues.None;
+        }
+        var (instance, process) = (presentation.Instance, presentation.Process);
+
+        // The last compositor frame of the document's frame sink presented at
+        // or before the composition, and the values of its compositor up to
+        // it, each the latest change.
+        var last = -1;
+        long presentedTime = 0;
+        for (var index = 0; index < _frames.Count; index++)
+        {
+            var frame = _frames[index];
+            if (frame.Instance == instance && frame.Process == process && frame.FrameSink == presentation.FrameSink &&
+                _presented.TryGetValue((instance, process, frame.Host, frame.Token), out var presented) &&
+                presented <= compositionNanoseconds)
+            {
+                last = index;
+                presentedTime = presented;
+            }
+        }
+        if (last < 0)
+        {
+            return _frames.Any(frame => frame.Instance == instance && frame.Process == process)
+                ? new RecordedCompositorValues(RecordedCompositorValues.None.ByNode,
+                    ["No compositor frame of the page's frame sink with a transform, opacity, filter, or backdrop filter was presented at or before the frame, so every element is drawn from its recorded style."])
+                : RecordedCompositorValues.None;
+        }
+        var chosen = _frames[last];
+        var values = new Dictionary<(string ElementId, string Property), (string? Text, string Token)>();
+        for (var index = 0; index <= last; index++)
+        {
+            var frame = _frames[index];
+            if (frame.Instance != instance || frame.Process != process || frame.Host != chosen.Host)
+            {
+                continue;
+            }
+            foreach (var (element, property, text) in frame.Values)
+            {
+                values[(element, property)] = (text, frame.Token);
+            }
+        }
+
+        var byNode = new Dictionary<long, List<RecordedCompositorValue>>();
+        int unjoined = 0, ended = 0, absent = 0, unreadable = 0;
+        foreach (var ((element, property), (text, token)) in values.OrderBy(item => item.Key.ElementId, StringComparer.Ordinal).ThenBy(item => item.Key.Property, StringComparer.Ordinal))
+        {
+            // The element's latest start in the document's renderer at or
+            // before the composition names its node and namespace.
+            var start = _started.LastOrDefault(item =>
+                item.Instance == instance && item.Process == process && item.ElementId == element &&
+                item.Time <= compositionNanoseconds);
+            if (start is null)
+            {
+                unjoined++;
+                continue;
+            }
+            // A value is dropped when its animation ended and a later
+            // rendering update of the document was presented, which holds
+            // the main thread's value after it.
+            if (_ended.TryGetValue((instance, process, start.KeyframeModel), out var endedTime) &&
+                endedTime >= start.Time && endedTime <= compositionNanoseconds &&
+                _presentations.Any(item => item.Instance == instance && item.Process == process &&
+                                           item.Time > endedTime && item.Time <= compositionNanoseconds))
+            {
+                ended++;
+                continue;
+            }
+            if (text is null)
+            {
+                absent++;
+                continue;
+            }
+            var key = property == "transform" ? start.Namespace : property;
+            if (property == "transform" && !TransformNamespaces.Contains(key))
+            {
+                unreadable++;
+                continue;
+            }
+            if (text == Malformed)
+            {
+                unreadable++;
+                continue;
+            }
+            if (!byNode.TryGetValue(start.NodeId, out var list))
+            {
+                byNode[start.NodeId] = list = [];
+            }
+            if (list.Any(item => item.Key == key))
+            {
+                // Two element IDs of one node under one key, as when a node's
+                // layout object was replaced: the later element ID's value is
+                // kept, as it was started later.
+                list.RemoveAll(item => item.Key == key);
+            }
+            // A filter list with no operations is the key alone.
+            list.Add(new RecordedCompositorValue(key, text.Length == 0 ? key : $"{key} {text}", token));
+        }
+        foreach (var list in byNode.Values)
+        {
+            list.Sort((left, right) => string.CompareOrdinal(left.Key, right.Key));
+        }
+
+        static string Count(int value) => value.ToString(CultureInfo.InvariantCulture);
+        var notes = new List<string>();
+        if (byNode.Count > 0)
+        {
+            notes.Add($"{Count(byNode.Values.Sum(list => list.Count))} compositor values are imposed on {Count(byNode.Count)} elements, as of compositor frame {chosen.Token} of the page's frame sink, presented at {(presentedTime / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s: "
+                + string.Join("; ", byNode.OrderBy(item => item.Key).Select(item =>
+                    $"node {item.Key.ToString(CultureInfo.InvariantCulture)}: " + string.Join(", ", item.Value.Select(value => $"{value.Key}, last changed in compositor frame {value.FrameToken}"))))
+                + ". They are written on each element in its data-a11y-recorded-compositor attribute, which is shown in the Elements pane but was not an attribute of the recorded page. Transforms, filters, and backdrop filters are imposed on Blink's paint properties, so DevTools' Computed pane shows the recorded style's values for them; the opacity is imposed through the style. An imposed filter whose operations are not those of the recorded style, or a transform the recorded style gives the element no node for, is not imposed, and DevTools' Console names the element.");
+        }
+        if (unjoined > 0)
+        {
+            notes.Add($"{Count(unjoined)} compositor values have no compositor-animation-started record of the page at or before the frame naming their element, as for an animation started before the recorder's client connected, so they are not imposed.");
+        }
+        if (ended > 0)
+        {
+            notes.Add($"{Count(ended)} compositor values belong to animations that had ended before a later presented rendering update, so the recorded style holds their element's value and they are not imposed.");
+        }
+        if (absent > 0)
+        {
+            notes.Add($"{Count(absent)} compositor values were no longer in the drawn tree at the frame, so they are not imposed.");
+        }
+        if (unreadable > 0)
+        {
+            notes.Add($"{Count(unreadable)} compositor values are of a namespace or form the recreation does not impose, so they are not imposed.");
+        }
+        return new RecordedCompositorValues(
+            byNode.ToDictionary(item => item.Key, item => (IReadOnlyList<RecordedCompositorValue>)item.Value),
+            notes);
+    }
+
+    // What ValueText gives for a value not of its property's form.
+    private const string Malformed = "\u0000";
+
+    // A value's numbers as the recording wrote them, separated by single
+    // spaces: a transform's 16 entries or an opacity; a filter's operations,
+    // separated by ", ", each its type and numbers, or empty for no
+    // operations. Null for a null value, and Malformed for a value not of its
+    // property's form.
+    private static string? ValueText(string property, JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+        switch (property)
+        {
+            case "transform":
+                return value.ValueKind == JsonValueKind.Array && value.GetArrayLength() == 16 &&
+                       value.EnumerateArray().All(entry => entry.ValueKind == JsonValueKind.Number)
+                    ? string.Join(" ", value.EnumerateArray().Select(entry => entry.GetRawText()))
+                    : Malformed;
+            case "opacity":
+                return value.ValueKind == JsonValueKind.Number ? value.GetRawText() : Malformed;
+            default:
+                if (value.ValueKind != JsonValueKind.Array)
+                {
+                    return Malformed;
+                }
+                var operations = new List<string>();
+                foreach (var operation in value.EnumerateArray())
+                {
+                    if (Text(operation, "type") is not { } type || type.Length == 0 ||
+                        !type.All(character => character is >= 'a' and <= 'z' or '-') ||
+                        !operation.TryGetProperty("numbers", out var numbers) ||
+                        numbers.ValueKind != JsonValueKind.Array ||
+                        !numbers.EnumerateArray().All(entry => entry.ValueKind == JsonValueKind.Number))
+                    {
+                        return Malformed;
+                    }
+                    var text = new StringBuilder(type);
+                    foreach (var number in numbers.EnumerateArray())
+                    {
+                        text.Append(' ').Append(number.GetRawText());
+                    }
+                    operations.Add(text.ToString());
+                }
+                return string.Join(", ", operations);
+        }
+    }
+
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object &&
+        element.TryGetProperty(name, out var value) &&
+        value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static long? Int64(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object &&
+        element.TryGetProperty(name, out var value) &&
+        value.ValueKind == JsonValueKind.Number &&
+        value.TryGetInt64(out var result)
+            ? result
+            : null;
+}

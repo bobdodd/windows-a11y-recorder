@@ -7567,6 +7567,43 @@ class RecreationIntegrationTests(unittest.TestCase):
             INTEGRATE.describe_signature_mismatches("patched", first, signatures),
         )
 
+    def test_upgrades_the_inferred_display_style_hook_to_the_compositor_opacity(self):
+        self.assertNotIn(
+            INTEGRATE.STAGE_9915_BLINK_RECREATION_STYLE_HOOK,
+            INTEGRATE.BLINK_RECREATION_STYLE_HOOK,
+        )
+        source = self.STYLE_RESOLVER_SOURCE.replace(
+            INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            INTEGRATE.STAGE_9915_BLINK_RECREATION_STYLE_HOOK
+            + INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(INTEGRATE.STAGE_9915_BLINK_RECREATION_STYLE_HOOK, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_STYLE_HOOK))
+        hook = INTEGRATE.BLINK_RECREATION_STYLE_HOOK
+        # The compositor's opacity is set last, as recorded, and never on a
+        # user agent shadow copy.
+        self.assertIn('AtomicString("data-a11y-recorded-compositor")', hook)
+        self.assertIn("!element.IsInUserAgentShadowRoot()) {\n      recorder_compositor_opacity =", hook)
+        self.assertLess(
+            hook.index("recorder_impose(recorder_inferred_display);"),
+            hook.index('recorder_impose("opacity: " +'),
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", first, signatures)
+        )
+
     def test_upgrades_the_stage_1a_style_hook_to_the_inferred_display(self):
         self.assertNotIn(
             INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK,
@@ -8218,6 +8255,134 @@ class RecreationIntegrationTests(unittest.TestCase):
                 check=True,
             )
             subprocess.run([str(binary)], check=True)
+
+    def test_the_compositor_values_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_compositor_values.h",', build)
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        self.assertIn("RecreationCompositorValues RecreationCompositorValuesOf(", source)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_compositor_values_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_compositor_values_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_holds_css_animations_and_transitions_once(self):
+        source = self.patch_source_twice(
+            "css_animations.cc",
+            INTEGRATE.BLINK_CSS_ANIMATIONS_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_CSS_ANIMATION_UPDATE_ANCHOR
+            + "  update.Clear();\n}\n\n"
+            + INTEGRATE.BLINK_CSS_TRANSITION_UPDATE_ANCHOR
+            + "  update.Clear();\n}\n\n}  // namespace blink\n",
+            INTEGRATE.patch_blink_css_animations,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CSS_ANIMATION_UPDATE_HOOK))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CSS_TRANSITION_UPDATE_HOOK))
+        # Each returns before it changes the update.
+        self.assertEqual(2, source.count("if (a11y_recorder::RecreationHoldsTime()) {\n    return;\n  }\n  update.Clear();"))
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(0, signatures["RecreationHoldsTime"])
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, signatures)
+        )
+
+    PAINT_PROPERTY_SOURCE = (
+        INTEGRATE.BLINK_PAINT_PROPERTY_TREE_BUILDER_OWN_INCLUDE
+        + "\n\nnamespace blink {\nnamespace {\n\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_HELPERS_ANCHOR
+        + "  return false;\n}\n\n"
+        + "void FragmentPaintPropertyTreeBuilder::UpdateIndividualTransform() {\n"
+        + "    if (needs) {\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_TRANSFORM_ANCHOR
+        + INTEGRATE.BLINK_PAINT_PROPERTY_NO_TRANSFORM_ANCHOR
+        + "}\n\n"
+        + "static void UpdateFilterEffect(const LayoutObject& object) {\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_FILTER_ANCHOR
+        + "}\n\n"
+        + "void FragmentPaintPropertyTreeBuilder::UpdateFilter() {\n"
+        + "    if (needs) {\n"
+        + "      Update();\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_NO_FILTER_ANCHOR
+        + "}\n\n"
+        + "void FragmentPaintPropertyTreeBuilder::PopulateBackdropFilterIfNeeded() {\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_BACKDROP_ANCHOR
+        + "}\n\n}  // namespace\n}  // namespace blink\n"
+    )
+
+    def test_imposes_the_compositor_values_on_the_paint_properties_once(self):
+        source = self.patch_source_twice(
+            "paint_property_tree_builder.cc",
+            self.PAINT_PROPERTY_SOURCE,
+            INTEGRATE.patch_blink_paint_property_tree_builder,
+        )
+        for include in INTEGRATE.BLINK_PAINT_PROPERTY_TREE_BUILDER_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_PAINT_PROPERTY_HELPERS))
+        # The helpers come before their first use.
+        self.assertLess(
+            source.index("static void RecorderImposeFilters("),
+            source.index("static bool NeedsIndividualTransform("),
+        )
+        for hook in (
+            INTEGRATE.BLINK_PAINT_PROPERTY_TRANSFORM_HOOK,
+            INTEGRATE.BLINK_PAINT_PROPERTY_NO_TRANSFORM_HOOK,
+            INTEGRATE.BLINK_PAINT_PROPERTY_FILTER_HOOK,
+            INTEGRATE.BLINK_PAINT_PROPERTY_NO_FILTER_HOOK,
+            INTEGRATE.BLINK_PAINT_PROPERTY_BACKDROP_HOOK,
+        ):
+            self.assertEqual(1, source.count(hook))
+        helpers = INTEGRATE.BLINK_PAINT_PROPERTY_HELPERS
+        # Values are read only while the recreation holds time, from the
+        # element's own attribute, never a user agent shadow copy's.
+        self.assertIn("if (!a11y_recorder::RecreationHoldsTime() || object.IsAnonymous()) {", helpers)
+        self.assertIn("recorder_element->IsInUserAgentShadowRoot()", helpers)
+        self.assertIn('AtomicString("data-a11y-recorded-compositor")', helpers)
+        # A filter is replaced only when its operations match, and what the
+        # record does not hold is kept from Blink's own operation.
+        self.assertIn("recorder_current.size() != recorder_recorded->size()", helpers)
+        self.assertIn("recorder_own.blur_tile_mode()", helpers)
+        self.assertIn("operations.AppendReferenceFilter(recorder_own.image_filter());", helpers)
+        self.assertLess(
+            helpers.index("RecorderReportCompositorNotImposed(\n          object, recorder_property,\n          \"an operation"),
+            helpers.index("operations.ReleaseCcFilterOperations();"),
+        )
+        # The transform's matrix is replaced and its origin kept.
+        transform = INTEGRATE.BLINK_PAINT_PROPERTY_TRANSFORM_HOOK
+        self.assertIn("state.transform_and_origin.matrix = gfx::Transform::RowMajor(", transform)
+        self.assertNotIn("transform_and_origin.origin", transform)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(1, signatures["RecreationCompositorValuesOf"])
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, signatures)
+        )
 
     def test_each_paint_image_made_from_an_image_is_recorded_once(self):
         source = self.patch_source_twice(

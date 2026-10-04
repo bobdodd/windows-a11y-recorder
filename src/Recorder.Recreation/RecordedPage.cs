@@ -78,6 +78,8 @@ public static class RecordedPage
         // request of the tab.
         // The content takes the resources, which the recreation's server
         // disposes; resources it does not use are disposed here.
+        // The compositor values do not depend on where the page is served.
+        var compositorValues = resources?.CompositorValues ?? RecordedCompositorValues.None;
         if (!servedAtRecordedAddress)
         {
             resources?.Dispose();
@@ -131,6 +133,8 @@ public static class RecordedPage
             notes.Add("The recorded address is not an http or https URL, so the page is served from the recorder's loopback address, and its relative URLs do not resolve as they did.");
         }
         notes.Add("The recreation is a snapshot in time and takes no input except scrolling with its scrollbars and the wheel, the right-click that opens the context menu with Inspect, and the DevTools element picker: clicks, keys, touch, and hovering do nothing, and the page receives no wheel event, so focus, selection, and control state stay as recorded. Scrolling in the recreation changes that scroll offset from the one the recreation opened at, and DevTools then shows the moved offset.");
+        notes.Add("The recreation holds the recorded moment: no CSS animation or transition is run in it, though the recorded style keeps their properties, and SVG animation elements are not held by this. The compositor's transforms, opacities, filters, and backdrop filters at the frame are imposed where recorded; its scroll offsets, paint worklet colors and clip paths are not yet, so those are drawn from the main thread's records.");
+        notes.AddRange(compositorValues.Notes);
         notes.Add("Element namespaces are not recorded: an element named in capitals is built in the HTML namespace, and any other in the namespace of an svg or math ancestor.");
         var documentId = DocumentNodeId(tree);
         var (scrollX, scrollY) = state.Layout.ScrollOffsets.TryGetValue(documentId, out var rootScroll)
@@ -176,7 +180,7 @@ public static class RecordedPage
             new RecreationFidelity("not-checked", "The recreation is not yet compared with the recording.", []),
             notes);
         return new RecreationContent(
-            Markup(Tree(state, used.Faces, fontAddress, placed), DocumentTypeName(tree, documentId), nonce),
+            Markup(Tree(state, used.Faces, fontAddress, placed, compositorValues), DocumentTypeName(tree, documentId), nonce),
             evidence,
             nonce)
         {
@@ -246,10 +250,12 @@ public static class RecordedPage
         BrowserDocumentState state,
         IReadOnlyList<RecordedFontFace>? faces = null,
         string? fontAddress = null,
-        IReadOnlyList<PopupData>? popups = null)
+        IReadOnlyList<PopupData>? popups = null,
+        RecordedCompositorValues? compositorValues = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var documentId = DocumentNodeId(tree);
+        var compositor = compositorValues ?? RecordedCompositorValues.None;
         var interaction = state.Interaction.Current();
         var manualSlots = new List<(long Slot, long[] Assigned)>();
         var withoutLayoutObject = NoLayoutObjectDisplays(state);
@@ -261,7 +267,7 @@ public static class RecordedPage
         {
             writer.WriteStartObject();
             writer.WritePropertyName("document");
-            WriteNode(writer, tree, state.Layout, withoutLayoutObject, documentId, documentId, manualSlots, manual: false);
+            WriteNode(writer, tree, state.Layout, withoutLayoutObject, compositor, documentId, documentId, manualSlots, manual: false);
 
             writer.WriteStartArray("manualSlots");
             foreach (var (slot, assigned) in manualSlots)
@@ -373,6 +379,7 @@ public static class RecordedPage
         DomDocumentTree tree,
         LayoutDocumentChangeState layout,
         IReadOnlyDictionary<long, string> withoutLayoutObject,
+        RecordedCompositorValues compositor,
         long id,
         long documentId,
         List<(long Slot, long[] Assigned)> manualSlots,
@@ -416,6 +423,8 @@ public static class RecordedPage
         WriteText(writer, "recordedStyle", record is { } styled ? RecordedStyle(styled) : null);
         WriteText(writer, "recordedLayout", record is { } laidOut ? RecordedLayout(laidOut, id) : null);
         WriteText(writer, "noLayoutObject", withoutLayoutObject.TryGetValue(id, out var display) ? display : null);
+        // Slice 4b sub-step 2b-i: the compositor values the element takes.
+        WriteText(writer, "recordedCompositor", node.NodeType == "element" ? compositor.Attribute(id) : null);
         if (node.NodeName == "SLOT" && manual && node.AssignedNodes is { } assigned && assigned != DomTreeRebuilder.Cut)
         {
             manualSlots.Add((id, JsonSerializer.Deserialize<long[]>(assigned) ?? []));
@@ -441,10 +450,10 @@ public static class RecordedPage
             writer.WriteBoolean("serializable", fields[5].GetBoolean());
             writer.WritePropertyName("referenceTarget");
             fields[8].WriteTo(writer);
-            WriteChildren(writer, tree, layout, withoutLayoutObject, shadow, documentId, manualSlots, fields[3].GetString() == "manual");
+            WriteChildren(writer, tree, layout, withoutLayoutObject, compositor, shadow, documentId, manualSlots, fields[3].GetString() == "manual");
             writer.WriteEndObject();
         }
-        WriteChildren(writer, tree, layout, withoutLayoutObject, node, documentId, manualSlots, manual);
+        WriteChildren(writer, tree, layout, withoutLayoutObject, compositor, node, documentId, manualSlots, manual);
         writer.WriteEndObject();
     }
 
@@ -453,6 +462,7 @@ public static class RecordedPage
         DomDocumentTree tree,
         LayoutDocumentChangeState layout,
         IReadOnlyDictionary<long, string> withoutLayoutObject,
+        RecordedCompositorValues compositor,
         DomNode node,
         long documentId,
         List<(long Slot, long[] Assigned)> manualSlots,
@@ -463,7 +473,7 @@ public static class RecordedPage
         {
             if (tree.Nodes.ContainsKey(child))
             {
-                WriteNode(writer, tree, layout, withoutLayoutObject, child, documentId, manualSlots, manual);
+                WriteNode(writer, tree, layout, withoutLayoutObject, compositor, child, documentId, manualSlots, manual);
             }
         }
         writer.WriteEndArray();

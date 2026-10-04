@@ -144,6 +144,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (node.noLayoutObject !== null && node.noLayoutObject !== undefined) {
           element.setAttribute("data-a11y-recorded-no-layout-object", node.noLayoutObject);
         }
+        if (node.recordedCompositor !== null && node.recordedCompositor !== undefined) {
+          element.setAttribute("data-a11y-recorded-compositor", node.recordedCompositor);
+        }
         if (node.shadowRoot) {
           attachShadow(element, node.shadowRoot, namespace);
         }

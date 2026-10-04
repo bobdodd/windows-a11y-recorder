@@ -30,6 +30,7 @@ component("recorder_bridge") {
     "network_text.h",
     "recorder_protocol.cc",
     "recorder_protocol.h",
+    "recreation_compositor_values.h",
     "recreation_image_frames.h",
     "recreation_input.h",
   ]

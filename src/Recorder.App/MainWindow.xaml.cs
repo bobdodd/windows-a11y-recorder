@@ -1691,7 +1691,7 @@ public partial class MainWindow : Window
                     timings.Add(new RecreationTiming("Reading the page's fonts and images from the recording", Math.Round(resourcesMilliseconds - framesMilliseconds, 1)));
                     if (resources.ImageFramesMilliseconds is { } imageFrames)
                     {
-                        timings.Add(new RecreationTiming("Choosing the frame of each animated image from the recording's compositor records", imageFrames));
+                        timings.Add(new RecreationTiming("Choosing the frame of each animated image and the compositor values from the recording's compositor records", imageFrames));
                     }
                     clock.Restart();
                     try

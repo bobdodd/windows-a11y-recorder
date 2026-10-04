@@ -1893,6 +1893,11 @@ bool RecreationRefusesCompositorInput() {
          !g_recreation_browser_page_process.load(std::memory_order_relaxed);
 }
 
+bool RecreationHoldsTime() {
+  return IsRecreationMode() &&
+         !g_recreation_browser_page_process.load(std::memory_order_relaxed);
+}
+
 namespace {
 
 using RecreationImageFrames = HeldImageFrames<base::Lock, base::AutoLock>;
@@ -1919,6 +1924,16 @@ std::optional<size_t> RecreationHeldImageFrame(int64_t paint_image_id) {
     return std::nullopt;
   }
   return HeldRecreationImageFrames().Find(paint_image_id);
+}
+
+RecreationCompositorValues RecreationCompositorValuesOf(std::string_view text) {
+  if (!IsRecreationMode()) {
+    return {};
+  }
+  return ParseRecreationCompositorValues(
+      text, [](std::string_view number, double* value) {
+        return base::StringToDouble(number, value);
+      });
 }
 
 RecorderPipeClient* GetProcessRecorderClient() {

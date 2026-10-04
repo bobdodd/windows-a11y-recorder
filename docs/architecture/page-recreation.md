@@ -4183,7 +4183,7 @@ what is recorded and the first does not:
   ties that ID to a node, so this part adds the ID to the scroll offset
   record (protocol 0.49). Its design is written once 2b-i is tested.
 
-#### Sub-step 2b-i design: compositor values imposed (proposed, not built)
+#### Sub-step 2b-i design: compositor values imposed (agreed, built)
 
 What the recording holds, read from the recording of the fixture with 1c
 (`20261004-131014-0d65424b09d04391aab4ef4714aec25c`):
@@ -4331,6 +4331,50 @@ Required tests:
   when it was moving, look as in the captured frame, and two screenshots
   of the recreation taken a second apart are identical. The blur panel is
   not composited and is drawn from the recorded style, as now.
+
+#### Sub-step 2b-i as built
+
+Built as designed, with these differences:
+
+- Time is held only in a recreation process that shows no browser page:
+  `RecreationHoldsTime()` is `IsRecreationMode()` and not a browser page
+  process, as for the refused input, so DevTools' own animations still
+  run. The transform and filter hooks read values only while it is true.
+- No node is forced. `NeedsTranslate`, `NeedsRotate`, `NeedsScale`,
+  `NeedsTransform`, and `NeedsFilter` are unchanged, because forcing a
+  node changes the element's stacking and compositing from what the
+  recorded style gives. A recorded transform of a namespace the element
+  has no node of, as when the recorded style holds `none`, or a recorded
+  filter of an element with no filter node, is not imposed, and the
+  Console of the element's document names the element and the reason.
+  Whether this leaves the skip link's motion unshown at some frames is to
+  be seen on the target machine.
+- Filters are imposed only when the recorded operations are of the same
+  number and types, in the same order, as those Blink made from the
+  recorded style, and each has the expected count of numbers; otherwise
+  none of the element's filter is imposed, and the Console says so. What
+  the record does not hold is kept from Blink's own operation: a blur's
+  tile mode, and a reference filter's image filter, so a reference filter
+  is drawn from the recorded style and the other operations of the same
+  filter are imposed.
+- A drop shadow's color passes through `AppendDropShadowFilter`, which
+  makes it from `color.Rgb()`, so it is rounded to 8 bits a channel.
+- Popups take no compositor values: only the page document's nodes are
+  given the attribute.
+- The values are read in the same pass over the compositor records as the
+  image frames, and the evidence panel's timing names both. The values
+  are given to the page whether or not it is served at its recorded
+  address.
+- The evidence panel always says that the recreation holds the recorded
+  moment and which compositor values are not imposed yet.
+
+Checked in the sandbox with the fixture recording of the design, at
+frames 38.297 s, 38.492 s, and 56.697 s: 7 values were chosen for 5
+elements at each (the rotation, the three separate transform properties,
+the fade's opacity, the frosted glass panel's backdrop blur, and the web
+animation's transform), with the recorded number text unchanged. Building
+Chromium and the look of the recreation are to be checked on the target
+machine.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 

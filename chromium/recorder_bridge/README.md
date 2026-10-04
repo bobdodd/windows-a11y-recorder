@@ -460,6 +460,25 @@ frame, the first when none is held, and
 image advances. Both functions do nothing outside the recreation mode. See
 "Sub-step 2a" in the page recreation design.
 
+In the recreation mode, the page is held at the recorded moment and the
+compositor values recorded at the frame are imposed (slice 4b sub-step
+2b-i). `RecreationHoldsTime()` is true in a recreation process that shows no
+browser page, so DevTools still runs its own animations. While it is true,
+`CSSAnimations::CalculateAnimationUpdate` and
+`CSSAnimations::CalculateTransitionUpdate` return before they make any
+update. The app writes each element's values in its
+`data-a11y-recorded-compositor` attribute, which
+`RecreationCompositorValuesOf` parses with
+`ParseRecreationCompositorValues` (in `recreation_compositor_values.h`,
+tested by `recreation_compositor_values_test.cc`); malformed text gives no
+values. `FragmentPaintPropertyTreeBuilder::UpdateIndividualTransform`
+replaces the matrix of each transform node with a recorded value of its
+namespace, `UpdateFilterEffect` and `PopulateBackdropFilterIfNeeded`
+replace the numbers of filter operations of the recorded types, and the
+style resolution hook adds the recorded opacity after the recorded style.
+A value that cannot be imposed is named in the Console of the element's
+document. See "Sub-step 2b-i" in the page recreation design.
+
 Protocol 0.48 adds the `browser.compositor` channel (slice 4b sub-step 1).
 `RegisterCompositorWidget` is called where each presentation request is
 made, and names the widget of the compositor with that `LayerTreeHost` ID.

@@ -222,16 +222,17 @@ public static class RecordingFileResources
         }
 
         RecordedImageFrames? frames = null;
+        RecordedCompositorValues? compositorValues = null;
         double? framesMilliseconds = null;
         if (compositionNanoseconds is { } composition)
         {
             var clock = System.Diagnostics.Stopwatch.StartNew();
-            frames = RecordingFileImageFrames.Read(reader, documentKey, cutNanoseconds, composition, cancellationToken);
+            (frames, compositorValues) = RecordingFileImageFrames.ReadWithCompositorValues(reader, documentKey, cutNanoseconds, composition, cancellationToken);
             framesMilliseconds = Math.Round(clock.Elapsed.TotalMilliseconds, 1);
             notes.AddRange(frames.Notes);
         }
 
-        return new RecordedPageResources(faces, images, Bytes, notes, owner, frames, framesMilliseconds);
+        return new RecordedPageResources(faces, images, Bytes, notes, owner, frames, framesMilliseconds, compositorValues);
     }
 
     private static string? FaceName(JsonElement payload)
