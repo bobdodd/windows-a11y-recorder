@@ -4168,6 +4168,170 @@ so a recording of it has http addresses and its recreation is served at its
 recorded address with its images. A page recorded from a file still shows
 no images in its recreation; that limit stands.
 
+#### Sub-step 2b in parts (proposed)
+
+Proposed 2026-10-04, after the owner asked to start on 2b ("Please push
+and then start on 2b"). 2b is delivered in two parts, each tested on the
+target machine before the next, because the second needs a change to
+what is recorded and the first does not:
+
+- 2b-i: no CSS animation or transition run in the recreation, and the
+  compositor's recorded transforms, opacities, filters, and backdrop
+  filters imposed (designed below).
+- 2b-ii: the compositor's recorded scroll offsets imposed. The compositor
+  names a scroller only by its compositor element ID, and nothing recorded
+  ties that ID to a node, so this part adds the ID to the scroll offset
+  record (protocol 0.49). Its design is written once 2b-i is tested.
+
+#### Sub-step 2b-i design: compositor values imposed (proposed, not built)
+
+What the recording holds, read from the recording of the fixture with 1c
+(`20261004-131014-0d65424b09d04391aab4ef4714aec25c`):
+
+- The main thread's computed style of each composited element is recorded
+  at almost every rendering update, as CSS text with six significant
+  digits: 3,641 recorded styles of `#rotation` with 3,630 distinct
+  transforms, and 3,640 of `#fade` with 3,622 distinct opacities. The
+  recorded style therefore holds a value close to the drawn one, not the
+  drawn one.
+- Compared with the last recorded style written before it, each of the
+  5,980 compositor opacities of `#fade` differs by a median of 0.0133 and
+  at most 0.1200. This compares records by the time they were written, not
+  by presentation, so it shows the size of the difference, not its exact
+  value at a frame; at the fixture's rate of 0.4 a second, 0.0133 is about
+  two frames of the animation.
+- The skip link's recorded transform is `none` in some records, so a
+  compositor value can belong to an element whose recorded style has no
+  value for that property.
+
+Read in the target machine's checkout, 2026-10-04:
+
+- Blink makes one transform node for each of `translate`, `rotate`,
+  `scale`, and `transform`, in
+  `FragmentPaintPropertyTreeBuilder::UpdateIndividualTransform`
+  (`third_party/blink/renderer/core/paint/paint_property_tree_builder.cc`),
+  each with its matrix computed without the transform origin, and the
+  compositor element ID of its namespace. `UpdateCcTransformLocalMatrix`
+  (`platform/graphics/compositing/property_tree_manager.cc`) copies the
+  matrix to the cc transform node's `local` and the origin to its
+  `origin`. The `local` matrix the recording holds for a namespace is
+  therefore the matrix of the Blink node of that namespace, and the origin
+  is unchanged by the animation.
+- The effect node's `opacity`, `filters`, and `backdrop_filters` are
+  copied from the Blink effect nodes (`effect.Opacity()`,
+  `filter->AsCcFilterOperations()`,
+  `backdrop_filter->AsCcFilterOperations()`), which `UpdateEffect`,
+  `UpdateFilter`, and `PopulateBackdropFilterIfNeeded` make from the style.
+- Whether a node exists is decided from the style and the compositing
+  reasons (`NeedsTranslate`, `NeedsRotate`, `NeedsScale`,
+  `NeedsTransform`, `NeedsFilter`, `NeedsEffectIgnoringClipPathAnd2DScale`).
+  An element that is not animated in the recreation has no animation
+  compositing reason, so an element whose recorded style holds `none` for
+  the property would have no node of that namespace.
+- `CSSAnimations::CalculateAnimationUpdate` and
+  `CSSAnimations::CalculateTransitionUpdate`
+  (`core/animation/css/css_animations.cc`) are where style resolution
+  starts, updates, and cancels CSS animations and transitions. A CSS
+  animation of a property the recorded style imposes as important is not
+  put on the compositor (`KeyframeEffect::AffectsImportantProperty`), but
+  it still runs on the main thread (`element_animations.h`), and a
+  transition is above important declarations in the cascade.
+
+What the recreation does:
+
+- Nothing is animated. In the recreation mode, `CalculateAnimationUpdate`
+  and `CalculateTransitionUpdate` return before they make any update, so
+  no CSS animation or transition is started. The recorded computed style
+  keeps its `animation` and `transition` properties, and DevTools shows
+  them, but they are not run. Whether a CSS animation changes what the
+  recreation draws today is not established; this makes it certain that
+  none does, and stops the main thread work of running them. SVG
+  animation elements are not part of 2b.
+- The app chooses the compositor values at the frame as 2a chooses image
+  frames: for the frame sink of the document's widget, the last
+  `compositor-frame` presented at or before the frame's composition,
+  together with each earlier frame's values of the same compositor not
+  yet replaced. A value is joined to its node by its element ID, through
+  the `compositor-animation-started` records of the same renderer, which
+  name the node and the element ID's namespace. As "Which state a captured
+  frame shows" states, a value is dropped when its animation ended, by a
+  `compositor-animation-ended` record, and a later rendering update was
+  presented at or before the composition, and a null value is dropped.
+- Each node with values is given them in an attribute of its own,
+  `data-a11y-recorded-compositor`, so DevTools shows them on the element.
+  It holds, for each value, the namespace or property and the numbers as
+  the recording wrote them: a transform's 16 entries row by row, an
+  opacity, or a filter's operations with their types and numbers. The app
+  copies the recorded number text, and Blink reads it with
+  `base::StringToDouble`, so no number is rounded on the way.
+- Transforms are imposed on Blink's paint property tree, not through the
+  style: in the recreation mode, `UpdateIndividualTransform` replaces the
+  matrix of a namespace with a recorded value with that value, and keeps
+  the origin it computed from the recorded style. `NeedsTranslate`,
+  `NeedsRotate`, `NeedsScale`, and `NeedsTransform` are true for a node
+  with a recorded value of their namespace, so the node exists when the
+  recorded style holds `none`. A `rotate` matrix cannot be written as a
+  `rotate` value without recomputing it, which is why the property tree is
+  used.
+- Filters and backdrop filters are imposed on the paint property tree as
+  well: `UpdateFilter` and `PopulateBackdropFilterIfNeeded` replace the
+  operations made from the style with ones made from the recorded types
+  and numbers. A reference filter (an SVG `url()` filter) is recorded with
+  no numbers and cannot be made again, so it is not imposed, and the
+  Console names the element. `NeedsFilter` is true for a node with a
+  recorded filter.
+- Opacity is imposed through the style: the style resolution hook of
+  slice 1a adds the recorded opacity after the recorded style, as an
+  important declaration of the same origin. The opacity decides whether
+  the element is a stacking context and has an effect node, and imposing
+  it through the style keeps those decisions Blink's own; the recorded
+  value, a float, is written with enough digits to be read back as the
+  same float.
+- The evidence panel has one note listing each imposed value's node, its
+  property, the compositor frame that last changed it, and the compositor
+  frame and presentation time it was chosen at, and counts the values not
+  imposed with their reasons.
+
+Limits:
+
+- A composited animation is drawn from a layer the compositor rasterized
+  at a scale of its own choosing, and the recreation draws the element
+  without the animation, so its raster scale, and with it the pixels of
+  scaled or rotated text and images, can differ. The values are the
+  recorded ones; the pixels are not claimed equal.
+- An element whose stacking or compositing during the recording came
+  only from its running animation, with a recorded opacity of exactly 1
+  and no other reason, is not a stacking context in the recreation.
+- An animation that started before the recorder's client connected has
+  no `compositor-animation-started` record, so its values cannot be
+  joined to a node and are not imposed; the panel counts them.
+- DevTools' Computed pane shows the recorded style's transform and
+  filters, not the imposed ones; the attribute shows the imposed values.
+- Scroll offsets are 2b-ii's, background colors and clip paths 2c's.
+
+Required tests:
+
+- Unit (app): the values chosen at a frame from a sequence of compositor
+  frames and their presentations, including a failed presentation, a
+  frame presented after the composition, another frame sink's frames, a
+  null value, an ended animation before and after a later presented
+  rendering update, and an element ID with no start record; the join of a
+  value to its node and namespace through another renderer's records not
+  taken; the attribute's text, with the recorded number text unchanged;
+  the panel's note.
+- Unit (integration script): each hook against copies of the target
+  machine's `css_animations.cc`, `paint_property_tree_builder.cc`, and
+  `style_resolver.cc`, applied once and unchanged on a second run, with
+  the slice 1a style hook upgraded; the bridge call shapes.
+- Unit (bridge): the parsing of the attribute's text, with malformed text
+  imposing nothing.
+- System, on the target machine: a new recording of the fixture served
+  over http, opened at several frames; at each, the rotation, separate
+  transform properties, fade, and frosted glass panels, and the skip link
+  when it was moving, look as in the captured frame, and two screenshots
+  of the recreation taken a second apart are identical. The blur panel is
+  not composited and is drawn from the recorded style, as now.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
