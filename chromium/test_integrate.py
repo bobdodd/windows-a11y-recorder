@@ -7567,6 +7567,29 @@ class RecreationIntegrationTests(unittest.TestCase):
             INTEGRATE.describe_signature_mismatches("patched", first, signatures),
         )
 
+    def test_upgrades_the_first_compositor_opacity_style_hook(self):
+        legacy = INTEGRATE.STAGE_1E0B_BLINK_RECREATION_STYLE_HOOK
+        self.assertIn("String::FromUTF8(", legacy)
+        self.assertNotIn("String::FromUTF8(", INTEGRATE.BLINK_RECREATION_STYLE_HOOK)
+        self.assertIn(
+            '("opacity: " + *recorder_compositor_opacity).c_str()));',
+            INTEGRATE.BLINK_RECREATION_STYLE_HOOK,
+        )
+        source = self.STYLE_RESOLVER_SOURCE.replace(
+            INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            legacy + INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_STYLE_HOOK))
+
     def test_upgrades_the_inferred_display_style_hook_to_the_compositor_opacity(self):
         self.assertNotIn(
             INTEGRATE.STAGE_9915_BLINK_RECREATION_STYLE_HOOK,
@@ -7594,7 +7617,7 @@ class RecreationIntegrationTests(unittest.TestCase):
         self.assertIn("!element.IsInUserAgentShadowRoot()) {\n      recorder_compositor_opacity =", hook)
         self.assertLess(
             hook.index("recorder_impose(recorder_inferred_display);"),
-            hook.index('recorder_impose("opacity: " +'),
+            hook.index('("opacity: " + *recorder_compositor_opacity)'),
         )
         signatures = INTEGRATE.parse_bridge_signatures(
             (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")

@@ -4368,6 +4368,12 @@ Built as designed, with these differences:
 - The evidence panel always says that the recreation holds the recorded
   moment and which compositor values are not imposed yet.
 
+Found while building on the target machine: the first delivery (1e0bdfd)
+called `String::FromUTF8`, which Blink does not have, and `style_resolver.cc`
+failed to compile. The style hook now makes the declaration as a
+`std::string` and converts it with `String::FromUtf8`, and a checkout
+patched with the first hook is upgraded to it.
+
 Checked in the sandbox with the fixture recording of the design, at
 frames 38.297 s, 38.492 s, and 56.697 s: 7 values were chosen for 5
 elements at each (the rotation, the three separate transform properties,

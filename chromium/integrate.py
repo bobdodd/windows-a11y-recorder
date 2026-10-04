@@ -6852,7 +6852,8 @@ STAGE_9915_BLINK_RECREATION_STYLE_HOOK = """
                                           /*is_inline_style=*/true);
     }
   }"""
-BLINK_RECREATION_STYLE_HOOK = """
+# The 2b-i hook as first delivered (1e0bdfd), which named String::FromUTF8.
+STAGE_1E0B_BLINK_RECREATION_STYLE_HOOK = """
   // Windows A11y Recorder recreation mode: an element's recorded computed
   // style is added as its last author declarations, important and attached
   // to the element, so it wins over every style sheet rule, the element's
@@ -6923,6 +6924,77 @@ BLINK_RECREATION_STYLE_HOOK = """
                                           /*is_inline_style=*/true);
     }
   }"""
+BLINK_RECREATION_STYLE_HOOK = """
+  // Windows A11y Recorder recreation mode: an element's recorded computed
+  // style is added as its last author declarations, important and attached
+  // to the element, so it wins over every style sheet rule, the element's
+  // own style attribute, and animations. The recorded style is read from the
+  // element's data-a11y-recorded-style attribute. An element recorded without
+  // a layout object at the frame then takes the display the recreation
+  // inferred for it, none or contents, from its
+  // data-a11y-recorded-no-layout-object attribute; it is set after the
+  // recorded style, so that it replaces any recorded display. The opacity
+  // the compositor drew at the frame, from the element's
+  // data-a11y-recorded-compositor attribute ("Sub-step 2b-i design:
+  // compositor values imposed"), is set after both, as recorded. A copy of
+  // the element in a user agent shadow tree, as an svg use element makes,
+  // takes none of these: the copy's own layout object was not the one
+  // recorded.
+  if (a11y_recorder::IsRecreationMode() && element.IsStyledElement() &&
+      !state.IsForPseudoElement()) {
+    const AtomicString& recorder_recorded_style =
+        element.getAttribute(AtomicString("data-a11y-recorded-style"));
+    const AtomicString& recorder_no_layout_object = element.getAttribute(
+        AtomicString("data-a11y-recorded-no-layout-object"));
+    const char* recorder_inferred_display =
+        element.IsInUserAgentShadowRoot()         ? nullptr
+        : recorder_no_layout_object == "none"     ? "display: none"
+        : recorder_no_layout_object == "contents" ? "display: contents"
+                                                  : nullptr;
+    const AtomicString& recorder_recorded_compositor = element.getAttribute(
+        AtomicString("data-a11y-recorded-compositor"));
+    std::optional<std::string> recorder_compositor_opacity;
+    if (!recorder_recorded_compositor.IsNull() &&
+        !element.IsInUserAgentShadowRoot()) {
+      recorder_compositor_opacity =
+          a11y_recorder::RecreationCompositorValuesOf(
+              recorder_recorded_compositor.Utf8())
+              .opacity_text;
+    }
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display ||
+        recorder_compositor_opacity) {
+      auto* recorder_imposed =
+          MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+      auto recorder_impose = [&](const String& recorder_text) {
+        const ImmutableCSSPropertyValueSet* recorder_parsed =
+            CSSParser::ParseInlineStyleDeclaration(recorder_text, &element);
+        for (unsigned recorder_index = 0;
+             recorder_index < recorder_parsed->PropertyCount();
+             ++recorder_index) {
+          const CSSPropertyValue& recorder_property =
+              recorder_parsed->PropertyAt(recorder_index);
+          recorder_imposed->SetProperty(recorder_property.Name(),
+                                        recorder_property.Value(),
+                                        /*important=*/true);
+        }
+      };
+      if (!recorder_recorded_style.IsNull()) {
+        recorder_impose(recorder_recorded_style);
+      }
+      if (recorder_inferred_display) {
+        recorder_impose(recorder_inferred_display);
+      }
+      if (recorder_compositor_opacity) {
+        recorder_impose(String::FromUtf8(
+            ("opacity: " + *recorder_compositor_opacity).c_str()));
+      }
+      collector.BeginAddingAuthorRulesForTreeScope(element.GetTreeScope());
+      collector.AddElementStyleProperties(recorder_imposed,
+                                          CascadeOrigin::kAuthor,
+                                          /*is_cacheable=*/false,
+                                          /*is_inline_style=*/true);
+    }
+  }"""
 
 
 def patch_blink_style_resolver(path: Path) -> None:
@@ -6936,6 +7008,7 @@ def patch_blink_style_resolver(path: Path) -> None:
         (
             (STAGE_1A_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
             (STAGE_9915_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
+            (STAGE_1E0B_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
         ),
         path,
     )
