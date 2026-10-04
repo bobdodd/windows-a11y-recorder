@@ -4103,7 +4103,10 @@ Tests run in the sandbox, 2026-10-04:
   integration script's tests: 219 passed. The bridge's other native tests
   (full walks, recreation input, evidence cost) passed.
 
-Not yet run: the system test on the target machine.
+System test on the target machine, 2026-10-04, with 6a83cf8 on a
+recording of the fixture served over http ("Images of a page recorded from
+a file" below), as the owner reported: "The animated numbers match on
+every check".
 
 #### Images of a page recorded from a file (proposed, not built)
 
