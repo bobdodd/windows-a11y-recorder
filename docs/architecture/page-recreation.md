@@ -3695,6 +3695,88 @@ before. Not done here: the
 instrumented Chromium build and the integration and system tests, which
 are for the target machine.
 
+#### Sub-step 1c design (proposed)
+
+Proposed 2026-10-04, after the fixture's recordings, for the owner's
+agreement before it is built. It covers what the table above calls
+`image-paint-image` and an animated image's frame in `compositor-frame`,
+and the cost measurement "To be settled" names.
+
+Read in the Chromium checkout on the target machine:
+
+- A Blink image has one ID of its own, made when it is made:
+  `Image::paint_image_id()`, set from `PaintImage::GetNextId()` in its
+  constructor (`third_party/blink/renderer/platform/graphics/image.cc`).
+- The paint images drawn from it are made in
+  `BitmapImage::PaintImageForCurrentFrameWithInfo` (`bitmap_image.cc`),
+  which calls `CreatePaintImage` when no paint image is cached for the
+  case. By default the paint image takes the image's own ID (the
+  "shared" sequence). With the CSS `image-animation` property, an element
+  whose image is paused or running on its own gets a new ID of its own
+  (`PaintImage::GetNextId()`, the "own" sequence, cached by the element's
+  `DOMNodeId`), which can name the shared ID it is synchronised to; a
+  stopped image keeps the ID it had or, with none, gets a new one. So one image resource can be drawn
+  under several paint image IDs, and a record made once, when the
+  resource finishes loading, as the table above has it, would miss every
+  ID but the first.
+- In cc, `ImageAnimationController` (`cc/trees/image_animation_controller.h`)
+  keeps each animated paint image's state by `PaintImage::Id`. Its
+  `active_index()` is the frame the active tree draws; its
+  `GetFrameIndexForImage` gives that for `ACTIVE_TREE`.
+  `GatherFrameIndexes` gives the pending tree's frames, not the drawn
+  ones, so it is not used. `LayerTreeHostImpl::GetFrameIndexForImage`
+  gives frame 0 for a paint image that should not animate, which the
+  controller does not hold.
+
+What is recorded (protocol 0.48, additive):
+
+| Record | Where | Holds |
+| --- | --- | --- |
+| `image-resource` (one field added) | `ImageResource::Finish`, after the bytes are given to the image | `imageId`: the Blink image's own ID, or null when no image was made, as for a decode error |
+| `image-paint-image` | Blink, main thread, in `PaintImageForCurrentFrameWithInfo`, when it makes a paint image with an ID not recorded before in the renderer | `imageId`; `paintImageId`; `sequence`, `shared` or `own`; `nodeId`, the element's `DOMNodeId` for an own sequence, else null; `syncTargetPaintImageId`, or null |
+| `compositor-frame` (a change added) | the 1a hook in `DrawLayers` | for each paint image the controller holds, `{"paintImageId", "property": "image-frame", "value"}`, the active tree's frame index; null once when the image leaves the controller |
+
+So a drawn frame index is tied to its image by `paintImageId` to
+`image-paint-image`, by `imageId` to `image-resource`, and by its digest to
+the bytes. The cc side adds a recorder accessor to
+`ImageAnimationController` that lists each held ID with its
+`active_index()`, as `GatherFrameIndexes` lists pending ones. A frame
+index, like every compositor value, is recorded only when it changes.
+
+The cost measurement:
+
+- The bridge's cost lines time each bridge call, not the hooks' work
+  before it (the 1a and 1b hooks read the trees and copy values first).
+  Each hook added in sub-step 1 is therefore timed whole, as its own
+  kind in the same cost lines: the `DrawLayers` hook, the paint worklet
+  hooks, the paint worklet results hook, and the two image hooks.
+- Measured on the target machine with the fixture, which has a running
+  composited animation, a background color animation, and animated
+  images, as "To be settled" asks; the count, mean, and longest call of
+  each kind are recorded here. A pause of the renderer like the one in
+  the fixture's third recording, if the recorder caused it, shows as a
+  longest call or span of that length in the line for its interval; a
+  pause the recorder did not cause is not measured.
+
+Limits:
+
+- An image from a `data:` URL has no `image-resource` record, as before,
+  so its `image-paint-image` names an image ID with no resource; the
+  element's recorded attribute holds the URL.
+- A multipart image and an image that failed its integrity check have no
+  `image-resource` record, as before.
+- An SVG image is not a `BitmapImage`, and its animation is not the
+  controller's; it is not covered.
+
+Required tests: unit tests of each hook against copies of the target
+machine's files, applied once and in place, with a tree patched by 1a and
+1b upgraded to the same result as a fresh tree; unit tests of the new
+fields and records against the receiver's contracts and the validator;
+and, on the target machine, an integration test with the fixture: each
+animated image's `image-paint-image` and `image-resource` records linked
+as above, and its recorded frame indexes advancing through 0 to 7 at
+250 ms a frame.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
