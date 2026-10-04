@@ -5357,10 +5357,11 @@ hooks of "Scrollbars take input" are upgraded once and left unchanged on a
 second run (221 passed); both patches run against copies of the target
 machine's `input_handler_proxy.cc` and `web_frame_widget_impl.cc` as
 patched by 6a83cf8, applied once, unchanged on a second run, and checked
-against the bridge's signatures; the app's note test. Not yet run: the
-system test on the target machine, that the wheel scrolls the recreated
-page and its scrollable areas, the scrollbars still work, and clicks and
-keys still do nothing.
+against the bridge's signatures; the app's note test. The system test on
+the target machine, that the wheel scrolls the recreated page and its
+scrollable areas, the scrollbars still work, and clicks and keys still do
+nothing, with 9915aa8, as the owner reported on 2026-10-04: "yes, that
+works".
 
 #### Popup on screen (agreed)
 
