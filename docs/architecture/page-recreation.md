@@ -3319,9 +3319,10 @@ Each sub-step is tested on the target machine before the next.
   animations and an animated image is opened at several frames, and each
   recreation is compared with the captured frame.
 
-#### Animation fixture (proposed)
+#### Animation fixture (built)
 
-Proposed 2026-10-03, at the owner's request: existing sites do not hold
+Proposed 2026-10-03, at the owner's request, and agreed by the owner the
+same day ("yes please build as written"): existing sites do not hold
 each kind of animation this slice records, so a fixture page in the
 repository does, each kind in its own labelled panel. It serves the
 target machine tests of sub-step 1 (each record present, with the values
@@ -3381,6 +3382,30 @@ Tests: the fixture is a test asset; it is checked by opening it in the
 instrumented Chromium on the target machine and reading the recording for
 the records the table names. No automated test is added for the page
 itself.
+
+As built, in `tests/fixtures/animation/`: `index.html`, `make_images.py`,
+and the images it made, `frames.gif`, `frames.webp`, and `frames.png`.
+Each image has eight frames of 96 by 96 pixels, each 250 ms, numbered 0
+to 7 by white squares on a solid color, so no font is needed; the page
+lists the colors. Each held twin's rule sets `animation-play-state:
+paused` after its animation shorthand, which would otherwise reset it.
+The clip path change of shape panel lasts 4 s, so its held twin is at
+1 s. Script runs in two panels only: the compositor scroll panel, which
+also makes its 60 rows, and the Web Animations panel.
+
+Checked here, in a headless Chromium of the build environment with the
+images inlined as data URLs (not the instrumented Chromium): every held
+twin's computed value is the one the page states (`rotate(90deg)` as a
+matrix; translate 30px, rotate 45deg, scale 1.125; opacity 0.8;
+`blur(1.5px)`; backdrop `blur(2px)`; `rgb(153, 0, 51)` for the background
+and the text; `inset(15% 8.75%)`; `circle(27.5% at 50% 50%)`;
+`inset(10%)`; width 150px), each `paused`. The first Tab focuses the skip
+link, which ends at `translateY(0)`; the scroll button scrolls the list to
+row 30 (649 px); the Web Animations button starts its animation; the
+focus ring's outline ends at `rgb(0, 80, 200)` on keyboard focus; and the
+three images advance their frames. Not checked here: anything about the
+recording, which needs the target machine, and whether a file URL's
+images are recorded.
 
 
 Sub-step 1 is delivered in three parts, each tested on the target machine

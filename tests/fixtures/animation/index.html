@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Animation evidence fixture</title>
+  <!--
+    The slice 4b animation fixture. See docs/architecture/page-recreation.md,
+    "Animation fixture". Each panel states its element, property, keyframes,
+    duration, and timing. Running animations use linear timing and repeat
+    from page load; each has a twin held still at 25 percent of its first
+    iteration (animation-play-state: paused with a negative delay). The page
+    does not test prefers-reduced-motion. Script runs only in the panels
+    that say so.
+  -->
+  <style>
+    :root {
+      color: #1a1a1a;
+      background: #ffffff;
+      font: 16px/1.4 system-ui, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+    }
+    header, main {
+      max-width: 72rem;
+      margin: 0 auto;
+      padding: 0 1rem;
+    }
+    h1 {
+      font-size: 1.6rem;
+    }
+    h2 {
+      font-size: 1.15rem;
+      margin: 0 0 0.25rem;
+    }
+    .panels {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+      gap: 1rem;
+      padding-bottom: 2rem;
+    }
+    section {
+      border: 1px solid #8a8a8a;
+      border-radius: 4px;
+      padding: 0.75rem;
+    }
+    .facts {
+      margin: 0 0 0.5rem;
+      font-size: 0.9rem;
+    }
+    .facts code {
+      font-size: 0.85rem;
+    }
+    .pair {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+    .stage {
+      position: relative;
+      width: 9.5rem;
+      height: 7rem;
+      border: 1px dashed #8a8a8a;
+      overflow: hidden;
+    }
+    .stage-label {
+      font-size: 0.8rem;
+      margin: 0.25rem 0 0;
+    }
+    .box {
+      position: absolute;
+      left: 0.5rem;
+      top: 1.5rem;
+      width: 3rem;
+      height: 3rem;
+      background: #0050c8;
+    }
+    /* Each held twin's rule, after its animation shorthand, sets
+       animation-play-state: paused and a negative delay. */
+
+    /* Skip link: a transform transition on focus. */
+    .skip-link {
+      position: absolute;
+      left: 1rem;
+      top: 0;
+      padding: 0.5rem 1rem;
+      background: #1a1a1a;
+      color: #ffffff;
+      transform: translateY(-120%);
+      transition: transform 1s linear;
+    }
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    /* Rotation: transform rotate() 0 to 360 degrees, 4 s. */
+    @keyframes rotation {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    #rotation, #rotation-held {
+      animation: rotation 4s linear infinite;
+    }
+    #rotation-held {
+      animation-delay: -1s;
+      animation-play-state: paused;
+    }
+
+    /* Separate transform properties: translate, rotate, and scale, 4 s. */
+    @keyframes separate {
+      from { translate: 0 0; rotate: 0deg; scale: 1; }
+      to { translate: 120px 0; rotate: 180deg; scale: 1.5; }
+    }
+    #separate, #separate-held {
+      animation: separate 4s linear infinite;
+    }
+    #separate-held {
+      animation-delay: -1s;
+      animation-play-state: paused;
+    }
+
+    /* Fade: opacity 1 to 0.2, 2 s, alternate. */
+    @keyframes fade {
+      from { opacity: 1; }
+      to { opacity: 0.2; }
+    }
+    #fade, #fade-held {
+      animation: fade 2s linear infinite alternate;
+    }
+    #fade-held {
+      animation-delay: -0.5s;
+      animation-play-state: paused;
+    }
+
+    /* Blur: filter blur() 0 to 6 px, 3 s, alternate. */
+    @keyframes blur {
+      from { filter: blur(0px); }
+      to { filter: blur(6px); }
+    }
+    #blur, #blur-held {
+      animation: blur 3s linear infinite alternate;
+    }
+    #blur-held {
+      animation-delay: -0.75s;
+      animation-play-state: paused;
+    }
+
+    /* Frosted glass: backdrop-filter blur() 0 to 8 px, 3 s, alternate. */
+    .stripes {
+      background: repeating-linear-gradient(
+        45deg, #cc0000 0 8px, #ffffff 8px 16px, #0000cc 16px 24px);
+    }
+    .glass {
+      position: absolute;
+      left: 1.5rem;
+      top: 1.25rem;
+      width: 6rem;
+      height: 4.5rem;
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid #1a1a1a;
+    }
+    @keyframes frost {
+      from { backdrop-filter: blur(0px); }
+      to { backdrop-filter: blur(8px); }
+    }
+    #frost, #frost-held {
+      animation: frost 3s linear infinite alternate;
+    }
+    #frost-held {
+      animation-delay: -0.75s;
+      animation-play-state: paused;
+    }
+
+    /* Compositor scroll. */
+    #scroller {
+      position: relative;
+      width: 20rem;
+      max-width: 100%;
+      height: 8rem;
+      overflow-y: scroll;
+      border: 1px solid #1a1a1a;
+    }
+    #scroller li:nth-child(odd) {
+      background: #e8eef8;
+    }
+
+    /* Background color: red to blue, 2 s, alternate. */
+    @keyframes background {
+      from { background-color: rgb(204, 0, 0); }
+      to { background-color: rgb(0, 0, 204); }
+    }
+    #background, #background-held {
+      animation: background 2s linear infinite alternate;
+    }
+    #background-held {
+      animation-delay: -0.5s;
+      animation-play-state: paused;
+    }
+
+    /* Clip path, same shape: inset() to inset(), 3 s, alternate. */
+    .clipped {
+      position: absolute;
+      left: 0.5rem;
+      top: 0.5rem;
+      width: 8rem;
+      height: 6rem;
+      background: #006600;
+    }
+    @keyframes clip-inset {
+      from { clip-path: inset(10%); }
+      to { clip-path: inset(30% 5%); }
+    }
+    #clip-inset, #clip-inset-held {
+      animation: clip-inset 3s linear infinite alternate;
+    }
+    #clip-inset-held {
+      animation-delay: -0.75s;
+      animation-play-state: paused;
+    }
+
+    /* Clip path, circle: circle() radius 20 to 50 percent, 3 s, alternate. */
+    @keyframes clip-circle {
+      from { clip-path: circle(20% at 50% 50%); }
+      to { clip-path: circle(50% at 50% 50%); }
+    }
+    #clip-circle, #clip-circle-held {
+      animation: clip-circle 3s linear infinite alternate;
+    }
+    #clip-circle-held {
+      animation-delay: -0.75s;
+      animation-play-state: paused;
+    }
+
+    /* Clip path, change of shape: inset() to circle(), 4 s, alternate. */
+    @keyframes clip-change {
+      from { clip-path: inset(10%); }
+      to { clip-path: circle(40% at 50% 50%); }
+    }
+    #clip-change, #clip-change-held {
+      animation: clip-change 4s linear infinite alternate;
+    }
+    #clip-change-held {
+      animation-delay: -1s;
+      animation-play-state: paused;
+    }
+
+    /* Animated images. */
+    .images {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .images figure {
+      margin: 0;
+    }
+    .images figcaption {
+      font-size: 0.8rem;
+    }
+    .frame-table {
+      font-size: 0.8rem;
+      border-collapse: collapse;
+      margin-top: 0.5rem;
+    }
+    .frame-table th, .frame-table td {
+      border: 1px solid #8a8a8a;
+      padding: 0 0.35rem;
+      text-align: left;
+    }
+
+    /* Main thread, text color: 2 s, alternate. */
+    @keyframes text-color {
+      from { color: rgb(204, 0, 0); }
+      to { color: rgb(0, 0, 204); }
+    }
+    #text-color, #text-color-held {
+      animation: text-color 2s linear infinite alternate;
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin: 1.5rem 0.5rem;
+    }
+    #text-color-held {
+      animation-delay: -0.5s;
+      animation-play-state: paused;
+    }
+
+    /* Main thread, layout: width 100 to 300 px, 3 s, alternate. */
+    .layout-stage {
+      width: 100%;
+      height: auto;
+      padding: 0.5rem 0;
+    }
+    @keyframes layout-width {
+      from { width: 100px; }
+      to { width: 300px; }
+    }
+    #layout-width, #layout-width-held {
+      position: static;
+      height: 1.5rem;
+      margin: 0.25rem 0;
+      animation: layout-width 3s linear infinite alternate;
+    }
+    #layout-width-held {
+      animation-delay: -0.75s;
+      animation-play-state: paused;
+    }
+
+    /* Web Animations. */
+    #web-animation {
+      left: 0.5rem;
+    }
+
+    /* Focus ring: an outline-color transition on :focus-visible, 1 s. */
+    #focus-ring {
+      font: inherit;
+      padding: 0.5rem 1rem;
+      outline: 4px solid transparent;
+      outline-offset: 3px;
+      transition: outline-color 1s linear;
+    }
+    #focus-ring:focus-visible {
+      outline-color: rgb(0, 80, 200);
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" id="skip-link" href="#main">Skip to content</a>
+  <header>
+    <h1>Animation evidence fixture</h1>
+    <p>
+      Each panel states its element, property, keyframes, duration, and
+      timing. Running animations use linear timing and repeat from page load.
+      Each has a twin held still at 25 percent of its first iteration, with
+      the value it should show. This page does not test
+      <code>prefers-reduced-motion</code>, so the Windows animation setting
+      does not stop it. Script runs only in the panels that say so.
+    </p>
+  </header>
+  <main id="main" tabindex="-1">
+    <div class="panels">
+
+      <section aria-labelledby="skip-heading">
+        <h2 id="skip-heading">Skip link</h2>
+        <p class="facts">
+          <code>#skip-link</code>, <code>transform</code>: a transition from
+          <code>translateY(-120%)</code> to <code>translateY(0)</code>, 1 s,
+          linear, on focus. Press Tab once from the top of the page. No held
+          twin: a transition runs only on a change of state.
+        </p>
+      </section>
+
+      <section aria-labelledby="rotation-heading">
+        <h2 id="rotation-heading">Rotation</h2>
+        <p class="facts">
+          <code>#rotation</code>, <code>transform</code>:
+          <code>rotate(0deg)</code> to <code>rotate(360deg)</code>, 4 s,
+          linear, infinite.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage"><div class="box" id="rotation"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage"><div class="box held" id="rotation-held"></div></div>
+            <p class="stage-label">Held: <code>rotate(90deg)</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="separate-heading">
+        <h2 id="separate-heading">Separate transform properties</h2>
+        <p class="facts">
+          <code>#separate</code>: <code>translate</code> 0 to 120px,
+          <code>rotate</code> 0deg to 180deg, <code>scale</code> 1 to 1.5,
+          4 s, linear, infinite.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage"><div class="box" id="separate"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage"><div class="box held" id="separate-held"></div></div>
+            <p class="stage-label">Held: translate 30px, rotate 45deg, scale 1.125</p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="fade-heading">
+        <h2 id="fade-heading">Fade</h2>
+        <p class="facts">
+          <code>#fade</code>, <code>opacity</code>: 1 to 0.2, 2 s, linear,
+          infinite, alternate.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage"><div class="box" id="fade"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage"><div class="box held" id="fade-held"></div></div>
+            <p class="stage-label">Held: opacity 0.8</p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="blur-heading">
+        <h2 id="blur-heading">Blur</h2>
+        <p class="facts">
+          <code>#blur</code>, <code>filter</code>: <code>blur(0px)</code> to
+          <code>blur(6px)</code>, 3 s, linear, infinite, alternate.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage"><div class="box" id="blur"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage"><div class="box held" id="blur-held"></div></div>
+            <p class="stage-label">Held: <code>blur(1.5px)</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="frost-heading">
+        <h2 id="frost-heading">Frosted glass</h2>
+        <p class="facts">
+          <code>#frost</code>, <code>backdrop-filter</code>:
+          <code>blur(0px)</code> to <code>blur(8px)</code>, over stripes,
+          3 s, linear, infinite, alternate.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage stripes"><div class="glass" id="frost"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage stripes"><div class="glass held" id="frost-held"></div></div>
+            <p class="stage-label">Held: <code>blur(2px)</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="scroll-heading">
+        <h2 id="scroll-heading">Compositor scroll</h2>
+        <p class="facts">
+          <code>#scroller</code>, its scroll offset. The button runs script:
+          <code>scrollTo</code> with <code>behavior: "smooth"</code> to the
+          top of row 30, or back to row 1. Also scroll it with the wheel.
+        </p>
+        <button type="button" id="scroll-button">Smooth scroll to row 30</button>
+        <ol id="scroller"></ol>
+      </section>
+
+      <section aria-labelledby="background-heading">
+        <h2 id="background-heading">Background color</h2>
+        <p class="facts">
+          <code>#background</code>, <code>background-color</code>:
+          <code>rgb(204, 0, 0)</code> to <code>rgb(0, 0, 204)</code>, 2 s,
+          linear, infinite, alternate.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage"><div class="box" id="background"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage"><div class="box held" id="background-held"></div></div>
+            <p class="stage-label">Held: <code>rgb(153, 0, 51)</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="clip-inset-heading">
+        <h2 id="clip-inset-heading">Clip path, same shape</h2>
+        <p class="facts">
+          <code>#clip-inset</code>, <code>clip-path</code>:
+          <code>inset(10%)</code> to <code>inset(30% 5%)</code>, 3 s, linear,
+          infinite, alternate.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage"><div class="clipped" id="clip-inset"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage"><div class="clipped held" id="clip-inset-held"></div></div>
+            <p class="stage-label">Held: <code>inset(15% 8.75%)</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="clip-circle-heading">
+        <h2 id="clip-circle-heading">Clip path, circle</h2>
+        <p class="facts">
+          <code>#clip-circle</code>, <code>clip-path</code>:
+          <code>circle(20% at 50% 50%)</code> to
+          <code>circle(50% at 50% 50%)</code>, 3 s, linear, infinite,
+          alternate.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage"><div class="clipped" id="clip-circle"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage"><div class="clipped held" id="clip-circle-held"></div></div>
+            <p class="stage-label">Held: <code>circle(27.5% at 50% 50%)</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="clip-change-heading">
+        <h2 id="clip-change-heading">Clip path, change of shape</h2>
+        <p class="facts">
+          <code>#clip-change</code>, <code>clip-path</code>:
+          <code>inset(10%)</code> to <code>circle(40% at 50% 50%)</code>, 4 s,
+          linear, infinite, alternate. The shapes do not interpolate, so the
+          shape changes at half way.
+        </p>
+        <div class="pair">
+          <div>
+            <div class="stage"><div class="clipped" id="clip-change"></div></div>
+            <p class="stage-label">Running</p>
+          </div>
+          <div>
+            <div class="stage"><div class="clipped held" id="clip-change-held"></div></div>
+            <p class="stage-label">Held: <code>inset(10%)</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="images-heading">
+        <h2 id="images-heading">Animated images</h2>
+        <p class="facts">
+          Eight frames of 250 ms, repeating, made by
+          <code>make_images.py</code>. Each frame is a solid color with its
+          number in white.
+        </p>
+        <div class="images">
+          <figure>
+            <img id="image-gif" src="frames.gif" width="96" height="96" alt="Animated GIF, frames numbered 0 to 7">
+            <figcaption>GIF</figcaption>
+          </figure>
+          <figure>
+            <img id="image-webp" src="frames.webp" width="96" height="96" alt="Animated WebP, frames numbered 0 to 7">
+            <figcaption>WebP</figcaption>
+          </figure>
+          <figure>
+            <img id="image-png" src="frames.png" width="96" height="96" alt="Animated PNG, frames numbered 0 to 7">
+            <figcaption>Animated PNG</figcaption>
+          </figure>
+        </div>
+        <table class="frame-table">
+          <caption class="stage-label">Frame colors</caption>
+          <thead>
+            <tr><th scope="col">Frame</th><th scope="col">Color</th><th scope="col">RGB</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>0</td><td>red</td><td>204, 0, 0</td></tr>
+            <tr><td>1</td><td>orange</td><td>204, 102, 0</td></tr>
+            <tr><td>2</td><td>olive</td><td>128, 128, 0</td></tr>
+            <tr><td>3</td><td>green</td><td>0, 128, 0</td></tr>
+            <tr><td>4</td><td>teal</td><td>0, 128, 128</td></tr>
+            <tr><td>5</td><td>blue</td><td>0, 0, 204</td></tr>
+            <tr><td>6</td><td>purple</td><td>102, 0, 153</td></tr>
+            <tr><td>7</td><td>black</td><td>0, 0, 0</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section aria-labelledby="text-color-heading">
+        <h2 id="text-color-heading">Main thread, text color</h2>
+        <p class="facts">
+          <code>#text-color</code>, <code>color</code>:
+          <code>rgb(204, 0, 0)</code> to <code>rgb(0, 0, 204)</code>, 2 s,
+          linear, infinite, alternate. Not run on the compositor.
+        </p>
+        <div class="pair">
+          <div>
+            <p id="text-color">Running</p>
+          </div>
+          <div>
+            <p id="text-color-held" class="held">Held</p>
+            <p class="stage-label">Held: <code>rgb(153, 0, 51)</code></p>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="layout-heading">
+        <h2 id="layout-heading">Main thread, layout</h2>
+        <p class="facts">
+          <code>#layout-width</code>, <code>width</code>: 100px to 300px,
+          3 s, linear, infinite, alternate. Lays out at each frame.
+        </p>
+        <div class="stage layout-stage">
+          <div class="box" id="layout-width"></div>
+          <p class="stage-label">Running</p>
+          <div class="box held" id="layout-width-held"></div>
+          <p class="stage-label">Held: width 150px</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="web-animation-heading">
+        <h2 id="web-animation-heading">Web Animations</h2>
+        <p class="facts">
+          <code>#web-animation</code>, <code>transform</code>: the button runs
+          script, <code>element.animate()</code> of
+          <code>translateX(0)</code> to <code>translateX(80px)</code>, 2 s,
+          linear, infinite, alternate. A second press cancels it.
+        </p>
+        <button type="button" id="web-animation-button">Start the animation</button>
+        <div class="stage"><div class="box" id="web-animation"></div></div>
+      </section>
+
+      <section aria-labelledby="focus-heading">
+        <h2 id="focus-heading">Focus ring</h2>
+        <p class="facts">
+          <code>#focus-ring</code>, <code>outline-color</code>: a transition
+          from <code>transparent</code> to <code>rgb(0, 80, 200)</code>, 1 s,
+          linear, on <code>:focus-visible</code>. Move focus to it with Tab.
+        </p>
+        <button type="button" id="focus-ring">Focus me with Tab</button>
+      </section>
+
+    </div>
+  </main>
+  <script>
+    // Compositor scroll panel: the rows, and a smooth scroll on the button.
+    (() => {
+      const scroller = document.getElementById("scroller");
+      for (let row = 1; row <= 60; row++) {
+        const item = document.createElement("li");
+        item.id = `row-${row}`;
+        item.textContent = `Row ${row}`;
+        scroller.append(item);
+      }
+      const button = document.getElementById("scroll-button");
+      button.addEventListener("click", () => {
+        const toRow30 = button.textContent.includes("30");
+        const target = toRow30 ? document.getElementById("row-30").offsetTop : 0;
+        scroller.scrollTo({ top: target, behavior: "smooth" });
+        button.textContent = toRow30 ? "Smooth scroll to row 1" : "Smooth scroll to row 30";
+      });
+    })();
+
+    // Web Animations panel: one element.animate() animation, started and
+    // cancelled by the button.
+    (() => {
+      const box = document.getElementById("web-animation");
+      const button = document.getElementById("web-animation-button");
+      let animation = null;
+      button.addEventListener("click", () => {
+        if (animation) {
+          animation.cancel();
+          animation = null;
+          button.textContent = "Start the animation";
+          return;
+        }
+        animation = box.animate(
+          [{ transform: "translateX(0)" }, { transform: "translateX(80px)" }],
+          { duration: 2000, iterations: Infinity, direction: "alternate", easing: "linear" });
+        button.textContent = "Cancel the animation";
+      });
+    })();
+  </script>
+</body>
+</html>
