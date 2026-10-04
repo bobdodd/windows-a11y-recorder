@@ -3455,6 +3455,45 @@ Not shown by this recording: the recreation's use of these records
 (sub-step 2), the animated image frame index (sub-step 1c), and the
 panels that need input.
 
+#### Second recording of the fixture, with input (target machine, 2026-10-04)
+
+Recording `20261004-034141-b0217e5cafc542c48681ad91880709f2`, about 66
+s, with the same build, in which the owner pressed Tab through the page
+several times, clicked, and scrolled. The recording shows no activation
+of the compositor scroll panel's button (it was focused by Tab, not
+pressed), so the smooth `scrollTo` was not exercised. Read from the
+recording:
+
+- The eight animations of the first recording, and three more:
+  `#skip-link` twice and `#web-animation` once.
+- `#skip-link`: the first Tab from the top of the page focused it at
+  11.39 s (recording times are from the first compositor record) and
+  the next Tab moved focus on at 11.76 s, so its 1 s transition ran for
+  about 0.37 s and was then reversed by a second transition. Its
+  recorded translation went from -46.07 px (-120 percent of its height)
+  to -29.95 px, which is 35 percent of the way, and back.
+- `#web-animation`: started by a click on its button at 47.74 s and
+  cancelled by a second click at 51.02 s. Its translation went from 0 to
+  79.998 px, with its peak 2.0 s after its start, as the page states,
+  and was written as a null value when cancelled.
+- Scroll offsets: 207 for the document's scroller (to 631 and 1604 px as
+  Tab moved focus down the page, and through the wheel scrolls between
+  26 s and 47 s), and 65 for `#scroller`, scrolled with the wheel from 0
+  to 1182.8 px between 32.4 s and 34.1 s.
+- `#focus-ring`: its `outline-color` transition is on the main thread,
+  so it has no compositor record. The layout records hold its style at
+  each update: from `rgba(0, 0, 0, 0)` through `rgba(0, 80, 200, a)`
+  rising in alpha to `rgb(0, 80, 200)` when Tab focused it, about 30 ms
+  apart, and back when focus left it. The interaction checkpoints record
+  `focusVisible` true while it had keyboard focus, and false for
+  `#web-animation-button` after it was clicked. (The `focusVisible` of
+  a `focus-changed` record is what the request stated, so it is null for
+  these focus moves, as documented in instrumented-chromium.md.)
+- 2,873 `compositor-frame-presented` records; 9 failed: frame tokens 1
+  to 6 and a second token 1 at startup, and 1127 and 1480 during the
+  run. Why those two failed is not established.
+- 8,820 `paint-worklet-painted` records, as in the first recording.
+
 #### Sub-step 1 in parts
 
 Sub-step 1 is delivered in three parts, each tested on the target machine
