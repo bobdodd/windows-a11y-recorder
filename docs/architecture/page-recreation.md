@@ -3899,6 +3899,135 @@ is not established. Sixteen of the 5986 presentations failed: five at
 startup, and eleven between 10.46 s and 84.59 s, each within 0.52 s of a
 recorded scroll offset change; their cause is not established either.
 
+#### Sub-step 2 in parts (proposed)
+
+Proposed 2026-10-04, after the owner asked to hold the recorded image
+frames in the recreation next ("ok let's do that work"). Sub-step 2 of
+"Sub-steps" above is delivered in three parts, each tested on the target
+machine before the next, as each is a different part of Chromium:
+
+- 2a: animated images held at their recorded frame (designed below).
+- 2b: no CSS animation or transition run in the recreation, and the
+  compositor's recorded transforms, opacities, filters, backdrop filters,
+  and scroll offsets imposed.
+- 2c: the paint worklets' recorded background colors and clip paths
+  imposed.
+
+Until 2b and 2c are built, the fixture's other panels are not expected to
+match the captured frame in the recreation, and are not judged in 2a's
+test.
+
+#### Sub-step 2a design: animated images held (proposed)
+
+Read in the target machine's checkout before this was written.
+
+What Chromium does, from the source:
+
+- The frame drawn of an animated image is the image animation
+  controller's index for its paint image, read in three places: the tile
+  manager's raster, through `LayerTreeHostImpl::GetFrameIndexForImage`
+  (`cc/tiles/tile_manager.cc`); the picture quad's image map, from the
+  controller directly (`PictureLayerImpl::AppendQuads`,
+  `cc/layers/picture_layer_impl.cc`); and the indexes sent to the main
+  thread at commit (`GatherFrameIndexes`, from
+  `LayerTreeHostImpl::ProcessCompositorDeltas`). So the hold is made in
+  the controller, which all three read, not in one of them.
+- `LayerTreeHostImpl::GetFrameIndexForImage` gives the first frame for a
+  paint image that should not animate (`PaintImage::ShouldAnimate`: not
+  animated, no repetitions, or one frame), and the controller's index
+  otherwise. `ShouldAnimate` does not depend on whether the image's loops
+  are done, so the index recorded in 1c is the frame drawn.
+- The controller learns of an image from `UpdateAnimatedImage`, with its
+  frames, and advances it in `AnimateForSyncTree` when its own
+  `AnimationState::ShouldAnimate()` is true, which also asks for the next
+  frame at the time the image next changes.
+- An element's own sequence (the CSS `image-animation` property) is behind
+  `CSSImageAnimation`, whose status in
+  `runtime_enabled_features.json5` is "test", so it is not on in the
+  instrumented Chromium, and the recording holds only shared sequences, as
+  the fixture's did.
+
+What the app does when it opens a recreation at a frame, for each image it
+answers:
+
+1. The document's renderer and frame sink are those of its presentation
+   records (browser instance, process, and `frameSinkId`).
+2. The image's ID is the `imageId` of the latest `image-resource` for the
+   image's URL in that renderer at or before the time the document's state
+   is read at. Its paint image is the `shared` `image-paint-image` with
+   that `imageId`.
+3. The frame is the `image-frame` value for that paint image as of the
+   last `compositor-frame` of the document's frame sink whose
+   `compositor-frame-presented` was not failed and was presented at or
+   before the frame's composition: the latest change for the paint image
+   in that frame or any recorded before it, as "Which state a captured
+   frame shows" states. The presentation time is taken to recording time
+   as the presentation feedback's is (`PlaybackIndex`).
+4. The answer carries a response header of the recorder's,
+   `X-A11y-Recorder-Image-Frame`, with that index. An image with no such
+   frame (not painted animated, a null value, or a recording before
+   protocol 0.48) has no header and is held at its first frame.
+
+The header is listed with the response in DevTools' Network panel, so the
+frame imposed can be seen there. The evidence panel lists each image
+answered with a held frame: its URL, the index, and the compositor frame's
+token and presentation time; and how many images were held at their first
+frame for want of a recorded frame, with the reason.
+
+What the instrumented Chromium does, only in the recreation mode:
+
+- Blink, in `ImageResource::Finish`
+  (`third_party/blink/renderer/core/loader/resource/image_resource.cc`),
+  after the image is updated with its bytes: when the response has the
+  header, it gives the bridge the image's paint image ID
+  (`Image::paint_image_id()`, which a shared sequence's paint image uses)
+  and the index.
+- The bridge keeps these in the renderer, by paint image ID, under a lock,
+  as Blink's main thread writes them and the compositor thread reads them.
+- cc, in `ImageAnimationController::UpdateAnimatedImage`
+  (`cc/trees/image_animation_controller.cc`), after the image's metadata
+  is updated: the image's pending and active index are set to its held
+  index, or to the first frame when it has none or the index is not one
+  of its frames. A method the integration adds to `AnimationState` sets
+  them.
+- cc, in `AnimationState::ShouldAnimate()`: false, so no image is
+  advanced and no frame is asked for to advance one.
+
+Nothing is recorded for this part, and the recording protocol stays 0.48.
+
+Limits:
+
+- An image of an element's own sequence, or of a popup's compositor, is
+  held at the frame of the tab's shared sequence, or its first frame. Own
+  sequences are not on in the instrumented Chromium (above).
+- An image not fetched through the recorder, such as one with a `data:`
+  URL, has no header and is held at its first frame.
+- An image drawn by the main thread outside the compositor, such as one a
+  canvas draws, is not held by this; no page script runs in the
+  recreation to draw one.
+- The app reads the recording's compositor records up to the frame to
+  find the image frames, which takes longer the later the frame in a long
+  recording. The time is listed as a step of "Time to open the
+  recreation", and its optimization is left for later, as the owner asked.
+
+Required tests:
+
+- Unit (app): the frame chosen for an image from a sequence of compositor
+  frames and presentations, with a failed presentation, a frame presented
+  after the composition, a null value, another frame sink's frames, and
+  another renderer's `image-resource` for the same URL; the header in the
+  answer, and its absence; the panel's lines.
+- Unit (integration script): each hook against copies of the target
+  machine's files, applying once and leaving them unchanged on a second
+  run; the bridge functions' call shapes.
+- Unit (bridge): the held frames by paint image ID, read from another
+  thread.
+- System, on the target machine: the fixture recording opened at several
+  frames, chosen by the owner, while the images panel was in view; in each
+  recreation, the number drawn on each of the three images is the one on
+  the captured frame and the one in the evidence panel, and it does not
+  change while the recreation is open.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
