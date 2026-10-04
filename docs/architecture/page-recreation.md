@@ -4105,7 +4105,7 @@ Tests run in the sandbox, 2026-10-04:
 
 Not yet run: the system test on the target machine.
 
-#### Images of a page recorded from a file (proposed)
+#### Images of a page recorded from a file (proposed, not built)
 
 Reported by the owner on 2026-10-04, with 6a83cf8, on the fixture
 recording 20261004-131014-0d65424b09d04391aab4ef4714aec25c: "THe number
@@ -4157,6 +4157,13 @@ Required tests:
 - System, on the target machine: the fixture recording opened at several
   frames while the images panel was in view; the three images are shown,
   and the 2a test of "Sub-step 2a design" is run.
+
+Decision, 2026-10-04: the owner chose to re-record the fixture over http
+rather than build this. `tests/fixtures/animation/Serve-Fixture.ps1` serves
+the fixture folder at `http://127.0.0.1:8765/`, from an ordinary PowerShell,
+so a recording of it has http addresses and its recreation is served at its
+recorded address with its images. A page recorded from a file still shows
+no images in its recreation; that limit stands.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
