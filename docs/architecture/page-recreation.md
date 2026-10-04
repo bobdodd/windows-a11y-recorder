@@ -5311,6 +5311,57 @@ thumb, pressing its track, and pressing its arrows scroll the recreated
 page and its scrollable areas, while clicks, keys, and the wheel still do
 nothing, and right-click and Inspect still work.
 
+#### The wheel scrolls (owner's direction, built)
+
+Reported by the owner on 2026-10-04, after "Scrollbars take input" and the
+2a system test: "You fixed the scrollbars to work, but not the scroll
+wheel". This replaces, for the wheel's scrolling, the refusal of the wheel
+in "Input refused (agreed)".
+
+How the wheel scrolls in this checkout, read in the target machine's
+`components/input/mouse_wheel_event_queue.cc` and
+`input_handler_proxy.cc`: the browser sends the wheel event to the
+renderer, and only when the renderer's answer is not "consumed" does it
+send scroll gestures, of the device `WebGestureDevice::kTouchpad`
+(`MouseWheelEventQueue`, lines 97 and 147). The compositor hook already
+dropped the wheel event, which answers "no consumer", so the browser sent
+its gestures, and the hook then dropped them too.
+
+As built:
+
+- Compositor thread: the wheel event is still dropped, so the page
+  receives no `wheel` event and the browser sends its scroll gestures. A
+  scroll gesture of the device `kTouchpad`, as of `kScrollbar` before, is
+  handled as in any Chromium.
+- Main thread: a scroll gesture of the device `kTouchpad`, which cc sends
+  on when the scroll must be made on the main thread, is handled as in any
+  Chromium, as for `kScrollbar`.
+- A tree patched before this has its two input hooks replaced whole
+  (`STAGE_6A83_*` in `integrate.py`).
+- The evidence panel's note on input says the recreation scrolls with its
+  scrollbars and the wheel, and that the page receives no wheel event.
+
+Limits:
+
+- A precision touchpad's two-finger scroll reaches the renderer as wheel
+  events and gestures of the same device, so it also scrolls; touchpad
+  pinches stay dropped.
+- The keyboard and the touchscreen still do not scroll.
+- A scroll offset moved by the wheel is not the recorded one; nothing of it
+  is recorded.
+
+Tests run in the sandbox, 2026-10-04: the integration script's tests, that
+the compositor hook passes scroll gestures of both devices and still drops
+the wheel event, that the main-thread hook passes them, and that the
+hooks of "Scrollbars take input" are upgraded once and left unchanged on a
+second run (221 passed); both patches run against copies of the target
+machine's `input_handler_proxy.cc` and `web_frame_widget_impl.cc` as
+patched by 6a83cf8, applied once, unchanged on a second run, and checked
+against the bridge's signatures; the app's note test. Not yet run: the
+system test on the target machine, that the wheel scrolls the recreated
+page and its scrollable areas, the scrollbars still work, and clicks and
+keys still do nothing.
+
 #### Popup on screen (agreed)
 
 Reported by the owner on 2026-10-03, with d9461fc, on recording

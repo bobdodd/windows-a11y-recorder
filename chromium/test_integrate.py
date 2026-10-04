@@ -6580,11 +6580,15 @@ class RecreationInputIntegrationTests(unittest.TestCase):
         # gestures cc makes for a scrollbar are handled; the rest is dropped.
         self.assertIn("!WebInputEvent::IsMouseEventType(event.GetType()) &&", patched)
         self.assertIn(
-            "static_cast<const WebGestureEvent&>(event).SourceDevice() ==\n"
-            "            WebGestureDevice::kScrollbar)) {\n"
+            "        (static_cast<const WebGestureEvent&>(event).SourceDevice() ==\n"
+            "             WebGestureDevice::kScrollbar ||\n"
+            "         static_cast<const WebGestureEvent&>(event).SourceDevice() ==\n"
+            "             WebGestureDevice::kTouchpad))) {\n"
             "    return DROP_EVENT;",
             patched,
         )
+        # The wheel event itself is still dropped, before the page sees it.
+        self.assertNotIn("kMouseWheel", INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK)
         self.assertNotIn("DID_NOT_HANDLE", INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK)
 
     def test_the_main_thread_shows_only_the_context_menu_once(self):
@@ -6612,8 +6616,10 @@ class RecreationInputIntegrationTests(unittest.TestCase):
         # A scroll gesture cc made for a scrollbar is not refused.
         self.assertIn(
             "!(input_event.IsGestureScroll() &&\n"
-            "        static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==\n"
-            "            WebGestureDevice::kScrollbar) &&",
+            "        (static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==\n"
+            "             WebGestureDevice::kScrollbar ||\n"
+            "         static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==\n"
+            "             WebGestureDevice::kTouchpad)) &&",
             block,
         )
         # A browser page's widget takes input: the refusal tests the local
@@ -6671,6 +6677,30 @@ class RecreationInputIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(1, widget.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
         self.assertNotIn(INTEGRATE.STAGE_0172_BLINK_WIDGET_INPUT_HOOK, widget)
+
+    def test_hooks_that_refused_the_wheel_are_upgraded(self):
+        proxy = self.proxy_source().replace(
+            INTEGRATE.BLINK_INPUT_HANDLER_PROXY_ANCHOR,
+            INTEGRATE.STAGE_6A83_BLINK_INPUT_HANDLER_PROXY_HOOK,
+        )
+        patched = self.patch_twice(
+            "input_handler_proxy.cc", proxy, INTEGRATE.patch_blink_input_handler_proxy
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_6A83_BLINK_INPUT_HANDLER_PROXY_HOOK, patched)
+        widget = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                "devtools->HandleInputEvent(input_event);\n"
+                + INTEGRATE.STAGE_6A83_BLINK_WIDGET_INPUT_HOOK
+                + "  return WidgetEventHandler::HandleInputEvent(coalesced_event,\n",
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(1, widget.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_6A83_BLINK_WIDGET_INPUT_HOOK, widget)
 
     def test_a_browser_pages_parser_marks_its_process_once(self):
         hook = INTEGRATE.BLINK_DOCUMENT_STARTED_PARSING_HOOK
