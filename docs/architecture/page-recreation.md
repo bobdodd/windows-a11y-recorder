@@ -3333,7 +3333,7 @@ opened in the instrumented Chromium from the unpacked package as a file
 URL, as `tests/fixtures/blink-listener-dispatch.html` is. Whether a file
 URL's images are recorded as an https page's are is checked in its first
 run; if not, the fixture is served from a local server instead, which is
-proposed then.
+proposed then. (They are; see the first recording below.)
 
 How each panel is made checkable:
 
@@ -3407,6 +3407,55 @@ three images advance their frames. Not checked here: anything about the
 recording, which needs the target machine, and whether a file URL's
 images are recorded.
 
+#### First recording of the fixture (target machine, 2026-10-04)
+
+Recording `20261004-033545-4c52758971324a5486ac0bfe66ee1d4d`, about 30
+s, made by the owner with the d08a701 build (sub-steps 1a and 1b) and
+the fixture opened as a file URL. The recording holds no Tab, button
+press, or scroll in the fixture, so the skip link, focus ring, compositor
+scroll, and Web Animations panels were not exercised. Read from the
+recording's `browser.compositor`, `browser.resources`, and `browser.dom`
+channels:
+
+- Eight `compositor-animation-started` records, each with an ended
+  record when the page went away, matched to the fixture by the `id`
+  attributes of their nodes: `#rotation` (transform), `#separate` (one
+  animation of three keyframe models, `translate-transform`,
+  `rotate-transform`, and `scale-transform`), `#fade` (opacity),
+  `#frost` (backdrop filter), and `#background`, `#clip-inset`,
+  `#clip-circle`, and `#clip-change` (each `native-property`).
+- Not on the compositor: `#blur`. Its `filter: blur()` moves pixels, and
+  `CompositorAnimations::CheckCanStartEffectOnCompositor`
+  (`compositor_animations.cc`) marks a filter animation that does so
+  `kFilterRelatedPropertyMayMovePixels`, while a backdrop filter's is
+  composited. None of the eleven held twins was started on the
+  compositor. The main thread controls (text color, width) had no
+  compositor record, as expected.
+- 1,466 `compositor-frame` records, 1,465 of them from widget `6:3`, a
+  median of 16.666 ms apart over 26.1 s. Each composited value stayed in
+  its stated range: opacity 0.2 to 1.0, translate 0 to 119.9973 px,
+  scale 1.0 to 1.5, backdrop blur 0 to 7.9996 px, and each native
+  property's progress 0 to 1 (914 values each). The only scroll offsets
+  were five zero offsets.
+- 1,464 `compositor-frame-presented` records; the five that failed are
+  frame tokens 1 to 5, at startup.
+- 3,721 `paint-worklet-painted` records: 930 each for the background and
+  the three clip paths, and one for `#background-held`. Each background
+  color is the sRGB interpolation of its progress (at progress 0.5584 the
+  color is 0.3533, 0, 0.4467, which is 0.8 times 0.4416 and 0.5584). The
+  held twin's single paint, with no progress, is 0.6, 0, 0.2, which is
+  `rgb(153, 0, 51)`, the value the page states. `#clip-change` is a
+  four-line inset path below progress 0.5 and a four-conic circle path
+  above it, changing between progress 0.4959 and 0.5041 each time.
+- The three images were recorded from their file URLs with their bytes
+  (`image-resource` with `dataRecorded` true, and `image-data`), so the
+  fixture does not need a local server.
+
+Not shown by this recording: the recreation's use of these records
+(sub-step 2), the animated image frame index (sub-step 1c), and the
+panels that need input.
+
+#### Sub-step 1 in parts
 
 Sub-step 1 is delivered in three parts, each tested on the target machine
 before the next, as the hooks are in different parts of Chromium:
