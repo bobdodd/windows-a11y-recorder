@@ -3823,6 +3823,82 @@ ChromiumLauncherTests that need Windows failing as before.
 Not done here: the instrumented Chromium build and the integration test
 with the fixture, which are for the target machine.
 
+#### Recording of the fixture with 1c (target machine, 2026-10-04)
+
+Recording `20261004-131014-0d65424b09d04391aab4ef4714aec25c`, built from
+9f075b3, of the fixture page, 110.6 s long. The page's renderer is process
+38536, with one compositor (`layerTreeHostId` 1). The main scroller's
+offset (element 452) shows the page scrolled up and down several times.
+
+The images are linked as designed:
+
+| Image | `image-resource` `imageId` | `image-paint-image` |
+| --- | --- | --- |
+| `frames.gif` | 0 | paint image 0, `shared`, `nodeId` null, no sync target |
+| `frames.webp` | 1 | paint image 1, `shared`, `nodeId` null, no sync target |
+| `frames.png` | 2 | paint image 2, `shared`, `nodeId` null, no sync target |
+
+The resources were recorded at 3.00 s and the paint images at 3.42 s. No
+`own` sequence was recorded; the fixture does not use the CSS
+`image-animation` property. The browser's own renderer (process 21976)
+recorded four SVG `image-resource` records with `imageId` 2 to 5 and no
+`image-paint-image`; IDs are per renderer process.
+
+The frames, from the `image-frame` changes:
+
+- Each of the three paint images has 173 changes, all three in the same
+  compositor frames (173 of the 5987 frames), with every index from 0 to
+  7.
+- Between consecutive changes the begin-frame times are 249.996 ms apart
+  at the median, which is the fixture's 250 ms a frame; the shortest is
+  16.674 ms.
+- The index stopped changing from 3.70 s to 24.85 s and from 49.60 s to
+  90.3 s. Each pause began as the main scroller's offset fell below about
+  700 px and ended as it rose past it. This is consistent with Chromium
+  not advancing an image that is out of view; the recording does not show
+  it directly.
+- Three changes are out of sequence: 4 to 6 on resuming after 40.7 s, 7
+  to 4 (1316.6 ms later) and 4 to 1 (1283.3 ms later), the last two
+  around jumps of the scroller to 631 px and 0 px. They are consistent with
+  the controller's resynchronisation of an image that resumes
+  (`enable_image_animation_resync`); that is not established.
+
+The cost, from the 26 cost lines in `chromium.log`, for the page's
+renderer over the whole recording (a hook's time includes its bridge
+call's):
+
+| Kind | Calls | Mean (µs) | Longest (µs) | Total (ms) |
+| --- | --- | --- | --- | --- |
+| `hook:compositor-frame` | 5856 | 77.2 | 568 | 452.3 |
+| `RecordCompositorFrame` (within it) | 5856 | 51.0 | 543 | 298.9 |
+| `RecordCompositorFramePresented` | 5853 | 15.5 | 91 | 90.5 |
+| `hook:paint-worklet-results` | 3605 | 1.6 | 15 | 5.6 |
+| `hook:background-color-painted` | 3614 | 9.4 | 184 | 34.0 |
+| `hook:clip-path-painted` | 10809 | 19.5 | 222 | 211.0 |
+| `RecordPaintWorkletPainted` (within those two) | 14423 | 14.0 | 219 | 201.2 |
+| `hook:image-resource` | 3 | 5.0 | 7 | 0.0 |
+| `RecordBlinkImageResource` | 3 | 20.7 | 26 | 0.1 |
+| `hook:image-paint-image` | 3 | 16.0 | 24 | 0.0 |
+| `RecordBlinkLayoutChanges` | 3564 | 1485.3 | 12201 | 5293.8 |
+| `span:interaction-checkpoint` | 3581 | 57.2 | 244 | 205.0 |
+| `span:layout-checkpoint` | 1 | 31343.0 | 31343 | 31.3 |
+
+On the compositor thread the sub-step 1 hooks cost about 0.55 s in
+110.6 s; on Blink's main thread the layout changes of each rendering
+update cost about 5.3 s, about 1.5 ms an update, which is the largest
+recorder cost measured on the page's threads. The writer thread's longest
+write was 26.4 ms.
+
+Pauses of the page's renderer: after the first 4.1 s, two intervals of
+more than 100 ms had no record from it, 172 ms at 9.23 s and 159 ms at
+66.11 s. Each began just after a `layout-changes-started` record; at
+66.11 s the browser's own renderer was recording DOM changes. The longest
+call or span of any measured kind on the page's renderer was 31.3 ms, so
+the measured recorder work does not account for either pause. Their cause
+is not established. Sixteen of the 5986 presentations failed: five at
+startup, and eleven between 10.46 s and 84.59 s, each within 0.52 s of a
+recorded scroll offset change; their cause is not established either.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
