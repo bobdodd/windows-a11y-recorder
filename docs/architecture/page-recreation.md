@@ -3409,6 +3409,23 @@ before. Not done here: the
 instrumented Chromium build and the integration and system tests, which
 are for the target machine.
 
+On the target machine (2026-10-03): the instrumented Chromium built, after
+a first attempt stopped at `generate_v8_context_snapshot` because the
+earlier build's running Chromium held `v8_context_snapshot.bin` open.
+The user recorded a page with a CSS animation of text color and a slide-in
+of a skip-to-content link, and reports the animations drawn correctly.
+Read from that recording (20261004-022434): 32
+`compositor-animation-started` and 32 `compositor-animation-ended`
+records, each with one transform keyframe model, on four nodes of one
+document; 249 `compositor-frame` records holding 970 transform values and
+4 scroll offsets, 248 of them from the page's widget, at a median of
+16.667 ms between begin frames; and 249 `compositor-frame-presented`
+records, one for each recorded frame, none failed. The text color
+animation has no compositor record, as color is not animated on the
+compositor. The recreation does not yet impose the recorded compositor
+values (sub-step 2), so what it drew is from the main thread's records,
+and this recording does not test the replay.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
