@@ -440,7 +440,10 @@ chrome, chrome-untrusted, and chrome-extension; `Document::ImplicitOpen`
 calls `MarkRecreationBrowserPageProcess` for such a page, and the
 compositor thread's hook refuses input only while
 `RecreationRefusesCompositorInput()` is true. See "Input refused only in
-the recreation" in the page recreation design.
+the recreation" in the page recreation design. The scrollbars still take
+input: mouse events reach cc's scrollbar controller, and the scroll
+gestures it makes, of the device `kScrollbar`, are handled on both threads
+("Scrollbars take input" in the page recreation design).
 
 In the recreation mode, animated images are held at their recorded frame
 (slice 4b sub-step 2a). `ImageResource::Finish` passes the value of the

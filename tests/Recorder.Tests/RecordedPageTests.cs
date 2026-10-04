@@ -278,7 +278,7 @@ public sealed class RecordedPageTests : IDisposable
         Assert.Contains(content.Evidence.Notes, note => note.StartsWith("1 of the ", StringComparison.Ordinal) && note.Contains("data-a11y-recorded-layout", StringComparison.Ordinal));
         Assert.Contains(content.Evidence.Notes, note => note.Contains("DevTools' Console", StringComparison.Ordinal));
         // The notes say the recreation takes no input but the right-click.
-        Assert.Contains(content.Evidence.Notes, note => note.StartsWith("The recreation is a snapshot in time and takes no input except the right-click", StringComparison.Ordinal));
+        Assert.Contains(content.Evidence.Notes, note => note.StartsWith("The recreation is a snapshot in time and takes no input except its scrollbars, the right-click", StringComparison.Ordinal));
     }
 
     // An element recorded without a layout object takes display: none, or

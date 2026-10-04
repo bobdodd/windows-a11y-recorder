@@ -5186,6 +5186,68 @@ target machine.
 On the target machine, with 0172bbd, as the owner reported on 2026-10-03:
 "That worked".
 
+#### Scrollbars take input (owner's direction, built)
+
+Reported by the owner on 2026-10-04, with 7ec8f56, unable to run the
+sub-step 2a system test: "I can't do that test for you because you have
+blocked access to the scrollbar. The scrollbar must work. Go fix please".
+This replaces, for the scrollbars only, the refusal of scrolling in "Input
+refused (agreed)".
+
+Cause, read in the target machine's
+`third_party/blink/renderer/platform/widget/input/input_handler_proxy.cc`.
+The compositor hook of "Input refused only in the recreation as built"
+returned before the `switch` of `RouteToTypeSpecificHandler`, so cc's
+scrollbar controller (`HandlePointerDown`, `HandlePointerMove`, and
+`HandlePointerUp`, reached from the left button's mouse events) never saw a
+press on a scrollbar, and the scroll gestures it makes for one
+(`InjectScrollbarGestureScroll`, with the device
+`WebGestureDevice::kScrollbar`, from
+`WebGestureEvent::GenerateInjectedScrollbarGestureScroll` in
+`third_party/blink/common/input/web_gesture_event.cc`) would have been
+dropped by the same hook.
+
+As built:
+
+- Compositor thread: in a process that refuses input, a mouse event is
+  routed as in any Chromium, so cc's scrollbar controller sees it; it
+  still goes on to the main thread, as Chromium sends it. A scroll gesture
+  whose device is `kScrollbar` is handled as in any Chromium. Every other
+  event (the wheel, keys, touch, and other gestures) is dropped as before.
+- Main thread: a scroll gesture whose device is `kScrollbar`, which cc
+  sends on when the scroll must be made on the main thread, is handled as
+  in any Chromium. Mouse events are refused as before, apart from the
+  right-click's context menu, so the page sees no press, release, or move,
+  and focus, selection, hover, and control state stay as recorded.
+- A tree patched before this has its two input hooks replaced whole
+  (`STAGE_0172_*` in `integrate.py`).
+- The evidence panel's note on input says the scrollbars take input, and
+  that a scrollbar moved in the recreation changes that scroll offset from
+  the one the recreation opened at.
+
+Limits:
+
+- Only a scrollbar cc handles takes input. A scrollbar Blink handles on the
+  main thread, from mouse events the page would also receive, does not;
+  whether any scrollbar of a recreated page is of that kind is for the
+  system test.
+- The wheel, the keyboard, and touch still do not scroll.
+- A scroll offset moved by a scrollbar is not the recorded one; nothing of
+  it is recorded.
+
+Tests run in the sandbox, 2026-10-04: the integration script's tests, that
+the compositor hook drops only events that are neither mouse events nor
+scrollbar scroll gestures, that the main-thread hook passes scrollbar
+scroll gestures, and that the earlier hooks are upgraded once and left
+unchanged on a second run (220 passed); both patches run against copies of
+the target machine's `input_handler_proxy.cc` and
+`web_frame_widget_impl.cc`, applied once, unchanged on a second run, and
+checked against the bridge's signatures; the app's note test. Not yet run:
+the system test on the target machine, that dragging each scrollbar's
+thumb, pressing its track, and pressing its arrows scroll the recreated
+page and its scrollable areas, while clicks, keys, and the wheel still do
+nothing, and right-click and Inspect still work.
+
 #### Popup on screen (agreed)
 
 Reported by the owner on 2026-10-03, with d9461fc, on recording

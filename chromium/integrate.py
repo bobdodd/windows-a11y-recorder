@@ -13741,7 +13741,7 @@ STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK = """\
   }
   if (event.IsGestureScroll() &&
 """
-BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+STAGE_0172_BLINK_INPUT_HANDLER_PROXY_HOOK = """\
   const WebInputEvent& event = event_with_callback->event();
   // Windows A11y Recorder: a recreation takes no input on this thread. A
   // mouse event goes to the main thread, which shows the context menu for
@@ -13751,6 +13751,25 @@ BLINK_INPUT_HANDLER_PROXY_HOOK = """\
   if (a11y_recorder::RecreationRefusesCompositorInput()) {
     return WebInputEvent::IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE
                                                             : DROP_EVENT;
+  }
+  if (event.IsGestureScroll() &&
+"""
+BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+  const WebInputEvent& event = event_with_callback->event();
+  // Windows A11y Recorder: a recreation takes no input on this thread but
+  // its scrollbars'. A mouse event is seen by cc's scrollbar controller, as
+  // in any Chromium, and then goes to the main thread, which shows the
+  // context menu for the right button and suppresses the rest; the scroll
+  // gestures cc makes for a scrollbar are handled; every other event, the
+  // wheel, keys, touch, and other gestures, is dropped. A process showing a
+  // browser page (DevTools, the evidence panel, the browser's own pages)
+  // takes input as in any Chromium.
+  if (a11y_recorder::RecreationRefusesCompositorInput() &&
+      !WebInputEvent::IsMouseEventType(event.GetType()) &&
+      !(event.IsGestureScroll() &&
+        static_cast<const WebGestureEvent&>(event).SourceDevice() ==
+            WebGestureDevice::kScrollbar)) {
+    return DROP_EVENT;
   }
   if (event.IsGestureScroll() &&
 """
@@ -13786,7 +13805,7 @@ STAGE_045_BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
   }
 """
 
-BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+STAGE_0172_BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
 
   // Windows A11y Recorder: a recreation is a snapshot in time and takes no
   // input but the right-click that opens the context menu with Inspect. The
@@ -13819,6 +13838,45 @@ BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
 """
 
 
+BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+
+  // Windows A11y Recorder: a recreation is a snapshot in time and takes no
+  // input but the right-click that opens the context menu with Inspect. The
+  // DevTools overlay, for its element picker, has had the event above. The
+  // menu is shown on the button event the page's setting names, as
+  // HandleMouseDown and HandleMouseUp show it. The page receives only the
+  // contextmenu event, which no page script runs to see. A scroll gesture
+  // cc made for a scrollbar, which cc leaves to this thread when the scroll
+  // must be made here, is handled as in any Chromium, so the scrollbars
+  // work. A browser page
+  // (DevTools, the evidence panel, the browser's own pages) takes input as
+  // in any Chromium.
+  if (a11y_recorder::IsRecreationMode() &&
+      !(input_event.IsGestureScroll() &&
+        static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==
+            WebGestureDevice::kScrollbar) &&
+      !(LocalRootImpl()->GetFrame() &&
+        LocalRootImpl()->GetFrame()->GetDocument() &&
+        a11y_recorder::IsRecreationBrowserPageScheme(
+            String(LocalRootImpl()->GetFrame()->GetDocument()->Url().Protocol())
+                .Utf8()))) {
+    if (WebInputEvent::IsMouseEventType(input_event.GetType())) {
+      const auto& recorder_mouse = static_cast<const WebMouseEvent&>(input_event);
+      const WebInputEvent::Type recorder_menu_type =
+          GetPage()->GetSettings().GetShowContextMenuOnMouseUp()
+              ? WebInputEvent::Type::kMouseUp
+              : WebInputEvent::Type::kMouseDown;
+      if (recorder_mouse.button == WebMouseEvent::Button::kRight &&
+          input_event.GetType() == recorder_menu_type) {
+        MouseContextMenu(recorder_mouse);
+        return WebInputEventResult::kHandledSystem;
+      }
+    }
+    return WebInputEventResult::kHandledSuppressed;
+  }
+"""
+
+
 def patch_blink_input_handler_proxy(path: Path) -> None:
     """Drops a recreation's input on the compositor thread."""
     text = read_source(path)
@@ -13827,7 +13885,10 @@ def patch_blink_input_handler_proxy(path: Path) -> None:
     )
     text = upgrade_legacy_hooks(
         text,
-        ((STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK, BLINK_INPUT_HANDLER_PROXY_HOOK),),
+        (
+            (STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK, BLINK_INPUT_HANDLER_PROXY_HOOK),
+            (STAGE_0172_BLINK_INPUT_HANDLER_PROXY_HOOK, BLINK_INPUT_HANDLER_PROXY_HOOK),
+        ),
         path,
     )
     text = apply_cookie_hook(
@@ -13898,7 +13959,12 @@ def patch_blink_web_frame_widget(path: Path) -> None:
             text, recorder_anchor, blink_compositor_widget_hook(recorder_anchor), path
         )
     text = upgrade_legacy_hooks(
-        text, ((STAGE_045_BLINK_WIDGET_INPUT_HOOK, BLINK_WIDGET_INPUT_HOOK),), path
+        text,
+        (
+            (STAGE_045_BLINK_WIDGET_INPUT_HOOK, BLINK_WIDGET_INPUT_HOOK),
+            (STAGE_0172_BLINK_WIDGET_INPUT_HOOK, BLINK_WIDGET_INPUT_HOOK),
+        ),
+        path,
     )
     text = apply_cookie_hook(
         text, BLINK_WIDGET_INPUT_ANCHOR, BLINK_WIDGET_INPUT_HOOK, path

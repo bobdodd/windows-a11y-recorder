@@ -6576,8 +6576,16 @@ class RecreationInputIntegrationTests(unittest.TestCase):
             patched.index("a11y_recorder::RecreationRefusesCompositorInput()"),
             patched.index("if (event.IsGestureScroll() &&"),
         )
-        self.assertIn("IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE", patched)
-        self.assertIn(": DROP_EVENT;", patched)
+        # Mouse events reach cc's scrollbar controller, and the scroll
+        # gestures cc makes for a scrollbar are handled; the rest is dropped.
+        self.assertIn("!WebInputEvent::IsMouseEventType(event.GetType()) &&", patched)
+        self.assertIn(
+            "static_cast<const WebGestureEvent&>(event).SourceDevice() ==\n"
+            "            WebGestureDevice::kScrollbar)) {\n"
+            "    return DROP_EVENT;",
+            patched,
+        )
+        self.assertNotIn("DID_NOT_HANDLE", INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK)
 
     def test_the_main_thread_shows_only_the_context_menu_once(self):
         patched = self.patch_twice(
@@ -6601,6 +6609,13 @@ class RecreationInputIntegrationTests(unittest.TestCase):
         self.assertIn("GetShowContextMenuOnMouseUp()", block)
         self.assertIn("MouseContextMenu(recorder_mouse);", block)
         self.assertIn("return WebInputEventResult::kHandledSuppressed;", block)
+        # A scroll gesture cc made for a scrollbar is not refused.
+        self.assertIn(
+            "!(input_event.IsGestureScroll() &&\n"
+            "        static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==\n"
+            "            WebGestureDevice::kScrollbar) &&",
+            block,
+        )
         # A browser page's widget takes input: the refusal tests the local
         # root document's scheme.
         self.assertIn(
@@ -6632,6 +6647,30 @@ class RecreationInputIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(1, widget.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
         self.assertNotIn(INTEGRATE.STAGE_045_BLINK_WIDGET_INPUT_HOOK, widget)
+
+    def test_hooks_that_refused_the_scrollbars_are_upgraded(self):
+        proxy = self.proxy_source().replace(
+            INTEGRATE.BLINK_INPUT_HANDLER_PROXY_ANCHOR,
+            INTEGRATE.STAGE_0172_BLINK_INPUT_HANDLER_PROXY_HOOK,
+        )
+        patched = self.patch_twice(
+            "input_handler_proxy.cc", proxy, INTEGRATE.patch_blink_input_handler_proxy
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_0172_BLINK_INPUT_HANDLER_PROXY_HOOK, patched)
+        widget = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                "devtools->HandleInputEvent(input_event);\n"
+                + INTEGRATE.STAGE_0172_BLINK_WIDGET_INPUT_HOOK
+                + "  return WidgetEventHandler::HandleInputEvent(coalesced_event,\n",
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(1, widget.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_0172_BLINK_WIDGET_INPUT_HOOK, widget)
 
     def test_a_browser_pages_parser_marks_its_process_once(self):
         hook = INTEGRATE.BLINK_DOCUMENT_STARTED_PARSING_HOOK
