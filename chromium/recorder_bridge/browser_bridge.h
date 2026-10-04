@@ -14,6 +14,7 @@
 #include "chromium/recorder_bridge/full_walks.h"
 #include "chromium/recorder_bridge/layout_changes.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
+#include "chromium/recorder_bridge/recreation_image_frames.h"
 
 namespace base {
 class CommandLine;
@@ -70,6 +71,19 @@ void MarkRecreationBrowserPageProcess();
 // shows no browser page, so that the compositor thread refuses its input.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 bool RecreationRefusesCompositorInput();
+
+// "Sub-step 2a design: animated images held": in the recreation mode, Blink's
+// main thread gives the value of the X-A11y-Recorder-Image-Frame header of
+// the recorder's answer for an image, and its paint image is held at that
+// frame index; cc reads it, on the compositor thread, for each animated
+// image it is given. An empty or malformed value holds nothing. Does nothing
+// outside the recreation mode.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void HoldRecreationImageFrame(int64_t paint_image_id, std::string frame_header);
+
+// The frame index a paint image is held at in the recreation mode, or none.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::optional<size_t> RecreationHeldImageFrame(int64_t paint_image_id);
 
 // Appends a non-secret startup diagnostic when the opt-in bridge log
 // environment variable is present. This works before Chromium logging starts.

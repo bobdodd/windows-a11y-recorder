@@ -41,13 +41,19 @@ public sealed class RecordedPageResources : IDisposable
     /// <param name="bytes">Reads the bytes of a record kind ("font-file" or "image-data") by digest, or null.</param>
     /// <param name="notes">What the recreation does not take from the recording, for the evidence panel.</param>
     /// <param name="owner">Disposed with these resources, such as the recording file reader the bytes are read from.</param>
+    /// <param name="imageFrames">The frame each animated image is held at (slice 4b sub-step 2a), or none.</param>
+    /// <param name="imageFramesMilliseconds">How long choosing the image frames took, or null when they were not read.</param>
     public RecordedPageResources(
         IReadOnlyList<RecordedFontFace> faces,
         IReadOnlyDictionary<string, RecordedImage> images,
         Func<string, string, byte[]?> bytes,
         IReadOnlyList<string> notes,
-        IDisposable? owner = null)
+        IDisposable? owner = null,
+        RecordedImageFrames? imageFrames = null,
+        double? imageFramesMilliseconds = null)
     {
+        ImageFrames = imageFrames ?? RecordedImageFrames.None;
+        ImageFramesMilliseconds = imageFramesMilliseconds;
         Faces = faces ?? throw new ArgumentNullException(nameof(faces));
         _images = images ?? throw new ArgumentNullException(nameof(images));
         _bytes = bytes ?? throw new ArgumentNullException(nameof(bytes));
@@ -58,6 +64,12 @@ public sealed class RecordedPageResources : IDisposable
     public static RecordedPageResources None { get; } = new([], new Dictionary<string, RecordedImage>(), (_, _) => null, []);
 
     public IReadOnlyList<RecordedFontFace> Faces { get; }
+
+    /// <summary>The frame each animated image is held at in the recreation, by URL.</summary>
+    public RecordedImageFrames ImageFrames { get; }
+
+    /// <summary>How long choosing the image frames took, or null when they were not read.</summary>
+    public double? ImageFramesMilliseconds { get; }
 
     public int ImageCount => _images.Values.Distinct().Count();
 

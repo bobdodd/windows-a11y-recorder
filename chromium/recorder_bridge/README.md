@@ -442,6 +442,19 @@ compositor thread's hook refuses input only while
 `RecreationRefusesCompositorInput()` is true. See "Input refused only in
 the recreation" in the page recreation design.
 
+In the recreation mode, animated images are held at their recorded frame
+(slice 4b sub-step 2a). `ImageResource::Finish` passes the value of the
+recorder's `X-A11y-Recorder-Image-Frame` response header and the image's
+paint image ID to `HoldRecreationImageFrame`, which parses it with
+`ParseRecreationImageFrame` and keeps it in a `HeldImageFrames` (both in
+`recreation_image_frames.h`, tested by `recreation_image_frames_test.cc`).
+`ImageAnimationController::UpdateAnimatedImage` reads it with
+`RecreationHeldImageFrame` on the compositor thread and sets the image's
+frame, the first when none is held, and
+`ImageAnimationController::AnimationState::ShouldAnimate` is false, so no
+image advances. Both functions do nothing outside the recreation mode. See
+"Sub-step 2a" in the page recreation design.
+
 Protocol 0.48 adds the `browser.compositor` channel (slice 4b sub-step 1).
 `RegisterCompositorWidget` is called where each presentation request is
 made, and names the widget of the compositor with that `LayerTreeHost` ID.

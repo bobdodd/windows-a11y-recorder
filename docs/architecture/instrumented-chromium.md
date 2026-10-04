@@ -1117,6 +1117,13 @@ written by the hooks of slice 4b sub-step 1 in `cc/trees/layer_tree_host_impl.cc
 `bitmap_image.cc`. The design is in
 [page recreation](page-recreation.md), "Slice 4b".
 
+In the recreation mode only, slice 4b sub-step 2a holds each animated image
+at the frame the recorder names in its answer's
+`X-A11y-Recorder-Image-Frame` header, with hooks in `image_resource.cc`,
+`image_animation_controller.h`, and `cc/trees/image_animation_controller.cc`;
+it records nothing, and the protocol stays 0.48. The design is in
+[page recreation](page-recreation.md), "Sub-step 2a".
+
 Live 0.48 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a

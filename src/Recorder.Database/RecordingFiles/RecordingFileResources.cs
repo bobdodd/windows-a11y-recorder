@@ -22,16 +22,18 @@ public static class RecordingFileResources
     /// <param name="filePath">The recording file.</param>
     /// <param name="documentKey">The document's state key, its token and identity.</param>
     /// <param name="cutNanoseconds">The recording time the document's state is read at.</param>
+    /// <param name="compositionNanoseconds">The recording time of the frame's composition, at which the frame of each animated image is chosen (slice 4b sub-step 2a), or null for none.</param>
     public static RecordedPageResources Read(
         string filePath,
         string documentKey,
         long cutNanoseconds,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        long? compositionNanoseconds = null)
     {
         var reader = RecordingFileReader.Open(filePath);
         try
         {
-            return Read(reader, documentKey, cutNanoseconds, cancellationToken, owner: reader);
+            return Read(reader, documentKey, cutNanoseconds, cancellationToken, owner: reader, compositionNanoseconds: compositionNanoseconds);
         }
         catch
         {
@@ -46,7 +48,8 @@ public static class RecordingFileResources
         string documentKey,
         long cutNanoseconds,
         CancellationToken cancellationToken = default,
-        IDisposable? owner = null)
+        IDisposable? owner = null,
+        long? compositionNanoseconds = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(documentKey);
@@ -218,7 +221,17 @@ public static class RecordingFileResources
             return Convert.ToHexStringLower(SHA256.HashData(data)) == digest ? data : null;
         }
 
-        return new RecordedPageResources(faces, images, Bytes, notes, owner);
+        RecordedImageFrames? frames = null;
+        double? framesMilliseconds = null;
+        if (compositionNanoseconds is { } composition)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            frames = RecordingFileImageFrames.Read(reader, documentKey, cutNanoseconds, composition, cancellationToken);
+            framesMilliseconds = Math.Round(clock.Elapsed.TotalMilliseconds, 1);
+            notes.AddRange(frames.Notes);
+        }
+
+        return new RecordedPageResources(faces, images, Bytes, notes, owner, frames, framesMilliseconds);
     }
 
     private static string? FaceName(JsonElement payload)

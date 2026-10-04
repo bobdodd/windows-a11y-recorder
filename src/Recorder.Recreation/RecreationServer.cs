@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -169,13 +170,24 @@ public sealed class RecreationServer : IAsyncDisposable
         {
             return null;
         }
-        return new RecreationAnswer(image.Status,
-        [
+        var headers = new List<KeyValuePair<string, string>>
+        {
             new("Content-Type", image.MimeType),
             new("Cache-Control", "no-store"),
             new("X-Content-Type-Options", "nosniff"),
-        ], bytes);
+        };
+        // Slice 4b sub-step 2a: the frame the image is held at, which the
+        // instrumented Chromium reads in the recreation mode. An image with
+        // no recorded frame has no header and is held at its first frame.
+        if (_resources.ImageFrames.Frame(url) is { } frame)
+        {
+            headers.Add(new(ImageFrameHeader, frame.Index.ToString(CultureInfo.InvariantCulture)));
+        }
+        return new RecreationAnswer(image.Status, headers, bytes);
     }
+
+    /// <summary>The response header that names the frame an animated image is held at.</summary>
+    public const string ImageFrameHeader = "X-A11y-Recorder-Image-Frame";
 
     public static bool SameDocument(string requested, string recorded)
     {

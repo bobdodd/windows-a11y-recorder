@@ -1893,6 +1893,34 @@ bool RecreationRefusesCompositorInput() {
          !g_recreation_browser_page_process.load(std::memory_order_relaxed);
 }
 
+namespace {
+
+using RecreationImageFrames = HeldImageFrames<base::Lock, base::AutoLock>;
+
+RecreationImageFrames& HeldRecreationImageFrames() {
+  static base::NoDestructor<RecreationImageFrames> frames;
+  return *frames;
+}
+
+}  // namespace
+
+void HoldRecreationImageFrame(int64_t paint_image_id, std::string frame_header) {
+  if (!IsRecreationMode()) {
+    return;
+  }
+  if (const std::optional<size_t> frame_index =
+          ParseRecreationImageFrame(frame_header)) {
+    HeldRecreationImageFrames().Hold(paint_image_id, *frame_index);
+  }
+}
+
+std::optional<size_t> RecreationHeldImageFrame(int64_t paint_image_id) {
+  if (!IsRecreationMode()) {
+    return std::nullopt;
+  }
+  return HeldRecreationImageFrames().Find(paint_image_id);
+}
+
 RecorderPipeClient* GetProcessRecorderClient() {
   return ProcessClientStorage().get();
 }

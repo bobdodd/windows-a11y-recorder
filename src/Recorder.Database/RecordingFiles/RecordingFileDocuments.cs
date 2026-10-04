@@ -142,10 +142,15 @@ public sealed class RecordingFileDocuments
     /// hold until disposed, so that a recreation can read their bytes after
     /// the recording is closed. None when the file's path is not known.
     /// </summary>
-    public RecordedPageResources Resources(string key, long cutNanoseconds, CancellationToken cancellationToken = default) =>
+    /// <param name="compositionNanoseconds">The frame's composition time, at which each animated image's frame is chosen, or null for none.</param>
+    public RecordedPageResources Resources(
+        string key,
+        long cutNanoseconds,
+        CancellationToken cancellationToken = default,
+        long? compositionNanoseconds = null) =>
         _filePath is null
             ? RecordedPageResources.None
-            : RecordingFileResources.Read(_filePath, key, cutNanoseconds, cancellationToken);
+            : RecordingFileResources.Read(_filePath, key, cutNanoseconds, cancellationToken, compositionNanoseconds);
 
     /// <summary>
     /// The recording time of the frame's composition, which the state is

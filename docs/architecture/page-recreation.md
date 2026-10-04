@@ -3899,7 +3899,7 @@ is not established. Sixteen of the 5986 presentations failed: five at
 startup, and eleven between 10.46 s and 84.59 s, each within 0.52 s of a
 recorded scroll offset change; their cause is not established either.
 
-#### Sub-step 2 in parts (proposed)
+#### Sub-step 2 in parts (agreed)
 
 Proposed 2026-10-04, after the owner asked to hold the recorded image
 frames in the recreation next ("ok let's do that work"). Sub-step 2 of
@@ -3917,7 +3917,11 @@ Until 2b and 2c are built, the fixture's other panels are not expected to
 match the captured frame in the recreation, and are not judged in 2a's
 test.
 
-#### Sub-step 2a design: animated images held (proposed)
+#### Sub-step 2a design: animated images held (agreed, built)
+
+Agreed by the owner on 2026-10-04 ("yes please"), and built as "Sub-step
+2a as built" below states. The parts of sub-step 2 above were agreed with
+it.
 
 Read in the target machine's checkout before this was written.
 
@@ -4027,6 +4031,79 @@ Required tests:
   recreation, the number drawn on each of the three images is the one on
   the captured frame and the one in the evidence panel, and it does not
   change while the recreation is open.
+
+#### Sub-step 2a as built
+
+Built on 2026-10-04 as designed above, with these differences and
+additions:
+
+- Blink gives the bridge the header's text, and the bridge parses it
+  (`ParseRecreationImageFrame` in `recreation_image_frames.h`): digits
+  only, with no sign, space, or overflow; any other value holds nothing.
+  The integration script's check of the bridge's call shapes allows only
+  the bridge's own entry points in a patched file, and the parsing helper
+  is not one.
+- `HoldRecreationImageFrame(paint_image_id, frame_header)` and
+  `RecreationHeldImageFrame(paint_image_id)` are the bridge's entry
+  points. The held frames are a `HeldImageFrames` (in
+  `recreation_image_frames.h`) under a `base::Lock`; both functions do
+  nothing outside the recreation mode.
+- The hold in `image_resource.cc` is added to the 1c hook in
+  `ImageResource::Finish`, after `RecordBlinkImageResource`; a checkout
+  patched with the 1c or the 0.40 hook is upgraded in place.
+- `RecorderHoldFrame`, the method added to `AnimationState` in
+  `image_animation_controller.h`, takes an index that is not one of the
+  image's frames as the first frame.
+- The frame chosen accumulates the changes of the chosen compositor
+  frame's own compositor (its `layerTreeHostId`) only, as a compositor
+  recreated for the frame sink starts with no image frames of its own.
+- The app reads the recording's presentation, lifecycle, resources, and
+  compositor records up to two seconds after the frame's composition, so
+  that a compositor frame presented by the composition has its
+  presentation record. A presentation recorded more than two seconds after
+  the composition is taken as not presented; this limit is stated here and
+  not in the evidence panel.
+- The evidence panel lists the images held at a recorded frame in one
+  note, with each URL, its index, and the compositor frame that last
+  changed it, and the compositor frame and presentation time it was
+  chosen at. Images the compositor had released at the frame (a null
+  value) are counted. Other images are not counted, as a still image and
+  an animated image with no recorded frame are both drawn at their first
+  frame; one note says so for every recreation.
+- In the recreation mode every animated image is held at its first frame
+  unless a header names another, including any on a browser page such as
+  DevTools, as `ShouldAnimate()` is false in each process of the
+  recreation's browser.
+- "Time to open the recreation" lists "Choosing the frame of each animated
+  image from the recording's compositor records" as its own step, apart
+  from reading the fonts and images.
+
+Tests run in the sandbox, 2026-10-04:
+
+- Unit (app), `RecordedImageFramesTests`: the frame chosen with a failed
+  presentation, a frame presented after the composition, a null value,
+  another frame sink's frames, and another renderer's `image-resource`; a
+  document with no presentation; the header in the answer and its absence;
+  the panel's note. All passed.
+- Unit (integration script): each hook against copies of the target
+  machine's `image_animation_controller.h`, `image_animation_controller.cc`,
+  and `image_resource.cc`, patched once and unchanged on a second run; the
+  1c hook upgraded; the bridge call shapes. All passed.
+- Unit (bridge), `recreation_image_frames_test.cc`: the parsing, and the
+  held frames by paint image ID, read from another thread. Passed.
+- The chooser was run, outside the committed tests, on the 1c fixture
+  recording ("Recording of the fixture with 1c") at 10 to 100 s, and gave
+  the same frames as a separate reading of the same records. Each choice
+  took 0.36 to 0.73 s in the sandbox, which reads the compositor records
+  from the start of the recording; the time on the target machine is not
+  measured.
+
+- The full app run in the sandbox: 1038 passed, and the 4
+  `ChromiumLauncherTests` that fail in the sandbox, as before, failed. The
+  integration script's tests: 219 passed. The bridge's other native tests
+  (full walks, recreation input, evidence cost) passed.
+
+Not yet run: the system test on the target machine.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 

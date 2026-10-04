@@ -8734,6 +8734,36 @@ BLINK_IMAGE_RESOURCE_HOOK_0_40 = """\
 """
 # Protocol 0.48 part 1c: the record is made once the bytes were given to the
 # image, with the image's own ID, and the copy of the bytes is timed.
+BLINK_IMAGE_RESOURCE_HOOK_1C = """\
+  } else {
+    // Windows A11y Recorder (protocol 0.40): the encoded bytes, before they
+    // are cleared, with the URL requested and the response. A data URL's
+    // bytes are its URL, which the DOM already holds. Protocol 0.48: with
+    // the ID of the Blink image they were given to.
+    std::optional<a11y_recorder::ImageResourceFacts> recorder_image;
+    if (Data() && a11y_recorder::IsRecorderActive() &&
+        !Url().ProtocolIsData()) {
+      A11Y_RECORDER_HOOK_COST("hook:image-resource");
+      recorder_image.emplace();
+      recorder_image->url = Url().GetString().Utf8();
+      recorder_image->response_url =
+          GetResponse().ResponseUrl().GetString().Utf8();
+      recorder_image->status = GetResponse().HttpStatusCode();
+      recorder_image->mime_type = GetResponse().MimeType().Utf8();
+      recorder_image->bytes.reserve(Data()->size());
+      for (const base::span<const char>& recorder_segment : *Data()) {
+        recorder_image->bytes.append(recorder_segment.begin(),
+                                     recorder_segment.end());
+      }
+    }
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+    if (recorder_image) {
+      if (GetContent()->HasImage()) {
+        recorder_image->image_id = GetContent()->GetImage()->paint_image_id();
+      }
+      a11y_recorder::RecordBlinkImageResource(std::move(*recorder_image));
+    }
+"""
 BLINK_IMAGE_RESOURCE_HOOK = """\
   } else {
     // Windows A11y Recorder (protocol 0.40): the encoded bytes, before they
@@ -8762,6 +8792,16 @@ BLINK_IMAGE_RESOURCE_HOOK = """\
         recorder_image->image_id = GetContent()->GetImage()->paint_image_id();
       }
       a11y_recorder::RecordBlinkImageResource(std::move(*recorder_image));
+    }
+    // Windows A11y Recorder recreation mode ("Sub-step 2a design: animated
+    // images held"): the frame the recorder's answer names for the image,
+    // held by the paint image ID its shared sequence uses.
+    if (a11y_recorder::IsRecreationMode() && GetContent()->HasImage()) {
+      a11y_recorder::HoldRecreationImageFrame(
+          GetContent()->GetImage()->paint_image_id(),
+          GetResponse()
+              .HttpHeaderField(AtomicString("X-A11y-Recorder-Image-Frame"))
+              .Utf8());
     }
 """
 
@@ -8844,11 +8884,14 @@ def patch_blink_image_resource(path: Path) -> None:
         (BLINK_BRIDGE_INCLUDE,),
         path,
     )
-    # A tree patched for protocol 0.40 holds the earlier hook; it is replaced
-    # in place.
-    text = upgrade_legacy_hooks(
-        text, ((BLINK_IMAGE_RESOURCE_HOOK_0_40, BLINK_IMAGE_RESOURCE_HOOK),), path
-    )
+    # A tree patched for protocol 0.40, or for part 1c, holds an earlier hook;
+    # it is replaced in place. The 1c hook begins the current one, so a tree
+    # that holds the current hook is left alone.
+    for legacy_hook in (BLINK_IMAGE_RESOURCE_HOOK_0_40, BLINK_IMAGE_RESOURCE_HOOK_1C):
+        if BLINK_IMAGE_RESOURCE_HOOK not in text:
+            text = upgrade_legacy_hooks(
+                text, ((legacy_hook, BLINK_IMAGE_RESOURCE_HOOK),), path
+            )
     if BLINK_IMAGE_RESOURCE_HOOK not in text:
         text = replace_once(
             text, BLINK_IMAGE_RESOURCE_ANCHOR, BLINK_IMAGE_RESOURCE_HOOK, path
@@ -16401,14 +16444,87 @@ CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR = """\
 """
 
 
+CC_IMAGE_ANIMATION_STATE_ANCHOR = (
+    "    size_t active_index() const { return active_index_; }\n"
+)
+CC_IMAGE_ANIMATION_STATE_HOLD = """\
+
+    // Windows A11y Recorder recreation mode ("Sub-step 2a design: animated
+    // images held"): the image is held at the frame on both trees, or at its
+    // first frame when the index is not one of its frames.
+    void RecorderHoldFrame(size_t index) {
+      if (index >= frames_.size()) {
+        index = PaintImage::kDefaultFrameIndex;
+      }
+      current_state_.pending_index = index;
+      active_index_ = index;
+    }
+"""
+
+
 def patch_cc_image_animation_controller(path: Path) -> None:
     """Protocol 0.48 part 1c: lets the recorder read the frame each animated
-    paint image is drawn at."""
+    paint image is drawn at. Sub-step 2a: lets the recreation hold an image
+    at a frame."""
     text = read_source(path)
     text = apply_cookie_hook(
         text,
         CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR,
         CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR + CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CC_IMAGE_ANIMATION_STATE_ANCHOR,
+        CC_IMAGE_ANIMATION_STATE_ANCHOR + CC_IMAGE_ANIMATION_STATE_HOLD,
+        path,
+    )
+    write_patched(path, text)
+
+
+CC_IMAGE_ANIMATION_CONTROLLER_OWN_INCLUDE = (
+    '#include "cc/trees/image_animation_controller.h"'
+)
+CC_IMAGE_ANIMATION_UPDATE_ANCHOR = """\
+  AnimationState& animation_state = animation_state_map_[data.paint_image_id];
+  animation_state.UpdateMetadata(data, animation_state_map_);
+"""
+CC_IMAGE_ANIMATION_UPDATE_HOOK = CC_IMAGE_ANIMATION_UPDATE_ANCHOR + """\
+  // Windows A11y Recorder recreation mode ("Sub-step 2a design: animated
+  // images held"): the image is held at the frame the recorder's answer
+  // named, or at its first frame.
+  if (a11y_recorder::IsRecreationMode()) {
+    animation_state.RecorderHoldFrame(
+        a11y_recorder::RecreationHeldImageFrame(data.paint_image_id)
+            .value_or(PaintImage::kDefaultFrameIndex));
+  }
+"""
+CC_IMAGE_ANIMATION_SHOULD_ANIMATE_ANCHOR = """\
+bool ImageAnimationController::AnimationState::ShouldAnimate() const {
+"""
+CC_IMAGE_ANIMATION_SHOULD_ANIMATE_HOOK = CC_IMAGE_ANIMATION_SHOULD_ANIMATE_ANCHOR + """\
+  // Windows A11y Recorder recreation mode: a recreation is a snapshot in
+  // time, so no image is advanced, and no frame is asked for to advance one.
+  if (a11y_recorder::IsRecreationMode()) {
+    return false;
+  }
+"""
+
+
+def patch_cc_image_animation_controller_source(path: Path) -> None:
+    """Sub-step 2a: in the recreation mode, each animated image is held at
+    its recorded frame and never advanced."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, CC_IMAGE_ANIMATION_CONTROLLER_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text, CC_IMAGE_ANIMATION_UPDATE_ANCHOR, CC_IMAGE_ANIMATION_UPDATE_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text,
+        CC_IMAGE_ANIMATION_SHOULD_ANIMATE_ANCHOR,
+        CC_IMAGE_ANIMATION_SHOULD_ANIMATE_HOOK,
         path,
     )
     write_patched(path, text)
@@ -17074,6 +17190,9 @@ def main() -> int:
     patch_cc_layer_tree_host_impl(source / "cc" / "trees" / "layer_tree_host_impl.cc")
     patch_cc_image_animation_controller(
         source / "cc" / "trees" / "image_animation_controller.h"
+    )
+    patch_cc_image_animation_controller_source(
+        source / "cc" / "trees" / "image_animation_controller.cc"
     )
     patch_cc_client_layer_tree_host_impl(
         source / "cc" / "trees" / "client_layer_tree_host_impl.cc"

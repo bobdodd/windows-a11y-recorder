@@ -7296,7 +7296,9 @@ class CompositorRecordIntegrationTests(unittest.TestCase):
             "image_animation_controller.h",
             "class ImageAnimationController {\n public:\n"
             + INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR
-            + "\n private:\n  AnimationStateMap animation_state_map_;\n};\n",
+            + "\n private:\n  class AnimationState {\n   public:\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_STATE_ANCHOR
+            + "  };\n  AnimationStateMap animation_state_map_;\n};\n",
             INTEGRATE.patch_cc_image_animation_controller,
         )
         self.assertEqual(1, header.count(INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR))
@@ -8015,6 +8017,138 @@ class RecreationIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(fresh, upgraded)
         self.assertNotIn(INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK_0_40, upgraded)
+
+    def test_an_image_resource_hook_of_part_1c_is_upgraded_in_place(self):
+        original = (
+            '#include "third_party/blink/renderer/core/loader/resource/'
+            'image_resource.h"\n\nvoid ImageResource::Finish() {\n'
+            "  if (a) {\n"
+            + INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR
+            + "    ClearData();\n  }\n}\n"
+        )
+        fresh = self.patch_source_twice(
+            "image_resource.cc", original, INTEGRATE.patch_blink_image_resource
+        )
+        earlier = original.replace(
+            INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR,
+            INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK_1C,
+        )
+        upgraded = self.patch_source_twice(
+            "image_resource.cc", earlier, INTEGRATE.patch_blink_image_resource
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertEqual(1, upgraded.count("X-A11y-Recorder-Image-Frame"))
+
+    def test_the_recreation_holds_an_image_at_the_frame_its_answer_names(self):
+        source = self.patch_source_twice(
+            "image_resource.cc",
+            '#include "third_party/blink/renderer/core/loader/resource/'
+            'image_resource.h"\n\nvoid ImageResource::Finish() {\n'
+            "  if (a) {\n"
+            + INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR
+            + "    ClearData();\n  }\n}\n",
+            INTEGRATE.patch_blink_image_resource,
+        )
+        # Held once the image has its bytes, only in the recreation mode, by
+        # the image's own paint image ID, before the bytes are cleared.
+        self.assertEqual(1, source.count("a11y_recorder::HoldRecreationImageFrame("))
+        self.assertLess(
+            source.index("UpdateImage(Data()"),
+            source.index("a11y_recorder::HoldRecreationImageFrame("),
+        )
+        self.assertLess(
+            source.index("a11y_recorder::HoldRecreationImageFrame("),
+            source.index("ClearData();"),
+        )
+        self.assertIn(
+            "if (a11y_recorder::IsRecreationMode() && GetContent()->HasImage()) {",
+            source,
+        )
+        self.assertIn('AtomicString("X-A11y-Recorder-Image-Frame")', source)
+        header = self.patch_source_twice(
+            "image_animation_controller.h",
+            "class ImageAnimationController {\n public:\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR
+            + "\n private:\n  class AnimationState {\n   public:\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_STATE_ANCHOR
+            + "   private:\n    std::vector<FrameMetadata> frames_;\n  };\n"
+            "  AnimationStateMap animation_state_map_;\n};\n",
+            INTEGRATE.patch_cc_image_animation_controller,
+        )
+        self.assertEqual(1, header.count(INTEGRATE.CC_IMAGE_ANIMATION_STATE_HOLD))
+        self.assertEqual(1, header.count(INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR))
+        # The hold is a member of AnimationState, beside its index accessor.
+        self.assertLess(
+            header.index("class AnimationState"), header.index("void RecorderHoldFrame(")
+        )
+        self.assertIn("if (index >= frames_.size()) {", header)
+        controller = self.patch_source_twice(
+            "image_animation_controller.cc",
+            INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_OWN_INCLUDE
+            + "\n\nvoid ImageAnimationController::UpdateAnimatedImage(\n"
+            "    const DiscardableImageMap::AnimatedImageMetadata& data) {\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_UPDATE_ANCHOR
+            + "}\n\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_SHOULD_ANIMATE_ANCHOR
+            + "  return ShouldAnimate(0, 0);\n}\n",
+            INTEGRATE.patch_cc_image_animation_controller_source,
+        )
+        self.assertEqual(1, controller.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, controller.count(INTEGRATE.CC_IMAGE_ANIMATION_UPDATE_HOOK))
+        self.assertEqual(
+            1, controller.count(INTEGRATE.CC_IMAGE_ANIMATION_SHOULD_ANIMATE_HOOK)
+        )
+        # The hold follows the metadata, which may reset the image's indexes.
+        self.assertLess(
+            controller.index("animation_state.UpdateMetadata("),
+            controller.index("animation_state.RecorderHoldFrame("),
+        )
+        self.assertLess(
+            controller.index("if (a11y_recorder::IsRecreationMode()) {\n    return false;"),
+            controller.index("return ShouldAnimate(0, 0);"),
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        for name, text in (
+            ("image_resource.cc", source),
+            ("image_animation_controller.cc", controller),
+        ):
+            self.assertEqual(
+                [], INTEGRATE.describe_signature_mismatches(name, text, signatures)
+            )
+
+    def test_the_held_image_frames_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_image_frames.h",', build)
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        self.assertIn("HeldImageFrames<base::Lock, base::AutoLock>", source)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_image_frames_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-pthread",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_image_frames_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
 
     def test_each_paint_image_made_from_an_image_is_recorded_once(self):
         source = self.patch_source_twice(

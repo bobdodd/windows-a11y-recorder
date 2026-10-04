@@ -1683,8 +1683,16 @@ public partial class MainWindow : Window
                         .ToArray();
                     timings.Add(new RecreationTiming("Reading the page's popups at the frame from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                     clock.Restart();
-                    var resources = documents.Resources(chosen.Key, found.Basis.CutTime);
-                    timings.Add(new RecreationTiming("Reading the page's fonts and images from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                    // Slice 4b sub-step 2a: the frame each animated image
+                    // is held at, chosen at the frame's composition.
+                    var resources = documents.Resources(chosen.Key, found.Basis.CutTime, compositionNanoseconds: documents.CompositionTime(frame));
+                    var resourcesMilliseconds = Math.Round(clock.Elapsed.TotalMilliseconds, 1);
+                    var framesMilliseconds = resources.ImageFramesMilliseconds ?? 0;
+                    timings.Add(new RecreationTiming("Reading the page's fonts and images from the recording", Math.Round(resourcesMilliseconds - framesMilliseconds, 1)));
+                    if (resources.ImageFramesMilliseconds is { } imageFrames)
+                    {
+                        timings.Add(new RecreationTiming("Choosing the frame of each animated image from the recording's compositor records", imageFrames));
+                    }
                     clock.Restart();
                     try
                     {
