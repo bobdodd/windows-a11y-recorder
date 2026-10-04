@@ -1515,8 +1515,11 @@ struct CompositorFilterOperation {
 // "scroll-offset" (x and y), or "background-color-progress" or
 // "clip-path-progress" (the compositor's progress a native paint worklet's
 // drawn record was painted with, one number, or none when it was painted
-// with no compositor progress). An element whose node or paint worklet is
-// no longer in the tree is given with present false.
+// with no compositor progress), or "image-frame" (protocol 0.48 part 1c:
+// the frame index of an animated paint image on the active tree, one number,
+// with element_id holding the PaintImage::Id). An element whose node or paint
+// worklet, or an image the image animation controller no longer holds, is
+// given with present false.
 struct CompositorDrawnValue {
   uint64_t element_id = 0;
   std::string property;
@@ -2095,12 +2098,63 @@ struct ImageResourceFacts {
   int status = 0;
   std::string mime_type;
   std::string bytes;
+  // Protocol 0.48: the Blink image's own ID (Image::paint_image_id()) once
+  // the bytes were given to it, or none when no image was made.
+  std::optional<int64_t> image_id;
 };
 
 // Records an image-resource record, and an image-data record the first time
 // the renderer meets the bytes' digest.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkImageResource(ImageResourceFacts image);
+
+// Protocol 0.48: a paint image Blink made from an image
+// (BitmapImage::PaintImageForCurrentFrameWithInfo): the image's own ID, the
+// paint image's ID, whether its animation sequence is the image's shared one
+// or an element's own, the element it was made for, and the paint image it is
+// synchronised to.
+// IDs are PaintImage::Id values, which start at 0; a negative one, such as
+// PaintImage::kInvalidId, names none.
+struct ImagePaintImageFacts {
+  int64_t image_id = -1;
+  int64_t paint_image_id = -1;
+  bool own_sequence = false;
+  std::optional<int> node_id;
+  std::optional<int64_t> sync_target_paint_image_id;
+};
+
+// Records an image-paint-image record the first time the renderer makes a
+// paint image with the ID.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkImagePaintImage(ImagePaintImageFacts facts);
+
+// Protocol 0.48: times a recorder hook's whole work, before and including its
+// bridge call, as a kind of its own in the bridge's cost lines. A hook writes
+// A11Y_RECORDER_HOOK_COST("hook:name") at the start of its block.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+int RegisterHookCostKind(const char* name);
+// Returns the start in nanoseconds, or -1 when cost is not being reported.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+int64_t StartHookCost(int slot);
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void StopHookCost(int slot, int64_t started);
+
+class HookCost {
+ public:
+  explicit HookCost(int slot) : slot_(slot), started_(StartHookCost(slot)) {}
+  ~HookCost() { StopHookCost(slot_, started_); }
+  HookCost(const HookCost&) = delete;
+  HookCost& operator=(const HookCost&) = delete;
+
+ private:
+  const int slot_;
+  const int64_t started_;
+};
+
+#define A11Y_RECORDER_HOOK_COST(name)                               \
+  static const int recorder_hook_cost_slot =                        \
+      ::a11y_recorder::RegisterHookCostKind(name);                  \
+  const ::a11y_recorder::HookCost recorder_hook_cost(recorder_hook_cost_slot)
 
 }  // namespace a11y_recorder
 

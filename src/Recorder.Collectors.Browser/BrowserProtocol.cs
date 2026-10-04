@@ -408,6 +408,10 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.ImageResource) =>
                 payload.Deserialize<BrowserImageResourcePayload>(JsonOptions)
                     as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.ImagePaintImage) =>
+                payload.Deserialize<BrowserImagePaintImagePayload>(JsonOptions)
+                    as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or
                 BrowserEvidenceChannels.Dispatch or

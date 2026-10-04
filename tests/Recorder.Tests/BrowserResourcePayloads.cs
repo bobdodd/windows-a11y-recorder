@@ -89,7 +89,20 @@ internal static class BrowserResourcePayloads
           "mimeType": "image/png",
           "size": "5",
           "digest": "{{Digest}}",
-          "dataRecorded": true
+          "dataRecorded": true,
+          "imageId": "41"
+        }
+        """;
+
+    // Protocol 0.48: a paint image made for an element's own animation.
+    public static readonly string ImagePaintImage = $$"""
+        {
+          "context": {{ProcessContextJson}},
+          "imageId": "41",
+          "paintImageId": "57",
+          "sequence": "own",
+          "nodeId": 88,
+          "syncTargetPaintImageId": "41"
         }
         """;
 }

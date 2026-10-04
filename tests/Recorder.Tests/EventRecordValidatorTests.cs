@@ -4912,9 +4912,36 @@ public sealed class EventRecordValidatorTests
     [InlineData("font-face-removed")]
     [InlineData("font-face-loaded")]
     [InlineData("image-resource")]
+    [InlineData("image-paint-image")]
     public void AcceptsResourceRecords(string eventType)
     {
         Assert.Empty(ValidateResourceRecord(eventType, ResourcePayload(eventType)));
+    }
+
+    [Fact]
+    public void AcceptsAnImageWithNoImageIdAndASharedPaintImageWithNoNode()
+    {
+        var resource = ResourcePayload("image-resource");
+        resource["imageId"] = null;
+        Assert.Empty(ValidateResourceRecord("image-resource", resource));
+
+        var shared = ResourcePayload("image-paint-image");
+        shared["sequence"] = "shared";
+        shared["paintImageId"] = "0";
+        shared["nodeId"] = null;
+        shared["syncTargetPaintImageId"] = null;
+        Assert.Empty(ValidateResourceRecord("image-paint-image", shared));
+    }
+
+    [Fact]
+    public void APaintImageOfAnElementsOwnSequenceNamesItsNode()
+    {
+        var payload = ResourcePayload("image-paint-image");
+        payload["nodeId"] = null;
+
+        Assert.Contains(
+            ValidateResourceRecord("image-paint-image", payload),
+            issue => issue.Code == "browser-image-paint-image-node-missing");
     }
 
     [Theory]
@@ -4928,6 +4955,10 @@ public sealed class EventRecordValidatorTests
     [InlineData("font-face-loaded", "fontFile/index", "-1", "payload-property-invalid")]
     [InlineData("image-resource", "url", "7", "payload-property-invalid")]
     [InlineData("image-resource", "dataRecorded", "null", "payload-property-invalid")]
+    [InlineData("image-resource", "imageId", "41", "payload-property-invalid")]
+    [InlineData("image-paint-image", "paintImageId", "\"-2\"", "payload-property-invalid")]
+    [InlineData("image-paint-image", "sequence", "\"stopped\"", "payload-property-invalid")]
+    [InlineData("image-paint-image", "nodeId", "0", "payload-property-invalid")]
     public void RejectsMalformedResourceRecords(
         string eventType, string path, string value, string code)
     {
@@ -4984,6 +5015,7 @@ public sealed class EventRecordValidatorTests
             "font-file" or "image-data" => BrowserResourcePayloads.FontFile,
             "font-face-added" or "font-face-removed" => BrowserResourcePayloads.FaceAdded,
             "font-face-loaded" => BrowserResourcePayloads.FaceLoaded,
+            "image-paint-image" => BrowserResourcePayloads.ImagePaintImage,
             _ => BrowserResourcePayloads.ImageResource
         })!;
 

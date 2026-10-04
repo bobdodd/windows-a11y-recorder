@@ -8710,7 +8710,7 @@ BLINK_IMAGE_RESOURCE_ANCHOR = """\
   } else {
     UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
 """
-BLINK_IMAGE_RESOURCE_HOOK = """\
+BLINK_IMAGE_RESOURCE_HOOK_0_40 = """\
   } else {
     // Windows A11y Recorder (protocol 0.40): the encoded bytes, before they
     // are cleared, with the URL requested and the response. A data URL's
@@ -8731,6 +8731,38 @@ BLINK_IMAGE_RESOURCE_HOOK = """\
       a11y_recorder::RecordBlinkImageResource(std::move(recorder_image));
     }
     UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+"""
+# Protocol 0.48 part 1c: the record is made once the bytes were given to the
+# image, with the image's own ID, and the copy of the bytes is timed.
+BLINK_IMAGE_RESOURCE_HOOK = """\
+  } else {
+    // Windows A11y Recorder (protocol 0.40): the encoded bytes, before they
+    // are cleared, with the URL requested and the response. A data URL's
+    // bytes are its URL, which the DOM already holds. Protocol 0.48: with
+    // the ID of the Blink image they were given to.
+    std::optional<a11y_recorder::ImageResourceFacts> recorder_image;
+    if (Data() && a11y_recorder::IsRecorderActive() &&
+        !Url().ProtocolIsData()) {
+      A11Y_RECORDER_HOOK_COST("hook:image-resource");
+      recorder_image.emplace();
+      recorder_image->url = Url().GetString().Utf8();
+      recorder_image->response_url =
+          GetResponse().ResponseUrl().GetString().Utf8();
+      recorder_image->status = GetResponse().HttpStatusCode();
+      recorder_image->mime_type = GetResponse().MimeType().Utf8();
+      recorder_image->bytes.reserve(Data()->size());
+      for (const base::span<const char>& recorder_segment : *Data()) {
+        recorder_image->bytes.append(recorder_segment.begin(),
+                                     recorder_segment.end());
+      }
+    }
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+    if (recorder_image) {
+      if (GetContent()->HasImage()) {
+        recorder_image->image_id = GetContent()->GetImage()->paint_image_id();
+      }
+      a11y_recorder::RecordBlinkImageResource(std::move(*recorder_image));
+    }
 """
 
 
@@ -8812,10 +8844,61 @@ def patch_blink_image_resource(path: Path) -> None:
         (BLINK_BRIDGE_INCLUDE,),
         path,
     )
+    # A tree patched for protocol 0.40 holds the earlier hook; it is replaced
+    # in place.
+    text = upgrade_legacy_hooks(
+        text, ((BLINK_IMAGE_RESOURCE_HOOK_0_40, BLINK_IMAGE_RESOURCE_HOOK),), path
+    )
     if BLINK_IMAGE_RESOURCE_HOOK not in text:
         text = replace_once(
             text, BLINK_IMAGE_RESOURCE_ANCHOR, BLINK_IMAGE_RESOURCE_HOOK, path
         )
+    write_patched(path, text)
+
+
+BLINK_BITMAP_IMAGE_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/platform/graphics/bitmap_image.h"'
+)
+BLINK_BITMAP_IMAGE_PAINT_IMAGE_ANCHOR = """\
+  PaintImage new_frame =
+      CreatePaintImage(paint_id, sync_animation_target_id, sync_sequence,
+                       reset_animation_sequence_id, expected_repetition_count);
+"""
+BLINK_BITMAP_IMAGE_PAINT_IMAGE_HOOK = BLINK_BITMAP_IMAGE_PAINT_IMAGE_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the paint image made, with the
+  // image it was made from, its animation sequence, the element it was made
+  // for, and the paint image it is synchronised to.
+  if (new_frame && a11y_recorder::GetProcessRecorderClient()) {
+    A11Y_RECORDER_HOOK_COST("hook:image-paint-image");
+    a11y_recorder::ImagePaintImageFacts recorder_facts;
+    recorder_facts.image_id = paint_image_id();
+    recorder_facts.paint_image_id = paint_id;
+    recorder_facts.own_sequence =
+        sync_sequence == PaintImage::AnimationSyncSequence::kOwn;
+    if (id != kNormalCachedFrameId) {
+      recorder_facts.node_id = static_cast<int>(id);
+    }
+    if (sync_animation_target_id != PaintImage::kInvalidId) {
+      recorder_facts.sync_target_paint_image_id = sync_animation_target_id;
+    }
+    a11y_recorder::RecordBlinkImagePaintImage(std::move(recorder_facts));
+  }
+"""
+
+
+def patch_blink_bitmap_image(path: Path) -> None:
+    """Protocol 0.48 part 1c: records each paint image Blink makes from an
+    image, so that an animated image's drawn frame names its image."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_BITMAP_IMAGE_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_BITMAP_IMAGE_PAINT_IMAGE_ANCHOR,
+        BLINK_BITMAP_IMAGE_PAINT_IMAGE_HOOK,
+        path,
+    )
     write_patched(path, text)
 
 
@@ -15881,8 +15964,9 @@ void RecorderRecordCompositorFrame(int host_id,
 """
 
 # Part 1b: the compositor progress each native paint worklet's drawn record
-# was painted with.
-CC_PAINT_WORKLET_HELPERS = """\
+# was painted with. As part 1b inserted them; part 1c times the results hook
+# (CC_PAINT_WORKLET_HELPERS, below).
+CC_PAINT_WORKLET_HELPERS_1B = """\
 // Windows A11y Recorder (protocol 0.48): the compositor progress each paint
 // worklet result was painted with, by its record's buffer, for each
 // compositor. Noted as the results reach the pending tree
@@ -16027,9 +16111,83 @@ void RecorderNotePaintWorkletResults(int host_id,
 
 """
 
+CC_PAINT_WORKLET_RESULTS_START = """\
+  if (!a11y_recorder::GetProcessRecorderClient()) {
+    return;
+  }
+  RecorderPaintWorkletResultMap& noted = RecorderPaintWorkletResults()[host_id];
+  for (const auto& entry : results) {
+"""
+CC_PAINT_WORKLET_HELPERS = CC_PAINT_WORKLET_HELPERS_1B.replace(
+    CC_PAINT_WORKLET_RESULTS_START,
+    CC_PAINT_WORKLET_RESULTS_START.replace(
+        "  }\n  RecorderPaintWorkletResultMap",
+        '  }\n  A11Y_RECORDER_HOOK_COST("hook:paint-worklet-results");\n'
+        "  RecorderPaintWorkletResultMap",
+    ),
+)
+
+# Part 1c: the frame each animated paint image is drawn at on the active
+# tree, as the image animation controller holds it.
+CC_IMAGE_FRAME_HELPERS = """\
+// Windows A11y Recorder (protocol 0.48): the paint images whose frame each
+// compositor's last recorded frame named. Used on the compositor thread
+// alone.
+namespace {
+
+std::map<int, std::set<PaintImage::Id>>& RecorderImageFrameIds() {
+  static base::NoDestructor<std::map<int, std::set<PaintImage::Id>>> ids;
+  return *ids;
+}
+
+// Adds, for each paint image the image animation controller holds, the frame
+// the active tree draws, and, for each one no longer held, its absence.
+void RecorderReadImageFrames(
+    int host_id,
+    const ImageAnimationController* images,
+    std::vector<a11y_recorder::CompositorDrawnValue>* values) {
+  std::set<PaintImage::Id>& recorded = RecorderImageFrameIds()[host_id];
+  std::set<PaintImage::Id> held;
+  if (images) {
+    for (const auto& [paint_image_id, frame_index] :
+         images->RecorderActiveFrameIndexes()) {
+      if (paint_image_id < 0 || !held.insert(paint_image_id).second) {
+        continue;
+      }
+      a11y_recorder::CompositorDrawnValue value;
+      value.element_id = static_cast<uint64_t>(paint_image_id);
+      value.property = "image-frame";
+      value.numbers = {static_cast<double>(frame_index)};
+      values->push_back(std::move(value));
+    }
+  }
+  for (const PaintImage::Id paint_image_id : recorded) {
+    if (held.contains(paint_image_id)) {
+      continue;
+    }
+    a11y_recorder::CompositorDrawnValue value;
+    value.element_id = static_cast<uint64_t>(paint_image_id);
+    value.property = "image-frame";
+    value.present = false;
+    values->push_back(std::move(value));
+  }
+  recorded = std::move(held);
+}
+
+}  // namespace
+
+"""
+
 CC_FRAME_SIGNATURE_1A = """\
 void RecorderRecordCompositorFrame(int host_id,
                                    const LayerTreeImpl* tree,
+                                   const viz::BeginFrameArgs& args,
+                                   uint32_t frame_token) {
+"""
+CC_FRAME_SIGNATURE_1B = """\
+void RecorderRecordCompositorFrame(int host_id,
+                                   const LayerTreeImpl* tree,
+                                   const LayerTreeImpl* pending_tree,
                                    const viz::BeginFrameArgs& args,
                                    uint32_t frame_token) {
 """
@@ -16037,18 +16195,43 @@ CC_FRAME_SIGNATURE = """\
 void RecorderRecordCompositorFrame(int host_id,
                                    const LayerTreeImpl* tree,
                                    const LayerTreeImpl* pending_tree,
+                                   const ImageAnimationController* images,
                                    const viz::BeginFrameArgs& args,
                                    uint32_t frame_token) {
+"""
+CC_FRAME_CLIENT_CHECK = """\
+  if (!a11y_recorder::GetProcessRecorderClient() || !tree) {
+    return;
+  }
 """
 CC_FRAME_SCROLL_COMMENT = """\
   // Every scroll node's offset as drawn, so a scroll the compositor made
 """
-CC_COMPOSITOR_FRAME_HELPERS = CC_PAINT_WORKLET_HELPERS + (
+# The helpers as part 1b inserted them, replaced in place.
+CC_COMPOSITOR_FRAME_HELPERS_1B = CC_PAINT_WORKLET_HELPERS_1B + (
     CC_COMPOSITOR_FRAME_HELPERS_1A.replace(
-        CC_FRAME_SIGNATURE_1A, CC_FRAME_SIGNATURE
+        CC_FRAME_SIGNATURE_1A, CC_FRAME_SIGNATURE_1B
     ).replace(
         CC_FRAME_SCROLL_COMMENT,
         "  RecorderReadPaintWorkletProgress(host_id, tree, pending_tree, &values);\n"
+        + CC_FRAME_SCROLL_COMMENT,
+    )
+)
+CC_COMPOSITOR_FRAME_HELPERS = (
+    CC_PAINT_WORKLET_HELPERS
+    + CC_IMAGE_FRAME_HELPERS
+    + CC_COMPOSITOR_FRAME_HELPERS_1A.replace(
+        CC_FRAME_SIGNATURE_1A, CC_FRAME_SIGNATURE
+    )
+    .replace(
+        CC_FRAME_CLIENT_CHECK,
+        CC_FRAME_CLIENT_CHECK
+        + '  A11Y_RECORDER_HOOK_COST("hook:compositor-frame");\n',
+    )
+    .replace(
+        CC_FRAME_SCROLL_COMMENT,
+        "  RecorderReadPaintWorkletProgress(host_id, tree, pending_tree, &values);\n"
+        "  RecorderReadImageFrames(host_id, images, &values);\n"
         + CC_FRAME_SCROLL_COMMENT,
     )
 )
@@ -16065,11 +16248,21 @@ CC_DRAW_LAYERS_HOOK_1A = CC_DRAW_LAYERS_ANCHOR + """\
                                   frame_token);
   }
 """
-CC_DRAW_LAYERS_HOOK = CC_DRAW_LAYERS_ANCHOR + """\
+CC_DRAW_LAYERS_HOOK_1B = CC_DRAW_LAYERS_ANCHOR + """\
   // Windows A11y Recorder (protocol 0.48): the active tree's values as drawn
   // in the frame about to be submitted, for a page's compositor.
   if (!settings_.is_layer_tree_for_ui) {
     RecorderRecordCompositorFrame(id_, active_tree(), pending_tree(),
+                                  CurrentBeginFrameArgs(), frame_token);
+  }
+"""
+CC_DRAW_LAYERS_HOOK = CC_DRAW_LAYERS_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the active tree's values as drawn
+  // in the frame about to be submitted, for a page's compositor, with each
+  // animated image's frame.
+  if (!settings_.is_layer_tree_for_ui) {
+    RecorderRecordCompositorFrame(id_, active_tree(), pending_tree(),
+                                  image_animation_controller_.get(),
                                   CurrentBeginFrameArgs(), frame_token);
   }
 """
@@ -16159,14 +16352,18 @@ def patch_cc_layer_tree_host_impl(path: Path) -> None:
     )
     if "#include <set>\n" not in text:
         text = replace_once(text, "#include <map>\n", "#include <map>\n#include <set>\n", path)
-    # A tree patched by part 1a holds its helpers and draw hook; they are
-    # replaced in place.
-    if CC_COMPOSITOR_FRAME_HELPERS_1A in text:
-        text = replace_once(
-            text, CC_COMPOSITOR_FRAME_HELPERS_1A, CC_COMPOSITOR_FRAME_HELPERS, path
-        )
-    if CC_DRAW_LAYERS_HOOK_1A in text:
-        text = replace_once(text, CC_DRAW_LAYERS_HOOK_1A, CC_DRAW_LAYERS_HOOK, path)
+    # A tree patched by part 1a or 1b holds its helpers and draw hook; they
+    # are replaced in place.
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (CC_COMPOSITOR_FRAME_HELPERS_1A, CC_COMPOSITOR_FRAME_HELPERS),
+            (CC_COMPOSITOR_FRAME_HELPERS_1B, CC_COMPOSITOR_FRAME_HELPERS),
+            (CC_DRAW_LAYERS_HOOK_1A, CC_DRAW_LAYERS_HOOK),
+            (CC_DRAW_LAYERS_HOOK_1B, CC_DRAW_LAYERS_HOOK),
+        ),
+        path,
+    )
     if CC_COMPOSITOR_FRAME_HELPERS not in text:
         text = insert_before_once(
             text,
@@ -16181,6 +16378,39 @@ def patch_cc_layer_tree_host_impl(path: Path) -> None:
         text = apply_cookie_hook(
             text, anchor, cc_mutated_hook(anchor, property_name), path
         )
+    write_patched(path, text)
+
+
+CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR = (
+    "  scoped_refptr<AnimatedImageFrameIndexMap> GatherFrameIndexes() const;\n"
+)
+CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR = """\
+
+  // Windows A11y Recorder (protocol 0.48): each held paint image's frame on
+  // the active tree, the frame drawn, as GatherFrameIndexes gives the pending
+  // tree's.
+  std::vector<std::pair<PaintImage::Id, size_t>> RecorderActiveFrameIndexes()
+      const {
+    std::vector<std::pair<PaintImage::Id, size_t>> indexes;
+    indexes.reserve(animation_state_map_.size());
+    for (const auto& [paint_image_id, state] : animation_state_map_) {
+      indexes.emplace_back(paint_image_id, state.active_index());
+    }
+    return indexes;
+  }
+"""
+
+
+def patch_cc_image_animation_controller(path: Path) -> None:
+    """Protocol 0.48 part 1c: lets the recorder read the frame each animated
+    paint image is drawn at."""
+    text = read_source(path)
+    text = apply_cookie_hook(
+        text,
+        CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR,
+        CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR + CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR,
+        path,
+    )
     write_patched(path, text)
 
 
@@ -16431,7 +16661,12 @@ BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR = """\
   Color color = Sample(compositor_input, animated_property_values);
   SkColor4f sk_color = color.toSkColor4f();
 """
-BLINK_BACKGROUND_COLOR_PAINTED_HOOK = BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR + """\
+# The two paint worklet hooks as part 1b inserted them; part 1c times them.
+BLINK_PAINT_WORKLET_PAINTED_START = (
+    "  if (a11y_recorder::GetProcessRecorderClient()) {\n"
+    "    a11y_recorder::PaintWorkletPaintedFacts recorder_facts;\n"
+)
+BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B = BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR + """\
   // Windows A11y Recorder (protocol 0.48): the color painted, with the
   // compositor progress it was painted from.
   if (a11y_recorder::GetProcessRecorderClient()) {
@@ -16452,6 +16687,12 @@ BLINK_BACKGROUND_COLOR_PAINTED_HOOK = BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR + ""
     a11y_recorder::RecordPaintWorkletPainted(std::move(recorder_facts));
   }
 """
+BLINK_BACKGROUND_COLOR_PAINTED_HOOK = BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B.replace(
+    BLINK_PAINT_WORKLET_PAINTED_START,
+    BLINK_PAINT_WORKLET_PAINTED_START.replace(
+        "{\n", '{\n    A11Y_RECORDER_HOOK_COST("hook:background-color-painted");\n', 1
+    ),
+)
 
 BLINK_CLIP_PATH_PAINT_OWN_INCLUDE = (
     '#include "third_party/blink/renderer/modules/csspaint/nativepaint/'
@@ -16471,7 +16712,7 @@ BLINK_CLIP_PATH_PAINTED_ANCHOR = """\
   cc::InspectablePaintRecorder paint_recorder;
   const gfx::Size clip_area_size(
 """
-BLINK_CLIP_PATH_PAINTED_HOOK = """\
+BLINK_CLIP_PATH_PAINTED_HOOK_1B = """\
   // Windows A11y Recorder (protocol 0.48): the path painted, with the
   // compositor progress it was painted from.
   if (a11y_recorder::GetProcessRecorderClient()) {
@@ -16538,6 +16779,12 @@ BLINK_CLIP_PATH_PAINTED_HOOK = """\
   }
 
 """ + BLINK_CLIP_PATH_PAINTED_ANCHOR
+BLINK_CLIP_PATH_PAINTED_HOOK = BLINK_CLIP_PATH_PAINTED_HOOK_1B.replace(
+    BLINK_PAINT_WORKLET_PAINTED_START,
+    BLINK_PAINT_WORKLET_PAINTED_START.replace(
+        "{\n", '{\n    A11Y_RECORDER_HOOK_COST("hook:clip-path-painted");\n', 1
+    ),
+)
 
 BLINK_CSSPAINT_BUILD_ANCHOR = """\
   public_deps = [ "//third_party/blink/renderer/modules/canvas" ]
@@ -16552,6 +16799,13 @@ def patch_blink_native_paint_definitions(csspaint: Path) -> None:
     text = read_source(path)
     text = add_includes_after(
         text, BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    # A tree patched by part 1b holds the hook untimed; it is replaced in
+    # place.
+    text = upgrade_legacy_hooks(
+        text,
+        ((BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B, BLINK_BACKGROUND_COLOR_PAINTED_HOOK),),
+        path,
     )
     text = apply_cookie_hook(
         text,
@@ -16569,6 +16823,11 @@ def patch_blink_native_paint_definitions(csspaint: Path) -> None:
         text,
         BLINK_CLIP_PATH_TRANSLATION_ANCHOR,
         BLINK_CLIP_PATH_TRANSLATION_HOOK,
+        path,
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        ((BLINK_CLIP_PATH_PAINTED_HOOK_1B, BLINK_CLIP_PATH_PAINTED_HOOK),),
         path,
     )
     text = apply_cookie_hook(
@@ -16813,6 +17072,9 @@ def main() -> int:
     )
     patch_blink_keyframe_effect(blink_core / "animation" / "keyframe_effect.cc")
     patch_cc_layer_tree_host_impl(source / "cc" / "trees" / "layer_tree_host_impl.cc")
+    patch_cc_image_animation_controller(
+        source / "cc" / "trees" / "image_animation_controller.h"
+    )
     patch_cc_client_layer_tree_host_impl(
         source / "cc" / "trees" / "client_layer_tree_host_impl.cc"
     )
@@ -16868,6 +17130,9 @@ def main() -> int:
     )
     patch_blink_image_resource(
         blink_renderer / "core" / "loader" / "resource" / "image_resource.cc"
+    )
+    patch_blink_bitmap_image(
+        blink_renderer / "platform" / "graphics" / "bitmap_image.cc"
     )
     blink_inline = (
         source / "third_party" / "blink" / "renderer" / "core" / "layout"

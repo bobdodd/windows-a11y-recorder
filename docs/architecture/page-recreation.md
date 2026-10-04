@@ -3221,7 +3221,7 @@ sub-step 1b), and later each out of process iframe's.
 | `compositor-frame` | cc, compositor thread, in `DrawLayers`, for each submitted frame in which an animated value, a compositor scroll offset, a paint worklet progress, or an image's frame changed on the active tree since the last recorded frame | the frame sink and frame token, the begin frame's time, and each change: element ID, property, and value |
 | `compositor-frame-presented` | cc, at `DidPresentCompositorFrame`, for a recorded frame | the frame sink, the frame token, and the presentation time, on the clock of the existing presentation records, or the failure flag |
 | `paint-worklet-painted` | Blink, in a native paint definition's `Paint`, on the worklet's thread | the element ID, the property (background color or clip path), the progress given, and the value drawn |
-| `image-paint-image` | Blink, when an image resource's Blink image gets its paint image ID | the image's URL and digest (as `image-resource`) and its `PaintImage::Id` |
+| `image-paint-image` | Blink, when an image resource's Blink image gets its paint image ID | the image's URL and digest (as `image-resource`) and its `PaintImage::Id`; revised by "Sub-step 1c design" below |
 
 Values are written as the compositor holds them: a transform as its 16
 matrix entries, an opacity as a number, filters as their operations and
@@ -3695,10 +3695,10 @@ before. Not done here: the
 instrumented Chromium build and the integration and system tests, which
 are for the target machine.
 
-#### Sub-step 1c design (proposed)
+#### Sub-step 1c design (agreed)
 
-Proposed 2026-10-04, after the fixture's recordings, for the owner's
-agreement before it is built. It covers what the table above calls
+Proposed 2026-10-04, after the fixture's recordings, and agreed the same
+day. It covers what the table above calls
 `image-paint-image` and an animated image's frame in `compositor-frame`,
 and the cost measurement "To be settled" names.
 
@@ -3733,7 +3733,7 @@ What is recorded (protocol 0.48, additive):
 | Record | Where | Holds |
 | --- | --- | --- |
 | `image-resource` (one field added) | `ImageResource::Finish`, after the bytes are given to the image | `imageId`: the Blink image's own ID, or null when no image was made, as for a decode error |
-| `image-paint-image` | Blink, main thread, in `PaintImageForCurrentFrameWithInfo`, when it makes a paint image with an ID not recorded before in the renderer | `imageId`; `paintImageId`; `sequence`, `shared` or `own`; `nodeId`, the element's `DOMNodeId` for an own sequence, else null; `syncTargetPaintImageId`, or null |
+| `image-paint-image` | Blink, main thread, in `PaintImageForCurrentFrameWithInfo`, when it makes a paint image with an ID not recorded before in the renderer | `imageId`; `paintImageId`; `sequence`, `shared` or `own`; `nodeId`, the `DOMNodeId` of the node Blink caches the paint image's frames by (always for an own sequence, and for a stopped image), else null; `syncTargetPaintImageId`, or null |
 | `compositor-frame` (a change added) | the 1a hook in `DrawLayers` | for each paint image the controller holds, `{"paintImageId", "property": "image-frame", "value"}`, the active tree's frame index; null once when the image leaves the controller |
 
 So a drawn frame index is tied to its image by `paintImageId` to
@@ -3776,6 +3776,52 @@ and, on the target machine, an integration test with the fixture: each
 animated image's `image-paint-image` and `image-resource` records linked
 as above, and its recorded frame indexes advancing through 0 to 7 at
 250 ms a frame.
+
+#### Sub-step 1c as built
+
+Built 2026-10-04 as designed above, with these details settled in the
+building:
+
+- Paint image IDs come from a sequence number that starts at 0
+  (`PaintImage::GetNextId`, `cc/paint/paint_image.cc`), and
+  `PaintImage::kInvalidId` is -2, so an ID of 0 is recorded and a
+  negative one is not.
+- `image-paint-image` is written in
+  `BitmapImage::PaintImageForCurrentFrameWithInfo` just after
+  `CreatePaintImage`, and only when it made a paint image. Its `nodeId`
+  is the `DOMNodeId` the frame is cached by: Blink passes
+  `node->GetDomNodeId()` (`CSSImageAnimations::CreateImageNodeAnimationInfo`),
+  the recorder's node ID. The bridge writes a paint image ID once per
+  renderer.
+- In `ImageResource::Finish` the bytes are copied before
+  `UpdateImage`, as before, and `image-resource` is written after it,
+  with `imageId` read from the content's image. A tree with the protocol
+  0.40 hook is upgraded in place.
+- The image frames are read in `RecorderRecordCompositorFrame`, which
+  `DrawLayers` now also passes the compositor's image animation
+  controller. An image no longer held is written once as null. The
+  change names its paint image as `paintImageId` and has no `elementId`.
+- The hooks are timed with `A11Y_RECORDER_HOOK_COST`, a kind of its own
+  in the cost lines: `hook:compositor-frame` and
+  `hook:paint-worklet-results` time the cc helpers whole, after their
+  check that the recorder is connected; `hook:background-color-painted`
+  and `hook:clip-path-painted` time the paint worklet hooks;
+  `hook:image-resource` times the copy of the bytes, whose recording is
+  timed as `RecordBlinkImageResource`; and `hook:image-paint-image` times
+  the paint image hook. A tree patched by 1a or 1b is upgraded in place.
+
+Tests run: Python tests of the hooks, including the 1b and 0.40 upgrades,
+(216 passed); the patches applied twice, with no change the second
+time, to copies of the target machine's `layer_tree_host_impl.cc` (patched
+by 1b), `image_resource.cc` (patched for 0.40), `bitmap_image.cc`, and
+`image_animation_controller.h`, and its two native paint definitions
+found to hold the 1b hooks the upgrade replaces; the standalone checks of the cost accounting; .NET tests of
+the `image-frame` change, `image-paint-image`, and `imageId` against the
+receiver's contracts and the validator (593 passed in the compositor,
+resource, and validator tests); and the full .NET suite, 1026 passed, with the four
+ChromiumLauncherTests that need Windows failing as before.
+Not done here: the instrumented Chromium build and the integration test
+with the fixture, which are for the target machine.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 

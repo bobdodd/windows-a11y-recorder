@@ -402,6 +402,9 @@ internal static class EventPayloadValidator
             case ("browser.resources", "image-resource"):
                 ValidateBrowserImageResource(payload, issues);
                 break;
+            case ("browser.resources", "image-paint-image"):
+                ValidateBrowserImagePaintImage(payload, issues);
+                break;
             case ("browser.network", "request-will-be-sent"):
                 ValidateBrowserNetworkRequestWillBeSent(payload, issues);
                 break;
@@ -4148,6 +4151,15 @@ internal static class EventPayloadValidator
                 IsNonnegativeDecimal(value.GetString()),
             "must be a nonnegative decimal integer string");
 
+    private static PropertyRule NullableDecimalText(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsNonnegativeDecimal(value.GetString()),
+            "must be a nonnegative decimal integer string or null");
+
     private static PropertyRule NullablePositiveDecimalText(string name) =>
         new(
             name,
@@ -4525,10 +4537,39 @@ internal static class EventPayloadValidator
                 RequiredString("mimeType"),
                 RequiredDecimalText("size"),
                 DigestRule("digest"),
-                RequiredBoolean("dataRecorded")
+                RequiredBoolean("dataRecorded"),
+                NullableDecimalText("imageId")
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
+    }
+
+    private static void ValidateBrowserImagePaintImage(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredDecimalText("imageId"),
+                RequiredDecimalText("paintImageId"),
+                RequiredEnum("sequence", "shared", "own"),
+                NullableInteger("nodeId", positive: true),
+                NullableDecimalText("syncTargetPaintImageId")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        if (ReadString(payload, "sequence") == "own" &&
+            payload.TryGetProperty("nodeId", out var nodeId) &&
+            nodeId.ValueKind == JsonValueKind.Null)
+        {
+            AddError(
+                issues,
+                "browser-image-paint-image-node-missing",
+                "#/payload/nodeId",
+                "A paint image with its own animation sequence is made for a node.");
+        }
     }
 
     private static void ValidateBrowserPresentationSwapped(
@@ -4708,7 +4749,7 @@ internal static class EventPayloadValidator
         if (value.ValueKind == JsonValueKind.Null)
         {
             return property is "transform" or "opacity" or "filter" or "backdrop-filter" or
-                "background-color-progress" or "clip-path-progress";
+                "background-color-progress" or "clip-path-progress" or "image-frame";
         }
         switch (property)
         {
@@ -4716,6 +4757,8 @@ internal static class EventPayloadValidator
                 return IsFiniteNumberArray(value, 16);
             case "opacity":
                 return IsFiniteNumber(value);
+            case "image-frame":
+                return IsInteger(value) && value.GetInt64() >= 0;
             case "scroll-offset":
                 return value.ValueKind == JsonValueKind.Object &&
                     value.TryGetProperty("x", out var x) && IsFiniteNumber(x) &&
@@ -4784,13 +4827,16 @@ internal static class EventPayloadValidator
                 index++;
                 continue;
             }
+            // An animated image's frame names its paint image; every other
+            // change names its compositor element.
+            var imageFrame = ReadString(change, "property") == "image-frame";
             ValidateShape(
                 change,
                 [
-                    RequiredDecimalText("elementId"),
+                    RequiredDecimalText(imageFrame ? "paintImageId" : "elementId"),
                     RequiredEnum("property", "transform", "opacity", "filter",
                         "backdrop-filter", "scroll-offset", "background-color-progress",
-                        "clip-path-progress"),
+                        "clip-path-progress", "image-frame"),
                     new PropertyRule("value", true, true, _ => true, "must be present")
                 ],
                 issues,
@@ -4803,7 +4849,8 @@ internal static class EventPayloadValidator
                     "browser-compositor-value-invalid",
                     $"#/payload/changes/{index}/value",
                     "A compositor value must have its property's shape: 16 matrix " +
-                        "entries, a number, filter operations, x and y, or a progress.");
+                        "entries, a number, filter operations, x and y, a progress, " +
+                        "or a frame index.");
             }
             index++;
         }

@@ -416,9 +416,10 @@ rendering update" in [page recreation](docs/architecture/page-recreation.md).
 Protocol 0.48 adds the `browser.compositor` channel: each animation
 started on and removed from the compositor, and, for each compositor frame
 a page's compositor submits in which a drawn transform, opacity, filter,
-backdrop filter, scroll offset, or native paint worklet progress changed,
-the changed values as drawn, then the frame's presentation; and what each
-native paint worklet painted. See "Slice 4b" in
+backdrop filter, scroll offset, native paint worklet progress, or
+animated image frame changed, the changed values as drawn, then the
+frame's presentation; what each native paint worklet painted; and, on the
+`browser.resources` channel, each paint image made from an image. See "Slice 4b" in
 [page recreation](docs/architecture/page-recreation.md).
 
 Protocol 0.47 records the Windows animation settings with each popup

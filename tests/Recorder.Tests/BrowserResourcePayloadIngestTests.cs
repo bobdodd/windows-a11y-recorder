@@ -16,7 +16,8 @@ public sealed class BrowserResourcePayloadIngestTests
         { BrowserEvidenceEventTypes.FontFaceAdded, BrowserResourcePayloads.FaceAdded },
         { BrowserEvidenceEventTypes.FontFaceRemoved, BrowserResourcePayloads.FaceAdded },
         { BrowserEvidenceEventTypes.FontFaceLoaded, BrowserResourcePayloads.FaceLoaded },
-        { BrowserEvidenceEventTypes.ImageResource, BrowserResourcePayloads.ImageResource }
+        { BrowserEvidenceEventTypes.ImageResource, BrowserResourcePayloads.ImageResource },
+        { BrowserEvidenceEventTypes.ImagePaintImage, BrowserResourcePayloads.ImagePaintImage }
     };
 
     [Theory]

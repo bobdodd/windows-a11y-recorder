@@ -118,6 +118,7 @@ public static class BrowserEvidenceEventTypes
     public const string FontFaceRemoved = "font-face-removed";
     public const string ImageResource = "image-resource";
     public const string ImageData = "image-data";
+    public const string ImagePaintImage = "image-paint-image";
     public const string NetworkRequestWillBeSent = "request-will-be-sent";
     public const string NetworkResponseReceived = "response-received";
     public const string NetworkRequestFinished = "request-finished";
@@ -1436,11 +1437,13 @@ public sealed record BrowserCompositorWidget(
 // active tree's values that changed since the compositor's last recorded
 // frame. Value is, by property: transform, the 16 matrix entries row by row;
 // opacity, a number; filter and backdrop-filter, the operations;
-// scroll-offset, x and y; and background-color-progress and
+// scroll-offset, x and y; background-color-progress and
 // clip-path-progress, an object whose progress is the compositor progress the
 // drawn paint worklet record was painted with, or null when it was painted
-// with none. A null value means the element's node or paint worklet is no
-// longer in the drawn tree.
+// with none; and image-frame, the frame index an animated paint image is
+// drawn at. A null value means the element's node or paint worklet is no
+// longer in the drawn tree, or the paint image is no longer held by the
+// image animation controller.
 public sealed record BrowserCompositorFramePayload(
     BrowserContext Context,
     int LayerTreeHostId,
@@ -1452,10 +1455,13 @@ public sealed record BrowserCompositorFramePayload(
     bool HighResolutionTicks,
     IReadOnlyList<BrowserCompositorChange> Changes);
 
+// ElementId names the compositor element, and is null for image-frame, whose
+// PaintImageId names the paint image instead.
 public sealed record BrowserCompositorChange(
-    string ElementId,
+    string? ElementId,
     string Property,
-    System.Text.Json.JsonElement Value);
+    System.Text.Json.JsonElement Value,
+    string? PaintImageId = null);
 
 // A cc::FilterOperation: its type and numbers, as the bridge README states.
 public sealed record BrowserCompositorFilterOperation(
@@ -1550,6 +1556,8 @@ public sealed record BrowserFontFaceLoadedPayload(
 // An image resource that finished loading: the URL requested, the response's
 // URL, status, and MIME type, and the size and digest of its encoded bytes.
 // DataRecorded is false when the bytes' image-data record could not be queued.
+// ImageId (protocol 0.48) is the Blink image's own ID the bytes were given to,
+// as a decimal string, or null when no image was made.
 public sealed record BrowserImageResourcePayload(
     BrowserContext Context,
     string Url,
@@ -1558,7 +1566,21 @@ public sealed record BrowserImageResourcePayload(
     string MimeType,
     string Size,
     string Digest,
-    bool DataRecorded);
+    bool DataRecorded,
+    string? ImageId);
+
+// A paint image Blink made from an image (protocol 0.48), the first time the
+// renderer made one with its ID: the image's own ID, the paint image's ID,
+// its animation sequence (shared, the image's, or own, an element's), the
+// node it was made for, or null, and the paint image whose animation it is
+// synchronised to, or null. IDs are decimal strings.
+public sealed record BrowserImagePaintImagePayload(
+    BrowserContext Context,
+    string ImageId,
+    string PaintImageId,
+    string Sequence,
+    int? NodeId,
+    string? SyncTargetPaintImageId);
 
 // Network records report request and response metadata as the Blink loader and
 // the browser's network service observer already hold it. No record carries a

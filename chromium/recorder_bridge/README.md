@@ -470,6 +470,11 @@ the presentation of a recorded frame only. What is recorded, by property:
   it was painted with, as `{"progress": p}`, or `{"progress": null}` when
   it was painted from the main thread's value. Each result is noted by its
   record's buffer in `ClientLayerTreeHostImpl::OnPaintWorkletResultsReady`.
+- image frame (part 1c): for each paint image the compositor's
+  `ImageAnimationController` holds, the frame index the active tree draws
+  (`active_index()`, read through the accessor `RecorderActiveFrameIndexes`
+  the integration adds), written as `{"paintImageId", "property":
+  "image-frame", "value"}`, with no `elementId`.
 
 `RecordPaintWorkletPainted` writes `paint-worklet-painted` on the worklet's
 thread, from `BackgroundColorPaintDefinition::Paint` and
@@ -478,8 +483,26 @@ given, and the color as four floats, or the clip path's fill type, verbs,
 points, conic weights, translation, and whether it was drawn as a rounded
 rectangle.
 
+Part 1c ties a drawn image frame to its image. `RecordBlinkImageResource`
+is called once the bytes were given to the image, and `image-resource`
+gains `imageId`, the Blink image's own ID (`Image::paint_image_id()`), or
+null. `RecordBlinkImagePaintImage` writes `image-paint-image` from
+`BitmapImage::PaintImageForCurrentFrameWithInfo` when Blink makes a paint
+image, once per paint image ID in the renderer: the image's ID, the paint
+image's ID, its animation sequence (`shared` or `own`), the node it was
+made for (the `DOMNodeId` its frames are cached by), or null, and the paint
+image it is synchronised to, or null. Paint image IDs start at 0.
+
+`A11Y_RECORDER_HOOK_COST(name)` (`RegisterHookCostKind`, `StartHookCost`,
+`StopHookCost`) times a hook's whole work, before and including its bridge
+call, as a kind of its own in the cost lines: `hook:compositor-frame`,
+`hook:paint-worklet-results`, `hook:background-color-painted`,
+`hook:clip-path-painted`, `hook:image-resource` (the copy of the bytes),
+and `hook:image-paint-image`.
+
 A transform or effect node, or a paint worklet, no longer in the drawn
-tree is written once as a null value. Values are not rounded. The browser's own compositor
+tree, or a paint image the controller no longer holds, is written once as
+a null value. Values are not rounded. The browser's own compositor
 (`is_layer_tree_for_ui`) is not recorded.
 
 Protocol 0.47 adds `windowsAnimationSettings` to `popup-widget-shown`.

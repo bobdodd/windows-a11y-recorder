@@ -7234,6 +7234,123 @@ class CompositorRecordIntegrationTests(unittest.TestCase):
             clip.index("cc::InspectablePaintRecorder paint_recorder;"),
         )
 
+    def test_a_tree_patched_by_part_1b_is_upgraded_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "layer_tree_host_impl.cc"
+            path.write_text(self.host_impl_source(), encoding="utf-8")
+            helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+            hook = INTEGRATE.CC_DRAW_LAYERS_HOOK
+            try:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = (
+                    INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1B
+                )
+                INTEGRATE.CC_DRAW_LAYERS_HOOK = INTEGRATE.CC_DRAW_LAYERS_HOOK_1B
+                INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            finally:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = helpers
+                INTEGRATE.CC_DRAW_LAYERS_HOOK = hook
+            self.assertIn(
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1B,
+                path.read_text(encoding="utf-8"),
+            )
+            INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            upgraded = path.read_text(encoding="utf-8")
+        fresh = self.patch_twice(
+            "layer_tree_host_impl.cc",
+            self.host_impl_source(),
+            INTEGRATE.patch_cc_layer_tree_host_impl,
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertNotIn(INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1B, upgraded)
+        self.assertNotIn(INTEGRATE.CC_DRAW_LAYERS_HOOK_1B, upgraded)
+        self.assertEqual(1, upgraded.count("void RecorderRecordCompositorFrame("))
+        self.assertEqual(1, upgraded.count("void RecorderReadImageFrames("))
+
+    def test_each_frame_names_the_frame_each_animated_image_is_drawn_at(self):
+        helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+        self.assertTrue(
+            helpers.startswith(
+                INTEGRATE.CC_PAINT_WORKLET_HELPERS + INTEGRATE.CC_IMAGE_FRAME_HELPERS
+            )
+        )
+        self.assertIn(INTEGRATE.CC_FRAME_SIGNATURE, helpers)
+        self.assertNotIn(INTEGRATE.CC_FRAME_SIGNATURE_1B, helpers)
+        self.assertLess(
+            helpers.index("RecorderReadImageFrames(host_id, images, &values);"),
+            helpers.index(INTEGRATE.CC_FRAME_SCROLL_COMMENT),
+        )
+        self.assertIn('"image-frame"', helpers)
+        self.assertIn("images->RecorderActiveFrameIndexes()", helpers)
+        self.assertIn("image_animation_controller_.get(),", INTEGRATE.CC_DRAW_LAYERS_HOOK)
+        # The frame hook is timed whole, after the check that the recorder is
+        # connected, and so is the paint worklet results hook.
+        self.assertLess(
+            helpers.index(INTEGRATE.CC_FRAME_CLIENT_CHECK),
+            helpers.index('A11Y_RECORDER_HOOK_COST("hook:compositor-frame");'),
+        )
+        self.assertEqual(1, helpers.count('A11Y_RECORDER_HOOK_COST("hook:compositor-frame");'))
+        self.assertEqual(
+            1, helpers.count('A11Y_RECORDER_HOOK_COST("hook:paint-worklet-results");')
+        )
+        header = self.patch_twice(
+            "image_animation_controller.h",
+            "class ImageAnimationController {\n public:\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR
+            + "\n private:\n  AnimationStateMap animation_state_map_;\n};\n",
+            INTEGRATE.patch_cc_image_animation_controller,
+        )
+        self.assertEqual(1, header.count(INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR))
+        self.assertIn("state.active_index()", header)
+
+    def test_paint_worklet_hooks_of_part_1b_are_upgraded_and_timed(self):
+        def tree(background_hook, clip_hook):
+            directory = tempfile.mkdtemp()
+            csspaint = Path(directory) / "csspaint"
+            nativepaint = csspaint / "nativepaint"
+            nativepaint.mkdir(parents=True)
+            (nativepaint / "background_color_paint_definition.cc").write_text(
+                INTEGRATE.BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE
+                + "\n\nPaintRecord BackgroundColorPaintDefinition::Paint() {\n"
+                + background_hook
+                + "}\n",
+                encoding="utf-8",
+            )
+            (nativepaint / "clip_path_paint_definition.cc").write_text(
+                INTEGRATE.BLINK_CLIP_PATH_PAINT_OWN_INCLUDE
+                + "\n\nclass ClipPathPaintWorkletInput {\n"
+                + INTEGRATE.BLINK_CLIP_PATH_TRANSLATION_ANCHOR
+                + "};\n\nPaintRecord ClipPathPaintDefinition::Paint() {\n"
+                + clip_hook
+                + "}\n",
+                encoding="utf-8",
+            )
+            (csspaint / "BUILD.gn").write_text(
+                'blink_modules_sources("csspaint") {\n  sources = [\n  ]\n\n'
+                + INTEGRATE.BLINK_CSSPAINT_BUILD_ANCHOR,
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_native_paint_definitions(csspaint)
+            INTEGRATE.patch_blink_native_paint_definitions(csspaint)
+            files = sorted(path for path in csspaint.rglob("*") if path.is_file())
+            return [path.read_text(encoding="utf-8") for path in files]
+
+        fresh = tree(
+            INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR,
+            INTEGRATE.BLINK_CLIP_PATH_PAINTED_ANCHOR,
+        )
+        upgraded = tree(
+            INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B,
+            INTEGRATE.BLINK_CLIP_PATH_PAINTED_HOOK_1B,
+        )
+        self.assertEqual(fresh, upgraded)
+        _, background, clip = fresh
+        self.assertNotIn(INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B, background)
+        self.assertNotIn(INTEGRATE.BLINK_CLIP_PATH_PAINTED_HOOK_1B, clip)
+        self.assertEqual(
+            1, background.count('A11Y_RECORDER_HOOK_COST("hook:background-color-painted");')
+        )
+        self.assertEqual(1, clip.count('A11Y_RECORDER_HOOK_COST("hook:clip-path-painted");'))
+
     def test_the_cc_component_depends_on_the_bridge_once(self):
         source = (
             'cc_component("cc") {\n  sources = [\n  ]\n\n'
@@ -7848,10 +7965,22 @@ class RecreationIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(1, source.count(INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK))
         self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, source)
+        # Protocol 0.48: the bytes are copied before the image is updated,
+        # and recorded after it, with the image's own ID.
         self.assertLess(
-            source.index("a11y_recorder::RecordBlinkImageResource("),
+            source.index("recorder_image->bytes.append("),
             source.index("UpdateImage(Data()"),
         )
+        self.assertLess(
+            source.index("UpdateImage(Data()"),
+            source.index("a11y_recorder::RecordBlinkImageResource("),
+        )
+        self.assertLess(
+            source.index("GetImage()->paint_image_id()"),
+            source.index("a11y_recorder::RecordBlinkImageResource("),
+        )
+        self.assertEqual(1, source.count('A11Y_RECORDER_HOOK_COST("hook:image-resource");'))
+        self.assertEqual(1, source.count("UpdateImage(Data()"))
         self.assertLess(
             source.index("UpdateImage(Data()"), source.index("ClearData();")
         )
@@ -7863,6 +7992,59 @@ class RecreationIntegrationTests(unittest.TestCase):
             [],
             INTEGRATE.describe_signature_mismatches(
                 "image_resource.cc", source, signatures
+            ),
+        )
+
+    def test_an_image_resource_hook_of_protocol_0_40_is_upgraded_in_place(self):
+        original = (
+            '#include "third_party/blink/renderer/core/loader/resource/'
+            'image_resource.h"\n\nvoid ImageResource::Finish() {\n'
+            "  if (a) {\n"
+            + INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR
+            + "    ClearData();\n  }\n}\n"
+        )
+        fresh = self.patch_source_twice(
+            "image_resource.cc", original, INTEGRATE.patch_blink_image_resource
+        )
+        earlier = original.replace(
+            INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR,
+            INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK_0_40,
+        )
+        upgraded = self.patch_source_twice(
+            "image_resource.cc", earlier, INTEGRATE.patch_blink_image_resource
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertNotIn(INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK_0_40, upgraded)
+
+    def test_each_paint_image_made_from_an_image_is_recorded_once(self):
+        source = self.patch_source_twice(
+            "bitmap_image.cc",
+            INTEGRATE.BLINK_BITMAP_IMAGE_OWN_INCLUDE
+            + "\n\nPaintImage BitmapImage::PaintImageForCurrentFrameWithInfo() {\n"
+            + INTEGRATE.BLINK_BITMAP_IMAGE_PAINT_IMAGE_ANCHOR
+            + "  new_frame.GetSwSkImage();\n  return new_frame;\n}\n",
+            INTEGRATE.patch_blink_bitmap_image,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_BITMAP_IMAGE_PAINT_IMAGE_HOOK))
+        # The paint image is recorded once it is made, and only when made.
+        self.assertLess(
+            source.index("CreatePaintImage(paint_id"),
+            source.index("a11y_recorder::RecordBlinkImagePaintImage("),
+        )
+        self.assertIn("if (new_frame && a11y_recorder::GetProcessRecorderClient())", source)
+        self.assertIn("recorder_facts.image_id = paint_image_id();", source)
+        self.assertIn("if (id != kNormalCachedFrameId) {", source)
+        self.assertIn("PaintImage::AnimationSyncSequence::kOwn", source)
+        self.assertEqual(1, source.count('A11Y_RECORDER_HOOK_COST("hook:image-paint-image");'))
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "bitmap_image.cc", source, signatures
             ),
         )
 

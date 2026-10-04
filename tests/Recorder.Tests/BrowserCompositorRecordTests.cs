@@ -108,7 +108,9 @@ public sealed class BrowserCompositorRecordTests
             { "elementId": "1048601", "property": "scroll-offset", "value": { "x": 0, "y": 120.5 } },
             { "elementId": "1048594", "property": "backdrop-filter", "value": null },
             { "elementId": "1048620", "property": "background-color-progress", "value": { "progress": 0.375 } },
-            { "elementId": "1048621", "property": "clip-path-progress", "value": { "progress": null } }
+            { "elementId": "1048621", "property": "clip-path-progress", "value": { "progress": null } },
+            { "paintImageId": "57", "property": "image-frame", "value": 3 },
+            { "paintImageId": "0", "property": "image-frame", "value": null }
           ]
         }
         """;
@@ -221,6 +223,9 @@ public sealed class BrowserCompositorRecordTests
     [InlineData("background-color-progress", "0.5")]
     [InlineData("clip-path-progress", "{ \"progress\": \"0.5\" }")]
     [InlineData("clip-path-progress", "{ \"progress\": 0.5, \"extra\": 1 }")]
+    [InlineData("image-frame", "1.5")]
+    [InlineData("image-frame", "-1")]
+    [InlineData("image-frame", "{ \"index\": 1 }")]
     public void AValueWithoutItsPropertysShapeIsRejected(string property, string value)
     {
         var payload = JsonNode.Parse(Frame)!;
@@ -234,6 +239,22 @@ public sealed class BrowserCompositorRecordTests
         Assert.Contains(
             ValidateRecord(BrowserEvidenceEventTypes.CompositorFrame, payload),
             issue => issue.Code == "browser-compositor-value-invalid");
+    }
+
+    [Fact]
+    public void AnImageFrameNamesItsPaintImageAndNoElement()
+    {
+        var payload = JsonNode.Parse(Frame)!;
+        payload["changes"] = new JsonArray(new JsonObject
+        {
+            ["elementId"] = "57",
+            ["property"] = "image-frame",
+            ["value"] = 1
+        });
+
+        Assert.Contains(
+            ValidateRecord(BrowserEvidenceEventTypes.CompositorFrame, payload),
+            issue => issue.Path == "#/payload/changes/0/paintImageId");
     }
 
     [Fact]
@@ -343,7 +364,10 @@ public sealed class BrowserCompositorRecordTests
 
         Assert.Equal(2, frame.LayerTreeHostId);
         Assert.Equal("3:2", frame.Widget!.FrameSinkId);
-        Assert.Equal(7, frame.Changes.Count);
+        Assert.Equal(9, frame.Changes.Count);
+        Assert.Null(frame.Changes[7].ElementId);
+        Assert.Equal("57", frame.Changes[7].PaintImageId);
+        Assert.Equal(3, frame.Changes[7].Value.GetInt32());
         Assert.Equal(0.375, frame.Changes[5].Value.GetProperty("progress").GetDouble());
         Assert.Equal(37.25, frame.Changes[0].Value[3].GetDouble());
         Assert.Equal(0.4375, frame.Changes[1].Value.GetDouble());

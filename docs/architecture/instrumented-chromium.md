@@ -1106,11 +1106,15 @@ Protocol version 0.48 adds the `browser.compositor` channel, with
 `compositor-animation-started` and `compositor-animation-ended` from
 Blink's main thread, and `compositor-frame` and
 `compositor-frame-presented` from the compositor thread, and
-`paint-worklet-painted` from the paint worklet's thread. They are
+`paint-worklet-painted` from the paint worklet's thread. It adds
+`image-paint-image` to the `browser.resources` channel and `imageId` to
+`image-resource`. They are
 written by the hooks of slice 4b sub-step 1 in `cc/trees/layer_tree_host_impl.cc`,
+`image_animation_controller.h`,
 `client_layer_tree_host_impl.cc`, `compositor_animations.cc`,
-`keyframe_effect.cc`, `background_color_paint_definition.cc`, and
-`clip_path_paint_definition.cc`. The design is in
+`keyframe_effect.cc`, `background_color_paint_definition.cc`,
+`clip_path_paint_definition.cc`, `image_resource.cc`, and
+`bitmap_image.cc`. The design is in
 [page recreation](page-recreation.md), "Slice 4b".
 
 Live 0.48 connections require an exact protocol-version match.

@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -5731,6 +5732,9 @@ base::Value CompositorValueJson(const CompositorDrawnValue& value) {
   if (value.property == "opacity" && value.numbers.size() == 1) {
     return base::Value(value.numbers[0]);
   }
+  if (value.property == "image-frame" && value.numbers.size() == 1) {
+    return base::Value(static_cast<int>(value.numbers[0]));
+  }
   if (value.property == "scroll-offset" && value.numbers.size() == 2) {
     base::DictValue offset;
     offset.Set("x", value.numbers[0]);
@@ -5778,7 +5782,7 @@ bool IsCompositorProperty(const std::string& property) {
   return IsOneOf(property,
                  {"transform", "opacity", "filter", "backdrop-filter",
                   "scroll-offset", "background-color-progress",
-                  "clip-path-progress"});
+                  "clip-path-progress", "image-frame"});
 }
 
 }  // namespace
@@ -5886,7 +5890,10 @@ void RecordCompositorFrame(int layer_tree_host_id,
         continue;
       }
       base::DictValue change;
-      change.Set("elementId", base::NumberToString(value.element_id));
+      // An animated image's frame is the paint image's, which no compositor
+      // element names.
+      change.Set(value.property == "image-frame" ? "paintImageId" : "elementId",
+                 base::NumberToString(value.element_id));
       change.Set("property", value.property);
       change.Set("value", CompositorValueJson(value));
       changes.Append(std::move(change));
@@ -7071,6 +7078,8 @@ struct RecordedFontFile {
 struct ResourceStorage {
   base::Lock lock;
   std::unordered_map<uint32_t, RecordedFontFile> typefaces;
+  // Protocol 0.48: the paint image IDs already recorded in the renderer.
+  std::unordered_set<int64_t> paint_image_ids;
   std::unordered_map<std::string, bool> font_file_digests;
   std::unordered_map<std::string, bool> image_digests;
   uint64_t next_face_number = 0;
@@ -7302,7 +7311,58 @@ void RecordBlinkImageResource(ImageResourceFacts image) {
   payload.Set("size", base::NumberToString(size));
   payload.Set("digest", digest);
   payload.Set("dataRecorded", recorded);
+  payload.Set("imageId", image.image_id && *image.image_id >= 0
+                             ? base::Value(base::NumberToString(*image.image_id))
+                             : base::Value());
   SendBlinkEvidence(kResourcesChannel, "image-resource", std::move(payload));
+}
+
+void RecordBlinkImagePaintImage(ImagePaintImageFacts facts) {
+  A11Y_RECORDER_COST("RecordBlinkImagePaintImage");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.image_id < 0 || facts.paint_image_id < 0) {
+    return;
+  }
+  {
+    ResourceStorage& storage = Resources();
+    base::AutoLock lock(storage.lock);
+    if (!storage.paint_image_ids.insert(facts.paint_image_id).second) {
+      return;
+    }
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("imageId", base::NumberToString(facts.image_id));
+  payload.Set("paintImageId", base::NumberToString(facts.paint_image_id));
+  payload.Set("sequence", facts.own_sequence ? "own" : "shared");
+  payload.Set("nodeId", facts.node_id && *facts.node_id > 0
+                            ? base::Value(*facts.node_id)
+                            : base::Value());
+  payload.Set("syncTargetPaintImageId",
+              facts.sync_target_paint_image_id &&
+                      *facts.sync_target_paint_image_id >= 0
+                  ? base::Value(base::NumberToString(
+                        *facts.sync_target_paint_image_id))
+                  : base::Value());
+  SendBlinkEvidence(kResourcesChannel, "image-paint-image", std::move(payload));
+}
+
+int RegisterHookCostKind(const char* name) {
+  return RegisterCostKind(name);
+}
+
+int64_t StartHookCost(int slot) {
+  if (slot < 0 || !GetProcessRecorderClient()) {
+    return -1;
+  }
+  return CostNowNanoseconds();
+}
+
+void StopHookCost(int slot, int64_t started) {
+  if (slot < 0 || started < 0) {
+    return;
+  }
+  RecordCost(slot, CostNowNanoseconds() - started);
 }
 
 }  // namespace a11y_recorder
