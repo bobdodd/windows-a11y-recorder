@@ -4692,6 +4692,67 @@ Findings, each limited to this recording on this machine:
 Not yet measured on this recording: the transforms, opacities, filters and
 animated image frames of 2a and 2b-i.
 
+#### Sub-step 2b-iii: delay of the other compositor values
+
+Measured in the sandbox on the same recording
+(20261005-143057-3ad553cfa224444292249445ab5aaa9c), at the owner's request,
+for the frames in which the document was still and the element was in view.
+For each captured frame the value the image shows was measured, and the
+recorded compositor frames presented in the 250 ms before the composition
+time whose value equals it were found. A frame counts as consistent with a
+delay when one of those frames was presented that long before.
+
+- Transforms: a rotated, scaled square was fitted to the box by least
+  squares on its anti-aliased edges, giving its angle to about 0.05 degrees
+  and its side to about 0.005 px. One refresh moves `#rotation` by 1.5
+  degrees and `#separate` by 0.75 degrees and 0.1 px of side.
+- Opacity: the mean red level of `#fade`'s interior, against
+  `255 * (1 - opacity)`.
+- Background color and clip path (paint worklet progress): the mean color of
+  `#background`'s interior, and the height of `#clip-inset`'s visible
+  rectangle, against `96 * (0.8 - 0.4 * progress)` px.
+- Animated images: the color of each image's top left corner, which names
+  its frame.
+
+| Value | Captured frames from 8.0 s | Consistent with 33.2 ms | Otherwise |
+| --- | --- | --- | --- |
+| `#rotation` transform (element 718) | 6 | 6 | none |
+| `#separate` rotate (1944) | 83 | 82 | frame 62, 49.9 ms |
+| `#separate` scale (1942) | 83 | 82 | frame 62, 49.9 ms |
+| `#fade` opacity (1676) | 83 | 73 | 10 at 16.6 or 49.9 ms, each within one 8-bit level of the 33.2 ms value |
+| `#background` color progress (972) | 141 | 137 | frame 62; frame 126; frames 188 and 189 match no frame |
+| `#clip-inset` clip path progress (2956) | 64 | 59 | frame 126; frames 180, 181, 188 and 189 match no frame |
+| Animated images, all three | 62 | 61 | frame 126 |
+
+In 12 captured frames an animated image changed frame within 50 ms of the
+composition, so the image tells some delays apart: 3 rule out 16.6 ms, 5
+rule out 49.9 ms, 4 rule out only 66.6 ms, and all 12 show the frame of
+33.2 ms.
+
+Findings, each limited to this recording on this machine:
+
+1. From 8.0 s, every compositor value measured is drawn as of the compositor
+   frame presented 33.2 ms, two refreshes, before the composition time,
+   except at captured frame 62 (14.424 s), where every value, `#scroller`
+   included, is 49.9 ms behind. Opacity cannot tell neighboring refreshes
+   apart at 8-bit color, and is consistent with 33.2 ms within one level.
+2. `#scroller`, painted by the main thread, is 49.9 ms behind in 8 of its 15
+   frames, where the compositor animations in the same images are 33.2 ms
+   behind (frames 51, 55, 63, 64, 65, 88 and 98, and 62 for all). Why its
+   drawn content is sometimes one frame behind its compositor record is not
+   known.
+3. Before 8.0 s, as the page started, the delays were 66.6 to 199.9 ms.
+4. The paint worklet progress often holds one value for two refreshes, so
+   for background color and clip paths many frames fit 16.6, 33.2 and
+   49.9 ms alike.
+5. Unexplained: frames 180, 181, 188 and 189 near the end of the recording,
+   where the measured clip path or background color matches no compositor
+   frame of the 250 ms before.
+
+Not measured: `#blur`, which has no compositor record in this recording;
+`#frost`, whose backdrop blur this method cannot measure; `#clip-circle`,
+whose progress is the same as `#clip-inset`'s; and the main thread values.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
