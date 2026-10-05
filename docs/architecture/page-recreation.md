@@ -5837,6 +5837,17 @@ Built as designed, with these details settled in the code:
 Not built: the owner select's own drawing while its list is open is left
 as Blink draws a closed select with the recorded value.
 
+Reviewed on 2026-10-05 and closed until it is seen again. The limit above
+was stated from the design, not from a frame the owner had seen. On
+recording 20261003-143108, the day-of-week select (node 3255) whose list is
+open in the captured frame at 38.316 s differs from the same select closed,
+at 38.723 s, in its background, text, and border colors and its shadow,
+and these are values its layout records hold: from 37.962 s its recorded background
+color is rgb(255, 241, 0) and its color rgb(0, 0, 0), and from 38.161 s its
+border color is rgb(76, 161, 255) with a 3.2 px box shadow, all of which the
+recreation imposes. The owner has not seen a frame in which the select is
+drawn closed; the item is to be reopened with that frame if one appears.
+
 Found while building: the browser's `popup-widget-created` record carries
 the opener frame's navigation context, whose document token is the page's,
 so the state builder would have made a document of it, keyed by that
@@ -6616,6 +6627,201 @@ ChromiumLauncherTests failures that need Windows, and 199 Python tests.
 Not done: the integration test in the instrumented Chromium, for the
 reason given under "Popup on screen as built"; what is recorded is
 checked on the target machine with a new recording.
+
+### Slice 4e: page style sheets as they arrive (proposed, not built)
+
+Proposed 2026-10-05, at the owner's request that the page's CSS be recorded
+as it arrives, including sheets that arrive after the page has loaded, so
+that DevTools shows it in the recreation. It takes protocol 0.51.
+
+#### Why
+
+The recreation imposes each element's recorded computed style, so its
+drawing of elements does not depend on the page's style sheets. DevTools'
+Styles pane does: it lists the rules that match an element from the sheets
+the page has. Today the recreation has only the text of the page's `style`
+elements, recorded in the DOM since protocol 0.33. A sheet from a `link`
+element or an `@import` rule is refused by the recreation, since its body
+is not recorded (see "Slice 4a"), and a change script made through the
+CSSOM, a constructed sheet, and the adopted sheets of a document or shadow
+root are not recorded at all. Their rules are therefore missing from the
+Styles pane, the Sources panel, and `document.styleSheets`, and
+pseudo-elements, which take no recorded style, are drawn only as far as
+the `style` elements make them.
+
+#### What Chromium does
+
+Read in the Chromium checkout on the target machine; line numbers are
+those of that checkout, under `third_party/blink/renderer/core/`.
+
+- A sheet from a `link` element or an `@import` rule is parsed once its
+  resource has arrived, by `StyleSheetContents::ParseAuthorStyleSheet`
+  (`css/style_sheet_contents.cc`, line 435), called from
+  `html/link_style.cc` (line 130) and `css/style_rule_import.cc` (line
+  139). It decodes the resource to the sheet's text with
+  `CSSStyleSheetResource::SheetText`, and parses that text.
+- A sheet of a `style` element is parsed from the element's text, which is
+  recorded in the DOM.
+- A constructed sheet takes its text from `replace` and `replaceSync`
+  (`css/css_style_sheet.cc`, lines 556 and 574), both through
+  `CSSStyleSheet::SetText` (line 659).
+- Every change through the CSSOM, such as `insertRule`, `deleteRule`, a
+  rule's `style` or `selectorText`, or a media list, goes through
+  `CSSStyleSheet::WillMutateRules` (line 234), which copies shared
+  contents before the change, and `CSSStyleSheet::DidMutate` (line 251),
+  which marks the sheet's tree scope for an update of its active sheets.
+  `setDisabled` (line 343) also calls `DidMutate`.
+- The adopted sheets of a document or shadow root are an observable array
+  (`dom/tree_scope.cc`, from line 447), and each change is reported to the
+  sheet by `AddedAdoptedToTreeScope` and `RemovedAdoptedFromTreeScope`
+  (`css_style_sheet.cc`, lines 361 and 368).
+- Each of these changes is applied at the next
+  `StyleEngine::UpdateActiveStyleSheets` (`css/style_engine.cc`, line
+  678), which ends with `probe::ActiveStyleSheetsUpdated` (line 733). That
+  probe is what DevTools' CSS agent listens to
+  (`inspector/inspector_css_agent.cc`, line 1038) before it lists a
+  document's sheets from `StyleEngine::ActiveStyleSheetsForInspector`
+  (`css/style_engine.cc`, line 843).
+- DevTools takes a sheet's text in this order
+  (`inspector/inspector_style_sheet.cc`, `UpdateText`): a `style`
+  element's text, merged with its CSSOM rules when the sheet was changed
+  through the CSSOM (line 3011); then, for a sheet with an address, the
+  resource's content fetched by the network agent (line 2903); then the
+  CSSOM text, each rule's `cssText` on a line of its own (lines 2950 and
+  2959).
+- A sheet from another origin is not origin-clean, and its rules are
+  hidden from script (`CSSStyleSheet::CanAccessRules`, line 422) but not
+  from DevTools.
+
+So the text a sheet arrived with is known at one place for each kind, and
+every later change reaches one update, at which the sheets in effect can
+be listed as DevTools lists them.
+
+#### What is recorded (protocol 0.51)
+
+- At `ParseAuthorStyleSheet`, a `style-sheet-resource` record on
+  `browser.resources`: the document, the address requested and the
+  response's address, the response's status and MIME type, the digest of
+  the decoded text, and its length; and a `style-sheet-text` record, the
+  decoded text in UTF-8, the first time the renderer meets the digest, as
+  for font files and image bytes. A sheet that fails the MIME type check
+  is recorded with empty text, as Blink parses it.
+- At `UpdateActiveStyleSheets`, before the probe, a `style-sheets-updated`
+  record on `browser.layout` for the document: for each tree scope, the
+  document or the shadow host's node ID, its sheets in
+  `document.styleSheets` order
+  (`StyleSheetCollection::StyleSheetsForStyleSheetList`), then its adopted
+  sheets in order. Each sheet is named by a recorder sheet ID, kept on the
+  `CSSStyleSheet` for its life, and is given in full only when it is new
+  or has changed since the document's last record:
+  - its kind (`link`, `style`, `import`, `constructed`, or
+    `processing-instruction`), its owner node ID, or its parent sheet ID
+    and rule index for an import;
+  - its address, media text, title, whether it is disabled, and whether it
+    is active;
+  - its text: the digest of the text it arrived with, while it has not
+    been changed through the CSSOM; once it has, the digest of its CSSOM
+    text, built as DevTools builds it (each rule's `cssText` on a line of
+    its own), with a `style-sheet-text` record the first time the digest
+    is met.
+- A sheet is marked changed by a hook at `DidMutate` and at `SetText`, so
+  only marked sheets are serialized, once per update however many changes
+  script made.
+- A sheet no longer in a scope's list is left out of the next record; the
+  reader takes that as its removal.
+
+Sheets that arrive after the page has loaded, such as a `link` element or
+a `style` element inserted by script, a sheet built by a CSS-in-JS
+library through `insertRule`, or a constructed sheet adopted by a custom
+element, are recorded by the same hooks when they arrive.
+
+#### What the recreation does
+
+- The reader keeps, for each document, the sheets in effect at the frame:
+  the latest `style-sheets-updated` record at or before the frame's
+  composition, with each sheet's details from the record that last gave
+  them in full.
+- The recreation answers a request for a recorded sheet's address with the
+  text it arrived with, as `text/css; charset=utf-8`, from the latest
+  `style-sheet-resource` record of that document and address at or before
+  the frame. The page's `link` elements and `@import` rules therefore load
+  their sheets as they did, and DevTools fetches the same text.
+- The builder then gives each sheet that was changed through the CSSOM its
+  recorded CSSOM text: it removes the sheet's rules and inserts the
+  recorded ones, each through `insertRule`, as script did on the page, and
+  sets `disabled` and the media text where they differ. A sheet from
+  another origin is not origin-clean in the recreation either, so a
+  recreation-mode hook in `CSSStyleSheet::CanAccessRules` lets the builder
+  reach its rules; the page's own scripts do not run, so no page script
+  gains that access.
+- The builder makes each constructed sheet with `new CSSStyleSheet` and
+  `replaceSync` of its recorded text, with its media and disabled state,
+  and sets each tree scope's `adoptedStyleSheets` in the recorded order.
+- The builder waits for the `load` or `error` event of each `link` sheet,
+  and of the sheets they import, before the page is reported ready, so
+  that the first frame shown has them.
+- The evidence panel notes, for the document, how many sheets of each kind
+  were recorded, which were changed through the CSSOM, and any sheet that
+  could not be given its recorded state, such as a rule `insertRule`
+  refused, with the reason. DevTools' Console lists the same.
+
+#### What this changes in the recreation
+
+- The Styles pane lists the page's rules from every sheet, at their
+  recorded addresses, beside the recorded values the recreation imposes,
+  which keep their own source (see "Added to slice 4"). The Sources panel
+  lists the sheets.
+- Rendering of elements does not change, since their recorded computed
+  style is imposed. Pseudo-elements take their style from the sheets, as
+  they did on the page, so a `::before` from a linked sheet is drawn where
+  it was not. Rules that depend on a state the recreation does not hold,
+  such as `:hover`, still do not apply, and pseudo-elements stay
+  unchecked against the recording.
+- A font or image a sheet names is answered from the recording as before,
+  or refused when it was not recorded.
+
+#### Limits
+
+- Text is recorded decoded: the sheet's original bytes and character
+  encoding are not kept, so DevTools shows the text Blink parsed, served
+  as UTF-8.
+- The CSSOM text of a changed sheet is Blink's serialization, not the
+  script's own strings. DevTools on the page showed the same text for a
+  changed sheet without an owner element, and merged it with the
+  element's text for a `style` element, as it does in the recreation.
+- A sheet's state is recorded at style updates, not at each change. A
+  change script made and undid between two updates is not recorded; it
+  had no effect on any frame.
+- Sheets of iframes wait for slice 5, as their documents do. A sheet from
+  an `xml-stylesheet` processing instruction is listed, but its text is
+  not recorded, since it is not parsed through `ParseAuthorStyleSheet`.
+- Recordings before protocol 0.51 keep today's behaviour: `style` elements
+  only, and every other sheet refused.
+
+#### Cost
+
+Each arriving sheet's text is digested once, and a changed sheet is
+serialized once per style update. Both hooks are timed as a whole, and
+measured on the target machine on a page with a large linked sheet and on
+a page that inserts rules after load.
+
+#### Required tests
+
+- Unit tests: the record contract for the three records and the validator;
+  the reader's choice of each sheet's state at a frame, including a sheet
+  changed, removed, and adopted again; the server's answer for a sheet's
+  address, and refusal of an address with no record; the builder's data
+  for changed, constructed, and adopted sheets.
+- Integration tests in the instrumented Chromium, through `integrate.py`'s
+  test suite: each hook applied once and found again on a second pass; and
+  for a generated page with a linked sheet, an `@import`, a `style`
+  element changed through `insertRule`, a constructed sheet adopted by a
+  document and a shadow root, and a sheet inserted after load, the
+  recorded text of each equals the text DevTools reports for it.
+- System test on the target machine: a recording of a fixture page served
+  over HTTP with those sheets, where the Styles pane of chosen elements in
+  the recreation lists the same rules, with the same sources, as DevTools
+  did on the page, and the Sources panel lists the same sheets.
 
 ### To be settled
 
