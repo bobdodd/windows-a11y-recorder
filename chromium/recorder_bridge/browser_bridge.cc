@@ -5796,13 +5796,13 @@ base::Value CompositorValueJson(const CompositorDrawnValue& value) {
       offset.Set("isComposited", value.numbers[2] != 0);
       const auto bits = static_cast<unsigned>(value.numbers[3]);
       base::ListValue reasons;
-      static constexpr const char* kReasonNames[] = {
+      static constexpr std::array<const char*, 4> kReasonNames = {
           "has-background-attachment-fixed-objects",
           "not-opaque-for-text-and-lcd-text",
           "prefer-non-composited-scrolling",
           "background-needs-repaint-on-scroll",
       };
-      for (unsigned bit = 0; bit < 4; ++bit) {
+      for (size_t bit = 0; bit < kReasonNames.size(); ++bit) {
         if (bits & (1u << bit)) {
           reasons.Append(kReasonNames[bit]);
         }
