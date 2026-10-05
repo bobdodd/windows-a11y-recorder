@@ -4856,6 +4856,138 @@ close enough to what is needed. This is the owner's visual
 comparison of that frame, not pixel equality, and does not test the frames in
 which `#scroller` lags one refresh further.
 
+#### Sub-step 2c design: paint worklet colors and clip paths imposed (proposed, not built)
+
+Proposed 2026-10-05, after the owner asked for the design of 2c, the last
+part of sub-step 2. Nothing below is built.
+
+What the recording holds, read from recording
+20261005-143057-3ad553cfa224444292249445ab5aaa9c (protocol 0.50):
+
+- Four elements are animated by native paint worklets, each joined to its
+  node by a `compositor-animation-started` record (target property
+  `native-property`, namespace `primary-effect`): `#background` (element
+  972, node 323, background color) and three clip paths (2956, node 367,
+  `#clip-inset`; 2700, node 411, `#clip-circle`; 2444, node 455, the shape
+  change panel).
+- The compositor frames hold 1,208 background color progress values and
+  3,618 clip path progress values. For every one of them there is a
+  `paint-worklet-painted` record of the same element and property with the
+  same progress, written at or before the compositor frame, and the records
+  so matched hold one value each. One paint with no progress (painted from
+  the main thread's value) is recorded.
+- The recorded main thread style holds a value near the drawn one, not the
+  drawn one: 1,203 background colors of node 323 with 134 distinct
+  8-bit values, and 1,207 clip paths of node 367 written to six significant
+  digits (`inset(16.2287% 8.44283%)`).
+- A recorded clip path is in the element's transform space, with the paint
+  offset added: for node 367 at progress 0.8889 the path's first point is
+  (45.111, 1422.636), and the node's recorded border box in the same
+  transform space (`geometry.localRect`) starts at (38, 1395.969). The
+  recorded `translation` is the inverse of the deferred image's own offset,
+  (-44, -1405), not the paint offset, so it cannot be used to rebase the
+  path.
+
+Read in the target machine's checkout, 2026-10-05:
+
+- `BackgroundColorPaintDefinition::Paint`
+  (`modules/csspaint/nativepaint/background_color_paint_definition.cc`)
+  fills the element's background area with `drawColor` of the color
+  sampled at the progress, as an `SkColor4f`, which the recording holds.
+- `ClipPathPaintDefinition::Paint(zoom, reference_box, clip_area_rect,
+  node, worklet_id)` builds each keyframe's path on the reference box and
+  translates it by `FirstFragment().PaintOffset()`. The worklet draws the
+  interpolated path, as a rounded rectangle when `ReduceToRRectIfPossible`
+  reduces it.
+- On the main thread, `ClipPathClipper::PathBasedClip`
+  (`core/paint/clip_path_clipper.cc`) gives the clip path of a shape as the
+  shape's path on the reference box translated by the clip offset it is
+  passed, the paint offset: the same space as the recorded path.
+  `ClipPathClipper::LocalClipPathBoundingBox` gives its bounds without the
+  paint offset. Both are used only when the style has a clip path
+  (`HasClipPath`).
+
+What the recreation would do:
+
+- The values are chosen at the same compositor frame as the other
+  compositor values (sub-step 2b-iii change 2): for each element, the
+  progress that frame and earlier frames of the same compositor last gave
+  it, and then the last `paint-worklet-painted` record of the same
+  renderer, element, property, and progress written at or before that
+  frame. A null progress takes the last record painted with no progress. A
+  value is dropped, as in 2b-i, when its animation ended and a later
+  rendering update was presented. An element with no matching painted
+  record is not given a value, and the evidence panel counts it.
+- Each node's values are written in a new attribute,
+  `data-a11y-recorded-paint-worklet`, shown in the Elements pane as the
+  others are: the background color's four floats, and the clip path's fill
+  type, verbs, points, and conic weights, with the recorded number text
+  unchanged, followed by the recorded border box origin of the node at the
+  frame (from `geometry.localRect` of its main thread state). Blink reads the
+  numbers with `base::StringToDouble`, as it does for 2b-i.
+- Background color is imposed through the style, as the opacity is: the
+  style resolution hook adds `background-color: color(srgb r g b / a)`
+  after the recorded style, as an important declaration of the same
+  origin, each float written with enough digits to be read back as the same
+  float. DevTools' Computed pane therefore shows the imposed color.
+- A clip path is imposed on paint: in the recreation mode, for a node with
+  a recorded path, `PathBasedClip` returns the recorded path, and
+  `LocalClipPathBoundingBox` returns its bounds less the recorded origin.
+  When the clip offset Blink passes equals the recorded origin, the
+  recorded points are used unchanged; when it differs, as when the
+  recreation's paint offset is not the recording's, the path is moved by
+  the difference, in floats, and the Console names the element. A node
+  whose recorded style has no clip path (`none`) has no clip path node in
+  the recreation, so its path is not imposed, and the panel names it.
+- The evidence panel's hold note no longer says that paint worklet colors
+  and clip paths are not imposed. A new note lists each imposed value: the
+  node, the property, the progress, the compositor frame that last changed
+  it, and when it was painted, and counts the values not imposed, with their
+  reasons.
+
+Limits:
+
+- A paint worklet of the CSS Painting API is not recorded (sub-step 1b), so
+  it is not imposed.
+- The worklet's output is rasterized by the compositor as a deferred image,
+  and the recreation paints the same color and path on the main thread. The
+  values are the recorded ones; anti-aliased edges are not claimed equal. A
+  path the worklet drew as a rounded rectangle is clipped as a path, which
+  Blink may also reduce to a rounded rectangle; which it does is not
+  established.
+- A node drawn in more than one fragment, as across columns, has one
+  recorded path per paint and one origin, so it is not imposed and the panel
+  names it.
+- Popups get no paint worklet values, as they get no compositor values.
+- The two-refresh choice of frame is inferred from one machine (sub-step
+  2b-iii change 2), and the paint worklet progress often holds one value for
+  two refreshes, so frames near a change can show the neighbouring value.
+- Recordings before protocol 0.48 hold no paint worklet records and keep the
+  main thread's values.
+
+No protocol change is needed, so the test can use the existing recording
+(20261005-143057) without recording again.
+
+Required tests:
+
+- Unit (app): the value chosen at a frame from compositor frames and
+  painted records, including a null progress, a progress with no painted
+  record, a painted record written after the frame, another renderer's
+  records, and an ended animation before and after a later presented
+  rendering update; the attribute's text, with the recorded number text
+  unchanged; the panel's notes.
+- Unit (integration script): the new hooks against copies of the target
+  machine's `clip_path_clipper.cc` and `style_resolver.cc`, applied once and
+  unchanged on a second run, with the earlier hooks upgraded.
+- Unit (bridge): the parsing of the attribute's text, with malformed text
+  imposing nothing.
+- System, on the target machine: recording 20261005-143057 opened at
+  several frames from 8 s on; at each, the background color panel and the
+  three clip path panels look as in the captured frame, and two screenshots
+  of the recreation a second apart are identical. The same region
+  comparison of the recreation with the captured frame as for 2b-iii
+  change 2 is repeated in the sandbox.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
