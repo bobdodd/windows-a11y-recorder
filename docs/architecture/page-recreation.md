@@ -4382,6 +4382,18 @@ animation's transform), with the recorded number text unchanged. Building
 Chromium and the look of the recreation are to be checked on the target
 machine.
 
+Confirmed on the target machine, 2026-10-04, with c321322 and a new
+recording of the fixture served over http
+(`20261005-021819-4e1dd644c67646b3991e3ce1ba182f99`), as the owner
+reported: at the frames opened, the rotation, separate transform
+properties, fade, frosted glass, and skip link panels seemed correct
+against the captured frame; two screenshots of the recreation taken apart
+seemed stable; DevTools' inspection seemed correct; no Console message
+of a value not imposed was found. The evidence panel at 10.669 s listed 7
+compositor values imposed on 5 elements, as of compositor frame 288,
+including the skip link (node 25). Visual confirmation is not pixel
+equality.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
