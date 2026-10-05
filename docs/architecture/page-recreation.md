@@ -4851,8 +4851,8 @@ sandbox, the app's own code chose (0, 979.4688110351562) for node 295 at
 19.407 s in place of the main thread's (0, 1149).
 
 On 2026-10-05 the owner ran b351b87 on the target machine, opened the same
-recording at 19.407 s, and reported that the recreation "appears to be
-working close enough" to what is needed. This is the owner's visual
+recording at 19.407 s, and reported that the recreation appeared to work
+close enough to what is needed. This is the owner's visual
 comparison of that frame, not pixel equality, and does not test the frames in
 which `#scroller` lags one refresh further.
 
