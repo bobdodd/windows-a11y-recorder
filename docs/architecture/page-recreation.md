@@ -4860,8 +4860,8 @@ which `#scroller` lags one refresh further.
 
 Proposed 2026-10-05, after the owner asked for the design of 2c, the last
 part of sub-step 2, and agreed by the owner the same day. Built as described
-in "Sub-step 2c as built" below; the system test on the target machine is
-not yet reported.
+in "Sub-step 2c as built" below, and confirmed by the owner on the target
+machine on 2026-10-05 (below).
 
 What the recording holds, read from recording
 20261005-143057-3ad553cfa224444292249445ab5aaa9c (protocol 0.50):
@@ -5044,8 +5044,19 @@ before), the integration script's unit tests (231 pass, including three new
 ones, one of which compiles and runs the bridge's parsing test), and the
 patching of copies of the target machine's `clip_path_clipper.cc` and
 already patched `style_resolver.cc`, each applied once and unchanged on a
-second run. The Chromium build and the system test on the target machine
-are not yet run.
+second run.
+
+The first Chromium build failed: the helper passed a const `Element*` to
+`DOMNodeIds::IdForNode`, which takes a `Node*`. Revision 1fb3086 passes the
+layout object's node, and the integration script replaces the helper of
+5616770 in place (`STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS`).
+
+System test, on the target machine, 2026-10-05, with revision 1fb3086 and
+recording 20261005-143057: the owner reported that the background color
+panel and the three clip path panels matched the captured frame, that the
+recreation held still, and that DevTools' Console showed no warning that a
+recorded clip path was moved. This is the owner's visual comparison, not a
+pixel comparison; the sandbox region comparison was not repeated.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
