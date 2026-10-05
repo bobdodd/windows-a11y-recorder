@@ -236,6 +236,23 @@ Support:
 
 Full-display capture should be the default for accessibility testing because it can include browser chrome, screen-reader dialogs, task switching, magnification, and interactions outside the tested tab. Selected-window capture should remain available for privacy-sensitive sessions.
 
+#### Requirement: a frame rate parameter (recorded 2026-10-05, not built)
+
+The recorder needs a frame rate parameter that the tester sets for each recording. The default stays at 5 frames per second, which is enough for regular work. It is too slow for pages, applications and games with a lot of animation: in a recording of the animation fixture, a 0.4-second smooth scroll was caught in only two captured frames.
+
+What exists now:
+
+- `DesktopFrameCollector` accepts 1 to 30 frames per second, and `RecordingOptions.FramesPerSecond` passes the value through to it.
+- The app's recording settings do not set the value, so every recording so far has used the default of 5.
+- Each recording already stores its rate as `framesPerSecond`, in the session manifest and in every desktop frame's payload.
+- Each frame is a whole-desktop PNG. In one fixture recording on the target machine, frames were about 240 KB each and took about 54 ms to capture and save. That is longer than the 33 ms between frames at 30 frames per second, so the current code would probably fall behind at that rate. This has not been tested.
+
+Still to decide:
+
+- Which rates to offer, including whether to go above the collector's current limit of 30.
+- Where in the recording settings the rate is set.
+- What higher rates cost in capture time and storage, which has not been measured.
+
 ### Participant microphone
 
 Record microphone audio as an independent track. Do not mix microphone audio with screen-reader or system audio during capture.
