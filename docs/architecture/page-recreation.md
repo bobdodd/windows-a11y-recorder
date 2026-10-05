@@ -4602,7 +4602,7 @@ just before, and just after the shifted time; and the protocol hook and
 serializer, applied once and unchanged on a second run. On the target
 machine, the measurement above is repeated on a new recording.
 
-#### Sub-step 2b-iii change 1 as built
+#### Sub-step 2b-iii change 1 as built (withdrawn, see below)
 
 - The compositor frame hook records, with each scroll node's offset, 1 or
   0 for `cc::ScrollNode::is_composited` and a bitmask of the four
@@ -4805,6 +4805,51 @@ Checked in the sandbox against recording
 87, 97 and 141 the frame chosen was presented 32.9 to 33.6 ms before the
 composition, from presentation times the panel prints to the millisecond (compositor frame 797, presented at 19.390 s, for frame 87 at
 19.424 s). Not yet checked on the target machine.
+
+#### Sub-step 2b-iii change 2 on the target machine, and change 1 withdrawn
+
+On 2026-10-05 the owner ran 6d77b3f (restored as b4f6f1f) on the target
+machine and opened recording
+20261005-143057-3ad553cfa224444292249445ab5aaa9c at 19.407 s and 40.133 s.
+The owner reported the recreation at 19.407 s as much worse than the
+captured frame, and the frame at 40.133 s as not showing the browser.
+
+- 40.133 s is the recording's last captured frame. The browser closed when
+  the recording was stopped, between captured frames 187 and 188 (about
+  39.8 s), so frames 188 and 189 show no browser. That frame cannot test the
+  recreation; it was a wrong choice of test frame.
+- At 19.407 s the recreation open on the target machine was compared, in
+  the sandbox, with the captured frame, region by region, at 100 by 100 CSS
+  pixels. Every region matched within a mean of 1.4 grey levels except the
+  `#scroller` list (up to 24 levels) and the pointer. The list was at the
+  main thread's offset, 1149, kept by change 1 because the compositor
+  recorded the list as not scrolled by itself; the captured frame shows it
+  at about 978. The compositor frame change 2 chooses (797, presented at
+  19.390 s) drew it at 979.5.
+
+This agrees with the measurement under "Sub-step 2b-iii change 1 on the
+target machine", which had already found that the captured frames show
+`#scroller` where the compositor drew it, not at the main thread's offset.
+With the owner's agreement, change 1's rule is withdrawn: recreation imposes
+the compositor's position on every scroller whose record names its element
+ID, whether or not the compositor scrolled it. The protocol 0.50 fields are
+still recorded, and the evidence panel lists each scroller the compositor did
+not scroll itself, with its recorded repaint reasons, after the scrollers it
+imposes positions on. A scroller whose compositor frame record does not say,
+as before protocol 0.50, also takes the compositor's position, as it did in
+2b-ii.
+
+Not addressed: in 8 of the 15 captured frames measured during scrolls,
+`#scroller` was one refresh further behind (49.9 ms) than the compositor
+values in the same image, so during fast scrolling the list can still be one
+refresh away from the captured frame.
+
+Tests, at the unit level (`RecordedCompositorValuesTests`): a scroller the
+compositor did not scroll, and one whose record does not say, take the
+compositor's position, and the panel lists the first with its reasons. In the
+sandbox, the app's own code chose (0, 979.4688110351562) for node 295 at
+19.407 s in place of the main thread's (0, 1149). Not yet checked on the
+target machine.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 

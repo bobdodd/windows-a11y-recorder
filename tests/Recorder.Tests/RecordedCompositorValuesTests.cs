@@ -252,8 +252,9 @@ public sealed class RecordedCompositorValuesTests
         state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(1, 100, "68")));
         state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(295, 10, "70", originX: 50, zoom: 2)));
         state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(300, 30, null)));
-        // Sub-step 2b-iii: a scroller the compositor did not scroll itself,
-        // and one whose record does not say, keep the main thread's offset.
+        // Sub-step 2b-iii, change 1 withdrawn: a scroller the compositor did
+        // not scroll itself, and one whose record does not say, also take
+        // the compositor's position.
         state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(310, 20, "74")));
         state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(320, 11, "76")));
         var compositor = ChooseScrolls(3_700) with { };
@@ -272,12 +273,12 @@ public sealed class RecordedCompositorValuesTests
         Assert.Equal((10d, 20.5), offsets[295]);
         // A record naming no element ID keeps the main thread's offset.
         Assert.Equal((0d, 30d), offsets[300]);
-        Assert.Equal((0d, 20d), offsets[310]);
-        Assert.Equal((0d, 11d), offsets[320]);
-        Assert.Contains(notes, note => note.StartsWith("1 scrollers the compositor did not scroll itself at the frame", StringComparison.Ordinal) &&
-                                       note.Contains("node 310 at the main thread's (0, 20), not the compositor's position (0, 30) of compositor frame 2, with the repaint reasons not-opaque-for-text-and-lcd-text, prefer-non-composited-scrolling", StringComparison.Ordinal));
-        Assert.Contains(notes, note => note.StartsWith("The compositor frame records do not say whether the compositor scrolled 1 scrollers (nodes 320)", StringComparison.Ordinal));
-        Assert.Contains(notes, note => note.StartsWith("2 scrollers are scrolled to the offset the compositor drew at the frame", StringComparison.Ordinal) &&
+        Assert.Equal((0d, 30d), offsets[310]);
+        Assert.Equal((0d, 12d), offsets[320]);
+        Assert.Contains(notes, note => note.StartsWith("Of these, the compositor did not scroll 1 itself at the frame", StringComparison.Ordinal) &&
+                                       note.Contains("node 310, with the repaint reasons not-opaque-for-text-and-lcd-text, prefer-non-composited-scrolling", StringComparison.Ordinal));
+        Assert.DoesNotContain(notes, note => note.Contains("keep the main thread's offset", StringComparison.Ordinal));
+        Assert.Contains(notes, note => note.StartsWith("4 scrollers are scrolled to the offset the compositor drew at the frame", StringComparison.Ordinal) &&
                                        note.Contains("node 1 at (0, 240.25), last changed in compositor frame 2, in place of the main thread's (0, 100)", StringComparison.Ordinal));
         Assert.Contains(notes, note => note.StartsWith("1 scroll nodes of the compositor were at a nonzero offset", StringComparison.Ordinal));
     }
