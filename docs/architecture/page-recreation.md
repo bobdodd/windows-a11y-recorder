@@ -4625,6 +4625,73 @@ machine, the measurement above is repeated on a new recording.
 Building Chromium and what is recorded for `#scroller` are to be checked on
 the target machine.
 
+#### Sub-step 2b-iii change 1 on the target machine
+
+Commit 46686e0 (63864d5 with the reason names in a `std::array`, which
+Chromium's `-Wunsafe-buffer-usage` requires) built on the target machine.
+The owner recorded the fixture over http
+(20261005-143057-3ad553cfa224444292249445ab5aaa9c) with wheel scrolls of
+`#scroller` from 12.0 s to 16.1 s and the two smooth scrolls at 19.28 s and
+21.19 s. At 13.406 s the evidence panel listed node 295 as a scroller the
+compositor did not scroll itself, at the main thread's (0, 395) and not the
+compositor's (0, 400), with no repaint reason recorded. The owner reported
+that the recreation and the captured frame appeared to match there, and at
+40.133 s, after the scrolls had ended.
+
+What is recorded for `#scroller` (scroll element 1028): all 190 of its
+`scroll-offset` values have `isComposited` false and no
+`mainThreadRepaintReasons`. The document's scroller (element 452) is
+composited in 87 of 87. Why Chromium does not composite `#scroller` while
+giving none of the four reasons is not known.
+
+The recording was then measured in the sandbox. For each captured frame of
+the scrolls, the offset the image shows was measured from the edges of the
+shaded rows in one pixel column, as for 2b-ii, with the two-row ambiguity
+resolved by reading the row numbers in the image. Still frames at known
+offsets (0, 100, 200, 500, 1100, 1215) measured 0 to 0.8 px below the
+recorded offset, which bounds the method's error.
+
+| Captured frame | Composition (s) | Measured | Main thread at the cut | Last presented compositor frame | Compositor frame matching the image |
+| --- | --- | --- | --- | --- | --- |
+| 51 | 12.2238 | 51 | 78 | 77.89 | 364 (51.01), 49.9 ms before |
+| 53 | 12.6238 | 153 | 153 | 167.28 | 389 (152.88), 33.3 ms before |
+| 55 | 13.0238 | 277 | 299 | 294.53 | 412 (277.05), 49.9 ms before |
+| 57 | 13.4238 | 400 | 400 | 400.00 | 437 (400.00), 33.2 ms before |
+| 58 | 13.6238 | 425 | 425 | 438.67 | 449 (425.09), 33.2 ms before |
+| 62 | 14.4238 | 588 | 609 | 608.77 | 497 (587.67), 49.9 ms before |
+| 63 | 14.6238 | 700 | 700 | 700.00 | 508 (699.27), 49.9 ms before |
+| 64 | 14.8238 | 764 | 788 | 788.02 | 520 (764.30), 49.9 ms before |
+| 65 | 15.0238 | 900 | 919 | 918.87 | 532 (900.61), 49.9 ms before |
+| 66 | 15.2237 | 1022 | 1023 | 1034.61 | 545 (1022.62), 33.2 ms before |
+| 70 | 16.0237 | 1201 | 1202 | 1206.96 | 593 (1201.53), 33.2 ms before |
+| 87 | 19.4236 | 978 | 842 | 898.69 | 797 (979.47), 33.2 ms before |
+| 88 | 19.6236 | 668 | 658 | 657.99 | 808 (668.56), 49.9 ms before |
+| 97 | 21.4236 | 105 | 85 | 84.87 | 917 (105.45), 33.2 ms before |
+| 98 | 21.6235 | 2 | 0 | 0.08 | 928 (2.20), 49.9 ms before |
+
+"Main thread at the cut" is the last main thread scroll offset recorded at
+or before the composition time; the recreation's own basis may be an
+earlier rendering update, as at 13.406 s, where it was 395.
+
+Findings, each limited to this recording on this machine:
+
+1. In every one of the 15 frames, the image shows the offset of a recorded
+   compositor frame presented 33.2 or 49.9 ms (two or three refreshes)
+   before the composition time, to within the method's error, although the
+   compositor does not scroll `#scroller` itself.
+2. The main thread's offset at the cut matches the image only where the
+   list had stopped or was moving slowly. In fast motion it is ahead of the
+   image, by 136 px at frame 87, so change 1 does not make `#scroller`
+   match during a fast scroll.
+3. The 2b-ii finding that `#scroller`'s images matched the main thread and
+   its compositor offset "ran ahead" is not repeated here. Its comparison
+   was with the frame presented one refresh before the composition, which
+   is also ahead of the image here; that explains it without the scroller
+   being non-composited, though it was not re-measured on that recording.
+
+Not yet measured on this recording: the transforms, opacities, filters and
+animated image frames of 2a and 2b-i.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.
