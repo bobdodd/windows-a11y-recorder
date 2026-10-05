@@ -147,6 +147,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (node.recordedCompositor !== null && node.recordedCompositor !== undefined) {
           element.setAttribute("data-a11y-recorded-compositor", node.recordedCompositor);
         }
+        if (node.recordedPaintWorklet !== null && node.recordedPaintWorklet !== undefined) {
+          element.setAttribute("data-a11y-recorded-paint-worklet", node.recordedPaintWorklet);
+        }
         if (node.shadowRoot) {
           attachShadow(element, node.shadowRoot, namespace);
         }

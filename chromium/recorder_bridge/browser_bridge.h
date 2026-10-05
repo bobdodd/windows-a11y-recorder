@@ -15,6 +15,7 @@
 #include "chromium/recorder_bridge/layout_changes.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
 #include "chromium/recorder_bridge/recreation_compositor_values.h"
+#include "chromium/recorder_bridge/recreation_paint_worklet_values.h"
 #include "chromium/recorder_bridge/recreation_image_frames.h"
 
 namespace base {
@@ -100,6 +101,15 @@ std::optional<size_t> RecreationHeldImageFrame(int64_t paint_image_id);
 // of the attribute's form gives none. Gives none outside the recreation mode.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 RecreationCompositorValues RecreationCompositorValuesOf(std::string_view text);
+
+// "Sub-step 2c design: paint worklet colors and clip paths imposed": in the
+// recreation mode, the native paint worklet values of an element's
+// data-a11y-recorded-paint-worklet attribute, which Blink imposes on its
+// style and clip path. Text not of the attribute's form gives none. Gives
+// none outside the recreation mode.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+RecreationPaintWorkletValues RecreationPaintWorkletValuesOf(
+    std::string_view text);
 
 // Appends a non-secret startup diagnostic when the opt-in bridge log
 // environment variable is present. This works before Chromium logging starts.

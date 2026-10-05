@@ -479,6 +479,21 @@ style resolution hook adds the recorded opacity after the recorded style.
 A value that cannot be imposed is named in the Console of the element's
 document. See "Sub-step 2b-i" in the page recreation design.
 
+The native paint worklets' recorded background colors and clip paths are
+imposed in the same mode (slice 4b sub-step 2c). The app writes each
+element's values in its `data-a11y-recorded-paint-worklet` attribute, which
+`RecreationPaintWorkletValuesOf` parses with
+`ParseRecreationPaintWorkletValues` (in `recreation_paint_worklet_values.h`,
+tested by `recreation_paint_worklet_values_test.cc`); malformed text gives no
+values. The style resolution hook adds the background color after the
+opacity, as `color(srgb r g b / a)` of the recorded number text.
+`ClipPathClipper::PathBasedClip` gives the recorded path at the paint offset
+it is passed, and `ClipPathClipper::LocalClipPathBoundingBox` its bounds
+without it, for an element whose style has a basic shape clip path. When the
+paint offset is not the recorded origin of the element's border box, the
+path is moved by the difference and the Console of the element's document
+says so. See "Sub-step 2c" in the page recreation design.
+
 Protocol 0.49 (slice 4b sub-step 2b-ii) adds `scrollElementId` to
 `layout-scroll-offset-changed`: the layout change set's hook reads the
 scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s

@@ -8385,6 +8385,156 @@ class RecreationIntegrationTests(unittest.TestCase):
             )
             subprocess.run([str(binary)], check=True)
 
+    def test_the_paint_worklet_values_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_paint_worklet_values.h",', build)
+        header = (bridge / "browser_bridge.h").read_text(encoding="utf-8")
+        self.assertIn(
+            '#include "chromium/recorder_bridge/recreation_paint_worklet_values.h"',
+            header,
+        )
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        self.assertIn(
+            "RecreationPaintWorkletValues RecreationPaintWorkletValuesOf(\n", source
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_paint_worklet_values_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_paint_worklet_values_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_upgrades_the_compositor_opacity_style_hook_to_the_paint_worklet_color(self):
+        legacy = INTEGRATE.STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK
+        hook = INTEGRATE.BLINK_RECREATION_STYLE_HOOK
+        self.assertNotEqual(legacy, hook)
+        self.assertNotIn("data-a11y-recorded-paint-worklet", legacy)
+        source = self.STYLE_RESOLVER_SOURCE.replace(
+            INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            legacy + INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(hook))
+        # The paint worklet's color is read from the element's own attribute,
+        # never a user agent shadow copy's, and set last, after the opacity.
+        self.assertIn('AtomicString("data-a11y-recorded-paint-worklet")', hook)
+        self.assertIn(
+            "!element.IsInUserAgentShadowRoot()) {\n      recorder_worklet_color =",
+            hook,
+        )
+        self.assertIn(
+            "recorder_compositor_opacity || recorder_worklet_color) {", hook
+        )
+        self.assertLess(
+            hook.index('("opacity: " + *recorder_compositor_opacity)'),
+            hook.index('"background-color: color(srgb "'),
+        )
+        self.assertLess(
+            hook.index('"background-color: color(srgb "'),
+            hook.index("collector.BeginAddingAuthorRulesForTreeScope("),
+        )
+        self.assertIn('recorder_color[2] + " / " +', hook)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(1, signatures["RecreationPaintWorkletValuesOf"])
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", first, signatures)
+        )
+
+    CLIP_PATH_CLIPPER_SOURCE = (
+        INTEGRATE.BLINK_CLIP_PATH_CLIPPER_OWN_INCLUDE
+        + "\n\nnamespace blink {\n\n"
+        + INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR
+        + INTEGRATE.BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR
+        + "  return std::nullopt;\n}\n\n"
+        + INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_ANCHOR
+        + "  return std::nullopt;\n}\n\n}  // namespace blink\n"
+    )
+
+    def test_imposes_the_paint_worklet_clip_paths_once(self):
+        source = self.patch_source_twice(
+            "clip_path_clipper.cc",
+            self.CLIP_PATH_CLIPPER_SOURCE,
+            INTEGRATE.patch_blink_clip_path_clipper,
+        )
+        for include in INTEGRATE.BLINK_CLIP_PATH_CLIPPER_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CLIP_PATH_BOUNDING_BOX_HOOK))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK))
+        # The helper comes before both uses.
+        self.assertLess(
+            source.index("static std::optional<Path> RecorderPaintWorkletClipPath("),
+            source.index("std::optional<gfx::RectF> ClipPathClipper::LocalClipPathBoundingBox("),
+        )
+        helpers = INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS
+        # Only while the recreation holds time, from the element's own
+        # attribute, and only for a basic shape the style gives it.
+        self.assertIn("if (!a11y_recorder::RecreationHoldsTime() || object.IsAnonymous() ||", helpers)
+        self.assertIn("recorder_element->IsInUserAgentShadowRoot()", helpers)
+        self.assertIn("!IsA<ShapeClipPathOperation>(*recorder_operation)", helpers)
+        self.assertIn('AtomicString("data-a11y-recorded-paint-worklet")', helpers)
+        # The recorded points are used unchanged at the recorded origin, and
+        # moved, with a console message, elsewhere.
+        self.assertIn("recorder_dx != 0 || recorder_dy != 0", helpers)
+        self.assertIn("if (recorder_moved && report) {", helpers)
+        self.assertIn("/*discard_duplicates=*/true", helpers)
+        # The bounding box is without the paint offset and says nothing; the
+        # path-based clip is at the paint offset.
+        self.assertIn(
+            "object, gfx::Vector2dF(), /*report=*/false)",
+            INTEGRATE.BLINK_CLIP_PATH_BOUNDING_BOX_HOOK,
+        )
+        self.assertIn(
+            "clip_path_owner, clip_offset, /*report=*/true)",
+            INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK,
+        )
+        # The path-based clip hook comes before Blink's own clip.
+        hook = source.index(INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK)
+        self.assertEqual(
+            "  return std::nullopt;\n}",
+            source[
+                hook + len(INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK) : hook
+                + len(INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK)
+                + len("  return std::nullopt;\n}")
+            ],
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, signatures)
+        )
+
     def test_holds_css_animations_and_transitions_once(self):
         source = self.patch_source_twice(
             "css_animations.cc",

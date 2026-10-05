@@ -1936,6 +1936,17 @@ RecreationCompositorValues RecreationCompositorValuesOf(std::string_view text) {
       });
 }
 
+RecreationPaintWorkletValues RecreationPaintWorkletValuesOf(
+    std::string_view text) {
+  if (!IsRecreationMode()) {
+    return {};
+  }
+  return ParseRecreationPaintWorkletValues(
+      text, [](std::string_view number, double* value) {
+        return base::StringToDouble(number, value);
+      });
+}
+
 RecorderPipeClient* GetProcessRecorderClient() {
   return ProcessClientStorage().get();
 }

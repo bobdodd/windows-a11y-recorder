@@ -4856,10 +4856,12 @@ close enough to what is needed. This is the owner's visual
 comparison of that frame, not pixel equality, and does not test the frames in
 which `#scroller` lags one refresh further.
 
-#### Sub-step 2c design: paint worklet colors and clip paths imposed (proposed, not built)
+#### Sub-step 2c design: paint worklet colors and clip paths imposed (agreed, built)
 
 Proposed 2026-10-05, after the owner asked for the design of 2c, the last
-part of sub-step 2. Nothing below is built.
+part of sub-step 2, and agreed by the owner the same day. Built as described
+in "Sub-step 2c as built" below; the system test on the target machine is
+not yet reported.
 
 What the recording holds, read from recording
 20261005-143057-3ad553cfa224444292249445ab5aaa9c (protocol 0.50):
@@ -4987,6 +4989,63 @@ Required tests:
   of the recreation a second apart are identical. The same region
   comparison of the recreation with the captured frame as for 2b-iii
   change 2 is repeated in the sandbox.
+
+#### Sub-step 2c as built
+
+Built 2026-10-05.
+
+- `RecordedCompositorValueChooser` (`src/Recorder.Session/RecordedCompositorValues.cs`)
+  also reads the `background-color-progress` and `clip-path-progress`
+  changes of the compositor frames and the `paint-worklet-painted` records.
+  At the chosen compositor frame it gives each element's latest progress,
+  joined to its node by the latest `compositor-animation-started` record of
+  its element ID, and the last paint of the same renderer, element,
+  property, and progress (as a double, or null) written at or before that
+  frame's record. The chosen values are in `RecordedCompositorValues.PaintWorklet`.
+  A value is not imposed, and counted in the panel, when its element ID has
+  no start record, its animation ended before a later presented rendering
+  update, its value was null (no longer drawn), it has no paint at or before
+  the frame, or its painted value is not of its property's form.
+- `RecordedPage.PaintWorkletAttributes` (`src/Recorder.Recreation/RecordedPage.cs`)
+  writes the attribute. Its entries are separated by "; ":
+  `background-color r g b a`, and `clip-path x y fill verbs`, where x and y
+  are the node's recorded `geometry.localRect` origin and each verb is
+  followed by its points and, for a conic, its weight, all as recorded. The
+  origin comes before the path, not after it as the design said, so that the
+  path can end the entry. A clip path is left out, and the panel names the
+  node, when the recorded style's `clip-path` is `none`, when the node has
+  more than one recorded box fragment, or when it has no recorded
+  `localRect`. The builder (`src/Recorder.Recreation/Builder/builder.js`)
+  sets the attribute before the element is inserted.
+- The bridge parses the attribute with `ParseRecreationPaintWorkletValues`
+  (`chromium/recorder_bridge/recreation_paint_worklet_values.h`), through
+  `RecreationPaintWorkletValuesOf`, which gives nothing outside the
+  recreation mode.
+- `chromium/integrate.py` upgrades the style resolution hook in place (the
+  previous hook is kept as `STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK`) to add
+  `background-color: color(srgb r g b / a)` after the opacity, and adds
+  `patch_blink_clip_path_clipper` for `core/paint/clip_path_clipper.cc`: a
+  helper, `RecorderPaintWorkletClipPath`, builds the recorded path with
+  `SkPathBuilder`, and hooks at the start of `PathBasedClip` (at the paint
+  offset, with a Console warning when it moves the path) and
+  `LocalClipPathBoundingBox` (without the paint offset) return it. The
+  target machine's `paint_property_tree_builder.cc` then reduces a path
+  that is a rounded rectangle to a rounded rectangle clip (`PathToRRect`),
+  as the worklet does when it draws one.
+- In recording 20261005-143057, at 19.407 s, the app chooses all four values
+  at compositor frame 797: node 323's background color at progress
+  0.35021549463272095 and the three clip paths, each painted at 19.367 s.
+  At 19.001 s it chooses them at frame 773. One progress value, of an
+  element with no start record, is counted as not imposed at both.
+
+Tests run in the sandbox, 2026-10-05: the app's unit tests (1,074 pass,
+including five new ones; the 58 that need PostgreSQL or Windows fail as
+before), the integration script's unit tests (231 pass, including three new
+ones, one of which compiles and runs the bridge's parsing test), and the
+patching of copies of the target machine's `clip_path_clipper.cc` and
+already patched `style_resolver.cc`, each applied once and unchanged on a
+second run. The Chromium build and the system test on the target machine
+are not yet run.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 

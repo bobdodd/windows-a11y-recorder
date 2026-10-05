@@ -6924,7 +6924,9 @@ STAGE_1E0B_BLINK_RECREATION_STYLE_HOOK = """
                                           /*is_inline_style=*/true);
     }
   }"""
-BLINK_RECREATION_STYLE_HOOK = """
+# The 2b-i hook as delivered through e4c6, before sub-step 2c: no paint
+# worklet color.
+STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK = """
   // Windows A11y Recorder recreation mode: an element's recorded computed
   // style is added as its last author declarations, important and attached
   // to the element, so it wins over every style sheet rule, the element's
@@ -6997,6 +6999,70 @@ BLINK_RECREATION_STYLE_HOOK = """
   }"""
 
 
+# Sub-step 2c: the background color a native paint worklet painted is set
+# last. See docs/architecture/page-recreation.md, "Sub-step 2c design: paint
+# worklet colors and clip paths imposed".
+BLINK_RECREATION_STYLE_HOOK = (
+    STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK.replace(
+        '''  // compositor values imposed"), is set after both, as recorded. A copy of
+  // the element in a user agent shadow tree, as an svg use element makes,
+  // takes none of these: the copy's own layout object was not the one
+  // recorded.
+''',
+        '''  // compositor values imposed"), is set after both, as recorded. The
+  // background color a native paint worklet painted at the frame, from the
+  // element's data-a11y-recorded-paint-worklet attribute ("Sub-step 2c
+  // design: paint worklet colors and clip paths imposed"), is set last, as
+  // an sRGB color of the recorded floats. A copy of the element in a user
+  // agent shadow tree, as an svg use element makes, takes none of these: the
+  // copy's own layout object was not the one recorded.
+''',
+        1,
+    )
+    .replace(
+        '''              .opacity_text;
+    }
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display ||
+        recorder_compositor_opacity) {
+''',
+        '''              .opacity_text;
+    }
+    const AtomicString& recorder_recorded_paint_worklet = element.getAttribute(
+        AtomicString("data-a11y-recorded-paint-worklet"));
+    std::optional<std::array<std::string, 4>> recorder_worklet_color;
+    if (!recorder_recorded_paint_worklet.IsNull() &&
+        !element.IsInUserAgentShadowRoot()) {
+      recorder_worklet_color =
+          a11y_recorder::RecreationPaintWorkletValuesOf(
+              recorder_recorded_paint_worklet.Utf8())
+              .background_color_text;
+    }
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display ||
+        recorder_compositor_opacity || recorder_worklet_color) {
+''',
+        1,
+    )
+    .replace(
+        '''            ("opacity: " + *recorder_compositor_opacity).c_str()));
+      }
+''',
+        '''            ("opacity: " + *recorder_compositor_opacity).c_str()));
+      }
+      if (recorder_worklet_color) {
+        const std::array<std::string, 4>& recorder_color =
+            *recorder_worklet_color;
+        recorder_impose(String::FromUtf8(
+            ("background-color: color(srgb " + recorder_color[0] + " " +
+             recorder_color[1] + " " + recorder_color[2] + " / " +
+             recorder_color[3] + ")")
+                .c_str()));
+      }
+''',
+        1,
+    )
+)
+
+
 def patch_blink_style_resolver(path: Path) -> None:
     """Adds the recreation mode's recorded styles to rule matching."""
     text = read_source(path)
@@ -7009,6 +7075,7 @@ def patch_blink_style_resolver(path: Path) -> None:
             (STAGE_1A_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
             (STAGE_9915_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
             (STAGE_1E0B_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
+            (STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
         ),
         path,
     )
@@ -17793,6 +17860,216 @@ def patch_blink_paint_property_tree_builder(path: Path) -> None:
     write_patched(path, text)
 
 
+# Recreation mode, slice 4b sub-step 2c: the clip path a native paint worklet
+# painted at the frame is imposed on the element's clip path. See
+# docs/architecture/page-recreation.md, "Sub-step 2c design: paint worklet
+# colors and clip paths imposed".
+BLINK_CLIP_PATH_CLIPPER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/paint/clip_path_clipper.h"'
+)
+BLINK_CLIP_PATH_CLIPPER_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/public/mojom/devtools/'
+    'console_message.mojom-blink.h"',
+    '#include "third_party/blink/renderer/core/dom/document.h"',
+    '#include "third_party/blink/renderer/core/dom/dom_node_ids.h"',
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/inspector/console_message.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_builder.h"',
+    '#include "third_party/skia/include/core/SkPathBuilder.h"',
+)
+BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR = """\
+std::optional<gfx::RectF> ClipPathClipper::LocalClipPathBoundingBox(
+    const LayoutObject& object) {
+"""
+BLINK_CLIP_PATH_CLIPPER_HELPERS_MARKER = "RecorderPaintWorkletClipPath("
+BLINK_CLIP_PATH_CLIPPER_HELPERS = """\
+// Windows A11y Recorder recreation mode ("Sub-step 2c design: paint worklet
+// colors and clip paths imposed"): the clip path a native paint worklet
+// painted at the frame for the object's element, from its
+// data-a11y-recorded-paint-worklet attribute, or none. The recorded path
+// holds the recorded paint offset, the origin of the element's border box in
+// its transform space, which the attribute also holds; the path is given
+// with clip_offset in its place. When clip_offset is the recorded origin, the
+// recorded points are used unchanged; otherwise they are moved by the
+// difference and, when report is set, the element's console says so. Only an
+// element whose style has a basic shape clip path takes one, as only it has
+// a path-based clip for the recorded path to replace; an SVG child, an
+// anonymous object, or a copy in a user agent shadow tree takes none.
+static std::optional<Path> RecorderPaintWorkletClipPath(
+    const LayoutObject& object,
+    const gfx::Vector2dF& clip_offset,
+    bool report) {
+  if (!a11y_recorder::RecreationHoldsTime() || object.IsAnonymous() ||
+      object.IsSVGChild()) {
+    return std::nullopt;
+  }
+  const auto* recorder_element = DynamicTo<Element>(object.GetNode());
+  if (!recorder_element || recorder_element->IsInUserAgentShadowRoot()) {
+    return std::nullopt;
+  }
+  const ClipPathOperation* recorder_operation = object.StyleRef().ClipPath();
+  if (!recorder_operation ||
+      !IsA<ShapeClipPathOperation>(*recorder_operation)) {
+    return std::nullopt;
+  }
+  const AtomicString& recorder_text = recorder_element->getAttribute(
+      AtomicString("data-a11y-recorded-paint-worklet"));
+  if (recorder_text.IsNull()) {
+    return std::nullopt;
+  }
+  const a11y_recorder::RecreationPaintWorkletValues recorder_values =
+      a11y_recorder::RecreationPaintWorkletValuesOf(recorder_text.Utf8());
+  if (!recorder_values.clip_path) {
+    return std::nullopt;
+  }
+  const a11y_recorder::RecreationClipPath& recorder_path =
+      *recorder_values.clip_path;
+  const double recorder_dx = clip_offset.x() - recorder_path.origin_x;
+  const double recorder_dy = clip_offset.y() - recorder_path.origin_y;
+  const bool recorder_moved = recorder_dx != 0 || recorder_dy != 0;
+  // The recorded points are floats; each is read back as the same float.
+  auto recorder_point = [&](const std::vector<double>& recorder_points,
+                            size_t recorder_index) {
+    return recorder_moved
+               ? SkPoint::Make(
+                     static_cast<float>(recorder_points[2 * recorder_index] +
+                                        recorder_dx),
+                     static_cast<float>(
+                         recorder_points[2 * recorder_index + 1] +
+                         recorder_dy))
+               : SkPoint::Make(
+                     static_cast<float>(recorder_points[2 * recorder_index]),
+                     static_cast<float>(
+                         recorder_points[2 * recorder_index + 1]));
+  };
+  SkPathBuilder recorder_builder;
+  recorder_builder.setFillType(
+      recorder_path.fill_type == "even-odd" ? SkPathFillType::kEvenOdd
+      : recorder_path.fill_type == "inverse-winding"
+          ? SkPathFillType::kInverseWinding
+      : recorder_path.fill_type == "inverse-even-odd"
+          ? SkPathFillType::kInverseEvenOdd
+          : SkPathFillType::kWinding);
+  for (const a11y_recorder::RecreationPathSegment& recorder_segment :
+       recorder_path.segments) {
+    const std::vector<double>& recorder_points = recorder_segment.points;
+    switch (recorder_segment.verb) {
+      case a11y_recorder::RecreationPathVerb::kMove:
+        recorder_builder.moveTo(recorder_point(recorder_points, 0));
+        break;
+      case a11y_recorder::RecreationPathVerb::kLine:
+        recorder_builder.lineTo(recorder_point(recorder_points, 0));
+        break;
+      case a11y_recorder::RecreationPathVerb::kQuad:
+        recorder_builder.quadTo(recorder_point(recorder_points, 0),
+                                recorder_point(recorder_points, 1));
+        break;
+      case a11y_recorder::RecreationPathVerb::kConic:
+        recorder_builder.conicTo(recorder_point(recorder_points, 0),
+                                 recorder_point(recorder_points, 1),
+                                 static_cast<float>(recorder_segment.weight));
+        break;
+      case a11y_recorder::RecreationPathVerb::kCubic:
+        recorder_builder.cubicTo(recorder_point(recorder_points, 0),
+                                 recorder_point(recorder_points, 1),
+                                 recorder_point(recorder_points, 2));
+        break;
+      case a11y_recorder::RecreationPathVerb::kClose:
+        recorder_builder.close();
+        break;
+    }
+  }
+  if (recorder_moved && report) {
+    const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_element);
+    StringBuilder recorder_message_text;
+    recorder_message_text.Append(
+        "Recorded paint worklet clip path moved on ");
+    recorder_message_text.Append(recorder_element->nodeName());
+    if (recorder_element->HasID()) {
+      recorder_message_text.Append('#');
+      recorder_message_text.Append(recorder_element->GetIdAttribute());
+    }
+    recorder_message_text.Append(" (node ");
+    recorder_message_text.AppendNumber(recorder_id);
+    recorder_message_text.Append(
+        "): its paint offset in the recreation is not the recorded origin of "
+        "its border box, so the recorded path is moved by (");
+    recorder_message_text.AppendNumber(recorder_dx);
+    recorder_message_text.Append(", ");
+    recorder_message_text.AppendNumber(recorder_dy);
+    recorder_message_text.Append(").");
+    auto* recorder_message = MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kRendering,
+        mojom::blink::ConsoleMessageLevel::kWarning,
+        recorder_message_text.ToString());
+    Document& recorder_document = recorder_element->GetDocument();
+    if (LocalFrame* recorder_frame = recorder_document.GetFrame()) {
+      recorder_message->SetNodes(recorder_frame, {recorder_id});
+    }
+    recorder_document.AddConsoleMessage(recorder_message,
+                                        /*discard_duplicates=*/true);
+  }
+  return Path(recorder_builder.detach());
+}
+
+"""
+BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR = """\
+  if (object.IsText() || !object.StyleRef().HasClipPath() ||
+      (!object.IsSVGChild() && !object.HasLayer())) {
+    return std::nullopt;
+  }
+"""
+BLINK_CLIP_PATH_BOUNDING_BOX_HOOK = BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR + """\
+  // Windows A11y Recorder recreation mode (sub-step 2c): the bounds of the
+  // recorded paint worklet clip path, without the paint offset.
+  if (std::optional<Path> recorder_path = RecorderPaintWorkletClipPath(
+          object, gfx::Vector2dF(), /*report=*/false)) {
+    gfx::RectF recorder_bounds = recorder_path->BoundingRect();
+    recorder_bounds.Intersect(gfx::RectF(InfiniteIntRect()));
+    return recorder_bounds;
+  }
+"""
+BLINK_CLIP_PATH_PATH_BASED_ANCHOR = """\
+std::optional<Path> ClipPathClipper::PathBasedClip(
+    const LayoutObject& clip_path_owner,
+    const gfx::Vector2dF& clip_offset) {
+"""
+BLINK_CLIP_PATH_PATH_BASED_HOOK = BLINK_CLIP_PATH_PATH_BASED_ANCHOR + """\
+  // Windows A11y Recorder recreation mode (sub-step 2c): the recorded paint
+  // worklet clip path, at the paint offset.
+  if (std::optional<Path> recorder_path = RecorderPaintWorkletClipPath(
+          clip_path_owner, clip_offset, /*report=*/true)) {
+    return recorder_path;
+  }
+"""
+
+
+def patch_blink_clip_path_clipper(path: Path) -> None:
+    """Sub-step 2c: the recorded paint worklet clip paths are imposed."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_CLIP_PATH_CLIPPER_OWN_INCLUDE,
+        BLINK_CLIP_PATH_CLIPPER_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR,
+        BLINK_CLIP_PATH_CLIPPER_HELPERS,
+        BLINK_CLIP_PATH_CLIPPER_HELPERS_MARKER + "\n    const LayoutObject& object,",
+        path,
+    )
+    for anchor, hook in (
+        (BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR, BLINK_CLIP_PATH_BOUNDING_BOX_HOOK),
+        (BLINK_CLIP_PATH_PATH_BASED_ANCHOR, BLINK_CLIP_PATH_PATH_BASED_HOOK),
+    ):
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -18043,6 +18320,15 @@ def main() -> int:
         / "core"
         / "paint"
         / "paint_property_tree_builder.cc"
+    )
+    patch_blink_clip_path_clipper(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "paint"
+        / "clip_path_clipper.cc"
     )
     patch_blink_inspector_css_agent(
         source

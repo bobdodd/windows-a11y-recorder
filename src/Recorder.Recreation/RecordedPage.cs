@@ -133,8 +133,9 @@ public static class RecordedPage
             notes.Add("The recorded address is not an http or https URL, so the page is served from the recorder's loopback address, and its relative URLs do not resolve as they did.");
         }
         notes.Add("The recreation is a snapshot in time and takes no input except scrolling with its scrollbars and the wheel, the right-click that opens the context menu with Inspect, and the DevTools element picker: clicks, keys, touch, and hovering do nothing, and the page receives no wheel event, so focus, selection, and control state stay as recorded. Scrolling in the recreation changes that scroll offset from the one the recreation opened at, and DevTools then shows the moved offset.");
-        notes.Add("The recreation holds the recorded moment: no CSS animation or transition is run in it, though the recorded style keeps their properties, and SVG animation elements are not held by this. The compositor's transforms, opacities, filters, backdrop filters, and scroll offsets at the frame are imposed where recorded; its paint worklet colors and clip paths are not yet, so those are drawn from the main thread's records.");
+        notes.Add("The recreation holds the recorded moment: no CSS animation or transition is run in it, though the recorded style keeps their properties, and SVG animation elements are not held by this. The compositor's transforms, opacities, filters, backdrop filters, scroll offsets, and native paint worklet background colors and clip paths at the frame are imposed where recorded.");
         notes.AddRange(compositorValues.Notes);
+        notes.AddRange(PaintWorkletAttributes(state, compositorValues).Notes);
         var scrolls = ScrollOffsets(state, compositorValues);
         notes.AddRange(scrolls.Notes);
         notes.Add("Element namespaces are not recorded: an element named in capitals is built in the HTML namespace, and any other in the namespace of an svg or math ancestor.");
@@ -191,6 +192,87 @@ public static class RecordedPage
             Resources = used,
             FontAddress = servedAtRecordedAddress ? fontAddress : null,
         };
+    }
+
+    /// <summary>
+    /// The data-a11y-recorded-paint-worklet attribute of each node with a
+    /// chosen paint worklet value (slice 4b, "Sub-step 2c design: paint
+    /// worklet colors and clip paths imposed"), and what the evidence panel
+    /// says of them. The attribute is its values separated by "; ": a
+    /// background color as "background-color" and its four floats; a clip
+    /// path as "clip-path", the recorded origin of the node's border box in
+    /// its transform space, and the path. A clip path is left out when the
+    /// node's recorded style gives it no clip path, when it was laid out in
+    /// more than one fragment, or when its border box was not recorded.
+    /// </summary>
+    public static (IReadOnlyDictionary<long, string> Attributes, IReadOnlyList<string> Notes) PaintWorkletAttributes(
+        BrowserDocumentState state,
+        RecordedCompositorValues? compositorValues)
+    {
+        var attributes = new Dictionary<long, string>();
+        var noClipPath = new List<string>();
+        var fragmented = new List<string>();
+        var noOrigin = new List<string>();
+        foreach (var (node, values) in (compositorValues ?? RecordedCompositorValues.None).PaintWorklet.OrderBy(item => item.Key))
+        {
+            var nodeText = node.ToString(CultureInfo.InvariantCulture);
+            JsonElement? record = state.Layout.Nodes.TryGetValue(node, out var found) ? found : null;
+            var entries = new List<string>();
+            foreach (var value in values)
+            {
+                if (value.Property != "clip-path")
+                {
+                    entries.Add($"{value.Property} {value.Text}");
+                    continue;
+                }
+                // The recorded style must give the element a clip path, so
+                // that the recreation has a clip path node to impose it on.
+                if (record is not { } styled ||
+                    !styled.TryGetProperty("computedStyle", out var style) || style.ValueKind != JsonValueKind.Object ||
+                    !style.TryGetProperty("clip-path", out var clip) || clip.ValueKind != JsonValueKind.String ||
+                    clip.GetString() is null or "none")
+                {
+                    noClipPath.Add(nodeText);
+                    continue;
+                }
+                if (styled.TryGetProperty("boxFragments", out var boxes) && boxes.ValueKind == JsonValueKind.Object &&
+                    boxes.TryGetProperty("fragments", out var list) && list.ValueKind == JsonValueKind.Array &&
+                    list.GetArrayLength() > 1)
+                {
+                    fragmented.Add(nodeText);
+                    continue;
+                }
+                // The recorded path holds the element's paint offset, which
+                // is the origin of its border box in its transform space.
+                if (!styled.TryGetProperty("geometry", out var geometry) || geometry.ValueKind != JsonValueKind.Object ||
+                    !geometry.TryGetProperty("localRect", out var rect) || rect.ValueKind != JsonValueKind.Object ||
+                    !rect.TryGetProperty("x", out var x) || x.ValueKind != JsonValueKind.Number ||
+                    !rect.TryGetProperty("y", out var y) || y.ValueKind != JsonValueKind.Number)
+                {
+                    noOrigin.Add(nodeText);
+                    continue;
+                }
+                entries.Add($"clip-path {x.GetRawText()} {y.GetRawText()} {value.Text}");
+            }
+            if (entries.Count > 0)
+            {
+                attributes[node] = string.Join("; ", entries);
+            }
+        }
+        var notes = new List<string>();
+        if (noClipPath.Count > 0)
+        {
+            notes.Add($"The recorded style gives no clip path to {noClipPath.Count.ToString(CultureInfo.InvariantCulture)} elements whose paint worklet clip path was recorded, so the recreation has no clip path to impose it on, and they are drawn unclipped: nodes {string.Join(", ", noClipPath)}.");
+        }
+        if (fragmented.Count > 0)
+        {
+            notes.Add($"{fragmented.Count.ToString(CultureInfo.InvariantCulture)} elements with a recorded paint worklet clip path were laid out in more than one fragment, for which one recorded path does not say where each fragment is clipped, so their clip paths are drawn from the recorded style: nodes {string.Join(", ", fragmented)}.");
+        }
+        if (noOrigin.Count > 0)
+        {
+            notes.Add($"{noOrigin.Count.ToString(CultureInfo.InvariantCulture)} elements with a recorded paint worklet clip path have no recorded border box in their transform space, so their clip paths are drawn from the recorded style: nodes {string.Join(", ", noOrigin)}.");
+        }
+        return (attributes, notes);
     }
 
     // A scroll offset record's offset: the web-exposed offset when recorded.
@@ -332,6 +414,7 @@ public static class RecordedPage
         var interaction = state.Interaction.Current();
         var manualSlots = new List<(long Slot, long[] Assigned)>();
         var withoutLayoutObject = NoLayoutObjectDisplays(state);
+        var paintWorklet = PaintWorkletAttributes(state, compositor).Attributes;
         var buffer = new MemoryStream();
         using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
         {
@@ -340,7 +423,7 @@ public static class RecordedPage
         {
             writer.WriteStartObject();
             writer.WritePropertyName("document");
-            WriteNode(writer, tree, state.Layout, withoutLayoutObject, compositor, documentId, documentId, manualSlots, manual: false);
+            WriteNode(writer, tree, state.Layout, withoutLayoutObject, compositor, paintWorklet, documentId, documentId, manualSlots, manual: false);
 
             writer.WriteStartArray("manualSlots");
             foreach (var (slot, assigned) in manualSlots)
@@ -452,6 +535,7 @@ public static class RecordedPage
         LayoutDocumentChangeState layout,
         IReadOnlyDictionary<long, string> withoutLayoutObject,
         RecordedCompositorValues compositor,
+        IReadOnlyDictionary<long, string> paintWorklet,
         long id,
         long documentId,
         List<(long Slot, long[] Assigned)> manualSlots,
@@ -497,6 +581,8 @@ public static class RecordedPage
         WriteText(writer, "noLayoutObject", withoutLayoutObject.TryGetValue(id, out var display) ? display : null);
         // Slice 4b sub-step 2b-i: the compositor values the element takes.
         WriteText(writer, "recordedCompositor", node.NodeType == "element" ? compositor.Attribute(id) : null);
+        // Sub-step 2c: the paint worklet values the element takes.
+        WriteText(writer, "recordedPaintWorklet", node.NodeType == "element" && paintWorklet.TryGetValue(id, out var worklet) ? worklet : null);
         if (node.NodeName == "SLOT" && manual && node.AssignedNodes is { } assigned && assigned != DomTreeRebuilder.Cut)
         {
             manualSlots.Add((id, JsonSerializer.Deserialize<long[]>(assigned) ?? []));
@@ -522,10 +608,10 @@ public static class RecordedPage
             writer.WriteBoolean("serializable", fields[5].GetBoolean());
             writer.WritePropertyName("referenceTarget");
             fields[8].WriteTo(writer);
-            WriteChildren(writer, tree, layout, withoutLayoutObject, compositor, shadow, documentId, manualSlots, fields[3].GetString() == "manual");
+            WriteChildren(writer, tree, layout, withoutLayoutObject, compositor, paintWorklet, shadow, documentId, manualSlots, fields[3].GetString() == "manual");
             writer.WriteEndObject();
         }
-        WriteChildren(writer, tree, layout, withoutLayoutObject, compositor, node, documentId, manualSlots, manual);
+        WriteChildren(writer, tree, layout, withoutLayoutObject, compositor, paintWorklet, node, documentId, manualSlots, manual);
         writer.WriteEndObject();
     }
 
@@ -535,6 +621,7 @@ public static class RecordedPage
         LayoutDocumentChangeState layout,
         IReadOnlyDictionary<long, string> withoutLayoutObject,
         RecordedCompositorValues compositor,
+        IReadOnlyDictionary<long, string> paintWorklet,
         DomNode node,
         long documentId,
         List<(long Slot, long[] Assigned)> manualSlots,
@@ -545,7 +632,7 @@ public static class RecordedPage
         {
             if (tree.Nodes.ContainsKey(child))
             {
-                WriteNode(writer, tree, layout, withoutLayoutObject, compositor, child, documentId, manualSlots, manual);
+                WriteNode(writer, tree, layout, withoutLayoutObject, compositor, paintWorklet, child, documentId, manualSlots, manual);
             }
         }
         writer.WriteEndArray();

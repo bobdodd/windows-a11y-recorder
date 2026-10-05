@@ -293,6 +293,168 @@ public sealed class RecordedCompositorValuesTests
         Assert.Contains(notes, note => note.StartsWith("The recording's scroll offset records do not name", StringComparison.Ordinal));
     }
 
+    // Slice 4b sub-step 2c: the native paint worklets' background colors
+    // and clip paths, chosen by the progress the compositor drew.
+    private static string Painted(string element, string property, string progress, string value, long process = 5) =>
+        $$"""{"context":{"browserInstanceId":"b1","processId":{{process}},"documentId":null,"documentToken":null},"elementId":"{{element}}","property":"{{property}}","progress":{{progress}},"value":{{value}}}""";
+
+    private const string Path1 = """{"conicWeights":[0.7071067690849304],"drawnAsRoundedRect":false,"fillType":"winding","points":[45.5,1422.5,159.0,1422.5,1.0,2.0,3.0,4.0],"translation":{"x":-44.0,"y":-1405.0},"verbs":["move","line","conic","close"]}""";
+    private const string Path2 = """{"conicWeights":[],"drawnAsRoundedRect":true,"fillType":"even-odd","points":[40.0,1400.0,160.0,1400.0],"translation":{"x":-44.0,"y":-1405.0},"verbs":["move","line","close"]}""";
+    // One point too few for its verbs.
+    private const string Malformed = """{"conicWeights":[],"drawnAsRoundedRect":false,"fillType":"winding","points":[1.0,2.0,3.0],"translation":{"x":0.0,"y":0.0},"verbs":["move","line"]}""";
+
+    private static string Color(string color) => $$"""{"color":{{color}}}""";
+
+    private static string Progress(string progress) => $$"""{"progress":{{progress}}}""";
+
+    private static RecordedCompositorValues ChoosePaintWorklet(long composition)
+    {
+        var collector = Collector("test.browser", BrowserEvidenceChannels.Compositor, "browser.presentation");
+        var chooser = new RecordedCompositorValueChooser(DocumentKey, Frequency);
+        var painted = BrowserEvidenceEventTypes.PaintWorkletPainted;
+        var frame = BrowserEvidenceEventTypes.CompositorFrame;
+        var presented = BrowserEvidenceEventTypes.CompositorFramePresented;
+        var compositor = BrowserEvidenceChannels.Compositor;
+        var records = new (long, string, string, string)[]
+        {
+            (1_000, "browser.presentation", "presentation-feedback", Feedback()),
+            (1_100, compositor, BrowserEvidenceEventTypes.CompositorAnimationStarted,
+                Started(323, 1, Model("72", "primary-effect", 6))),
+            (1_110, compositor, BrowserEvidenceEventTypes.CompositorAnimationStarted,
+                Started(367, 2, Model("73", "primary-effect", 7))),
+            (1_120, compositor, BrowserEvidenceEventTypes.CompositorAnimationStarted,
+                Started(400, 3, Model("74", "primary-effect", 8))),
+            (1_130, compositor, BrowserEvidenceEventTypes.CompositorAnimationStarted,
+                Started(500, 4, Model("77", "primary-effect", 9))),
+            (1_500, compositor, painted, Painted("72", "background-color", "0.25", Color("[0.800000011920929,0.0,0.20000000298023224,1.0]"))),
+            (1_550, compositor, painted, Painted("72", "background-color", "0.5", Color("[0.5,0.0,0.5,1.0]"))),
+            (1_560, compositor, painted, Painted("73", "clip-path", "0.25", Path1)),
+            (1_570, compositor, painted, Painted("74", "background-color", "0.30000001192092896", Color("[0.1,0.2,0.3,0.4]"))),
+            (1_580, compositor, painted, Painted("77", "clip-path", "0.25", Malformed)),
+            // Another renderer's paint of the same element ID and progress.
+            (1_900, compositor, painted, Painted("72", "background-color", "0.25", Color("[0.0,1.0,0.0,1.0]"), process: 6)),
+            (2_000, compositor, frame, Frame("1", string.Join(",",
+                Change("72", "background-color-progress", Progress("0.25")),
+                Change("73", "clip-path-progress", Progress("0.25")),
+                Change("74", "background-color-progress", Progress("0.30000001192092896")),
+                Change("75", "background-color-progress", Progress("0.1")),
+                Change("77", "clip-path-progress", Progress("0.25"))))),
+            (2_600, compositor, presented, Presented("1", 2_500, 2_600)),
+            // The animation of element 74 ends; a rendering update is
+            // presented after.
+            (2_700, compositor, BrowserEvidenceEventTypes.CompositorAnimationEnded, Ended(400, 8)),
+            (2_800, "browser.presentation", "presentation-feedback", Feedback()),
+            (3_000, compositor, frame, Frame("2", string.Join(",",
+                Change("72", "background-color-progress", Progress("0.5")),
+                Change("73", "clip-path-progress", Progress("0.75"))))),
+            // Painted after the frame that drew its progress.
+            (3_100, compositor, painted, Painted("73", "clip-path", "0.75", Path2)),
+            (3_600, compositor, presented, Presented("2", 3_500, 3_600)),
+            (3_900, compositor, painted, Painted("73", "clip-path", "null", Path2)),
+            (4_000, compositor, frame, Frame("3", string.Join(",",
+                Change("72", "background-color-progress", "null"),
+                // Painted from the main thread's value.
+                Change("73", "clip-path-progress", Progress("null"))))),
+            (4_600, compositor, presented, Presented("3", 4_500, 4_600)),
+        };
+        var index = 0UL;
+        foreach (var (time, channel, type, json) in records)
+        {
+            chooser.Add(Event(SessionId, collector, ++index, time, channel, type) with
+            {
+                Payload = Json(json),
+                NativeTimestamp = new NativeTimestamp("qpc", NativeTicks(time), "ticks"),
+            });
+        }
+        return chooser.Choose(composition);
+    }
+
+    [Fact]
+    public void EachPaintWorkletValueIsThePaintAtTheProgressTheCompositorDrew()
+    {
+        var values = ChoosePaintWorklet(2_600);
+        var color = Assert.Single(values.PaintWorklet[323]);
+        // The number text is the recording's, unchanged, and another
+        // renderer's paint is not the document's.
+        Assert.Equal(new RecordedPaintWorkletValue("background-color", "0.800000011920929 0.0 0.20000000298023224 1.0", "0.25", "1", 1_500), color);
+        var clip = Assert.Single(values.PaintWorklet[367]);
+        Assert.Equal("winding move 45.5 1422.5 line 159.0 1422.5 conic 1.0 2.0 3.0 4.0 0.7071067690849304 close", clip.Text);
+        Assert.Equal("0.30000001192092896", Assert.Single(values.PaintWorklet[400]).Progress);
+        Assert.False(values.PaintWorklet.ContainsKey(500));
+        Assert.Empty(values.ByNode);
+        Assert.Contains(values.Notes, note => note.StartsWith("3 paint worklet values are chosen for 3 elements", StringComparison.Ordinal) &&
+                                              note.Contains("node 323: background-color at progress 0.25, last changed in compositor frame 1, painted at 0.000 s", StringComparison.Ordinal));
+        Assert.Contains(values.Notes, note => note.StartsWith("1 paint worklet progress values have no compositor-animation-started record", StringComparison.Ordinal));
+        Assert.Contains(values.Notes, note => note.StartsWith("1 paint worklet values are of a form the recreation does not impose", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void APaintWorkletValueNeedsAPaintAtOrBeforeTheFrame()
+    {
+        var values = ChoosePaintWorklet(3_600);
+        Assert.Equal("0.5 0.0 0.5 1.0", Assert.Single(values.PaintWorklet[323]).Text);
+        // Progress 0.75 was painted only after the frame that drew it.
+        Assert.False(values.PaintWorklet.ContainsKey(367));
+        Assert.Contains(values.Notes, note => note.StartsWith("1 paint worklet progress values have no paint-worklet-painted record", StringComparison.Ordinal));
+        // The ended animation's value is dropped.
+        Assert.False(values.PaintWorklet.ContainsKey(400));
+        Assert.Contains(values.Notes, note => note.StartsWith("1 paint worklet progress values belong to animations that had ended", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ANullProgressTakesTheMainThreadPaintAndAReleasedValueIsDropped()
+    {
+        var values = ChoosePaintWorklet(4_600);
+        var clip = Assert.Single(values.PaintWorklet[367]);
+        Assert.Null(clip.Progress);
+        Assert.Equal("even-odd move 40.0 1400.0 line 160.0 1400.0 close", clip.Text);
+        Assert.False(values.PaintWorklet.ContainsKey(323));
+        Assert.Contains(values.Notes, note => note.Contains("clip-path at progress none (the main thread's value)", StringComparison.Ordinal));
+        Assert.Contains(values.Notes, note => note.StartsWith("1 paint worklet progress values were no longer in the drawn tree", StringComparison.Ordinal));
+    }
+
+    private static string LayoutNode(long node, string clipPath, int fragments = 1, bool geometry = true) =>
+        $$"""{"context":{{Context("T1")}},"changeSetId":"c1","nodeId":{{node}},"nodeName":"DIV","nodeType":"element","layoutObjectPresent":true,"computedStyle":{"clip-path":"{{clipPath}}","background-color":"rgb(0, 102, 0)"},"computedStyleComplete":true,"boxFragments":{"fragments":[{{string.Join(",", Enumerable.Repeat("""{"width":128.0,"height":96.0}""", fragments))}}]},"geometry":{{(geometry ? """{"localRect":{"x":38.0,"y":1395.96875,"width":128.0,"height":96.0},"transformNodeId":"layout-transform-2"}""" : "null")}}}""";
+
+    [Fact]
+    public void TheAttributeHoldsEachValueAndTheClipPathsRecordedOrigin()
+    {
+        var state = new BrowserDocumentState("T1 dom-document-1");
+        state.Layout.Apply("layout-node-changed", Json(LayoutNode(323, "none")));
+        state.Layout.Apply("layout-node-changed", Json(LayoutNode(367, "inset(10%)")));
+        var compositor = ChoosePaintWorklet(2_600);
+        var both = compositor with
+        {
+            PaintWorklet = new Dictionary<long, IReadOnlyList<RecordedPaintWorkletValue>>(compositor.PaintWorklet)
+            {
+                [367] = [new RecordedPaintWorkletValue("background-color", "1.0 0.0 0.0 0.5", "0.25", "1", 1_500), compositor.PaintWorklet[367][0]],
+            },
+        };
+        var (attributes, notes) = RecordedPage.PaintWorkletAttributes(state, both);
+        Assert.Equal("background-color 0.800000011920929 0.0 0.20000000298023224 1.0", attributes[323]);
+        Assert.Equal("background-color 1.0 0.0 0.0 0.5; clip-path 38.0 1395.96875 winding move 45.5 1422.5 line 159.0 1422.5 conic 1.0 2.0 3.0 4.0 0.7071067690849304 close", attributes[367]);
+        Assert.Empty(notes);
+    }
+
+    [Fact]
+    public void AClipPathIsNotWrittenWithoutARecordedClipPathOneFragmentAndAnOrigin()
+    {
+        var compositor = ChoosePaintWorklet(2_600);
+        foreach (var (record, start) in new[]
+        {
+            (LayoutNode(367, "none"), "The recorded style gives no clip path to 1 elements"),
+            (LayoutNode(367, "inset(10%)", fragments: 2), "1 elements with a recorded paint worklet clip path were laid out in more than one fragment"),
+            (LayoutNode(367, "inset(10%)", geometry: false), "1 elements with a recorded paint worklet clip path have no recorded border box"),
+        })
+        {
+            var state = new BrowserDocumentState("T1 dom-document-1");
+            state.Layout.Apply("layout-node-changed", Json(record));
+            var (attributes, notes) = RecordedPage.PaintWorkletAttributes(state, compositor);
+            Assert.False(attributes.ContainsKey(367));
+            Assert.Contains(notes, note => note.StartsWith(start, StringComparison.Ordinal) && note.Contains("367", StringComparison.Ordinal));
+        }
+    }
+
     [Fact]
     public void ADocumentWithoutAPresentationHasNoValues()
     {

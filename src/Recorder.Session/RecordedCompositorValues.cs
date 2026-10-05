@@ -17,6 +17,22 @@ public sealed record RecordedCompositorValue(
     string FrameToken);
 
 /// <summary>
+/// One paint worklet value a recreation imposes on a node (slice 4b,
+/// "Sub-step 2c design: paint worklet colors and clip paths imposed"): the
+/// property, "background-color" or "clip-path"; its text in the node's
+/// data-a11y-recorded-paint-worklet attribute, without the clip path's
+/// recorded origin; the progress it was painted at, as recorded, or null for
+/// a paint from the main thread's value; the compositor frame that last
+/// changed the progress; and when it was painted.
+/// </summary>
+public sealed record RecordedPaintWorkletValue(
+    string Property,
+    string Text,
+    string? Progress,
+    string FrameToken,
+    long PaintedNanoseconds);
+
+/// <summary>
 /// The compositor values a document's nodes take in the recreation at a
 /// frame (slice 4b, "Sub-step 2b-i design: compositor values imposed"), by
 /// node, with the compositor frame they were chosen at and what the evidence
@@ -37,6 +53,13 @@ public sealed record RecordedCompositorValues(
     /// </summary>
     public IReadOnlyDictionary<string, RecordedScrollPosition> ScrollPositions { get; init; } =
         new Dictionary<string, RecordedScrollPosition>();
+
+    /// <summary>
+    /// The paint worklet values each node takes at the frame (slice 4b,
+    /// sub-step 2c), by node, in the order of their properties.
+    /// </summary>
+    public IReadOnlyDictionary<long, IReadOnlyList<RecordedPaintWorkletValue>> PaintWorklet { get; init; } =
+        new Dictionary<long, IReadOnlyList<RecordedPaintWorkletValue>>();
 
     /// <summary>
     /// The node's data-a11y-recorded-compositor attribute, or null: its values
@@ -77,8 +100,9 @@ public sealed record RecordedScrollPosition(double X, double Y, string FrameToke
 /// browser's clock synchronizations, and the compositor-animation-started,
 /// compositor-animation-ended, compositor-frame, and
 /// compositor-frame-presented records (protocol 0.48). Transforms,
-/// opacities, filters, and backdrop filters are chosen; scroll offsets, paint
-/// worklet progress, and image frames are not.
+/// opacities, filters, backdrop filters, and scroll positions are chosen,
+/// and, from the paint-worklet-painted records, the native paint worklets'
+/// background colors and clip paths (sub-step 2c); image frames are not.
 /// </summary>
 public sealed class RecordedCompositorValueChooser
 {
@@ -106,6 +130,29 @@ public sealed class RecordedCompositorValueChooser
     private readonly Dictionary<(string? Instance, long? Process, long KeyframeModel), long> _ended = [];
     private readonly List<CompositorFrame> _frames = [];
     private readonly Dictionary<(string? Instance, long? Process, long Host, string Token), long> _presented = [];
+    private readonly List<Painted> _painted = [];
+
+    // The two properties the native paint worklets animate, by the name of
+    // their progress in a compositor-frame record.
+    private static readonly Dictionary<string, string> ProgressProperties = new(StringComparer.Ordinal)
+    {
+        ["background-color-progress"] = "background-color",
+        ["clip-path-progress"] = "clip-path",
+    };
+
+    private sealed record Painted(
+        long Time,
+        string? Instance,
+        long? Process,
+        string ElementId,
+        string Property,
+        double? Progress,
+        string? Text);
+
+    // A progress the compositor drew an element at: its number, or null for
+    // the main thread's value; Drawn is false when the element was no longer
+    // in the drawn tree.
+    private sealed record ProgressChange(string ElementId, string Property, bool Drawn, double? Progress, string? ProgressText);
 
     private sealed record Started(
         long Time,
@@ -117,13 +164,17 @@ public sealed class RecordedCompositorValueChooser
         long KeyframeModel);
 
     private sealed record CompositorFrame(
+        long Time,
         string? Instance,
         long? Process,
         string FrameSink,
         long Host,
         string Token,
         IReadOnlyList<(string ElementId, string Property, string? Text)> Values,
-        IReadOnlyList<(string ElementId, RecordedScrollPosition? Position)> Scrolls);
+        IReadOnlyList<(string ElementId, RecordedScrollPosition? Position)> Scrolls)
+    {
+        public IReadOnlyList<ProgressChange> Progress { get; init; } = [];
+    }
 
     /// <param name="documentKey">The document's state key, its token and identity.</param>
     /// <param name="recordingFrequency">The recording's clock frequency, for a process with no clock synchronization record.</param>
@@ -213,8 +264,30 @@ public sealed class RecordedCompositorValueChooser
                 {
                     var values = new List<(string, string, string?)>();
                     var scrolls = new List<(string, RecordedScrollPosition?)>();
+                    var progress = new List<ProgressChange>();
                     foreach (var change in changes.EnumerateArray())
                     {
+                        // Sub-step 2c: a native paint worklet's progress, a
+                        // number, null for the main thread's value, or a null
+                        // value for an element no longer drawn.
+                        if (Text(change, "property") is { } progressName &&
+                            ProgressProperties.TryGetValue(progressName, out var painted) &&
+                            Text(change, "elementId") is { } worklet)
+                        {
+                            var drawn = change.TryGetProperty("value", out var drawnValue) ? drawnValue : default;
+                            if (drawn.ValueKind == JsonValueKind.Object && drawn.TryGetProperty("progress", out var number) &&
+                                number.ValueKind is JsonValueKind.Number or JsonValueKind.Null)
+                            {
+                                progress.Add(number.ValueKind == JsonValueKind.Number
+                                    ? new ProgressChange(worklet, painted, true, number.GetDouble(), number.GetRawText())
+                                    : new ProgressChange(worklet, painted, true, null, null));
+                            }
+                            else
+                            {
+                                progress.Add(new ProgressChange(worklet, painted, false, null, null));
+                            }
+                            continue;
+                        }
                         if (Text(change, "property") == "scroll-offset" && Text(change, "elementId") is { } scroller)
                         {
                             // Slice 4b sub-step 2b-ii: a null value is a
@@ -243,10 +316,26 @@ public sealed class RecordedCompositorValueChooser
                             values.Add((element, property, change.TryGetProperty("value", out var changed) ? ValueText(property, changed) : null));
                         }
                     }
-                    if (values.Count > 0 || scrolls.Count > 0)
+                    if (values.Count > 0 || scrolls.Count > 0 || progress.Count > 0)
                     {
-                        _frames.Add(new CompositorFrame(instance, process, frameSink, host, token, values, scrolls));
+                        _frames.Add(new CompositorFrame(record.MonotonicNanoseconds, instance, process, frameSink, host, token, values, scrolls)
+                        {
+                            Progress = progress,
+                        });
                     }
+                }
+                break;
+            case (BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.PaintWorkletPainted):
+                if (Text(payload, "elementId") is { } paintedElement &&
+                    Text(payload, "property") is { } paintedProperty &&
+                    ProgressProperties.ContainsValue(paintedProperty) &&
+                    payload.TryGetProperty("progress", out var paintedProgress) &&
+                    paintedProgress.ValueKind is JsonValueKind.Number or JsonValueKind.Null)
+                {
+                    _painted.Add(new Painted(
+                        record.MonotonicNanoseconds, instance, process, paintedElement, paintedProperty,
+                        paintedProgress.ValueKind == JsonValueKind.Number ? paintedProgress.GetDouble() : null,
+                        payload.TryGetProperty("value", out var paintedValue) ? PaintedText(paintedProperty, paintedValue) : Malformed));
                 }
                 break;
             case (BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFramePresented):
@@ -298,12 +387,13 @@ public sealed class RecordedCompositorValueChooser
         {
             return _frames.Any(frame => frame.Instance == instance && frame.Process == process)
                 ? new RecordedCompositorValues(RecordedCompositorValues.None.ByNode,
-                    ["No compositor frame of the page's frame sink with a transform, opacity, filter, backdrop filter, or scroll offset was presented at or before the frame, so every element is drawn from its recorded style and every scroller is at its main thread offset."])
+                    ["No compositor frame of the page's frame sink with a transform, opacity, filter, backdrop filter, scroll offset, or paint worklet progress was presented at or before the frame, so every element is drawn from its recorded style and every scroller is at its main thread offset."])
                 : RecordedCompositorValues.None;
         }
         var chosen = _frames[last];
         var values = new Dictionary<(string ElementId, string Property), (string? Text, string Token)>();
         var scrollPositions = new Dictionary<string, RecordedScrollPosition>(StringComparer.Ordinal);
+        var progressOf = new Dictionary<(string ElementId, string Property), (ProgressChange Change, string Token)>();
         for (var index = 0; index <= last; index++)
         {
             var frame = _frames[index];
@@ -314,6 +404,10 @@ public sealed class RecordedCompositorValueChooser
             foreach (var (element, property, text) in frame.Values)
             {
                 values[(element, property)] = (text, frame.Token);
+            }
+            foreach (var change in frame.Progress)
+            {
+                progressOf[(change.ElementId, change.Property)] = (change, frame.Token);
             }
             foreach (var (element, position) in frame.Scrolls)
             {
@@ -388,6 +482,62 @@ public sealed class RecordedCompositorValueChooser
             list.Sort((left, right) => string.CompareOrdinal(left.Key, right.Key));
         }
 
+        // Sub-step 2c: each element's progress, joined to its node as the
+        // values are, takes the last painted record of the same renderer,
+        // element, property, and progress written at or before the chosen
+        // frame.
+        var paintWorklet = new Dictionary<long, List<RecordedPaintWorkletValue>>();
+        int workletUnjoined = 0, workletEnded = 0, workletAbsent = 0, unpainted = 0, workletUnreadable = 0;
+        foreach (var ((element, property), (change, token)) in progressOf.OrderBy(item => item.Key.ElementId, StringComparer.Ordinal).ThenBy(item => item.Key.Property, StringComparer.Ordinal))
+        {
+            var start = _started.LastOrDefault(item =>
+                item.Instance == instance && item.Process == process && item.ElementId == element &&
+                item.Time <= compositionNanoseconds);
+            if (start is null)
+            {
+                workletUnjoined++;
+                continue;
+            }
+            if (_ended.TryGetValue((instance, process, start.KeyframeModel), out var endedTime) &&
+                endedTime >= start.Time && endedTime <= compositionNanoseconds &&
+                _presentations.Any(item => item.Instance == instance && item.Process == process &&
+                                           item.Time > endedTime && item.Time <= compositionNanoseconds))
+            {
+                workletEnded++;
+                continue;
+            }
+            if (!change.Drawn)
+            {
+                workletAbsent++;
+                continue;
+            }
+            var paint = _painted.LastOrDefault(item =>
+                item.Instance == instance && item.Process == process && item.ElementId == element &&
+                item.Property == property && item.Progress == change.Progress && item.Time <= chosen.Time);
+            if (paint is null)
+            {
+                unpainted++;
+                continue;
+            }
+            if (paint.Text is null || paint.Text == Malformed)
+            {
+                workletUnreadable++;
+                continue;
+            }
+            if (!paintWorklet.TryGetValue(start.NodeId, out var list))
+            {
+                paintWorklet[start.NodeId] = list = [];
+            }
+            // Two element IDs of one node for one property: the later
+            // element ID's value is kept, as it was started later.
+            list.RemoveAll(item => item.Property == property);
+            list.Add(new RecordedPaintWorkletValue(property, paint.Text, change.ProgressText, token, paint.Time));
+        }
+        foreach (var list in paintWorklet.Values)
+        {
+            list.Sort((left, right) => string.CompareOrdinal(left.Property, right.Property));
+        }
+
         static string Count(int value) => value.ToString(CultureInfo.InvariantCulture);
         var notes = new List<string>();
         if (byNode.Count > 0)
@@ -413,11 +563,40 @@ public sealed class RecordedCompositorValueChooser
         {
             notes.Add($"{Count(unreadable)} compositor values are of a namespace or form the recreation does not impose, so they are not imposed.");
         }
+        if (paintWorklet.Count > 0)
+        {
+            notes.Add($"{Count(paintWorklet.Values.Sum(list => list.Count))} paint worklet values are chosen for {Count(paintWorklet.Count)} elements, each as painted at the progress the compositor last drew it at by compositor frame {chosen.Token}: "
+                + string.Join("; ", paintWorklet.OrderBy(item => item.Key).Select(item =>
+                    $"node {item.Key.ToString(CultureInfo.InvariantCulture)}: " + string.Join(", ", item.Value.Select(value =>
+                        $"{value.Property} at progress {value.Progress ?? "none (the main thread's value)"}, last changed in compositor frame {value.FrameToken}, painted at {(value.PaintedNanoseconds / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s"))))
+                + ". They are written on each element in its data-a11y-recorded-paint-worklet attribute, which is shown in the Elements pane but was not an attribute of the recorded page. The background color is imposed through the style, so DevTools' Computed pane shows it; the clip path is imposed on Blink's paint properties, so the Computed pane shows the recorded style's clip path.");
+        }
+        if (workletUnjoined > 0)
+        {
+            notes.Add($"{Count(workletUnjoined)} paint worklet progress values have no compositor-animation-started record of the page at or before the frame naming their element, so they are not imposed.");
+        }
+        if (workletEnded > 0)
+        {
+            notes.Add($"{Count(workletEnded)} paint worklet progress values belong to animations that had ended before a later presented rendering update, so the recorded style holds their element's value and they are not imposed.");
+        }
+        if (workletAbsent > 0)
+        {
+            notes.Add($"{Count(workletAbsent)} paint worklet progress values were no longer in the drawn tree at the frame, so they are not imposed.");
+        }
+        if (unpainted > 0)
+        {
+            notes.Add($"{Count(unpainted)} paint worklet progress values have no paint-worklet-painted record of the same element and progress at or before the frame, so their elements are drawn from the recorded style.");
+        }
+        if (workletUnreadable > 0)
+        {
+            notes.Add($"{Count(workletUnreadable)} paint worklet values are of a form the recreation does not impose, so they are not imposed.");
+        }
         return new RecordedCompositorValues(
             byNode.ToDictionary(item => item.Key, item => (IReadOnlyList<RecordedCompositorValue>)item.Value),
             notes)
         {
             ScrollPositions = scrollPositions,
+            PaintWorklet = paintWorklet.ToDictionary(item => item.Key, item => (IReadOnlyList<RecordedPaintWorkletValue>)item.Value),
         };
     }
 
@@ -469,6 +648,77 @@ public sealed class RecordedCompositorValueChooser
                 }
                 return string.Join(", ", operations);
         }
+    }
+
+    // Points each path verb takes, and whether it takes a conic weight.
+    private static readonly Dictionary<string, (int Points, bool Weight)> Verbs = new(StringComparer.Ordinal)
+    {
+        ["move"] = (1, false),
+        ["line"] = (1, false),
+        ["quad"] = (2, false),
+        ["conic"] = (2, true),
+        ["cubic"] = (3, false),
+        ["close"] = (0, false),
+    };
+
+    private static readonly HashSet<string> FillTypes = new(StringComparer.Ordinal)
+    {
+        "winding",
+        "even-odd",
+        "inverse-winding",
+        "inverse-even-odd",
+    };
+
+    // A painted value's text, its numbers as the recording wrote them,
+    // separated by single spaces: a background color's four floats, red,
+    // green, blue, and alpha; or a clip path's fill type and then each verb
+    // followed by its points' coordinates and, for a conic, its weight.
+    // Malformed for a value not of its property's form.
+    private static string PaintedText(string property, JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            return Malformed;
+        }
+        static bool Numbers(JsonElement array) =>
+            array.ValueKind == JsonValueKind.Array && array.EnumerateArray().All(entry => entry.ValueKind == JsonValueKind.Number);
+        if (property == "background-color")
+        {
+            return value.TryGetProperty("color", out var color) && Numbers(color) && color.GetArrayLength() == 4
+                ? string.Join(" ", color.EnumerateArray().Select(entry => entry.GetRawText()))
+                : Malformed;
+        }
+        if (Text(value, "fillType") is not { } fill || !FillTypes.Contains(fill) ||
+            !value.TryGetProperty("verbs", out var verbs) || verbs.ValueKind != JsonValueKind.Array ||
+            !value.TryGetProperty("points", out var points) || !Numbers(points) ||
+            !value.TryGetProperty("conicWeights", out var weights) || !Numbers(weights))
+        {
+            return Malformed;
+        }
+        var coordinates = points.EnumerateArray().Select(entry => entry.GetRawText()).ToList();
+        var conics = weights.EnumerateArray().Select(entry => entry.GetRawText()).ToList();
+        int point = 0, weight = 0;
+        var text = new StringBuilder(fill);
+        foreach (var verb in verbs.EnumerateArray())
+        {
+            if (verb.ValueKind != JsonValueKind.String || verb.GetString() is not { } name ||
+                !Verbs.TryGetValue(name, out var shape) ||
+                point + 2 * shape.Points > coordinates.Count ||
+                (shape.Weight && weight >= conics.Count))
+            {
+                return Malformed;
+            }
+            text.Append(' ').Append(name);
+            for (var index = 0; index < 2 * shape.Points; index++)
+            {
+                text.Append(' ').Append(coordinates[point++]);
+            }
+            if (shape.Weight)
+            {
+                text.Append(' ').Append(conics[weight++]);
+            }
+        }
+        return point == coordinates.Count && weight == conics.Count ? text.ToString() : Malformed;
     }
 
     private static string? Text(JsonElement element, string name) =>

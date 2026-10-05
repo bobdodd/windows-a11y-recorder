@@ -31,6 +31,7 @@ component("recorder_bridge") {
     "recorder_protocol.cc",
     "recorder_protocol.h",
     "recreation_compositor_values.h",
+    "recreation_paint_worklet_values.h",
     "recreation_image_frames.h",
     "recreation_input.h",
   ]
