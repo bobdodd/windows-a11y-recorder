@@ -48,7 +48,8 @@ public static class RecordingFileImageFrames
                 : throw new InvalidDataException("The recording file does not state its clock frequency.");
         var channels = reader.Channels.Values
             .Where(channel => RecordedImageFrameChooser.Channels.Contains(channel.Topic) ||
-                              RecordedCompositorValueChooser.Channels.Contains(channel.Topic))
+                              RecordedCompositorValueChooser.Channels.Contains(channel.Topic) ||
+                              RecordedDisplayLatencyReader.Channels.Contains(channel.Topic))
             .Select(channel => channel.Id)
             .ToArray();
         if (!reader.Channels.Values.Any(channel => channel.Topic == Recorder.Contracts.BrowserEvidenceChannels.Compositor))
@@ -86,11 +87,24 @@ public static class RecordingFileImageFrames
         }
         var chooser = new RecordedImageFrameChooser(documentKey, frequency);
         var compositor = new RecordedCompositorValueChooser(documentKey, frequency);
+        var latencies = new RecordedDisplayLatencyReader(documentKey);
         foreach (var record in records.OrderBy(item => item.Time).ThenBy(item => item.Sequence))
         {
             chooser.Add(record.Event);
             compositor.Add(record.Event);
+            latencies.Add(record.Event);
         }
-        return (chooser.Choose(cutNanoseconds, compositionNanoseconds), compositor.Choose(compositionNanoseconds));
+        // Sub-step 2b-iii change 2: the screen shows a compositor frame some
+        // refreshes after it is presented, so the values are chosen as of the
+        // composition less that display latency.
+        var latency = latencies.At(compositionNanoseconds);
+        var drawn = compositionNanoseconds - (latency?.Nanoseconds ?? 0);
+        var frames = chooser.Choose(cutNanoseconds, drawn);
+        var values = compositor.Choose(drawn);
+        if (frames.ByUrl.Count > 0 || values.ByNode.Count > 0 || values.ScrollPositions.Count > 0)
+        {
+            frames = frames with { Notes = [latency?.Note ?? RecordedDisplayLatency.NoIntervalNote, .. frames.Notes] };
+        }
+        return (frames, values);
     }
 }

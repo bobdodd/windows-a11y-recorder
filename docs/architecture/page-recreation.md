@@ -4568,7 +4568,7 @@ The same one-refresh question applies to the other compositor values of
 same rule. They were not measured here: the owner's checks of them
 (animated image numbers, panel comparisons) did not test a single refresh.
 
-#### Sub-step 2b-iii design: which compositor frame an image shows (agreed, change 1 built)
+#### Sub-step 2b-iii design: which compositor frame an image shows (agreed, built)
 
 Two changes, each following one finding above.
 
@@ -4752,6 +4752,59 @@ Findings, each limited to this recording on this machine:
 Not measured: `#blur`, which has no compositor record in this recording;
 `#frost`, whose backdrop blur this method cannot measure; `#clip-circle`,
 whose progress is the same as `#clip-inset`'s; and the main thread values.
+
+#### Sub-step 2b-iii change 2 as built
+
+On 2026-10-05, after the measurement above, the owner chose to choose the
+compositor frame presented two refreshes before the captured picture. This
+replaces the one refresh the design proposed: from 8.0 s the pictures
+showed the frame presented 33.2 ms, two refreshes, before the composition,
+and the rule before this change chose the frame presented 16.6 ms before.
+
+What the recreation does now (`RecordedDisplayLatency` and
+`RecordingFileImageFrames.ReadWithCompositorValues`):
+
+- The refresh interval is the `intervalMicroseconds` Chromium recorded in
+  the document's latest `presentation-feedback` record at or before the
+  composition, not the median interval between presentations the design
+  proposed. The interval is recorded, so it is used as recorded; on the
+  target machine it is 16666.
+- The compositor frame, its compositor values and scroll positions, and the
+  animated image frames are chosen as of the composition time less one and
+  a half refreshes (25.0 ms at 16.666 ms): the last frame of the page's
+  frame sink presented at or before that time. Compositions and
+  presentations do not fall at the same instant of a refresh (the frame two
+  refreshes before was presented 33.2 ms before the composition, less than
+  two whole refreshes of 33.3 ms), so subtracting two whole refreshes would
+  choose the frame three refreshes before. Subtracting one and a half
+  chooses the frame two refreshes before while the offset between the two
+  clocks stays within half a refresh of where it was measured.
+- The evidence panel says, before the image notes, that the values are
+  those of the frame presented two refreshes before, gives the recorded
+  interval and the time subtracted, and says that the two refreshes are
+  inferred from measurements of one machine's recordings, not recorded, and
+  that a captured frame can lag by one refresh more. With no interval
+  recorded, nothing is subtracted and the panel says so.
+- Unchanged: the main thread state the recreation is built from, the
+  image resources' cut, and `#scroller` and other non-composited scrollers,
+  which keep the main thread's offset (change 1). The main thread lag of
+  finding 2 above and the startup delays of finding 3 are not addressed.
+
+Tests, at the unit level (`RecordedDisplayLatencyTests`): the latest
+recorded interval of the document is used, another document's and an
+unreadable one are not, and none before the first; a number interval is
+read; the panel text says the latency is inferred; and with compositions
+0.1 ms before and after a whole number of refreshes after a presentation,
+the frame presented two refreshes before is chosen, with presentations
+just before, at, and just after the shifted time. The full suite in the
+sandbox passed every test that does not need PostgreSQL binaries or
+Windows (58 such tests cannot run there).
+
+Checked in the sandbox against recording
+20261005-143057-3ad553cfa224444292249445ab5aaa9c: at captured frames 31,
+87, 97 and 141 the frame chosen was presented 32.9 to 33.6 ms before the
+composition, from presentation times the panel prints to the millisecond (compositor frame 797, presented at 19.390 s, for frame 87 at
+19.424 s). Not yet checked on the target machine.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
