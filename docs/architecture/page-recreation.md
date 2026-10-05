@@ -4806,7 +4806,7 @@ Checked in the sandbox against recording
 composition, from presentation times the panel prints to the millisecond (compositor frame 797, presented at 19.390 s, for frame 87 at
 19.424 s). Not yet checked on the target machine.
 
-#### Sub-step 2b-iii change 2 on the target machine, and change 1 withdrawn
+#### Sub-step 2b-iii change 2 on the target machine, and change 1 withdrawn (confirmed)
 
 On 2026-10-05 the owner ran 6d77b3f (restored as b4f6f1f) on the target
 machine and opened recording
@@ -4848,8 +4848,13 @@ Tests, at the unit level (`RecordedCompositorValuesTests`): a scroller the
 compositor did not scroll, and one whose record does not say, take the
 compositor's position, and the panel lists the first with its reasons. In the
 sandbox, the app's own code chose (0, 979.4688110351562) for node 295 at
-19.407 s in place of the main thread's (0, 1149). Not yet checked on the
-target machine.
+19.407 s in place of the main thread's (0, 1149).
+
+On 2026-10-05 the owner ran b351b87 on the target machine, opened the same
+recording at 19.407 s, and reported that the recreation "appears to be
+working close enough" to what is needed. This is the owner's visual
+comparison of that frame, not pixel equality, and does not test the frames in
+which `#scroller` lags one refresh further.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
