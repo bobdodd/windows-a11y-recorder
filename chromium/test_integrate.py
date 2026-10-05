@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.48"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.48"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.49"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.49"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -6183,7 +6183,7 @@ class LayoutIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION,
-            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[1],
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[2],
         )
         for include in (
             "layout/block_break_token.h",
@@ -6287,9 +6287,9 @@ class LayoutIntegrationTests(unittest.TestCase):
         # Protocol 0.41: a checkout at 0.40 holds the definition that left
         # such a node out, and is upgraded; only the skip differs.
         legacy = INTEGRATE.LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION
-        current = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION
         self.assertEqual(
-            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[0]
+            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[1]
         )
         self.assertIn(INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP, legacy)
         self.assertNotIn(INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP, current)
@@ -6301,6 +6301,39 @@ class LayoutIntegrationTests(unittest.TestCase):
             ),
         )
         self.assertNotIn("IsTextNode() && !recorder_node.GetLayoutObject()", current)
+
+    def test_a_scroll_offset_records_its_scroll_element_id(self):
+        # Protocol 0.49: a checkout at 0.48 holds the definition without the
+        # scroller's compositor element ID, and is upgraded; only that differs.
+        legacy = INTEGRATE.LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertEqual(
+            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[0]
+        )
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.BLINK_LAYOUT_CHANGES_SCROLL_PUSH,
+                INTEGRATE.BLINK_LAYOUT_CHANGES_SCROLL_ELEMENT_ID,
+            ),
+        )
+        self.assertEqual(
+            1,
+            current.count(
+                "recorder_scroll.scroll_element_id =\n"
+                "        recorder_area->GetScrollElementId().GetInternalValue();\n"
+                "    recorder_scroll_offsets.push_back(std::move(recorder_scroll));"
+            ),
+        )
+        bridge = (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('payload.Set("scrollElementId",', bridge)
+        self.assertIn("scroll.scroll_element_id == 0\n                    ? base::Value()", bridge)
+        layout = (MODULE_PATH.parent / "recorder_bridge" / "layout_changes.h").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("  uint64_t scroll_element_id = 0;\n};", layout)
 
     def test_the_fixed_list_before_protocol_0_37_stays_documented(self):
         # The list recorded before protocol 0.37 is kept to recognise the

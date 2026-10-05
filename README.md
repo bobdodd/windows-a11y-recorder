@@ -413,6 +413,11 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.49 adds each scroller's compositor element ID to its scroll
+offset record, so that page recreation can scroll it to the offset the
+compositor drew. See "Sub-step 2b-ii" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Protocol 0.48 adds the `browser.compositor` channel: each animation
 started on and removed from the compositor, and, for each compositor frame
 a page's compositor submits in which a drawn transform, opacity, filter,

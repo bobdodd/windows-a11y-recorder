@@ -780,7 +780,12 @@ scroller still connected is recorded as `layout-scroll-offset-changed`:
 - `scrollOrigin`, the position of offset zero;
 - `effectiveZoom`, the scroller's effective zoom;
 - `scrollTranslationNodeId`, the transform node the offset moves, read in
-  the same change set, or null when the scroller has none.
+  the same change set, or null when the scroller has none;
+- from protocol 0.49, `scrollElementId`, the scroller's compositor element
+  ID (`ScrollableArea::GetScrollElementId`) as decimal text, which the
+  `compositor-frame` records name its drawn scroll offset by, or null when
+  it has none. Page recreation joins the compositor's offset to the node
+  with it (slice 4b sub-step 2b-ii).
 
 A change set is recorded when only an offset was stored, and its completion
 record counts the offsets (`scrollOffsetCount`). The check compares each

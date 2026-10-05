@@ -195,6 +195,91 @@ public sealed class RecordedCompositorValuesTests
         Assert.Equal("filter", chooser.Choose(3_000).Attribute(256));
     }
 
+    // Slice 4b sub-step 2b-ii: scroll positions, by element ID.
+    private static RecordedCompositorValues ChooseScrolls(long composition)
+    {
+        var collector = Collector("test.browser", BrowserEvidenceChannels.Compositor, "browser.presentation");
+        var chooser = new RecordedCompositorValueChooser(DocumentKey, Frequency);
+        var records = new (long, string, string, string)[]
+        {
+            (1_000, "browser.presentation", "presentation-feedback", Feedback()),
+            (2_000, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFrame,
+                Frame("1", Change("68", "scroll-offset", """{"x":0.0,"y":120.5}""") + "," + Change("70", "scroll-offset", """{"x":0.0,"y":0.0}""") + "," + Change("72", "scroll-offset", """{"x":0.0,"y":8.0}"""))),
+            (2_600, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFramePresented, Presented("1", 2_500, 2_600)),
+            // Another frame sink's compositor.
+            (2_700, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFrame,
+                Frame("1", Change("68", "scroll-offset", """{"x":0.0,"y":999.0}"""), sink: "9:9", host: 2)),
+            (2_800, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFramePresented, Presented("1", 2_750, 2_800, host: 2)),
+            (3_000, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFrame,
+                Frame("2", Change("68", "scroll-offset", """{"x":0.0,"y":240.25}""") + "," + Change("72", "scroll-offset", "null"))),
+            (3_600, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFramePresented, Presented("2", 3_500, 3_600)),
+        };
+        var index = 0UL;
+        foreach (var (time, channel, type, json) in records)
+        {
+            chooser.Add(Event(SessionId, collector, ++index, time, channel, type) with
+            {
+                Payload = Json(json),
+                NativeTimestamp = new NativeTimestamp("qpc", NativeTicks(time), "ticks"),
+            });
+        }
+        return chooser.Choose(composition);
+    }
+
+    [Fact]
+    public void EachScrollNodesPositionIsTheLatestAsOfTheLastFramePresented()
+    {
+        var early = ChooseScrolls(2_900);
+        Assert.Equal(new RecordedScrollPosition(0, 120.5, "1"), early.ScrollPositions["68"]);
+        Assert.Equal(3, early.ScrollPositions.Count);
+        var late = ChooseScrolls(3_700);
+        Assert.Equal(new RecordedScrollPosition(0, 240.25, "2"), late.ScrollPositions["68"]);
+        // A scroll node the compositor no longer had is left out.
+        Assert.False(late.ScrollPositions.ContainsKey("72"));
+        Assert.Empty(late.ByNode);
+    }
+
+    private static string ScrollRecord(long node, double y, string? elementId, bool named = true, int originX = 0, double zoom = 1) =>
+        $$"""{"context":{{Context("T1")}},"changeSetId":"c1","nodeId":{{node}},"scrollOffset":{"x":0,"y":{{y}}},"webExposedScrollOffset":{"x":0,"y":{{y}}},"scrollOrigin":{"x":{{originX}},"y":0},"effectiveZoom":{{zoom}},"scrollTranslationNodeId":null{{(named ? $",\"scrollElementId\":{(elementId is null ? "null" : $"\"{elementId}\"")}" : "")}}}""";
+
+    [Fact]
+    public void AScrollerIsScrolledToTheCompositorsOffsetWhenItsRecordNamesIt()
+    {
+        var state = new BrowserDocumentState("T1 dom-document-1");
+        state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(1, 100, "68")));
+        state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(295, 10, "70", originX: 50, zoom: 2)));
+        state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(300, 30, null)));
+        var compositor = ChooseScrolls(3_700) with { };
+        var withOrigin = compositor with
+        {
+            ScrollPositions = new Dictionary<string, RecordedScrollPosition>(compositor.ScrollPositions)
+            {
+                ["70"] = new RecordedScrollPosition(70, 41, "2"),
+                ["90"] = new RecordedScrollPosition(0, 5, "2"),
+            },
+        };
+        var (offsets, notes) = RecordedPage.ScrollOffsets(state, withOrigin);
+        // The number unchanged with no origin and no zoom.
+        Assert.Equal((0d, 240.25), offsets[1]);
+        // Less the origin and divided by the zoom.
+        Assert.Equal((10d, 20.5), offsets[295]);
+        // A record naming no element ID keeps the main thread's offset.
+        Assert.Equal((0d, 30d), offsets[300]);
+        Assert.Contains(notes, note => note.StartsWith("2 scrollers are scrolled to the offset the compositor drew at the frame", StringComparison.Ordinal) &&
+                                       note.Contains("node 1 at (0, 240.25), last changed in compositor frame 2, in place of the main thread's (0, 100)", StringComparison.Ordinal));
+        Assert.Contains(notes, note => note.StartsWith("1 scroll nodes of the compositor were at a nonzero offset", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ARecordingBeforeProtocol049KeepsTheMainThreadOffsets()
+    {
+        var state = new BrowserDocumentState("T1 dom-document-1");
+        state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(1, 100, null, named: false)));
+        var (offsets, notes) = RecordedPage.ScrollOffsets(state, ChooseScrolls(3_700));
+        Assert.Equal((0d, 100d), offsets[1]);
+        Assert.Contains(notes, note => note.StartsWith("The recording's scroll offset records do not name", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void ADocumentWithoutAPresentationHasNoValues()
     {

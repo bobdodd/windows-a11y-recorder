@@ -133,12 +133,14 @@ public static class RecordedPage
             notes.Add("The recorded address is not an http or https URL, so the page is served from the recorder's loopback address, and its relative URLs do not resolve as they did.");
         }
         notes.Add("The recreation is a snapshot in time and takes no input except scrolling with its scrollbars and the wheel, the right-click that opens the context menu with Inspect, and the DevTools element picker: clicks, keys, touch, and hovering do nothing, and the page receives no wheel event, so focus, selection, and control state stay as recorded. Scrolling in the recreation changes that scroll offset from the one the recreation opened at, and DevTools then shows the moved offset.");
-        notes.Add("The recreation holds the recorded moment: no CSS animation or transition is run in it, though the recorded style keeps their properties, and SVG animation elements are not held by this. The compositor's transforms, opacities, filters, and backdrop filters at the frame are imposed where recorded; its scroll offsets, paint worklet colors and clip paths are not yet, so those are drawn from the main thread's records.");
+        notes.Add("The recreation holds the recorded moment: no CSS animation or transition is run in it, though the recorded style keeps their properties, and SVG animation elements are not held by this. The compositor's transforms, opacities, filters, backdrop filters, and scroll offsets at the frame are imposed where recorded; its paint worklet colors and clip paths are not yet, so those are drawn from the main thread's records.");
         notes.AddRange(compositorValues.Notes);
+        var scrolls = ScrollOffsets(state, compositorValues);
+        notes.AddRange(scrolls.Notes);
         notes.Add("Element namespaces are not recorded: an element named in capitals is built in the HTML namespace, and any other in the namespace of an svg or math ancestor.");
         var documentId = DocumentNodeId(tree);
-        var (scrollX, scrollY) = state.Layout.ScrollOffsets.TryGetValue(documentId, out var rootScroll)
-            ? ScrollOffsetOf(rootScroll)
+        var (scrollX, scrollY) = scrolls.Offsets.TryGetValue(documentId, out var rootScroll)
+            ? rootScroll
             : (0, 0);
         var placed = new List<PopupData>();
         foreach (var popup in popups ?? [])
@@ -192,6 +194,66 @@ public static class RecordedPage
     }
 
     // A scroll offset record's offset: the web-exposed offset when recorded.
+    /// <summary>
+    /// The offset each recorded scroller is scrolled to, in CSS pixels, and
+    /// what the evidence panel says of them (slice 4b sub-step 2b-ii): the
+    /// compositor's drawn position at the frame, less the scroll origin and
+    /// divided by the effective zoom of the scroller's latest main thread
+    /// record, where that record names the scroll node's element ID;
+    /// otherwise the main thread's offset.
+    /// </summary>
+    public static (IReadOnlyDictionary<long, (double X, double Y)> Offsets, IReadOnlyList<string> Notes) ScrollOffsets(
+        BrowserDocumentState state,
+        RecordedCompositorValues? compositorValues)
+    {
+        var positions = (compositorValues ?? RecordedCompositorValues.None).ScrollPositions;
+        var offsets = new Dictionary<long, (double X, double Y)>();
+        var imposed = new List<string>();
+        var joined = new HashSet<string>(StringComparer.Ordinal);
+        var named = 0;
+        foreach (var (node, record) in state.Layout.ScrollOffsets.OrderBy(item => item.Key))
+        {
+            var main = ScrollOffsetOf(record);
+            offsets[node] = main;
+            if (!record.TryGetProperty("scrollElementId", out var element))
+            {
+                continue;
+            }
+            named++;
+            if (element.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+            if (element.GetString() is not { } elementId || !positions.TryGetValue(elementId, out var drawn))
+            {
+                continue;
+            }
+            joined.Add(elementId);
+            var origin = record.GetProperty("scrollOrigin");
+            var zoom = record.GetProperty("effectiveZoom").GetDouble();
+            var offset = ((drawn.X - origin.GetProperty("x").GetDouble()) / zoom,
+                          (drawn.Y - origin.GetProperty("y").GetDouble()) / zoom);
+            offsets[node] = offset;
+            imposed.Add($"node {node.ToString(CultureInfo.InvariantCulture)} at ({Css(offset.Item1)}, {Css(offset.Item2)}), last changed in compositor frame {drawn.FrameToken}, in place of the main thread's ({Css(main.X)}, {Css(main.Y)})");
+        }
+        var notes = new List<string>();
+        if (state.Layout.ScrollOffsets.Count > 0 && named == 0)
+        {
+            notes.Add("The recording's scroll offset records do not name their scrollers' compositor element IDs, as before protocol 0.49, so every scroller is at its main thread offset.");
+        }
+        if (imposed.Count > 0)
+        {
+            notes.Add($"{imposed.Count.ToString(CultureInfo.InvariantCulture)} scrollers are scrolled to the offset the compositor drew at the frame, its position less the scroll origin and divided by the effective zoom of the scroller's latest main thread record: {string.Join("; ", imposed)}. The builder scrolls each once, after the page is built; the recreation's layout is still the main thread's recorded layout.");
+        }
+        var unjoined = positions.Where(item => !joined.Contains(item.Key)).ToList();
+        var moved = unjoined.Count(item => item.Value.X != 0 || item.Value.Y != 0);
+        if (named > 0 && moved > 0)
+        {
+            notes.Add($"{moved.ToString(CultureInfo.InvariantCulture)} scroll nodes of the compositor were at a nonzero offset at the frame but are named by no main thread scroll offset record of the page, such as the visual viewport's, so their offsets are not imposed.");
+        }
+        return (offsets, notes);
+    }
+
     private static (double X, double Y) ScrollOffsetOf(JsonElement record)
     {
         var offset = record.TryGetProperty("webExposedScrollOffset", out var exposed) && exposed.ValueKind == JsonValueKind.Object
@@ -298,9 +360,8 @@ public static class RecordedPage
             writer.WriteEndArray();
 
             writer.WriteStartArray("scrollOffsets");
-            foreach (var (node, record) in state.Layout.ScrollOffsets.OrderBy(item => item.Key))
+            foreach (var (node, (x, y)) in ScrollOffsets(state, compositor).Offsets.OrderBy(item => item.Key))
             {
-                var (x, y) = ScrollOffsetOf(record);
                 writer.WriteStartObject();
                 writer.WriteNumber("nodeId", node);
                 writer.WriteNumber("x", x);

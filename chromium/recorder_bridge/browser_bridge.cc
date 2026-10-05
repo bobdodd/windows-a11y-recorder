@@ -5452,6 +5452,12 @@ uint64_t RecordBlinkLayoutChanges(
                     ? base::Value()
                     : base::Value(LayoutTransformNodeId(
                           scroll.scroll_translation_node_id)));
+    // Protocol 0.49: the scroller's compositor element ID, as the decimal
+    // text the compositor records name element IDs with.
+    payload.Set("scrollElementId",
+                scroll.scroll_element_id == 0
+                    ? base::Value()
+                    : base::Value(base::NumberToString(scroll.scroll_element_id)));
     SendBlinkEvidence("browser.layout", "layout-scroll-offset-changed",
                       std::move(payload));
   }

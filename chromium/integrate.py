@@ -13127,7 +13127,36 @@ LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION = (
 BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
     BLINK_LAYOUT_CHANGES_TEXT_SKIP, BLINK_LAYOUT_CHANGES_TEXT_RECORDED, 1
 )
+# Protocol 0.49 (slice 4b sub-step 2b-ii) records each scroller's compositor
+# element ID with its scroll offset, so that the compositor's drawn offset of
+# it can be joined to its node.
+BLINK_LAYOUT_CHANGES_SCROLL_PUSH = """\
+            *recorder_translation, recorder_document_node_id);
+      }
+    }
+    recorder_scroll_offsets.push_back(std::move(recorder_scroll));
+"""
+BLINK_LAYOUT_CHANGES_SCROLL_ELEMENT_ID = """\
+            *recorder_translation, recorder_document_node_id);
+      }
+    }
+    // Protocol 0.49: the compositor element ID of the scroller, which the
+    // compositor's drawn scroll offset of it is recorded under.
+    recorder_scroll.scroll_element_id =
+        recorder_area->GetScrollElementId().GetInternalValue();
+    recorder_scroll_offsets.push_back(std::move(recorder_scroll));
+"""
+if BLINK_LAYOUT_CHANGES_DEFINITION.count(BLINK_LAYOUT_CHANGES_SCROLL_PUSH) != 1:
+    raise RuntimeError("the layout change set's scroll offset push was not found once")
+LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION = (
+    BLINK_LAYOUT_CHANGES_DEFINITION
+)
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_SCROLL_PUSH, BLINK_LAYOUT_CHANGES_SCROLL_ELEMENT_ID, 1
+)
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.49 recorded a scroller's compositor element ID.
+    LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.41 recorded a text node without a layout object.
     LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.38 recorded box fragments.

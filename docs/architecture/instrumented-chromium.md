@@ -1124,7 +1124,12 @@ at the frame the recorder names in its answer's
 it records nothing, and the protocol stays 0.48. The design is in
 [page recreation](page-recreation.md), "Sub-step 2a".
 
-Live 0.48 connections require an exact protocol-version match.
+Protocol version 0.49 adds `scrollElementId` to
+`layout-scroll-offset-changed`: the scroller's compositor element ID, which
+the `compositor-frame` records name its drawn scroll offset by. The design
+is in [page recreation](page-recreation.md), "Sub-step 2b-ii design".
+
+Live 0.49 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

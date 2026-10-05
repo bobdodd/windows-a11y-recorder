@@ -4181,7 +4181,7 @@ what is recorded and the first does not:
 - 2b-ii: the compositor's recorded scroll offsets imposed. The compositor
   names a scroller only by its compositor element ID, and nothing recorded
   ties that ID to a node, so this part adds the ID to the scroll offset
-  record (protocol 0.49). Its design is written once 2b-i is tested.
+  record (protocol 0.49). See "Sub-step 2b-ii design" below.
 
 #### Sub-step 2b-i design: compositor values imposed (agreed, built)
 
@@ -4393,6 +4393,115 @@ of a value not imposed was found. The evidence panel at 10.669 s listed 7
 compositor values imposed on 5 elements, as of compositor frame 288,
 including the skip link (node 25). Visual confirmation is not pixel
 equality.
+
+#### Sub-step 2b-ii design: compositor scroll offsets imposed (agreed, built)
+
+Proposed 2026-10-04, after 2b-i was confirmed and the owner asked to start
+on 2b-ii ("yes push and then start on 2b-ii").
+
+What the recording holds (protocol 0.48):
+
+- Each `compositor-frame` record holds the drawn offset of every scroll
+  node of the page's compositor that changed, as `scroll-offset` with the
+  scroll node's compositor element ID
+  (`ScrollTree::current_scroll_offset`).
+- Blink's main thread records a scroller's offset in the layout records
+  when it changes, with the node, `scrollOffset`,
+  `webExposedScrollOffset`, `scrollOrigin`, and `effectiveZoom`. Nothing
+  recorded names the scroller's compositor element ID, so a compositor
+  offset cannot be joined to a node.
+- The recreation scrolls each scroller to its main thread offset from the
+  builder, once the page is built, and the owner can then scroll it.
+
+Read in the target machine's checkout, 2026-10-04:
+
+- `PaintLayerScrollableArea` overrides `ScrollOffsetToPosition` and
+  `ScrollPositionToOffset`, so that a scroll position is the scroll offset
+  plus the scroll origin, and `ScrollableArea::DidCompositorScroll`
+  (`core/scroll/scrollable_area.cc`) turns the compositor's value into an
+  offset with `ScrollPositionToOffset`. The compositor's `scroll-offset`
+  is therefore Blink's scroll position, and the scroll offset is it less
+  the scroll origin.
+- `ScrollableArea::GetScrollElementId` names the compositor element ID of
+  a scroller (`core/scroll/scrollable_area.h`).
+
+What is recorded (protocol 0.49):
+
+- The main thread's scroll offset record gains `scrollElementId`, the
+  scroller's `GetScrollElementId()` as the decimal text the compositor
+  records use for element IDs, or null when it has none. Nothing else
+  changes, and no record is added.
+
+What the recreation does:
+
+- The app chooses each scroll node's offset as 2b-i chooses its values:
+  the last value of the same compositor as of the last `compositor-frame`
+  of the document's frame sink presented at or before the frame's
+  composition. A null value is dropped.
+- An offset is joined to a node through the latest main thread scroll
+  offset record of the node at or before the cut whose `scrollElementId`
+  is the offset's element ID. The root scroller is the document's record,
+  as now. A scroll node with no such record, such as the visual
+  viewport's, is not joined, and the panel counts it.
+- A joined node is scrolled to the compositor's offset in place of its
+  main thread one: the position less the scroll origin of the node's
+  record, divided by its effective zoom, in CSS pixels, as the builder
+  does now. The scroll origin and zoom are read from the same record, so
+  with no zoom and a scroll origin of 0 the number is the recorded one
+  unchanged.
+- The builder's step is unchanged: each scroller is scrolled once, after
+  the page is built, so the scrollbars and the wheel still scroll the
+  recreation afterwards.
+- The evidence panel has one note listing each scroller given a
+  compositor offset, its node, the compositor frame that last changed it,
+  the offset, and the main thread's offset it replaced, and counts the
+  offsets not joined.
+
+Limits:
+
+- A recording made before protocol 0.49 has no `scrollElementId`, so its
+  scrollers keep their main thread offsets, and the panel says so.
+- A scroller whose layout object was replaced after its last main thread
+  scroll offset record has a new element ID with no record, so its
+  compositor offset is not joined.
+- Where the main thread and the compositor differ, the recreation's
+  layout is still the main thread's recorded layout, so content placed
+  from the scroll offset on the main thread, such as a sticky element's
+  offset, is as of the main thread's record. Whether this shows in the
+  fixture is to be seen.
+- The visual viewport's offset, from pinch zoom, is not imposed.
+
+Required tests:
+
+- Unit (bridge and integration script): the scroll offset record's
+  `scrollElementId`, written and null; the hook applied once and
+  unchanged on a second run.
+- Unit (app): the protocol 0.49 validation of `scrollElementId`; the
+  offsets chosen at a frame, with another frame sink's frames, a null
+  value, and an element ID with no record; the join through the latest
+  record of the node; the offset less a scroll origin and divided by a
+  zoom; a recording without `scrollElementId`; the panel's note.
+- System, on the target machine: a new recording of the fixture served
+  over http, with the smooth scroll button pressed and the page scrolled
+  with the wheel during it; frames opened while each scroll was moving
+  show the scroller and the page at the offset of the captured frame.
+
+#### Sub-step 2b-ii as built
+
+Built as designed, with these differences:
+
+- The offset each scroller is scrolled to is also the root scroll offset
+  the popups are placed with, so a popup is placed in the page at the
+  drawn offset.
+- An offset the compositor drew at zero for a scroll node no record names
+  is not counted: the compositor records every scroll node's offset, and
+  those never scrolled have no main thread record. Only scroll nodes at a
+  nonzero offset with no record are counted in the panel.
+- The panel says a recording predates protocol 0.49 when none of its
+  scroll offset records has the `scrollElementId` field.
+
+Building Chromium and the look of the recreation are to be checked on the
+target machine.
 
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 

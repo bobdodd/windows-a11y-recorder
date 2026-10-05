@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.48";
+    public const string CurrentVersion = "0.49";
 }
 
 public static class BrowserEvidenceChannels
@@ -1319,7 +1319,10 @@ public sealed record BrowserLayoutChangesCompletedPayload(
 // offset Blink holds, in physical pixels; WebExposedScrollOffset is the value
 // scrollLeft and scrollTop divide by EffectiveZoom; ScrollOrigin is the
 // position of offset zero. ScrollTranslationNodeId is the transform node the
-// offset moves, or null when the scroller has none.
+// offset moves, or null when the scroller has none. From protocol 0.49 (slice
+// 4b sub-step 2b-ii), ScrollElementId is the scroller's compositor element ID
+// as decimal text, which the compositor-frame records name its scroll offset
+// by, or null when it has none; it is absent before 0.49.
 public sealed record BrowserLayoutScrollOffsetChangedPayload(
     BrowserContext Context,
     string ChangeSetId,
@@ -1328,7 +1331,8 @@ public sealed record BrowserLayoutScrollOffsetChangedPayload(
     BrowserLayoutPoint WebExposedScrollOffset,
     BrowserLayoutPoint ScrollOrigin,
     double EffectiveZoom,
-    string? ScrollTranslationNodeId);
+    string? ScrollTranslationNodeId,
+    string? ScrollElementId = null);
 
 // Presentation records follow the compositor frame that carries one layout
 // checkpoint's rendering update, or, from protocol 0.35, one layout change

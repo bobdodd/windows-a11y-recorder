@@ -479,6 +479,12 @@ style resolution hook adds the recorded opacity after the recorded style.
 A value that cannot be imposed is named in the Console of the element's
 document. See "Sub-step 2b-i" in the page recreation design.
 
+Protocol 0.49 (slice 4b sub-step 2b-ii) adds `scrollElementId` to
+`layout-scroll-offset-changed`: the layout change set's hook reads the
+scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
+`scroll_element_id`, and the bridge writes it as decimal text, or null for
+zero.
+
 Protocol 0.48 adds the `browser.compositor` channel (slice 4b sub-step 1).
 `RegisterCompositorWidget` is called where each presentation request is
 made, and names the widget of the compositor with that `LayerTreeHost` ID.

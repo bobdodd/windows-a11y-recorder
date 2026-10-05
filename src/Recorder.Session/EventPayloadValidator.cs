@@ -4014,7 +4014,15 @@ internal static class EventPayloadValidator
                 RequiredObject("webExposedScrollOffset"),
                 RequiredObject("scrollOrigin"),
                 RequiredNumber("effectiveZoom", positive: true),
-                NullableString("scrollTranslationNodeId")
+                NullableString("scrollTranslationNodeId"),
+                // Protocol 0.49: absent from earlier recordings.
+                new PropertyRule(
+                    "scrollElementId",
+                    false,
+                    true,
+                    value => value.ValueKind == JsonValueKind.String &&
+                        IsPositiveDecimal(value.GetString(), ulong.MaxValue),
+                    "must be a positive decimal integer string or null")
             ],
             issues);
         ValidateLayoutChangeSetIdentity(payload, issues);

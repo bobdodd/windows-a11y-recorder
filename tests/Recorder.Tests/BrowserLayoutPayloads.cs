@@ -368,7 +368,8 @@ internal static class BrowserLayoutPayloads
           "webExposedScrollOffset": { "x": 0, "y": 300.625 },
           "scrollOrigin": { "x": 0, "y": 0 },
           "effectiveZoom": 1,
-          "scrollTranslationNodeId": "layout-transform-2"
+          "scrollTranslationNodeId": "layout-transform-2",
+          "scrollElementId": "68"
         }
         """;
 

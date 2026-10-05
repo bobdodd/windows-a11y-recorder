@@ -3164,6 +3164,31 @@ public sealed class EventRecordValidatorTests
         Assert.NotEmpty(issues);
     }
 
+    [Theory]
+    [InlineData("\"0\"")]
+    [InlineData("\"-4\"")]
+    [InlineData("68")]
+    [InlineData("\"\"")]
+    public void RejectsAScrollElementIdThatIsNotPositiveDecimalText(string value)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ScrollOffsetChanged)!;
+        payload["scrollElementId"] = JsonNode.Parse(value);
+
+        var issues = ValidateLayoutRecord("layout-scroll-offset-changed", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void AcceptsANullOrAbsentScrollElementId()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ScrollOffsetChanged)!;
+        payload["scrollElementId"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-scroll-offset-changed", payload));
+        payload.AsObject().Remove("scrollElementId");
+        Assert.Empty(ValidateLayoutRecord("layout-scroll-offset-changed", payload));
+    }
+
     [Fact]
     public void RejectsALayoutChangeCompletionWithoutItsScrollOffsetCount()
     {

@@ -319,7 +319,10 @@ struct LayoutChangesFrame {
 // PaintLayerScrollableArea holds, the web-exposed offset is the one
 // scrollLeft and scrollTop divide by the effective zoom, and the scroll
 // origin is the position of offset zero. The scroll translation is the
-// transform node the offset moves, or zero when the scroller has none.
+// transform node the offset moves, or zero when the scroller has none. From
+// protocol 0.49 (slice 4b sub-step 2b-ii), the scroll element ID is the
+// scroller's compositor element ID (ScrollableArea::GetScrollElementId), or
+// zero when it has none.
 struct LayoutScrollOffset {
   int node_id = 0;
   double scroll_offset_x = 0;
@@ -330,6 +333,7 @@ struct LayoutScrollOffset {
   int scroll_origin_y = 0;
   double effective_zoom = 1;
   uint64_t scroll_translation_node_id = 0;
+  uint64_t scroll_element_id = 0;
 };
 
 // Hashes every field a change record states, except the reasons it was

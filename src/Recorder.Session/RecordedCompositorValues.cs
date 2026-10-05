@@ -30,6 +30,15 @@ public sealed record RecordedCompositorValues(
         new(new Dictionary<long, IReadOnlyList<RecordedCompositorValue>>(), []);
 
     /// <summary>
+    /// The drawn scroll position of each scroll node of the document's
+    /// compositor at the frame (slice 4b sub-step 2b-ii), by its compositor
+    /// element ID as the records write it. A scroll node the compositor no
+    /// longer had is left out.
+    /// </summary>
+    public IReadOnlyDictionary<string, RecordedScrollPosition> ScrollPositions { get; init; } =
+        new Dictionary<string, RecordedScrollPosition>();
+
+    /// <summary>
     /// The node's data-a11y-recorded-compositor attribute, or null: its values
     /// in the order of their keys, separated by "; ", each the key and its
     /// numbers separated by single spaces, as the recorder bridge's
@@ -40,6 +49,12 @@ public sealed record RecordedCompositorValues(
             ? string.Join("; ", values.Select(value => value.Text))
             : null;
 }
+
+/// <summary>
+/// A scroll node's position as the compositor drew it: Blink's scroll offset
+/// plus the scroll origin, and the compositor frame that last changed it.
+/// </summary>
+public sealed record RecordedScrollPosition(double X, double Y, string FrameToken);
 
 /// <summary>
 /// Chooses the compositor values each node of a document takes in the
@@ -93,7 +108,8 @@ public sealed class RecordedCompositorValueChooser
         string FrameSink,
         long Host,
         string Token,
-        IReadOnlyList<(string ElementId, string Property, string? Text)> Values);
+        IReadOnlyList<(string ElementId, string Property, string? Text)> Values,
+        IReadOnlyList<(string ElementId, double? X, double? Y)> Scrolls);
 
     /// <param name="documentKey">The document's state key, its token and identity.</param>
     /// <param name="recordingFrequency">The recording's clock frequency, for a process with no clock synchronization record.</param>
@@ -182,17 +198,30 @@ public sealed class RecordedCompositorValueChooser
                     changes.ValueKind == JsonValueKind.Array)
                 {
                     var values = new List<(string, string, string?)>();
+                    var scrolls = new List<(string, double?, double?)>();
                     foreach (var change in changes.EnumerateArray())
                     {
+                        if (Text(change, "property") == "scroll-offset" && Text(change, "elementId") is { } scroller)
+                        {
+                            // Slice 4b sub-step 2b-ii: a null value is a
+                            // scroll node the compositor no longer had.
+                            var drawn = change.TryGetProperty("value", out var position) ? position : default;
+                            scrolls.Add(drawn.ValueKind == JsonValueKind.Object &&
+                                        drawn.TryGetProperty("x", out var x) && x.ValueKind == JsonValueKind.Number &&
+                                        drawn.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number
+                                ? (scroller, x.GetDouble(), y.GetDouble())
+                                : (scroller, null, null));
+                            continue;
+                        }
                         if (Text(change, "property") is { } property && Properties.Contains(property) &&
                             Text(change, "elementId") is { } element)
                         {
                             values.Add((element, property, change.TryGetProperty("value", out var changed) ? ValueText(property, changed) : null));
                         }
                     }
-                    if (values.Count > 0)
+                    if (values.Count > 0 || scrolls.Count > 0)
                     {
-                        _frames.Add(new CompositorFrame(instance, process, frameSink, host, token, values));
+                        _frames.Add(new CompositorFrame(instance, process, frameSink, host, token, values, scrolls));
                     }
                 }
                 break;
@@ -245,11 +274,12 @@ public sealed class RecordedCompositorValueChooser
         {
             return _frames.Any(frame => frame.Instance == instance && frame.Process == process)
                 ? new RecordedCompositorValues(RecordedCompositorValues.None.ByNode,
-                    ["No compositor frame of the page's frame sink with a transform, opacity, filter, or backdrop filter was presented at or before the frame, so every element is drawn from its recorded style."])
+                    ["No compositor frame of the page's frame sink with a transform, opacity, filter, backdrop filter, or scroll offset was presented at or before the frame, so every element is drawn from its recorded style and every scroller is at its main thread offset."])
                 : RecordedCompositorValues.None;
         }
         var chosen = _frames[last];
         var values = new Dictionary<(string ElementId, string Property), (string? Text, string Token)>();
+        var scrollPositions = new Dictionary<string, RecordedScrollPosition>(StringComparer.Ordinal);
         for (var index = 0; index <= last; index++)
         {
             var frame = _frames[index];
@@ -260,6 +290,17 @@ public sealed class RecordedCompositorValueChooser
             foreach (var (element, property, text) in frame.Values)
             {
                 values[(element, property)] = (text, frame.Token);
+            }
+            foreach (var (element, x, y) in frame.Scrolls)
+            {
+                if (x is { } drawnX && y is { } drawnY)
+                {
+                    scrollPositions[element] = new RecordedScrollPosition(drawnX, drawnY, frame.Token);
+                }
+                else
+                {
+                    scrollPositions.Remove(element);
+                }
             }
         }
 
@@ -350,7 +391,10 @@ public sealed class RecordedCompositorValueChooser
         }
         return new RecordedCompositorValues(
             byNode.ToDictionary(item => item.Key, item => (IReadOnlyList<RecordedCompositorValue>)item.Value),
-            notes);
+            notes)
+        {
+            ScrollPositions = scrollPositions,
+        };
     }
 
     // What ValueText gives for a value not of its property's form.
