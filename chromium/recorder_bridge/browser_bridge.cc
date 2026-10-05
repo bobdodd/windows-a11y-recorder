@@ -7144,6 +7144,23 @@ ImageResourceFacts::ImageResourceFacts(ImageResourceFacts&&) = default;
 ImageResourceFacts& ImageResourceFacts::operator=(ImageResourceFacts&&) =
     default;
 ImageResourceFacts::~ImageResourceFacts() = default;
+StyleSheetResourceFacts::StyleSheetResourceFacts() = default;
+StyleSheetResourceFacts::StyleSheetResourceFacts(StyleSheetResourceFacts&&) =
+    default;
+StyleSheetResourceFacts& StyleSheetResourceFacts::operator=(
+    StyleSheetResourceFacts&&) = default;
+StyleSheetResourceFacts::~StyleSheetResourceFacts() = default;
+StyleSheetFacts::StyleSheetFacts() = default;
+StyleSheetFacts::StyleSheetFacts(const StyleSheetFacts&) = default;
+StyleSheetFacts::StyleSheetFacts(StyleSheetFacts&&) = default;
+StyleSheetFacts& StyleSheetFacts::operator=(const StyleSheetFacts&) = default;
+StyleSheetFacts& StyleSheetFacts::operator=(StyleSheetFacts&&) = default;
+StyleSheetFacts::~StyleSheetFacts() = default;
+StyleSheetScopeFacts::StyleSheetScopeFacts() = default;
+StyleSheetScopeFacts::StyleSheetScopeFacts(StyleSheetScopeFacts&&) = default;
+StyleSheetScopeFacts& StyleSheetScopeFacts::operator=(StyleSheetScopeFacts&&) =
+    default;
+StyleSheetScopeFacts::~StyleSheetScopeFacts() = default;
 
 namespace {
 
@@ -7163,7 +7180,10 @@ struct ResourceStorage {
   std::unordered_set<int64_t> paint_image_ids;
   std::unordered_map<std::string, bool> font_file_digests;
   std::unordered_map<std::string, bool> image_digests;
+  // Protocol 0.51: the style sheet text digests already recorded.
+  std::unordered_map<std::string, bool> style_sheet_digests;
   uint64_t next_face_number = 0;
+  uint64_t next_style_sheet_number = 0;
 };
 
 ResourceStorage& Resources() {
@@ -7396,6 +7416,126 @@ void RecordBlinkImageResource(ImageResourceFacts image) {
                              ? base::Value(base::NumberToString(*image.image_id))
                              : base::Value());
   SendBlinkEvidence(kResourcesChannel, "image-resource", std::move(payload));
+}
+
+std::string RecordBlinkStyleSheetResource(StyleSheetResourceFacts sheet) {
+  A11Y_RECORDER_COST("RecordBlinkStyleSheetResource");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || sheet.url.empty()) {
+    return std::string();
+  }
+  const size_t size = sheet.text.size();
+  const std::string digest = Sha256Hex(sheet.text);
+  bool recorded = false;
+  {
+    ResourceStorage& storage = Resources();
+    base::AutoLock lock(storage.lock);
+    recorded = QueueResourceBytes(client, storage.style_sheet_digests,
+                                  "style-sheet-text", digest,
+                                  std::move(sheet.text));
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("url", std::move(sheet.url));
+  if (sheet.response_url.empty()) {
+    payload.Set("responseUrl", base::Value());
+  } else {
+    payload.Set("responseUrl", std::move(sheet.response_url));
+  }
+  payload.Set("status", sheet.status);
+  payload.Set("mimeType", std::move(sheet.mime_type));
+  payload.Set("size", base::NumberToString(size));
+  payload.Set("digest", digest);
+  payload.Set("textRecorded", recorded);
+  SendBlinkEvidence(kResourcesChannel, "style-sheet-resource",
+                    std::move(payload));
+  return recorded ? digest : std::string();
+}
+
+std::string RecordBlinkStyleSheetText(std::string text) {
+  A11Y_RECORDER_COST("RecordBlinkStyleSheetText");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return std::string();
+  }
+  const std::string digest = Sha256Hex(text);
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  return QueueResourceBytes(client, storage.style_sheet_digests,
+                            "style-sheet-text", digest, std::move(text))
+             ? digest
+             : std::string();
+}
+
+uint64_t AssignStyleSheetNumber() {
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  return ++storage.next_style_sheet_number;
+}
+
+namespace {
+
+base::DictValue StyleSheetFactsValue(const StyleSheetFacts& sheet) {
+  base::DictValue value;
+  value.Set("sheet", base::NumberToString(sheet.sheet_number));
+  if (!sheet.full) {
+    return value;
+  }
+  value.Set("kind", sheet.kind);
+  value.Set("ownerNodeId", sheet.owner_node_id > 0
+                               ? base::Value(sheet.owner_node_id)
+                               : base::Value());
+  if (sheet.parent_sheet_number > 0) {
+    value.Set("parentSheet", base::NumberToString(sheet.parent_sheet_number));
+    value.Set("ruleIndex", sheet.rule_index);
+  } else {
+    value.Set("parentSheet", base::Value());
+    value.Set("ruleIndex", base::Value());
+  }
+  value.Set("href", sheet.href.empty() ? base::Value() : base::Value(sheet.href));
+  value.Set("media", sheet.media);
+  value.Set("title", sheet.title);
+  value.Set("disabled", sheet.disabled);
+  value.Set("active", sheet.active);
+  value.Set("textSource", sheet.text_source);
+  value.Set("textDigest", sheet.text_digest.empty()
+                              ? base::Value()
+                              : base::Value(sheet.text_digest));
+  return value;
+}
+
+}  // namespace
+
+void RecordBlinkStyleSheetsUpdated(int document_node_id,
+                                   std::string document_token,
+                                   std::vector<StyleSheetScopeFacts> scopes) {
+  A11Y_RECORDER_COST("RecordBlinkStyleSheetsUpdated");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || scopes.empty()) {
+    return;
+  }
+  base::ListValue scope_values;
+  for (const StyleSheetScopeFacts& scope : scopes) {
+    base::DictValue scope_value;
+    scope_value.Set("scopeNodeId", scope.scope_node_id);
+    base::ListValue sheets;
+    for (const StyleSheetFacts& sheet : scope.sheets) {
+      sheets.Append(StyleSheetFactsValue(sheet));
+    }
+    base::ListValue adopted;
+    for (const StyleSheetFacts& sheet : scope.adopted) {
+      adopted.Append(StyleSheetFactsValue(sheet));
+    }
+    scope_value.Set("sheets", std::move(sheets));
+    scope_value.Set("adopted", std::move(adopted));
+    scope_values.Append(std::move(scope_value));
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("scopes", std::move(scope_values));
+  SendBlinkEvidence(kResourcesChannel, "style-sheets-updated",
+                    std::move(payload));
 }
 
 void RecordBlinkImagePaintImage(ImagePaintImageFacts facts) {

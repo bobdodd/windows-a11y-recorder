@@ -38,12 +38,14 @@ public sealed class RecreationServer : IAsyncDisposable
 
     // For a recorded page served at its recorded address (sub-step 3), the
     // builder may also read the recorded font files, from the recorder's own
-    // address, and images may be asked for at any http or https address,
-    // since the recorder answers every request of the tab itself, from the
-    // recording, or refuses it: nothing reaches the network.
+    // address, and images and style sheets (slice 4e) may be asked for at
+    // any http or https address, since the recorder answers every request of
+    // the tab itself, from the recording, or refuses it: nothing reaches the
+    // network.
     public static string RecordedPageContentSecurityPolicy(string nonce, string fontAddress) =>
         RecordedPageContentSecurityPolicy(nonce)
             .Replace("img-src 'self' data:", "img-src 'self' data: http: https:", StringComparison.Ordinal)
+            .Replace("style-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline' http: https:", StringComparison.Ordinal)
             .Replace("connect-src 'none'", $"connect-src {fontAddress}", StringComparison.Ordinal);
 
     // The recorder's own address for the recorded font files: a name under
@@ -164,6 +166,22 @@ public sealed class RecreationServer : IAsyncDisposable
                 new("Cache-Control", "no-store"),
                 new("X-Content-Type-Options", "nosniff"),
             ], file);
+        }
+        // Slice 4e: a style sheet's address is answered with the text it
+        // arrived with, in UTF-8, as Blink decoded it when it was recorded.
+        if (resourceType == "Stylesheet")
+        {
+            if (_resources.StyleSheets.ArrivedDigest(url) is not { } sheetDigest ||
+                _resources.StyleSheetText(sheetDigest) is not { } sheetText)
+            {
+                return null;
+            }
+            return new RecreationAnswer(200,
+            [
+                new("Content-Type", "text/css; charset=utf-8"),
+                new("Cache-Control", "no-store"),
+                new("X-Content-Type-Options", "nosniff"),
+            ], sheetText);
         }
         if (resourceType != "Image" || _resources.Image(url) is not { } image ||
             _resources.ImageBytes(image.Digest) is not { } bytes)

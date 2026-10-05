@@ -390,6 +390,7 @@ internal static class EventPayloadValidator
                 break;
             case ("browser.resources", "font-file"):
             case ("browser.resources", "image-data"):
+            case ("browser.resources", "style-sheet-text"):
                 ValidateBrowserResourceBytes(payload, issues);
                 break;
             case ("browser.resources", "font-face-added"):
@@ -404,6 +405,12 @@ internal static class EventPayloadValidator
                 break;
             case ("browser.resources", "image-paint-image"):
                 ValidateBrowserImagePaintImage(payload, issues);
+                break;
+            case ("browser.resources", "style-sheet-resource"):
+                ValidateBrowserStyleSheetResource(payload, issues);
+                break;
+            case ("browser.resources", "style-sheets-updated"):
+                ValidateBrowserStyleSheetsUpdated(payload, issues);
                 break;
             case ("browser.network", "request-will-be-sent"):
                 ValidateBrowserNetworkRequestWillBeSent(payload, issues);
@@ -4550,6 +4557,136 @@ internal static class EventPayloadValidator
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
+    }
+
+    // Protocol 0.51 (slice 4e).
+    private static void ValidateBrowserStyleSheetResource(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("url"),
+                NullableString("responseUrl"),
+                RequiredInteger("status", nonnegative: true),
+                RequiredText("mimeType"),
+                RequiredDecimalText("size"),
+                DigestRule("digest"),
+                RequiredBoolean("textRecorded")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+    }
+
+    private static PropertyRule NullableDigestRule(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.Null ||
+                (value.ValueKind == JsonValueKind.String && IsSha256Digest(value.GetString())),
+            "must be null or a SHA-256 digest in lowercase hexadecimal");
+
+    private static readonly string[] StyleSheetKinds =
+        ["link", "style", "import", "constructed", "processing-instruction", "other"];
+
+    private static void ValidateBrowserStyleSheetsUpdated(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredObjectArray("scopes")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        if (!payload.TryGetProperty("scopes", out var scopes) || scopes.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        var scopeIndex = 0;
+        foreach (var scope in scopes.EnumerateArray())
+        {
+            var scopePointer = $"#/payload/scopes/{scopeIndex}";
+            scopeIndex++;
+            if (scope.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            ValidateShape(
+                scope,
+                [
+                    RequiredInteger("scopeNodeId", positive: true),
+                    RequiredObjectArray("sheets"),
+                    RequiredObjectArray("adopted")
+                ],
+                issues,
+                scopePointer);
+            foreach (var list in new[] { "sheets", "adopted" })
+            {
+                if (!scope.TryGetProperty(list, out var entries) || entries.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+                var entryIndex = 0;
+                foreach (var entry in entries.EnumerateArray())
+                {
+                    var pointer = $"{scopePointer}/{list}/{entryIndex}";
+                    entryIndex++;
+                    if (entry.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+                    if (!entry.TryGetProperty("kind", out _))
+                    {
+                        // A sheet unchanged since the document's last record.
+                        ValidateShape(entry, [RequiredDecimalText("sheet")], issues, pointer);
+                        continue;
+                    }
+                    ValidateShape(
+                        entry,
+                        [
+                            RequiredDecimalText("sheet"),
+                            RequiredEnum("kind", StyleSheetKinds),
+                            NullableInteger("ownerNodeId", positive: true),
+                            NullableDecimalText("parentSheet"),
+                            NullableInteger("ruleIndex", nonnegative: true),
+                            NullableString("href"),
+                            RequiredText("media"),
+                            RequiredText("title"),
+                            RequiredBoolean("disabled"),
+                            RequiredBoolean("active"),
+                            RequiredEnum("textSource", "arrived", "element", "cssom", "none"),
+                            NullableDigestRule("textDigest")
+                        ],
+                        issues,
+                        pointer);
+                    var kind = ReadString(entry, "kind");
+                    var hasParent = HasNonnullProperty(entry, "parentSheet");
+                    if ((kind == "import") != hasParent || hasParent != HasNonnullProperty(entry, "ruleIndex"))
+                    {
+                        AddError(
+                            issues,
+                            "browser-style-sheet-import-parent",
+                            pointer + "/parentSheet",
+                            "An import names its parent sheet and rule index, and no other sheet does.");
+                    }
+                    var source = ReadString(entry, "textSource");
+                    if ((source is "arrived" or "cssom") != HasNonnullProperty(entry, "textDigest"))
+                    {
+                        AddError(
+                            issues,
+                            "browser-style-sheet-text-digest",
+                            pointer + "/textDigest",
+                            "Arrived and CSSOM text is named by its digest, and no other text source is.");
+                    }
+                }
+            }
+        }
     }
 
     private static void ValidateBrowserImagePaintImage(

@@ -6628,7 +6628,7 @@ Not done: the integration test in the instrumented Chromium, for the
 reason given under "Popup on screen as built"; what is recorded is
 checked on the target machine with a new recording.
 
-### Slice 4e: page style sheets as they arrive (proposed, not built)
+### Slice 4e: page style sheets as they arrive (agreed, built, not yet tested on the target machine)
 
 Proposed 2026-10-05, at the owner's request that the page's CSS be recorded
 as it arrives, including sheets that arrive after the page has loaded, so
@@ -6822,6 +6822,82 @@ a page that inserts rules after load.
   over HTTP with those sheets, where the Styles pane of chosen elements in
   the recreation lists the same rules, with the same sources, as DevTools
   did on the page, and the Sources panel lists the same sheets.
+
+#### Slice 4e as built
+
+Agreed by the owner on 2026-10-05 and built in the commit that adds this
+section. It is not yet tested on the target machine.
+
+What was built:
+
+- The bridge (`browser_bridge.h`, `browser_bridge.cc`) adds
+  `RecordBlinkStyleSheetResource`, `RecordBlinkStyleSheetText`,
+  `AssignStyleSheetNumber`, and `RecordBlinkStyleSheetsUpdated`. The
+  `style-sheet-text` record has the shape of `font-file` and `image-data`,
+  and is sent the first time the renderer meets a digest.
+- `integrate.py` adds five patches: `CSSStyleSheet`'s header and source
+  (the sheet's number, a changed flag set in `DidMutate` for every mutation
+  but `kSheet` and in `SetText`, the CSSOM text built as DevTools builds it,
+  and the recreation-mode `CanAccessRules`), `StyleSheetContents`'s header
+  and source (the record after `SheetText` decodes the text, before it is
+  parsed, with the digest kept on the contents, so a sheet whose parsed
+  contents are reused from the cache keeps it), and
+  `StyleEngine::UpdateActiveStyleSheets` (the record before
+  `probe::ActiveStyleSheetsUpdated`).
+- The recorder's contracts, the receiver's deserialization, and the
+  validator accept the three records. The validator checks that an import,
+  and only an import, names its parent sheet and rule index, and that
+  arrived and CSSOM text, and only those, are named by a digest.
+- `RecordedStyleSheets` (`Recorder.Session`) is the reader's choice at the
+  frame, read by `RecordingFileResources` with the fonts and images.
+- The recreation's server answers a `Stylesheet` request for an address
+  with the recorded text, as `text/css; charset=utf-8` with `nosniff` and
+  `no-store`, and the page's content security policy allows style sheets
+  at any http or https address, which the recorder answers or refuses.
+- The builder waits up to 10 s for the `load` or `error` event of each
+  linked sheet, then replaces the rules of each sheet changed through the
+  CSSOM, makes each constructed sheet, and sets each scope's adopted
+  sheets. A sheet's CSSOM text is split into rules at the ends of
+  top-level blocks and statements, outside strings and comments. Leading
+  `@import` rules the loaded sheet already has as recorded are kept, so
+  an imported sheet already loaded is not asked for again. The evidence
+  panel lists the time the sheets were loaded and applied, and the first
+  style and layout is timed from then.
+- A fixture page, `tests/fixtures/style-sheets/`, has a linked sheet, an
+  `@import`, a `style` element changed through `insertRule` and
+  `deleteRule`, constructed sheets adopted by the document and by a shadow
+  root, a sheet linked 1.5 s after load, and a `style` element and rule
+  inserted 3 s after load. It is served with
+  `tests/fixtures/animation/Serve-Fixture.ps1 -Folder <the folder>`.
+
+Differences from the design:
+
+- `style-sheets-updated` is on `browser.resources`, not `browser.layout`,
+  so that the reader reads every style sheet record in one pass with the
+  fonts and images.
+- `style-sheet-resource` records carry no document, as the image records
+  do not, and the reader keys them by address and response address, the
+  latest at or before the frame. A sheet in effect whose text arrived names
+  its own digest, which is preferred for its address.
+- A scope is named by its root node's ID, the document or the shadow root,
+  not the shadow host. The builder holds shadow roots by that ID.
+- Each record lists only the tree scopes the update touched: the document
+  scope when its collection was updated, and each connected shadow tree
+  scope that was dirty. The reader keeps each scope's latest list.
+- A changed sheet whose CSSOM text could not be recorded is given text
+  source `none`.
+- The reader takes the sheets of the latest records at or before the
+  frame's cut, as it does for fonts and images, not at the frame's
+  composition.
+
+Tests run in the sandbox: the .NET suite (1096 passing; the 58 failures
+are the known tests that need PostgreSQL or Windows) with new tests of the
+three record contracts, the validator, the reader's choice, the server's
+answer and refusal, and the builder's data; and `integrate.py`'s suite (236
+tests), where each new patch is applied once and found again on a second
+pass. The integration test in the instrumented Chromium, comparing each
+recorded text with the text DevTools reports, is not built; the fixture
+page and the system test on the target machine take its place for now.
 
 ### To be settled
 

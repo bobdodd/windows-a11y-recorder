@@ -69,6 +69,7 @@ public static class RecordingFileResources
         var inSet = new List<string>();
         var loaded = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         var imagesWithoutData = new HashSet<string>(StringComparer.Ordinal);
+        var styleSheets = new RecordedStyleSheets.Builder();
         foreach (var chunk in reader.Chunks)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -95,6 +96,7 @@ public static class RecordingFileResources
                 {
                     case BrowserEvidenceEventTypes.FontFile:
                     case BrowserEvidenceEventTypes.ImageData:
+                    case BrowserEvidenceEventTypes.StyleSheetText:
                         if (Text(payload, "digest") is { } digest)
                         {
                             bytes.TryAdd((stored.Event.EventType, digest), new Location(chunk, offset));
@@ -122,6 +124,15 @@ public static class RecordingFileResources
                         if (image.ResponseUrl is { } response && response != url)
                         {
                             images[RecordedPageResources.WithoutFragment(response)] = image;
+                        }
+                        break;
+                    case BrowserEvidenceEventTypes.StyleSheetResource:
+                        styleSheets.AddResource(payload);
+                        break;
+                    case BrowserEvidenceEventTypes.StyleSheetsUpdated:
+                        if (DomTreeRebuilder.DocumentKey(payload) == documentKey)
+                        {
+                            styleSheets.AddUpdate(payload);
                         }
                         break;
                     case BrowserEvidenceEventTypes.FontFaceAdded:
@@ -232,7 +243,12 @@ public static class RecordingFileResources
             notes.AddRange(frames.Notes);
         }
 
-        return new RecordedPageResources(faces, images, Bytes, notes, owner, frames, framesMilliseconds, compositorValues);
+        // Slice 4e: the document's style sheets at the cut, and a sheet text
+        // is used only when its record is held.
+        var sheets = styleSheets.Build();
+        notes.AddRange(sheets.Notes());
+
+        return new RecordedPageResources(faces, images, Bytes, notes, owner, frames, framesMilliseconds, compositorValues, sheets);
     }
 
     private static string? FaceName(JsonElement payload)

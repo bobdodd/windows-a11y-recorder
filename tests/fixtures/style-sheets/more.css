@@ -1,0 +1,10 @@
+/* Imported by site.css. */
+.imported {
+  background: #e8f5e9;
+  border-left: 0.5rem solid #2e7d32;
+}
+
+.imported::after {
+  content: " (imported sheet rule)";
+  font-style: italic;
+}

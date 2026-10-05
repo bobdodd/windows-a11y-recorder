@@ -17,7 +17,10 @@ public sealed class BrowserResourcePayloadIngestTests
         { BrowserEvidenceEventTypes.FontFaceRemoved, BrowserResourcePayloads.FaceAdded },
         { BrowserEvidenceEventTypes.FontFaceLoaded, BrowserResourcePayloads.FaceLoaded },
         { BrowserEvidenceEventTypes.ImageResource, BrowserResourcePayloads.ImageResource },
-        { BrowserEvidenceEventTypes.ImagePaintImage, BrowserResourcePayloads.ImagePaintImage }
+        { BrowserEvidenceEventTypes.ImagePaintImage, BrowserResourcePayloads.ImagePaintImage },
+        { BrowserEvidenceEventTypes.StyleSheetText, BrowserResourcePayloads.FontFile },
+        { BrowserEvidenceEventTypes.StyleSheetResource, BrowserResourcePayloads.StyleSheetResource },
+        { BrowserEvidenceEventTypes.StyleSheetsUpdated, BrowserResourcePayloads.StyleSheetsUpdated }
     };
 
     [Theory]

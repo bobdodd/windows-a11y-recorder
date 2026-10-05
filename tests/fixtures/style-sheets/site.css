@@ -1,0 +1,12 @@
+/* Linked sheet of the style sheet fixture. Imports more.css. */
+@import url("more.css");
+
+.linked {
+  background: #e3f2fd;
+  border-left: 0.5rem solid #1565c0;
+}
+
+.linked::before {
+  content: "Linked sheet rule: ";
+  font-weight: 700;
+}

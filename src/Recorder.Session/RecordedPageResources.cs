@@ -38,12 +38,13 @@ public sealed class RecordedPageResources : IDisposable
 
     /// <param name="faces">The document's faces, in the order they were added.</param>
     /// <param name="images">The images by URL without its fragment: the URL requested, and the response's URL.</param>
-    /// <param name="bytes">Reads the bytes of a record kind ("font-file" or "image-data") by digest, or null.</param>
+    /// <param name="bytes">Reads the bytes of a record kind ("font-file", "image-data", or "style-sheet-text") by digest, or null.</param>
     /// <param name="notes">What the recreation does not take from the recording, for the evidence panel.</param>
     /// <param name="owner">Disposed with these resources, such as the recording file reader the bytes are read from.</param>
     /// <param name="imageFrames">The frame each animated image is held at (slice 4b sub-step 2a), or none.</param>
     /// <param name="imageFramesMilliseconds">How long choosing the image frames took, or null when they were not read.</param>
     /// <param name="compositorValues">The compositor values the document's nodes take (slice 4b sub-step 2b-i), or none.</param>
+    /// <param name="styleSheets">The document's style sheets at the frame (slice 4e), or none.</param>
     public RecordedPageResources(
         IReadOnlyList<RecordedFontFace> faces,
         IReadOnlyDictionary<string, RecordedImage> images,
@@ -52,8 +53,10 @@ public sealed class RecordedPageResources : IDisposable
         IDisposable? owner = null,
         RecordedImageFrames? imageFrames = null,
         double? imageFramesMilliseconds = null,
-        RecordedCompositorValues? compositorValues = null)
+        RecordedCompositorValues? compositorValues = null,
+        RecordedStyleSheets? styleSheets = null)
     {
+        StyleSheets = styleSheets ?? RecordedStyleSheets.None;
         ImageFrames = imageFrames ?? RecordedImageFrames.None;
         CompositorValues = compositorValues ?? RecordedCompositorValues.None;
         ImageFramesMilliseconds = imageFramesMilliseconds;
@@ -90,6 +93,12 @@ public sealed class RecordedPageResources : IDisposable
 
     /// <summary>The bytes of an image by digest, or null when the recording holds none.</summary>
     public byte[]? ImageBytes(string digest) => _bytes("image-data", digest);
+
+    /// <summary>The document's style sheets at the frame (slice 4e).</summary>
+    public RecordedStyleSheets StyleSheets { get; }
+
+    /// <summary>The UTF-8 text of a style sheet by digest, or null when the recording holds none.</summary>
+    public byte[]? StyleSheetText(string digest) => _bytes("style-sheet-text", digest);
 
     public static string WithoutFragment(string url) =>
         url.IndexOf('#') is var hash and >= 0 ? url[..hash] : url;

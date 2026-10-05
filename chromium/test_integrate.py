@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.50"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.50"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.51"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.51"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -8468,6 +8468,180 @@ class RecreationIntegrationTests(unittest.TestCase):
         self.assertEqual(
             [], INTEGRATE.describe_signature_mismatches("patched", first, signatures)
         )
+
+    # Slice 4e (protocol 0.51): page style sheets as they arrive.
+    CSS_STYLE_SHEET_HEADER_SOURCE = (
+        "class CORE_EXPORT CSSStyleSheet final : public StyleSheet {\n"
+        " public:\n"
+        "  void Trace(Visitor*) const override;\n"
+        "\n"
+        " private:\n"
+        "  friend class QuietMutationScope;\n"
+        "};\n"
+    )
+    CSS_STYLE_SHEET_SOURCE = (
+        '#include "third_party/blink/renderer/core/css/css_style_sheet.h"\n'
+        "\n"
+        "namespace blink {\n"
+        "\n"
+        "void CSSStyleSheet::DidMutate(Mutation mutation) {\n"
+        "  if (mutation == Mutation::kRules) {\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "bool CSSStyleSheet::CanAccessRules() const {\n"
+        "  return enable_rule_access_for_inspector_ || contents_->IsOriginClean();\n"
+        "}\n"
+        "\n"
+        "void CSSStyleSheet::SetText(const String& text, CSSImportRules import_rules) {\n"
+        "  DetachCSSOMWrappers();\n"
+        "}\n"
+        "\n"
+        "void CSSStyleSheet::Trace(Visitor* visitor) const {\n"
+        "}\n"
+        "\n"
+        "}  // namespace blink\n"
+    )
+    STYLE_SHEET_CONTENTS_HEADER_SOURCE = (
+        "class CORE_EXPORT StyleSheetContents final {\n"
+        " public:\n"
+        "  void Trace(Visitor*) const;\n"
+        "\n"
+        " private:\n"
+        "  StyleSheetContents& operator=(const StyleSheetContents&) = delete;\n"
+        "};\n"
+    )
+    STYLE_SHEET_CONTENTS_SOURCE = (
+        '#include "third_party/blink/renderer/core/css/style_sheet_contents.h"\n'
+        "\n"
+        "void StyleSheetContents::ParseAuthorStyleSheet(\n"
+        "    const CSSStyleSheetResource* cached_style_sheet) {\n"
+        "  const ResourceResponse& response = cached_style_sheet->GetResponse();\n"
+        "  String sheet_text =\n"
+        "      cached_style_sheet->SheetText(parser_context_, mime_type_check);\n"
+        "  CSSParser::ParseSheet(context, this, sheet_text);\n"
+        "}\n"
+    )
+    STYLE_ENGINE_SOURCE = (
+        '#include "third_party/blink/renderer/core/css/style_engine.h"\n'
+        "\n"
+        "namespace blink {\n"
+        "\n"
+        "void StyleEngine::UpdateActiveStyleSheets() {\n"
+        "  probe::ActiveStyleSheetsUpdated(document_);\n"
+        "\n"
+        "  dirty_tree_scopes_.clear();\n"
+        "}\n"
+        "\n"
+        "}  // namespace blink\n"
+    )
+
+    def test_records_style_sheet_changes_once(self):
+        header = self.patch_source_twice(
+            "css_style_sheet.h",
+            self.CSS_STYLE_SHEET_HEADER_SOURCE,
+            INTEGRATE.patch_blink_css_style_sheet_header,
+        )
+        self.assertEqual(1, header.count(INTEGRATE.BLINK_CSS_STYLE_SHEET_HEADER))
+        # The members are public, before the private section.
+        self.assertLess(
+            header.index("uint64_t recorder_sheet_number_ = 0;"),
+            header.index(" private:"),
+        )
+        source = self.patch_source_twice(
+            "css_style_sheet.cc",
+            self.CSS_STYLE_SHEET_SOURCE,
+            INTEGRATE.patch_blink_css_style_sheet,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        for hook in (
+            INTEGRATE.BLINK_CSS_STYLE_SHEET_DID_MUTATE_HOOK,
+            INTEGRATE.BLINK_CSS_STYLE_SHEET_SET_TEXT_HOOK,
+            INTEGRATE.BLINK_CSS_STYLE_SHEET_CAN_ACCESS_HOOK,
+            INTEGRATE.BLINK_CSS_STYLE_SHEET_DEFINITIONS,
+        ):
+            self.assertEqual(1, source.count(hook))
+        # A change of the sheet's disabled state alone is not a change of its
+        # rules; replace() and replaceSync() are.
+        self.assertIn(
+            "if (mutation != Mutation::kSheet) {\n    recorder_cssom_changed_ = true;",
+            source,
+        )
+        # Rules are reachable by the builder only in the recreation mode.
+        self.assertIn(
+            "if (a11y_recorder::IsRecreationMode()) {\n    return true;\n  }",
+            source,
+        )
+        # The CSSOM text is built as DevTools builds it.
+        self.assertIn("recorder_builder.Append(ItemInternal(i)->cssText());", source)
+
+    def test_records_the_text_a_style_sheet_arrived_with_once(self):
+        header = self.patch_source_twice(
+            "style_sheet_contents.h",
+            self.STYLE_SHEET_CONTENTS_HEADER_SOURCE,
+            INTEGRATE.patch_blink_style_sheet_contents_header,
+        )
+        self.assertEqual(1, header.count("String recorder_arrived_digest_;"))
+        source = self.patch_source_twice(
+            "style_sheet_contents.cc",
+            self.STYLE_SHEET_CONTENTS_SOURCE,
+            INTEGRATE.patch_blink_style_sheet_contents,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK))
+        # Recorded after the text is decoded and before it is parsed.
+        self.assertLess(
+            source.index("RecordBlinkStyleSheetResource"),
+            source.index("CSSParser::ParseSheet"),
+        )
+        self.assertIn("recorder_sheet.text = sheet_text.Utf8();", source)
+
+    def test_records_each_active_style_sheet_update_once(self):
+        source = self.patch_source_twice(
+            "style_engine.cc",
+            self.STYLE_ENGINE_SOURCE,
+            INTEGRATE.patch_blink_style_engine_style_sheets,
+        )
+        for include in INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS))
+        self.assertEqual(1, source.count("a11y_recorder::RecordBlinkStyleSheetsUpdated("))
+        # The helpers come before the update, and the record before the probe,
+        # while the dirty tree scopes are still known.
+        self.assertLess(
+            source.index("void RecorderAppendStyleSheet("),
+            source.index("void StyleEngine::UpdateActiveStyleSheets() {"),
+        )
+        self.assertLess(
+            source.index("RecordBlinkStyleSheetsUpdated("),
+            source.index("probe::ActiveStyleSheetsUpdated(document_);"),
+        )
+        self.assertLess(
+            source.index("probe::ActiveStyleSheetsUpdated(document_);"),
+            source.index("dirty_tree_scopes_.clear();"),
+        )
+        helpers = INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS
+        # Only a sheet script changed, or a constructed one, is serialized,
+        # and only when its rules changed since it last was.
+        self.assertIn(
+            "if (sheet.recorder_cssom_changed_ || sheet.recorder_cssom_digest_.empty()) {",
+            helpers,
+        )
+        self.assertIn("sheet.IsConstructed() || (contents && contents->IsMutable())", helpers)
+        # Imports follow the sheet that imports them.
+        self.assertIn("DynamicTo<CSSImportRule>(sheet.ItemInternal(i))", helpers)
+        self.assertIn("for (CSSStyleSheet* sheet : *tree_scope.AdoptedStyleSheets())", helpers)
+
+    def test_style_sheet_bridge_calls_match_the_bridge(self):
+        bridge = (Path(__file__).parent / "recorder_bridge" / "browser_bridge.h").read_text(encoding="utf-8")
+        for name in (
+            "RecordBlinkStyleSheetResource",
+            "RecordBlinkStyleSheetText",
+            "AssignStyleSheetNumber",
+            "RecordBlinkStyleSheetsUpdated",
+        ):
+            self.assertIn(name + "(", bridge)
+        signatures = INTEGRATE.parse_bridge_signatures(bridge)
+        INTEGRATE.verify_hook_templates(signatures)
 
     CLIP_PATH_CLIPPER_SOURCE = (
         INTEGRATE.BLINK_CLIP_PATH_CLIPPER_OWN_INCLUDE

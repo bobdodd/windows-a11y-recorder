@@ -413,6 +413,13 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.51 records the page's style sheets as they arrive and as they
+change: the text each linked or imported sheet arrived with, the CSSOM text
+of a sheet script changed or constructed, and each tree scope's sheets and
+adopted sheets at each update, so that page recreation serves and rebuilds
+them for DevTools. See "Slice 4e" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Protocol 0.50 adds, to each compositor scroll offset, whether the
 compositor scrolls the node and the reasons Chromium gives for repainting it
 on the main thread, so that page recreation imposes the compositor's offset

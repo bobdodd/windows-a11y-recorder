@@ -114,7 +114,7 @@ public static class RecordedPage
         }
         var elements = tree.Nodes.Values.Where(node => node.NodeType == "element").ToList();
         var withLayout = elements.Count(node => state.Layout.Nodes.ContainsKey(node.Id));
-        notes.Add($"{withLayout.ToString(CultureInfo.InvariantCulture)} of the {elements.Count.ToString(CultureInfo.InvariantCulture)} recorded elements have a layout record, whose recorded style and box fragments the recreation imposes. They are written on each element in its data-a11y-recorded-style and data-a11y-recorded-layout attributes, which are shown in the Elements pane but were not attributes of the recorded page. Pseudo-elements, such as ::before, take no recorded style: they appear only as far as the page's recorded style elements make them.");
+        notes.Add($"{withLayout.ToString(CultureInfo.InvariantCulture)} of the {elements.Count.ToString(CultureInfo.InvariantCulture)} recorded elements have a layout record, whose recorded style and box fragments the recreation imposes. They are written on each element in its data-a11y-recorded-style and data-a11y-recorded-layout attributes, which are shown in the Elements pane but were not attributes of the recorded page. Pseudo-elements, such as ::before, take no recorded style: they appear only as far as the page's recorded style sheets make them.");
         var withoutLayoutObject = NoLayoutObjectDisplays(state);
         if (withoutLayoutObject.Count > 0)
         {
@@ -125,7 +125,7 @@ public static class RecordedPage
         notes.Add("A box or block whose recorded layout could not be imposed, as when Blink lays out different children or text from those recorded, keeps Blink's layout, and is listed in DevTools' Console with the reason. Text is drawn from its recorded glyphs only when the font Blink chose for it is the recorded font file, by digest, at the recorded size; other text keeps Blink's shaping, and the Console lists its block.");
         if (servedAtRecordedAddress)
         {
-            notes.Add($"The page is served at its recorded address, {url}, so that its relative URLs resolve as they did. The recorder answers that address, and the page's images and the builder's font files from the recording; it refuses every other request of the page, such as a style sheet, which DevTools' Network panel lists, so nothing reaches the network.");
+            notes.Add($"The page is served at its recorded address, {url}, so that its relative URLs resolve as they did. The recorder answers that address, and the page's images and the builder's font files from the recording; and from protocol 0.51 its style sheets; it refuses every other request of the page, which DevTools' Network panel lists, so nothing reaches the network.");
             notes.AddRange(used.Notes);
         }
         else
@@ -183,7 +183,7 @@ public static class RecordedPage
             new RecreationFidelity("not-checked", "The recreation is not yet compared with the recording.", []),
             notes);
         return new RecreationContent(
-            Markup(Tree(state, used.Faces, fontAddress, placed, compositorValues), DocumentTypeName(tree, documentId), nonce),
+            Markup(Tree(state, used.Faces, fontAddress, placed, compositorValues, used.StyleSheets, used.StyleSheetText), DocumentTypeName(tree, documentId), nonce),
             evidence,
             nonce)
         {
@@ -406,7 +406,9 @@ public static class RecordedPage
         IReadOnlyList<RecordedFontFace>? faces = null,
         string? fontAddress = null,
         IReadOnlyList<PopupData>? popups = null,
-        RecordedCompositorValues? compositorValues = null)
+        RecordedCompositorValues? compositorValues = null,
+        RecordedStyleSheets? styleSheets = null,
+        Func<string, byte[]?>? styleSheetText = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var documentId = DocumentNodeId(tree);
@@ -504,6 +506,47 @@ public static class RecordedPage
                 writer.WriteString("kind", popup.Kind);
                 writer.WriteNumber("ownerNodeId", popup.OwnerNodeId);
                 writer.WriteString("label", popup.Label);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
+            // Slice 4e: each style sheet in effect at the frame, parents
+            // before the sheets they import, with its recorded CSSOM text
+            // where script changed it or constructed it, and the adopted
+            // sheets of each tree scope, by number.
+            writer.WriteStartArray("styleSheets");
+            foreach (var sheet in (styleSheets ?? RecordedStyleSheets.None).InEffect())
+            {
+                writer.WriteStartObject();
+                writer.WriteString("sheet", sheet.Sheet);
+                writer.WriteString("kind", sheet.Kind);
+                WriteNumber(writer, "ownerNodeId", sheet.OwnerNodeId);
+                WriteText(writer, "parentSheet", sheet.ParentSheet);
+                WriteNumber(writer, "ruleIndex", sheet.RuleIndex);
+                writer.WriteString("media", sheet.Media);
+                writer.WriteBoolean("disabled", sheet.Disabled);
+                string? text = null;
+                if (sheet is { TextSource: "cssom", TextDigest: { } digest } &&
+                    styleSheetText?.Invoke(digest) is { } bytes)
+                {
+                    text = Encoding.UTF8.GetString(bytes);
+                }
+                WriteText(writer, "text", text);
+                writer.WriteBoolean("textExpected", sheet.TextSource == "cssom");
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            writer.WriteStartArray("adoptedStyleSheets");
+            foreach (var scope in (styleSheets ?? RecordedStyleSheets.None).Scopes)
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber("scopeNodeId", scope.ScopeNodeId);
+                writer.WriteStartArray("sheets");
+                foreach (var number in scope.Adopted)
+                {
+                    writer.WriteStringValue(number);
+                }
+                writer.WriteEndArray();
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();

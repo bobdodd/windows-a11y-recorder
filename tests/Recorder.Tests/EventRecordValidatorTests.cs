@@ -4958,6 +4958,54 @@ public sealed class EventRecordValidatorTests
         Assert.Empty(ValidateResourceRecord("image-paint-image", shared));
     }
 
+    // Protocol 0.51 (slice 4e).
+    [Fact]
+    public void AcceptsTheStyleSheetRecords()
+    {
+        Assert.Empty(ValidateResourceRecord("style-sheet-text", ResourcePayload("style-sheet-text")));
+        Assert.Empty(ValidateResourceRecord("style-sheet-resource", ResourcePayload("style-sheet-resource")));
+        Assert.Empty(ValidateResourceRecord("style-sheets-updated", ResourcePayload("style-sheets-updated")));
+    }
+
+    [Theory]
+    [InlineData("kind", "\"sheet\"", "payload-property-invalid")]
+    [InlineData("sheet", "\"-1\"", "payload-property-invalid")]
+    [InlineData("textSource", "\"network\"", "payload-property-invalid")]
+    [InlineData("textDigest", "null", "browser-style-sheet-text-digest")]
+    [InlineData("parentSheet", "\"7\"", "browser-style-sheet-import-parent")]
+    [InlineData("media", "null", "payload-property-invalid")]
+    public void RejectsMalformedStyleSheetEntries(string property, string value, string code)
+    {
+        var payload = ResourcePayload("style-sheets-updated");
+        payload["scopes"]![0]!["sheets"]![0]![property] = JsonNode.Parse(value);
+
+        Assert.Contains(
+            ValidateResourceRecord("style-sheets-updated", payload),
+            issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void AnImportNamesItsParentAndRule()
+    {
+        var payload = ResourcePayload("style-sheets-updated");
+        payload["scopes"]![0]!["sheets"]![1]!["ruleIndex"] = null;
+
+        Assert.Contains(
+            ValidateResourceRecord("style-sheets-updated", payload),
+            issue => issue.Code == "browser-style-sheet-import-parent");
+    }
+
+    [Fact]
+    public void ASheetUnchangedSinceItsLastRecordIsItsNumberAlone()
+    {
+        var payload = ResourcePayload("style-sheets-updated");
+        payload["scopes"]![0]!["sheets"]![2]!["media"] = "";
+
+        Assert.Contains(
+            ValidateResourceRecord("style-sheets-updated", payload),
+            issue => issue.Code == "payload-property-unexpected");
+    }
+
     [Fact]
     public void APaintImageOfAnElementsOwnSequenceNamesItsNode()
     {
@@ -4984,6 +5032,9 @@ public sealed class EventRecordValidatorTests
     [InlineData("image-paint-image", "paintImageId", "\"-2\"", "payload-property-invalid")]
     [InlineData("image-paint-image", "sequence", "\"stopped\"", "payload-property-invalid")]
     [InlineData("image-paint-image", "nodeId", "0", "payload-property-invalid")]
+    [InlineData("style-sheet-text", "size", "\"6\"", "browser-resource-bytes-invalid")]
+    [InlineData("style-sheet-resource", "textRecorded", "null", "payload-property-invalid")]
+    [InlineData("style-sheet-resource", "digest", "\"ab\"", "payload-property-invalid")]
     public void RejectsMalformedResourceRecords(
         string eventType, string path, string value, string code)
     {
@@ -5041,6 +5092,9 @@ public sealed class EventRecordValidatorTests
             "font-face-added" or "font-face-removed" => BrowserResourcePayloads.FaceAdded,
             "font-face-loaded" => BrowserResourcePayloads.FaceLoaded,
             "image-paint-image" => BrowserResourcePayloads.ImagePaintImage,
+            "style-sheet-text" => BrowserResourcePayloads.FontFile,
+            "style-sheet-resource" => BrowserResourcePayloads.StyleSheetResource,
+            "style-sheets-updated" => BrowserResourcePayloads.StyleSheetsUpdated,
             _ => BrowserResourcePayloads.ImageResource
         })!;
 

@@ -369,6 +369,8 @@ function showTimings(steps, times) {
       ["treeRead", "The recorded tree was read"],
       ["fontsLoaded", "The recorded font faces were added and loaded"],
       ["domBuilt", "The DOM was built"],
+      ["styleSheetsLoaded", "The page's linked style sheets were loaded"],
+      ["styleSheetsApplied", "The recorded style sheet changes and adopted sheets were applied"],
       ["styleAndLayout", "The first style and layout, with the recorded values, finished"],
       ["builderFinished", "The builder finished"],
       ["firstPaint", "The first frame after the build was painted"],
@@ -378,9 +380,10 @@ function showTimings(steps, times) {
         timingsList.appendChild(element("li", `${label} at ${times[key].toFixed(1)} ms`));
       }
     }
-    if (typeof times.domBuilt === "number" && typeof times.styleAndLayout === "number") {
+    const beforeStyle = typeof times.styleSheetsApplied === "number" ? times.styleSheetsApplied : times.domBuilt;
+    if (typeof beforeStyle === "number" && typeof times.styleAndLayout === "number") {
       timingsList.appendChild(element("li",
-        `The first style and layout took ${(times.styleAndLayout - times.domBuilt).toFixed(1)} ms`));
+        `The first style and layout took ${(times.styleAndLayout - beforeStyle).toFixed(1)} ms`));
     }
   }
 }

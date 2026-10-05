@@ -500,6 +500,17 @@ scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
 `scroll_element_id`, and the bridge writes it as decimal text, or null for
 zero.
 
+Protocol 0.51 (slice 4e) adds three `browser.resources` records.
+`RecordBlinkStyleSheetResource` is called from
+`StyleSheetContents::ParseAuthorStyleSheet` once a linked or imported
+sheet's text is decoded, and writes `style-sheet-resource` with a
+`style-sheet-text` record of the text in UTF-8 the first time the renderer
+meets its digest. `RecordBlinkStyleSheetsUpdated` is called from
+`StyleEngine::UpdateActiveStyleSheets`, before
+`probe::ActiveStyleSheetsUpdated`, and writes `style-sheets-updated`: each
+touched tree scope's sheets and adopted sheets, each named by a number from
+`AssignStyleSheetNumber` and given in full only when new or changed.
+
 Protocol 0.50 (slice 4b sub-step 2b-iii) extends each `scroll-offset`
 `CompositorDrawnValue` to four numbers: x, y, 1 or 0 for
 `ScrollNode::is_composited`, and a bitmask of the node's

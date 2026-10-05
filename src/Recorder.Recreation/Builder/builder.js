@@ -285,6 +285,171 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // Slice 4e: the page's style sheets as recorded at the frame. The link
+  // sheets the built DOM asks for, and the sheets they import, are answered
+  // by the recorder with the text they arrived with; the builder waits for
+  // them, then gives each sheet script changed its recorded CSSOM text, makes
+  // each constructed sheet, and adopts the sheets of each tree scope in the
+  // recorded order. A sheet that cannot be given its recorded state is noted,
+  // and the Console says so.
+  const sheetNote = (sheet, reason) => {
+    note(null, `style sheet ${sheet}`, reason);
+    console.warn(`Windows A11y Recorder: the recorded style sheet ${sheet} ${reason}.`);
+  };
+  const linkLoads = [];
+  for (const made of nodes.values()) {
+    if (made instanceof HTMLLinkElement && made.relList.contains("stylesheet") && !made.sheet) {
+      linkLoads.push(new Promise((resolve) => {
+        made.addEventListener("load", resolve, { once: true });
+        made.addEventListener("error", resolve, { once: true });
+      }));
+    }
+  }
+  if (linkLoads.length > 0) {
+    await Promise.race([
+      Promise.all(linkLoads),
+      new Promise((resolve) => setTimeout(resolve, 10000)),
+    ]);
+  }
+  times.styleSheetsLoaded = performance.now();
+  // A sheet's CSSOM text is each rule's cssText on a line of its own, and a
+  // rule may span lines, so it is split into rules at the ends of top-level
+  // blocks and statements, outside strings and comments.
+  const splitRules = (text) => {
+    const rules = [];
+    let depth = 0;
+    let start = 0;
+    let quote = null;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quote !== null) {
+        if (c === "\\") {
+          i++;
+        } else if (c === quote) {
+          quote = null;
+        }
+        continue;
+      }
+      if (c === "\"" || c === "'") {
+        quote = c;
+      } else if (c === "/" && text[i + 1] === "*") {
+        const end = text.indexOf("*/", i + 2);
+        i = end < 0 ? text.length : end + 1;
+      } else if (c === "{") {
+        depth++;
+      } else if (c === "}") {
+        depth = Math.max(0, depth - 1);
+        if (depth === 0) {
+          rules.push(text.slice(start, i + 1));
+          start = i + 1;
+        }
+      } else if (c === ";" && depth === 0) {
+        rules.push(text.slice(start, i + 1));
+        start = i + 1;
+      }
+    }
+    rules.push(text.slice(start));
+    return rules.map((rule) => rule.trim()).filter((rule) => rule.length > 0);
+  };
+  // Leading rules the loaded sheet already has as recorded, such as its
+  // @import rules, are kept, so that an imported sheet already loaded is
+  // not asked for again.
+  const replaceRules = (sheet, recorded) => {
+    const rules = splitRules(recorded.text);
+    let kept = 0;
+    try {
+      while (kept < sheet.cssRules.length && kept < rules.length &&
+             sheet.cssRules[kept] instanceof CSSImportRule &&
+             sheet.cssRules[kept].cssText === rules[kept]) {
+        kept++;
+      }
+      while (sheet.cssRules.length > kept) {
+        sheet.deleteRule(sheet.cssRules.length - 1);
+      }
+    } catch (error) {
+      sheetNote(recorded.sheet, `kept its loaded rules: ${error.message}`);
+      return;
+    }
+    let refused = 0;
+    let firstError = null;
+    for (const rule of rules.slice(kept)) {
+      try {
+        sheet.insertRule(rule, sheet.cssRules.length);
+      } catch (error) {
+        refused++;
+        firstError ??= error.message;
+      }
+    }
+    if (refused > 0) {
+      sheetNote(recorded.sheet, `lacks ${refused} recorded rules that insertRule refused, the first with: ${firstError}`);
+    }
+  };
+  const sheetObjects = new Map();
+  for (const recorded of data.styleSheets ?? []) {
+    let sheet = null;
+    try {
+      if (recorded.kind === "constructed") {
+        sheet = new CSSStyleSheet({ media: recorded.media, disabled: recorded.disabled });
+        sheet.replaceSync(recorded.text ?? "");
+        if (recorded.text === null) {
+          sheetNote(recorded.sheet, "was constructed, but its text is not in the recording, so it is made empty");
+        }
+      } else if (recorded.kind === "import") {
+        const parent = sheetObjects.get(recorded.parentSheet);
+        sheet = parent?.cssRules[recorded.ruleIndex]?.styleSheet ?? null;
+      } else if (recorded.ownerNodeId !== null) {
+        sheet = nodes.get(recorded.ownerNodeId)?.sheet ?? null;
+      }
+    } catch (error) {
+      sheetNote(recorded.sheet, `was not reached: ${error.message}`);
+      continue;
+    }
+    if (!sheet) {
+      sheetNote(recorded.sheet, `(${recorded.kind}) was not found in the built page`);
+      continue;
+    }
+    sheetObjects.set(recorded.sheet, sheet);
+    if (recorded.kind === "constructed") {
+      continue;
+    }
+    if (recorded.text !== null) {
+      replaceRules(sheet, recorded);
+    } else if (recorded.textExpected) {
+      sheetNote(recorded.sheet, "had been changed through the CSSOM, but its CSSOM text is not in the recording, so it keeps the rules it loaded");
+    }
+    try {
+      if (sheet.media.mediaText !== recorded.media) {
+        sheet.media.mediaText = recorded.media;
+      }
+      if (sheet.disabled !== recorded.disabled) {
+        sheet.disabled = recorded.disabled;
+      }
+    } catch (error) {
+      sheetNote(recorded.sheet, `media or disabled state not set: ${error.message}`);
+    }
+  }
+  for (const scope of data.adoptedStyleSheets ?? []) {
+    const root = scope.scopeNodeId === data.document.id ? document : nodes.get(scope.scopeNodeId);
+    if (!root || !("adoptedStyleSheets" in root)) {
+      if (scope.sheets.length > 0) {
+        note(scope.scopeNodeId, "adopted style sheets", "the tree scope was not built");
+      }
+      continue;
+    }
+    const adopted = scope.sheets.map((number) => sheetObjects.get(number)).filter((sheet) => sheet);
+    if (adopted.length !== scope.sheets.length) {
+      note(scope.scopeNodeId, "adopted style sheets", `${scope.sheets.length - adopted.length} of ${scope.sheets.length} were not made`);
+    }
+    if (scope.sheets.length > 0 || root.adoptedStyleSheets.length > 0) {
+      try {
+        root.adoptedStyleSheets = adopted;
+      } catch (error) {
+        note(scope.scopeNodeId, "adopted style sheets", `not set: ${error.message}`);
+      }
+    }
+  }
+  times.styleSheetsApplied = performance.now();
+
   // The page's first style and layout, forced here so that its time is
   // measured apart from the rest; scrolling would force it in any case.
   document.documentElement.getBoundingClientRect();

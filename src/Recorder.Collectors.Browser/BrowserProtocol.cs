@@ -392,7 +392,8 @@ internal static class BrowserProtocol
                     JsonOptions) as object,
             (BrowserEvidenceChannels.Resources,
                 BrowserEvidenceEventTypes.FontFile or
-                BrowserEvidenceEventTypes.ImageData) =>
+                BrowserEvidenceEventTypes.ImageData or
+                BrowserEvidenceEventTypes.StyleSheetText) =>
                 payload.Deserialize<BrowserResourceBytesPayload>(JsonOptions)
                     as object,
             (BrowserEvidenceChannels.Resources,
@@ -411,6 +412,14 @@ internal static class BrowserProtocol
             (BrowserEvidenceChannels.Resources,
                 BrowserEvidenceEventTypes.ImagePaintImage) =>
                 payload.Deserialize<BrowserImagePaintImagePayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.StyleSheetResource) =>
+                payload.Deserialize<BrowserStyleSheetResourcePayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.StyleSheetsUpdated) =>
+                payload.Deserialize<BrowserStyleSheetsUpdatedPayload>(JsonOptions)
                     as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or

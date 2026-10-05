@@ -1135,7 +1135,14 @@ Protocol version 0.50 adds, to each `scroll-offset` value of
 main thread (`mainThreadRepaintReasons`). The design is in
 [page recreation](page-recreation.md), "Sub-step 2b-iii design".
 
-Live 0.50 connections require an exact protocol-version match.
+Protocol version 0.51 adds `style-sheet-resource`, `style-sheet-text`, and
+`style-sheets-updated` on `browser.resources`: the text each linked or
+imported sheet arrived with, and each tree scope's sheets and adopted
+sheets at each update of the document's active style sheets, with the
+CSSOM text of a sheet script changed or constructed. The design is in
+[page recreation](page-recreation.md), "Slice 4e".
+
+Live 0.51 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

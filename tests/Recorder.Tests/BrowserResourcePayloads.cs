@@ -105,4 +105,52 @@ internal static class BrowserResourcePayloads
           "syncTargetPaintImageId": "41"
         }
         """;
+
+    // Protocol 0.51: a style sheet as it arrived.
+    public static readonly string StyleSheetResource = $$"""
+        {
+          "context": {{ProcessContextJson}},
+          "url": "https://www.example.org/site.css",
+          "responseUrl": null,
+          "status": 200,
+          "mimeType": "text/css",
+          "size": "5",
+          "digest": "{{Digest}}",
+          "textRecorded": true
+        }
+        """;
+
+    // Protocol 0.51: an update of a document's active sheets, with a sheet
+    // given in full, an import, a sheet unchanged since the last record, and
+    // an adopted constructed sheet.
+    public static readonly string StyleSheetsUpdated = $$"""
+        {
+          "context": {{DocumentContextJson}},
+          "scopes": [
+            {
+              "scopeNodeId": 1,
+              "sheets": [
+                {
+                  "sheet": "1", "kind": "link", "ownerNodeId": 12, "parentSheet": null, "ruleIndex": null,
+                  "href": "https://www.example.org/site.css", "media": "", "title": "", "disabled": false,
+                  "active": true, "textSource": "arrived", "textDigest": "{{Digest}}"
+                },
+                {
+                  "sheet": "2", "kind": "import", "ownerNodeId": null, "parentSheet": "1", "ruleIndex": 0,
+                  "href": "https://www.example.org/more.css", "media": "", "title": "", "disabled": false,
+                  "active": true, "textSource": "arrived", "textDigest": "{{Digest}}"
+                },
+                { "sheet": "3" }
+              ],
+              "adopted": [
+                {
+                  "sheet": "4", "kind": "constructed", "ownerNodeId": null, "parentSheet": null, "ruleIndex": null,
+                  "href": null, "media": "screen", "title": "", "disabled": false,
+                  "active": true, "textSource": "cssom", "textDigest": "{{Digest}}"
+                }
+              ]
+            }
+          ]
+        }
+        """;
 }

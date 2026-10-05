@@ -18092,6 +18092,408 @@ def patch_blink_clip_path_clipper(path: Path) -> None:
     write_patched(path, text)
 
 
+# Slice 4e (protocol 0.51): the page's style sheets as they arrive. The text a
+# link or @import sheet arrived with is recorded when Blink parses it, and
+# each update of a document's active style sheets records the sheets of the
+# tree scopes it touched, with the CSSOM text of each sheet script changed.
+# See docs/architecture/page-recreation.md, "Slice 4e".
+BLINK_CSS_STYLE_SHEET_HEADER_ANCHOR = """\
+  void Trace(Visitor*) const override;
+
+ private:
+  friend class QuietMutationScope;
+"""
+BLINK_CSS_STYLE_SHEET_HEADER_MARKER = "uint64_t recorder_sheet_number_ = 0;"
+BLINK_CSS_STYLE_SHEET_HEADER = """\
+  // Windows A11y Recorder (protocol 0.51, slice 4e): the sheet's number in
+  // the renderer's records, assigned when it is first recorded; whether its
+  // rules changed since its CSSOM text was last recorded; the digest of that
+  // text; and the state last recorded, so an unchanged sheet is recorded by
+  // its number only.
+  uint64_t recorder_sheet_number_ = 0;
+  bool recorder_cssom_changed_ = false;
+  String recorder_cssom_digest_;
+  String recorder_last_facts_;
+  // The sheet's CSSOM text as DevTools builds it: each rule's cssText on a
+  // line of its own.
+  String RecorderCSSOMText();
+
+"""
+
+BLINK_CSS_STYLE_SHEET_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/css/css_style_sheet.h"'
+)
+BLINK_CSS_STYLE_SHEET_DID_MUTATE_ANCHOR = """\
+void CSSStyleSheet::DidMutate(Mutation mutation) {
+"""
+BLINK_CSS_STYLE_SHEET_DID_MUTATE_HOOK = """\
+void CSSStyleSheet::DidMutate(Mutation mutation) {
+  // Windows A11y Recorder (protocol 0.51): a change to the rules or contents
+  // is recorded as the sheet's CSSOM text at the next active sheet update.
+  if (mutation != Mutation::kSheet) {
+    recorder_cssom_changed_ = true;
+  }
+"""
+BLINK_CSS_STYLE_SHEET_SET_TEXT_ANCHOR = """\
+void CSSStyleSheet::SetText(const String& text, CSSImportRules import_rules) {
+"""
+BLINK_CSS_STYLE_SHEET_SET_TEXT_HOOK = """\
+void CSSStyleSheet::SetText(const String& text, CSSImportRules import_rules) {
+  // Windows A11y Recorder (protocol 0.51): replace() and replaceSync().
+  recorder_cssom_changed_ = true;
+"""
+BLINK_CSS_STYLE_SHEET_CAN_ACCESS_ANCHOR = """\
+bool CSSStyleSheet::CanAccessRules() const {
+  return enable_rule_access_for_inspector_ || contents_->IsOriginClean();
+}
+"""
+BLINK_CSS_STYLE_SHEET_CAN_ACCESS_HOOK = """\
+bool CSSStyleSheet::CanAccessRules() const {
+  // Windows A11y Recorder recreation mode (slice 4e): the builder gives a
+  // sheet from another origin its recorded CSSOM text. The page's own
+  // scripts do not run in a recreation.
+  if (a11y_recorder::IsRecreationMode()) {
+    return true;
+  }
+  return enable_rule_access_for_inspector_ || contents_->IsOriginClean();
+}
+"""
+BLINK_CSS_STYLE_SHEET_DEFINITIONS_ANCHOR = """\
+void CSSStyleSheet::Trace(Visitor* visitor) const {
+"""
+BLINK_CSS_STYLE_SHEET_DEFINITIONS_MARKER = "String CSSStyleSheet::RecorderCSSOMText() {"
+BLINK_CSS_STYLE_SHEET_DEFINITIONS = """\
+// Windows A11y Recorder (protocol 0.51): as
+// InspectorStyleSheet::CollectStyleSheetRules builds it.
+String CSSStyleSheet::RecorderCSSOMText() {
+  StringBuilder recorder_builder;
+  for (unsigned i = 0; i < length(); ++i) {
+    recorder_builder.Append(ItemInternal(i)->cssText());
+    recorder_builder.Append('\\n');
+  }
+  return recorder_builder.ToString();
+}
+
+"""
+
+BLINK_STYLE_SHEET_CONTENTS_HEADER_ANCHOR = """\
+  void Trace(Visitor*) const;
+
+ private:
+  StyleSheetContents& operator=(const StyleSheetContents&) = delete;
+"""
+BLINK_STYLE_SHEET_CONTENTS_HEADER_MARKER = "String recorder_arrived_digest_;"
+BLINK_STYLE_SHEET_CONTENTS_HEADER = """\
+  // Windows A11y Recorder (protocol 0.51, slice 4e): the digest of the text
+  // this sheet's resource arrived with, or empty when it was not recorded.
+  String recorder_arrived_digest_;
+
+"""
+BLINK_STYLE_SHEET_CONTENTS_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/css/style_sheet_contents.h"'
+)
+BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR = """\
+  String sheet_text =
+      cached_style_sheet->SheetText(parser_context_, mime_type_check);
+"""
+BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK = BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.51, slice 4e): the text this sheet
+  // arrived with, by its address, recorded once for each digest.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    A11Y_RECORDER_HOOK_COST("hook:style-sheet-resource");
+    a11y_recorder::StyleSheetResourceFacts recorder_sheet;
+    recorder_sheet.url = cached_style_sheet->Url().GetString().Utf8();
+    recorder_sheet.response_url = response.ResponseUrl().GetString().Utf8();
+    recorder_sheet.status = response.HttpStatusCode();
+    recorder_sheet.mime_type = response.MimeType().Utf8();
+    recorder_sheet.text = sheet_text.Utf8();
+    recorder_arrived_digest_ = String::FromUTF8(
+        a11y_recorder::RecordBlinkStyleSheetResource(std::move(recorder_sheet)));
+  }
+"""
+
+BLINK_STYLE_ENGINE_STYLE_SHEETS_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/bindings/core/v8/v8_observable_array_css_style_sheet.h"',
+    '#include "third_party/blink/renderer/core/css/css_import_rule.h"',
+    '#include "third_party/blink/renderer/core/css/media_list.h"',
+    '#include "third_party/blink/renderer/core/html/html_link_element.h"',
+    '#include "third_party/blink/renderer/core/html/html_style_element.h"',
+    '#include "third_party/blink/renderer/core/svg/svg_style_element.h"',
+    '#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"',
+    "#include <string>",
+    "#include <vector>",
+    '#include "base/strings/string_number_conversions.h"',
+)
+BLINK_STYLE_ENGINE_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/css/style_engine.h"'
+)
+BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_ANCHOR = """\
+void StyleEngine::UpdateActiveStyleSheets() {
+"""
+BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_MARKER = (
+    "void RecorderAppendStyleSheet("
+)
+BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS = """\
+namespace {
+
+// Windows A11y Recorder (protocol 0.51, slice 4e): a sheet's facts at an
+// update of the active style sheets, in full only when they differ from
+// those last recorded for it. A sheet that script changed, and a constructed
+// sheet, is recorded by its CSSOM text, serialized only when its rules
+// changed since it was last serialized.
+a11y_recorder::StyleSheetFacts RecorderStyleSheetFacts(
+    CSSStyleSheet& sheet,
+    bool active,
+    CSSStyleSheet* parent,
+    int rule_index) {
+  a11y_recorder::StyleSheetFacts facts;
+  if (!sheet.recorder_sheet_number_) {
+    sheet.recorder_sheet_number_ = a11y_recorder::AssignStyleSheetNumber();
+  }
+  facts.sheet_number = sheet.recorder_sheet_number_;
+  Node* owner = sheet.ownerNode();
+  if (parent) {
+    facts.kind = "import";
+    if (!parent->recorder_sheet_number_) {
+      parent->recorder_sheet_number_ = a11y_recorder::AssignStyleSheetNumber();
+    }
+    facts.parent_sheet_number = parent->recorder_sheet_number_;
+    facts.rule_index = rule_index;
+  } else if (sheet.IsConstructed()) {
+    facts.kind = "constructed";
+  } else if (IsA<HTMLLinkElement>(owner)) {
+    facts.kind = "link";
+  } else if (IsA<HTMLStyleElement>(owner) || IsA<SVGStyleElement>(owner)) {
+    facts.kind = "style";
+  } else if (IsA<ProcessingInstruction>(owner)) {
+    facts.kind = "processing-instruction";
+  } else {
+    facts.kind = "other";
+  }
+  facts.owner_node_id = owner ? static_cast<int>(owner->GetDomNodeId()) : 0;
+  facts.href = sheet.href().Utf8();
+  facts.media =
+      sheet.MediaQueries() ? sheet.MediaQueries()->MediaText().Utf8() : "";
+  facts.title = sheet.title().Utf8();
+  facts.disabled = sheet.disabled();
+  facts.active = active;
+  StyleSheetContents* contents = sheet.Contents();
+  if (sheet.IsConstructed() || (contents && contents->IsMutable())) {
+    if (sheet.recorder_cssom_changed_ || sheet.recorder_cssom_digest_.empty()) {
+      sheet.recorder_cssom_digest_ = String::FromUTF8(
+          a11y_recorder::RecordBlinkStyleSheetText(
+              sheet.RecorderCSSOMText().Utf8()));
+      sheet.recorder_cssom_changed_ = false;
+    }
+    // A text whose record could not be queued is named by no digest.
+    facts.text_digest = sheet.recorder_cssom_digest_.Utf8();
+    facts.text_source = facts.text_digest.empty() ? "none" : "cssom";
+  } else if (facts.kind == "style") {
+    facts.text_source = "element";
+  } else if (contents && !contents->recorder_arrived_digest_.empty()) {
+    facts.text_source = "arrived";
+    facts.text_digest = contents->recorder_arrived_digest_.Utf8();
+  } else {
+    facts.text_source = "none";
+  }
+  const std::string state =
+      facts.kind + "\\n" + base::NumberToString(facts.owner_node_id) + "\\n" +
+      base::NumberToString(facts.parent_sheet_number) + "\\n" +
+      base::NumberToString(facts.rule_index) + "\\n" + facts.href + "\\n" +
+      facts.media + "\\n" + facts.title + "\\n" +
+      (facts.disabled ? "1" : "0") + (facts.active ? "1" : "0") + "\\n" +
+      facts.text_source + "\\n" + facts.text_digest;
+  const String recorder_state = String::FromUTF8(state);
+  facts.full = recorder_state != sheet.recorder_last_facts_;
+  sheet.recorder_last_facts_ = recorder_state;
+  return facts;
+}
+
+// A sheet, then each sheet it imports, depth first. Import rules precede
+// every rule but @charset and @layer statements, so the walk stops once the
+// sheet's import rules are all met.
+void RecorderAppendStyleSheet(
+    CSSStyleSheet& sheet,
+    bool active,
+    CSSStyleSheet* parent,
+    int rule_index,
+    int depth,
+    std::vector<a11y_recorder::StyleSheetFacts>& out) {
+  out.push_back(RecorderStyleSheetFacts(sheet, active, parent, rule_index));
+  StyleSheetContents* contents = sheet.Contents();
+  if (!contents || depth >= 16) {
+    return;
+  }
+  const wtf_size_t imports = contents->ImportRules().size();
+  wtf_size_t met = 0;
+  for (unsigned i = 0; i < sheet.length() && met < imports; ++i) {
+    auto* import_rule = DynamicTo<CSSImportRule>(sheet.ItemInternal(i));
+    if (!import_rule) {
+      continue;
+    }
+    ++met;
+    if (CSSStyleSheet* imported = import_rule->styleSheet()) {
+      RecorderAppendStyleSheet(*imported, active, &sheet, static_cast<int>(i),
+                               depth + 1, out);
+    }
+  }
+}
+
+// A tree scope's sheets in document.styleSheets order, then its adopted
+// sheets.
+a11y_recorder::StyleSheetScopeFacts RecorderStyleSheetScope(
+    TreeScope& tree_scope,
+    StyleSheetCollection& collection) {
+  a11y_recorder::StyleSheetScopeFacts scope;
+  scope.scope_node_id = static_cast<int>(tree_scope.RootNode().GetDomNodeId());
+  HeapHashSet<Member<CSSStyleSheet>> active;
+  for (const auto& entry : collection.ActiveStyleSheets()) {
+    active.insert(entry.first);
+  }
+  collection.UpdateStyleSheetList();
+  for (StyleSheet* listed : collection.StyleSheetsForStyleSheetList()) {
+    if (auto* sheet = DynamicTo<CSSStyleSheet>(listed)) {
+      RecorderAppendStyleSheet(*sheet, active.Contains(sheet), nullptr, -1, 0,
+                               scope.sheets);
+    }
+  }
+  if (tree_scope.HasAdoptedStyleSheets()) {
+    for (CSSStyleSheet* sheet : *tree_scope.AdoptedStyleSheets()) {
+      if (sheet) {
+        RecorderAppendStyleSheet(*sheet, active.Contains(sheet), nullptr, -1,
+                                 0, scope.adopted);
+      }
+    }
+  }
+  return scope;
+}
+
+}  // namespace
+
+"""
+BLINK_STYLE_ENGINE_STYLE_SHEETS_ANCHOR = """\
+  probe::ActiveStyleSheetsUpdated(document_);
+
+  dirty_tree_scopes_.clear();
+"""
+BLINK_STYLE_ENGINE_STYLE_SHEETS_HOOK = """\
+  // Windows A11y Recorder (protocol 0.51, slice 4e): the sheets of each tree
+  // scope this update touched.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    A11Y_RECORDER_HOOK_COST("hook:style-sheets-updated");
+    std::vector<a11y_recorder::StyleSheetScopeFacts> recorder_scopes;
+    if (ShouldUpdateDocumentStyleSheetCollection()) {
+      recorder_scopes.push_back(RecorderStyleSheetScope(
+          *document_, GetDocumentStyleSheetCollection()));
+    }
+    if (ShouldUpdateShadowTreeStyleSheetCollection()) {
+      for (TreeScope* tree_scope : dirty_tree_scopes_) {
+        if (!tree_scope || !tree_scope->RootNode().isConnected()) {
+          continue;
+        }
+        if (StyleSheetCollection* recorder_collection =
+                StyleSheetCollectionFor(*tree_scope)) {
+          recorder_scopes.push_back(
+              RecorderStyleSheetScope(*tree_scope, *recorder_collection));
+        }
+      }
+    }
+    a11y_recorder::RecordBlinkStyleSheetsUpdated(
+        document_->GetDomNodeId(), document_->Token().ToString(),
+        std::move(recorder_scopes));
+  }
+""" + BLINK_STYLE_ENGINE_STYLE_SHEETS_ANCHOR
+
+
+def patch_blink_css_style_sheet_header(path: Path) -> None:
+    """Slice 4e: the CSSStyleSheet members that record a sheet."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        BLINK_CSS_STYLE_SHEET_HEADER_ANCHOR,
+        BLINK_CSS_STYLE_SHEET_HEADER,
+        BLINK_CSS_STYLE_SHEET_HEADER_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_css_style_sheet(path: Path) -> None:
+    """Slice 4e: a changed sheet is marked, and its CSSOM text is built."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_CSS_STYLE_SHEET_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    for anchor, hook in (
+        (BLINK_CSS_STYLE_SHEET_DID_MUTATE_ANCHOR, BLINK_CSS_STYLE_SHEET_DID_MUTATE_HOOK),
+        (BLINK_CSS_STYLE_SHEET_SET_TEXT_ANCHOR, BLINK_CSS_STYLE_SHEET_SET_TEXT_HOOK),
+        (BLINK_CSS_STYLE_SHEET_CAN_ACCESS_ANCHOR, BLINK_CSS_STYLE_SHEET_CAN_ACCESS_HOOK),
+    ):
+        text = apply_cookie_hook(text, anchor, hook, path)
+    text = insert_before_once(
+        text,
+        BLINK_CSS_STYLE_SHEET_DEFINITIONS_ANCHOR,
+        BLINK_CSS_STYLE_SHEET_DEFINITIONS,
+        BLINK_CSS_STYLE_SHEET_DEFINITIONS_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_style_sheet_contents_header(path: Path) -> None:
+    """Slice 4e: the digest of the text a sheet arrived with."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        BLINK_STYLE_SHEET_CONTENTS_HEADER_ANCHOR,
+        BLINK_STYLE_SHEET_CONTENTS_HEADER,
+        BLINK_STYLE_SHEET_CONTENTS_HEADER_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_style_sheet_contents(path: Path) -> None:
+    """Slice 4e: the text a link or @import sheet arrived with is recorded."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_STYLE_SHEET_CONTENTS_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR,
+        BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_style_engine_style_sheets(path: Path) -> None:
+    """Slice 4e: each update of the active style sheets is recorded."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_STYLE_ENGINE_OWN_INCLUDE,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_ANCHOR,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_ANCHOR,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -18276,6 +18678,7 @@ def main() -> int:
         patch_blink_layout_change_notes(
             recorder_path, recorder_declaration, recorder_hooks
         )
+    patch_blink_style_engine_style_sheets(blink_core / "css" / "style_engine.cc")
     patch_blink_web_frame_widget_header(
         blink_core / "frame" / "web_frame_widget_impl.h"
     )
@@ -18382,6 +18785,11 @@ def main() -> int:
     patch_blink_image_resource(
         blink_renderer / "core" / "loader" / "resource" / "image_resource.cc"
     )
+    blink_css = blink_renderer / "core" / "css"
+    patch_blink_css_style_sheet_header(blink_css / "css_style_sheet.h")
+    patch_blink_css_style_sheet(blink_css / "css_style_sheet.cc")
+    patch_blink_style_sheet_contents_header(blink_css / "style_sheet_contents.h")
+    patch_blink_style_sheet_contents(blink_css / "style_sheet_contents.cc")
     patch_blink_bitmap_image(
         blink_renderer / "platform" / "graphics" / "bitmap_image.cc"
     )

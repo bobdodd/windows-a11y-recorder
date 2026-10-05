@@ -2150,6 +2150,97 @@ struct ImageResourceFacts {
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkImageResource(ImageResourceFacts image);
 
+// Protocol 0.51 (slice 4e): a style sheet resource Blink parsed
+// (StyleSheetContents::ParseAuthorStyleSheet), with the text it decoded.
+struct StyleSheetResourceFacts {
+  StyleSheetResourceFacts();
+  StyleSheetResourceFacts(StyleSheetResourceFacts&&);
+  StyleSheetResourceFacts& operator=(StyleSheetResourceFacts&&);
+  ~StyleSheetResourceFacts();
+
+  std::string url;
+  std::string response_url;
+  int status = 0;
+  std::string mime_type;
+  // The decoded text, in UTF-8.
+  std::string text;
+};
+
+// Records a style-sheet-resource record, and a style-sheet-text record the
+// first time the renderer meets the text's digest. Returns the digest, which
+// the parsed contents keep. Records nothing when the recorder is not active,
+// and returns an empty digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::string RecordBlinkStyleSheetResource(StyleSheetResourceFacts sheet);
+
+// Protocol 0.51: a style sheet's CSSOM text, as DevTools builds it (each
+// rule's cssText on a line of its own). Records a style-sheet-text record the
+// first time the renderer meets the digest, and returns the digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::string RecordBlinkStyleSheetText(std::string text);
+
+// Protocol 0.51: a number for a CSSStyleSheet, unique in the renderer, so the
+// sheet's records refer to the same sheet. Numbers start at 1.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t AssignStyleSheetNumber();
+
+// Protocol 0.51: one style sheet of a tree scope at an update of the active
+// style sheets. Only the number is recorded for a sheet whose state is
+// unchanged since the document's last record (full is false).
+struct StyleSheetFacts {
+  StyleSheetFacts();
+  StyleSheetFacts(const StyleSheetFacts&);
+  StyleSheetFacts(StyleSheetFacts&&);
+  StyleSheetFacts& operator=(const StyleSheetFacts&);
+  StyleSheetFacts& operator=(StyleSheetFacts&&);
+  ~StyleSheetFacts();
+
+  uint64_t sheet_number = 0;
+  bool full = false;
+  // "link", "style", "import", "constructed", "processing-instruction", or
+  // "other".
+  std::string kind;
+  // The owner node's DOM node ID, or 0 for none.
+  int owner_node_id = 0;
+  // For an import: the parent sheet's number and the import rule's index.
+  uint64_t parent_sheet_number = 0;
+  int rule_index = -1;
+  // The address, or empty for none.
+  std::string href;
+  std::string media;
+  std::string title;
+  bool disabled = false;
+  bool active = false;
+  // "arrived" (the text the resource arrived with), "element" (the owner
+  // element's text, recorded in the DOM), "cssom" (the CSSOM text), or "none".
+  std::string text_source;
+  // The digest of the text, for "arrived" and "cssom"; empty otherwise.
+  std::string text_digest;
+};
+
+// Protocol 0.51: a tree scope's style sheets at an update: the scope's root
+// node (the document or a shadow root), its sheets in document.styleSheets
+// order with each import after the sheet that imports it, and its adopted
+// sheets in order.
+struct StyleSheetScopeFacts {
+  StyleSheetScopeFacts();
+  StyleSheetScopeFacts(StyleSheetScopeFacts&&);
+  StyleSheetScopeFacts& operator=(StyleSheetScopeFacts&&);
+  ~StyleSheetScopeFacts();
+
+  int scope_node_id = 0;
+  std::vector<StyleSheetFacts> sheets;
+  std::vector<StyleSheetFacts> adopted;
+};
+
+// Protocol 0.51: records a style-sheets-updated record for the tree scopes an
+// update of a document's active style sheets touched
+// (StyleEngine::UpdateActiveStyleSheets).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkStyleSheetsUpdated(int document_node_id,
+                                   std::string document_token,
+                                   std::vector<StyleSheetScopeFacts> scopes);
+
 // Protocol 0.48: a paint image Blink made from an image
 // (BitmapImage::PaintImageForCurrentFrameWithInfo): the image's own ID, the
 // paint image's ID, whether its animation sequence is the image's shared one

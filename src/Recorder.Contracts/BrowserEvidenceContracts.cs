@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.50";
+    public const string CurrentVersion = "0.51";
 }
 
 public static class BrowserEvidenceChannels
@@ -119,6 +119,9 @@ public static class BrowserEvidenceEventTypes
     public const string ImageResource = "image-resource";
     public const string ImageData = "image-data";
     public const string ImagePaintImage = "image-paint-image";
+    public const string StyleSheetResource = "style-sheet-resource";
+    public const string StyleSheetText = "style-sheet-text";
+    public const string StyleSheetsUpdated = "style-sheets-updated";
     public const string NetworkRequestWillBeSent = "request-will-be-sent";
     public const string NetworkResponseReceived = "response-received";
     public const string NetworkRequestFinished = "request-finished";
@@ -1572,6 +1575,58 @@ public sealed record BrowserImageResourcePayload(
     string Digest,
     bool DataRecorded,
     string? ImageId);
+
+// A style sheet resource Blink parsed (protocol 0.51, slice 4e): the URL
+// requested, the response's URL, status, and MIME type, and the size and
+// digest of the decoded text in UTF-8, whose bytes are in a style-sheet-text
+// record (BrowserResourceBytesPayload). TextRecorded is false when that
+// record could not be queued. These records carry no document.
+public sealed record BrowserStyleSheetResourcePayload(
+    BrowserContext Context,
+    string Url,
+    string? ResponseUrl,
+    int Status,
+    string MimeType,
+    string Size,
+    string Digest,
+    bool TextRecorded);
+
+// One style sheet at an update of a document's active style sheets
+// (protocol 0.51). Sheet is the sheet's number in the renderer, as a decimal
+// string. The other members are present only when the sheet is new or its
+// state changed since the document's last record. Kind is "link", "style",
+// "import", "constructed", "processing-instruction", or "other"; an import
+// names its parent sheet and the index of its import rule. TextSource is
+// "arrived" (the resource's text, by TextDigest), "element" (the owner
+// element's text, in the DOM), "cssom" (the CSSOM text, by TextDigest), or
+// "none".
+public sealed record BrowserStyleSheetEntry(
+    string Sheet,
+    string? Kind,
+    int? OwnerNodeId,
+    string? ParentSheet,
+    int? RuleIndex,
+    string? Href,
+    string? Media,
+    string? Title,
+    bool? Disabled,
+    bool? Active,
+    string? TextSource,
+    string? TextDigest);
+
+// A tree scope's sheets: the scope's root node (the document or a shadow
+// root), its sheets in document.styleSheets order with each import after the
+// sheet that imports it, and its adopted sheets in order.
+public sealed record BrowserStyleSheetScope(
+    int ScopeNodeId,
+    IReadOnlyList<BrowserStyleSheetEntry> Sheets,
+    IReadOnlyList<BrowserStyleSheetEntry> Adopted);
+
+// The tree scopes an update of a document's active style sheets touched
+// (protocol 0.51).
+public sealed record BrowserStyleSheetsUpdatedPayload(
+    BrowserContext Context,
+    IReadOnlyList<BrowserStyleSheetScope> Scopes);
 
 // A paint image Blink made from an image (protocol 0.48), the first time the
 // renderer made one with its ID: the image's own ID, the paint image's ID,
