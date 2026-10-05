@@ -17884,7 +17884,9 @@ std::optional<gfx::RectF> ClipPathClipper::LocalClipPathBoundingBox(
     const LayoutObject& object) {
 """
 BLINK_CLIP_PATH_CLIPPER_HELPERS_MARKER = "RecorderPaintWorkletClipPath("
-BLINK_CLIP_PATH_CLIPPER_HELPERS = """\
+# The helper as first delivered (5616770), which passed a const Element to
+# DOMNodeIds::IdForNode, which takes a Node.
+STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS = """\
 // Windows A11y Recorder recreation mode ("Sub-step 2c design: paint worklet
 // colors and clip paths imposed"): the clip path a native paint worklet
 // painted at the frame for the object's element, from its
@@ -18015,6 +18017,16 @@ static std::optional<Path> RecorderPaintWorkletClipPath(
 }
 
 """
+BLINK_CLIP_PATH_CLIPPER_HELPERS = STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS.replace(
+    """  if (recorder_moved && report) {
+    const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_element);
+""",
+    """  if (recorder_moved && report) {
+    Node* recorder_node = object.GetNode();
+    const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_node);
+""",
+    1,
+)
 BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR = """\
   if (object.IsText() || !object.StyleRef().HasClipPath() ||
       (!object.IsSVGChild() && !object.HasLayer())) {
@@ -18053,6 +18065,16 @@ def patch_blink_clip_path_clipper(path: Path) -> None:
         text,
         BLINK_CLIP_PATH_CLIPPER_OWN_INCLUDE,
         BLINK_CLIP_PATH_CLIPPER_INCLUDES,
+        path,
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS,
+                BLINK_CLIP_PATH_CLIPPER_HELPERS,
+            ),
+        ),
         path,
     )
     text = insert_before_once(

@@ -8479,6 +8479,28 @@ class RecreationIntegrationTests(unittest.TestCase):
         + "  return std::nullopt;\n}\n\n}  // namespace blink\n"
     )
 
+    def test_upgrades_the_first_paint_worklet_clip_path_helper(self):
+        legacy = INTEGRATE.STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS
+        helpers = INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS
+        # DOMNodeIds::IdForNode takes a Node, not a const Element.
+        self.assertIn("DOMNodeIds::IdForNode(recorder_element)", legacy)
+        self.assertNotIn("DOMNodeIds::IdForNode(recorder_element)", helpers)
+        self.assertIn(
+            "Node* recorder_node = object.GetNode();\n"
+            "    const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_node);",
+            helpers,
+        )
+        source = self.CLIP_PATH_CLIPPER_SOURCE.replace(
+            INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR,
+            legacy + INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR,
+            1,
+        )
+        patched = self.patch_source_twice(
+            "clip_path_clipper.cc", source, INTEGRATE.patch_blink_clip_path_clipper
+        )
+        self.assertNotIn(legacy, patched)
+        self.assertEqual(1, patched.count(helpers))
+
     def test_imposes_the_paint_worklet_clip_paths_once(self):
         source = self.patch_source_twice(
             "clip_path_clipper.cc",
