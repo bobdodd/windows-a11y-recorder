@@ -1542,7 +1542,9 @@ struct CompositorFilterOperation {
 // One property of one element of the active tree as drawn. The property is
 // "transform" (numbers: the 16 matrix entries, row by row), "opacity" (one
 // number), "filter" or "backdrop-filter" (the operations), or
-// "scroll-offset" (x and y), or "background-color-progress" or
+// "scroll-offset" (x and y, and from protocol 0.50 1 or 0 for whether the
+// compositor scrolls the node and a bitmask of its main thread repaint
+// reasons), or "background-color-progress" or
 // "clip-path-progress" (the compositor's progress a native paint worklet's
 // drawn record was painted with, one number, or none when it was painted
 // with no compositor progress), or "image-frame" (protocol 0.48 part 1c:

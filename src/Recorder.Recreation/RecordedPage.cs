@@ -199,8 +199,9 @@ public static class RecordedPage
     /// what the evidence panel says of them (slice 4b sub-step 2b-ii): the
     /// compositor's drawn position at the frame, less the scroll origin and
     /// divided by the effective zoom of the scroller's latest main thread
-    /// record, where that record names the scroll node's element ID;
-    /// otherwise the main thread's offset.
+    /// record, where that record names the scroll node's element ID and
+    /// the compositor scrolled the node itself in the frame that last
+    /// changed it (sub-step 2b-iii); otherwise the main thread's offset.
     /// </summary>
     public static (IReadOnlyDictionary<long, (double X, double Y)> Offsets, IReadOnlyList<string> Notes) ScrollOffsets(
         BrowserDocumentState state,
@@ -209,6 +210,8 @@ public static class RecordedPage
         var positions = (compositorValues ?? RecordedCompositorValues.None).ScrollPositions;
         var offsets = new Dictionary<long, (double X, double Y)>();
         var imposed = new List<string>();
+        var kept = new List<string>();
+        var unknown = new List<string>();
         var joined = new HashSet<string>(StringComparer.Ordinal);
         var named = 0;
         foreach (var (node, record) in state.Layout.ScrollOffsets.OrderBy(item => item.Key))
@@ -229,12 +232,23 @@ public static class RecordedPage
                 continue;
             }
             joined.Add(elementId);
+            var nodeText = node.ToString(CultureInfo.InvariantCulture);
+            if (drawn.IsComposited is null)
+            {
+                unknown.Add(nodeText);
+                continue;
+            }
+            if (drawn.IsComposited == false)
+            {
+                kept.Add($"node {nodeText} at the main thread's ({Css(main.X)}, {Css(main.Y)}), not the compositor's position ({Css(drawn.X)}, {Css(drawn.Y)}) of compositor frame {drawn.FrameToken}, with {(drawn.RepaintReasons.Length == 0 ? "no repaint reason recorded" : $"the repaint reasons {drawn.RepaintReasons}")}");
+                continue;
+            }
             var origin = record.GetProperty("scrollOrigin");
             var zoom = record.GetProperty("effectiveZoom").GetDouble();
             var offset = ((drawn.X - origin.GetProperty("x").GetDouble()) / zoom,
                           (drawn.Y - origin.GetProperty("y").GetDouble()) / zoom);
             offsets[node] = offset;
-            imposed.Add($"node {node.ToString(CultureInfo.InvariantCulture)} at ({Css(offset.Item1)}, {Css(offset.Item2)}), last changed in compositor frame {drawn.FrameToken}, in place of the main thread's ({Css(main.X)}, {Css(main.Y)})");
+            imposed.Add($"node {nodeText} at ({Css(offset.Item1)}, {Css(offset.Item2)}), last changed in compositor frame {drawn.FrameToken}, in place of the main thread's ({Css(main.X)}, {Css(main.Y)})");
         }
         var notes = new List<string>();
         if (state.Layout.ScrollOffsets.Count > 0 && named == 0)
@@ -244,6 +258,14 @@ public static class RecordedPage
         if (imposed.Count > 0)
         {
             notes.Add($"{imposed.Count.ToString(CultureInfo.InvariantCulture)} scrollers are scrolled to the offset the compositor drew at the frame, its position less the scroll origin and divided by the effective zoom of the scroller's latest main thread record: {string.Join("; ", imposed)}. The builder scrolls each once, after the page is built; the recreation's layout is still the main thread's recorded layout.");
+        }
+        if (kept.Count > 0)
+        {
+            notes.Add($"{kept.Count.ToString(CultureInfo.InvariantCulture)} scrollers the compositor did not scroll itself at the frame, so their content is painted by the main thread, keep the main thread's offset: {string.Join("; ", kept)}.");
+        }
+        if (unknown.Count > 0)
+        {
+            notes.Add($"The compositor frame records do not say whether the compositor scrolled {unknown.Count.ToString(CultureInfo.InvariantCulture)} scrollers (nodes {string.Join(", ", unknown)}), as before protocol 0.50, so they keep the main thread's offset.");
         }
         var unjoined = positions.Where(item => !joined.Contains(item.Key)).ToList();
         var moved = unjoined.Count(item => item.Value.X != 0 || item.Value.Y != 0);

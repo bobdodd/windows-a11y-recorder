@@ -4609,6 +4609,24 @@ internal static class EventPayloadValidator
         "rotate-transform", "translate-transform", "scroll", "primary", "other", "none"
     ];
 
+    // Protocol 0.50: whether the compositor scrolls the node, and the reasons
+    // Chromium gives for repainting it on the main thread, each named once.
+    private static readonly string[] ScrollRepaintReasons =
+    [
+        "has-background-attachment-fixed-objects", "not-opaque-for-text-and-lcd-text",
+        "prefer-non-composited-scrolling", "background-needs-repaint-on-scroll",
+    ];
+
+    private static bool IsScrollCompositing(JsonElement value) =>
+        value.EnumerateObject().Count() == 4 &&
+        value.TryGetProperty("isComposited", out var composited) &&
+        (composited.ValueKind is JsonValueKind.True or JsonValueKind.False) &&
+        value.TryGetProperty("mainThreadRepaintReasons", out var reasons) &&
+        reasons.ValueKind == JsonValueKind.Array &&
+        reasons.EnumerateArray().All(reason =>
+            reason.ValueKind == JsonValueKind.String && ScrollRepaintReasons.Contains(reason.GetString(), StringComparer.Ordinal)) &&
+        reasons.EnumerateArray().Select(reason => reason.GetString()).Distinct(StringComparer.Ordinal).Count() == reasons.GetArrayLength();
+
     private static readonly string[] CompositorFilterTypes =
     [
         "grayscale", "sepia", "saturate", "hue-rotate", "invert", "brightness",
@@ -4771,7 +4789,7 @@ internal static class EventPayloadValidator
                 return value.ValueKind == JsonValueKind.Object &&
                     value.TryGetProperty("x", out var x) && IsFiniteNumber(x) &&
                     value.TryGetProperty("y", out var y) && IsFiniteNumber(y) &&
-                    value.EnumerateObject().Count() == 2;
+                    (value.EnumerateObject().Count() == 2 || IsScrollCompositing(value));
             case "background-color-progress":
             case "clip-path-progress":
                 return value.ValueKind == JsonValueKind.Object &&

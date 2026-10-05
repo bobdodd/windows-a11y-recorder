@@ -485,6 +485,12 @@ scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
 `scroll_element_id`, and the bridge writes it as decimal text, or null for
 zero.
 
+Protocol 0.50 (slice 4b sub-step 2b-iii) extends each `scroll-offset`
+`CompositorDrawnValue` to four numbers: x, y, 1 or 0 for
+`ScrollNode::is_composited`, and a bitmask of the node's
+`main_thread_repaint_reasons`. The bridge writes `isComposited` and the
+reasons by name.
+
 Protocol 0.48 adds the `browser.compositor` channel (slice 4b sub-step 1).
 `RegisterCompositorWidget` is called where each presentation request is
 made, and names the widget of the compositor with that `LayerTreeHost` ID.

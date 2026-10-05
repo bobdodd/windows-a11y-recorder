@@ -413,6 +413,12 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.50 adds, to each compositor scroll offset, whether the
+compositor scrolls the node and the reasons Chromium gives for repainting it
+on the main thread, so that page recreation imposes the compositor's offset
+only where the compositor drew it. See "Sub-step 2b-iii" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Protocol 0.49 adds each scroller's compositor element ID to its scroll
 offset record, so that page recreation can scroll it to the offset the
 compositor drew. See "Sub-step 2b-ii" in

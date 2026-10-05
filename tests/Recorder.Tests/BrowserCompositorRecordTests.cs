@@ -110,7 +110,17 @@ public sealed class BrowserCompositorRecordTests
             { "elementId": "1048620", "property": "background-color-progress", "value": { "progress": 0.375 } },
             { "elementId": "1048621", "property": "clip-path-progress", "value": { "progress": null } },
             { "paintImageId": "57", "property": "image-frame", "value": 3 },
-            { "paintImageId": "0", "property": "image-frame", "value": null }
+            { "paintImageId": "0", "property": "image-frame", "value": null },
+            {
+              "elementId": "1048602",
+              "property": "scroll-offset",
+              "value": {
+                "x": 0,
+                "y": 40,
+                "isComposited": false,
+                "mainThreadRepaintReasons": ["not-opaque-for-text-and-lcd-text"]
+              }
+            }
           ]
         }
         """;
@@ -218,6 +228,10 @@ public sealed class BrowserCompositorRecordTests
     [InlineData("opacity", "\"0.5\"")]
     [InlineData("scroll-offset", "{ \"x\": 1 }")]
     [InlineData("scroll-offset", "null")]
+    [InlineData("scroll-offset", "{ \"x\": 1, \"y\": 2, \"isComposited\": 1, \"mainThreadRepaintReasons\": [] }")]
+    [InlineData("scroll-offset", "{ \"x\": 1, \"y\": 2, \"isComposited\": true }")]
+    [InlineData("scroll-offset", "{ \"x\": 1, \"y\": 2, \"isComposited\": false, \"mainThreadRepaintReasons\": [\"slow\"] }")]
+    [InlineData("scroll-offset", "{ \"x\": 1, \"y\": 2, \"isComposited\": false, \"mainThreadRepaintReasons\": [\"prefer-non-composited-scrolling\", \"prefer-non-composited-scrolling\"] }")]
     [InlineData("filter", "[{ \"type\": \"glow\", \"numbers\": [1] }]")]
     [InlineData("filter", "[{ \"type\": \"blur\" }]")]
     [InlineData("background-color-progress", "0.5")]
@@ -364,7 +378,8 @@ public sealed class BrowserCompositorRecordTests
 
         Assert.Equal(2, frame.LayerTreeHostId);
         Assert.Equal("3:2", frame.Widget!.FrameSinkId);
-        Assert.Equal(9, frame.Changes.Count);
+        Assert.Equal(10, frame.Changes.Count);
+        Assert.False(frame.Changes[9].Value.GetProperty("isComposited").GetBoolean());
         Assert.Null(frame.Changes[7].ElementId);
         Assert.Equal("57", frame.Changes[7].PaintImageId);
         Assert.Equal(3, frame.Changes[7].Value.GetInt32());

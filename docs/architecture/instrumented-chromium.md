@@ -1129,7 +1129,13 @@ Protocol version 0.49 adds `scrollElementId` to
 the `compositor-frame` records name its drawn scroll offset by. The design
 is in [page recreation](page-recreation.md), "Sub-step 2b-ii design".
 
-Live 0.49 connections require an exact protocol-version match.
+Protocol version 0.50 adds, to each `scroll-offset` value of
+`compositor-frame`, whether the compositor scrolls the node
+(`isComposited`) and the reasons Chromium gives for repainting it on the
+main thread (`mainThreadRepaintReasons`). The design is in
+[page recreation](page-recreation.md), "Sub-step 2b-iii design".
+
+Live 0.50 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

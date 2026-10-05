@@ -16587,6 +16587,44 @@ CC_COMPOSITOR_FRAME_HELPERS = (
         + CC_FRAME_SCROLL_COMMENT,
     )
 )
+# Protocol 0.50 (slice 4b sub-step 2b-iii): with each scroll node's offset,
+# whether the compositor scrolls it (cc::ScrollNode::is_composited) and the
+# reasons Chromium gives for repainting it on the main thread instead, as
+# a bitmask of the four cc::MainThreadRepaintReason values in their order.
+CC_FRAME_SCROLL_NUMBERS = """\
+    value.numbers = {offset.x(), offset.y()};
+"""
+CC_FRAME_SCROLL_COMPOSITED_NUMBERS = """\
+    // Protocol 0.50: whether the compositor scrolls the node, and the
+    // reasons it is repainted on the main thread instead, one bit each.
+    const MainThreadRepaintReasons& recorder_reasons =
+        node.main_thread_repaint_reasons;
+    const double recorder_reason_bits =
+        (recorder_reasons.Has(
+             MainThreadRepaintReason::kHasBackgroundAttachmentFixedObjects)
+             ? 1
+             : 0) +
+        (recorder_reasons.Has(MainThreadRepaintReason::kNotOpaqueForTextAndLCDText)
+             ? 2
+             : 0) +
+        (recorder_reasons.Has(
+             MainThreadRepaintReason::kPreferNonCompositedScrolling)
+             ? 4
+             : 0) +
+        (recorder_reasons.Has(
+             MainThreadRepaintReason::kBackgroundNeedsRepaintOnScroll)
+             ? 8
+             : 0);
+    value.numbers = {offset.x(), offset.y(), node.is_composited ? 1.0 : 0.0,
+                     recorder_reason_bits};
+"""
+if CC_COMPOSITOR_FRAME_HELPERS.count(CC_FRAME_SCROLL_NUMBERS) != 1:
+    raise RuntimeError("the compositor frame's scroll offset numbers were not found once")
+# The helpers as protocol 0.48 and 0.49 inserted them, replaced in place.
+CC_COMPOSITOR_FRAME_HELPERS_0_49 = CC_COMPOSITOR_FRAME_HELPERS
+CC_COMPOSITOR_FRAME_HELPERS = CC_COMPOSITOR_FRAME_HELPERS.replace(
+    CC_FRAME_SCROLL_NUMBERS, CC_FRAME_SCROLL_COMPOSITED_NUMBERS, 1
+)
 
 CC_DRAW_LAYERS_ANCHOR = """\
   const auto frame_token = compositor_frame.metadata.frame_token;
@@ -16711,6 +16749,7 @@ def patch_cc_layer_tree_host_impl(path: Path) -> None:
         (
             (CC_COMPOSITOR_FRAME_HELPERS_1A, CC_COMPOSITOR_FRAME_HELPERS),
             (CC_COMPOSITOR_FRAME_HELPERS_1B, CC_COMPOSITOR_FRAME_HELPERS),
+            (CC_COMPOSITOR_FRAME_HELPERS_0_49, CC_COMPOSITOR_FRAME_HELPERS),
             (CC_DRAW_LAYERS_HOOK_1A, CC_DRAW_LAYERS_HOOK),
             (CC_DRAW_LAYERS_HOOK_1B, CC_DRAW_LAYERS_HOOK),
         ),

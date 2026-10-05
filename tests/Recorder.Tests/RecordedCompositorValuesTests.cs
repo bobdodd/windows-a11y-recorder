@@ -204,14 +204,14 @@ public sealed class RecordedCompositorValuesTests
         {
             (1_000, "browser.presentation", "presentation-feedback", Feedback()),
             (2_000, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFrame,
-                Frame("1", Change("68", "scroll-offset", """{"x":0.0,"y":120.5}""") + "," + Change("70", "scroll-offset", """{"x":0.0,"y":0.0}""") + "," + Change("72", "scroll-offset", """{"x":0.0,"y":8.0}"""))),
+                Frame("1", Change("68", "scroll-offset", """{"x":0.0,"y":120.5,"isComposited":true,"mainThreadRepaintReasons":[]}""") + "," + Change("70", "scroll-offset", """{"x":0.0,"y":0.0,"isComposited":true,"mainThreadRepaintReasons":[]}""") + "," + Change("72", "scroll-offset", """{"x":0.0,"y":8.0,"isComposited":false,"mainThreadRepaintReasons":["not-opaque-for-text-and-lcd-text"]}"""))),
             (2_600, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFramePresented, Presented("1", 2_500, 2_600)),
             // Another frame sink's compositor.
             (2_700, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFrame,
-                Frame("1", Change("68", "scroll-offset", """{"x":0.0,"y":999.0}"""), sink: "9:9", host: 2)),
+                Frame("1", Change("68", "scroll-offset", """{"x":0.0,"y":999.0,"isComposited":true,"mainThreadRepaintReasons":[]}"""), sink: "9:9", host: 2)),
             (2_800, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFramePresented, Presented("1", 2_750, 2_800, host: 2)),
             (3_000, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFrame,
-                Frame("2", Change("68", "scroll-offset", """{"x":0.0,"y":240.25}""") + "," + Change("72", "scroll-offset", "null"))),
+                Frame("2", Change("68", "scroll-offset", """{"x":0.0,"y":240.25,"isComposited":true,"mainThreadRepaintReasons":[]}""") + "," + Change("74", "scroll-offset", """{"x":0.0,"y":30.0,"isComposited":false,"mainThreadRepaintReasons":["not-opaque-for-text-and-lcd-text","prefer-non-composited-scrolling"]}""") + "," + Change("76", "scroll-offset", """{"x":0.0,"y":12.0}""") + "," + Change("72", "scroll-offset", "null"))),
             (3_600, BrowserEvidenceChannels.Compositor, BrowserEvidenceEventTypes.CompositorFramePresented, Presented("2", 3_500, 3_600)),
         };
         var index = 0UL;
@@ -230,10 +230,13 @@ public sealed class RecordedCompositorValuesTests
     public void EachScrollNodesPositionIsTheLatestAsOfTheLastFramePresented()
     {
         var early = ChooseScrolls(2_900);
-        Assert.Equal(new RecordedScrollPosition(0, 120.5, "1"), early.ScrollPositions["68"]);
+        Assert.Equal(new RecordedScrollPosition(0, 120.5, "1") { IsComposited = true }, early.ScrollPositions["68"]);
+        Assert.Equal(new RecordedScrollPosition(0, 8, "1") { IsComposited = false, RepaintReasons = "not-opaque-for-text-and-lcd-text" }, early.ScrollPositions["72"]);
         Assert.Equal(3, early.ScrollPositions.Count);
         var late = ChooseScrolls(3_700);
-        Assert.Equal(new RecordedScrollPosition(0, 240.25, "2"), late.ScrollPositions["68"]);
+        Assert.Equal(new RecordedScrollPosition(0, 240.25, "2") { IsComposited = true }, late.ScrollPositions["68"]);
+        // Before protocol 0.50 the record does not say.
+        Assert.Null(late.ScrollPositions["76"].IsComposited);
         // A scroll node the compositor no longer had is left out.
         Assert.False(late.ScrollPositions.ContainsKey("72"));
         Assert.Empty(late.ByNode);
@@ -249,13 +252,17 @@ public sealed class RecordedCompositorValuesTests
         state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(1, 100, "68")));
         state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(295, 10, "70", originX: 50, zoom: 2)));
         state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(300, 30, null)));
+        // Sub-step 2b-iii: a scroller the compositor did not scroll itself,
+        // and one whose record does not say, keep the main thread's offset.
+        state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(310, 20, "74")));
+        state.Layout.Apply("layout-scroll-offset-changed", Json(ScrollRecord(320, 11, "76")));
         var compositor = ChooseScrolls(3_700) with { };
         var withOrigin = compositor with
         {
             ScrollPositions = new Dictionary<string, RecordedScrollPosition>(compositor.ScrollPositions)
             {
-                ["70"] = new RecordedScrollPosition(70, 41, "2"),
-                ["90"] = new RecordedScrollPosition(0, 5, "2"),
+                ["70"] = new RecordedScrollPosition(70, 41, "2") { IsComposited = true },
+                ["90"] = new RecordedScrollPosition(0, 5, "2") { IsComposited = true },
             },
         };
         var (offsets, notes) = RecordedPage.ScrollOffsets(state, withOrigin);
@@ -265,6 +272,11 @@ public sealed class RecordedCompositorValuesTests
         Assert.Equal((10d, 20.5), offsets[295]);
         // A record naming no element ID keeps the main thread's offset.
         Assert.Equal((0d, 30d), offsets[300]);
+        Assert.Equal((0d, 20d), offsets[310]);
+        Assert.Equal((0d, 11d), offsets[320]);
+        Assert.Contains(notes, note => note.StartsWith("1 scrollers the compositor did not scroll itself at the frame", StringComparison.Ordinal) &&
+                                       note.Contains("node 310 at the main thread's (0, 20), not the compositor's position (0, 30) of compositor frame 2, with the repaint reasons not-opaque-for-text-and-lcd-text, prefer-non-composited-scrolling", StringComparison.Ordinal));
+        Assert.Contains(notes, note => note.StartsWith("The compositor frame records do not say whether the compositor scrolled 1 scrollers (nodes 320)", StringComparison.Ordinal));
         Assert.Contains(notes, note => note.StartsWith("2 scrollers are scrolled to the offset the compositor drew at the frame", StringComparison.Ordinal) &&
                                        note.Contains("node 1 at (0, 240.25), last changed in compositor frame 2, in place of the main thread's (0, 100)", StringComparison.Ordinal));
         Assert.Contains(notes, note => note.StartsWith("1 scroll nodes of the compositor were at a nonzero offset", StringComparison.Ordinal));

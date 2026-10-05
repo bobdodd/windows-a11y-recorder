@@ -4503,6 +4503,128 @@ Built as designed, with these differences:
 Building Chromium and the look of the recreation are to be checked on the
 target machine.
 
+#### Sub-step 2b-ii on the target machine
+
+Commit 9bd42f3 built on the target machine. The owner recorded the
+animation fixture over http, scrolled the page with the wheel, pressed the
+smooth scroll button twice, and opened frames during the scrolls. The owner
+reported that the wheel scroll "seems accurate" and the smooth scroll "is
+approximate". At 15.398 s the evidence panel listed one scroller, node 5,
+the document, at (0, 367.1295166015625) in place of the main thread's
+(0, 340).
+
+The recording (20261005-121508-1d8b647fe66e4c3e89772b0dfd29721d) was then
+measured in the sandbox. For each captured frame taken during a scroll, the
+scroll offset the captured image shows was measured and compared with the
+recorded offsets:
+
+- For the document, the vertical shift of the page content between the
+  frame and a captured frame at a known, still offset (800, at 18.0 s), found
+  by the least mean absolute difference over whole-pixel shifts.
+- For `#scroller`, the edges of its alternately shaded rows in one pixel
+  column, against the rows' period of 649 / 29 CSS pixels, row 30's offset
+  divided by the 29 rows above it. The candidates were the offsets of
+  compositor frames presented within 150 ms of the frame's composition,
+  since the row pattern repeats every two rows.
+
+The display has a device pixel ratio of 1, so one CSS pixel is one captured
+pixel.
+
+| Captured frame | Composition (s) | Measured | Main thread at the cut | Imposed (9bd42f3) | Compositor frame matching the image |
+| --- | --- | --- | --- | --- | --- |
+| Document, 67 | 15.4186 | 354 | 340 | 367.13 | 452 (353.73), presented 33.2 ms before |
+| Document, 71 | 16.2185 | 488 | 465 | 494.77 | 500 (487.62), 33.2 ms before |
+| Document, 72 | 16.4185 | 599 | 590 | 600 | 512 (599.00), 33.2 ms before |
+| Document, 105 | 23.0183 | 850 | 836 | 864.53 | 908 (850.37), 33.2 ms before |
+| Document, 106 | 23.2183 | 968 | 955 | 979.63 | 920 (967.98), 33.2 ms before |
+| Document, 107 | 23.4183 | 1173 | 1152 | 1194.86 | 932 (1173.20), 33.2 ms before |
+| Document, 114 | 24.8183 | 1244 | 1290 | 1218.26 | 1003 (1243.74), 33.2 ms before |
+| Document, 115 | 25.0183 | 969 | 1003 | 952.86 | 1015 (968.89), 33.2 ms before |
+| Document, 116 | 25.2183 | 771 | 806 | 753.65 | 1027 (770.74), 33.2 ms before |
+| `#scroller`, 87 | 19.4184 | 324 | 324 | 447.81 | 691 (323.85), 49.9 ms before |
+| `#scroller`, 88 | 19.6184 | 632 | 632 | 641.33 | 703 (631.74), 49.9 ms before |
+| `#scroller`, 98 | 21.6184 | 105 to 106 | 105 | 67.87 | 823 (105.53), 49.9 ms before |
+
+Two findings follow, each limited to this recording on this machine:
+
+1. For the document, which the compositor scrolls, every one of the nine
+   images shows the compositor frame presented 33.2 ms, two refreshes of
+   the 60 Hz display, before the frame's composition time. The rule of
+   2b-i and 2b-ii, the last frame presented at or before the composition,
+   picks the frame presented one refresh (16.6 ms) before it, which is one
+   frame too late. The imposed offsets were nearer the image than the main
+   thread's in every case, but not equal to it.
+2. For `#scroller`, every one of the three images shows the main thread's
+   recorded offset at the cut, exactly, and not the compositor's. Its
+   compositor scroll offset ran ahead of what was drawn. A likely reason,
+   not yet evidenced, is that the compositor does not scroll `#scroller`
+   itself, so its content is painted by the main thread at the main
+   thread's offset. Chromium's `cc::ScrollNode` (`cc/trees/scroll_node.h`)
+   holds `is_composited` and `main_thread_repaint_reasons`, which would say
+   so, and the recording does not hold them.
+
+The same one-refresh question applies to the other compositor values of
+2b-i and to the animated image frames of 2a, which choose their frame by the
+same rule. They were not measured here: the owner's checks of them
+(animated image numbers, panel comparisons) did not test a single refresh.
+
+#### Sub-step 2b-iii design: which compositor frame an image shows (agreed, change 1 built)
+
+Two changes, each following one finding above.
+
+1. Protocol 0.50 records, with each scroll node's `scroll-offset` value in
+   `compositor-frame`, the node's `isComposited` and its
+   `mainThreadRepaintReasons` as Chromium holds them. Recreation imposes
+   the compositor's offset only on a scroller whose node was composited at
+   the chosen frame; any other scroller keeps the main thread's offset, and
+   the evidence panel lists it with the reasons recorded. This is a check
+   of the likely reason in finding 2 as much as a fix: if `#scroller` is
+   recorded as composited, the finding is not explained and is reported
+   again, not fixed by this change.
+2. The compositor frame and animated image frames are chosen from the
+   frames presented at or before the composition time less a display
+   latency. Two ways of setting it are open for the owner's choice:
+   - a fixed latency of one display refresh, measured from the recording as
+     the median interval between successive presentation times of the
+     page's frame sink, with the evidence panel saying that the latency is
+     inferred from this machine's measurements, not recorded; or
+   - no change to the rule until the latency is measured for the other
+     compositor values on the target machine, by recording the fixture and
+     comparing captured images of the moving elements as was done here.
+
+The owner agreed change 1 and chose, for change 2, to measure first: the
+selection rule is unchanged until the latency is measured for the other
+compositor values on the target machine.
+
+Required tests, at the unit level: the scroller rule with composited,
+non-composited, and pre-0.50 records; the latency rule with presentations at,
+just before, and just after the shifted time; and the protocol hook and
+serializer, applied once and unchanged on a second run. On the target
+machine, the measurement above is repeated on a new recording.
+
+#### Sub-step 2b-iii change 1 as built
+
+- The compositor frame hook records, with each scroll node's offset, 1 or
+  0 for `cc::ScrollNode::is_composited` and a bitmask of the four
+  `cc::MainThreadRepaintReason` values the node's
+  `main_thread_repaint_reasons` holds, in the enum's order. The bridge
+  writes the offset as `{x, y, isComposited, mainThreadRepaintReasons}`,
+  the reasons as a list of names: `has-background-attachment-fixed-objects`,
+  `not-opaque-for-text-and-lcd-text`, `prefer-non-composited-scrolling`,
+  and `background-needs-repaint-on-scroll`. A change of either is a change
+  of the value, so a frame records it.
+- The validator accepts the 0.49 offset, `{x, y}`, or the 0.50 one, with
+  each reason named once.
+- Recreation imposes the compositor's offset only where the frame that last
+  changed it says the compositor scrolled the node. A scroller it did not
+  scroll keeps the main thread's offset, and the evidence panel lists it with
+  the compositor's position and the reasons recorded. A scroller whose
+  compositor frame record does not say, as before protocol 0.50, keeps the
+  main thread's offset, and the panel names it.
+
+Building Chromium and what is recorded for `#scroller` are to be checked on
+the target machine.
+
 ### Slice 4c: the DOM from the start of parsing (agreed, built)
 
 Proposed and agreed 2026-10-02.

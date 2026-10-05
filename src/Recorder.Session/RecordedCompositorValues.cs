@@ -54,7 +54,21 @@ public sealed record RecordedCompositorValues(
 /// A scroll node's position as the compositor drew it: Blink's scroll offset
 /// plus the scroll origin, and the compositor frame that last changed it.
 /// </summary>
-public sealed record RecordedScrollPosition(double X, double Y, string FrameToken);
+public sealed record RecordedScrollPosition(double X, double Y, string FrameToken)
+{
+    /// <summary>
+    /// Whether the compositor scrolled the node itself in that frame
+    /// (protocol 0.50, sub-step 2b-iii), or null when the record does not
+    /// say, as before protocol 0.50.
+    /// </summary>
+    public bool? IsComposited { get; init; }
+
+    /// <summary>
+    /// The reasons Chromium gave for repainting the node on the main thread,
+    /// comma separated as recorded, or empty.
+    /// </summary>
+    public string RepaintReasons { get; init; } = "";
+}
 
 /// <summary>
 /// Chooses the compositor values each node of a document takes in the
@@ -109,7 +123,7 @@ public sealed class RecordedCompositorValueChooser
         long Host,
         string Token,
         IReadOnlyList<(string ElementId, string Property, string? Text)> Values,
-        IReadOnlyList<(string ElementId, double? X, double? Y)> Scrolls);
+        IReadOnlyList<(string ElementId, RecordedScrollPosition? Position)> Scrolls);
 
     /// <param name="documentKey">The document's state key, its token and identity.</param>
     /// <param name="recordingFrequency">The recording's clock frequency, for a process with no clock synchronization record.</param>
@@ -198,7 +212,7 @@ public sealed class RecordedCompositorValueChooser
                     changes.ValueKind == JsonValueKind.Array)
                 {
                     var values = new List<(string, string, string?)>();
-                    var scrolls = new List<(string, double?, double?)>();
+                    var scrolls = new List<(string, RecordedScrollPosition?)>();
                     foreach (var change in changes.EnumerateArray())
                     {
                         if (Text(change, "property") == "scroll-offset" && Text(change, "elementId") is { } scroller)
@@ -209,8 +223,18 @@ public sealed class RecordedCompositorValueChooser
                             scrolls.Add(drawn.ValueKind == JsonValueKind.Object &&
                                         drawn.TryGetProperty("x", out var x) && x.ValueKind == JsonValueKind.Number &&
                                         drawn.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number
-                                ? (scroller, x.GetDouble(), y.GetDouble())
-                                : (scroller, null, null));
+                                ? (scroller, new RecordedScrollPosition(x.GetDouble(), y.GetDouble(), token)
+                                {
+                                    IsComposited = drawn.TryGetProperty("isComposited", out var composited) &&
+                                                   composited.ValueKind is JsonValueKind.True or JsonValueKind.False
+                                        ? composited.GetBoolean()
+                                        : null,
+                                    RepaintReasons = drawn.TryGetProperty("mainThreadRepaintReasons", out var reasons) &&
+                                                     reasons.ValueKind == JsonValueKind.Array
+                                        ? string.Join(", ", reasons.EnumerateArray().Select(reason => reason.GetString()))
+                                        : "",
+                                })
+                                : (scroller, null));
                             continue;
                         }
                         if (Text(change, "property") is { } property && Properties.Contains(property) &&
@@ -291,11 +315,11 @@ public sealed class RecordedCompositorValueChooser
             {
                 values[(element, property)] = (text, frame.Token);
             }
-            foreach (var (element, x, y) in frame.Scrolls)
+            foreach (var (element, position) in frame.Scrolls)
             {
-                if (x is { } drawnX && y is { } drawnY)
+                if (position is not null)
                 {
-                    scrollPositions[element] = new RecordedScrollPosition(drawnX, drawnY, frame.Token);
+                    scrollPositions[element] = position;
                 }
                 else
                 {

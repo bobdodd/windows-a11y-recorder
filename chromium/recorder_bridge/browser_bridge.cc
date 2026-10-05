@@ -5784,10 +5784,31 @@ base::Value CompositorValueJson(const CompositorDrawnValue& value) {
   if (value.property == "image-frame" && value.numbers.size() == 1) {
     return base::Value(static_cast<int>(value.numbers[0]));
   }
-  if (value.property == "scroll-offset" && value.numbers.size() == 2) {
+  if (value.property == "scroll-offset" &&
+      (value.numbers.size() == 2 || value.numbers.size() == 4)) {
     base::DictValue offset;
     offset.Set("x", value.numbers[0]);
     offset.Set("y", value.numbers[1]);
+    if (value.numbers.size() == 4) {
+      // Protocol 0.50: whether the compositor scrolls the node, and the
+      // reasons Chromium gives for repainting it on the main thread
+      // instead (cc::MainThreadRepaintReason), one bit each in its order.
+      offset.Set("isComposited", value.numbers[2] != 0);
+      const auto bits = static_cast<unsigned>(value.numbers[3]);
+      base::ListValue reasons;
+      static constexpr const char* kReasonNames[] = {
+          "has-background-attachment-fixed-objects",
+          "not-opaque-for-text-and-lcd-text",
+          "prefer-non-composited-scrolling",
+          "background-needs-repaint-on-scroll",
+      };
+      for (unsigned bit = 0; bit < 4; ++bit) {
+        if (bits & (1u << bit)) {
+          reasons.Append(kReasonNames[bit]);
+        }
+      }
+      offset.Set("mainThreadRepaintReasons", std::move(reasons));
+    }
     return base::Value(std::move(offset));
   }
   if (value.property == "background-color-progress" ||

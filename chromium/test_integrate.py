@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.49"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.49"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.50"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.50"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -7254,6 +7254,49 @@ class CompositorRecordIntegrationTests(unittest.TestCase):
         self.assertNotIn(INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1A, upgraded)
         self.assertNotIn(INTEGRATE.CC_DRAW_LAYERS_HOOK_1A, upgraded)
         self.assertEqual(1, upgraded.count("void RecorderRecordCompositorFrame("))
+
+    def test_a_tree_patched_at_protocol_0_49_records_whether_a_scroll_is_composited(self):
+        # Protocol 0.50: the helpers as 0.48 and 0.49 inserted them are
+        # replaced in place; only the scroll offset's numbers differ.
+        legacy = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_0_49
+        current = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.CC_FRAME_SCROLL_NUMBERS,
+                INTEGRATE.CC_FRAME_SCROLL_COMPOSITED_NUMBERS,
+            ),
+        )
+        self.assertIn("node.is_composited ? 1.0 : 0.0", current)
+        for reason in (
+            "kHasBackgroundAttachmentFixedObjects",
+            "kNotOpaqueForTextAndLCDText",
+            "kPreferNonCompositedScrolling",
+            "kBackgroundNeedsRepaintOnScroll",
+        ):
+            self.assertEqual(1, current.count("MainThreadRepaintReason::" + reason))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "layer_tree_host_impl.cc"
+            path.write_text(self.host_impl_source(), encoding="utf-8")
+            try:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = legacy
+                INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            finally:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = current
+            INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            upgraded = path.read_text(encoding="utf-8")
+        fresh = self.patch_twice(
+            "layer_tree_host_impl.cc",
+            self.host_impl_source(),
+            INTEGRATE.patch_cc_layer_tree_host_impl,
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertEqual(1, upgraded.count(INTEGRATE.CC_FRAME_SCROLL_COMPOSITED_NUMBERS))
+        bridge = (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('offset.Set("isComposited", value.numbers[2] != 0);', bridge)
+        self.assertIn('offset.Set("mainThreadRepaintReasons", std::move(reasons));', bridge)
 
     def test_each_frame_names_the_progress_its_paint_worklet_records_were_painted_with(self):
         helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
