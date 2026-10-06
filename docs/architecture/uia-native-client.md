@@ -156,3 +156,21 @@ problems outside the client:
   the recorder's database had not yet started; that start applied migration
   0016. The script now waits up to 180 seconds for Start to be enabled, and
   otherwise reports the app's status.
+- At c7dc210, the recording 20261006-194432-e1acf87e2d6949d397621fece68ae4b9
+  was started and stopped from the recorder's window under the load
+  source's UI Automation load, and the app reported "Recording completed and
+  stored." with no database problem. The script then stopped, because it
+  expects the status of the retired session-file check, "Recording completed
+  and session files verified.". The evidence checks after it read
+  `events.ndjson` and `diagnostics/archive-validation.json`, which recordings
+  have not had since the database store (see
+  [session database](session-database.md), where the scripts are listed as
+  not yet ported). The validation therefore cannot pass until the scripts
+  read the recording file.
+- Read from that recording's file in the sandbox: 44,544 messages, of which
+  30,628 are UI Automation events (29,680 property changes, 915 structure
+  changes, 17 focus changes, 16 automation events) and no collector
+  omission. Two structure changes, a ChildrenInvalidated on the taskbar and
+  a ChildAdded on a XAML progress ring, carry an empty runtime ID. Both were
+  recorded; the managed client's fault was an event delivered without a
+  runtime ID.
