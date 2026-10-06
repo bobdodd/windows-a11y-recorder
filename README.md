@@ -413,6 +413,15 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.54 records the source of each script V8 instantiates, or fails
+to compile, in a document's main thread, on a new channel, `browser.script`:
+a `script-parsed` record for each script, with its kind, world, URL, start
+position, and the digest of its source, and a `script-text` record with the
+source, once per digest, so that the evidence panel lists the document's
+scripts at the frame and shows the text of each. Scripts compiled while a
+DevTools command runs, such as Console expressions, are not recorded. See
+"Slice 4h" in [page recreation](docs/architecture/page-recreation.md).
+
 Protocol 0.53 records each Blink animation, a CSS animation, a CSS
 transition, or a Web Animation, on a new channel, `browser.animation`: its
 kind, name, target, play state, start and current times, timeline, and

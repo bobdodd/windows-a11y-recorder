@@ -23,6 +23,12 @@ public sealed record RecreationContent(string Html, RecreationEvidence Evidence,
     // server that holds the recreation disposes the resources.
     public Recorder.Session.RecordedPageResources? Resources { get; init; }
 
+    // Slice 4h: the document's scripts, whose texts the server answers for
+    // the evidence panel wherever the page is served, and what owns the
+    // reader they are read through, which the server disposes.
+    public Recorder.Session.RecordedScripts? Scripts { get; init; }
+    public IDisposable? ScriptsOwner { get; init; }
+
     public string? FontAddress { get; init; }
 }
 
@@ -57,6 +63,15 @@ public sealed record RecreationEvidence(
     // What the panel says of the animations listed: how their times at the
     // frame were found, and what is not listed.
     public IReadOnlyList<string> AnimationNotes { get; init; } = [];
+
+    // The document's scripts at the frame (slice 4h, protocol 0.54).
+    public IReadOnlyList<RecordedScript> Scripts { get; init; } = [];
+
+    // Why the scripts list is not evidence, when it is not: the recording
+    // holds no script records, as before protocol 0.54.
+    public string? ScriptsNotRead { get; init; }
+
+    public IReadOnlyList<string> ScriptNotes { get; init; } = [];
 }
 
 // Source is "fixed" for slice 3a and "recording" from slice 3b. The frame,
@@ -115,7 +130,43 @@ public sealed record RecordedTimerOrigin(
     string? ElementNote,
     string? Caller,
     string? Callback,
-    string? Handler);
+    string? Handler)
+{
+    // Slice 4h: the caller's and the callback's line in the recorded text
+    // of their script, when the script's text is recorded.
+    public RecordedSourceLink? CallerSource { get; init; }
+    public RecordedSourceLink? CallbackSource { get; init; }
+}
+
+// A line of a script's recorded text (slice 4h): the script, the digest of
+// its text, which the panel reads it by, and the one-based line and column.
+public sealed record RecordedSourceLink(string ScriptId, string Digest, int Line, int? Column);
+
+// A script of the document at the frame (slice 4h, protocol 0.54), from its
+// script-parsed record. Kind is "classic", "module", "eval", or "function".
+// Owner says whose script it was, from its world, as for a timer. Element
+// names the script element or on... attribute it came from, with its path,
+// joined by script ID to the slice 4f script-compiled record, or is null.
+// Line and Column are its one-based start in its resource. EvalFrom names
+// the script that called eval. Digest is the digest of its recorded text,
+// null when the text is not recorded; Size is the text's UTF-8 byte count.
+public sealed record RecordedScript(
+    string ScriptId,
+    string Kind,
+    string Owner,
+    string? Element,
+    NodePath? ElementPath,
+    string? Url,
+    string? SourceUrl,
+    string? SourceMapUrl,
+    int? Line,
+    int? Column,
+    string? EvalFromScriptId,
+    string? EvalFrom,
+    bool CompileError,
+    string? Digest,
+    long Size,
+    long RecordedNanoseconds);
 
 // An animation of the document at the frame (slice 4g, protocol 0.53), as
 // its latest animation-updated record at or before the frame gives it. Kind

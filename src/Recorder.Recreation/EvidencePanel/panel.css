@@ -16,3 +16,8 @@ button:focus-visible { outline: 2px solid Highlight; outline-offset: 1px; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 1rem; margin: 0; }
 dt { font-weight: 600; }
 dd { margin: 0; }
+ol.source { font-family: Consolas, ui-monospace, monospace; padding-left: 4.5em; margin: 0.5rem 0; }
+ol.source li { white-space: pre-wrap; overflow-wrap: anywhere; }
+ol.source li code { white-space: pre-wrap; }
+ol.source li.target { outline: 2px solid Highlight; }
+ol.source li:focus-visible { outline: 2px solid Highlight; }

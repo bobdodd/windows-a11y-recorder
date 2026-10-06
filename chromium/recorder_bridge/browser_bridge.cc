@@ -7430,6 +7430,10 @@ struct ResourceStorage {
   std::unordered_map<std::string, bool> image_digests;
   // Protocol 0.51: the style sheet text digests already recorded.
   std::unordered_map<std::string, bool> style_sheet_digests;
+  // Protocol 0.54 (slice 4h): the digests of the script sources recorded,
+  // and the script IDs of the main thread recorded.
+  std::unordered_map<std::string, bool> script_digests;
+  std::unordered_set<int> script_ids;
   uint64_t next_face_number = 0;
   uint64_t next_style_sheet_number = 0;
 };
@@ -7467,22 +7471,23 @@ bool QueueResourceBytes(RecorderPipeClient* client,
                         std::unordered_map<std::string, bool>& recorded,
                         const char* event_type,
                         const std::string& digest,
-                        std::string bytes) {
+                        std::string bytes,
+                        const char* channel = kResourcesChannel) {
   if (recorded.contains(digest)) {
     return true;
   }
   auto evidence = std::make_unique<ResourceBytesEvidence>();
-  evidence->channel = kResourcesChannel;
+  evidence->channel = channel;
   evidence->event_type = event_type;
   // The context and members with their names, and the base64 of the bytes.
   evidence->bytes = 400 + digest.size() + (bytes.size() + 2) / 3 * 4;
   evidence->client = client;
   evidence->digest = digest;
   evidence->data = std::move(bytes);
-  ReportOmittedEvidence(client, kResourcesChannel);
+  ReportOmittedEvidence(client, channel);
   std::string error;
   if (!client->QueueEvidence(std::move(evidence), &error)) {
-    HoldOmittedEvidence(kResourcesChannel, 1);
+    HoldOmittedEvidence(channel, 1);
     WriteDiagnosticLine("Blink evidence write failed: " + error);
     return false;
   }
@@ -7931,6 +7936,100 @@ void RecordBlinkClassicScriptCompiled(uintptr_t script_identity,
   }
   facts.script_id = script_id;
   RecordBlinkScriptSource(std::move(facts));
+}
+
+ScriptParsedFacts::ScriptParsedFacts() = default;
+ScriptParsedFacts::ScriptParsedFacts(ScriptParsedFacts&&) = default;
+ScriptParsedFacts& ScriptParsedFacts::operator=(ScriptParsedFacts&&) = default;
+ScriptParsedFacts::~ScriptParsedFacts() = default;
+
+namespace {
+
+constexpr char kScriptChannel[] = "browser.script";
+
+std::atomic<int>& DevToolsCommandDepth() {
+  static std::atomic<int> depth{0};
+  return depth;
+}
+
+base::Value TextOrNullValue(std::string text) {
+  return text.empty() ? base::Value() : base::Value(std::move(text));
+}
+
+}  // namespace
+
+bool ClaimScriptParsed(int script_id) {
+  if (script_id <= 0) {
+    return false;
+  }
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  return storage.script_ids.insert(script_id).second;
+}
+
+void RecordScriptParsed(ScriptParsedFacts facts) {
+  A11Y_RECORDER_COST("RecordScriptParsed");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.document_node_id <= 0 || facts.script_id <= 0 ||
+      (facts.kind != kScriptParsedKindClassic &&
+       facts.kind != kScriptParsedKindModule &&
+       facts.kind != kScriptParsedKindEval &&
+       facts.kind != kScriptParsedKindFunction)) {
+    return;
+  }
+  const size_t size = facts.source.size();
+  const std::string digest = Sha256Hex(facts.source);
+  bool recorded = false;
+  {
+    ResourceStorage& storage = Resources();
+    base::AutoLock lock(storage.lock);
+    recorded = QueueResourceBytes(client, storage.script_digests,
+                                  "script-text", digest,
+                                  std::move(facts.source), kScriptChannel);
+  }
+  const std::string world_kind =
+      NormalizeExecutionWorldKind(std::move(facts.world_kind));
+  base::DictValue context = CreateContext(*client, facts.document_node_id,
+                                          std::move(facts.document_token));
+  if (!world_kind.empty()) {
+    context.Set("executionWorldId", ExecutionWorldId(facts.world_id));
+  }
+  base::DictValue payload;
+  payload.Set("context", std::move(context));
+  payload.Set("world", CreateExecutionWorld(world_kind, facts.world_id,
+                                            std::move(facts.world_name),
+                                            std::move(facts.world_stable_id)));
+  payload.Set("scriptId", base::NumberToString(facts.script_id));
+  payload.Set("kind", facts.kind);
+  payload.Set("url", TextOrNullValue(std::move(facts.url)));
+  payload.Set("sourceUrl", TextOrNullValue(std::move(facts.source_url)));
+  payload.Set("sourceMapUrl", TextOrNullValue(std::move(facts.source_map_url)));
+  payload.Set("line", facts.line_number > 0 ? base::Value(facts.line_number)
+                                            : base::Value());
+  payload.Set("column", facts.column_number > 0
+                            ? base::Value(facts.column_number)
+                            : base::Value());
+  payload.Set("evalFromScriptId",
+              facts.eval_from_script_id > 0
+                  ? base::Value(base::NumberToString(facts.eval_from_script_id))
+                  : base::Value());
+  payload.Set("compileError", facts.compile_error);
+  payload.Set("digest", digest);
+  payload.Set("size", base::NumberToString(size));
+  payload.Set("textRecorded", recorded);
+  SendBlinkEvidence(kScriptChannel, "script-parsed", std::move(payload));
+}
+
+void EnterDevToolsCommand() {
+  DevToolsCommandDepth().fetch_add(1, std::memory_order_relaxed);
+}
+
+void LeaveDevToolsCommand() {
+  DevToolsCommandDepth().fetch_sub(1, std::memory_order_relaxed);
+}
+
+bool InDevToolsCommand() {
+  return DevToolsCommandDepth().load(std::memory_order_relaxed) > 0;
 }
 
 }  // namespace a11y_recorder

@@ -34,6 +34,7 @@ component("recorder_bridge") {
     "recreation_paint_worklet_values.h",
     "recreation_image_frames.h",
     "recreation_input.h",
+    "v8_script_hook.h",
   ]
 
   public_deps = [ ":cookie_names" ]

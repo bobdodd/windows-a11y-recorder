@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.53"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.53"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.54"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.54"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -9307,3 +9307,145 @@ class RecreationIntegrationTests(unittest.TestCase):
             INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, patched
         )
         self.assertEqual(1, patched.count(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK))
+
+
+class ScriptSourceIntegrationTests(unittest.TestCase):
+    """Slice 4h (protocol 0.54): the page's script source."""
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def signatures(self):
+        return {
+            **INTEGRATE.parse_bridge_signatures(
+                (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+                .read_text(encoding="utf-8")
+            ),
+            **INTEGRATE.V8_SCRIPT_HOOK_ENTRY_POINTS,
+        }
+
+    def test_v8_gives_each_instantiated_script_to_the_hook_once(self):
+        source = self.patch_twice(
+            "debug.cc",
+            INTEGRATE.V8_DEBUG_OWN_INCLUDE
+            + "\n\nnamespace v8 {\nnamespace internal {\n\n"
+            + INTEGRATE.V8_DEBUG_REPORT_ANCHOR
+            + "  ProcessCompileEvent(true, script);\n}\n\n"
+            + INTEGRATE.V8_DEBUG_AFTER_COMPILE_ANCHOR
+            + "\n"
+            + INTEGRATE.V8_DEBUG_END_ANCHOR,
+            INTEGRATE.patch_v8_debug,
+        )
+        for include in INTEGRATE.V8_DEBUG_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.V8_DEBUG_REPORT))
+        self.assertEqual(1, source.count(INTEGRATE.V8_DEBUG_AFTER_COMPILE_HOOK))
+        # The report is defined before its first use and inside V8's
+        # namespaces; the hook storage follows them.
+        self.assertLess(
+            source.index("void A11yRecorderReportScript("),
+            source.index("A11yRecorderReportScript(isolate_, script, false);"),
+        )
+        self.assertTrue(source.endswith(INTEGRATE.V8_DEBUG_END))
+        report = INTEGRATE.V8_DEBUG_REPORT
+        # Only normal, non-temporary scripts with string source.
+        self.assertIn("script->type() != Script::Type::kNormal", report)
+        self.assertIn("Script::kTemporaryScriptId", report)
+        self.assertIn("if (!IsString(*source)) {", report)
+        self.assertIn("facts.is_module = script->origin_options().IsModule();", report)
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, self.signatures())
+        )
+
+    def test_a_script_that_fails_to_compile_is_given_to_the_hook(self):
+        source = self.patch_twice(
+            "pending-compilation-error-handler.cc",
+            INTEGRATE.V8_COMPILE_ERROR_OWN_INCLUDE
+            + "\n\nnamespace v8 {\nnamespace internal {\n\n"
+            + INTEGRATE.V8_COMPILE_ERROR_DECLARATION_ANCHOR
+            + "    Isolate* isolate, Handle<Script> script) const {\n"
+            + INTEGRATE.V8_COMPILE_ERROR_ANCHOR
+            + "}\n\n}  // namespace internal\n}  // namespace v8\n",
+            INTEGRATE.patch_v8_compile_error,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.V8_COMPILE_ERROR_DECLARATION))
+        self.assertEqual(1, source.count(INTEGRATE.V8_COMPILE_ERROR_HOOK))
+        self.assertIn("A11yRecorderReportScript(isolate, script, true);", source)
+
+    def test_blink_records_main_thread_scripts_outside_devtools_commands(self):
+        source = self.patch_twice(
+            "v8_initializer.cc",
+            INTEGRATE.BLINK_V8_INITIALIZER_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_V8_INITIALIZER_HELPERS_ANCHOR
+            + INTEGRATE.BLINK_V8_INITIALIZER_INSTALL_ANCHOR
+            + "}\n\n}  // namespace blink\n",
+            INTEGRATE.patch_blink_v8_initializer,
+        )
+        for include in INTEGRATE.BLINK_V8_INITIALIZER_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_V8_INITIALIZER_HELPERS))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_V8_INITIALIZER_INSTALL_HOOK))
+        helpers = INTEGRATE.BLINK_V8_INITIALIZER_HELPERS
+        self.assertIn("a11y_recorder::InDevToolsCommand()", helpers)
+        self.assertIn("!IsMainThread()", helpers)
+        self.assertIn("WorldType::kInspectorIsolated ||", helpers)
+        # Once per script ID, before the text is converted.
+        self.assertLess(
+            helpers.index("a11y_recorder::ClaimScriptParsed(script.script_id)"),
+            helpers.index("RecorderScriptText(isolate, script.source)"),
+        )
+        self.assertIn("v8::String::WriteFlags::kReplaceInvalidUtf8", helpers)
+        self.assertIn('A11Y_RECORDER_HOOK_COST("hook:script-parsed");', helpers)
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, self.signatures())
+        )
+
+    def test_devtools_commands_are_bracketed_on_the_main_thread(self):
+        source = self.patch_twice(
+            "devtools_session.cc",
+            INTEGRATE.BLINK_DEVTOOLS_SESSION_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\nvoid Detach() {\n"
+            + "  agent_->client_->DebuggerTaskStarted();\n"
+            + "  agent_->client_->DebuggerTaskFinished();\n}\n\n"
+            + "void Dispatch() {\n"
+            + INTEGRATE.BLINK_DEVTOOLS_SESSION_START_ANCHOR
+            + "          method)) {\n  } else {\n"
+            + INTEGRATE.BLINK_DEVTOOLS_SESSION_FINISH_ANCHOR
+            + "}\n\n}  // namespace blink\n",
+            INTEGRATE.patch_blink_devtools_session,
+        )
+        self.assertEqual(1, source.count("a11y_recorder::EnterDevToolsCommand();"))
+        self.assertEqual(1, source.count("a11y_recorder::LeaveDevToolsCommand();"))
+        self.assertLess(
+            source.index("EnterDevToolsCommand"), source.index("LeaveDevToolsCommand")
+        )
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, self.signatures())
+        )
+
+    def test_the_bridge_records_script_parsed_and_script_text(self):
+        bridge = (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc").read_text(
+            encoding="utf-8"
+        )
+        build = (MODULE_PATH.parent / "recorder_bridge" / "BUILD.gn").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"v8_script_hook.h",', build)
+        self.assertIn('constexpr char kScriptChannel[] = "browser.script";', bridge)
+        self.assertIn('SendBlinkEvidence(kScriptChannel, "script-parsed",', bridge)
+        self.assertIn('"script-text", digest,', bridge)
+        self.assertIn("std::move(facts.source), kScriptChannel);", bridge)
+        for field in (
+            "scriptId", "kind", "url", "sourceUrl", "sourceMapUrl", "line", "column",
+            "evalFromScriptId", "compileError", "digest", "size", "textRecorded",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(f'payload.Set("{field}",', bridge)

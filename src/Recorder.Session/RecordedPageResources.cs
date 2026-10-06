@@ -83,6 +83,9 @@ public sealed class RecordedPageResources : IDisposable
     /// </summary>
     public RecordedAnimations Animations { get; init; } = RecordedAnimations.None;
 
+    /// <summary>The document's scripts at the cut (slice 4h), with their texts by digest.</summary>
+    public RecordedScripts Scripts { get; init; } = RecordedScripts.None;
+
     /// <summary>How long choosing the image frames took, or null when they were not read.</summary>
     public double? ImageFramesMilliseconds { get; }
 

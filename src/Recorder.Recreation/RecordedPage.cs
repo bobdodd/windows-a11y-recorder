@@ -81,9 +81,21 @@ public static class RecordedPage
         // The compositor values do not depend on where the page is served.
         var compositorValues = resources?.CompositorValues ?? RecordedCompositorValues.None;
         var animations = resources?.Animations ?? RecordedAnimations.None;
+        // Slice 4h: the scripts' texts are read through the resources'
+        // reader, so resources not otherwise used are kept for them while
+        // the recording holds scripts.
+        var scripts = resources?.Scripts ?? RecordedScripts.None;
+        IDisposable? scriptsOwner = null;
         if (!servedAtRecordedAddress)
         {
-            resources?.Dispose();
+            if (scripts.Recorded)
+            {
+                scriptsOwner = resources;
+            }
+            else
+            {
+                resources?.Dispose();
+            }
         }
         var used = servedAtRecordedAddress ? resources ?? RecordedPageResources.None : RecordedPageResources.None;
         var fontAddress = RecreationServer.FontAddress(RecreationServer.NewToken());
@@ -183,7 +195,8 @@ public static class RecordedPage
             basis,
             new RecreationFidelity("not-checked", "The recreation is not yet compared with the recording.", []),
             notes,
-            animations);
+            animations,
+            scripts);
         return new RecreationContent(
             Markup(Tree(state, used.Faces, fontAddress, placed, compositorValues, used.StyleSheets, used.StyleSheetText), DocumentTypeName(tree, documentId), nonce),
             evidence,
@@ -193,6 +206,8 @@ public static class RecordedPage
             DocumentUrl = servedAtRecordedAddress ? url : null,
             Resources = used,
             FontAddress = servedAtRecordedAddress ? fontAddress : null,
+            Scripts = scripts,
+            ScriptsOwner = scriptsOwner,
         };
     }
 

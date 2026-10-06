@@ -68,6 +68,8 @@ public sealed class RecreationServer : IAsyncDisposable
     private readonly string? _documentUrl;
     private readonly string? _fontAddress;
     private readonly Recorder.Session.RecordedPageResources _resources;
+    private readonly Recorder.Session.RecordedScripts _scripts;
+    private readonly IDisposable? _scriptsOwner;
     private readonly List<BlockedNavigation> _blocked = [];
     private readonly List<RecreationTiming> _timings = [];
 
@@ -81,6 +83,8 @@ public sealed class RecreationServer : IAsyncDisposable
         _documentUrl = content.DocumentUrl is { } url && IsServableAddress(url) ? url : null;
         _fontAddress = _documentUrl is not null ? content.FontAddress : null;
         _resources = content.Resources ?? Recorder.Session.RecordedPageResources.None;
+        _scripts = content.Scripts ?? Recorder.Session.RecordedScripts.None;
+        _scriptsOwner = content.ScriptsOwner;
         _policy = content.ScriptNonce is not { } nonce
             ? PageContentSecurityPolicy
             : _fontAddress is { } fonts
@@ -325,6 +329,14 @@ public sealed class RecreationServer : IAsyncDisposable
                 response.ContentType = "application/json; charset=utf-8";
                 body = JsonSerializer.SerializeToUtf8Bytes(Timings, EvidenceJson);
                 break;
+            // Slice 4h: a listed script's recorded text, for the evidence
+            // panel's viewer, as plain text, which is never run.
+            case var script when script.StartsWith(ScriptResourcePrefix, StringComparison.Ordinal) &&
+                ScriptText(script[ScriptResourcePrefix.Length..]) is { } text:
+                response.ContentType = "text/plain; charset=utf-8";
+                response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+                body = text;
+                break;
             default:
                 response.StatusCode = StatusCodes.Status404NotFound;
                 return;
@@ -334,6 +346,21 @@ public sealed class RecreationServer : IAsyncDisposable
         {
             await response.Body.WriteAsync(body, context.RequestAborted);
         }
+    }
+
+    /// <summary>The resource a script's text is served at, followed by its digest (slice 4h).</summary>
+    public const string ScriptResourcePrefix = "script/";
+
+    // The UTF-8 text of a script of the document's list, by its digest.
+    private byte[]? ScriptText(string digest)
+    {
+        if (digest.Length != 64 || !digest.All(Uri.IsHexDigit) ||
+            !_scripts.Scripts.Any(item => item.Digest == digest) ||
+            _scripts.Text(digest) is not { } text)
+        {
+            return null;
+        }
+        return Encoding.UTF8.GetBytes(text);
     }
 
     // The path is /<token>/<resource>. The token is compared in constant time.
@@ -363,5 +390,6 @@ public sealed class RecreationServer : IAsyncDisposable
         await _application.StopAsync();
         await _application.DisposeAsync();
         _resources.Dispose();
+        _scriptsOwner?.Dispose();
     }
 }

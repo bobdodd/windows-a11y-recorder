@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.53";
+    public const string CurrentVersion = "0.54";
 }
 
 public static class BrowserEvidenceChannels
@@ -23,6 +23,7 @@ public static class BrowserEvidenceChannels
     public const string Resources = "browser.resources";
     public const string Compositor = "browser.compositor";
     public const string Animation = "browser.animation";
+    public const string Script = "browser.script";
 }
 
 public static class BrowserEvidenceEventTypes
@@ -42,6 +43,8 @@ public static class BrowserEvidenceEventTypes
     public const string TimerCancelled = "timer-cancelled";
     public const string TimerOrigin = "timer-origin";
     public const string ScriptCompiled = "script-compiled";
+    public const string ScriptParsed = "script-parsed";
+    public const string ScriptText = "script-text";
     public const string WakeUpDeferred = "wake-up-deferred";
     public const string NavigationStarted = "navigation-started";
     public const string NavigationCompleted = "navigation-completed";
@@ -337,6 +340,35 @@ public sealed record BrowserScriptCompiledPayload(
     string? Url,
     int? Line,
     int? Column);
+
+// A script V8 instantiated, or failed to compile, in a document of the main
+// thread (protocol 0.54, slice 4h), on browser.script, once per script ID in
+// the renderer process. Kind is "classic", "module", "eval", or "function"
+// (a function made by new Function or wrapped by Blink, such as an attribute
+// handler). Url is V8's script name, SourceUrl and SourceMapUrl the
+// script's own sourceURL and sourceMappingURL comments, null when absent.
+// Line and Column are the one-based start of the script in its resource.
+// EvalFromScriptId is the script ID of the code that called eval, when V8
+// kept it. Digest is the SHA-256 of the UTF-8 source, in lowercase
+// hexadecimal, and Size its byte count as a decimal string; the source is
+// the script-text record of that digest (BrowserResourceBytesPayload),
+// written the first time the renderer met the digest. TextRecorded is
+// false when that record could not be queued.
+public sealed record BrowserScriptParsedPayload(
+    BrowserContext Context,
+    BrowserExecutionWorld? World,
+    string ScriptId,
+    string Kind,
+    string? Url,
+    string? SourceUrl,
+    string? SourceMapUrl,
+    int? Line,
+    int? Column,
+    string? EvalFromScriptId,
+    bool CompileError,
+    string Digest,
+    string Size,
+    bool TextRecorded);
 
 public sealed record BrowserSchedulerPayload(
     BrowserContext Context,

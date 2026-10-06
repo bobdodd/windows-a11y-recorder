@@ -1157,7 +1157,13 @@ than its current time changes, and its release. The design is in
 [page recreation](page-recreation.md), "Slice 4g: running animations in the
 evidence panel".
 
-Live 0.53 connections require an exact protocol-version match.
+Protocol version 0.54 adds the `browser.script` channel, with
+`script-parsed` and `script-text`: each script V8 instantiates, or fails to
+compile, in a document's main thread, and its source once per digest. The
+design is in [page recreation](page-recreation.md), "Slice 4h: the page's
+script source".
+
+Live 0.54 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

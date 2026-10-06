@@ -500,6 +500,21 @@ scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
 `scroll_element_id`, and the bridge writes it as decimal text, or null for
 zero.
 
+Protocol 0.54 (slice 4h) adds the `browser.script` channel. `integrate.py`
+patches V8: `Debug::OnAfterCompile` and
+`PendingCompilationErrorHandler::ThrowPendingError` call
+`A11yRecorderReportScript`, written into `debug.cc`, which gives each normal
+script with a string source to the hook declared in `v8_script_hook.h`,
+before the debugger's own checks. The hook's setter and getter are defined in
+V8, so they link only in a build that is not a component build. Blink sets
+the hook in `V8Initializer::InitializeV8Common` for the main thread; the
+hook skips scripts compiled while `DevToolsSession` dispatches a command
+(`EnterDevToolsCommand` and `LeaveDevToolsCommand`) and scripts of DevTools'
+isolated world, claims each script ID once (`ClaimScriptParsed`), copies the
+source to UTF-8, and calls `RecordScriptParsed`, which writes `script-text`
+through the resource bytes queue the first time the process meets the
+source's digest, and `script-parsed`.
+
 Protocol 0.53 (slice 4g) adds the `browser.animation` channel.
 `Animation::NotifyProbe`, after its `probe::AnimationUpdated` call, fills an
 `AnimationFacts` with the animation's kind, name, target, play state, times,

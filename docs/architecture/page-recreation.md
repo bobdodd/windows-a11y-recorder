@@ -7339,11 +7339,12 @@ shown in the evidence panel. The checks of each listed value against the
 values the page states, and the integration and system tests above, are
 not yet recorded.
 
-### Slice 4h: the page's script source (proposed, not built)
+### Slice 4h: the page's script source (agreed, built)
 
 Proposed 2026-10-06, at the owner's request that the JavaScript source of
 each frame be recorded, so that when testing the exact code that ran can be
-read. It takes protocol 0.54.
+read. It takes protocol 0.54. Agreed by the owner on 2026-10-06, with the
+two open questions settled as recorded under "Settled" below.
 
 #### Why
 
@@ -7472,13 +7473,19 @@ ID. The text is written once per digest, encoded off the main thread by
 the existing queue. The hook is timed as a whole and measured on the target
 machine on a page with large bundles and much `eval`.
 
-#### To be settled
+#### Settled (2026-10-06)
 
-- Whether the source copy and digest of a very large script (several
-  megabytes) is acceptable on the main thread, or the copy is kept and the
-  digest computed on the queue's thread.
-- Whether expressions typed in DevTools' Console, compiled as normal
-  scripts, are recorded as DevTools-owned scripts or left out.
+- The source copy and digest are made on the main thread to start with,
+  within the limits above, and measured on the target machine; moving the
+  digest to the queue's thread is left until a measurement asks for it.
+- Nothing compiled during a DevTools protocol command is recorded. An
+  expression typed in the Console is, at most, an auditor's test code, not
+  the system under test. The bracket is
+  `DevToolsSession::DispatchProtocolCommandImpl`
+  (`core/inspector/devtools_session.cc`, lines 309 to 350), between its
+  `DebuggerTaskStarted` and `DebuggerTaskFinished` calls, on the main
+  thread. V8's own inspector scripts are not normal scripts and are not
+  reported in any case.
 
 #### Required tests
 
@@ -7495,6 +7502,84 @@ machine on a page with large bundles and much `eval`.
   Function`, a `javascript:` link, and a script that fails to compile,
   where the Scripts table lists each with its kind, element, and text, and
   each "View source" shows the fixture's own text, compared by the owner.
+
+#### As built
+
+Built 2026-10-06 on the `recreation` branch, protocol 0.54.
+
+- V8 (`integrate.py`, `patch_v8_debug` and `patch_v8_compile_error`):
+  `A11yRecorderReportScript`, written into `debug/debug.cc` before
+  `Debug::OnCompileError`, is called first in `Debug::OnAfterCompile` and in
+  `PendingCompilationErrorHandler::ThrowPendingError`
+  (`parsing/pending-compilation-error-handler.cc`), before
+  `OnCompileError`. It gives the hook a script whose type is normal, whose
+  ID is not the temporary ID, and whose source is a string, with its name,
+  `sourceURL`, `sourceMappingURL`, offsets, module flag, compilation kind,
+  and the script ID of the eval caller, read as `debug-interface.cc` reads
+  them. The hook's setter and getter are defined at the end of `debug.cc`
+  and declared in `chromium/recorder_bridge/v8_script_hook.h`.
+- Blink (`patch_blink_v8_initializer`): `V8Initializer::InitializeV8Common`
+  sets the hook on the main thread. The hook returns unless it is on the
+  main thread, the recorder is connected, no DevTools command is being
+  dispatched, and the current context is a window with a document; it skips
+  DevTools' isolated world, claims the script ID, reads the source and texts
+  as UTF-8 with `WriteUtf8V2` and unpaired surrogates replaced, and calls
+  `RecordScriptParsed`. `patch_blink_devtools_session` brackets the
+  dispatch with `EnterDevToolsCommand` and `LeaveDevToolsCommand`.
+- The bridge writes `script-text` through the resource bytes queue
+  (`QueueResourceBytes`, now given its channel) and `script-parsed`, both
+  on `browser.script`.
+- The recorder: `RecordedScriptReader` and `RecordedScripts`
+  (`Recorder.Session`), `RecordingFileScripts` (`Recorder.Database`), read
+  with the page's resources at the state's cut; `RecordedEvidence` lists
+  the rows and links the timer origins; `RecreationServer` answers
+  `script/<digest>` with the text, as `text/plain`, only for a listed
+  script; the evidence panel adds the Scripts table, the viewer, and the
+  "View line" buttons in "Scheduled by". The resources are kept for the
+  scripts when the page is served from the loopback address.
+- The timer origin fixture gains `module.js`, a `new Function` call, a
+  `javascript:` link, and a script that fails to compile, with a list of
+  the scripts the table is expected to show.
+
+Differences from the design:
+
+- The hook is not in `Debug::ProcessCompileEvent`. Its two callers are
+  patched instead, because `OnCompileError` is also called by the JSON
+  parser (`json/json-parser.cc`, line 572) for a `JSON.parse` error, with a
+  script holding the JSON text, which is not page code. A failed compile is
+  therefore taken from the parser's error handler only.
+- The kinds are as designed; `function` covers both a `new Function`
+  function (`kFunctionConstructor`) and a function Blink wraps, such as an
+  attribute handler (`kWrapped`). A string timer handler and a
+  `javascript:` URL are compiled as classic scripts and are listed as
+  `classic`, with no element.
+- `script-parsed` keeps the world, as the timer records give it, in a
+  `world` member, and names the eval caller in `evalFromScriptId`; the
+  validator refuses an eval caller on a script that is not eval code.
+- The table gives the size in bytes, not the line count, so that no text is
+  read until it is shown; the viewer gives the line count. Lines are split
+  as V8 counts them, at CR LF, LF, CR, U+2028, and U+2029.
+- The viewer is a view inside the evidence panel, not a separate page;
+  "Back to the evidence" returns focus to the button that opened it.
+- A callback location's line is used as recorded; a location with no line
+  opens the text at line 1.
+- Reading the scripts decodes each `script-text` record at or before the cut
+  once, to index it, since the recording file is indexed by channel, not by
+  digest. Its cost on a large recording is to be measured.
+
+Tests: `chromium/test_integrate.py` (`ScriptSourceIntegrationTests`, 5
+tests, and the existing signature and cost checks; all 249 pass), and
+`tests/Recorder.Tests/RecordedScriptTests.cs` (10 tests, 11 cases: the records as the
+bridge writes them, the validator, the scripts at a time with another
+document's script, a repeat, eval code with its caller, a compile failure,
+a text that does not match its digest, a recording before protocol 0.54,
+the join to `script-compiled`, the timer links, the recording file, the
+recorder's answer, and the panel). The full suite fails only the 59 tests
+that need PostgreSQL or Windows, as before. The V8 and Blink patches were
+applied twice, with no change on the second pass, to copies of
+`debug.cc`, `pending-compilation-error-handler.cc`, `v8_initializer.cc`,
+and `devtools_session.cc` taken from the target machine's checkout. The
+system test on the target machine is pending.
 
 ### To be settled
 

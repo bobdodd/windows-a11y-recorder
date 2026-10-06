@@ -56,6 +56,9 @@ public static class RecordingFileResources
         // Slice 4g: the document's animations at the time its state is read
         // at, for the evidence panel.
         var animations = RecordingFileAnimations.Read(reader, documentKey, cutNanoseconds, cancellationToken);
+        // Slice 4h: the document's scripts at the same time, whose texts are
+        // read through this reader when the panel asks for them.
+        var scripts = RecordingFileScripts.Read(reader, documentKey, cutNanoseconds, cancellationToken);
         var channel = reader.Channels.Values.FirstOrDefault(item => item.Topic == BrowserEvidenceChannels.Resources);
         if (channel is null)
         {
@@ -64,6 +67,7 @@ public static class RecordingFileResources
                 owner)
             {
                 Animations = animations,
+            Scripts = scripts,
             };
         }
 
@@ -257,6 +261,7 @@ public static class RecordingFileResources
         return new RecordedPageResources(faces, images, Bytes, notes, owner, frames, framesMilliseconds, compositorValues, sheets)
         {
             Animations = animations,
+            Scripts = scripts,
         };
     }
 

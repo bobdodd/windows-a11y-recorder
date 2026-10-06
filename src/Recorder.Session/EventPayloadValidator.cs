@@ -30,7 +30,8 @@ internal static class EventPayloadValidator
         "browser.network",
         "browser.resources",
         "browser.compositor",
-        "browser.animation"
+        "browser.animation",
+        "browser.script"
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -383,6 +384,12 @@ internal static class EventPayloadValidator
             case ("browser.animation", "animation-updated"):
                 ValidateBrowserAnimationUpdated(payload, issues);
                 break;
+            case ("browser.script", "script-parsed"):
+                ValidateBrowserScriptParsed(payload, issues);
+                break;
+            case ("browser.script", "script-text"):
+                ValidateBrowserResourceBytes(payload, issues);
+                break;
             case ("browser.animation", "animation-removed"):
                 ValidateShape(
                     payload,
@@ -497,6 +504,7 @@ internal static class EventPayloadValidator
             case ("browser.resources", "collector-omission"):
             case ("browser.compositor", "collector-omission"):
             case ("browser.animation", "collector-omission"):
+            case ("browser.script", "collector-omission"):
                 ValidateBrowserOmission(payload, issues);
                 break;
             default:
@@ -1376,6 +1384,42 @@ internal static class EventPayloadValidator
                 "browser-script-compiled-attribute",
                 "#/payload/attributeName",
                 "An attribute handler names its attribute, and no other script does.");
+        }
+    }
+
+    // Protocol 0.54 (slice 4h).
+    private static void ValidateBrowserScriptParsed(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableObject("world"),
+                RequiredDecimalText("scriptId"),
+                RequiredEnum("kind", "classic", "module", "eval", "function"),
+                NullableString("url"),
+                NullableString("sourceUrl"),
+                NullableString("sourceMapUrl"),
+                NullableInteger("line", positive: true),
+                NullableInteger("column", positive: true),
+                NullableDecimalText("evalFromScriptId"),
+                RequiredBoolean("compileError"),
+                DigestRule("digest"),
+                RequiredDecimalText("size"),
+                RequiredBoolean("textRecorded")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
+        if (HasNonnullProperty(payload, "evalFromScriptId") && ReadString(payload, "kind") != "eval")
+        {
+            AddError(
+                issues,
+                "browser-script-parsed-eval-from",
+                "#/payload/evalFromScriptId",
+                "Only eval code names the script that called eval.");
         }
     }
 

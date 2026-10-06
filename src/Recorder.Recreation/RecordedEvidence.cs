@@ -125,7 +125,8 @@ public static class RecordedEvidence
         string basis,
         RecreationFidelity fidelity,
         IReadOnlyList<string> notes,
-        RecordedAnimations? animations = null)
+        RecordedAnimations? animations = null,
+        RecordedScripts? scripts = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         string Element(long id) => tree.Nodes.TryGetValue(id, out var node) ? node.NodeName?.ToLowerInvariant() ?? "" : "";
@@ -181,10 +182,16 @@ public static class RecordedEvidence
                 accessibility is { } d ? Text(d.Record, "serializedProperties") : null));
         }
 
+        // Slice 4h: the document's scripts at the frame's recording time.
+        var recordedScripts = scripts ?? RecordedScripts.None;
+        var scriptRows = recordedScripts.Scripts
+            .Select(item => Script(item, recordedScripts, state.Script, tree))
+            .ToArray();
+
         var timers = state.Script.Timers.Values
             .OrderBy(timer => timer.ScheduledTime)
             .ThenBy(timer => Text(timer.Scheduled, "timerId"), StringComparer.Ordinal)
-            .Select(timer => Timer(timer, recordingNanoseconds, TimerOrigins.Of(timer, state.Script, tree)))
+            .Select(timer => Timer(timer, recordingNanoseconds, TimerOrigins.Of(timer, state.Script, tree, recordedScripts)))
             .ToArray();
 
         // Slice 4g: the document's animations at the frame's recording time.
@@ -231,7 +238,56 @@ public static class RecordedEvidence
                 ? null
                 : "The recording holds no animation records, which are recorded from protocol 0.53, so running animations and transitions are not listed.",
             AnimationNotes = recordedAnimations.Recorded ? AnimationNotes : [],
+            Scripts = scriptRows,
+            ScriptsNotRead = recordedScripts.Recorded
+                ? null
+                : "The recording holds no script records, which are recorded from protocol 0.54, so the page's script source was not recorded.",
+            ScriptNotes = recordedScripts.Recorded ? ScriptNotes : [],
         };
+    }
+
+    // What the panel says of the scripts it lists (slice 4h).
+    public static readonly IReadOnlyList<string> ScriptNotes =
+    [
+        "Scripts are read from the recording's script-parsed records, made by V8 when it instantiates a script, or fails to compile one, in the document's main thread, once per script. A script is listed when its record is at or before the recording time.",
+        "The text is the source V8 compiled, after decoding, shown as text and never run. It is not the bytes the server sent, and not the original of a minified or transpiled script; a source map is named, not recorded.",
+        "Compiled is not the same as ran: a script's top level runs after it is compiled, but a function in it may never have been called. A script that failed to compile did not run.",
+        "Scripts compiled while a DevTools protocol command ran, such as expressions typed in the Console, and scripts of DevTools' own world are not recorded. Scripts of iframes, workers, and WebAssembly are not recorded.",
+    ];
+
+    private static RecordedScript Script(RecordedScriptState item, RecordedScripts scripts, ScriptDocumentState state, DomDocumentTree tree)
+    {
+        string? element = null;
+        NodePath? path = null;
+        if (state.Scripts.TryGetValue(item.ScriptId, out var source))
+        {
+            (element, path) = TimerOrigins.Describe(source, tree);
+        }
+        string? evalFrom = null;
+        if (item.EvalFromScriptId is { } caller)
+        {
+            var callerScript = scripts.Scripts.FirstOrDefault(other => other.ScriptId == caller);
+            evalFrom = callerScript is null
+                ? $"script {caller}, which is not listed"
+                : $"script {caller}" + ((callerScript.Url ?? callerScript.SourceUrl) is { } address ? $", {address}" : "");
+        }
+        return new RecordedScript(
+            item.ScriptId,
+            item.Kind,
+            TimerOrigins.OwnerOf(item.World, [item.Url, item.SourceUrl]),
+            element,
+            path,
+            item.Url,
+            item.SourceUrl,
+            item.SourceMapUrl,
+            item.Line,
+            item.Column,
+            item.EvalFromScriptId,
+            evalFrom,
+            item.CompileError,
+            scripts.HasText(item.Digest) ? item.Digest : null,
+            item.Size,
+            item.RecordedNanoseconds);
     }
 
     // What the panel says of the animations it lists (slice 4g).
@@ -392,12 +448,19 @@ public static class TimerOrigins
     public const string NotRecorded =
         "not recorded; who scheduled a timer is recorded from protocol 0.52";
 
-    public static RecordedTimerOrigin Of(PendingTimer timer, ScriptDocumentState script, DomDocumentTree tree)
+    public static RecordedTimerOrigin Of(PendingTimer timer, ScriptDocumentState script, DomDocumentTree tree, RecordedScripts? scripts = null)
     {
-        var callback = Location(timer.Scheduled.TryGetProperty("callbackLocation", out var value) ? value : default);
+        var callbackRecord = timer.Scheduled.TryGetProperty("callbackLocation", out var value) ? value : default;
+        var callback = Location(callbackRecord);
+        // Slice 4h: a location whose script has recorded text links to its
+        // line in the viewer.
+        var callbackSource = Link(callbackRecord, scripts);
         if (timer.Origin is not { } origin)
         {
-            return new RecordedTimerOrigin(NotRecorded, null, null, null, null, callback, null);
+            return new RecordedTimerOrigin(NotRecorded, null, null, null, null, callback, null)
+            {
+                CallbackSource = callbackSource,
+            };
         }
         var frames = origin.TryGetProperty("stack", out var stack) && stack.ValueKind == JsonValueKind.Array
             ? stack.EnumerateArray().ToArray()
@@ -433,16 +496,35 @@ public static class TimerOrigins
                 : "No frame of the stack has a script element or attribute recorded.";
         }
         return new RecordedTimerOrigin(
-            Owner(world, frames),
+            OwnerOf(world, frames.Select(frame => Text(frame, "url"))),
             element,
             path,
             note,
             frames.Length > 0 ? Frame(frames[0]) : null,
             callback,
-            handler);
+            handler)
+        {
+            CallerSource = frames.Length > 0 ? Link(frames[0], scripts) : null,
+            CallbackSource = callbackSource,
+        };
     }
 
-    private static string Owner(JsonElement? world, JsonElement[] frames)
+    // The text and line of a recorded location, when its script is one of
+    // the document's scripts with recorded text.
+    private static RecordedSourceLink? Link(JsonElement location, RecordedScripts? scripts)
+    {
+        if (scripts is null || Text(location, "scriptId") is not { } id ||
+            scripts.Scripts.FirstOrDefault(item => item.ScriptId == id) is not { } script ||
+            !scripts.HasText(script.Digest))
+        {
+            return null;
+        }
+        var line = Number(location, "line") is { } recorded && recorded > 0 ? (int)recorded : 1;
+        var column = Number(location, "column") is { } at && at > 0 ? (int?)at : null;
+        return new RecordedSourceLink(script.ScriptId, script.Digest, line, column);
+    }
+
+    public static string OwnerOf(JsonElement? world, IEnumerable<string?> urls)
     {
         if (world is not { } recorded)
         {
@@ -453,7 +535,7 @@ public static class TimerOrigins
         switch (Text(recorded, "kind"))
         {
             case "main":
-                var extension = frames.Select(frame => Text(frame, "url"))
+                var extension = urls
                     .FirstOrDefault(url => url is not null && url.StartsWith("chrome-extension://", StringComparison.Ordinal));
                 return extension is null
                     ? "the page"
@@ -471,7 +553,7 @@ public static class TimerOrigins
         }
     }
 
-    private static (string Element, NodePath? Path) Describe(JsonElement source, DomDocumentTree tree)
+    public static (string Element, NodePath? Path) Describe(JsonElement source, DomDocumentTree tree)
     {
         var url = Text(source, "url");
         var description = Text(source, "kind") switch

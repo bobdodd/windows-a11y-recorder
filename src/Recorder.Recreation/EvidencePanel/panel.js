@@ -7,6 +7,9 @@
 const content = document.getElementById("content");
 const notice = document.getElementById("notice");
 const status = document.getElementById("status");
+const viewer = document.getElementById("viewer");
+// The address of the recorder's resources for this recreation, set by load.
+let recorderBase = null;
 
 function element(name, text, attributes) {
   const result = document.createElement(name);
@@ -181,14 +184,110 @@ function scheduledByCell(item) {
     cell.appendChild(element("p", origin.elementNote));
   }
   if (origin.caller) {
-    cell.appendChild(element("p", `Called from: ${origin.caller}`));
+    const paragraph = element("p", `Called from: ${origin.caller}`);
+    sourceLink(paragraph, origin.callerSource, `the caller of ${item.timerId}`);
+    cell.appendChild(paragraph);
   }
   if (origin.handler === "string") {
     cell.appendChild(element("p", "Handler: a string of code"));
   } else if (origin.callback) {
-    cell.appendChild(element("p", `Callback defined at: ${origin.callback}`));
+    const paragraph = element("p", `Callback defined at: ${origin.callback}`);
+    sourceLink(paragraph, origin.callbackSource, `the callback of ${item.timerId}`);
+    cell.appendChild(paragraph);
   }
   return cell;
+}
+
+// Slice 4h (protocol 0.54): a button that opens a recorded script's text at
+// a line, added to a paragraph when the script's text is recorded.
+function sourceLink(paragraph, link, label) {
+  if (!link) {
+    return;
+  }
+  const button = element("button", `View line ${link.line}`, {
+    type: "button",
+    "aria-label": `View ${label} at line ${link.line} of script ${link.scriptId}`
+  });
+  button.addEventListener("click", () => viewSource(link.digest, `script ${link.scriptId}`, link.line, button));
+  paragraph.appendChild(element("br"));
+  paragraph.appendChild(button);
+}
+
+function scriptAddress(item) {
+  const parts = [];
+  if (item.url) {
+    parts.push(item.url);
+  }
+  if (item.sourceUrl && item.sourceUrl !== item.url) {
+    parts.push(`sourceURL ${item.sourceUrl}`);
+  }
+  if (item.sourceMapUrl) {
+    parts.push(`source map ${item.sourceMapUrl}, not recorded`);
+  }
+  return parts.length > 0 ? parts.join("; ") : "none, inline or generated";
+}
+
+function scriptSize(size) {
+  return size === 1 ? "1 byte" : `${size} bytes`;
+}
+
+// The lines of a text as V8 counts them.
+function sourceLines(text) {
+  return text.split(/\r\n|[\n\r\u2028\u2029]/);
+}
+
+// Opens the read-only viewer of a script's recorded text, at a line when one
+// is given. The text is inserted as text, never run. Closing the viewer
+// returns focus to the control that opened it.
+async function viewSource(digest, label, line, opener) {
+  say(`Reading the text of ${label}.`);
+  let text;
+  try {
+    const response = await fetch(`${recorderBase}script/${digest}`, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`the recorder answered ${response.status}`);
+    }
+    text = await response.text();
+  } catch (error) {
+    say(`The text of ${label} could not be read: ${error.message}.`);
+    return;
+  }
+  const lines = sourceLines(text);
+  viewer.replaceChildren();
+  const heading = element("h2", `Recorded source of ${label}`, { tabindex: "-1" });
+  const close = element("button", "Back to the evidence", { type: "button" });
+  close.addEventListener("click", () => {
+    viewer.hidden = true;
+    viewer.replaceChildren();
+    content.hidden = false;
+    if (opener && opener.isConnected) {
+      opener.focus();
+    }
+  });
+  viewer.append(
+    heading,
+    element("p", `${lines.length} lines, ${scriptSize(new TextEncoder().encode(text).length)}. This is the text V8 compiled, as recorded; it is shown as text and does not run.`),
+    close);
+  const list = element("ol", null, { class: "source", "aria-label": `Lines of ${label}` });
+  lines.forEach((value, index) => {
+    const number = index + 1;
+    const item = element("li", null, { id: `line-${number}`, tabindex: "-1" });
+    item.appendChild(element("code", value === "" ? " " : value));
+    list.appendChild(item);
+  });
+  viewer.appendChild(list);
+  content.hidden = true;
+  viewer.hidden = false;
+  const target = line ? document.getElementById(`line-${Math.min(line, lines.length)}`) : null;
+  if (target) {
+    target.classList.add("target");
+    target.scrollIntoView({ block: "center" });
+    target.focus();
+    say(`Showing ${label} at line ${line} of ${lines.length}.`);
+  } else {
+    heading.focus();
+    say(`Showing ${label}, ${lines.length} lines.`);
+  }
 }
 
 // Slice 4g: an animation's start, on its timeline and in the recording.
@@ -341,6 +440,54 @@ function describe(evidence) {
     if (evidence.animationNotes && evidence.animationNotes.length > 0) {
       const list = element("ul");
       for (const item of evidence.animationNotes) {
+        list.appendChild(element("li", item));
+      }
+      content.appendChild(list);
+    }
+  }
+
+  // Slice 4h (protocol 0.54): the document's scripts at the frame.
+  if (evidence.scriptsNotRead) {
+    content.appendChild(element("h2", "Scripts"));
+    content.appendChild(element("p", evidence.scriptsNotRead));
+  } else {
+    table(
+      "Scripts",
+      ["Script", "Kind", "Owner", "Element", "Address", "Starts at", "Eval called from", "Size", "Compiled", "Source"],
+      (evidence.scripts || []).map(item => {
+        const label = `script ${item.scriptId}`;
+        let elementCell;
+        if (item.element && item.elementPath) {
+          elementCell = pathCell(item.elementPath, `${item.element}, for ${label}`);
+          elementCell.insertBefore(element("p", item.element), elementCell.firstChild);
+        } else {
+          elementCell = element("td", item.element || "none recorded");
+        }
+        const source = element("td");
+        if (item.digest) {
+          const button = element("button", "View source", { type: "button", "aria-label": `View the source of ${label}` });
+          button.addEventListener("click", () => viewSource(item.digest, label, null, button));
+          source.appendChild(button);
+        } else {
+          source.textContent = "text not recorded";
+        }
+        return [
+          item.scriptId,
+          item.kind,
+          longCell(item.owner),
+          elementCell,
+          longCell(scriptAddress(item)),
+          item.line ? `line ${item.line}, column ${item.column || 1}` : "not recorded",
+          item.evalFrom ? longCell(item.evalFrom) : "",
+          scriptSize(item.size),
+          item.compileError ? `${seconds(item.recordedNanoseconds)}, failed to compile` : seconds(item.recordedNanoseconds),
+          source
+        ];
+      }),
+      "No scripts were recorded in the document at or before the frame.");
+    if (evidence.scriptNotes && evidence.scriptNotes.length > 0) {
+      const list = element("ul");
+      for (const item of evidence.scriptNotes) {
         list.appendChild(element("li", item));
       }
       content.appendChild(list);
@@ -512,6 +659,7 @@ async function load() {
     if (!response.ok) {
       throw new Error(`the recorder answered ${response.status}`);
     }
+    recorderBase = config.evidenceAddress.replace(/evidence\.json$/, "");
     describe(await response.json());
     watchBlocked(config.evidenceAddress.replace(/evidence\.json$/, "blocked.json"));
     watchTimings(config.evidenceAddress.replace(/evidence\.json$/, "timings.json"));

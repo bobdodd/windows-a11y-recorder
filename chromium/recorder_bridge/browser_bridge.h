@@ -2398,6 +2398,64 @@ COMPONENT_EXPORT(RECORDER_BRIDGE)
 void RecordBlinkClassicScriptCompiled(uintptr_t script_identity,
                                       int script_id);
 
+inline constexpr char kScriptParsedKindClassic[] = "classic";
+inline constexpr char kScriptParsedKindModule[] = "module";
+inline constexpr char kScriptParsedKindEval[] = "eval";
+// A function made by new Function or wrapped by Blink, such as an attribute
+// handler.
+inline constexpr char kScriptParsedKindFunction[] = "function";
+
+// Protocol 0.54 (slice 4h): a script V8 instantiated, or failed to compile,
+// in a document of the main thread, with its source as UTF-8. Line and column
+// are one-based; an eval-from script ID of zero is none. Empty texts are
+// recorded as null.
+struct ScriptParsedFacts {
+  ScriptParsedFacts();
+  ScriptParsedFacts(ScriptParsedFacts&&);
+  ScriptParsedFacts& operator=(ScriptParsedFacts&&);
+  ~ScriptParsedFacts();
+
+  int document_node_id = 0;
+  std::string document_token;
+  std::string world_kind;
+  int world_id = kExecutionWorldIdUnobserved;
+  std::string world_name;
+  std::string world_stable_id;
+  int script_id = 0;
+  std::string kind;
+  std::string source;
+  std::string url;
+  std::string source_url;
+  std::string source_map_url;
+  int line_number = 0;
+  int column_number = 0;
+  int eval_from_script_id = 0;
+  bool compile_error = false;
+};
+
+// Notes a script ID of the process's main thread, and returns whether it was
+// not noted before, so that a script V8 reports again, as it does each time a
+// cached script or eval code is instantiated again, is recorded once.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool ClaimScriptParsed(int script_id);
+
+// Records script-parsed on browser.script, with a script-text record the
+// first time the process meets the source's digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordScriptParsed(ScriptParsedFacts facts);
+
+// Bracket a DevTools protocol command dispatched on the main thread, so that
+// the scripts DevTools compiles, such as a Console expression, are not
+// recorded as the page's.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void EnterDevToolsCommand();
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void LeaveDevToolsCommand();
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool InDevToolsCommand();
+
 // Protocol 0.48: a paint image Blink made from an image
 // (BitmapImage::PaintImageForCurrentFrameWithInfo): the image's own ID, the
 // paint image's ID, whether its animation sequence is the image's shared one

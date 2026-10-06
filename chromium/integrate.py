@@ -3673,6 +3673,9 @@ def split_argument_list(
     return None, len(text)
 
 
+V8_SCRIPT_HOOK_ENTRY_POINTS = {"SetV8ScriptHook": 1, "GetV8ScriptHook": 0}
+
+
 def parse_bridge_signatures(header_text: str) -> dict[str, int]:
     """Maps each exported bridge entry point to its declared parameter count."""
     text = strip_cxx_comments(header_text)
@@ -3773,6 +3776,10 @@ def verify_hook_templates(signatures: dict[str, int]) -> None:
     build failure at the patched call site rather than an integration failure.
     This check moves that failure forward to integration time.
     """
+    # Protocol 0.54 (slice 4h): the V8 script hook's setter and getter are
+    # declared in v8_script_hook.h and defined in V8, not exported by the
+    # bridge component.
+    signatures = {**signatures, **V8_SCRIPT_HOOK_ENTRY_POINTS}
     problems: list[str] = []
     for name, template in current_hook_templates().items():
         problems.extend(
@@ -3803,6 +3810,10 @@ def verify_integrated_sources(signatures: dict[str, int]) -> None:
     by an earlier protocol revision can read as already integrated. This check
     inspects what the checkout actually contains after patching.
     """
+    # Protocol 0.54 (slice 4h): the V8 script hook's setter and getter are
+    # declared in v8_script_hook.h and defined in V8, not exported by the
+    # bridge component.
+    signatures = {**signatures, **V8_SCRIPT_HOOK_ENTRY_POINTS}
     problems: list[str] = []
     for path in integrated_paths():
         text = read_source(path)
@@ -19067,6 +19078,377 @@ def patch_blink_content_attribute_handler(path: Path) -> None:
     write_patched(path, text)
 
 
+# Slice 4h (protocol 0.54): the page's script source. V8 reports each script
+# it instantiates, or fails to compile, to a hook Blink sets for the main
+# thread; the hook records the script and its source text. See
+# docs/architecture/page-recreation.md, "Slice 4h: the page's script source".
+V8_SCRIPT_HOOK_INCLUDE = '#include "chromium/recorder_bridge/v8_script_hook.h"'
+
+V8_DEBUG_OWN_INCLUDE = '#include "src/debug/debug.h"'
+V8_DEBUG_INCLUDES = (
+    "#include <atomic>",
+    V8_SCRIPT_HOOK_INCLUDE,
+    '#include "src/objects/script-inl.h"',
+    '#include "src/objects/shared-function-info-inl.h"',
+)
+V8_DEBUG_REPORT_ANCHOR = "void Debug::OnCompileError(DirectHandle<Script> script) {\n"
+V8_DEBUG_REPORT_MARKER = "void A11yRecorderReportScript("
+V8_DEBUG_REPORT = """\
+// Windows A11y Recorder (protocol 0.54, slice 4h): a normal script, when it
+// is instantiated or fails to compile, is given to the hook Blink sets,
+// before the debugger's own checks, which skip every script while no
+// debugger is attached. Temporary, native, extension, inspector, and
+// WebAssembly scripts are not given.
+void A11yRecorderReportScript(Isolate* isolate, DirectHandle<Script> script,
+                              bool compile_error) {
+  ::a11y_recorder::V8ScriptHook hook = ::a11y_recorder::GetV8ScriptHook();
+  if (!hook || script->id() == Script::kTemporaryScriptId ||
+      script->type() != Script::Type::kNormal) {
+    return;
+  }
+  HandleScope scope(isolate);
+  DirectHandle<PrimitiveHeapObject> source(script->source(), isolate);
+  if (!IsString(*source)) {
+    return;
+  }
+  ::a11y_recorder::V8ScriptFacts facts;
+  facts.script_id = script->id();
+  facts.source = v8::Utils::ToLocal(Cast<String>(source));
+  DirectHandle<Object> name(script->name(), isolate);
+  if (IsString(*name)) {
+    facts.name = v8::Utils::ToLocal(Cast<String>(name));
+  }
+  DirectHandle<PrimitiveHeapObject> source_url(script->source_url(), isolate);
+  if (IsString(*source_url)) {
+    facts.source_url = v8::Utils::ToLocal(Cast<String>(source_url));
+  }
+  DirectHandle<Object> source_mapping_url(script->source_mapping_url(),
+                                          isolate);
+  if (IsString(*source_mapping_url)) {
+    facts.source_mapping_url =
+        v8::Utils::ToLocal(Cast<String>(source_mapping_url));
+  }
+  facts.line_offset = script->line_offset();
+  facts.column_offset = script->column_offset();
+  facts.is_module = script->origin_options().IsModule();
+  facts.compilation_kind = static_cast<int>(script->compilation_kind());
+  if (script->has_eval_from_shared()) {
+    Tagged<HeapObject> from = script->eval_from_shared()->script();
+    if (IsScript(from)) {
+      facts.eval_from_script_id = Cast<Script>(from)->id();
+    }
+  }
+  facts.compile_error = compile_error;
+  hook(reinterpret_cast<v8::Isolate*>(isolate), facts);
+}
+
+"""
+V8_DEBUG_AFTER_COMPILE_ANCHOR = """\
+void Debug::OnAfterCompile(DirectHandle<Script> script) {
+  ProcessCompileEvent(false, script);
+}
+"""
+V8_DEBUG_AFTER_COMPILE_HOOK = """\
+void Debug::OnAfterCompile(DirectHandle<Script> script) {
+  // Windows A11y Recorder (protocol 0.54, slice 4h).
+  A11yRecorderReportScript(isolate_, script, false);
+  ProcessCompileEvent(false, script);
+}
+"""
+V8_DEBUG_END_ANCHOR = "}  // namespace internal\n}  // namespace v8\n"
+V8_DEBUG_END_MARKER = "void SetV8ScriptHook(V8ScriptHook hook) {"
+V8_DEBUG_END = """\
+}  // namespace internal
+}  // namespace v8
+
+// Windows A11y Recorder (protocol 0.54, slice 4h): the hook V8 gives each
+// script to. Declared in chromium/recorder_bridge/v8_script_hook.h.
+namespace a11y_recorder {
+namespace {
+std::atomic<V8ScriptHook> g_v8_script_hook{nullptr};
+}  // namespace
+
+void SetV8ScriptHook(V8ScriptHook hook) {
+  g_v8_script_hook.store(hook, std::memory_order_release);
+}
+
+V8ScriptHook GetV8ScriptHook() {
+  return g_v8_script_hook.load(std::memory_order_acquire);
+}
+}  // namespace a11y_recorder
+"""
+
+V8_COMPILE_ERROR_OWN_INCLUDE = (
+    '#include "src/parsing/pending-compilation-error-handler.h"'
+)
+V8_COMPILE_ERROR_DECLARATION_ANCHOR = (
+    "void PendingCompilationErrorHandler::ThrowPendingError(\n"
+)
+V8_COMPILE_ERROR_DECLARATION_MARKER = "// Windows A11y Recorder (protocol 0.54, slice 4h): defined in"
+V8_COMPILE_ERROR_DECLARATION = """\
+// Windows A11y Recorder (protocol 0.54, slice 4h): defined in
+// src/debug/debug.cc.
+void A11yRecorderReportScript(Isolate* isolate, DirectHandle<Script> script,
+                              bool compile_error);
+
+"""
+V8_COMPILE_ERROR_ANCHOR = """\
+  isolate->debug()->OnCompileError(script);
+
+  Factory* factory = isolate->factory();
+"""
+V8_COMPILE_ERROR_HOOK = """\
+  // Windows A11y Recorder (protocol 0.54, slice 4h): a script that failed
+  // to compile.
+  A11yRecorderReportScript(isolate, script, true);
+  isolate->debug()->OnCompileError(script);
+
+  Factory* factory = isolate->factory();
+"""
+
+BLINK_V8_INITIALIZER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/bindings/core/v8/v8_initializer.h"'
+)
+BLINK_V8_INITIALIZER_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    V8_SCRIPT_HOOK_INCLUDE,
+    BLINK_DOCUMENT_INCLUDE,
+)
+BLINK_V8_INITIALIZER_HELPERS_ANCHOR = (
+    "void V8Initializer::InitializeV8Common(v8::Isolate* isolate) {\n"
+)
+BLINK_V8_INITIALIZER_HELPERS_MARKER = "void RecorderV8ScriptCompiled("
+BLINK_V8_INITIALIZER_HELPERS = """\
+namespace {
+
+// Windows A11y Recorder (protocol 0.54, slice 4h): the recorder's name for a
+// world type, as the timer records give it.
+const char* RecorderScriptWorldKind(const DOMWrapperWorld& world) {
+  if (world.IsMainWorld()) {
+    return a11y_recorder::kExecutionWorldKindMain;
+  }
+  if (world.GetWorldType() == DOMWrapperWorld::WorldType::kInspectorIsolated) {
+    return a11y_recorder::kExecutionWorldKindInspectorIsolated;
+  }
+  if (world.IsIsolatedWorld()) {
+    return a11y_recorder::kExecutionWorldKindIsolated;
+  }
+  if (world.IsWorkerOrWorkletWorld()) {
+    return a11y_recorder::kExecutionWorldKindWorkerOrWorklet;
+  }
+  if (world.IsShadowRealmWorld()) {
+    return a11y_recorder::kExecutionWorldKindShadowRealm;
+  }
+  return a11y_recorder::kExecutionWorldKindOther;
+}
+
+// A V8 string as UTF-8, with unpaired surrogates replaced, or empty for an
+// empty handle. Read with V8's own API, so the string is not changed.
+std::string RecorderScriptText(v8::Isolate* isolate,
+                               v8::Local<v8::String> text) {
+  if (text.IsEmpty()) {
+    return std::string();
+  }
+  const size_t length = text->Utf8LengthV2(isolate);
+  std::string utf8(length, '\\0');
+  if (length > 0) {
+    text->WriteUtf8V2(isolate, utf8.data(), length,
+                      v8::String::WriteFlags::kReplaceInvalidUtf8);
+  }
+  return utf8;
+}
+
+// The recorder's kind of a V8 script.
+const char* RecorderScriptKind(const a11y_recorder::V8ScriptFacts& script) {
+  if (script.is_module) {
+    return a11y_recorder::kScriptParsedKindModule;
+  }
+  switch (script.compilation_kind) {
+    case a11y_recorder::kV8CompilationKindDirectEval:
+    case a11y_recorder::kV8CompilationKindIndirectEval:
+      return a11y_recorder::kScriptParsedKindEval;
+    case a11y_recorder::kV8CompilationKindFunctionConstructor:
+    case a11y_recorder::kV8CompilationKindWrapped:
+      return a11y_recorder::kScriptParsedKindFunction;
+    default:
+      return a11y_recorder::kScriptParsedKindClassic;
+  }
+}
+
+// Records a script of a document of the main thread, once per script ID.
+// A script compiled while a DevTools protocol command runs, such as an
+// expression typed in the Console, or in DevTools' own isolated world, is
+// not the page's and is not recorded.
+void RecorderV8ScriptCompiled(v8::Isolate* isolate,
+                              const a11y_recorder::V8ScriptFacts& script) {
+  if (!IsMainThread() || !a11y_recorder::IsRecorderActive() ||
+      a11y_recorder::InDevToolsCommand() || script.script_id <= 0 ||
+      !isolate->InContext()) {
+    return;
+  }
+  A11Y_RECORDER_HOOK_COST("hook:script-parsed");
+  v8::HandleScope handles(isolate);
+  LocalDOMWindow* window = ToLocalDOMWindow(isolate->GetCurrentContext());
+  Document* document = window ? window->document() : nullptr;
+  if (!document) {
+    return;
+  }
+  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
+  if (world.GetWorldType() == DOMWrapperWorld::WorldType::kInspectorIsolated ||
+      !a11y_recorder::ClaimScriptParsed(script.script_id)) {
+    return;
+  }
+  a11y_recorder::ScriptParsedFacts facts;
+  facts.document_node_id = static_cast<int>(document->GetDomNodeId());
+  facts.document_token = document->Token().ToString();
+  facts.world_kind = RecorderScriptWorldKind(world);
+  facts.world_id = world.GetWorldId();
+  // Blink keeps isolated world names and stable identifiers in main-thread
+  // maps; this is the main thread.
+  if (!world.IsMainWorld() && IsMainThread()) {
+    facts.world_name = world.NonMainWorldHumanReadableName().Utf8();
+    facts.world_stable_id = world.NonMainWorldStableId().Utf8();
+  }
+  facts.script_id = script.script_id;
+  facts.kind = RecorderScriptKind(script);
+  facts.source = RecorderScriptText(isolate, script.source);
+  facts.url = RecorderScriptText(isolate, script.name);
+  facts.source_url = RecorderScriptText(isolate, script.source_url);
+  facts.source_map_url = RecorderScriptText(isolate, script.source_mapping_url);
+  facts.line_number = script.line_offset + 1;
+  facts.column_number = script.column_offset + 1;
+  facts.eval_from_script_id = script.eval_from_script_id;
+  facts.compile_error = script.compile_error;
+  a11y_recorder::RecordScriptParsed(std::move(facts));
+}
+
+}  // namespace
+
+"""
+BLINK_V8_INITIALIZER_INSTALL_ANCHOR = (
+    "  isolate->SetUseCounterCallback(&UseCounterCallback);\n"
+)
+BLINK_V8_INITIALIZER_INSTALL_HOOK = """\
+  isolate->SetUseCounterCallback(&UseCounterCallback);
+  // Windows A11y Recorder (protocol 0.54, slice 4h): the main thread's
+  // scripts, as V8 instantiates them.
+  if (IsMainThread()) {
+    a11y_recorder::SetV8ScriptHook(&RecorderV8ScriptCompiled);
+  }
+"""
+
+BLINK_DEVTOOLS_SESSION_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/inspector/devtools_session.h"'
+)
+BLINK_DEVTOOLS_SESSION_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/platform/wtf/threading.h"',
+)
+BLINK_DEVTOOLS_SESSION_START_ANCHOR = """\
+  agent_->client_->DebuggerTaskStarted();
+  if (v8_inspector::V8InspectorSession::canDispatchMethod(
+"""
+BLINK_DEVTOOLS_SESSION_START_HOOK = """\
+  agent_->client_->DebuggerTaskStarted();
+  // Windows A11y Recorder (protocol 0.54, slice 4h): a script compiled while
+  // a DevTools command runs on the main thread is DevTools', not the page's.
+  const bool recorder_devtools_command = IsMainThread();
+  if (recorder_devtools_command) {
+    a11y_recorder::EnterDevToolsCommand();
+  }
+  if (v8_inspector::V8InspectorSession::canDispatchMethod(
+"""
+BLINK_DEVTOOLS_SESSION_FINISH_ANCHOR = """\
+    inspector_backend_dispatcher_->Dispatch(dispatchable);
+  }
+  agent_->client_->DebuggerTaskFinished();
+"""
+BLINK_DEVTOOLS_SESSION_FINISH_HOOK = """\
+    inspector_backend_dispatcher_->Dispatch(dispatchable);
+  }
+  if (recorder_devtools_command) {
+    a11y_recorder::LeaveDevToolsCommand();
+  }
+  agent_->client_->DebuggerTaskFinished();
+"""
+
+
+def patch_v8_debug(path: Path) -> None:
+    """Slice 4h: V8 gives each instantiated script to the recorder's hook."""
+    text = read_source(path)
+    text = add_includes_after(text, V8_DEBUG_OWN_INCLUDE, V8_DEBUG_INCLUDES, path)
+    text = insert_before_once(
+        text, V8_DEBUG_REPORT_ANCHOR, V8_DEBUG_REPORT, V8_DEBUG_REPORT_MARKER, path
+    )
+    text = apply_cookie_hook(
+        text, V8_DEBUG_AFTER_COMPILE_ANCHOR, V8_DEBUG_AFTER_COMPILE_HOOK, path
+    )
+    if V8_DEBUG_END_MARKER not in text:
+        if not text.endswith(V8_DEBUG_END_ANCHOR):
+            raise RuntimeError(f"{path}: expected the file to end with its namespaces")
+        text = text[: -len(V8_DEBUG_END_ANCHOR)] + V8_DEBUG_END
+    write_patched(path, text)
+
+
+def patch_v8_compile_error(path: Path) -> None:
+    """Slice 4h: a script that failed to compile is given to the hook."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        V8_COMPILE_ERROR_DECLARATION_ANCHOR,
+        V8_COMPILE_ERROR_DECLARATION,
+        V8_COMPILE_ERROR_DECLARATION_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, V8_COMPILE_ERROR_ANCHOR, V8_COMPILE_ERROR_HOOK, path
+    )
+    write_patched(path, text)
+
+
+def patch_blink_v8_initializer(path: Path) -> None:
+    """Slice 4h: Blink sets the V8 script hook for the main thread."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_V8_INITIALIZER_OWN_INCLUDE, BLINK_V8_INITIALIZER_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        BLINK_V8_INITIALIZER_HELPERS_ANCHOR,
+        BLINK_V8_INITIALIZER_HELPERS,
+        BLINK_V8_INITIALIZER_HELPERS_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_V8_INITIALIZER_INSTALL_ANCHOR,
+        BLINK_V8_INITIALIZER_INSTALL_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_devtools_session(path: Path) -> None:
+    """Slice 4h: DevTools commands on the main thread are bracketed."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_DEVTOOLS_SESSION_OWN_INCLUDE, BLINK_DEVTOOLS_SESSION_INCLUDES, path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_DEVTOOLS_SESSION_START_ANCHOR,
+        BLINK_DEVTOOLS_SESSION_START_HOOK,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_DEVTOOLS_SESSION_FINISH_ANCHOR,
+        BLINK_DEVTOOLS_SESSION_FINISH_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -19460,6 +19842,14 @@ def main() -> int:
     patch_blink_v8_script_runner(blink_bindings_v8 / "v8_script_runner.cc")
     patch_blink_content_attribute_handler(
         blink_bindings_v8 / "js_event_handler_for_content_attribute.cc"
+    )
+    patch_blink_v8_initializer(blink_bindings_v8 / "v8_initializer.cc")
+    patch_blink_devtools_session(
+        blink_source / "core" / "inspector" / "devtools_session.cc"
+    )
+    patch_v8_debug(source / "v8" / "src" / "debug" / "debug.cc")
+    patch_v8_compile_error(
+        source / "v8" / "src" / "parsing" / "pending-compilation-error-handler.cc"
     )
     patch_blink_animation_frame_callbacks(
         source

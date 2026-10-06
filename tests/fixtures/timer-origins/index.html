@@ -11,6 +11,11 @@
     evidence panel's "Scheduled by" column is expected to name for each. Serve
     this folder over http with ..\animation\Serve-Fixture.ps1 -Folder <this
     folder>.
+
+    Slice 4h (protocol 0.54) adds an external module, new Function, a
+    javascript: link, and a script that fails to compile; the second list
+    says what the evidence panel's Scripts table is expected to list. See
+    "Slice 4h: the page's script source".
   -->
   <style>
     :root {
@@ -29,10 +34,11 @@
     }
   </style>
   <script src="app.js"></script>
+  <script type="module" src="module.js"></script>
 </head>
 <body>
   <h1>Timer origin evidence fixture</h1>
-  <p id="status" role="status">Six timers are scheduled at load; the buttons
+  <p id="status" role="status">Eight timers are scheduled at load; the buttons
     schedule two more.</p>
 
   <ol>
@@ -50,11 +56,33 @@
     <li>The first button: its onclick attribute.</li>
     <li>The second button: the script element loading app.js, whose listener
       schedules it.</li>
+    <li>At load, the external module module.js: the module script element
+      loading module.js.</li>
+    <li>At load, a function made by new Function in the inline script: no
+      element, the stack's next frame is the inline script.</li>
+  </ol>
+
+  <h2>Scripts</h2>
+  <ol>
+    <li>app.js, classic, the script element loading it.</li>
+    <li>module.js, module, the module script element loading it.</li>
+    <li>The onclick attribute of the first button, function, once it has
+      been clicked or its handler compiled.</li>
+    <li>The inline script, classic, the inline script element.</li>
+    <li>The eval code and the string handler, eval and classic, with no
+      element; the eval names the inline script as its caller.</li>
+    <li>The function made by new Function, function, with no element.</li>
+    <li>The inline module script, module, the inline module script
+      element.</li>
+    <li>The script that fails to compile, classic, marked as failed to
+      compile.</li>
+    <li>The javascript: link, classic, after it has been followed.</li>
   </ol>
 
   <button type="button" id="attribute-button"
     onclick="setTimeout(function fromAttribute() {}, 600000); document.getElementById('status').textContent = 'The onclick attribute scheduled a timer.';">Schedule from an onclick attribute</button>
   <button type="button" id="listener-button">Schedule from a listener</button>
+  <p><a id="javascript-link" href="javascript:void(document.getElementById('status').textContent = 'The javascript: link ran.')">Run a javascript: link</a></p>
 
   <script>
     function inlineTimer() {}
@@ -64,6 +92,12 @@
     setTimeout(() => {
       setTimeout(function fromCallback() {}, 600000);
     }, 100);
+    const made = new Function("setTimeout(function fromFunction() {}, 600000);");
+    made();
+  </script>
+  <!-- Fails to compile on purpose (slice 4h). -->
+  <script>
+    let broken = ;
   </script>
   <script type="module">
     setTimeout(function fromModule() {}, 600000);
