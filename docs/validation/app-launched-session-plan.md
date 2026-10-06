@@ -43,13 +43,20 @@ interaction consistently.
    collector records, so injected input can be told apart from any other
    input during the run.
 8. Stops the recording with the Stop button and waits for the application to
-   report that the session files were verified and to load the session into
-   playback.
+   report "Recording completed and stored." with no database problem, and to
+   load the session into playback. (Until 2026-09-26 the status was that the
+   session files were verified.)
 9. Closes the application through its window, which runs its normal shutdown.
-10. Checks the archive validation report and applies the same evidence-loss
-    rule as the Blink validation: browser records reported as lost, or events
-    refused by the event sink, fail the run.
-11. Runs `scripts\Verify-AppSessionEvidence.ps1` on the session.
+10. Writes the events of the session's recording file, `recording.mcap`, as
+    one JSON event per line with `tests\RecordingEventExport`, beside the
+    session as `<session>.events.ndjson`, and requires their count to equal
+    the manifest's accepted count. Checks the size and SHA-256 digest of every
+    file the manifest lists. Applies the same evidence-loss rule as the Blink
+    validation: browser records reported as lost, or events refused by the
+    event sink, fail the run. (Until 2026-09-26 the events were in the
+    session's `events.ndjson` and were checked by the archive validation
+    report, both since retired.)
+11. Runs `scripts\Verify-AppSessionEvidence.ps1` on the exported events.
 
 ## What the verifier requires
 

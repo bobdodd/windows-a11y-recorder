@@ -901,6 +901,41 @@ public sealed class BrowserStateTests : IDisposable
         }
     }
 
+    // The validation scripts read a recording's events in the form of the
+    // retired events.ndjson. Every event is written once, in key order, on
+    // one line, although these payloads span lines; the snapshots and index
+    // records are not events.
+    [Fact]
+    public async Task TheEventsOfAFileAreExportedInKeyOrderWithoutTheStateRecords()
+    {
+        var path = await WriteSessionAsync("export.mcap", 25_000_000);
+        var records = Session(out _);
+        using var reader = RecordingFileReader.Open(path);
+        using var output = new MemoryStream();
+
+        var count = RecordingFileEventExport.Write(reader, output);
+
+        var lines = System.Text.Encoding.UTF8.GetString(output.ToArray()).Split('\n');
+        Assert.Equal("", lines[^1]);
+        Assert.Equal(records.Count, count);
+        Assert.Equal(records.Count, lines.Length - 1);
+        for (var index = 0; index < records.Count; index++)
+        {
+            using var line = JsonDocument.Parse(lines[index]);
+            var root = line.RootElement;
+            Assert.Equal(index + 1, root.GetProperty("sequence").GetInt64());
+            Assert.Equal(records[index].Channel, root.GetProperty("channel").GetString());
+            Assert.Equal(records[index].EventType, root.GetProperty("eventType").GetString());
+            Assert.True(JsonElement.DeepEquals(records[index].Payload, root.GetProperty("payload")));
+        }
+
+        var cutPath = Path.Combine(_directory, "export-cut.mcap");
+        var bytes = await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken);
+        await File.WriteAllBytesAsync(cutPath, bytes[..(bytes.Length / 2)], TestContext.Current.CancellationToken);
+        using var cut = RecordingFileReader.Open(cutPath);
+        Assert.Throws<InvalidDataException>(() => RecordingFileEventExport.Write(cut, new MemoryStream()));
+    }
+
     [Fact]
     public void TheStateThreadStopsWhenItFallsBehindAndPassingNeverWaits()
     {

@@ -3,6 +3,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $SessionPath,
 
+    # The session's events, one JSON event per line, as written from its
+    # recording file by tests\RecordingEventExport.
+    [Parameter(Mandatory = $true)]
+    [string] $EventsPath,
+
     # The URL the run script served the app session fixture page from.
     [Parameter(Mandatory = $true)]
     [string] $FixtureUri,
@@ -66,9 +71,9 @@ function Test-InsideRect {
         $Y -ge $Rect.y -and $Y -lt ($Rect.y + $Rect.height)
 }
 
-$eventPath = Join-Path $SessionPath "events.ndjson"
+$eventPath = $EventsPath
 if (-not (Test-Path -LiteralPath $eventPath -PathType Leaf)) {
-    throw "The session does not contain events.ndjson: $SessionPath"
+    throw "The session's events were not found: $EventsPath"
 }
 $steps = ConvertFrom-Json $StepsJson
 $marker = [long] $steps.InputMarker

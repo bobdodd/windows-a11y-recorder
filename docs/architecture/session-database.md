@@ -760,11 +760,13 @@ only once the database version is tested in full. It adds the
 
 Still to come on the branch: media rows for frames and audio, which would let
 the manifest's artifact inventory go, and the hour-long Windows system test.
-The Windows validation scripts `Run-AppSessionValidation.ps1`,
-`Verify-AppSessionEvidence.ps1`, `Run-BlinkValidation.ps1`, and
+The Windows validation scripts `Run-BlinkValidation.ps1` and
 `Verify-BlinkEvidence.ps1` read `events.ndjson` and the archive check's
-report, and do not run against a recording made on this branch until they
-read the database instead.
+report, and do not run against a recording made on this branch.
+`Run-AppSessionValidation.ps1` and `Verify-AppSessionEvidence.ps1` were
+ported on 2026-10-06: they read the events written from the recording file
+by `tests\RecordingEventExport` (see
+[the application session validation](../validation/app-launched-session-plan.md)).
 
 A throughput probe on the Linux development sandbox, with two processor cores
 and a debug build, wrote 200,000 events with payloads of about 2.8 KB at about
