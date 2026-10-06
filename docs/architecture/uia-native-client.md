@@ -118,6 +118,15 @@ reads throws.
 - The application session verifier reports how many structure changes were
   recorded and how many had no runtime ID.
 
+### First run on the target machine
+
+At `3b07ab3`, on 2026-10-06, recording
+`20261006-162006-73ac3c88d7b64ce99f063cbbb1806e38`, 16 seconds of the timer
+origin fixture, was stopped from the recorder's window and completed. The
+Windows Application log holds no fault of the recorder after the one that
+led to this change. That is one stop; the application session validation
+has not been run at this revision.
+
 Tests: `UiaNativeClientTests` (the names of every subscribed event and
 property, control types, structure-change types and state values, the
 reading of property values and rectangles, the failure flags, and a handler
