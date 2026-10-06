@@ -4,7 +4,8 @@ namespace Recorder.Session;
 
 /// <summary>A timer scheduled and not yet finished: its scheduling record, when it was scheduled, and when it last ran.</summary>
 /// <param name="LastRunTime">For an interval timer, the time of its last recorded run, or null before the first.</param>
-public sealed record PendingTimer(JsonElement Scheduled, long ScheduledTime, long? LastRunTime);
+/// <param name="Origin">Protocol 0.52: the timer-origin record of who scheduled it, or null.</param>
+public sealed record PendingTimer(JsonElement Scheduled, long ScheduledTime, long? LastRunTime, JsonElement? Origin = null);
 
 /// <summary>
 /// The script state of one document, rebuilt from its listener and timer
@@ -17,12 +18,20 @@ public sealed class ScriptDocumentState
 {
     private readonly Dictionary<string, JsonElement> _listeners = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PendingTimer> _timers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, JsonElement> _scripts = new(StringComparer.Ordinal);
 
     /// <summary>The registration records of the listeners registered and not removed, by listener identity.</summary>
     public IReadOnlyDictionary<string, JsonElement> Listeners => _listeners;
 
     /// <summary>The timers scheduled and not finished, by timer identity.</summary>
     public IReadOnlyDictionary<string, PendingTimer> Timers => _timers;
+
+    /// <summary>
+    /// Protocol 0.52: the script-compiled record of each script whose markup
+    /// was recorded, by V8 script ID. A script ID is per renderer process, as
+    /// the document is.
+    /// </summary>
+    public IReadOnlyDictionary<string, JsonElement> Scripts => _scripts;
 
     /// <summary>The event key and time of the record that last changed the state, or -1.</summary>
     public long EventKey { get; internal set; } = -1;
@@ -56,6 +65,15 @@ public sealed class ScriptDocumentState
             case "timer-cancelled" when Text(payload, "timerId") is { } id:
                 _timers.Remove(id);
                 break;
+            case "timer-origin" when Text(payload, "timerId") is { } id:
+                if (_timers.TryGetValue(id, out var scheduled))
+                {
+                    _timers[id] = scheduled with { Origin = payload.Clone() };
+                }
+                break;
+            case "script-compiled" when Text(payload, "scriptId") is { } id:
+                _scripts[id] = payload.Clone();
+                break;
             default:
                 return false;
         }
@@ -64,8 +82,18 @@ public sealed class ScriptDocumentState
         return true;
     }
 
-    internal void Load(IEnumerable<JsonElement> listeners, IEnumerable<PendingTimer> timers, long eventKey, long time)
+    internal void Load(
+        IEnumerable<JsonElement> listeners,
+        IEnumerable<PendingTimer> timers,
+        long eventKey,
+        long time,
+        IEnumerable<JsonElement>? scripts = null)
     {
+        _scripts.Clear();
+        foreach (var script in scripts ?? [])
+        {
+            _scripts[Text(script, "scriptId")!] = script.Clone();
+        }
         _listeners.Clear();
         foreach (var listener in listeners)
         {
@@ -74,7 +102,11 @@ public sealed class ScriptDocumentState
         _timers.Clear();
         foreach (var timer in timers)
         {
-            _timers[Text(timer.Scheduled, "timerId")!] = timer with { Scheduled = timer.Scheduled.Clone() };
+            _timers[Text(timer.Scheduled, "timerId")!] = timer with
+            {
+                Scheduled = timer.Scheduled.Clone(),
+                Origin = timer.Origin?.Clone()
+            };
         }
         EventKey = eventKey;
         Time = time;

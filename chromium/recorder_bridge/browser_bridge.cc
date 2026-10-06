@@ -227,10 +227,18 @@ struct EvidenceIdentityStorage {
     std::optional<double> requested_delay_milliseconds;
     std::optional<double> effective_delay_milliseconds;
     int nesting_level;
+    // Protocol 0.52: where the callback function is defined.
+    std::optional<ScriptFrameFacts> callback = std::nullopt;
   };
   std::unordered_map<uintptr_t, DispatchState> dispatches;
   std::unordered_map<uintptr_t, InvocationState> active_invocations;
   std::unordered_map<uintptr_t, TimerState> timers;
+  // Protocol 0.52: who scheduled a timer, noted in the call that schedules it
+  // and taken by its timer-scheduled record.
+  std::unordered_map<uintptr_t, TimerOriginFacts> timer_origins;
+  // Protocol 0.52: the script elements whose classic scripts are running, by
+  // the script's identity.
+  std::unordered_map<uintptr_t, ScriptSourceFacts> running_script_elements;
 };
 
 EvidenceIdentityStorage& EvidenceIdentities() {
@@ -838,7 +846,8 @@ EvidenceIdentityStorage::TimerState RegisterTimerIdentity(
     std::string timer_kind,
     std::optional<double> requested_delay_milliseconds,
     std::optional<double> effective_delay_milliseconds,
-    int nesting_level) {
+    int nesting_level,
+    std::optional<ScriptFrameFacts> callback = std::nullopt) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
   EvidenceIdentityStorage::TimerState state{
@@ -849,6 +858,7 @@ EvidenceIdentityStorage::TimerState RegisterTimerIdentity(
       .requested_delay_milliseconds = requested_delay_milliseconds,
       .effective_delay_milliseconds = effective_delay_milliseconds,
       .nesting_level = nesting_level,
+      .callback = std::move(callback),
   };
   identities.timers.insert_or_assign(timer_identity, state);
   return state;
@@ -1159,6 +1169,70 @@ base::DictValue CreateDispatchPayload(
   return payload;
 }
 
+// Protocol 0.52: takes who scheduled a timer, noted by the call that
+// schedules it.
+std::optional<TimerOriginFacts> TakeTimerOrigin(uintptr_t timer_identity) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.timer_origins.find(timer_identity);
+  if (found == identities.timer_origins.end()) {
+    return std::nullopt;
+  }
+  TimerOriginFacts origin = std::move(found->second);
+  identities.timer_origins.erase(found);
+  return origin;
+}
+
+// One stack frame of a timer-origin record. Unobserved values are null, as in
+// a script location.
+base::DictValue CreateScriptFrame(ScriptFrameFacts frame) {
+  base::DictValue value;
+  value.Set("scriptId", frame.script_id > 0
+                            ? base::Value(base::NumberToString(frame.script_id))
+                            : base::Value());
+  value.Set("url", frame.url.empty() ? base::Value()
+                                     : base::Value(std::move(frame.url)));
+  value.Set("functionName",
+            frame.function_name.empty()
+                ? base::Value()
+                : base::Value(std::move(frame.function_name)));
+  value.Set("line", frame.line_number > 0 ? base::Value(frame.line_number)
+                                          : base::Value());
+  value.Set("column", frame.column_number > 0
+                          ? base::Value(frame.column_number)
+                          : base::Value());
+  value.Set("isEval", frame.is_eval);
+  return value;
+}
+
+base::DictValue CreateTimerOriginPayload(
+    const RecorderPipeClient& client,
+    const EvidenceIdentityStorage::TimerState& state,
+    TimerOriginFacts origin) {
+  const std::string world_kind =
+      NormalizeExecutionWorldKind(std::move(origin.world_kind));
+  base::DictValue context = CreateContext(client, state.document_node_id);
+  if (!world_kind.empty()) {
+    context.Set("executionWorldId", ExecutionWorldId(origin.world_id));
+  }
+  base::DictValue payload;
+  payload.Set("context", std::move(context));
+  payload.Set("timerId", state.timer_id);
+  payload.Set("world", CreateExecutionWorld(world_kind, origin.world_id,
+                                            std::move(origin.world_name),
+                                            std::move(origin.world_stable_id)));
+  base::ListValue stack;
+  if (origin.stack.size() > kMaximumTimerOriginFrames) {
+    origin.stack.resize(kMaximumTimerOriginFrames);
+  }
+  for (ScriptFrameFacts& frame : origin.stack) {
+    stack.Append(CreateScriptFrame(std::move(frame)));
+  }
+  payload.Set("stack", std::move(stack));
+  payload.Set("handler", origin.string_handler ? "string" : "function");
+  return payload;
+}
+
 base::DictValue CreateTimerPayload(
     const RecorderPipeClient& client,
     const EvidenceIdentityStorage::TimerState& state,
@@ -1185,7 +1259,16 @@ base::DictValue CreateTimerPayload(
   payload.Set("throttled", base::Value());
   payload.Set("pageLifecycleState",
               PageLifecycleStateName(page_lifecycle_state));
-  payload.Set("callbackLocation", base::Value());
+  if (state.callback) {
+    payload.Set("callbackLocation",
+                CreateScriptLocation(state.callback->url,
+                                     state.callback->function_name,
+                                     state.callback->script_id,
+                                     state.callback->line_number,
+                                     state.callback->column_number));
+  } else {
+    payload.Set("callbackLocation", base::Value());
+  }
   if (cancellation_reason) {
     payload.Set("cancellationReason", std::move(*cancellation_reason));
   } else {
@@ -2443,14 +2526,24 @@ void RecordBlinkTimerScheduled(uintptr_t timer_identity,
     return;
   }
 
+  std::optional<TimerOriginFacts> origin = TakeTimerOrigin(timer_identity);
+  std::optional<ScriptFrameFacts> callback;
+  if (origin && origin->has_callback) {
+    callback = origin->callback;
+  }
   EvidenceIdentityStorage::TimerState state = RegisterTimerIdentity(
       timer_identity, document_node_id, repeating ? "interval" : "timeout",
       requested_delay_milliseconds, effective_delay_milliseconds,
-      nesting_level);
+      nesting_level, std::move(callback));
   base::DictValue payload =
       CreateTimerPayload(*client, state, std::nullopt, std::nullopt,
                          page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-scheduled", std::move(payload));
+  if (origin) {
+    SendBlinkEvidence(
+        "browser.timer", "timer-origin",
+        CreateTimerOriginPayload(*client, state, std::move(*origin)));
+  }
 }
 
 void RecordBlinkTimerFired(uintptr_t timer_identity,
@@ -7584,6 +7677,105 @@ void StopHookCost(int slot, int64_t started) {
     return;
   }
   RecordCost(slot, CostNowNanoseconds() - started);
+}
+
+
+ScriptFrameFacts::ScriptFrameFacts() = default;
+ScriptFrameFacts::ScriptFrameFacts(const ScriptFrameFacts&) = default;
+ScriptFrameFacts::ScriptFrameFacts(ScriptFrameFacts&&) = default;
+ScriptFrameFacts& ScriptFrameFacts::operator=(const ScriptFrameFacts&) =
+    default;
+ScriptFrameFacts& ScriptFrameFacts::operator=(ScriptFrameFacts&&) = default;
+ScriptFrameFacts::~ScriptFrameFacts() = default;
+TimerOriginFacts::TimerOriginFacts() = default;
+TimerOriginFacts::TimerOriginFacts(TimerOriginFacts&&) = default;
+TimerOriginFacts& TimerOriginFacts::operator=(TimerOriginFacts&&) = default;
+TimerOriginFacts::~TimerOriginFacts() = default;
+ScriptSourceFacts::ScriptSourceFacts() = default;
+ScriptSourceFacts::ScriptSourceFacts(const ScriptSourceFacts&) = default;
+ScriptSourceFacts::ScriptSourceFacts(ScriptSourceFacts&&) = default;
+ScriptSourceFacts& ScriptSourceFacts::operator=(const ScriptSourceFacts&) =
+    default;
+ScriptSourceFacts& ScriptSourceFacts::operator=(ScriptSourceFacts&&) = default;
+ScriptSourceFacts::~ScriptSourceFacts() = default;
+
+void NoteBlinkTimerOrigin(uintptr_t timer_identity, TimerOriginFacts facts) {
+  A11Y_RECORDER_COST("NoteBlinkTimerOrigin");
+  if (!GetProcessRecorderClient() || timer_identity == 0) {
+    return;
+  }
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  identities.timer_origins.insert_or_assign(timer_identity, std::move(facts));
+}
+
+void RecordBlinkScriptSource(ScriptSourceFacts facts) {
+  A11Y_RECORDER_COST("RecordBlinkScriptSource");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.document_node_id <= 0 || facts.script_id <= 0 ||
+      (facts.kind != kScriptSourceKindClassic &&
+       facts.kind != kScriptSourceKindModule &&
+       facts.kind != kScriptSourceKindEventHandlerAttribute)) {
+    return;
+  }
+  const bool attribute = facts.kind == kScriptSourceKindEventHandlerAttribute;
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, facts.document_node_id,
+                                       std::move(facts.document_token)));
+  payload.Set("scriptId", base::NumberToString(facts.script_id));
+  payload.Set("kind", facts.kind);
+  payload.Set("elementNodeId", facts.element_node_id > 0
+                                   ? base::Value(facts.element_node_id)
+                                   : base::Value());
+  payload.Set("attributeName",
+              attribute && !facts.attribute_name.empty()
+                  ? base::Value(std::move(facts.attribute_name))
+                  : base::Value());
+  payload.Set("url", facts.url.empty() ? base::Value()
+                                       : base::Value(std::move(facts.url)));
+  payload.Set("line", facts.line_number > 0 ? base::Value(facts.line_number)
+                                            : base::Value());
+  payload.Set("column", facts.column_number > 0
+                            ? base::Value(facts.column_number)
+                            : base::Value());
+  SendBlinkEvidence("browser.timer", "script-compiled", std::move(payload));
+}
+
+void PushBlinkScriptElement(uintptr_t script_identity,
+                            ScriptSourceFacts facts) {
+  if (!GetProcessRecorderClient() || script_identity == 0) {
+    return;
+  }
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  identities.running_script_elements.insert_or_assign(script_identity,
+                                                      std::move(facts));
+}
+
+void PopBlinkScriptElement(uintptr_t script_identity) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  identities.running_script_elements.erase(script_identity);
+}
+
+void RecordBlinkClassicScriptCompiled(uintptr_t script_identity,
+                                      int script_id) {
+  A11Y_RECORDER_COST("RecordBlinkClassicScriptCompiled");
+  if (!GetProcessRecorderClient() || script_identity == 0 || script_id <= 0) {
+    return;
+  }
+  ScriptSourceFacts facts;
+  {
+    EvidenceIdentityStorage& identities = EvidenceIdentities();
+    base::AutoLock lock(identities.lock);
+    auto found = identities.running_script_elements.find(script_identity);
+    if (found == identities.running_script_elements.end()) {
+      return;
+    }
+    facts = found->second;
+  }
+  facts.script_id = script_id;
+  RecordBlinkScriptSource(std::move(facts));
 }
 
 }  // namespace a11y_recorder

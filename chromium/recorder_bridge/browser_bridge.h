@@ -2241,6 +2241,100 @@ void RecordBlinkStyleSheetsUpdated(int document_node_id,
                                    std::string document_token,
                                    std::vector<StyleSheetScopeFacts> scopes);
 
+// Protocol 0.52 (slice 4f): one frame of the script stack at a call, as V8
+// reports it. An unobserved URL or function name is empty, and an unobserved
+// script identifier, line, or column is zero; lines and columns are one-based.
+struct ScriptFrameFacts {
+  ScriptFrameFacts();
+  ScriptFrameFacts(const ScriptFrameFacts&);
+  ScriptFrameFacts(ScriptFrameFacts&&);
+  ScriptFrameFacts& operator=(const ScriptFrameFacts&);
+  ScriptFrameFacts& operator=(ScriptFrameFacts&&);
+  ~ScriptFrameFacts();
+
+  int script_id = 0;
+  std::string url;
+  std::string function_name;
+  int line_number = 0;
+  int column_number = 0;
+  bool is_eval = false;
+};
+
+// The most stack frames a timer-origin record carries, innermost first.
+inline constexpr size_t kMaximumTimerOriginFrames = 16;
+
+// Protocol 0.52: who scheduled a window timer, read in the setTimeout or
+// setInterval call. An empty world kind means no script was running. The
+// callback is the function the timer runs, read from the function itself; a
+// string handler has none.
+struct TimerOriginFacts {
+  TimerOriginFacts();
+  TimerOriginFacts(TimerOriginFacts&&);
+  TimerOriginFacts& operator=(TimerOriginFacts&&);
+  ~TimerOriginFacts();
+
+  std::string world_kind;
+  int world_id = kExecutionWorldIdUnobserved;
+  std::string world_name;
+  std::string world_stable_id;
+  std::vector<ScriptFrameFacts> stack;
+  bool string_handler = false;
+  bool has_callback = false;
+  ScriptFrameFacts callback;
+};
+
+// Notes who scheduled a timer, for the timer-scheduled record the same call
+// makes next (RecordBlinkTimerScheduled), which carries the callback location
+// and is followed by a timer-origin record.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void NoteBlinkTimerOrigin(uintptr_t timer_identity, TimerOriginFacts facts);
+
+inline constexpr char kScriptSourceKindClassic[] = "classic";
+inline constexpr char kScriptSourceKindModule[] = "module";
+inline constexpr char kScriptSourceKindEventHandlerAttribute[] =
+    "event-handler-attribute";
+
+// Protocol 0.52: the markup a V8 script came from: a script element's classic
+// or module script, or an on... attribute's handler. A window handler set by
+// a body or frameset attribute is given the document's body element; a zero
+// element node ID is an element Blink did not give. The URL is empty for an
+// inline script.
+struct ScriptSourceFacts {
+  ScriptSourceFacts();
+  ScriptSourceFacts(const ScriptSourceFacts&);
+  ScriptSourceFacts(ScriptSourceFacts&&);
+  ScriptSourceFacts& operator=(const ScriptSourceFacts&);
+  ScriptSourceFacts& operator=(ScriptSourceFacts&&);
+  ~ScriptSourceFacts();
+
+  int document_node_id = 0;
+  std::string document_token;
+  int script_id = 0;
+  std::string kind;
+  int element_node_id = 0;
+  std::string attribute_name;
+  std::string url;
+  int line_number = 0;
+  int column_number = 0;
+};
+
+// Records a script-compiled record for a script whose V8 script ID is known.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkScriptSource(ScriptSourceFacts facts);
+
+// A classic script is compiled inside its run, so the element running it is
+// noted by the script's identity before the run and forgotten after it, and
+// the compile records the script ID (RecordBlinkClassicScriptCompiled).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void PushBlinkScriptElement(uintptr_t script_identity, ScriptSourceFacts facts);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void PopBlinkScriptElement(uintptr_t script_identity);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkClassicScriptCompiled(uintptr_t script_identity,
+                                      int script_id);
+
 // Protocol 0.48: a paint image Blink made from an image
 // (BitmapImage::PaintImageForCurrentFrameWithInfo): the image's own ID, the
 // paint image's ID, whether its animation sequence is the image's shared one

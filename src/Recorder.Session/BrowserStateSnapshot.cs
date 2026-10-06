@@ -150,9 +150,16 @@ public static class BrowserStateSnapshot
             WriteNumber(writer, "lastRunTime", timer.LastRunTime);
             writer.WritePropertyName("scheduled");
             writer.WriteRawValue(timer.Scheduled.GetRawText(), skipInputValidation: true);
+            // Protocol 0.52; a snapshot written before it has none.
+            if (timer.Origin is { } origin)
+            {
+                writer.WritePropertyName("origin");
+                writer.WriteRawValue(origin.GetRawText(), skipInputValidation: true);
+            }
             writer.WriteEndObject();
         }
         writer.WriteEndArray();
+        WriteRecords(writer, "scripts", script.Scripts.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => item.Value));
         writer.WriteEndObject();
 
         var accessibility = document.Accessibility;
@@ -261,9 +268,12 @@ public static class BrowserStateSnapshot
             script.GetProperty("timers").EnumerateArray().Select(timer => new PendingTimer(
                 timer.GetProperty("scheduled"),
                 timer.GetProperty("scheduledTime").GetInt64(),
-                Number(timer, "lastRunTime"))),
+                Number(timer, "lastRunTime"),
+                timer.TryGetProperty("origin", out var origin) ? origin : null)),
             script.GetProperty("eventKey").GetInt64(),
-            script.GetProperty("time").GetInt64());
+            script.GetProperty("time").GetInt64(),
+            // Protocol 0.52; a snapshot written before it has none.
+            script.TryGetProperty("scripts", out var scripts) ? scripts.EnumerateArray() : null);
 
         var accessibility = root.GetProperty("accessibility");
         document.AccessibilityCompleteness = Parse(accessibility.GetProperty("completeness").GetString());

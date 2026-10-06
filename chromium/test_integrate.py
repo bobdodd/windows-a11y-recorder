@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.51"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.51"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.52"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.52"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -8662,6 +8662,151 @@ class RecreationIntegrationTests(unittest.TestCase):
         )
         self.assertNotIn("FromUTF8", patched)
         self.assertEqual(1, patched.count(INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS))
+
+    # Slice 4f (protocol 0.52): who scheduled each timer.
+    def test_notes_who_scheduled_a_timer_before_its_record_once(self):
+        source = (
+            '#include "third_party/blink/renderer/core/scheduler/dom_timer.h"\n'
+            "\n"
+            "namespace blink {\n"
+            "namespace {\n"
+            "constexpr int kValue = 1;\n"
+            "}  // namespace\n"
+            "\n"
+            "DOMTimer::DOMTimer(ExecutionContext& context,\n"
+            "                   ScheduledAction* action) {\n"
+            + INTEGRATE.BLINK_TIMER_SCHEDULED_HOOK
+            + "}\n"
+            "\n"
+            "}  // namespace blink\n"
+        )
+        patched = self.patch_source_twice(
+            "dom_timer.cc", source, INTEGRATE.patch_blink_dom_timer_origin
+        )
+        for include in INTEGRATE.BLINK_DOM_TIMER_ORIGIN_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_DOM_TIMER_ORIGIN_HELPERS))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_TIMER_ORIGIN_HOOK))
+        # The helpers are in the file's anonymous namespace, and the origin is
+        # noted before the scheduled record that takes it.
+        self.assertLess(
+            patched.index("RecorderTimerOrigin(ExecutionContext& context,"),
+            patched.index("}  // namespace\n"),
+        )
+        self.assertLess(
+            patched.index("NoteBlinkTimerOrigin("),
+            patched.index("RecordBlinkTimerScheduled("),
+        )
+        helpers = INTEGRATE.BLINK_DOM_TIMER_ORIGIN_HELPERS
+        self.assertIn("DOMWrapperWorld::Current(isolate)", helpers)
+        self.assertIn("v8::StackTrace::CurrentStackTrace(", helpers)
+        self.assertIn("kMaximumTimerOriginFrames", helpers)
+        self.assertIn("action->CallbackFunction()", helpers)
+        self.assertIn("origin.string_handler = true;", helpers)
+        # V8 gives a function's position zero-based and a stack frame's
+        # one-based; both are recorded one-based.
+        self.assertIn("line >= 0 ? line + 1 : 0", helpers)
+
+    def test_notes_the_element_of_a_running_script_once(self):
+        source = (
+            '#include "third_party/blink/renderer/core/script/pending_script.h"\n'
+            "\n"
+            "namespace blink {\n"
+            "\n"
+            + INTEGRATE.BLINK_PENDING_SCRIPT_HELPERS_ANCHOR
+            + "    Script* script,\n"
+            "    ScriptElementBase* element,\n"
+            "    bool is_external) {\n"
+            "    context_document->PushCurrentScript(current_script);\n"
+            + INTEGRATE.BLINK_PENDING_SCRIPT_RUN_ANCHOR
+            + "    context_document->PopCurrentScript(current_script);\n"
+            "}\n"
+            "\n"
+            "}  // namespace blink\n"
+        )
+        patched = self.patch_source_twice(
+            "pending_script.cc", source, INTEGRATE.patch_blink_pending_script
+        )
+        for include in INTEGRATE.BLINK_PENDING_SCRIPT_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PENDING_SCRIPT_HELPERS))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PENDING_SCRIPT_RUN_HOOK))
+        self.assertEqual(1, patched.count("script->RunScript("))
+        # The element is noted just before the run and forgotten just after.
+        self.assertLess(
+            patched.index("RecorderNoteScriptElement(\n        script"),
+            patched.index("script->RunScript("),
+        )
+        self.assertLess(
+            patched.index("script->RunScript("),
+            patched.index("PopBlinkScriptElement("),
+        )
+        helpers = INTEGRATE.BLINK_PENDING_SCRIPT_HELPERS
+        self.assertIn("record->IsSourceTextModule()", helpers)
+        self.assertIn("a11y_recorder::RecordBlinkScriptSource(", helpers)
+        self.assertIn("a11y_recorder::PushBlinkScriptElement(", helpers)
+        # Only an external script's address is recorded.
+        self.assertIn("if (is_external) {", helpers)
+
+    def test_records_the_script_id_of_a_classic_script_once(self):
+        source = (
+            INTEGRATE.BLINK_V8_SCRIPT_RUNNER_OWN_INCLUDE
+            + "\n\n"
+            "    if (V8ScriptRunner::CompileScript(script_state, *classic_script)\n"
+            "            .ToLocal(&script)) {\n"
+            + INTEGRATE.BLINK_V8_SCRIPT_RUNNER_COMPILED_ANCHOR
+            + "      maybe_result = V8ScriptRunner::RunCompiledScript(isolate, script);\n"
+            "    }\n"
+        )
+        patched = self.patch_source_twice(
+            "v8_script_runner.cc", source, INTEGRATE.patch_blink_v8_script_runner
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, patched.count("RecordBlinkClassicScriptCompiled("))
+        # Recorded after the compile and before the run, which may schedule
+        # timers from the script.
+        self.assertLess(
+            patched.index("RecordBlinkClassicScriptCompiled("),
+            patched.index("RunCompiledScript("),
+        )
+
+    def test_records_the_element_of_an_attribute_handler_once(self):
+        source = (
+            INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_OWN_INCLUDE
+            + "\n\n"
+            "  if (!maybe_result.ToLocal(&compiled_function))\n"
+            "    return v8::Null(isolate);\n"
+            "\n"
+            + INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_ANCHOR
+            + "  compiled_function->SetName(V8String(isolate, function_name_));\n"
+        )
+        patched = self.patch_source_twice(
+            "js_event_handler_for_content_attribute.cc",
+            source,
+            INTEGRATE.patch_blink_content_attribute_handler,
+        )
+        for include in INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_HOOK))
+        self.assertEqual(1, patched.count("// Step 12."))
+        hook = INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_HOOK
+        self.assertIn("compiled_function->ScriptId()", hook)
+        self.assertIn("kScriptSourceKindEventHandlerAttribute", hook)
+        self.assertIn("function_name_.Utf8()", hook)
+        self.assertIn("window ? document->body() : nullptr", hook)
+
+    def test_slice_4f_hooks_call_declared_bridge_functions(self):
+        header = (Path(__file__).parent / "recorder_bridge" / "browser_bridge.h").read_text(
+            encoding="utf-8"
+        )
+        for name in (
+            "NoteBlinkTimerOrigin",
+            "RecordBlinkScriptSource",
+            "PushBlinkScriptElement",
+            "PopBlinkScriptElement",
+            "RecordBlinkClassicScriptCompiled",
+        ):
+            self.assertIn(f"void {name}(", header)
 
     def test_style_sheet_bridge_calls_match_the_bridge(self):
         bridge = (Path(__file__).parent / "recorder_bridge" / "browser_bridge.h").read_text(encoding="utf-8")

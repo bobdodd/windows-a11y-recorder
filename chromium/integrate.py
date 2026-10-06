@@ -18551,6 +18551,352 @@ def patch_blink_style_engine_style_sheets(path: Path) -> None:
     write_patched(path, text)
 
 
+# Slice 4f (protocol 0.52): who scheduled each timer. See
+# docs/architecture/page-recreation.md, "Slice 4f: who scheduled each timer".
+BLINK_DOM_TIMER_ORIGIN_INCLUDES = (
+    '#include "third_party/blink/renderer/platform/bindings/'
+    'callback_function_base.h"',
+    BLINK_DOM_WRAPPER_WORLD_INCLUDE,
+    BLINK_WTF_INCLUDE,
+    '#include "v8/include/v8-debug.h"',
+    '#include "v8/include/v8-function.h"',
+    '#include "v8/include/v8-isolate.h"',
+    '#include "v8/include/v8-local-handle.h"',
+    '#include "v8/include/v8-primitive.h"',
+    '#include "v8/include/v8-script.h"',
+)
+BLINK_DOM_TIMER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/scheduler/dom_timer.h"'
+)
+BLINK_DOM_TIMER_ORIGIN_HELPERS_ANCHOR = "}  // namespace\n"
+BLINK_DOM_TIMER_ORIGIN_HELPERS_MARKER = (
+    "a11y_recorder::TimerOriginFacts RecorderTimerOrigin("
+)
+BLINK_DOM_TIMER_ORIGIN_HELPERS = """\
+// Windows A11y Recorder (protocol 0.52, slice 4f): who scheduled a timer.
+// The recorder's name for a world type. The inspector's isolated worlds are
+// tested before isolated worlds generally, because Blink classifies both as
+// isolated.
+const char* RecorderTimerWorldKind(const DOMWrapperWorld& world) {
+  if (world.IsMainWorld()) {
+    return a11y_recorder::kExecutionWorldKindMain;
+  }
+  if (world.GetWorldType() == DOMWrapperWorld::WorldType::kInspectorIsolated) {
+    return a11y_recorder::kExecutionWorldKindInspectorIsolated;
+  }
+  if (world.IsIsolatedWorld()) {
+    return a11y_recorder::kExecutionWorldKindIsolated;
+  }
+  if (world.IsWorkerOrWorkletWorld()) {
+    return a11y_recorder::kExecutionWorldKindWorkerOrWorklet;
+  }
+  if (world.IsShadowRealmWorld()) {
+    return a11y_recorder::kExecutionWorldKindShadowRealm;
+  }
+  return a11y_recorder::kExecutionWorldKindOther;
+}
+
+// A V8 string as UTF-8, or empty for a value that is not a string.
+std::string RecorderTimerText(v8::Isolate* isolate,
+                              v8::Local<v8::Value> value) {
+  if (value.IsEmpty() || !value->IsString()) {
+    return std::string();
+  }
+  v8::String::Utf8Value text(isolate, value);
+  return *text ? std::string(*text, text.length()) : std::string();
+}
+
+// Reads the world and the script stack of the setTimeout or setInterval call
+// that is running, and where the timer's callback function is defined.
+a11y_recorder::TimerOriginFacts RecorderTimerOrigin(ExecutionContext& context,
+                                                    ScheduledAction* action) {
+  a11y_recorder::TimerOriginFacts origin;
+  v8::Isolate* isolate = context.GetIsolate();
+  if (!isolate) {
+    return origin;
+  }
+  v8::HandleScope handles(isolate);
+  if (isolate->InContext()) {
+    const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
+    origin.world_kind = RecorderTimerWorldKind(world);
+    origin.world_id = world.GetWorldId();
+    // Blink keeps isolated world names and stable identifiers in main-thread
+    // maps.
+    if (!world.IsMainWorld() && IsMainThread()) {
+      origin.world_name = world.NonMainWorldHumanReadableName().Utf8();
+      origin.world_stable_id = world.NonMainWorldStableId().Utf8();
+    }
+    v8::Local<v8::StackTrace> stack = v8::StackTrace::CurrentStackTrace(
+        isolate, static_cast<int>(a11y_recorder::kMaximumTimerOriginFrames),
+        v8::StackTrace::kDetailed);
+    const int frame_count = stack.IsEmpty() ? 0 : stack->GetFrameCount();
+    for (int index = 0; index < frame_count; ++index) {
+      v8::Local<v8::StackFrame> frame = stack->GetFrame(isolate, index);
+      if (frame.IsEmpty()) {
+        continue;
+      }
+      a11y_recorder::ScriptFrameFacts facts;
+      facts.script_id = frame->GetScriptId();
+      facts.url = RecorderTimerText(isolate, frame->GetScriptNameOrSourceURL());
+      facts.function_name = RecorderTimerText(isolate, frame->GetFunctionName());
+      facts.line_number = frame->GetLineNumber();
+      facts.column_number = frame->GetColumn();
+      facts.is_eval = frame->IsEval();
+      origin.stack.push_back(std::move(facts));
+    }
+  }
+  CallbackFunctionBase* callback =
+      action ? action->CallbackFunction() : nullptr;
+  if (!callback) {
+    origin.string_handler = true;
+    return origin;
+  }
+  v8::Local<v8::Object> callback_object = callback->CallbackObject();
+  if (callback_object.IsEmpty() || !callback_object->IsFunction()) {
+    return origin;
+  }
+  v8::Local<v8::Function> function = callback_object.As<v8::Function>();
+  origin.has_callback = true;
+  origin.callback.script_id = function->ScriptId();
+  // V8 reports a function's line and column zero-based, and a negative value
+  // for a function with no script position, such as a bound function.
+  const int line = function->GetScriptLineNumber();
+  const int column = function->GetScriptColumnNumber();
+  origin.callback.line_number = line >= 0 ? line + 1 : 0;
+  origin.callback.column_number = column >= 0 ? column + 1 : 0;
+  origin.callback.url =
+      RecorderTimerText(isolate, function->GetScriptOrigin().ResourceName());
+  origin.callback.function_name =
+      RecorderTimerText(isolate, function->GetDebugName());
+  return origin;
+}
+
+"""
+BLINK_TIMER_ORIGIN_HOOK = """\
+  // Windows A11y Recorder (protocol 0.52, slice 4f): who scheduled the timer,
+  // read while the call that scheduled it is running.
+  if (a11y_recorder::GetProcessRecorderClient() &&
+      IsA<LocalDOMWindow>(context)) {
+    A11Y_RECORDER_HOOK_COST("hook:timer-origin");
+    a11y_recorder::NoteBlinkTimerOrigin(reinterpret_cast<uintptr_t>(this),
+                                        RecorderTimerOrigin(context, action));
+  }
+"""
+BLINK_TIMER_ORIGIN_MARKER = "RecorderTimerOrigin(context, action)"
+
+# A script element's script: the element is noted around the run, a module's
+# script ID is read from its record, and a classic script's from its compile.
+BLINK_PENDING_SCRIPT_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/script/pending_script.h"'
+)
+BLINK_PENDING_SCRIPT_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/script/module_script.h"',
+    '#include "v8/include/v8-local-handle.h"',
+    '#include "v8/include/v8-script.h"',
+)
+BLINK_PENDING_SCRIPT_HELPERS_ANCHOR = """\
+// <specdef href="https://html.spec.whatwg.org/C/#execute-the-script-block">
+void PendingScript::ExecuteScriptBlockInternal(
+"""
+BLINK_PENDING_SCRIPT_HELPERS_MARKER = "bool RecorderNoteScriptElement("
+BLINK_PENDING_SCRIPT_HELPERS = """\
+namespace {
+
+// Windows A11y Recorder (protocol 0.52, slice 4f): the element whose script is
+// about to run. A module's script ID is in its record, so it is recorded here;
+// a classic script is compiled inside its run, so its element is noted and
+// the compile records it. Returns true when the element was noted.
+bool RecorderNoteScriptElement(Script* script,
+                               ScriptElementBase* element,
+                               bool is_external,
+                               Document& context_document) {
+  if (!script || !element || !a11y_recorder::GetProcessRecorderClient()) {
+    return false;
+  }
+  A11Y_RECORDER_HOOK_COST("hook:script-element");
+  a11y_recorder::ScriptSourceFacts facts;
+  facts.document_node_id = static_cast<int>(context_document.GetDomNodeId());
+  facts.document_token = context_document.Token().ToString();
+  facts.element_node_id = static_cast<int>(element->GetDOMNodeId());
+  if (is_external) {
+    facts.url = script->SourceUrl().GetString().Utf8();
+  }
+  facts.line_number = script->StartPosition().line_.OneBasedInt();
+  facts.column_number = script->StartPosition().column_.OneBasedInt();
+  if (script->GetScriptType() == mojom::blink::ScriptType::kModule) {
+    facts.kind = a11y_recorder::kScriptSourceKindModule;
+    auto* module_script = static_cast<ModuleScript*>(script);
+    ExecutionContext* execution_context =
+        context_document.GetExecutionContext();
+    if (!execution_context || module_script->HasEmptyRecord()) {
+      return false;
+    }
+    v8::Isolate* isolate = execution_context->GetIsolate();
+    v8::HandleScope handles(isolate);
+    v8::Local<v8::Module> record = module_script->V8Module();
+    if (!record.IsEmpty() && record->IsSourceTextModule()) {
+      facts.script_id = record->ScriptId();
+      a11y_recorder::RecordBlinkScriptSource(std::move(facts));
+    }
+    return false;
+  }
+  facts.kind = a11y_recorder::kScriptSourceKindClassic;
+  a11y_recorder::PushBlinkScriptElement(reinterpret_cast<uintptr_t>(script),
+                                        std::move(facts));
+  return true;
+}
+
+}  // namespace
+
+"""
+BLINK_PENDING_SCRIPT_RUN_ANCHOR = """\
+    script->RunScript(context_document->domWindow());
+"""
+BLINK_PENDING_SCRIPT_RUN_HOOK = """\
+    // Windows A11y Recorder (protocol 0.52, slice 4f): the element whose
+    // script runs, for the script ID its compile gives.
+    const bool recorder_script_noted = RecorderNoteScriptElement(
+        script, element, is_external, *context_document);
+    script->RunScript(context_document->domWindow());
+    if (recorder_script_noted) {
+      a11y_recorder::PopBlinkScriptElement(
+          reinterpret_cast<uintptr_t>(script));
+    }
+"""
+
+BLINK_V8_SCRIPT_RUNNER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"'
+)
+BLINK_V8_SCRIPT_RUNNER_COMPILED_ANCHOR = """\
+      DEVTOOLS_TIMELINE_TRACE_EVENT_WITH_CATEGORIES(
+          TRACE_DISABLED_BY_DEFAULT("devtools.target-rundown"),
+          "ScriptCompiled", inspector_target_rundown_event::Data,
+          execution_context, isolate, script_state, script->ScriptId());
+"""
+BLINK_V8_SCRIPT_RUNNER_COMPILED_HOOK = BLINK_V8_SCRIPT_RUNNER_COMPILED_ANCHOR + """\
+      // Windows A11y Recorder (protocol 0.52, slice 4f): the script ID of a
+      // script element's classic script, recorded when the element was noted.
+      a11y_recorder::RecordBlinkClassicScriptCompiled(
+          reinterpret_cast<uintptr_t>(classic_script), script->ScriptId());
+"""
+
+BLINK_CONTENT_ATTRIBUTE_HANDLER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/bindings/core/v8/'
+    'js_event_handler_for_content_attribute.h"'
+)
+BLINK_CONTENT_ATTRIBUTE_HANDLER_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    BLINK_DOCUMENT_INCLUDE,
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/html/html_element.h"',
+)
+BLINK_CONTENT_ATTRIBUTE_HANDLER_ANCHOR = """\
+  // Step 12. Set eventHandler's value to the result of creating a Web IDL
+"""
+BLINK_CONTENT_ATTRIBUTE_HANDLER_HOOK = """\
+  // Windows A11y Recorder (protocol 0.52, slice 4f): the element and attribute
+  // an on... handler was compiled from, by its script ID.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    A11Y_RECORDER_HOOK_COST("hook:script-compiled-attribute");
+    a11y_recorder::ScriptSourceFacts recorder_source;
+    recorder_source.document_node_id =
+        static_cast<int>(document->GetDomNodeId());
+    recorder_source.document_token = document->Token().ToString();
+    recorder_source.script_id = compiled_function->ScriptId();
+    recorder_source.kind =
+        a11y_recorder::kScriptSourceKindEventHandlerAttribute;
+    // A window handler set by a body or frameset attribute is recorded with
+    // the document's body element, which holds the attribute.
+    Element* recorder_owner =
+        element ? element : (window ? document->body() : nullptr);
+    recorder_source.element_node_id =
+        recorder_owner ? static_cast<int>(recorder_owner->GetDomNodeId()) : 0;
+    recorder_source.attribute_name = function_name_.Utf8();
+    recorder_source.url = source_url_.Utf8();
+    recorder_source.line_number = position_.line_.OneBasedInt();
+    recorder_source.column_number = position_.column_.OneBasedInt();
+    a11y_recorder::RecordBlinkScriptSource(std::move(recorder_source));
+  }
+
+""" + BLINK_CONTENT_ATTRIBUTE_HANDLER_ANCHOR
+
+
+def patch_blink_dom_timer_origin(path: Path) -> None:
+    """Slice 4f: who scheduled a timer, noted before its scheduled record."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_DOM_TIMER_OWN_INCLUDE, BLINK_DOM_TIMER_ORIGIN_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        BLINK_DOM_TIMER_ORIGIN_HELPERS_ANCHOR,
+        BLINK_DOM_TIMER_ORIGIN_HELPERS,
+        BLINK_DOM_TIMER_ORIGIN_HELPERS_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_TIMER_SCHEDULED_HOOK,
+        BLINK_TIMER_ORIGIN_HOOK,
+        BLINK_TIMER_ORIGIN_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_pending_script(path: Path) -> None:
+    """Slice 4f: the element of each script element's script."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_PENDING_SCRIPT_OWN_INCLUDE, BLINK_PENDING_SCRIPT_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PENDING_SCRIPT_HELPERS_ANCHOR,
+        BLINK_PENDING_SCRIPT_HELPERS,
+        BLINK_PENDING_SCRIPT_HELPERS_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_PENDING_SCRIPT_RUN_ANCHOR, BLINK_PENDING_SCRIPT_RUN_HOOK, path
+    )
+    write_patched(path, text)
+
+
+def patch_blink_v8_script_runner(path: Path) -> None:
+    """Slice 4f: the script ID of a script element's classic script."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_V8_SCRIPT_RUNNER_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_V8_SCRIPT_RUNNER_COMPILED_ANCHOR,
+        BLINK_V8_SCRIPT_RUNNER_COMPILED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_content_attribute_handler(path: Path) -> None:
+    """Slice 4f: the element and attribute of each compiled on... handler."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_CONTENT_ATTRIBUTE_HANDLER_OWN_INCLUDE,
+        BLINK_CONTENT_ATTRIBUTE_HANDLER_INCLUDES,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_CONTENT_ATTRIBUTE_HANDLER_ANCHOR,
+        BLINK_CONTENT_ATTRIBUTE_HANDLER_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -18935,6 +19281,14 @@ def main() -> int:
         / "core"
         / "scheduler"
         / "dom_timer.cc"
+    )
+    blink_source = source / "third_party" / "blink" / "renderer"
+    patch_blink_dom_timer_origin(blink_source / "core" / "scheduler" / "dom_timer.cc")
+    patch_blink_pending_script(blink_source / "core" / "script" / "pending_script.cc")
+    blink_bindings_v8 = blink_source / "bindings" / "core" / "v8"
+    patch_blink_v8_script_runner(blink_bindings_v8 / "v8_script_runner.cc")
+    patch_blink_content_attribute_handler(
+        blink_bindings_v8 / "js_event_handler_for_content_attribute.cc"
     )
     patch_blink_animation_frame_callbacks(
         source

@@ -150,6 +150,12 @@ internal static class EventPayloadValidator
             case ("browser.timer", "timer-cancelled"):
                 ValidateBrowserTimer(payload, issues);
                 break;
+            case ("browser.timer", "timer-origin"):
+                ValidateBrowserTimerOrigin(payload, issues);
+                break;
+            case ("browser.timer", "script-compiled"):
+                ValidateBrowserScriptCompiled(payload, issues);
+                break;
             case ("browser.scheduler", "wake-up-deferred"):
                 ValidateBrowserScheduler(payload, issues);
                 break;
@@ -1273,6 +1279,89 @@ internal static class EventPayloadValidator
             payload,
             issues,
             "callbackLocation");
+    }
+
+    // Protocol 0.52 (slice 4f): who scheduled a timer.
+    private static void ValidateBrowserTimerOrigin(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("timerId"),
+                NullableObject("world"),
+                RequiredObjectArray("stack"),
+                RequiredEnum("handler", "function", "string")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
+        if (!payload.TryGetProperty("stack", out var stack) || stack.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        if (stack.GetArrayLength() > 16)
+        {
+            AddError(
+                issues,
+                "browser-timer-origin-stack",
+                "#/payload/stack",
+                "a timer origin carries at most 16 stack frames");
+        }
+        var index = 0;
+        foreach (var frame in stack.EnumerateArray())
+        {
+            var pointer = $"#/payload/stack/{index}";
+            index++;
+            if (frame.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            ValidateShape(
+                frame,
+                [
+                    NullableDecimalText("scriptId"),
+                    NullableString("url"),
+                    NullableString("functionName"),
+                    NullableInteger("line", positive: true),
+                    NullableInteger("column", positive: true),
+                    RequiredBoolean("isEval")
+                ],
+                issues,
+                pointer);
+        }
+    }
+
+    // Protocol 0.52: the markup a V8 script came from.
+    private static void ValidateBrowserScriptCompiled(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredDecimalText("scriptId"),
+                RequiredEnum("kind", "classic", "module", "event-handler-attribute"),
+                NullableInteger("elementNodeId", positive: true),
+                NullableString("attributeName"),
+                NullableString("url"),
+                NullableInteger("line", positive: true),
+                NullableInteger("column", positive: true)
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        var attribute = ReadString(payload, "kind") == "event-handler-attribute";
+        if (attribute != HasNonnullProperty(payload, "attributeName"))
+        {
+            AddError(
+                issues,
+                "browser-script-compiled-attribute",
+                "#/payload/attributeName",
+                "An attribute handler names its attribute, and no other script does.");
+        }
     }
 
     private static void ValidateBrowserScheduler(

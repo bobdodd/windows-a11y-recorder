@@ -6915,7 +6915,7 @@ pass. The integration test in the instrumented Chromium, comparing each
 recorded text with the text DevTools reports, is not built; the fixture
 page and the system test on the target machine take its place for now.
 
-### Slice 4f: who scheduled each timer (proposed, not built)
+### Slice 4f: who scheduled each timer (agreed, built, not yet confirmed on the target machine)
 
 Proposed 2026-10-05, at the owner's request that the evidence panel say who
 owns each pending timer: the page, the browser, an extension, or another
@@ -7062,6 +7062,50 @@ the target machine on a page that schedules many timers.
   string handler, with an extension's content script where one is
   installed, where the panel's "Scheduled by" column names each as
   scheduled.
+
+#### As built
+
+Agreed by the owner on 2026-10-05 and built in protocol 0.52. Where the build
+differs from the design above, the build is what is recorded:
+
+- Who scheduled a timer is a `timer-origin` record that follows the timer's
+  `timer-scheduled` record, with the timer's ID, the world, the stack, and the
+  handler, rather than a `scheduledBy` member of `timer-scheduled`. The
+  session database stores `timer-scheduled` in fixed columns and refuses a
+  record with a member it does not map, so a new member would have kept every
+  timer record out of it. `timer-origin` and `script-compiled`, like the slice
+  4e records, are kept in the recording file and are not stored in the
+  database. `callbackLocation`, which the database already maps, is filled in
+  `timer-scheduled`, `timer-fired`, and `timer-cancelled`.
+- A `script-compiled` record does not carry a world: a script element's
+  script and an attribute's handler run in the page's own world.
+- A window handler set by a `body` or `frameset` attribute, such as
+  `onload`, is recorded with the document's body element, which holds the
+  attribute.
+- Lines and columns are one-based throughout. V8 gives a function's own
+  position zero-based, and the hook adds one.
+- The renderer notes a classic script's element by the script's identity
+  around its run, and its compile records the element with the script ID, so
+  a script compiled during another script's run, such as one written by
+  `document.write`, is joined to its own element.
+- The state snapshot keeps each pending timer's origin and the document's
+  `script-compiled` records; a snapshot written before protocol 0.52 has
+  neither and is read as such.
+- The fixture is `tests/fixtures/timer-origins/`: an inline script with a
+  function callback, eval code, a string handler, and a timer scheduled from
+  another timer's callback; `app.js`, an external script, with a timer and a
+  listener that schedules one; an inline module script; and a button whose
+  `onclick` attribute schedules a timer. Every timer waits ten minutes. The
+  page lists what the panel is expected to name for each. An extension's
+  content script is not part of the fixture.
+
+Tests: `TimerOriginTests` (the contract, the validator, the script state and
+snapshot, and the join for an inline script, an external script, an
+attribute handler below eval code, a removed element, an isolated world, an
+extension's script in the page's world, an empty stack, and a recording
+before protocol 0.52), and five `integrate.py` tests: one for each of the
+four patched files, that its hook is applied once and found again on a
+second pass, and one that the hooks call functions the bridge declares.
 
 ### To be settled
 

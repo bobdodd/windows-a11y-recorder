@@ -183,7 +183,7 @@ public static class RecordedEvidence
         var timers = state.Script.Timers.Values
             .OrderBy(timer => timer.ScheduledTime)
             .ThenBy(timer => Text(timer.Scheduled, "timerId"), StringComparer.Ordinal)
-            .Select(timer => Timer(timer, recordingNanoseconds))
+            .Select(timer => Timer(timer, recordingNanoseconds, TimerOrigins.Of(timer, state.Script, tree)))
             .ToArray();
 
         var current = state.Interaction.Current();
@@ -249,7 +249,7 @@ public static class RecordedEvidence
         }
     }
 
-    public static RecordedTimer Timer(PendingTimer timer, long recordingNanoseconds)
+    public static RecordedTimer Timer(PendingTimer timer, long recordingNanoseconds, RecordedTimerOrigin? scheduledBy = null)
     {
         var record = timer.Scheduled;
         var kind = Text(record, "timerKind") ?? "unknown";
@@ -264,7 +264,8 @@ public static class RecordedEvidence
             effective,
             timer.ScheduledTime,
             timer.LastRunTime,
-            remaining);
+            remaining,
+            scheduledBy);
     }
 
     private static RecordedListener Listener(JsonElement record)
@@ -321,5 +322,169 @@ public static class RecordedEvidence
     private static double? Number(JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
             ? value.GetDouble()
+            : null;
+}
+
+// Slice 4f (protocol 0.52): who scheduled a timer, read from its timer-origin
+// record and joined to the script-compiled records of its document by V8
+// script ID. The panel shows what was recorded; nothing here infers an owner
+// the records do not give. See docs/architecture/page-recreation.md, "Slice
+// 4f: who scheduled each timer".
+public static class TimerOrigins
+{
+    public const string NotRecorded =
+        "not recorded; who scheduled a timer is recorded from protocol 0.52";
+
+    public static RecordedTimerOrigin Of(PendingTimer timer, ScriptDocumentState script, DomDocumentTree tree)
+    {
+        var callback = Location(timer.Scheduled.TryGetProperty("callbackLocation", out var value) ? value : default);
+        if (timer.Origin is not { } origin)
+        {
+            return new RecordedTimerOrigin(NotRecorded, null, null, null, null, callback, null);
+        }
+        var frames = origin.TryGetProperty("stack", out var stack) && stack.ValueKind == JsonValueKind.Array
+            ? stack.EnumerateArray().ToArray()
+            : [];
+        var handler = Text(origin, "handler");
+        var world = origin.TryGetProperty("world", out var recordedWorld) && recordedWorld.ValueKind == JsonValueKind.Object
+            ? recordedWorld
+            : (JsonElement?)null;
+
+        string? element = null;
+        NodePath? path = null;
+        string? note = null;
+        for (var index = 0; index < frames.Length; index++)
+        {
+            if (Text(frames[index], "scriptId") is not { } id || !script.Scripts.TryGetValue(id, out var source))
+            {
+                continue;
+            }
+            (element, path) = Describe(source, tree);
+            if (index > 0)
+            {
+                note = $"Found from stack frame {index + 1}, counting from the innermost; " +
+                    (frames.Take(index).Any(frame => Flag(frame, "isEval"))
+                        ? "the frames inside it include eval code, which has no element of its own."
+                        : "the frames inside it have no script element or attribute recorded.");
+            }
+            break;
+        }
+        if (element is null && frames.Length > 0)
+        {
+            note = frames.Any(frame => Flag(frame, "isEval"))
+                ? "No frame of the stack has a script element or attribute recorded; the stack includes eval code."
+                : "No frame of the stack has a script element or attribute recorded.";
+        }
+        return new RecordedTimerOrigin(
+            Owner(world, frames),
+            element,
+            path,
+            note,
+            frames.Length > 0 ? Frame(frames[0]) : null,
+            callback,
+            handler);
+    }
+
+    private static string Owner(JsonElement? world, JsonElement[] frames)
+    {
+        if (world is not { } recorded)
+        {
+            return "no script was running";
+        }
+        var name = Text(recorded, "name");
+        var stableId = Text(recorded, "stableId");
+        switch (Text(recorded, "kind"))
+        {
+            case "main":
+                var extension = frames.Select(frame => Text(frame, "url"))
+                    .FirstOrDefault(url => url is not null && url.StartsWith("chrome-extension://", StringComparison.Ordinal));
+                return extension is null
+                    ? "the page"
+                    : $"an extension's script in the page's own world, {extension}";
+            case "isolated":
+                return name is null && stableId is null
+                    ? "an isolated world, such as an extension's content script, with no name or ID recorded"
+                    : $"an isolated world, such as an extension's content script: {name ?? "no name recorded"}, ID {stableId ?? "not recorded"}";
+            case "inspector-isolated":
+                return "DevTools";
+            case { } kind:
+                return $"script in a {kind} world";
+            default:
+                return "not recorded";
+        }
+    }
+
+    private static (string Element, NodePath? Path) Describe(JsonElement source, DomDocumentTree tree)
+    {
+        var url = Text(source, "url");
+        var description = Text(source, "kind") switch
+        {
+            "classic" => url is null ? "the inline script element" : $"the script element loading {url}",
+            "module" => url is null ? "the inline module script element" : $"the module script element loading {url}",
+            "event-handler-attribute" => $"the {Text(source, "attributeName") ?? "on..."} attribute of the element",
+            _ => "a script element",
+        };
+        if (!source.TryGetProperty("elementNodeId", out var node) || node.ValueKind != JsonValueKind.Number)
+        {
+            return ($"{description}; the element was not recorded", null);
+        }
+        var id = node.GetInt64();
+        return RecordedPaths.Of(tree, id) is { } path
+            ? (description, path)
+            : ($"{description}, node {id.ToString(CultureInfo.InvariantCulture)}, which is not in the document at the frame", null);
+    }
+
+    private static string Frame(JsonElement frame)
+    {
+        var text = Text(frame, "url") ?? "a script with no address";
+        if (Number(frame, "line") is { } line)
+        {
+            text += ":" + line.ToString(CultureInfo.InvariantCulture);
+            if (Number(frame, "column") is { } column)
+            {
+                text += ":" + column.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+        text += Text(frame, "functionName") is { } function ? $", in {function}" : ", at the top level or in an anonymous function";
+        if (Flag(frame, "isEval"))
+        {
+            text += ", eval code";
+        }
+        return text;
+    }
+
+    private static string? Location(JsonElement location)
+    {
+        if (location.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        var text = Text(location, "url") ?? "a script with no address";
+        if (Number(location, "line") is { } line)
+        {
+            text += ":" + line.ToString(CultureInfo.InvariantCulture);
+            if (Number(location, "column") is { } column)
+            {
+                text += ":" + column.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+        if (Text(location, "functionName") is { } function)
+        {
+            text += $", {function}";
+        }
+        return text;
+    }
+
+    private static bool Flag(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static string? Text(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static long? Number(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+            ? value.GetInt64()
             : null;
 }

@@ -500,6 +500,22 @@ scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
 `scroll_element_id`, and the bridge writes it as decimal text, or null for
 zero.
 
+Protocol 0.52 (slice 4f) adds two `browser.timer` records and fills a
+timer's `callbackLocation`. `NoteBlinkTimerOrigin` is called from the
+`DOMTimer` constructor, before `RecordBlinkTimerScheduled`, with the world
+current at the call, up to 16 frames of the V8 stack, and the callback
+function's own position; `RecordBlinkTimerScheduled` writes the callback
+location into `timer-scheduled` and follows it with `timer-origin`.
+`script-compiled` joins a V8 script ID to its markup: `PushBlinkScriptElement`
+and `PopBlinkScriptElement` bracket `script->RunScript` in
+`PendingScript::ExecuteScriptBlockInternal`, and
+`RecordBlinkClassicScriptCompiled`, called from
+`V8ScriptRunner::CompileAndRunScript` after the compile, records a classic
+script with its element; a module script is recorded from its module record
+before the run; and `RecordBlinkScriptSource` is called from
+`JSEventHandlerForContentAttribute::GetCompiledHandler` for each compiled
+on... attribute.
+
 Protocol 0.51 (slice 4e) adds three `browser.resources` records.
 `RecordBlinkStyleSheetResource` is called from
 `StyleSheetContents::ParseAuthorStyleSheet` once a linked or imported

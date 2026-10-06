@@ -234,7 +234,8 @@ records the accepted requested delay, Blink's effective delay, and nesting
 level. The timer event timestamp is the observed callback-entry time; it does
 not claim callback completion or resulting page effects. Throttling is null,
 page lifecycle state is `unknown`, and callback location is null until those
-facts have dedicated instrumentation. Implicit one-shot retirement and
+facts have dedicated instrumentation (protocol 0.52 records the callback
+location of window timers). Implicit one-shot retirement and
 execution-context destruction are not reported as explicit cancellation.
 Animation frames, idle callbacks, worker timers, and browser-process task
 scheduling remain outside this slice. Live 0.5 connections require an exact
@@ -1142,7 +1143,14 @@ sheets at each update of the document's active style sheets, with the
 CSSOM text of a sheet script changed or constructed. The design is in
 [page recreation](page-recreation.md), "Slice 4e".
 
-Live 0.51 connections require an exact protocol-version match.
+Protocol version 0.52 adds `timer-origin` and `script-compiled` on
+`browser.timer`, and fills `callbackLocation` in the window timer records:
+the world and script stack of the call that scheduled a timer, where its
+callback is defined, and the script element or on... attribute each script ID
+came from. The design is in [page recreation](page-recreation.md), "Slice
+4f: who scheduled each timer".
+
+Live 0.52 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

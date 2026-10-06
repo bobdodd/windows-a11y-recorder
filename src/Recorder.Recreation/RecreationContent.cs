@@ -94,7 +94,24 @@ public sealed record RecordedTimer(
     double? EffectiveDelayMilliseconds,
     long ScheduledNanoseconds,
     long? LastRunNanoseconds,
-    double? RemainingMilliseconds);
+    double? RemainingMilliseconds,
+    RecordedTimerOrigin? ScheduledBy = null);
+
+// Who scheduled a timer (protocol 0.52, slice 4f), as its timer-origin record
+// and the script-compiled records of its document give it. Owner says whose
+// script it was; Element names the script element or on... attribute the
+// first stack frame with a script-compiled record came from, with its path,
+// or is null; ElementNote says how that frame was found when it is not the
+// innermost; Caller is the innermost frame; Callback is where the callback
+// function is defined. Text that is not recorded is null.
+public sealed record RecordedTimerOrigin(
+    string Owner,
+    string? Element,
+    NodePath? ElementPath,
+    string? ElementNote,
+    string? Caller,
+    string? Callback,
+    string? Handler);
 
 // Kind is "animation" or "transition". Name is the animation name or the
 // transitioned property.

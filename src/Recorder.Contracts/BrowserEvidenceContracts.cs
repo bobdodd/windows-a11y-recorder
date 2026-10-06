@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.51";
+    public const string CurrentVersion = "0.52";
 }
 
 public static class BrowserEvidenceChannels
@@ -39,6 +39,8 @@ public static class BrowserEvidenceEventTypes
     public const string TimerScheduled = "timer-scheduled";
     public const string TimerFired = "timer-fired";
     public const string TimerCancelled = "timer-cancelled";
+    public const string TimerOrigin = "timer-origin";
+    public const string ScriptCompiled = "script-compiled";
     public const string WakeUpDeferred = "wake-up-deferred";
     public const string NavigationStarted = "navigation-started";
     public const string NavigationCompleted = "navigation-completed";
@@ -294,6 +296,44 @@ public sealed record BrowserTimerPayload(
     BrowserScriptLocation? CallbackLocation,
     string? CancellationReason,
     bool? DidTimeout);
+
+// One frame of the script stack at a call (protocol 0.52, slice 4f): the V8
+// script ID as a decimal string, the script's URL, the function's name, the
+// one-based line and column, and whether it is eval code. Unobserved values
+// are null.
+public sealed record BrowserScriptFrame(
+    string? ScriptId,
+    string? Url,
+    string? FunctionName,
+    int? Line,
+    int? Column,
+    bool IsEval);
+
+// Who scheduled a window timer (protocol 0.52), recorded after its
+// timer-scheduled record: the world current at the call, or null when no
+// script was running, the script stack, innermost first and at most 16
+// frames, and whether the handler is a function or a string.
+public sealed record BrowserTimerOriginPayload(
+    BrowserContext Context,
+    string TimerId,
+    BrowserExecutionWorld? World,
+    IReadOnlyList<BrowserScriptFrame> Stack,
+    string Handler);
+
+// The markup a V8 script came from (protocol 0.52): a script element's
+// classic or module script, or an on... attribute's handler, with the
+// element's node ID, the attribute's name, the script's URL (null for an
+// inline script), and its one-based start line and column. Script IDs are
+// per renderer process.
+public sealed record BrowserScriptCompiledPayload(
+    BrowserContext Context,
+    string ScriptId,
+    string Kind,
+    long? ElementNodeId,
+    string? AttributeName,
+    string? Url,
+    int? Line,
+    int? Column);
 
 public sealed record BrowserSchedulerPayload(
     BrowserContext Context,

@@ -157,6 +157,40 @@ function pathCell(path, label) {
   return cell;
 }
 
+// Slice 4f (protocol 0.52): who scheduled a timer, as recorded. The element's
+// path has the same Select and Copy buttons as every other path.
+function scheduledByCell(item) {
+  const origin = item.scheduledBy;
+  const cell = element("td", null, { class: "long" });
+  if (!origin) {
+    cell.textContent = "not recorded";
+    return cell;
+  }
+  cell.appendChild(element("p", `Owner: ${origin.owner}`));
+  if (origin.element) {
+    const label = `${origin.element}, for ${item.timerId}`;
+    const paragraph = element("p", `Element: ${origin.element}`);
+    if (origin.elementPath) {
+      // The path and its buttons, moved from the cell pathCell builds.
+      paragraph.appendChild(element("br"));
+      paragraph.append(...Array.from(pathCell(origin.elementPath, label).childNodes));
+    }
+    cell.appendChild(paragraph);
+  }
+  if (origin.elementNote) {
+    cell.appendChild(element("p", origin.elementNote));
+  }
+  if (origin.caller) {
+    cell.appendChild(element("p", `Called from: ${origin.caller}`));
+  }
+  if (origin.handler === "string") {
+    cell.appendChild(element("p", "Handler: a string of code"));
+  } else if (origin.callback) {
+    cell.appendChild(element("p", `Callback defined at: ${origin.callback}`));
+  }
+  return cell;
+}
+
 function table(caption, headings, rows, empty) {
   content.appendChild(element("h2", caption));
   if (rows.length === 0) {
@@ -225,7 +259,7 @@ function describe(evidence) {
 
   table(
     "Pending timers",
-    ["Timer", "Kind", "Requested delay", "Effective delay", "Scheduled", "Last run", "Remaining at the frame"],
+    ["Timer", "Kind", "Requested delay", "Effective delay", "Scheduled", "Last run", "Remaining at the frame", "Scheduled by"],
     evidence.timers.map(item => [
       item.timerId, item.kind, optionalMilliseconds(item.requestedDelayMilliseconds),
       optionalMilliseconds(item.effectiveDelayMilliseconds), seconds(item.scheduledNanoseconds),
@@ -234,7 +268,8 @@ function describe(evidence) {
         ? "no due time"
         : item.remainingMilliseconds < 0
           ? `${milliseconds(-item.remainingMilliseconds)} overdue`
-          : milliseconds(item.remainingMilliseconds)
+          : milliseconds(item.remainingMilliseconds),
+      scheduledByCell(item)
     ]),
     "No timers were pending at the frame.");
 

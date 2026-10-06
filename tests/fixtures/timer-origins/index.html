@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Timer origin evidence fixture</title>
+  <!--
+    The slice 4f timer origin fixture. See docs/architecture/page-recreation.md,
+    "Slice 4f: who scheduled each timer". Every timer waits ten minutes, so each
+    is pending at any frame of a short recording. The list below says what the
+    evidence panel's "Scheduled by" column is expected to name for each. Serve
+    this folder over http with ..\animation\Serve-Fixture.ps1 -Folder <this
+    folder>.
+  -->
+  <style>
+    :root {
+      color: #1a1a1a;
+      background: #ffffff;
+      font: 16px/1.4 system-ui, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 48rem;
+      padding: 1rem;
+    }
+    button {
+      font: inherit;
+      margin: 0 0.5rem 0.5rem 0;
+    }
+  </style>
+  <script src="app.js"></script>
+</head>
+<body>
+  <h1>Timer origin evidence fixture</h1>
+  <p id="status" role="status">Six timers are scheduled at load; the buttons
+    schedule two more.</p>
+
+  <ol>
+    <li>At load, the inline script in the body: the inline script element,
+      called from its top level, with the callback inlineTimer.</li>
+    <li>At load, app.js in the head: the script element loading app.js.</li>
+    <li>At load, eval code in the inline script: the inline script element,
+      found below the eval frame.</li>
+    <li>At load, a string handler in the inline script: the inline script
+      element, with a string of code as the handler.</li>
+    <li>At load, the inline module script: the inline module script
+      element.</li>
+    <li>0.1 s after load, from the callback of a timer the inline script
+      scheduled: the inline script element, which defined the callback.</li>
+    <li>The first button: its onclick attribute.</li>
+    <li>The second button: the script element loading app.js, whose listener
+      schedules it.</li>
+  </ol>
+
+  <button type="button" id="attribute-button"
+    onclick="setTimeout(function fromAttribute() {}, 600000); document.getElementById('status').textContent = 'The onclick attribute scheduled a timer.';">Schedule from an onclick attribute</button>
+  <button type="button" id="listener-button">Schedule from a listener</button>
+
+  <script>
+    function inlineTimer() {}
+    setTimeout(inlineTimer, 600000);
+    eval("setTimeout(function fromEval() {}, 600000)");
+    setTimeout("document.title = document.title", 600000);
+    setTimeout(() => {
+      setTimeout(function fromCallback() {}, 600000);
+    }, 100);
+  </script>
+  <script type="module">
+    setTimeout(function fromModule() {}, 600000);
+  </script>
+</body>
+</html>

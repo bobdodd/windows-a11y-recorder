@@ -413,6 +413,13 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.52 records who scheduled each window timer: the world and script
+stack of the setTimeout or setInterval call, where the callback is defined,
+and, for each script element's script and each on... attribute's handler,
+the element it came from, so that the evidence panel names the owner of each
+pending timer and the element whose script scheduled it. See "Slice 4f" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Protocol 0.51 records the page's style sheets as they arrive and as they
 change: the text each linked or imported sheet arrived with, the CSSOM text
 of a sheet script changed or constructed, and each tree scope's sheets and
