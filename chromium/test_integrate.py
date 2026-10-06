@@ -8631,6 +8631,38 @@ class RecreationIntegrationTests(unittest.TestCase):
         self.assertIn("DynamicTo<CSSImportRule>(sheet.ItemInternal(i))", helpers)
         self.assertIn("for (CSSStyleSheet* sheet : *tree_scope.AdoptedStyleSheets())", helpers)
 
+    def test_upgrades_the_first_style_sheet_hooks(self):
+        # blink::String has FromUtf8 of a byte span, not FromUTF8.
+        self.assertIn("String::FromUTF8(", INTEGRATE.STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK)
+        self.assertEqual(2, INTEGRATE.STAGE_AB95_BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS.count("String::FromUTF8("))
+        for current in (
+            INTEGRATE.BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+            INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS,
+        ):
+            self.assertNotIn("FromUTF8", current)
+            self.assertIn("String::FromUtf8(base::as_byte_span(", current)
+        legacy_contents = self.STYLE_SHEET_CONTENTS_SOURCE.replace(
+            INTEGRATE.BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR,
+            INTEGRATE.STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+            1,
+        )
+        patched = self.patch_source_twice(
+            "style_sheet_contents.cc", legacy_contents, INTEGRATE.patch_blink_style_sheet_contents
+        )
+        self.assertNotIn("FromUTF8", patched)
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK))
+        legacy_engine = self.STYLE_ENGINE_SOURCE.replace(
+            INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_ANCHOR,
+            INTEGRATE.STAGE_AB95_BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS
+            + INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_ANCHOR,
+            1,
+        )
+        patched = self.patch_source_twice(
+            "style_engine.cc", legacy_engine, INTEGRATE.patch_blink_style_engine_style_sheets
+        )
+        self.assertNotIn("FromUTF8", patched)
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS))
+
     def test_style_sheet_bridge_calls_match_the_bridge(self):
         bridge = (Path(__file__).parent / "recorder_bridge" / "browser_bridge.h").read_text(encoding="utf-8")
         for name in (

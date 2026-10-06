@@ -6890,11 +6890,18 @@ Differences from the design:
   frame's cut, as it does for fonts and images, not at the frame's
   composition.
 
+Found on the target machine: the first build of `ab95625` failed in
+`style_sheet_contents.cc`, since `blink::String` has `FromUtf8` of a byte
+span, not `FromUTF8` of a `std::string`. The parse hook and the style
+engine helpers now pass `base::as_byte_span` of the text to
+`String::FromUtf8`, and `integrate.py` upgrades a checkout patched by
+`ab95625`.
+
 Tests run in the sandbox: the .NET suite (1096 passing; the 58 failures
 are the known tests that need PostgreSQL or Windows) with new tests of the
 three record contracts, the validator, the reader's choice, the server's
 answer and refusal, and the builder's data; and `integrate.py`'s suite (236
-tests), where each new patch is applied once and found again on a second
+tests at the time), where each new patch is applied once and found again on a second
 pass. The integration test in the instrumented Chromium, comparing each
 recorded text with the text DevTools reports, is not built; the fixture
 page and the system test on the target machine take its place for now.

@@ -18196,6 +18196,9 @@ BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR = """\
   String sheet_text =
       cached_style_sheet->SheetText(parser_context_, mime_type_check);
 """
+# The parse hook as first delivered (ab95625) named String::FromUTF8 and
+# passed it a std::string; blink::String has FromUtf8 of a byte span. That
+# hook is STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK, below.
 BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK = BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR + """\
   // Windows A11y Recorder (protocol 0.51, slice 4e): the text this sheet
   // arrived with, by its address, recorded once for each digest.
@@ -18207,10 +18210,24 @@ BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK = BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR 
     recorder_sheet.status = response.HttpStatusCode();
     recorder_sheet.mime_type = response.MimeType().Utf8();
     recorder_sheet.text = sheet_text.Utf8();
-    recorder_arrived_digest_ = String::FromUTF8(
-        a11y_recorder::RecordBlinkStyleSheetResource(std::move(recorder_sheet)));
+    const std::string recorder_digest =
+        a11y_recorder::RecordBlinkStyleSheetResource(std::move(recorder_sheet));
+    recorder_arrived_digest_ =
+        String::FromUtf8(base::as_byte_span(recorder_digest));
   }
 """
+
+STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK = BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK.replace(
+    """    const std::string recorder_digest =
+        a11y_recorder::RecordBlinkStyleSheetResource(std::move(recorder_sheet));
+    recorder_arrived_digest_ =
+        String::FromUtf8(base::as_byte_span(recorder_digest));
+""",
+    """    recorder_arrived_digest_ = String::FromUTF8(
+        a11y_recorder::RecordBlinkStyleSheetResource(std::move(recorder_sheet)));
+""",
+    1,
+)
 
 BLINK_STYLE_ENGINE_STYLE_SHEETS_INCLUDES = (
     BLINK_BRIDGE_INCLUDE,
@@ -18281,9 +18298,11 @@ a11y_recorder::StyleSheetFacts RecorderStyleSheetFacts(
   StyleSheetContents* contents = sheet.Contents();
   if (sheet.IsConstructed() || (contents && contents->IsMutable())) {
     if (sheet.recorder_cssom_changed_ || sheet.recorder_cssom_digest_.empty()) {
-      sheet.recorder_cssom_digest_ = String::FromUTF8(
+      const std::string recorder_digest =
           a11y_recorder::RecordBlinkStyleSheetText(
-              sheet.RecorderCSSOMText().Utf8()));
+              sheet.RecorderCSSOMText().Utf8());
+      sheet.recorder_cssom_digest_ =
+          String::FromUtf8(base::as_byte_span(recorder_digest));
       sheet.recorder_cssom_changed_ = false;
     }
     // A text whose record could not be queued is named by no digest.
@@ -18304,7 +18323,7 @@ a11y_recorder::StyleSheetFacts RecorderStyleSheetFacts(
       facts.media + "\\n" + facts.title + "\\n" +
       (facts.disabled ? "1" : "0") + (facts.active ? "1" : "0") + "\\n" +
       facts.text_source + "\\n" + facts.text_digest;
-  const String recorder_state = String::FromUTF8(state);
+  const String recorder_state = String::FromUtf8(base::as_byte_span(state));
   facts.full = recorder_state != sheet.recorder_last_facts_;
   sheet.recorder_last_facts_ = recorder_state;
   return facts;
@@ -18372,6 +18391,24 @@ a11y_recorder::StyleSheetScopeFacts RecorderStyleSheetScope(
 }  // namespace
 
 """
+# The helpers as first delivered (ab95625), which named String::FromUTF8.
+STAGE_AB95_BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS = BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS.replace(
+    """      const std::string recorder_digest =
+          a11y_recorder::RecordBlinkStyleSheetText(
+              sheet.RecorderCSSOMText().Utf8());
+      sheet.recorder_cssom_digest_ =
+          String::FromUtf8(base::as_byte_span(recorder_digest));
+""",
+    """      sheet.recorder_cssom_digest_ = String::FromUTF8(
+          a11y_recorder::RecordBlinkStyleSheetText(
+              sheet.RecorderCSSOMText().Utf8()));
+""",
+    1,
+).replace(
+    "  const String recorder_state = String::FromUtf8(base::as_byte_span(state));\n",
+    "  const String recorder_state = String::FromUTF8(state);\n",
+    1,
+)
 BLINK_STYLE_ENGINE_STYLE_SHEETS_ANCHOR = """\
   probe::ActiveStyleSheetsUpdated(document_);
 
@@ -18460,6 +18497,16 @@ def patch_blink_style_sheet_contents(path: Path) -> None:
     text = add_includes_after(
         text, BLINK_STYLE_SHEET_CONTENTS_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
     )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+                BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+            ),
+        ),
+        path,
+    )
     text = apply_cookie_hook(
         text,
         BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR,
@@ -18476,6 +18523,16 @@ def patch_blink_style_engine_style_sheets(path: Path) -> None:
         text,
         BLINK_STYLE_ENGINE_OWN_INCLUDE,
         BLINK_STYLE_ENGINE_STYLE_SHEETS_INCLUDES,
+        path,
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_AB95_BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS,
+                BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS,
+            ),
+        ),
         path,
     )
     text = insert_before_once(
