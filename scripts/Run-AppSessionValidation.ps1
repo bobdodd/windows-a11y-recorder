@@ -632,9 +632,11 @@ if (-not (Test-Path -LiteralPath $loadExecutable -PathType Leaf)) {
 Invoke-Checked "Building the recording event export" {
     & $dotnet build $exportProject --configuration Release --output $exportOutput
 }
-$exportExecutable = Join-Path $exportOutput "RecordingEventExport.exe"
-if (-not (Test-Path -LiteralPath $exportExecutable -PathType Leaf)) {
-    throw "The export build did not produce $exportExecutable."
+# Run through dotnet, which finds its own runtime, as the app's host does
+# only with DOTNET_ROOT set (see the app's start below).
+$exportAssembly = Join-Path $exportOutput "RecordingEventExport.dll"
+if (-not (Test-Path -LiteralPath $exportAssembly -PathType Leaf)) {
+    throw "The export build did not produce $exportAssembly."
 }
 $loadSummaryPath = Join-Path $outputRoot "uia-load-source.json"
 Remove-Item -LiteralPath $loadSummaryPath -Force -ErrorAction SilentlyContinue
@@ -862,15 +864,22 @@ try {
         throw "The app reported: $stopStatus"
     }
 
-    # The app loads the finished session into playback on its own.
+    # The app loads the finished session into playback on its own. The
+    # status names the loaded session only until playback moves to its start
+    # and states the nearest event, so the load is known from the navigation
+    # summary, which leaves its initial text only when a recording loads or
+    # fails to.
     $playbackText = Find-ById $window "PlaybackStatusTextBlock"
-    $sessionId = Split-Path -Leaf $sessionPath
+    $correlationText = Find-ById $window "BrowserCorrelationTextBox"
+    $initialCorrelation = "Open a recording with browser evidence to inspect navigation correlation."
     Wait-Until -TimeoutSeconds 120 -Condition {
-        $playbackText.Current.Name -like "$sessionId |*" -or
-            $playbackText.Current.Name -eq "Recording load failed."
+        $playbackText.Current.Name -eq "Recording load failed." -or (
+            $playbackText.Current.Name -ne "Loading recording..." -and
+            (Get-TextValue $correlationText) -ne $initialCorrelation)
     } -Failure "The app did not load the recording. It reported: $($playbackText.Current.Name)"
     $playbackStatus = $playbackText.Current.Name
-    if ($playbackStatus -eq "Recording load failed.") {
+    if ($playbackStatus -eq "Recording load failed." -or
+        (Get-TextValue $correlationText) -eq "The recording could not be opened.") {
         throw "The app could not load the recording it made."
     }
     $navigationList = Find-ById $window "BrowserNavigationListBox"
@@ -931,7 +940,7 @@ if (-not $session -or $session.FullName -ne [IO.Path]::GetFullPath($sessionPath)
 $manifest = Get-Content -LiteralPath (Join-Path $session.FullName "manifest.json") -Raw |
     ConvertFrom-Json
 $eventsPath = Join-Path $outputRoot "$($session.Name).events.ndjson"
-$exportOutputLines = @(& $exportExecutable (Join-Path $session.FullName "recording.mcap") $eventsPath)
+$exportOutputLines = @(& $dotnet $exportAssembly (Join-Path $session.FullName "recording.mcap") $eventsPath)
 if ($LASTEXITCODE -ne 0) {
     throw "The recording file's events could not be read: $($exportOutputLines -join ' ')"
 }

@@ -180,3 +180,29 @@ Decision, 2026-10-06: the application session validation pair,
 to read the recording file, through `tests\RecordingEventExport`, which
 writes a recording file's events in the form of the retired `events.ndjson`.
 The Blink validation pair stays unported.
+
+Port runs, 2026-10-06:
+
+- At 89e8261, recording 20261006-201809-13929ba87e574248b9338397021e8b10
+  completed and stored, and the script then stopped waiting for the
+  playback status to name the session. The app sets that status when the
+  recording loads and replaces it, as playback moves to its start, with the
+  nearest event ("No matching event before this position."). The script now
+  waits for the navigation summary to leave its initial text.
+- The steps after it were then run against that recording without a new
+  recording. In the sandbox, its file gave 43,475 events, the manifest's
+  accepted count, and `Verify-AppSessionEvidence.ps1` passed on them, with
+  steps taken from the recording (the controls' rectangles from their UI
+  Automation focus events). On the target machine, in Windows PowerShell,
+  the script's steps from the manifest check to the omission check passed
+  on the same events: 47 listed files with their sizes and digests, the
+  verifier, no browser evidence lost, and no omission. The export itself
+  could not be run there by the agent, and was run in the sandbox.
+- That check found that the export, a framework-dependent program, does not
+  find a per-user .NET without DOTNET_ROOT, as the app does not; the script
+  now runs it through `dotnet`.
+- The count of structure changes without a runtime ID now includes an empty
+  runtime ID: 2 in that recording.
+- Not run against a recording: the wait for the load, the navigation list,
+  closing the app, and the load source's summary; the first is new, the
+  others are unchanged from the last passing run on 2026-09-25.

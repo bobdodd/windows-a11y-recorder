@@ -789,9 +789,9 @@ $uiaPropertySources = @(
         Sort-Object Name |
         ForEach-Object { "$($_.Name)=$($_.Count)" }
 )
-# Structure changes, and how many arrived without a runtime ID. The managed
-# UI Automation client ended the recorder on such an event; the native client
-# delivers it, and it is recorded with a null runtime ID.
+# Structure changes, and how many arrived without a runtime ID, recorded as
+# null or as an empty list. The managed UI Automation client ended the
+# recorder on such an event; the native client delivers it.
 $uiaStructureChanges = @(
     $records |
         Where-Object {
@@ -800,7 +800,9 @@ $uiaStructureChanges = @(
         }
 )
 $uiaStructureChangesWithoutRuntimeId = @(
-    $uiaStructureChanges | Where-Object { $null -eq $_.payload.runtimeId }
+    $uiaStructureChanges | Where-Object {
+        $null -eq $_.payload.runtimeId -or @($_.payload.runtimeId).Count -eq 0
+    }
 )
 $uiaDropEpisodes = @(
     $records |

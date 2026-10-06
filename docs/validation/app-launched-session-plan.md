@@ -44,7 +44,9 @@ interaction consistently.
    input during the run.
 8. Stops the recording with the Stop button and waits for the application to
    report "Recording completed and stored." with no database problem, and to
-   load the session into playback. (Until 2026-09-26 the status was that the
+   load the session into playback. The load is known from the navigation
+   summary leaving its initial text, because the status names the loaded
+   session only until playback moves to its start. (Until 2026-09-26 the status was that the
    session files were verified.)
 9. Closes the application through its window, which runs its normal shutdown.
 10. Writes the events of the session's recording file, `recording.mcap`, as
