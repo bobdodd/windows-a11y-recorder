@@ -7339,6 +7339,163 @@ shown in the evidence panel. The checks of each listed value against the
 values the page states, and the integration and system tests above, are
 not yet recorded.
 
+### Slice 4h: the page's script source (proposed, not built)
+
+Proposed 2026-10-06, at the owner's request that the JavaScript source of
+each frame be recorded, so that when testing the exact code that ran can be
+read. It takes protocol 0.54.
+
+#### Why
+
+The recording holds the text of inline `script` elements, as character
+data in the DOM, and, since protocol 0.52, the script ID, element, URL, and
+start position of each script element's script and each `on...` attribute
+handler (slice 4f). It does not hold the text of an external script, a
+module, code given to `eval` or `new Function`, a string handler of a
+timer, a `javascript:` URL, or an extension's content script. A timer's
+stack names script IDs, lines, and columns, but the code at those lines
+cannot be read from the recording.
+
+#### What Chromium does
+
+Read in the patched Chromium checkout on the target machine, under `v8/src/`
+and `third_party/blink/renderer/`; line numbers are those of that checkout.
+
+- Every top-level script and every wrapped function V8 makes is reported to
+  the debugger by `Compiler::PostInstantiation`
+  (`codegen/compiler.cc`, line 4663, `isolate->debug()->OnAfterCompile`),
+  when its function is made in a context, before it runs. A script that
+  fails to compile is reported by `Debug::OnCompileError`, from
+  `parsing/pending-compilation-error-handler.cc` (line 206). Both reach
+  `Debug::ProcessCompileEvent` (`debug/debug.cc`, line 2831). This covers
+  classic and module scripts, `eval`, `new Function`, string timers,
+  `javascript:` URLs, attribute handlers (wrapped functions), and extension
+  scripts, since all of them are V8 scripts. WebAssembly modules are
+  reported at the same place.
+- `ProcessCompileEvent` returns before it reports anything when no
+  debugger is attached: `ignore_events()` is true while `is_active_` is
+  false (`debug/debug.h`, line 521), and the delegate is checked at line
+  2841. DevTools' Sources panel is that delegate, and V8 has one. So the
+  record cannot come from the debugger interface without displacing
+  DevTools, and the hook goes before those checks.
+- `Script::IsSubjectToDebugging` (`objects/script.cc`, line 221) is true
+  for normal and WebAssembly scripts only, not for V8's native, extension,
+  and inspector-internal scripts.
+- A V8 script holds its source, as decoded text, its name (the URL), its
+  `//# sourceURL` and `//# sourceMappingURL` values, its line and column
+  offset in its resource (an inline script's place in the page), whether it
+  is eval code and the function that called `eval`, and whether it is
+  wrapped (`objects/script.h`, lines 76 to 235).
+- Blink alone does not see every script: `eval` and `new Function` reach
+  Blink's code generation callback only when the page's content security
+  policy checks eval (`bindings/core/v8/local_window_proxy.cc`, line 283,
+  and `codegen/compiler.cc`, lines 3515 to 3523), and then without a
+  script ID.
+- The instrumented build is not a component build (`out/A11yRecorder/args.gn`,
+  `is_component_build = false`), so a function V8 defines can be called
+  from Blink without changing V8's exported interface.
+
+#### What is recorded (protocol 0.54)
+
+- A patch to `Debug::ProcessCompileEvent`, before its checks, calls a hook
+  that Blink sets for the main thread's isolate (in
+  `V8Initializer::InitializeV8Common`, `v8_initializer.cc`, line 888). It
+  skips temporary scripts, scripts not subject to debugging, and
+  WebAssembly. Blink finds the document and world from the current context;
+  a script compiled with no document, such as in a worker, is not recorded.
+- The bridge keeps, per renderer process, the script IDs it has recorded,
+  so a script reported again, as V8 does each time a cached script or eval
+  code is instantiated again, is recorded once.
+- A new `browser.script` channel with two records:
+  - `script-parsed`, once per script: the document, the world (as the
+    cookie and timer records give it), the script ID, the digest and length
+    of its source, its URL, source URL, and source map URL, its start line
+    and column (one-based), its kind (`classic`, `module`, `eval`,
+    `function` for a wrapped function such as `new Function` or an
+    attribute handler), for eval code the script ID of the caller, and
+    whether it failed to compile;
+  - `script-text`: the source as UTF-8 bytes, with its digest and size, the
+    first time the renderer meets the digest, as `style-sheet-text`,
+    `font-file`, and `image-data` are, through the same queue.
+- The digest is the SHA-256 of the UTF-8 source. The same source compiled
+  many times, in many documents, or by many `eval` calls, is held once per
+  renderer process.
+
+No frame holds a copy or a list of its scripts. The scripts of a document
+at a frame are those whose `script-parsed` record is at or before the
+frame's time, read as the timers and animations at a frame are. Each
+refers to its text by digest, so the text is read only when it is shown.
+
+#### What the evidence panel shows
+
+- A "Scripts" table for the document at the frame: for each script, its
+  kind; the owner (page, extension, or DevTools, from the world, as in the
+  "Scheduled by" column); its element and path, for a script element's
+  script or an attribute handler, joined by script ID to the slice 4f
+  `script-compiled` record; its URL or source URL; for eval code, the
+  script that called `eval`; its size and lines; when it was compiled; and
+  whether it failed to compile.
+- A "View source" button for each, which opens the recorded text in a
+  read-only viewer page of the evidence panel with numbered lines, each
+  line addressable, and the browser's own find. The text is the text V8
+  compiled, shown as text, never run.
+- In the "Scheduled by" column, each stack frame and callback location
+  whose script has recorded text links to its line in the viewer.
+- For a recording before protocol 0.54 the table says the script source
+  was not recorded.
+
+DevTools' Sources panel in the recreation does not list these scripts,
+since the recreation runs no page script (see "Slice 3"). Listing them
+there, compiled but not run, is a later step, not part of this slice.
+
+#### Limits
+
+- The text is the decoded source V8 compiled, not the bytes the server
+  sent, and not the original of a minified or transpiled script; a source
+  map URL is recorded, not the map.
+- Compiled is not the same as ran: a script's top level runs after it is
+  reported, but a function in it may never have been called. A script that
+  failed to compile is listed as such and did not run.
+- Script in iframes waits for slice 5, as their documents do. Worker and
+  service worker scripts are not recorded. WebAssembly is not recorded.
+- The recording holds the page's script text, which may include values the
+  page put there, such as tokens in an inline script, as the DOM already
+  holds inline script text.
+- Script IDs are per renderer process, so joins are made within the
+  document's process, as in slice 4f.
+
+#### Cost
+
+Each new script's source is copied to UTF-8 and digested on the main
+thread when it is first instantiated; repeats cost a lookup of the script
+ID. The text is written once per digest, encoded off the main thread by
+the existing queue. The hook is timed as a whole and measured on the target
+machine on a page with large bundles and much `eval`.
+
+#### To be settled
+
+- Whether the source copy and digest of a very large script (several
+  megabytes) is acceptable on the main thread, or the copy is kept and the
+  digest computed on the queue's thread.
+- Whether expressions typed in DevTools' Console, compiled as normal
+  scripts, are recorded as DevTools-owned scripts or left out.
+
+#### Required tests
+
+- Unit tests: the two records against the record contract and the
+  validator; the scripts of a document at a time, including a script
+  compiled after the frame, another document's script, eval code with its
+  caller, a compile failure, and a recording before protocol 0.54; the join
+  to `script-compiled`; the panel's rows and the viewer's lines.
+- Integration tests in the instrumented Chromium, through `integrate.py`'s
+  test suite: the V8 and Blink hooks applied once and found again on a
+  second pass, and called with functions the bridge declares.
+- System test on the target machine: a recording of the timer origin
+  fixture, served over HTTP, extended with an external module, `new
+  Function`, a `javascript:` link, and a script that fails to compile,
+  where the Scripts table lists each with its kind, element, and text, and
+  each "View source" shows the fixture's own text, compared by the owner.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
