@@ -174,3 +174,9 @@ problems outside the client:
   a ChildAdded on a XAML progress ring, carry an empty runtime ID. Both were
   recorded; the managed client's fault was an event delivered without a
   runtime ID.
+
+Decision, 2026-10-06: the validation scripts stay unported for now. The
+native client's result on the target machine is the recordings stopped from
+the recorder's window by hand and the c7dc210 run above, a recording started
+and stopped from the window under UI Automation load and read from its file
+in the sandbox.
