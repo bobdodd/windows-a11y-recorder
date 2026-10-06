@@ -714,7 +714,17 @@ try {
 
     $stopButton = Find-ById $window "StopButton"
     $statusText = Find-ById $window "StatusTextBlock"
-    Invoke-Element (Find-ById $window "StartButton")
+    # The window opens before the recorder's database has started, and Start
+    # is enabled only once it has. A start that applies a new migration or
+    # marks recordings interrupted can take longer than the settings above.
+    # If the database cannot start, Start stays disabled and the status
+    # says why.
+    $startButton = Find-ById $window "StartButton"
+    Wait-Until -TimeoutSeconds 180 -Condition { $startButton.Current.IsEnabled } -Failure (
+        "The recorder did not become ready to record. The app reported: " +
+        $statusText.Current.Name
+    )
+    Invoke-Element $startButton
     Wait-Until -TimeoutSeconds 60 -Condition { $stopButton.Current.IsEnabled } -Failure (
         "The recording did not start. The app reported: " +
         $statusText.Current.Name

@@ -136,3 +136,23 @@ handler-fault omission). The Windows integration and system tests are the
 application session validation, `scripts/Run-AppSessionValidation.ps1`,
 which starts and stops a recording from the recorder's window under UI
 Automation load, and recordings stopped from the recorder's window by hand.
+
+## Application session validation
+
+The first runs of the application session validation with the native client,
+on the target machine on 2026-10-06, stopped before the evidence checks on
+problems outside the client:
+
+- At 3b07ab3, two managed tests failed: a recording file cut between
+  two snapshot chunks of one sweep could not be read (see
+  [page recreation](page-recreation.md)), and the evidence samples lacked the
+  resources and compositor omissions. Both were fixed at 36dd057, and the
+  managed tests then passed, 1,218 of 1,218.
+- At 36dd057, the recording completed, but its file's chunk index was
+  refused by the database (see
+  [change-driven recording](change-driven-recording.md)). Fixed by migration
+  0016 at df4911f.
+- At df4911f, the script pressed Start while it was still disabled, because
+  the recorder's database had not yet started; that start applied migration
+  0016. The script now waits up to 180 seconds for Start to be enabled, and
+  otherwise reports the app's status.
