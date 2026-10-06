@@ -1,7 +1,8 @@
-# UI Automation through the native client (proposed, not built)
+# UI Automation through the native client (agreed, built, not yet confirmed on the target machine)
 
 Proposed 2026-10-06, after the recorder closed when a recording was stopped
-on the target machine.
+on the target machine. The owner agreed to move the whole collector to the
+native client the same day.
 
 ## What happened
 
@@ -85,3 +86,44 @@ reads throws.
 - System test on the target machine: several recordings, each stopped from
   the recorder's window, complete; the payloads of a recording match those
   of the managed client for the same actions in kind and fields.
+
+## As built
+
+- The COM interfaces come from the `Interop.UIAutomationClient` package,
+  version 10.19041.0, an MIT-licensed import of the Windows 10 2004 UI
+  Automation client type library
+  ([UIAutomation-Interop](https://github.com/Roemer/UIAutomation-Interop)).
+  The collector no longer references WPF.
+- The collector creates `CUIAutomation8`, subscribes on the root element with
+  one cache request, and removes its handlers with `RemoveAllEventHandlers`,
+  which waits for running handlers to return.
+- The native client gives identifiers, control types, structure-change types,
+  and toggle and expand-collapse states as numbers. `UiaEvidenceText` names
+  them with the programmatic names the managed client gave. Those names were
+  read on the target machine from `System.Windows.Automation` on 2026-10-06.
+  The managed client gave no name for control types above 50038 (semantic
+  zoom and app bar), and neither does the collector.
+- Property values are read with `GetCachedPropertyValueEx` and, for a sender
+  delivered without cached properties, `GetCurrentPropertyValueEx`, each
+  asking for a property's default value where it is not supported, as the
+  managed client's reads did. A failed read is flagged by its result code:
+  an element that is not available or whose process has gone is
+  `element-not-available`, an invalid operation is
+  `element-property-read-failed`, and any other is `uia-provider-error`.
+- A fault in the recorder's handling of an event is counted, and the count is
+  recorded once when the collector stops, as a `collector-omission` with
+  reason `uia-event-handler-failed`, flagged `evidence-dropped`, and the
+  collector's health becomes degraded. It is not recorded at the time of the
+  fault, so that the records stay in time order behind the observation queue.
+- The application session verifier reports how many structure changes were
+  recorded and how many had no runtime ID.
+
+Tests: `UiaNativeClientTests` (the names of every subscribed event and
+property, control types, structure-change types and state values, the
+reading of property values and rectangles, the failure flags, and a handler
+fault that is counted while later events are still handled), and three
+validator tests (a structure change with and without a runtime ID, and the
+handler-fault omission). The Windows integration and system tests are the
+application session validation, `scripts/Run-AppSessionValidation.ps1`,
+which starts and stops a recording from the recorder's window under UI
+Automation load, and recordings stopped from the recorder's window by hand.

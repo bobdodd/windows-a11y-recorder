@@ -1,11 +1,14 @@
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Automation;
+using Interop.UIAutomationClient;
 using Recorder.Contracts;
-using UiaAutomation = System.Windows.Automation.Automation;
 
 namespace Recorder.Collectors.Automation;
 
+// Records UI Automation events from the whole desktop through the native UI
+// Automation client, IUIAutomation. The managed client,
+// System.Windows.Automation, read each event's arguments in its own callback
+// before any handler of the recorder, and ended the process when that read
+// threw; see docs/architecture/uia-native-client.md.
 public sealed class UiAutomationCollector : ICaptureCollector
 {
     private const int ObservationCapacity = 4_096;
@@ -14,26 +17,6 @@ public sealed class UiAutomationCollector : ICaptureCollector
     // changed) may use, so a flood of property or structure changes from any
     // process cannot displace them.
     private const int ReservedObservationCapacity = 512;
-
-    // The element properties every observation records. They are requested
-    // with each event, so UI Automation reads them when it raises the event
-    // instead of the processor reading them afterwards, one call each.
-    private static readonly AutomationProperty[] SnapshotProperties =
-    [
-        AutomationElement.ProcessIdProperty,
-        AutomationElement.NativeWindowHandleProperty,
-        AutomationElement.AutomationIdProperty,
-        AutomationElement.NameProperty,
-        AutomationElement.ClassNameProperty,
-        AutomationElement.FrameworkIdProperty,
-        AutomationElement.ControlTypeProperty,
-        AutomationElement.LocalizedControlTypeProperty,
-        AutomationElement.HasKeyboardFocusProperty,
-        AutomationElement.IsKeyboardFocusableProperty,
-        AutomationElement.IsEnabledProperty,
-        AutomationElement.IsOffscreenProperty,
-        AutomationElement.BoundingRectangleProperty
-    ];
 
     private readonly object _gate = new();
     private readonly ManualResetEventSlim _stopRequested = new(false);
@@ -44,6 +27,7 @@ public sealed class UiAutomationCollector : ICaptureCollector
     private CollectorInitializationContext? _context;
     private long _eventSequence = -1;
     private long _lifecycleSequence = -1;
+    private long _handlerFaults;
     private bool _disposed;
 
     public UiAutomationCollector()
@@ -221,6 +205,19 @@ public sealed class UiAutomationCollector : ICaptureCollector
             HealthState = CollectorHealthState.Degraded;
         }
 
+        // Events whose handling failed in the recorder's handler were not
+        // recorded; the count is stated once, after every recorded event.
+        var handlerFaults = Interlocked.Read(ref _handlerFaults);
+        if (handlerFaults > 0)
+        {
+            HealthState = CollectorHealthState.Degraded;
+            EmitEvent(
+                "collector-omission",
+                new { reason = "uia-event-handler-failed", count = handlerFaults },
+                CollectorClosingTimestamp.Resolve(_context?.Clock, boundary),
+                "evidence-dropped");
+        }
+
         LifecycleState = CollectorLifecycleState.Stopped;
         EmitLifecycle("stopped", boundary);
         return CollectorTransitionResult.Success(LifecycleState);
@@ -249,57 +246,49 @@ public sealed class UiAutomationCollector : ICaptureCollector
 
     private void SubscriptionLoop()
     {
-        AutomationFocusChangedEventHandler focusHandler = OnFocusChanged;
-        AutomationEventHandler automationHandler = OnAutomationEvent;
-        StructureChangedEventHandler structureHandler = OnStructureChanged;
-        AutomationPropertyChangedEventHandler propertyHandler = OnPropertyChanged;
-
+        IUIAutomation? automation = null;
         try
         {
-            var root = AutomationElement.RootElement;
-            var cacheRequest = new CacheRequest
+            automation = new CUIAutomation8Class();
+            var root = automation.GetRootElement();
+            var cacheRequest = automation.CreateCacheRequest();
+            cacheRequest.TreeScope = Interop.UIAutomationClient.TreeScope.TreeScope_Element;
+            cacheRequest.AutomationElementMode = AutomationElementMode.AutomationElementMode_Full;
+            foreach (var property in UiaEvidenceText.SnapshotPropertyIds)
             {
-                TreeScope = TreeScope.Element,
-                AutomationElementMode = AutomationElementMode.Full
-            };
-            foreach (var property in SnapshotProperties)
-            {
-                cacheRequest.Add(property);
+                cacheRequest.AddProperty(property);
             }
 
-            // Handlers added while the request is active receive each event's
-            // sender with these properties cached.
-            using var activeCacheRequest = cacheRequest.Activate();
-            UiaAutomation.AddAutomationFocusChangedEventHandler(focusHandler);
-            UiaAutomation.AddAutomationEventHandler(
-                InvokePattern.InvokedEvent,
+            // Each handler is given the request, so UI Automation reads these
+            // properties of the sender when it raises the event.
+            var handlers = new EventHandlers(this);
+            automation.AddFocusChangedEventHandler(cacheRequest, handlers);
+            foreach (var eventId in new[]
+                     {
+                         UiaEvidenceText.InvokedEventId,
+                         UiaEvidenceText.ElementSelectedEventId,
+                         UiaEvidenceText.TextChangedEventId
+                     })
+            {
+                automation.AddAutomationEventHandler(
+                    eventId,
+                    root,
+                    Interop.UIAutomationClient.TreeScope.TreeScope_Subtree,
+                    cacheRequest,
+                    handlers);
+            }
+
+            automation.AddStructureChangedEventHandler(
                 root,
-                TreeScope.Subtree,
-                automationHandler);
-            UiaAutomation.AddAutomationEventHandler(
-                SelectionItemPattern.ElementSelectedEvent,
+                Interop.UIAutomationClient.TreeScope.TreeScope_Subtree,
+                cacheRequest,
+                handlers);
+            automation.AddPropertyChangedEventHandler(
                 root,
-                TreeScope.Subtree,
-                automationHandler);
-            UiaAutomation.AddAutomationEventHandler(
-                TextPattern.TextChangedEvent,
-                root,
-                TreeScope.Subtree,
-                automationHandler);
-            UiaAutomation.AddStructureChangedEventHandler(
-                root,
-                TreeScope.Subtree,
-                structureHandler);
-            UiaAutomation.AddAutomationPropertyChangedEventHandler(
-                root,
-                TreeScope.Subtree,
-                propertyHandler,
-                AutomationElement.NameProperty,
-                AutomationElement.HasKeyboardFocusProperty,
-                AutomationElement.IsEnabledProperty,
-                ValuePattern.ValueProperty,
-                TogglePattern.ToggleStateProperty,
-                ExpandCollapsePattern.ExpandCollapseStateProperty);
+                Interop.UIAutomationClient.TreeScope.TreeScope_Subtree,
+                cacheRequest,
+                handlers,
+                UiaEvidenceText.ChangedPropertyIds.ToArray());
 
             _ready!.TrySetResult(true);
             _stopRequested.Wait();
@@ -312,38 +301,23 @@ public sealed class UiAutomationCollector : ICaptureCollector
         }
         finally
         {
-            RemoveHandlers(focusHandler, automationHandler, structureHandler, propertyHandler);
+            RemoveHandlers(automation);
         }
     }
 
-    private static void RemoveHandlers(
-        AutomationFocusChangedEventHandler focusHandler,
-        AutomationEventHandler automationHandler,
-        StructureChangedEventHandler structureHandler,
-        AutomationPropertyChangedEventHandler propertyHandler)
+    // Removing every handler waits for handlers already running to return.
+    private static void RemoveHandlers(IUIAutomation? automation)
     {
+        if (automation is null)
+        {
+            return;
+        }
+
         try
         {
-            var root = AutomationElement.RootElement;
-            UiaAutomation.RemoveAutomationFocusChangedEventHandler(focusHandler);
-            UiaAutomation.RemoveAutomationEventHandler(
-                InvokePattern.InvokedEvent,
-                root,
-                automationHandler);
-            UiaAutomation.RemoveAutomationEventHandler(
-                SelectionItemPattern.ElementSelectedEvent,
-                root,
-                automationHandler);
-            UiaAutomation.RemoveAutomationEventHandler(
-                TextPattern.TextChangedEvent,
-                root,
-                automationHandler);
-            UiaAutomation.RemoveStructureChangedEventHandler(root, structureHandler);
-            UiaAutomation.RemoveAutomationPropertyChangedEventHandler(
-                root,
-                propertyHandler);
+            automation.RemoveAllEventHandlers();
         }
-        catch (ElementNotAvailableException)
+        catch (COMException)
         {
         }
         catch (InvalidOperationException)
@@ -351,59 +325,17 @@ public sealed class UiAutomationCollector : ICaptureCollector
         }
     }
 
-    private void OnFocusChanged(object sender, AutomationFocusChangedEventArgs eventArgs)
-    {
-        Enqueue(
-            sender,
-            "focus-changed",
-            eventArgs.EventId.ProgrammaticName,
-            null,
-            null,
-            null);
-    }
-
-    private void OnAutomationEvent(object sender, AutomationEventArgs eventArgs)
-    {
-        Enqueue(
-            sender,
-            "automation-event",
-            eventArgs.EventId.ProgrammaticName,
-            null,
-            null,
-            null);
-    }
-
-    private void OnStructureChanged(object sender, StructureChangedEventArgs eventArgs)
-    {
-        Enqueue(
-            sender,
-            "structure-changed",
-            AutomationElementIdentifiers.StructureChangedEvent.ProgrammaticName,
-            eventArgs.StructureChangeType.ToString(),
-            eventArgs.GetRuntimeId(),
-            null);
-    }
-
-    private void OnPropertyChanged(object sender, AutomationPropertyChangedEventArgs eventArgs)
-    {
-        Enqueue(
-            sender,
-            "property-changed",
-            eventArgs.Property.ProgrammaticName,
-            null,
-            null,
-            NormalizeValue(eventArgs.NewValue));
-    }
+    private void CountHandlerFault() => Interlocked.Increment(ref _handlerFaults);
 
     private void Enqueue(
-        object sender,
+        IUIAutomationElement? element,
         string observationType,
         string eventId,
         string? changeType,
         int[]? runtimeId,
         string? newValue)
     {
-        if (sender is not AutomationElement element || _observations is null)
+        if (element is null || _observations is null)
         {
             return;
         }
@@ -420,6 +352,66 @@ public sealed class UiAutomationCollector : ICaptureCollector
                 newValue,
                 arrivedAt,
                 null));
+    }
+
+    [ComVisible(true)]
+    private sealed class EventHandlers(UiAutomationCollector collector) :
+        IUIAutomationFocusChangedEventHandler,
+        IUIAutomationEventHandler,
+        IUIAutomationStructureChangedEventHandler,
+        IUIAutomationPropertyChangedEventHandler
+    {
+        public void HandleFocusChangedEvent(IUIAutomationElement sender) =>
+            UiaHandlerGuard.Run(
+                () => collector.Enqueue(
+                    sender,
+                    "focus-changed",
+                    UiaEvidenceText.EventName(UiaEvidenceText.FocusChangedEventId),
+                    null,
+                    null,
+                    null),
+                collector.CountHandlerFault);
+
+        public void HandleAutomationEvent(IUIAutomationElement sender, int eventId) =>
+            UiaHandlerGuard.Run(
+                () => collector.Enqueue(
+                    sender,
+                    "automation-event",
+                    UiaEvidenceText.EventName(eventId),
+                    null,
+                    null,
+                    null),
+                collector.CountHandlerFault);
+
+        // A provider may raise a structure change without a runtime ID; it
+        // arrives as a null array and is recorded as null.
+        public void HandleStructureChangedEvent(
+            IUIAutomationElement sender,
+            StructureChangeType changeType,
+            int[] runtimeId) =>
+            UiaHandlerGuard.Run(
+                () => collector.Enqueue(
+                    sender,
+                    "structure-changed",
+                    UiaEvidenceText.EventName(UiaEvidenceText.StructureChangedEventId),
+                    UiaEvidenceText.StructureChangeName((int)changeType),
+                    runtimeId,
+                    null),
+                collector.CountHandlerFault);
+
+        public void HandlePropertyChangedEvent(
+            IUIAutomationElement sender,
+            int propertyId,
+            object newValue) =>
+            UiaHandlerGuard.Run(
+                () => collector.Enqueue(
+                    sender,
+                    "property-changed",
+                    UiaEvidenceText.PropertyName(propertyId),
+                    null,
+                    null,
+                    UiaEvidenceText.NormalizeValue(propertyId, newValue)),
+                collector.CountHandlerFault);
     }
 
     private static bool IsReservedObservationType(string observationType) =>
@@ -512,79 +504,43 @@ public sealed class UiAutomationCollector : ICaptureCollector
     // Reads the properties UI Automation cached when it raised the event. A
     // sender delivered without them is read now instead, which the snapshot
     // states, because its values may postdate the event.
-    private static ElementSnapshot ReadElementSnapshot(AutomationElement element)
+    private static ElementSnapshot ReadElementSnapshot(IUIAutomationElement element)
     {
         try
         {
-            var cached = element.Cached;
-            return new ElementSnapshot(
-                cached.ProcessId,
-                cached.NativeWindowHandle,
-                cached.AutomationId,
-                cached.Name,
-                cached.ClassName,
-                cached.FrameworkId,
-                cached.ControlType?.ProgrammaticName,
-                cached.LocalizedControlType,
-                cached.HasKeyboardFocus,
-                cached.IsKeyboardFocusable,
-                cached.IsEnabled,
-                cached.IsOffscreen,
-                ToRectangle(cached.BoundingRectangle),
+            return ReadSnapshot(
+                propertyId => element.GetCachedPropertyValueEx(propertyId, 0),
                 "event-cache",
                 []);
         }
-        // ElementNotAvailableException is neither of the other two types; the
-        // current read below records that the element had gone.
-        catch (ElementNotAvailableException)
+        catch (COMException)
         {
         }
         catch (InvalidOperationException)
-        {
-        }
-        catch (COMException)
         {
         }
 
         return ReadCurrentElementSnapshot(element);
     }
 
-    private static ElementSnapshot ReadCurrentElementSnapshot(AutomationElement element)
+    private static ElementSnapshot ReadCurrentElementSnapshot(IUIAutomationElement element)
     {
         var qualityFlags = new List<string>();
 
         try
         {
-            var current = element.Current;
-            var rectangle = current.BoundingRectangle;
-            return new ElementSnapshot(
-                current.ProcessId,
-                current.NativeWindowHandle,
-                current.AutomationId,
-                current.Name,
-                current.ClassName,
-                current.FrameworkId,
-                current.ControlType?.ProgrammaticName,
-                current.LocalizedControlType,
-                current.HasKeyboardFocus,
-                current.IsKeyboardFocusable,
-                current.IsEnabled,
-                current.IsOffscreen,
-                ToRectangle(rectangle),
+            return ReadSnapshot(
+                propertyId => element.GetCurrentPropertyValueEx(propertyId, 0),
                 "current-read",
                 qualityFlags);
         }
-        catch (ElementNotAvailableException)
+        catch (COMException ex)
         {
-            qualityFlags.Add("element-not-available");
+            qualityFlags.Add(UiaEvidenceText.ReadFailureFlag(ex.HResult));
         }
         catch (InvalidOperationException)
         {
             qualityFlags.Add("element-property-read-failed");
-        }
-        catch (COMException)
-        {
-            qualityFlags.Add("uia-provider-error");
         }
 
         return new ElementSnapshot(
@@ -605,22 +561,34 @@ public sealed class UiAutomationCollector : ICaptureCollector
             qualityFlags);
     }
 
-    private static string? NormalizeValue(object? value) =>
-        value switch
-        {
-            null => null,
-            AutomationIdentifier identifier => identifier.ProgrammaticName,
-            bool boolean => boolean ? "true" : "false",
-            _ => value.ToString()
-        };
-
-    private static RectangleSnapshot? ToRectangle(Rect rectangle) =>
-        rectangle.IsEmpty
-            ? null
-            : new RectangleSnapshot(rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);
+    private static ElementSnapshot ReadSnapshot(
+        Func<int, object?> read,
+        string propertySource,
+        IReadOnlyList<string> qualityFlags)
+    {
+        var rectangle = UiaEvidenceText.Rectangle(read(UiaEvidenceText.BoundingRectanglePropertyId));
+        return new ElementSnapshot(
+            UiaEvidenceText.Integer(read(UiaEvidenceText.ProcessIdPropertyId)),
+            UiaEvidenceText.Integer(read(UiaEvidenceText.NativeWindowHandlePropertyId)),
+            UiaEvidenceText.Text(read(UiaEvidenceText.AutomationIdPropertyId)),
+            UiaEvidenceText.Text(read(UiaEvidenceText.NamePropertyId)),
+            UiaEvidenceText.Text(read(UiaEvidenceText.ClassNamePropertyId)),
+            UiaEvidenceText.Text(read(UiaEvidenceText.FrameworkIdPropertyId)),
+            UiaEvidenceText.ControlTypeName(read(UiaEvidenceText.ControlTypePropertyId)),
+            UiaEvidenceText.Text(read(UiaEvidenceText.LocalizedControlTypePropertyId)),
+            UiaEvidenceText.Boolean(read(UiaEvidenceText.HasKeyboardFocusPropertyId)),
+            UiaEvidenceText.Boolean(read(UiaEvidenceText.IsKeyboardFocusablePropertyId)),
+            UiaEvidenceText.Boolean(read(UiaEvidenceText.IsEnabledPropertyId)),
+            UiaEvidenceText.Boolean(read(UiaEvidenceText.IsOffscreenPropertyId)),
+            rectangle is { } box
+                ? new RectangleSnapshot(box.X, box.Y, box.Width, box.Height)
+                : null,
+            propertySource,
+            qualityFlags);
+    }
 
     private sealed record Observation(
-        AutomationElement? Element,
+        IUIAutomationElement? Element,
         string ObservationType,
         string EventId,
         string? ChangeType,

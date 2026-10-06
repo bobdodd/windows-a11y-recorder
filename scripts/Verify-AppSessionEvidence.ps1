@@ -784,6 +784,19 @@ $uiaPropertySources = @(
         Sort-Object Name |
         ForEach-Object { "$($_.Name)=$($_.Count)" }
 )
+# Structure changes, and how many arrived without a runtime ID. The managed
+# UI Automation client ended the recorder on such an event; the native client
+# delivers it, and it is recorded with a null runtime ID.
+$uiaStructureChanges = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "accessibility.uia.events" -and
+            $_.eventType -eq "structure-changed"
+        }
+)
+$uiaStructureChangesWithoutRuntimeId = @(
+    $uiaStructureChanges | Where-Object { $null -eq $_.payload.runtimeId }
+)
 $uiaDropEpisodes = @(
     $records |
         Where-Object {
@@ -851,6 +864,8 @@ if ($null -ne $loadProcessId) {
     UiaLoadSourceReceived = $uiaLoadReceived
     UiaLoadSourceReceivedPeakPerSecond = $uiaLoadReceivedPeak
     UiaPropertySources = ($uiaPropertySources -join "; ")
+    UiaStructureChanges = $uiaStructureChanges.Count
+    UiaStructureChangesWithoutRuntimeId = $uiaStructureChangesWithoutRuntimeId.Count
     UiaDropEpisodes = $uiaDropEpisodes.Count
     UiaDroppedByType = ($uiaDroppedByType -join "; ")
     OmissionKinds = ($omissions -join "; ")

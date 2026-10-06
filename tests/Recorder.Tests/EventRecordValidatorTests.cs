@@ -4900,6 +4900,48 @@ public sealed class EventRecordValidatorTests
         Assert.NotEmpty(issues);
     }
 
+    // A structure change raised without a runtime ID, which the native client
+    // delivers as a null array; see docs/architecture/uia-native-client.md.
+    [Fact]
+    public void AcceptsAUiaStructureChangeWithoutARuntimeId()
+    {
+        var payload = JsonNode.Parse(UiaPropertyChange)!;
+        payload["eventId"] = "AutomationElementIdentifiers.StructureChangedEvent";
+        payload["changeType"] = "ChildrenBulkRemoved";
+        payload["runtimeId"] = null;
+        payload["newValue"] = null;
+
+        var issues = ValidateUiaRecord("structure-changed", payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public void AcceptsAUiaStructureChangeWithARuntimeId()
+    {
+        var payload = JsonNode.Parse(UiaPropertyChange)!;
+        payload["eventId"] = "AutomationElementIdentifiers.StructureChangedEvent";
+        payload["changeType"] = "ChildRemoved";
+        payload["runtimeId"] = new JsonArray(42, 7, 3);
+        payload["newValue"] = null;
+
+        var issues = ValidateUiaRecord("structure-changed", payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public void AcceptsAUiaHandlerFaultOmission()
+    {
+        var payload = JsonNode.Parse("""
+            { "reason": "uia-event-handler-failed", "count": 2 }
+            """)!;
+
+        var issues = ValidateUiaRecord("collector-omission", payload);
+
+        Assert.Empty(issues);
+    }
+
     private static IReadOnlyList<EventValidationIssue> ValidateUiaRecord(string eventType, JsonNode payload, long timestamp = 100)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());

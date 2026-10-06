@@ -3,6 +3,8 @@
     <ProjectReference Include="../Recorder.Contracts/Recorder.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+    <!-- The native UI Automation client's COM interfaces, imported from its
+         type library. See docs/architecture/uia-native-client.md. -->
+    <PackageReference Include="Interop.UIAutomationClient" Version="10.19041.0" />
   </ItemGroup>
 </Project>
