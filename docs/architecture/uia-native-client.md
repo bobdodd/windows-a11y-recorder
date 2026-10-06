@@ -203,6 +203,7 @@ Port runs, 2026-10-06:
   now runs it through `dotnet`.
 - The count of structure changes without a runtime ID now includes an empty
   runtime ID: 2 in that recording.
-- Not run against a recording: the wait for the load, the navigation list,
-  closing the app, and the load source's summary; the first is new, the
-  others are unchanged from the last passing run on 2026-09-25.
+- At c609e4a, on 2026-10-06, the application session validation ran to the
+  end on the target machine and reported success, as the owner reported.
+  This is the first passing run since 2026-09-25, and the first with the
+  native client, the recording file, and the event export.
