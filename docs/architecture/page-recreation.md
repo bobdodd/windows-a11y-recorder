@@ -7332,6 +7332,13 @@ hooks are written once and after the probe, and the bridge does not compare
 the current time or progress). The integration and system tests below run
 on the target machine.
 
+First target machine run, 2026-10-06, at b90d6a6: the owner recorded the
+animation fixture, served by `Serve-Fixture.ps1`, with the instrumented
+Chromium built from this revision, and reported that the animations are
+shown in the evidence panel. The checks of each listed value against the
+values the page states, and the integration and system tests above, are
+not yet recorded.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
