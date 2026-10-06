@@ -7138,7 +7138,7 @@ same second. Timer names are unique only within a renderer process; the
 recorder keys documents by process as well, so they were not joined to the
 fixture's document.
 
-### Slice 4g: running animations in the evidence panel (proposed, not built)
+### Slice 4g: running animations in the evidence panel (agreed, built)
 
 Proposed 2026-10-06, at the owner's request that the evidence panel's
 Evidence tab show the animations running at the frame, which the design
@@ -7247,7 +7247,8 @@ latest record, since its time follows the scroll position, not the clock.
 
 - Whether "released" can be observed without a new hook in
   `Animation`'s destructor or garbage collection; if not, an animation is
-  ended by its play state and its document only.
+  ended by its play state and its document only. Settled while building:
+  see "As built".
 - The cost on the target machine, on the animation fixture.
 
 #### Required tests
@@ -7267,6 +7268,69 @@ latest record, since its time follows the scroll position, not the clock.
 - System test on the target machine: the animation fixture recorded and
   opened at several frames, and the Evidence tab lists its animations with
   their progress at each.
+
+#### As built
+
+Agreed by the owner on 2026-10-06 ("yes, I agree, go build it").
+
+- Blink: `chromium/integrate.py` patches `core/animation/animation.cc`.
+  After `probe::AnimationUpdated(document_, this)` in
+  `Animation::NotifyProbe`, while the recorder is connected, it fills an
+  `AnimationFacts` and calls `RecordAnimationUpdated`. The effect's delays
+  and iteration duration are read from `NormalizedTiming()`, the
+  iterations, iteration start, direction, fill, and easing from
+  `SpecifiedTiming()`, and the progress and current iteration from the
+  effect's `Progress()` and `CurrentIteration()`, which are those
+  `getComputedTiming()` gives, read only when the animation is not
+  outdated, since reading an outdated animation's timing updates it, which
+  the recorder must not cause; otherwise they are null. `Animation::Dispose`, the animation's
+  pre-finalizer, and `Animation::ContextDestroyed` call
+  `RecordAnimationRemoved`. This settles the first item of "To be settled"
+  above: release is observed through the pre-finalizer Blink already has.
+- Bridge: `RecordAnimationUpdated` keeps the last description of each
+  animation by sequence number and writes `animation-updated` only when
+  something other than the current time, progress, and current iteration
+  changed. `RecordAnimationRemoved` writes `animation-removed` only for an
+  animation it recorded. A document timeline's zero time is written in
+  counter ticks (`timeline.zeroTicks`), as presentation times are, and as
+  TimeTicks microseconds.
+- Recorder: `browser.animation` is a built-in channel of the browser
+  collector; `BrowserProtocol` and `EventPayloadValidator` hold the two
+  records' contracts. The channel is not part of the document state that
+  is rebuilt and kept in snapshots: as the compositor records are,
+  `RecordingFileAnimations` reads its records, with the browser's clock
+  synchronizations, from the recording file up to the time the state is
+  read at, the cut of the frame's basis, the same time the pending timers
+  are given at. `RecordedAnimationReader` maps the zero time to recording
+  time through the record's native timestamp and the process's clock
+  frequency, as the compositor's presentation times are mapped.
+- Panel: the table has the columns kind, name or property, target (with
+  Select and Copy buttons, and the pseudo-element), play state, start (as
+  a recording time, and on the timeline), timing (duration, delay,
+  iterations, direction, fill), easing, current time at the frame (and
+  whether computed or as recorded), iteration and progress at the frame,
+  timeline, on the compositor, and the time of the record used. Blink's own
+  progress at the record, after the easing, is shown beside the computed
+  progress. Notes under the table state how the times are found and what
+  is not listed.
+- The compositor column is from the record's own compositor animation ID,
+  which Blink gives while the animation has active animations on the
+  compositor, not from a join to the slice 4b records.
+- Fixture: the Web Animations panel of `tests/fixtures/animation/index.html`
+  names its animation `slide` and gains buttons that pause and resume it
+  and set its playback rate to 2 and back to 1, and a "Scroll timeline"
+  panel holds a bar on `scroll(nearest block)`.
+
+Tests built: `tests/Recorder.Tests/RecordedAnimationTests.cs` (the records
+as the bridge writes them against the protocol and the validator; the
+animations at a time, including a playback rate, pause, pending, a later
+record, idle, removal, another document, and finish with and without a
+fill; the directed progress for each direction, delay, fill, iteration
+start, fractional and infinite iterations; the panel's rows; and reading
+from a recording file), and two tests in `chromium/test_integrate.py` (the
+hooks are written once and after the probe, and the bridge does not compare
+the current time or progress). The integration and system tests below run
+on the target machine.
 
 ### To be settled
 
@@ -7352,8 +7416,9 @@ guard").
   ([HTML standard, adjust foreign attributes](https://html.spec.whatwg.org/multipage/parsing.html#adjust-foreign-attributes)).
 - A pending timer's time remaining is counted from the recording time of
   the state used, the cut of the frame's basis, not from the frame's time.
-- Running animations and transitions are not read from the recording yet;
-  the panel says so rather than listing none.
+- Running animations and transitions were not read from the recording
+  before protocol 0.53; for an earlier recording the panel says so rather
+  than listing none. From protocol 0.53 they are listed (slice 4g).
 - Chromium's layout zoom factor includes the device pixel ratio, so the
   panel notes a possible browser zoom when the recorded factor differs from
   the recorded ratio, not when it differs from 1.

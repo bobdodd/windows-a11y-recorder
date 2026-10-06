@@ -232,7 +232,7 @@ public sealed class RecreationTests : IDisposable
         var findNode = panel[panel.IndexOf("function findNode", StringComparison.Ordinal)..panel.IndexOf("// Selects the node", StringComparison.Ordinal)];
         var evidence = content.Evidence;
         var paths = evidence.InteractiveElements.Select(item => item.Node)
-            .Concat(evidence.Animations.Select(item => item.Target))
+            .Concat(evidence.Animations.Select(item => item.Target!))
             .Concat(evidence.Interaction.FormValues.Select(item => item.Node))
             .Append(evidence.Interaction.Focus!)
             .ToArray();

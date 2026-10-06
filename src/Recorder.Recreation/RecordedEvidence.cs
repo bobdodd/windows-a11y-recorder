@@ -124,7 +124,8 @@ public static class RecordedEvidence
         long recordingNanoseconds,
         string basis,
         RecreationFidelity fidelity,
-        IReadOnlyList<string> notes)
+        IReadOnlyList<string> notes,
+        RecordedAnimations? animations = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         string Element(long id) => tree.Nodes.TryGetValue(id, out var node) ? node.NodeName?.ToLowerInvariant() ?? "" : "";
@@ -186,6 +187,12 @@ public static class RecordedEvidence
             .Select(timer => Timer(timer, recordingNanoseconds, TimerOrigins.Of(timer, state.Script, tree)))
             .ToArray();
 
+        // Slice 4g: the document's animations at the frame's recording time.
+        var recordedAnimations = animations ?? RecordedAnimations.None;
+        var animationRows = recordedAnimations.Animations
+            .Select(item => Animation(item, tree))
+            .ToArray();
+
         var current = state.Interaction.Current();
         NodePath? PathOf(long? id) => id is { } value ? RecordedPaths.Of(tree, value) : null;
         var formValues = current.TextControls.Values
@@ -214,14 +221,64 @@ public static class RecordedEvidence
             },
             fidelity,
             timers,
-            [],
+            animationRows,
             interactive,
             new RecordedInteraction(PathOf(current.FocusedNodeId), selection, formValues))
         {
             OtherListeners = others,
             Notes = notes,
-            AnimationsNotRead = "Running animations and transitions are not yet read from the recording, so none are listed.",
+            AnimationsNotRead = recordedAnimations.Recorded
+                ? null
+                : "The recording holds no animation records, which are recorded from protocol 0.53, so running animations and transitions are not listed.",
+            AnimationNotes = recordedAnimations.Recorded ? AnimationNotes : [],
         };
+    }
+
+    // What the panel says of the animations it lists (slice 4g).
+    public static readonly IReadOnlyList<string> AnimationNotes =
+    [
+        "Animations are read from the recording's animation-updated records, made by Blink when an animation starts and each time its play state, start time, playback rate, timing, or timeline changes, and from its animation-removed records.",
+        "An animation is listed when its latest record at or before the recording time is running, paused, or pending, or finished with a fill that holds its effect. Idle, cancelled, and released animations are not listed.",
+        "For a running animation on a document timeline, the current time at the frame is computed from its start time and the timeline's recorded zero time; Blink's own time for the rendering update shown is that update's animation frame time, which can differ by up to one display refresh. For any other animation the current time is the one recorded.",
+        "The progress is the directed progress of the Web Animations model, computed from the current time and the recorded timing, before the easing is applied; the easing is shown as recorded. The progress of an animation on a scroll or view timeline is that of its latest record, not computed at the frame.",
+        "SVG animation elements, such as animate and animateTransform, are not Blink animations and are not listed.",
+    ];
+
+    private static RecordedAnimation Animation(RecordedAnimationState item, DomDocumentTree tree)
+    {
+        var timeline = item.TimelineKind switch
+        {
+            "document" => "document timeline",
+            "scroll" or "view" => $"{item.TimelineKind} timeline" +
+                (item.TimelineAxis is { } axis ? $", {axis}" : "") +
+                (item.TimelineSourceNodeId is { } source ? $", source node {source.ToString(CultureInfo.InvariantCulture)}" : ""),
+            "none" => "no timeline",
+            _ => "another timeline",
+        };
+        var timing = item.Timing;
+        return new RecordedAnimation(
+            item.Kind,
+            item.Name,
+            item.TargetNodeId is { } target ? RecordedPaths.Of(tree, target) : null,
+            item.PseudoElement,
+            item.PlayState,
+            item.Pending,
+            item.StartTimeMilliseconds,
+            item.StartRecordingNanoseconds,
+            timing?.DelayMilliseconds,
+            timing?.DurationMilliseconds,
+            timing?.Iterations,
+            timing?.Direction,
+            timing?.Fill,
+            timing?.Easing,
+            item.CurrentTimeMilliseconds,
+            item.CurrentTimeBasis,
+            item.CurrentIteration,
+            item.Progress,
+            timeline,
+            item.CompositorAnimationId is not null,
+            item.RecordedNanoseconds,
+            item.RecordedProgress);
     }
 
     // The nodes of the tree in tree order, each shadow root before its

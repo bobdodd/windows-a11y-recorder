@@ -53,12 +53,18 @@ public static class RecordingFileResources
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(documentKey);
+        // Slice 4g: the document's animations at the time its state is read
+        // at, for the evidence panel.
+        var animations = RecordingFileAnimations.Read(reader, documentKey, cutNanoseconds, cancellationToken);
         var channel = reader.Channels.Values.FirstOrDefault(item => item.Topic == BrowserEvidenceChannels.Resources);
         if (channel is null)
         {
             return new RecordedPageResources([], new Dictionary<string, RecordedImage>(), (_, _) => null,
                 ["The recording holds no font or image records, which are recorded from protocol 0.40, so the recreation draws no image and uses no recorded font."],
-                owner);
+                owner)
+            {
+                Animations = animations,
+            };
         }
 
         var bytes = new Dictionary<(string Kind, string Digest), Location>();
@@ -248,7 +254,10 @@ public static class RecordingFileResources
         var sheets = styleSheets.Build();
         notes.AddRange(sheets.Notes());
 
-        return new RecordedPageResources(faces, images, Bytes, notes, owner, frames, framesMilliseconds, compositorValues, sheets);
+        return new RecordedPageResources(faces, images, Bytes, notes, owner, frames, framesMilliseconds, compositorValues, sheets)
+        {
+            Animations = animations,
+        };
     }
 
     private static string? FaceName(JsonElement payload)

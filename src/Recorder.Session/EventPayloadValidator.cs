@@ -29,7 +29,8 @@ internal static class EventPayloadValidator
         "browser.presentation",
         "browser.network",
         "browser.resources",
-        "browser.compositor"
+        "browser.compositor",
+        "browser.animation"
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -379,6 +380,19 @@ internal static class EventPayloadValidator
             case ("browser.presentation", "presentation-feedback"):
                 ValidateBrowserPresentationFeedback(payload, issues);
                 break;
+            case ("browser.animation", "animation-updated"):
+                ValidateBrowserAnimationUpdated(payload, issues);
+                break;
+            case ("browser.animation", "animation-removed"):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredObject("context"),
+                        RequiredDecimalText("sequenceNumber")
+                    ],
+                    issues);
+                ValidateCompositorRendererContext(payload, false, issues);
+                break;
             case ("browser.compositor", "compositor-animation-started"):
                 ValidateBrowserCompositorAnimationStarted(payload, issues);
                 break;
@@ -482,6 +496,7 @@ internal static class EventPayloadValidator
             case ("browser.network", "collector-omission"):
             case ("browser.resources", "collector-omission"):
             case ("browser.compositor", "collector-omission"):
+            case ("browser.animation", "collector-omission"):
                 ValidateBrowserOmission(payload, issues);
                 break;
             default:
@@ -4901,6 +4916,75 @@ internal static class EventPayloadValidator
             ],
             issues,
             "#/payload/widget");
+    }
+
+    private static readonly string[] AnimationKinds = ["css-animation", "css-transition", "web-animation"];
+    private static readonly string[] AnimationPlayStates = ["idle", "pending", "running", "paused", "finished"];
+    private static readonly string[] AnimationTimelineKinds = ["document", "scroll", "view", "other", "none"];
+    private static readonly string[] AnimationDirections = ["normal", "reverse", "alternate", "alternate-reverse"];
+    private static readonly string[] AnimationFills = ["none", "forwards", "backwards", "both", "auto"];
+
+    // Protocol 0.53 (slice 4g): a Blink animation.
+    private static void ValidateBrowserAnimationUpdated(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredDecimalText("sequenceNumber"),
+                RequiredEnum("kind", AnimationKinds),
+                NullableString("name"),
+                NullableString("id"),
+                NullableInteger("targetNodeId", positive: true),
+                NullableString("pseudoElement"),
+                RequiredEnum("playState", AnimationPlayStates),
+                RequiredBoolean("pending"),
+                RequiredNullableNumber("playbackRate"),
+                RequiredNullableNumber("startTimeMilliseconds"),
+                RequiredNullableNumber("currentTimeMilliseconds"),
+                RequiredObject("timeline"),
+                NullableObject("effect"),
+                NullableInteger("compositorAnimationId", positive: true)
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, true, issues);
+        if (payload.TryGetProperty("timeline", out var timeline) && timeline.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                timeline,
+                [
+                    RequiredEnum("kind", AnimationTimelineKinds),
+                    NullablePositiveDecimalText("zeroTicks"),
+                    NullablePositiveDecimalText("zeroTimeTicksMicroseconds"),
+                    RequiredNullableNumber("playbackRate"),
+                    NullableInteger("sourceNodeId", positive: true),
+                    NullableInteger("subjectNodeId", positive: true),
+                    NullableEnum("axis", "horizontal", "vertical")
+                ],
+                issues,
+                "#/payload/timeline");
+        }
+        if (payload.TryGetProperty("effect", out var effect) && effect.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                effect,
+                [
+                    RequiredNullableNumber("delayMilliseconds"),
+                    RequiredNullableNumber("endDelayMilliseconds"),
+                    RequiredNullableNumber("iterationStart", nonnegative: true),
+                    RequiredNullableNumber("iterations", nonnegative: true),
+                    RequiredNullableNumber("durationMilliseconds", nonnegative: true),
+                    RequiredEnum("direction", AnimationDirections),
+                    RequiredEnum("fill", AnimationFills),
+                    RequiredString("easing"),
+                    RequiredNullableNumber("progress"),
+                    RequiredNullableNumber("currentIteration")
+                ],
+                issues,
+                "#/payload/effect");
+        }
     }
 
     private static void ValidateBrowserCompositorAnimationStarted(

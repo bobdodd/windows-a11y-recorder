@@ -17119,6 +17119,176 @@ def patch_blink_compositor_animations(path: Path) -> None:
     write_patched(path, text)
 
 
+# Slice 4g (protocol 0.53): each Blink animation, from the probe DevTools'
+# Animations panel is fed from. The bridge records an animation again only
+# when something other than its current time and progress changed.
+BLINK_ANIMATION_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/animation/animation.h"'
+)
+BLINK_ANIMATION_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/animation/scroll_snapshot_timeline.h"',
+    '#include "third_party/blink/renderer/core/animation/view_timeline.h"',
+)
+BLINK_ANIMATION_UPDATED_ANCHOR = """\
+  probe::AnimationUpdated(document_, this);
+"""
+BLINK_ANIMATION_UPDATED_HOOK = BLINK_ANIMATION_UPDATED_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.53): the animation, its play state,
+  // times, timeline, and effect timing, as DevTools' Animations panel
+  // describes it.
+  if (document_ && a11y_recorder::IsRecorderActive()) {
+    A11Y_RECORDER_HOOK_COST("hook:animation-updated");
+    a11y_recorder::AnimationFacts recorder_facts;
+    recorder_facts.document_node_id = document_->GetDomNodeId();
+    recorder_facts.document_token = document_->Token().ToString();
+    recorder_facts.sequence_number = sequence_number_;
+    recorder_facts.kind = IsA<CSSTransition>(*this)  ? "css-transition"
+                          : IsA<CSSAnimation>(*this) ? "css-animation"
+                                                     : "web-animation";
+    recorder_facts.id = id().Utf8();
+    if (!id().empty()) {
+      recorder_facts.name = id().Utf8();
+    } else if (auto* recorder_css_animation = DynamicTo<CSSAnimation>(this)) {
+      recorder_facts.name = recorder_css_animation->animationName().Utf8();
+    } else if (auto* recorder_transition = DynamicTo<CSSTransition>(this)) {
+      recorder_facts.name = recorder_transition->transitionProperty().Utf8();
+    }
+    recorder_facts.play_state =
+        V8AnimationPlayState(CalculateAnimationPlayState()).AsCStr();
+    recorder_facts.pending = PendingInternal();
+    recorder_facts.playback_rate = playbackRate();
+    if (std::optional<AnimationTimeDelta> recorder_start = StartTimeInternal()) {
+      recorder_facts.start_time_milliseconds = recorder_start->InMillisecondsF();
+    }
+    if (std::optional<AnimationTimeDelta> recorder_current =
+            CurrentTimeInternal()) {
+      recorder_facts.current_time_milliseconds =
+          recorder_current->InMillisecondsF();
+    }
+    AnimationTimeline* recorder_timeline = TimelineInternal();
+    if (!recorder_timeline) {
+      recorder_facts.timeline_kind = "none";
+    } else if (auto* recorder_document_timeline =
+                   DynamicTo<DocumentTimeline>(recorder_timeline)) {
+      recorder_facts.timeline_kind = "document";
+      recorder_facts.timeline_zero_microseconds =
+          recorder_document_timeline->CalculateZeroTime()
+              .since_origin()
+              .InMicroseconds();
+      recorder_facts.high_resolution_ticks =
+          base::TimeTicks::IsHighResolution();
+      recorder_facts.timeline_playback_rate =
+          recorder_document_timeline->PlaybackRate();
+    } else if (auto* recorder_scroll_timeline =
+                   DynamicTo<ScrollSnapshotTimeline>(recorder_timeline)) {
+      auto* recorder_view_timeline =
+          DynamicTo<ViewTimeline>(recorder_scroll_timeline);
+      recorder_facts.timeline_kind = recorder_view_timeline ? "view" : "scroll";
+      if (Node* recorder_source = recorder_scroll_timeline->ResolvedSource()) {
+        recorder_facts.timeline_source_node_id = recorder_source->GetDomNodeId();
+      }
+      if (std::optional<PhysicalDirection> recorder_direction =
+              recorder_scroll_timeline->GetResolvedScrollDirection()) {
+        recorder_facts.timeline_axis =
+            ScrollSnapshotTimeline::ToPhysicalAxis(*recorder_direction) ==
+                    PhysicalAxis::kHorizontal
+                ? "horizontal"
+                : "vertical";
+      }
+      if (recorder_view_timeline && recorder_view_timeline->subject()) {
+        recorder_facts.timeline_subject_node_id =
+            recorder_view_timeline->subject()->GetDomNodeId();
+      }
+    } else {
+      recorder_facts.timeline_kind = "other";
+    }
+    if (auto* recorder_effect = DynamicTo<KeyframeEffect>(effect())) {
+      const Timing& recorder_specified = recorder_effect->SpecifiedTiming();
+      const Timing::NormalizedTiming& recorder_normalized =
+          recorder_effect->NormalizedTiming();
+      recorder_facts.has_effect = true;
+      if (Element* recorder_target = recorder_effect->target()) {
+        recorder_facts.target_node_id = recorder_target->GetDomNodeId();
+      }
+      recorder_facts.pseudo_element = recorder_effect->pseudoElement().Utf8();
+      recorder_facts.delay_milliseconds =
+          recorder_normalized.start_delay.InMillisecondsF();
+      recorder_facts.end_delay_milliseconds =
+          recorder_normalized.end_delay.InMillisecondsF();
+      recorder_facts.iteration_start = recorder_specified.iteration_start;
+      if (std::isfinite(recorder_specified.iteration_count)) {
+        recorder_facts.iterations = recorder_specified.iteration_count;
+      }
+      recorder_facts.duration_milliseconds =
+          recorder_normalized.iteration_duration.InMillisecondsF();
+      recorder_facts.direction =
+          V8PlaybackDirection(
+              Timing::PlaybackDirectionEnum(recorder_specified.direction))
+              .AsCStr();
+      recorder_facts.fill =
+          V8FillMode(Timing::FillModeEnum(recorder_specified.fill_mode))
+              .AsCStr();
+      recorder_facts.easing =
+          recorder_specified.timing_function->ToString().Utf8();
+      // Read only when the timing is up to date: an outdated animation would
+      // be updated by the read, which the recorder must not cause.
+      if (!Outdated()) {
+        recorder_facts.progress = recorder_effect->Progress();
+        recorder_facts.current_iteration = recorder_effect->CurrentIteration();
+      }
+    }
+    if (GetCompositorAnimation() && HasActiveAnimationsOnCompositor()) {
+      recorder_facts.compositor_animation_id =
+          GetCompositorAnimation()->CcAnimationId();
+    }
+    a11y_recorder::RecordAnimationUpdated(std::move(recorder_facts));
+  }
+"""
+BLINK_ANIMATION_DISPOSE_ANCHOR = """\
+void Animation::Dispose() {
+"""
+BLINK_ANIMATION_DISPOSE_HOOK = BLINK_ANIMATION_DISPOSE_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.53): the animation is released.
+  if (a11y_recorder::IsRecorderActive()) {
+    a11y_recorder::RecordAnimationRemoved(sequence_number_);
+  }
+"""
+BLINK_ANIMATION_CONTEXT_DESTROYED_ANCHOR = """\
+void Animation::ContextDestroyed() {
+"""
+BLINK_ANIMATION_CONTEXT_DESTROYED_HOOK = (
+    BLINK_ANIMATION_CONTEXT_DESTROYED_ANCHOR
+    + """\
+  // Windows A11y Recorder (protocol 0.53): the animation's document is gone.
+  if (a11y_recorder::IsRecorderActive()) {
+    a11y_recorder::RecordAnimationRemoved(sequence_number_);
+  }
+"""
+)
+
+
+def patch_blink_animation(path: Path) -> None:
+    """Protocol 0.53: records each Blink animation and its removal."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_ANIMATION_OWN_INCLUDE, BLINK_ANIMATION_INCLUDES, path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_ANIMATION_UPDATED_ANCHOR, BLINK_ANIMATION_UPDATED_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_ANIMATION_DISPOSE_ANCHOR, BLINK_ANIMATION_DISPOSE_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_ANIMATION_CONTEXT_DESTROYED_ANCHOR,
+        BLINK_ANIMATION_CONTEXT_DESTROYED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
 def patch_blink_keyframe_effect(path: Path) -> None:
     """Protocol 0.48: records an animation's keyframe models leaving the
     compositor."""
@@ -19097,6 +19267,7 @@ def main() -> int:
         blink_core / "animation" / "compositor_animations.cc"
     )
     patch_blink_keyframe_effect(blink_core / "animation" / "keyframe_effect.cc")
+    patch_blink_animation(blink_core / "animation" / "animation.cc")
     patch_cc_layer_tree_host_impl(source / "cc" / "trees" / "layer_tree_host_impl.cc")
     patch_cc_image_animation_controller(
         source / "cc" / "trees" / "image_animation_controller.h"

@@ -500,6 +500,19 @@ scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
 `scroll_element_id`, and the bridge writes it as decimal text, or null for
 zero.
 
+Protocol 0.53 (slice 4g) adds the `browser.animation` channel.
+`Animation::NotifyProbe`, after its `probe::AnimationUpdated` call, fills an
+`AnimationFacts` with the animation's kind, name, target, play state, times,
+timeline, effect timing, Blink's computed progress, and compositor animation
+ID, and calls `RecordAnimationUpdated`, which writes `animation-updated` for
+an animation's first call and for each call in which anything other than its
+current time, progress, and current iteration changed, keeping the last
+description of each animation by sequence number. `Animation::Dispose` and
+`Animation::ContextDestroyed` call `RecordAnimationRemoved`, which writes
+`animation-removed` for an animation recorded before. A document timeline's
+zero time is written in counter ticks, as the presentation records' times
+are.
+
 Protocol 0.52 (slice 4f) adds two `browser.timer` records and fills a
 timer's `callbackLocation`. `NoteBlinkTimerOrigin` is called from the
 `DOMTimer` constructor, before `RecordBlinkTimerScheduled`, with the world

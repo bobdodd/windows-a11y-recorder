@@ -1606,6 +1606,69 @@ void RecordCompositorAnimationEnded(int document_node_id,
                                     int compositor_animation_id,
                                     std::vector<int> keyframe_model_ids);
 
+// One Blink animation as Animation::NotifyProbe sees it (protocol 0.53,
+// slice 4g): a CSS animation, a CSS transition, or a Web Animation, with its
+// target, play state, times on its timeline, and its effect's timing, as
+// DevTools' Animations panel describes it. Times are milliseconds; an
+// unresolved time is absent. The timeline's zero time is TimeTicks
+// microseconds, for a document timeline only.
+struct AnimationFacts {
+  int document_node_id = 0;
+  std::string document_token;
+  unsigned sequence_number = 0;
+  // "css-animation", "css-transition", or "web-animation".
+  std::string kind;
+  // The animation's id, else its animation-name, else the transitioned
+  // property, as DevTools names it; empty when it has none.
+  std::string name;
+  std::string id;
+  int target_node_id = 0;
+  std::string pseudo_element;
+  // The play state, "idle", "running", "paused", or "finished", and whether
+  // a play or pause is pending.
+  std::string play_state;
+  bool pending = false;
+  double playback_rate = 1;
+  std::optional<double> start_time_milliseconds;
+  std::optional<double> current_time_milliseconds;
+  // "document", "scroll", "view", "other", or "none".
+  std::string timeline_kind;
+  int64_t timeline_zero_microseconds = 0;
+  bool high_resolution_ticks = false;
+  double timeline_playback_rate = 1;
+  int timeline_source_node_id = 0;
+  int timeline_subject_node_id = 0;
+  std::string timeline_axis;
+  bool has_effect = false;
+  double delay_milliseconds = 0;
+  double end_delay_milliseconds = 0;
+  double iteration_start = 0;
+  // Absent when infinite.
+  std::optional<double> iterations;
+  double duration_milliseconds = 0;
+  std::string direction;
+  std::string fill;
+  std::string easing;
+  // Blink's computed progress, after the easing, and current iteration, at
+  // the call; absent when not in effect.
+  std::optional<double> progress;
+  std::optional<double> current_iteration;
+  int compositor_animation_id = 0;
+};
+
+// Records, on Blink's main thread, from Animation::NotifyProbe, an
+// animation's first call and each later call in which anything other than
+// its current time, progress, and current iteration changed, as
+// animation-updated on browser.animation (protocol 0.53).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordAnimationUpdated(AnimationFacts facts);
+
+// Records, on Blink's main thread, that an animation recorded before was
+// released (Animation::Dispose) or its document's context was destroyed
+// (Animation::ContextDestroyed), as animation-removed.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordAnimationRemoved(unsigned sequence_number);
+
 // Records, on the compositor thread in LayerTreeHostImpl::DrawLayers, the
 // frame about to be submitted: the values given are those of the active
 // tree as drawn, and only those changed since this compositor's last

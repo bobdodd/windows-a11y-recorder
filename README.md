@@ -413,6 +413,14 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.53 records each Blink animation, a CSS animation, a CSS
+transition, or a Web Animation, on a new channel, `browser.animation`: its
+kind, name, target, play state, start and current times, timeline, and
+effect timing, when it starts and each time any of them other than its
+current time changes, and its removal, so that the evidence panel lists the
+animations running at the frame with their progress. See "Slice 4g" in
+[page recreation](docs/architecture/page-recreation.md).
+
 Protocol 0.52 records who scheduled each window timer: the world and script
 stack of the setTimeout or setInterval call, where the callback is defined,
 and, for each script element's script and each on... attribute's handler,

@@ -191,6 +191,40 @@ function scheduledByCell(item) {
   return cell;
 }
 
+// Slice 4g: an animation's start, on its timeline and in the recording.
+function animationStart(item) {
+  if (item.startTimeMilliseconds === null || item.startTimeMilliseconds === undefined) {
+    return "unresolved";
+  }
+  const onTimeline = `${milliseconds(item.startTimeMilliseconds)} on its timeline`;
+  return item.startNanoseconds === null || item.startNanoseconds === undefined
+    ? onTimeline
+    : `${seconds(item.startNanoseconds)} (${onTimeline})`;
+}
+
+function animationTiming(item) {
+  if (item.durationMilliseconds === null || item.durationMilliseconds === undefined) {
+    return "no effect";
+  }
+  const iterations = item.iterations === null || item.iterations === undefined ? "infinite" : String(item.iterations);
+  return `duration ${milliseconds(item.durationMilliseconds)}, delay ${milliseconds(item.delayMilliseconds || 0)}, ` +
+    `iterations ${iterations}, direction ${item.direction}, fill ${item.fill}`;
+}
+
+function animationProgress(item) {
+  if (item.progress === null || item.progress === undefined) {
+    return "not in effect";
+  }
+  const iteration = item.currentIteration === null || item.currentIteration === undefined
+    ? "final"
+    : String(item.currentIteration + 1);
+  let text = `iteration ${iteration}, ${(item.progress * 100).toFixed(1)} % before easing`;
+  if (item.recordedProgress !== null && item.recordedProgress !== undefined) {
+    text += `; Blink's progress at the record, after easing: ${(item.recordedProgress * 100).toFixed(1)} %`;
+  }
+  return text;
+}
+
 function table(caption, headings, rows, empty) {
   content.appendChild(element("h2", caption));
   if (rows.length === 0) {
@@ -273,18 +307,44 @@ function describe(evidence) {
     ]),
     "No timers were pending at the frame.");
 
+  // Slice 4g (protocol 0.53): the animations at the frame, as recorded.
   if (evidence.animationsNotRead) {
     content.appendChild(element("h2", "Running animations and transitions"));
     content.appendChild(element("p", evidence.animationsNotRead));
   } else {
     table(
       "Running animations and transitions",
-      ["Kind", "Name or property", "Target", "Start", "Duration", "Progress"],
-      evidence.animations.map(item => [
-        item.kind, item.name, pathCell(item.target, `the target of ${item.kind} ${item.name}`), seconds(item.startNanoseconds),
-        milliseconds(item.durationMilliseconds), `${(item.progress * 100).toFixed(1)} %`
-      ]),
+      ["Kind", "Name or property", "Target", "Play state", "Start", "Timing", "Easing", "Current time at the frame", "Iteration and progress at the frame", "Timeline", "On the compositor", "Recorded"],
+      evidence.animations.map(item => {
+        const name = item.name || "unnamed";
+        const label = `the target of ${item.kind} ${name}`;
+        const target = pathCell(item.target, label);
+        if (item.pseudoElement) {
+          target.appendChild(element("p", `Pseudo-element: ${item.pseudoElement}`));
+        }
+        return [
+          item.kind, name, target,
+          item.pending ? `${item.playState}, pending` : item.playState,
+          animationStart(item),
+          longCell(animationTiming(item)),
+          item.easing || "not recorded",
+          item.currentTimeMilliseconds === null || item.currentTimeMilliseconds === undefined
+            ? "unresolved"
+            : `${milliseconds(item.currentTimeMilliseconds)}, ${item.currentTimeBasis === "computed" ? "computed at the frame" : "as recorded"}`,
+          animationProgress(item),
+          item.timeline,
+          item.onCompositor ? "yes" : "no",
+          seconds(item.recordedNanoseconds)
+        ];
+      }),
       "No animations or transitions were running at the frame.");
+    if (evidence.animationNotes && evidence.animationNotes.length > 0) {
+      const list = element("ul");
+      for (const item of evidence.animationNotes) {
+        list.appendChild(element("li", item));
+      }
+      content.appendChild(list);
+    }
   }
 
   table(

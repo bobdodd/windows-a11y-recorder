@@ -310,6 +310,31 @@
       left: 0.5rem;
     }
 
+    /* Scroll timeline (slice 4g): the bar's width follows the scroll
+       position of its scroller, 0 to 100 percent. */
+    #timeline-scroller {
+      height: 8rem;
+      overflow: auto;
+      border: 1px solid #555;
+    }
+    #timeline-scroller ol {
+      margin: 0;
+      padding: 0.5rem 2rem;
+      height: 40rem;
+    }
+    @keyframes scroll-progress {
+      from { width: 0%; }
+      to { width: 100%; }
+    }
+    #scroll-progress {
+      position: sticky;
+      top: 0;
+      height: 0.5rem;
+      background: rgb(0, 80, 200);
+      animation: scroll-progress linear both;
+      animation-timeline: scroll(nearest block);
+    }
+
     /* Focus ring: an outline-color transition on :focus-visible, 1 s. */
     #focus-ring {
       font: inherit;
@@ -608,10 +633,29 @@
           <code>#web-animation</code>, <code>transform</code>: the button runs
           script, <code>element.animate()</code> of
           <code>translateX(0)</code> to <code>translateX(80px)</code>, 2 s,
-          linear, infinite, alternate. A second press cancels it.
+          linear, infinite, alternate, with the id <code>slide</code>. A
+          second press cancels it. While it runs, the second button pauses
+          and resumes it, and the third sets its playback rate to 2 and back
+          to 1.
         </p>
         <button type="button" id="web-animation-button">Start the animation</button>
+        <button type="button" id="web-animation-pause">Pause the animation</button>
+        <button type="button" id="web-animation-rate">Play at twice the rate</button>
         <div class="stage"><div class="box" id="web-animation"></div></div>
+      </section>
+
+      <section aria-labelledby="scroll-timeline-heading">
+        <h2 id="scroll-timeline-heading">Scroll timeline</h2>
+        <p class="facts">
+          <code>#scroll-progress</code>, <code>width</code>: 0% to 100%,
+          linear, fill both, on <code>scroll(nearest block)</code>, the
+          scroll position of <code>#timeline-scroller</code>. Scroll the box
+          to move it.
+        </p>
+        <div id="timeline-scroller" tabindex="0" aria-label="Scroll timeline scroller">
+          <div id="scroll-progress"></div>
+          <ol><li>Top</li><li>Scroll down</li></ol>
+        </div>
       </section>
 
       <section aria-labelledby="focus-heading">
@@ -660,8 +704,30 @@
         }
         animation = box.animate(
           [{ transform: "translateX(0)" }, { transform: "translateX(80px)" }],
-          { duration: 2000, iterations: Infinity, direction: "alternate", easing: "linear" });
+          { id: "slide", duration: 2000, iterations: Infinity, direction: "alternate", easing: "linear" });
         button.textContent = "Cancel the animation";
+      });
+      const pause = document.getElementById("web-animation-pause");
+      pause.addEventListener("click", () => {
+        if (!animation) {
+          return;
+        }
+        if (animation.playState === "paused") {
+          animation.play();
+          pause.textContent = "Pause the animation";
+        } else {
+          animation.pause();
+          pause.textContent = "Resume the animation";
+        }
+      });
+      const rate = document.getElementById("web-animation-rate");
+      rate.addEventListener("click", () => {
+        if (!animation) {
+          return;
+        }
+        const twice = animation.playbackRate === 1;
+        animation.updatePlaybackRate(twice ? 2 : 1);
+        rate.textContent = twice ? "Play at the normal rate" : "Play at twice the rate";
       });
     })();
   </script>

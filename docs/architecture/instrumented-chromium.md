@@ -1150,7 +1150,14 @@ callback is defined, and the script element or on... attribute each script ID
 came from. The design is in [page recreation](page-recreation.md), "Slice
 4f: who scheduled each timer".
 
-Live 0.52 connections require an exact protocol-version match.
+Protocol version 0.53 adds the `browser.animation` channel, with
+`animation-updated` and `animation-removed`: each Blink animation, from
+`Animation::NotifyProbe`, recorded when it starts and when anything other
+than its current time changes, and its release. The design is in
+[page recreation](page-recreation.md), "Slice 4g: running animations in the
+evidence panel".
+
+Live 0.53 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

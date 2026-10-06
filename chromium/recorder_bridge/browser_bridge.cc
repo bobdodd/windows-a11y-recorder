@@ -6030,6 +6030,161 @@ void RecordCompositorAnimationEnded(int document_node_id,
                     std::move(payload));
 }
 
+// Protocol 0.53 (slice 4g): the last recorded description of each
+// animation of this renderer, by sequence number, so that an animation is
+// recorded again only when something other than its current time,
+// progress, and current iteration changed.
+namespace {
+
+struct AnimationRecordStorage {
+  base::Lock lock;
+  std::unordered_map<unsigned, AnimationFacts> last;
+};
+
+AnimationRecordStorage& GetAnimationRecordStorage() {
+  static base::NoDestructor<AnimationRecordStorage> storage;
+  return *storage;
+}
+
+bool SameAnimationDescription(const AnimationFacts& a,
+                              const AnimationFacts& b) {
+  return a.document_node_id == b.document_node_id &&
+         a.document_token == b.document_token && a.kind == b.kind &&
+         a.name == b.name && a.id == b.id &&
+         a.target_node_id == b.target_node_id &&
+         a.pseudo_element == b.pseudo_element &&
+         a.play_state == b.play_state && a.pending == b.pending &&
+         a.playback_rate == b.playback_rate &&
+         a.start_time_milliseconds == b.start_time_milliseconds &&
+         a.timeline_kind == b.timeline_kind &&
+         a.timeline_zero_microseconds == b.timeline_zero_microseconds &&
+         a.timeline_playback_rate == b.timeline_playback_rate &&
+         a.timeline_source_node_id == b.timeline_source_node_id &&
+         a.timeline_subject_node_id == b.timeline_subject_node_id &&
+         a.timeline_axis == b.timeline_axis &&
+         a.has_effect == b.has_effect &&
+         a.delay_milliseconds == b.delay_milliseconds &&
+         a.end_delay_milliseconds == b.end_delay_milliseconds &&
+         a.iteration_start == b.iteration_start &&
+         a.iterations == b.iterations &&
+         a.duration_milliseconds == b.duration_milliseconds &&
+         a.direction == b.direction && a.fill == b.fill &&
+         a.easing == b.easing &&
+         a.compositor_animation_id == b.compositor_animation_id;
+}
+
+base::Value FiniteOrNull(std::optional<double> value) {
+  return value && std::isfinite(*value) ? base::Value(*value) : base::Value();
+}
+
+base::Value NodeIdOrNull(int node_id) {
+  return node_id > 0 ? base::Value(node_id) : base::Value();
+}
+
+base::Value TextOrNull(const std::string& text) {
+  return text.empty() ? base::Value() : base::Value(text);
+}
+
+}  // namespace
+
+void RecordAnimationUpdated(AnimationFacts facts) {
+  A11Y_RECORDER_COST("RecordAnimationUpdated");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.document_node_id <= 0 ||
+      facts.document_token.empty() || facts.sequence_number == 0) {
+    return;
+  }
+  {
+    AnimationRecordStorage& storage = GetAnimationRecordStorage();
+    base::AutoLock locked(storage.lock);
+    auto found = storage.last.find(facts.sequence_number);
+    if (found != storage.last.end() &&
+        SameAnimationDescription(found->second, facts)) {
+      return;
+    }
+    storage.last[facts.sequence_number] = facts;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, facts.document_node_id,
+                                       facts.document_token));
+  payload.Set("sequenceNumber", base::NumberToString(facts.sequence_number));
+  payload.Set("kind", facts.kind);
+  payload.Set("name", TextOrNull(facts.name));
+  payload.Set("id", TextOrNull(facts.id));
+  payload.Set("targetNodeId", NodeIdOrNull(facts.target_node_id));
+  payload.Set("pseudoElement", TextOrNull(facts.pseudo_element));
+  payload.Set("playState", facts.play_state);
+  payload.Set("pending", facts.pending);
+  payload.Set("playbackRate", FiniteOrNull(facts.playback_rate));
+  payload.Set("startTimeMilliseconds",
+              FiniteOrNull(facts.start_time_milliseconds));
+  payload.Set("currentTimeMilliseconds",
+              FiniteOrNull(facts.current_time_milliseconds));
+  base::DictValue timeline;
+  timeline.Set("kind", facts.timeline_kind);
+  timeline.Set("zeroTicks",
+               facts.timeline_kind == "document"
+                   ? PresentationCounterTicks(facts.timeline_zero_microseconds,
+                                              facts.high_resolution_ticks)
+                   : base::Value());
+  timeline.Set("zeroTimeTicksMicroseconds",
+               facts.timeline_kind == "document"
+                   ? OptionalMicroseconds(facts.timeline_zero_microseconds)
+                   : base::Value());
+  timeline.Set("playbackRate", FiniteOrNull(facts.timeline_playback_rate));
+  timeline.Set("sourceNodeId", NodeIdOrNull(facts.timeline_source_node_id));
+  timeline.Set("subjectNodeId", NodeIdOrNull(facts.timeline_subject_node_id));
+  timeline.Set("axis", TextOrNull(facts.timeline_axis));
+  payload.Set("timeline", std::move(timeline));
+  if (facts.has_effect) {
+    base::DictValue effect;
+    effect.Set("delayMilliseconds", FiniteOrNull(facts.delay_milliseconds));
+    effect.Set("endDelayMilliseconds",
+               FiniteOrNull(facts.end_delay_milliseconds));
+    effect.Set("iterationStart", FiniteOrNull(facts.iteration_start));
+    effect.Set("iterations", FiniteOrNull(facts.iterations));
+    effect.Set("durationMilliseconds",
+               FiniteOrNull(facts.duration_milliseconds));
+    effect.Set("direction", facts.direction);
+    effect.Set("fill", facts.fill);
+    effect.Set("easing", facts.easing);
+    effect.Set("progress", FiniteOrNull(facts.progress));
+    effect.Set("currentIteration", FiniteOrNull(facts.current_iteration));
+    payload.Set("effect", std::move(effect));
+  } else {
+    payload.Set("effect", base::Value());
+  }
+  payload.Set("compositorAnimationId",
+              NodeIdOrNull(facts.compositor_animation_id));
+  SendBlinkEvidence("browser.animation", "animation-updated",
+                    std::move(payload));
+}
+
+void RecordAnimationRemoved(unsigned sequence_number) {
+  A11Y_RECORDER_COST("RecordAnimationRemoved");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || sequence_number == 0) {
+    return;
+  }
+  AnimationFacts last;
+  {
+    AnimationRecordStorage& storage = GetAnimationRecordStorage();
+    base::AutoLock locked(storage.lock);
+    auto found = storage.last.find(sequence_number);
+    if (found == storage.last.end()) {
+      return;
+    }
+    last = std::move(found->second);
+    storage.last.erase(found);
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, last.document_node_id,
+                                       std::move(last.document_token)));
+  payload.Set("sequenceNumber", base::NumberToString(sequence_number));
+  SendBlinkEvidence("browser.animation", "animation-removed",
+                    std::move(payload));
+}
+
 void RecordCompositorFrame(int layer_tree_host_id,
                            uint32_t frame_token,
                            int64_t begin_frame_microseconds,

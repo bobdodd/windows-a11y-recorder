@@ -77,6 +77,12 @@ public sealed class RecordedPageResources : IDisposable
     /// <summary>The compositor values the document's nodes take in the recreation, by node.</summary>
     public RecordedCompositorValues CompositorValues { get; }
 
+    /// <summary>
+    /// The document's animations at the time its state is read at (slice
+    /// 4g), for the evidence panel, or none.
+    /// </summary>
+    public RecordedAnimations Animations { get; init; } = RecordedAnimations.None;
+
     /// <summary>How long choosing the image frames took, or null when they were not read.</summary>
     public double? ImageFramesMilliseconds { get; }
 

@@ -50,9 +50,13 @@ public sealed record RecreationEvidence(
     // and what the builder inferred or could not build.
     public IReadOnlyList<string> Notes { get; init; } = [];
 
-    // Why the animations list is not evidence, when it is not: running
-    // animations and transitions are not yet read from a recording.
+    // Why the animations list is not evidence, when it is not: the recording
+    // holds no animation records, as before protocol 0.53.
     public string? AnimationsNotRead { get; init; }
+
+    // What the panel says of the animations listed: how their times at the
+    // frame were found, and what is not listed.
+    public IReadOnlyList<string> AnimationNotes { get; init; } = [];
 }
 
 // Source is "fixed" for slice 3a and "recording" from slice 3b. The frame,
@@ -113,15 +117,43 @@ public sealed record RecordedTimerOrigin(
     string? Callback,
     string? Handler);
 
-// Kind is "animation" or "transition". Name is the animation name or the
-// transitioned property.
+// An animation of the document at the frame (slice 4g, protocol 0.53), as
+// its latest animation-updated record at or before the frame gives it. Kind
+// is "css-animation", "css-transition", or "web-animation"; Name is the
+// animation's id, else its animation name, else the transitioned property.
+// Target is the path of the target element, with the pseudo-element when
+// the effect targets one. Times on the animation's timeline are
+// milliseconds; StartNanoseconds is the start time as a recording time,
+// when the timeline is a document timeline whose zero time is recorded.
+// Iterations is null when infinite. The current time, iteration, and
+// progress are at the frame: CurrentTimeBasis is "computed" when computed
+// from the record for a running animation, or "recorded" when taken as
+// recorded. Progress is the directed progress, before the easing; it and
+// the current iteration are null when the effect is not in effect.
+// RecordedProgress is Blink's own progress at the record, after the easing.
 public sealed record RecordedAnimation(
     string Kind,
-    string Name,
-    NodePath Target,
-    long StartNanoseconds,
-    double DurationMilliseconds,
-    double Progress);
+    string? Name,
+    NodePath? Target,
+    string? PseudoElement,
+    string PlayState,
+    bool Pending,
+    double? StartTimeMilliseconds,
+    long? StartNanoseconds,
+    double? DelayMilliseconds,
+    double? DurationMilliseconds,
+    double? Iterations,
+    string? Direction,
+    string? Fill,
+    string? Easing,
+    double? CurrentTimeMilliseconds,
+    string CurrentTimeBasis,
+    double? CurrentIteration,
+    double? Progress,
+    string Timeline,
+    bool OnCompositor,
+    long RecordedNanoseconds,
+    double? RecordedProgress);
 
 // A listener as its registration record gives it. Location is the script
 // address, line, and column of the registration, when recorded.

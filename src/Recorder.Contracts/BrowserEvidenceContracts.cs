@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.52";
+    public const string CurrentVersion = "0.53";
 }
 
 public static class BrowserEvidenceChannels
@@ -22,6 +22,7 @@ public static class BrowserEvidenceChannels
     public const string Network = "browser.network";
     public const string Resources = "browser.resources";
     public const string Compositor = "browser.compositor";
+    public const string Animation = "browser.animation";
 }
 
 public static class BrowserEvidenceEventTypes
@@ -111,6 +112,8 @@ public static class BrowserEvidenceEventTypes
     public const string PresentationFeedback = "presentation-feedback";
     public const string CompositorAnimationStarted = "compositor-animation-started";
     public const string CompositorAnimationEnded = "compositor-animation-ended";
+    public const string AnimationUpdated = "animation-updated";
+    public const string AnimationRemoved = "animation-removed";
     public const string CompositorFrame = "compositor-frame";
     public const string CompositorFramePresented = "compositor-frame-presented";
     public const string PaintWorkletPainted = "paint-worklet-painted";
@@ -1473,6 +1476,72 @@ public sealed record BrowserCompositorAnimationEndedPayload(
     int? NodeId,
     int? CompositorAnimationId,
     IReadOnlyList<int> KeyframeModelIds);
+
+// A Blink animation (protocol 0.53, slice 4g), from Animation::NotifyProbe
+// on the main thread: recorded at its first call and at each call in which
+// anything other than its current time, progress, and current iteration
+// changed. The sequence number is Blink's, a decimal string unique in the
+// renderer process. Kind is "css-animation", "css-transition", or
+// "web-animation"; Name is the id, else the animation name, else the
+// transitioned property. Play state is Blink's, "idle", "running",
+// "paused", or "finished", with Pending true while a play or pause is
+// pending. Times are milliseconds on the animation's timeline; an
+// unresolved time is null. Effect is null for an animation with no effect.
+public sealed record BrowserAnimationUpdatedPayload(
+    BrowserContext Context,
+    string SequenceNumber,
+    string Kind,
+    string? Name,
+    string? Id,
+    int? TargetNodeId,
+    string? PseudoElement,
+    string PlayState,
+    bool Pending,
+    double? PlaybackRate,
+    double? StartTimeMilliseconds,
+    double? CurrentTimeMilliseconds,
+    BrowserAnimationTimeline Timeline,
+    BrowserAnimationEffect? Effect,
+    int? CompositorAnimationId);
+
+// An animation's timeline. Kind is "document", "scroll", "view", "other", or
+// "none". A document timeline's zero time is given in the clock's counter
+// ticks, as a decimal string, null when the clock is not high resolution,
+// and as TimeTicks microseconds; its playback rate is the timeline's own. A
+// scroll or view timeline names its source node, its axis ("horizontal" or
+// "vertical"), and a view timeline its subject.
+public sealed record BrowserAnimationTimeline(
+    string Kind,
+    string? ZeroTicks,
+    string? ZeroTimeTicksMicroseconds,
+    double? PlaybackRate,
+    int? SourceNodeId,
+    int? SubjectNodeId,
+    string? Axis);
+
+// An animation's effect timing, normalized as Blink holds it: the delays and
+// iteration duration in milliseconds, iterations null when infinite, the
+// direction and fill as their Web Animations keywords, and the easing as
+// Blink writes it. Progress and current iteration are Blink's computed
+// values at the call, the progress after the easing, null when not in
+// effect.
+public sealed record BrowserAnimationEffect(
+    double? DelayMilliseconds,
+    double? EndDelayMilliseconds,
+    double? IterationStart,
+    double? Iterations,
+    double? DurationMilliseconds,
+    string Direction,
+    string Fill,
+    string Easing,
+    double? Progress,
+    double? CurrentIteration);
+
+// An animation recorded before was released, or its document's context was
+// destroyed.
+public sealed record BrowserAnimationRemovedPayload(
+    BrowserContext Context,
+    string SequenceNumber);
 
 // The compositor's widget, as its presentation records name it.
 public sealed record BrowserCompositorWidget(

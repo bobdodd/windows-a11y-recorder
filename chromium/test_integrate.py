@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.52"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.52"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.53"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.53"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -7544,6 +7544,58 @@ class CompositorRecordIntegrationTests(unittest.TestCase):
             patched.index("a11y_recorder::RecordCompositorAnimationEnded("),
             patched.index("compositor_keyframe_model_ids_.clear();"),
         )
+
+    def test_each_animation_and_its_removal_are_recorded_once(self):
+        source = (
+            INTEGRATE.BLINK_ANIMATION_OWN_INCLUDE
+            + "\n\n#include <limits>\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_ANIMATION_DISPOSE_ANCHOR
+            + "  DisassociateTriggers();\n}\n\n"
+            + INTEGRATE.BLINK_ANIMATION_CONTEXT_DESTROYED_ANCHOR
+            + "  inactive_ = true;\n}\n\n"
+            + "void Animation::NotifyProbe() {\n"
+            + INTEGRATE.BLINK_ANIMATION_UPDATED_ANCHOR
+            + "}\n\n}  // namespace blink\n"
+        )
+        patched = self.patch_twice(
+            "animation.cc", source, INTEGRATE.patch_blink_animation
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_ANIMATION_UPDATED_HOOK))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_ANIMATION_DISPOSE_HOOK))
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_ANIMATION_CONTEXT_DESTROYED_HOOK)
+        )
+        for include in INTEGRATE.BLINK_ANIMATION_INCLUDES:
+            with self.subTest(include=include):
+                self.assertEqual(1, patched.count(include + "\n"))
+        # The record follows the probe DevTools is fed from, and is made
+        # only while the recorder is connected.
+        self.assertLess(
+            patched.index("probe::AnimationUpdated(document_, this);"),
+            patched.index("a11y_recorder::RecordAnimationUpdated("),
+        )
+        self.assertEqual(3, patched.count("a11y_recorder::IsRecorderActive()"))
+        self.assertEqual(
+            1, patched.count('A11Y_RECORDER_HOOK_COST("hook:animation-updated");')
+        )
+
+    def test_the_bridge_holds_the_animation_records(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        for event_type in ("animation-updated", "animation-removed"):
+            with self.subTest(event_type=event_type):
+                self.assertIn(
+                    f'SendBlinkEvidence("browser.animation", "{event_type}",', source
+                )
+        # An animation is recorded again only when its description changed,
+        # and its current time and progress are not part of that comparison.
+        compare = source[source.index("bool SameAnimationDescription("):]
+        compare = compare[: compare.index("\n}\n")]
+        for field in ("current_time_milliseconds", "progress", "current_iteration"):
+            with self.subTest(field=field):
+                self.assertNotIn(f"a.{field} ", compare)
+                self.assertNotIn(f"a.{field} ==", compare)
+        self.assertIn("a.play_state == b.play_state", compare)
 
     def test_each_presentation_request_names_its_compositors_widget(self):
         block = INTEGRATE.blink_registered_presentation_widget_block()

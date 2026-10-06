@@ -97,7 +97,9 @@ public static class FixedRecreation
             new RecordedTimer("timer-13", "interval", 1_000, 1_000, 2_000_000_000, 11_500_000_000, 500)
         ],
         [
-            new RecordedAnimation("transition", "opacity", Status, 12_000_000_000, 1_000, 0.5)
+            new RecordedAnimation(
+                "css-transition", "opacity", Status, null, "running", false, 12_000, 12_000_000_000, 0, 1_000, 1,
+                "normal", "auto", "ease", 500, "computed", 0, 0.5, "document timeline", false, 12_000_000_000, null)
         ],
         [
             new RecordedInteractiveElement(Link(1), "a", [], true, "link", "Form", null, null),

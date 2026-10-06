@@ -80,6 +80,7 @@ public static class RecordedPage
         // disposes; resources it does not use are disposed here.
         // The compositor values do not depend on where the page is served.
         var compositorValues = resources?.CompositorValues ?? RecordedCompositorValues.None;
+        var animations = resources?.Animations ?? RecordedAnimations.None;
         if (!servedAtRecordedAddress)
         {
             resources?.Dispose();
@@ -181,7 +182,8 @@ public static class RecordedPage
             recordingNanoseconds,
             basis,
             new RecreationFidelity("not-checked", "The recreation is not yet compared with the recording.", []),
-            notes);
+            notes,
+            animations);
         return new RecreationContent(
             Markup(Tree(state, used.Faces, fontAddress, placed, compositorValues, used.StyleSheets, used.StyleSheetText), DocumentTypeName(tree, documentId), nonce),
             evidence,

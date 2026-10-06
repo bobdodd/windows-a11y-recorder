@@ -260,6 +260,12 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.PresentationFeedback) =>
                 payload.Deserialize<BrowserPresentationFeedbackPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Animation,
+                BrowserEvidenceEventTypes.AnimationUpdated) =>
+                payload.Deserialize<BrowserAnimationUpdatedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Animation,
+                BrowserEvidenceEventTypes.AnimationRemoved) =>
+                payload.Deserialize<BrowserAnimationRemovedPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Compositor,
                 BrowserEvidenceEventTypes.CompositorAnimationStarted) =>
                 payload.Deserialize<BrowserCompositorAnimationStartedPayload>(
@@ -441,7 +447,8 @@ internal static class BrowserProtocol
                 BrowserEvidenceChannels.Presentation or
                 BrowserEvidenceChannels.Network or
                 BrowserEvidenceChannels.Resources or
-                BrowserEvidenceChannels.Compositor,
+                BrowserEvidenceChannels.Compositor or
+                BrowserEvidenceChannels.Animation,
                 BrowserEvidenceEventTypes.Omission) =>
                 payload.Deserialize<BrowserOmissionPayload>(JsonOptions)
                     as object,
