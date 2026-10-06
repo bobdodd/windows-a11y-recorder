@@ -275,6 +275,18 @@ How the recorder uses MCAP:
   `state` and `state-index`; see
   [page recreation](page-recreation.md). Files written before are read from
   the `browser` stream.
+- Migration `0013_recording_files.sql` allowed only the first four streams
+  in `recording_file_chunks`, so from slice 2 the chunk index of every
+  recording file with browser state was refused when the recording was
+  completed, and with it the list of collectors whose events the file
+  holds. The recording and its file were stored; the refusal was reported
+  with the database status ("The recording file's index was not stored:
+  ... violates check constraint recording_file_chunks_stream_check"). It
+  was found on the target machine on 2026-10-06, when the application
+  session validation failed on that status. Nothing in the recorder reads
+  either table yet, and the index can be rebuilt from the file. Migration
+  `0016_recording_file_state_streams.sql` allows the three streams; the
+  chunk index of a recording stored before it is not added.
 
 The design this section proposed before slice 1:
 

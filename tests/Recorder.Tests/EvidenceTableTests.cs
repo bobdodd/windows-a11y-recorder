@@ -5,6 +5,7 @@ using Npgsql;
 using Recorder.Contracts;
 using Recorder.Database;
 using Recorder.Database.Evidence;
+using Recorder.Database.RecordingFiles;
 using Recorder.Session;
 using static Recorder.Tests.DatabaseTestSupport;
 
@@ -43,6 +44,40 @@ public sealed class EvidenceMigrationTests
             var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text)));
             Assert.True(digest == sha256, $"{file} was changed after it was applied.");
         }
+    }
+
+    // Every stream a recording file is written in. The recorder stream holds
+    // the writer's own records, and the state and state-index streams the
+    // state thread's snapshots and index records.
+    public static IReadOnlyList<string> RecordingFileStreams() =>
+    [
+        .. EvidenceSamples.All
+            .Select(item => item.Channel)
+            .Concat(["session.annotations", "collector.lifecycle"])
+            .Select(RecordingFileBatchTarget.StreamOf)
+            .Concat([
+                "recorder",
+                RecordingFileStateRecorder.SnapshotStream,
+                RecordingFileStateRecorder.IndexStream
+            ])
+            .Distinct()
+            .Order(StringComparer.Ordinal)
+    ];
+
+    // The chunk index of a recording file was refused from page recreation
+    // slice 2 until 0016, because 0013 allowed only the streams it knew.
+    [Fact]
+    public void TheLatestStreamCheckAllowsEveryStreamOfARecordingFile()
+    {
+        var text = File.ReadAllText(MigrationPath("0016_recording_file_state_streams.sql"));
+        var check = text[text.LastIndexOf("CHECK (stream IN (", StringComparison.Ordinal)..];
+        check = check[..check.IndexOf("))", StringComparison.Ordinal)];
+        var allowed = System.Text.RegularExpressions.Regex.Matches(check, "'([^']+)'")
+            .Select(match => match.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("browser-state", RecordingFileStreams());
+        Assert.All(RecordingFileStreams(), stream => Assert.Contains(stream, allowed));
+        Assert.Equal(1, DatabaseMigrator.Migrations.Count(item => item.Name.EndsWith("0016_recording_file_state_streams.sql", StringComparison.Ordinal)));
     }
 
     private static string MigrationPath(string file)
@@ -850,6 +885,29 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         }
 
         return rows;
+    }
+
+    [Fact]
+    public async Task StoresTheChunkIndexOfAFileWithEveryStream()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var (_, recordingId) = await CreateRecordingAsync();
+        var store = new RecordingStore(DataSource);
+        await store.AddRecordingFileAsync(recordingId, "recording.mcap", token);
+        var streams = EvidenceMigrationTests.RecordingFileStreams();
+        var chunks = streams
+            .Select((stream, ordinal) => new RecordingFileChunk(
+                ordinal, stream, ordinal * 10L, ordinal * 10L + 5, 100L * ordinal + 8, 64, 3, 40, 80))
+            .ToArray();
+
+        await store.StoreRecordingFileIndexAsync(recordingId, true, 4096, 3L * chunks.Length, chunks, token);
+
+        Assert.Equal(
+            streams,
+            await RowsAsync(
+                DataSource,
+                $"SELECT stream FROM recording_file_chunks WHERE recording_id = '{recordingId}' ORDER BY chunk_ordinal",
+                token));
     }
 
     private async Task<(string SessionKey, Guid RecordingId)> CreateRecordingAsync(
