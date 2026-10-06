@@ -6915,7 +6915,7 @@ pass. The integration test in the instrumented Chromium, comparing each
 recorded text with the text DevTools reports, is not built; the fixture
 page and the system test on the target machine take its place for now.
 
-### Slice 4f: who scheduled each timer (agreed, built, not yet confirmed on the target machine)
+### Slice 4f: who scheduled each timer (agreed, built, confirmed on the target machine)
 
 Proposed 2026-10-05, at the owner's request that the evidence panel say who
 owns each pending timer: the page, the browser, an extension, or another
@@ -7106,6 +7106,26 @@ extension's script in the page's world, an empty stack, and a recording
 before protocol 0.52), and five `integrate.py` tests: one for each of the
 four patched files, that its hook is applied once and found again on a
 second pass, and one that the hooks call functions the bridge declares.
+
+Result on the target machine (2026-10-06), at `3b07ab3`, which includes
+`e3bd29a`: the owner recorded the fixture, recording
+`20261006-162006-73ac3c88d7b64ce99f063cbbb1806e38`, clicked the first button,
+and opened the evidence panel at a frame of about 10.93 s. The Pending timers
+table listed seven timers, and the Scheduled by column named for each what
+the fixture's list expects: `app.js` for `externalTimer`; the inline script
+element for `inlineTimer`, for the eval code below which it was found at
+stack frame 2, for the string handler, and for `fromCallback`, scheduled from
+the callback of the 0.1 s timer, which had run; the inline module script for
+`fromModule`; and the first button's `onclick` attribute for
+`fromAttribute`. The timer the second button's listener scheduled was
+recorded at 13.081 s, after that frame. The owner had not expected so many
+timers in the fixture and, once each row was explained, accepted the result.
+
+In the same recording, the browser's toolbar, a WebUI page in another
+renderer process, scheduled timers also named `timer-1` to `timer-6` in the
+same second. Timer names are unique only within a renderer process; the
+recorder keys documents by process as well, so they were not joined to the
+fixture's document.
 
 ### To be settled
 
