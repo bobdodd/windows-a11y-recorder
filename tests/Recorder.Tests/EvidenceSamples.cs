@@ -274,6 +274,8 @@ internal static class EvidenceSamples
         ("browser.layout", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
         ("browser.presentation", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
         ("browser.network", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.resources", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
+        ("browser.compositor", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
         ("browser.accessibility", "accessibility-checkpoint-started",
             J("{'context':") + AxContext + J(",'checkpointId':'accessibility-checkpoint-1','reason':'renderer-serialization','maximumNodes':5000,'updateCount':3,'eventCount':7}")),
         ("browser.accessibility", "accessibility-checkpoint-node",

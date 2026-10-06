@@ -147,12 +147,21 @@ public sealed class RecordingFileBrowserState
         // In a file cut short, an index record can be in the file while a
         // snapshot it names, written to another chunk, is not. The index is
         // used only up to the first record that names a missing snapshot.
+        // Snapshots of several documents can share a log time and be written
+        // to different chunks, so in a file cut short each named snapshot is
+        // looked for by its document and event, not only by its log time.
         var usable = _records.Count;
+        var cutChunks = new Dictionary<RecordingFileChunk, byte[]>();
         foreach (var (key, history) in _history)
         {
             foreach (var (record, entry) in history)
             {
-                if (record < usable && entry.SnapshotLogTime is { } logTime && !_snapshots.ContainsKey(logTime))
+                if (record < usable &&
+                    entry.SnapshotLogTime is { } logTime &&
+                    (!_snapshots.TryGetValue(logTime, out var located) ||
+                     (reader.Incomplete is not null &&
+                      (entry.SnapshotEventKey is not { } snapshotKey ||
+                       !Locates(located, key, snapshotKey, cutChunks)))))
                 {
                     usable = record;
                 }
@@ -535,6 +544,28 @@ public sealed class RecordingFileBrowserState
             }
         }
         return null;
+    }
+
+    // Whether one of the snapshots at a log time is of the document at the event.
+    private bool Locates(
+        List<(RecordingFileChunk Chunk, int Offset)> located,
+        string key,
+        long eventKey,
+        Dictionary<RecordingFileChunk, byte[]> chunks)
+    {
+        foreach (var (chunk, offset) in located)
+        {
+            if (!chunks.TryGetValue(chunk, out var records))
+            {
+                records = _reader.ReadChunkRecords(chunk);
+                chunks.Add(chunk, records);
+            }
+            if (Names(_reader.ReadMessageAt(records, offset).Data.Span, key, eventKey))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     // Whether a snapshot is of the document at the event, read from its

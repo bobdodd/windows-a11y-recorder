@@ -386,6 +386,17 @@ machine, and say nothing about the target machine's times.
   time, and position, and the time of its first record not in that
   snapshot. The reader reads only these records when it opens a file, so a
   file cut short is read from the snapshots before the cut.
+- One sweep writes the snapshots of several documents at one log time, and
+  they can be split across two chunks of the snapshot stream. In a file cut
+  between those chunks, an index record names a snapshot that is not in the
+  file although another snapshot at its log time is. Found on the target
+  machine on 2026-10-06, where the test of a file cut at six tenths failed
+  with "The snapshot of document token-b doc-9 at event 2520 is not in the
+  file"; on the build machine the same cut fell elsewhere and passed. In a
+  file cut short, the reader therefore looks for each named snapshot by its
+  document and event, and uses the index only up to the first record that
+  names one it does not find. A test cuts the file after each chunk of the
+  snapshot and index streams, and failed before the change.
 - The state thread checks for due snapshots once a second of recording
   time. A document part way through a checkpoint, insertion set, or change
   set is not snapshotted until it completes.

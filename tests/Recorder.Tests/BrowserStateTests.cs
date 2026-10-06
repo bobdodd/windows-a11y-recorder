@@ -860,6 +860,47 @@ public sealed class BrowserStateTests : IDisposable
         }
     }
 
+    // One sweep of the state thread writes the snapshots of several
+    // documents at one log time, and they can be split across two chunks of
+    // the snapshot stream. A file cut between those chunks holds the index
+    // record and one of the snapshots, but not another. Each cut here ends
+    // just after a chunk of the snapshot or index stream; the state read
+    // from the snapshots in the file is the state read from the records.
+    [Fact]
+    public async Task AFileCutAfterAnySnapshotOrIndexChunkIsReadFromTheSnapshotsInTheFile()
+    {
+        var path = await WriteSessionAsync("whole.mcap", 25_000_000);
+        var bytes = await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken);
+        long[] cuts;
+        using (var whole = RecordingFileReader.Open(path))
+        {
+            cuts = [.. whole.Chunks
+                .Where(chunk => chunk.Stream is RecordingFileStateRecorder.IndexStream or RecordingFileStateRecorder.SnapshotStream)
+                .Select(chunk => chunk.Offset + chunk.Length)
+                .Where(end => end < bytes.Length)];
+        }
+        Assert.NotEmpty(cuts);
+
+        var token = TestContext.Current.CancellationToken;
+        foreach (var cut in cuts)
+        {
+            var cutPath = Path.Combine(_directory, $"cut-{cut}.mcap");
+            await File.WriteAllBytesAsync(cutPath, bytes[..(int)cut], token);
+            using var reader = RecordingFileReader.Open(cutPath);
+            Assert.NotNull(reader.Incomplete);
+            var state = new RecordingFileBrowserState(reader, null);
+            var stateChunks = reader.Chunks.Where(chunk => chunk.Stream == "browser-state").ToArray();
+            if (stateChunks.Length == 0)
+            {
+                continue;
+            }
+            var end = stateChunks.Max(chunk => chunk.EndTime);
+            Assert.Equal(
+                Describe(state.At(end, useSnapshots: false, cancellationToken: token)),
+                Describe(state.At(end, cancellationToken: token)));
+        }
+    }
+
     [Fact]
     public void TheStateThreadStopsWhenItFallsBehindAndPassingNeverWaits()
     {
