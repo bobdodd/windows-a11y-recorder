@@ -6915,6 +6915,154 @@ pass. The integration test in the instrumented Chromium, comparing each
 recorded text with the text DevTools reports, is not built; the fixture
 page and the system test on the target machine take its place for now.
 
+### Slice 4f: who scheduled each timer (proposed, not built)
+
+Proposed 2026-10-05, at the owner's request that the evidence panel say who
+owns each pending timer: the page, the browser, an extension, or another
+party, and, for a timer the page scheduled, the path of the element whose
+script scheduled it, a `script` element or an `on...` attribute. It takes
+protocol 0.52.
+
+#### Why
+
+The panel's "Pending timers" table lists each timer's kind, delays, and
+times, but not who scheduled it. A `timer-scheduled` record has no world
+and no location: its `callbackLocation` is always null, as protocol 0.5
+states ("callback location is null until those facts have dedicated
+instrumentation", [instrumented Chromium](instrumented-chromium.md)). On
+the style sheet fixture, the two timers pending before 1.5 s are the two
+`setTimeout` calls of the page's one inline `script` element (lines 76 and
+83 of `tests/fixtures/style-sheets/index.html`), but that is known from the
+fixture's source, not from the recording.
+
+#### What Chromium does
+
+Read in the patched Chromium checkout on the target machine, under
+`third_party/blink/renderer/`.
+
+- Every `setTimeout` and `setInterval` of a window makes a `DOMTimer`
+  (`core/scheduler/dom_timer.cc`, constructor at line 316), whose
+  `ScheduledAction` holds either the callback function or the code string
+  (`core/scheduler/scheduled_action.h`, `function_` and `code_`;
+  `CallbackFunction()` returns the function, or null for a string). The
+  constructor runs inside the script call that scheduled the timer, so the
+  script's stack and world are current there. The recorder's
+  `timer-scheduled` hook is already in that constructor.
+- Blink's own internal timers are not `DOMTimer`s, so every recorded timer
+  was scheduled by script; "the browser" as owner means script Chromium
+  itself ran in the page, such as DevTools.
+- The world current at a call is `DOMWrapperWorld::Current(isolate)`: the
+  main world for the page's scripts, an isolated world for an extension's
+  content scripts, whose human-readable name and stable ID Blink keeps,
+  and the inspector's isolated world for DevTools. The recorder already
+  reads this for cookie calls (`RecorderCookieCallOrigin` in
+  `integrate.py`) and for listener registrations.
+- `v8::StackTrace::CurrentStackTrace` gives the script stack at a call:
+  for each frame, its V8 script ID, script name (URL), function name, line,
+  column, and whether it is eval code.
+- A classic or module script from a `script` element runs in
+  `PendingScript::ExecuteScriptBlockInternal` (`core/script/pending_script.cc`,
+  line 312, `script->RunScript`), which knows the element. A classic
+  script is compiled inside that call, in
+  `V8ScriptRunner::CompileAndRunScript`
+  (`bindings/core/v8/v8_script_runner.cc`, from line 534), where the
+  compiled script's ID is known (line 622).
+- An `on...` attribute's handler is compiled on first use, in
+  `JSEventHandlerForContentAttribute::GetListenerObject`
+  (`bindings/core/v8/js_event_handler_for_content_attribute.cc`), which
+  knows the element (or the window, for the body's window handlers), the
+  attribute's name, and the compiled function's script ID (line 249).
+
+So a timer's scheduling stack names V8 script IDs, and the two places a
+page's markup becomes script can name the element of each script ID.
+
+#### What is recorded (protocol 0.52)
+
+- `timer-scheduled` gains `scheduledBy`:
+  - `world`: the world current at the call, as the cookie records give it
+    (kind, Blink world ID, and, for an isolated world, its name and stable
+    ID), or null when no script was running;
+  - `stack`: up to 16 frames, innermost first, each with script ID, URL,
+    function name, line, column, and whether it is eval code; empty when no
+    script was running;
+  - `handler`: `function` or `string`.
+- `callbackLocation`, null until now, is the callback function's script
+  ID, URL, line, column, and name, from the function itself; it stays null
+  for a string handler.
+- A new `script-compiled` record on `browser.timer`, which the reader
+  already reads for the timers table:
+  - for a script run from a `script` element: the document, the script ID,
+    `kind` `classic` or `module`, the element's node ID, the script's URL
+    (null for an inline script), its start line and column, and the world;
+  - for an `on...` attribute's handler: the document, the script ID, `kind`
+    `event-handler-attribute`, the element's node ID (null for a window
+    handler), the attribute's name, the URL, and the start line and column.
+
+Script IDs are per renderer process, so the reader joins them within the
+document's process. Scripts compiled any other way, such as by `eval`, `new
+Function`, a string timer, a `javascript:` URL, an extension's content
+script, or DevTools' Console, have no `script-compiled` record; their frames
+keep their URL, which for an extension is its `chrome-extension://`
+address.
+
+#### What the panel shows
+
+The "Pending timers" table gains a "Scheduled by" column. For each timer,
+from its recorded `scheduledBy`, the panel names:
+
+- the owner, from the world and the URLs: the page (main world), an
+  extension (an isolated world with its name and ID, or a
+  `chrome-extension://` script in the main world), DevTools (the inspector
+  world), or "no script was running";
+- the element: the first frame, innermost first, whose script ID has a
+  `script-compiled` record, given as the `script` element or as the named
+  attribute of its element, with the element's path and the panel's
+  existing Select and Copy path buttons. An element removed before the
+  frame is named by its recorded node ID, as removed;
+- the direct caller, the innermost frame, as URL, line, column, and
+  function, which may be a library the element's script called;
+- where the callback is defined, from `callbackLocation`.
+
+What is shown is what was recorded at the call; the panel does not infer
+an owner the records do not give, and says "not recorded" for recordings
+before protocol 0.52.
+
+#### Limits
+
+- A timer scheduled from a callback of another timer, a listener, or a
+  promise has, on its stack, the frames of that callback only, so its
+  element is the element whose script defined the callback. The chain of
+  callbacks that led there is not recorded.
+- An `eval` or `new Function` frame has no element of its own; the panel
+  takes the element of the next frame that has one, and says so.
+- Script in iframes waits for slice 5, as their documents do. Worker
+  timers are not `DOMTimer`s of a window and are not recorded.
+- Animation frame and idle callbacks share the timer record but are not in
+  the panel's table; they are outside this slice.
+
+#### Cost
+
+The stack is captured at each `setTimeout` and `setInterval`, and a
+`script-compiled` record is written once per compiled script and once per
+compiled attribute handler. Each hook is timed as a whole, and measured on
+the target machine on a page that schedules many timers.
+
+#### Required tests
+
+- Unit tests: the record contract and validator for `scheduledBy`,
+  `callbackLocation`, and `script-compiled`; the reader's join of a
+  timer's stack to its element, including an eval frame, an attribute
+  handler, an external script, an isolated world, an empty stack, and an
+  element removed before the frame; the panel's data for each.
+- Integration tests in the instrumented Chromium, through `integrate.py`'s
+  test suite: each hook applied once and found again on a second pass.
+- System test on the target machine: a recording of a fixture page served
+  over HTTP that schedules timers from an inline script, an external
+  script, an `onclick` attribute, a listener added by script, `eval`, and a
+  string handler, with an extension's content script where one is
+  installed, where the panel's "Scheduled by" column names each as
+  scheduled.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
