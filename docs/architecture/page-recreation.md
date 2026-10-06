@@ -7138,6 +7138,136 @@ same second. Timer names are unique only within a renderer process; the
 recorder keys documents by process as well, so they were not joined to the
 fixture's document.
 
+### Slice 4g: running animations in the evidence panel (proposed, not built)
+
+Proposed 2026-10-06, at the owner's request that the evidence panel's
+Evidence tab show the animations running at the frame, which the design
+(item 9 of the requirements above) lists and the panel does not: it says
+"Running animations and transitions are not yet read from the recording, so
+none are listed." It takes protocol 0.53. The recreation itself does not
+change: it still runs no animation, and holds the compositor values of
+slice 4b.
+
+#### Why
+
+The recording has no record of a Blink animation as such. Slice 4b records
+`compositor-animation-started` and `compositor-animation-ended` for
+animations started on the compositor, with the target node, element IDs,
+and target properties, but no animation name, kind, timing, start time, or
+play state. An animation run on Blink's main thread, such as one of
+`width` or `color`, has no record at all; only its effect on the recorded
+style and layout is recorded.
+
+#### What Chromium does
+
+Read in the patched Chromium checkout on the target machine, under
+`third_party/blink/renderer/core/`.
+
+- Every CSS animation, CSS transition, and Web Animation is a
+  `blink::Animation` (`animation/animation.h`). `CSSAnimation` holds the
+  `animation-name` (`css/css_animation.h`, `animationName()`), and
+  `CSSTransition` the transitioned property (`css/css_transition.h`,
+  `transitionProperty()`).
+- `Animation::NotifyProbe` (`animation/animation.cc`, line 3696) calls
+  `probe::AnimationUpdated(document_, this)` (`probe/core_probes.pidl`,
+  line 181) from `play`, `pause`, `cancel`, `finish`, `setStartTime`,
+  `setCurrentTime`, `setPlaybackRate`, `updatePlaybackRate`, `setEffect`,
+  `NotifyReady`, and, at each animation frame, `Update`
+  (`kTimingUpdateForAnimationFrame`, line 3323). DevTools' Animations
+  panel is fed from the same probe (`inspector/inspector_animation_agent.cc`,
+  `AnimationUpdated`, line 774), which compares each call with a snapshot
+  and reports only a start, a cancel, or a change.
+- The panel's description of an animation (`BuildObjectForAnimation` and
+  `BuildObjectForAnimationEffect`) is: the animation's sequence number,
+  display name (the `id`, else the animation name, else the transitioned
+  property), kind, play state, playback rate, start time, and current
+  time; and its effect's delay, end delay, iteration start, iterations,
+  duration, direction, fill, easing, and target node; and, for a scroll or
+  view timeline, its source node, axis, and offsets.
+- Times are on the animation's timeline. A document timeline's time is the
+  time since its zero time, `DocumentTimeline::CalculateZeroTime()`
+  (`animation/document_timeline.h`, line 82), a `base::TimeTicks`, the clock
+  of the bridge's other ticks.
+
+#### What is recorded (protocol 0.53)
+
+On a new channel, `browser.animation`, in the browser state stream, from
+the `AnimationUpdated` probe on the main thread:
+
+| Record | When | Holds |
+| --- | --- | --- |
+| `animation-updated` | an animation's first probe call, and each later call in which anything it holds other than its current time changed | the document, the sequence number, the kind (`css-animation`, `css-transition`, or `web-animation`), the display name, the target node and pseudo-element, the play state, whether it is pending, the playback rate, the start time and current time in milliseconds of its timeline, the timeline (document, with its zero time in bridge ticks, or scroll or view, with its source node and axis), the effect's timing as listed above, Blink's computed progress and current iteration at the call, and the compositor animation ID when it runs on the compositor |
+| `animation-removed` | the animation's target document is detached, or the animation is released | the sequence number |
+
+Like DevTools, the bridge keeps the last recorded description of each
+animation and records again only on a change, so an animation that runs
+on the main thread adds no record at each frame. Values are as Blink holds
+them; nothing is rounded.
+
+#### Which animations a frame shows
+
+At the frame's basis time, the state used for the rest of the panel, an
+animation is listed when its latest record at or before that time has a
+play state of running, paused, or pending, or finished with a fill that
+holds its effect. Its current time at the frame is computed from that
+record: for a running animation on a document timeline, the start time
+subtracted from the timeline's time at the frame, times the playback rate;
+for a paused one, the recorded current time. The current iteration and its
+progress are computed from the current time and the effect's timing by
+the Web Animations procedures
+([Web Animations, calculating the directed progress](https://www.w3.org/TR/web-animations-1/#calculating-the-directed-progress)).
+The progress is before the easing is applied; the easing is shown as
+recorded.
+
+#### What the panel shows
+
+The "Running animations and transitions" table gains its rows: kind, name
+or property, target (selecting it selects the node in the Elements panel),
+play state, start (recording time), duration, delay, iterations,
+direction, fill, easing, current time at the frame, current iteration and
+progress, and whether it runs on the compositor (joined to slice 4b's
+records by compositor animation ID). An animation on a scroll or view
+timeline is listed with its timeline and source, and its progress at its
+latest record, since its time follows the scroll position, not the clock.
+
+#### Limits
+
+- The time at the frame is the basis time of the state. Blink's own time
+  for the rendering update shown is that update's animation frame time,
+  which can differ by up to one display refresh; the panel says so.
+- The progress of an animation on a scroll or view timeline is that of its
+  latest record, not computed at the frame.
+- SVG animation elements (`animate`, `animateTransform`) are not
+  `blink::Animation`s and are not listed; the panel says so.
+- An animation created before the renderer's bridge connected is recorded
+  at its next probe call: at its next frame if it runs on the main thread,
+  at its next change of state if on the compositor.
+
+#### To be settled
+
+- Whether "released" can be observed without a new hook in
+  `Animation`'s destructor or garbage collection; if not, an animation is
+  ended by its play state and its document only.
+- The cost on the target machine, on the animation fixture.
+
+#### Required tests
+
+- Unit tests: the new records against the record contract; the state's
+  animations at a time from a sequence of records, including pause,
+  playback rate changes, `setCurrentTime`, cancel, finish with and without
+  fill, and a document's removal; the computed iteration and progress for
+  each direction, iteration start, and fractional iterations; the panel's
+  rows.
+- Integration tests in the instrumented Chromium, on a generated page with
+  a CSS animation, a CSS transition, a Web Animation started, paused, and
+  given a new playback rate by script, a composited and a main-thread
+  animation, and a scroll timeline: each animation is recorded once at its
+  start and once for each change, and not at each frame; at each record,
+  the app's computed progress equals Blink's recorded progress.
+- System test on the target machine: the animation fixture recorded and
+  opened at several frames, and the Evidence tab lists its animations with
+  their progress at each.
+
 ### To be settled
 
 - How the recorded state reaches the renderer of the recreation: over the
