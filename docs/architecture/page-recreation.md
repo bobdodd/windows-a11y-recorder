@@ -6628,7 +6628,7 @@ Not done: the integration test in the instrumented Chromium, for the
 reason given under "Popup on screen as built"; what is recorded is
 checked on the target machine with a new recording.
 
-### Slice 4e: page style sheets as they arrive (agreed, built, not yet tested on the target machine)
+### Slice 4e: page style sheets as they arrive (agreed, built, confirmed on the target machine)
 
 Proposed 2026-10-05, at the owner's request that the page's CSS be recorded
 as it arrives, including sheets that arrive after the page has loaded, so
@@ -6825,8 +6825,17 @@ a page that inserts rules after load.
 
 #### Slice 4e as built
 
-Agreed by the owner on 2026-10-05 and built in the commit that adds this
-section. It is not yet tested on the target machine.
+Agreed by the owner on 2026-10-05 and built in `ab95625`, with the build
+fix in `33a276c`.
+
+Result on the target machine (2026-10-05): the owner recorded the fixture
+page, `tests/fixtures/style-sheets/`, served over HTTP, and recreated a
+frame before 1.5 s and a frame after 3 s, that is, before and after the
+sheet linked and the rule inserted after load. The owner reported that in
+both recreations the styles matched those DevTools showed on the page. This
+is the owner's visual comparison of the Styles and Sources panels, not a
+check of each recorded text against DevTools' text, which remains to be
+built as an integration test.
 
 What was built:
 
