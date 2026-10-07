@@ -17,6 +17,9 @@ recording. Slices 3 to 5 are designed in "Slice 3 design", proposed
 target machine; see "Slice 3a implementation".
 Recording text by content hash is agreed and deferred; see "Text by content
 hash".
+Slice 5 (frames) is complete on the target machine (2026-10-07). The
+outstanding work found after it, for frames and for SVG, is listed in
+[outstanding work](recreation-outstanding-work.md).
 
 ## Purpose
 
