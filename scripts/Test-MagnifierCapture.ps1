@@ -203,7 +203,7 @@ foreach ($p in $phases) {
     $start = [DateTime]::Parse($p.startUtc).ToUniversalTime()
     $end = [DateTime]::Parse($p.endUtc).ToUniversalTime()
     # The latest frame written in the phase after its first second, or the
-    # latest before the phase ends, since frames are written on change.
+    # latest before the phase ends.
     $pick = $frames | Where-Object { $_.LastWriteTimeUtc -ge $start.AddSeconds(1) -and $_.LastWriteTimeUtc -le $end } | Select-Object -Last 1
     if (-not $pick) { $pick = $frames | Where-Object { $_.LastWriteTimeUtc -le $end } | Select-Object -Last 1 }
     $recDiff = $null; $recName = $null
