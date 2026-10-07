@@ -7578,8 +7578,16 @@ recorder's answer, and the panel). The full suite fails only the 59 tests
 that need PostgreSQL or Windows, as before. The V8 and Blink patches were
 applied twice, with no change on the second pass, to copies of
 `debug.cc`, `pending-compilation-error-handler.cc`, `v8_initializer.cc`,
-and `devtools_session.cc` taken from the target machine's checkout. The
-system test on the target machine is pending.
+and `devtools_session.cc` taken from the target machine's checkout.
+
+#### On the target machine
+
+With revision f72f679, on 2026-10-06, the instrumented Chromium built with
+the V8 and Blink patches, and the owner recorded the timer origin fixture,
+served over HTTP, and reported that the Scripts table and the source viewer
+worked as described in the system test. The individual rows were not
+reported one by one, and the cost of the main-thread copy and digest, and
+of reading the scripts on a large recording, has not been measured.
 
 ### To be settled
 
