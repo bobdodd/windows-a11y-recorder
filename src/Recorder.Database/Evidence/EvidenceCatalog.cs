@@ -483,6 +483,23 @@ internal static class EvidenceCatalog
         Int("shadowRootCount"),
         Int("slotCount"));
 
+    // Protocol 0.55 (page recreation slice 5a), created by
+    // 0018_dom_frame_owners.sql.
+    public static readonly EvidenceTable DomCheckpointFrameOwners = Evidence(
+        "browser_dom_checkpoint_frame_owners",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        BigInt("ownerNodeId"),
+        Text("frameToken"),
+        Name("frameLocation"));
+
+    public static readonly EvidenceTable DomFrameOwnerChanges = Evidence(
+        "browser_dom_frame_owner_changes",
+        new IdentityField("context", R, BrowserContexts),
+        BigInt("ownerNodeId"),
+        Text("frameToken", N),
+        Name("frameLocation", N));
+
     public static readonly EvidenceTable DomAttributeChanges = Evidence(
         "browser_dom_attribute_changes",
         new IdentityField("context", R, BrowserContexts),
@@ -1164,7 +1181,8 @@ internal static class EvidenceCatalog
             WebSocketMessagesReceived, WebSocketCloseRequests, WebSocketErrors, WebSocketClosures,
             EventSourceMessages, WebTransportCreations, WebTransportEstablishments,
             WebTransportCloseRequests, WebTransportClosures
-        ])
+        ]),
+        (18, "dom_frame_owners", [DomCheckpointFrameOwners, DomFrameOwnerChanges])
     ];
 
     /// <summary>
@@ -1202,6 +1220,8 @@ internal static class EvidenceCatalog
             [("browser.dom", "dom-checkpoint-shadow-root")] = DomCheckpointShadowRoots,
             [("browser.dom", "dom-checkpoint-slot-assignment")] = DomCheckpointSlotAssignments,
             [("browser.dom", "dom-checkpoint-completed")] = DomCheckpointCompletions,
+            [("browser.dom", "dom-checkpoint-frame-owner")] = DomCheckpointFrameOwners,
+            [("browser.dom", "dom-frame-owner-changed")] = DomFrameOwnerChanges,
             [("browser.dom", "dom-attribute-changed")] = DomAttributeChanges,
             [("browser.dom", "dom-character-data-changed")] = DomCharacterDataChanges,
             [("browser.interaction", "focus-changed")] = FocusChanges,

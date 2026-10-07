@@ -795,8 +795,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             await CreateLegacyPartitionsAsync(dataSource, recordingId, token);
 
             // Migrations 0010 and 0011 changed how layout nodes and dispatch
-            // path scopes are stored, and 0014 added columns, so the writer
-            // cannot store those records in the tables of version 8.
+            // path scopes are stored, 0014 added columns, and 0018 added the
+            // frame owner tables, so the writer cannot store those records in
+            // the tables of version 8.
             await WriteAsync(
                 sessionKey,
                 recordingId,
@@ -861,6 +862,7 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
     // 0015 the protocol 0.43 widget kind.
     private static bool WritableAtVersion8(RecorderEvent record) =>
         record.EventType is not ("layout-checkpoint-node" or "dom-checkpoint-started" or
+            "dom-checkpoint-frame-owner" or "dom-frame-owner-changed" or
             "layout-checkpoint-started" or "interaction-checkpoint-started" or
             "presentation-requested" or "presentation-not-swapped" or
             "presentation-swapped" or "presentation-feedback") &&
