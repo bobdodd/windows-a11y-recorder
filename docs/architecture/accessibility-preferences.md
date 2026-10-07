@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed 2026-10-07, not agreed and not built. It accompanies
+Proposed 2026-10-07, agreed 2026-10-07 with the decisions under
+"Decisions", not built. It accompanies
 [assistive technology detection](assistive-technology-detection.md), whose
 approach was agreed on 2026-10-07, and takes over that design's Windows
 settings, which are recorded here.
@@ -66,9 +67,9 @@ lines are given (Chromium 156.0.8065.0 on the target machine).
 | Animation effects | `SPI_GETCLIENTAREAANIMATION`; `UISettings.AnimationsEnabled` | `WM_SETTINGCHANGE`; `AnimationsEnabledChanged` | Chromium sets reduced motion from it, `ui/gfx/animation/animation_win.cc`, lines 38 to 48 |
 | Other animation settings | `SPI_GETUIEFFECTS`, `SPI_GETMENUANIMATION`, `SPI_GETMENUFADE`, `SPI_GETCOMBOBOXANIMATION` | `WM_SETTINGCHANGE` | as recorded today with popups |
 | Always show scrollbars | `DynamicScrollbars` under `HKCU\Control Panel\Accessibility`; `UISettings.AutoHideScrollBars` | registry notification; `AutoHideScrollBarsChanged` | Chromium sets overlay scrollbars from it, lines 254 to 260 |
-| Text size | `UISettings.TextScaleFactor` | its change event | Chromium applies it through `UwpTextScaleFactor`, `ui/display/win/screen_win.cc`, line 87 |
+| Text size | `UISettings.TextScaleFactor` | `TextScaleFactorChanged` | Chromium applies it through `UwpTextScaleFactor`, `ui/display/win/screen_win.cc`, line 87 |
 | Display scale | each monitor's DPI | `WM_DPICHANGED`, sent "when the effective dots per inch (dpi) for a window has changed" ([Microsoft](https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged)) | |
-| Caret blink rate | `GetCaretBlinkTime` | none | Chromium's comment, lines 147 to 155, notes Windows has no way to monitor its changes, so it is read at intervals |
+| Caret blink rate | `GetCaretBlinkTime` | none | Chromium's comment, lines 147 to 155, notes Windows has no way to monitor its changes; it is read at the start of a recording only (see "Decisions") |
 | Caret width, focus border width and height, keyboard cues, cursor size, message duration | `SystemParametersInfo`; `UISettings.CursorSize` and `MessageDuration` | `WM_SETTINGCHANGE` | registered as Windows settings in `ATs` (see [assistive technology detection](assistive-technology-detection.md)) |
 | Sticky, filter, toggle, and mouse keys | `SystemParametersInfo` | `WM_SETTINGCHANGE` | as above |
 | Accent color | `UISettings` | its change event | Chromium, `ui/color/win/accent_color_observer.cc`, lines 21 to 31 |
@@ -162,7 +163,7 @@ On a new desktop channel, `system.preferences`:
   with its value or null and the reason it could not be read.
 - `windows-preference-changed`: the setting, the old and new values, and
   the notice that led to the reading (`setting-change` with its `uiAction`
-  and area, `registry`, `ui-settings`, `dpi-changed`, or `interval`).
+  and area, `registry`, `ui-settings`, or `dpi-changed`).
 
 On the browser channel, at a protocol change:
 
@@ -178,18 +179,39 @@ allows, such as the Settings app in the foreground, the browser's settings
 page, or a keyboard shortcut, and to the page's response in the recorded
 style and layout changes; both are inferences with their basis.
 
-## Questions to settle
+## Decisions
 
-- Whether the list of Windows settings and browser preferences is
-  complete enough to start with, and how it is extended.
-- Whether `UISettings` is read through the .NET projection of the Windows
-  Runtime, or through the registry where a value is stored there.
-- The interval at which the caret blink rate is read.
-- Whether the recreation applies the recorded effect on the page through
-  DevTools emulation, as a separate change to
-  [page recreation](page-recreation.md).
-- Whether a recording may use the participant's own browser profile, and
-  what that means for the [threat model](../security/threat-model.md).
+Agreed 2026-10-07:
+
+1. The lists of Windows settings and browser preferences above are enough
+   to start with. A setting is added to a list by a change to this design.
+2. A setting that `UISettings` provides is read through `UISettings`, with
+   its change event, not from the registry where Windows happens to store
+   it, so that the recorder follows the supported interface as Windows
+   changes. The registry and `SystemParametersInfo` are used only for
+   settings `UISettings` does not provide. Where a `UISettings` change
+   event is missing on the running version of Windows, the property is
+   read again on `WM_SETTINGCHANGE`; the record states which way it was
+   read.
+3. The caret blink rate is read once, at the start of a recording. A
+   change during a recording is not expected and is not watched for; the
+   record states that the value is from the start.
+4. The recreation must be correct for the recorded instant. Every recorded
+   preference that changes how the page is drawn or laid out, such as the
+   value of a media query, forced colors, a font family or size, or the
+   zoom level, is applied to the recreation as the page was given it at
+   that instant. Applying them is a change to
+   [page recreation](page-recreation.md), designed with the browser part
+   of this work; a preference the recreation cannot apply is listed as a
+   difference, not left at the recreation browser's value.
+5. A recording may use a browser profile prepared for the test account,
+   since participants test on a test platform, usually with test accounts.
+   The recorder's existing `ProfileDirectory` option
+   (`src/Recorder.Collectors.Browser/BrowserEvidenceReceiverOptions.cs`,
+   line 19), not yet offered in the session settings, is offered there.
+   The recording records the profile directory and whether it was new,
+   and still reads only the stated preferences from it, not its browsing
+   data.
 
 ## Required tests
 
@@ -198,8 +220,8 @@ style and layout changes; both are inferences with their basis.
   stated list, so that no preference outside it is recorded.
 - Integration tests on the target machine: each Windows setting changed
   in turn while the collector runs, each producing one change record with
-  the right old and new values; a setting changed with no notice found by
-  the next interval reading.
+  the right old and new values and the way it was read; the caret blink
+  rate recorded once at the start.
 - Bridge tests in a Chromium build: each listed browser preference changed
   through the preference service, and a zoom change, each producing one
   record; `web-preferences-sent` recorded after a Windows dark mode change.
@@ -210,4 +232,8 @@ style and layout changes; both are inferences with their basis.
   filter are changed in Windows, and the font size and zoom in the
   browser. The recording shows each change with its time, the
   preferences sent to the page, and the page's recorded style changes
-  that follow.
+  that follow. The recreation at a frame after each change is drawn with
+  the preferences in effect at that frame, and its media queries evaluate
+  as they did in the recording.
+- A recording with a prepared test profile, showing its preferences
+  recorded at the start and its browsing data not recorded.

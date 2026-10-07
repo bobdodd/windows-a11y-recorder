@@ -929,6 +929,15 @@ window resized after the latest checkpoint is recreated at the older size;
 the check will show it, and recording the viewport size with each change is
 added to slice 4.
 
+Revised 2026-10-07: the recreation must be correct for the recorded
+instant, so every recorded preference that changes how the page is drawn
+or laid out, such as the value of a media query, forced colors, a font
+family or size, or the zoom level, is applied as the page was given it at
+that instant, and one it cannot apply is listed as a difference. The
+preferences are recorded as designed in
+[accessibility preferences](accessibility-preferences.md); applying them
+here is designed with that work.
+
 ### Leaving the recreation
 
 A recreation is a static copy of a recorded page, but its links and forms
