@@ -8299,7 +8299,7 @@ Settled with the agreement: the case of two cross-site frames with one
 address is tested in the sandbox only for now, and the fixture is not
 extended.
 
-#### 5c as built (2026-10-07, not yet tested on the target machine)
+#### 5c as built (2026-10-07)
 
 Built as the plan above says, with these details:
 
@@ -8379,6 +8379,20 @@ Sandbox results:
 - The full suite fails the same 61 tests as the 5b commit does (the
   sandbox environment, and stock Chromium's lack of the recreation
   mode). The Python tests pass.
+
+#### 5c results (2026-10-07)
+
+The owner ran the system test on the target machine, on the 5a
+recording at about 10 s, with the c9f2591 package, and reported that
+every check passed: the Frames table's times for each built frame and
+none for the frames not built; each frame's own evidence from its
+"Show evidence" button, the second twin with no script; Select on a node
+of each frame's evidence selecting it in the Elements panel, for the
+same-origin, cross-site, nested, srcdoc, and in-place frames; and an
+empty watch window. The open time was not reported in figures. Slice 5
+(5a, 5b, and 5c) is complete on the target machine. The case of two
+cross-site frames at one address remains tested in the sandbox only, as
+agreed.
 
 ## Slice 3b implementation
 
