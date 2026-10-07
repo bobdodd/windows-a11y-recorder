@@ -36,6 +36,10 @@ public sealed class RecreationControl : IAsyncDisposable
     private readonly RecreationViewport? _viewport;
     private readonly Action<BlockedNavigation> _blocked;
     private readonly IRecreationAnswers? _answers;
+
+    // Slice 5c: the binding through which each document's builder reports
+    // its build; the builder names it too.
+    public const string BuildBinding = "__a11yRecorderBuilt";
     private int _refused;
     private int _refusedByBrowser;
     private readonly CancellationTokenSource _stop = new();
@@ -225,6 +229,11 @@ public sealed class RecreationControl : IAsyncDisposable
                         case "Fetch.requestPaused":
                             Handle(PausedAtBrowserAsync(item.Parameters));
                             break;
+                        case "Runtime.bindingCalled" when _answers is not null &&
+                            item.Parameters.TryGetProperty("name", out var name) && name.GetString() == BuildBinding &&
+                            item.Parameters.TryGetProperty("payload", out var payload) && payload.GetString() is { } report:
+                            _answers.DocumentBuilt(report);
+                            break;
                     }
                 }
                 catch (InvalidOperationException)
@@ -314,6 +323,15 @@ public sealed class RecreationControl : IAsyncDisposable
                     new { exclude = true }
                 }
             }, session, token));
+            // Slice 5c: each document's builder reports its build through
+            // this binding, which is added to every context of the target,
+            // and, while Runtime is enabled in this session, to each made
+            // later (v8-runtime-agent-impl.cc, addBinding and addBindings).
+            if (_answers is not null)
+            {
+                commands.Add(_connection.SendAsync("Runtime.addBinding", new { name = BuildBinding }, session, token));
+                commands.Add(_connection.SendAsync("Runtime.enable", null, session, token));
+            }
             if (!frame && _recreationSession is null)
             {
                 _recreationSession = session;

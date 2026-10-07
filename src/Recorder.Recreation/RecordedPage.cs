@@ -38,6 +38,11 @@ public sealed record RecordedFrame(
 {
     public RecordedPageResources? Resources { get; init; }
 
+    // Slice 5c: the recording time of the frame's state, its cut, against
+    // which its timers' remaining times are read. Null when not known, as
+    // in tests, where the top document's is used.
+    public long? RecordingNanoseconds { get; init; }
+
     /// <summary>Disposes the resources of the frame and of its frames.</summary>
     public static void DisposeAll(IEnumerable<RecordedFrame> frames)
     {
@@ -135,16 +140,7 @@ public static class RecordedPage
         }
         var used = servedAtRecordedAddress ? resources ?? RecordedPageResources.None : RecordedPageResources.None;
         var fontAddress = RecreationServer.FontAddress(RecreationServer.NewToken());
-        var notes = new List<string>();
-        if (state.DomCompleteness is not BrowserStateCompleteness.Complete)
-        {
-            notes.Add($"The recorded DOM is {BrowserStateSnapshot.Name(state.DomCompleteness)} at the frame, so nodes may be missing.");
-        }
-        var cut = tree.Nodes.Values.Count(node => node.Data == DomTreeRebuilder.Cut || node.Attributes.ContainsValue(DomTreeRebuilder.Cut));
-        if (cut > 0)
-        {
-            notes.Add($"{cut} nodes have an attribute value or character data cut in the recording; those values are not built.");
-        }
+        var notes = StateNotes(state);
         RecreationViewport? viewport = null;
         if (state.Viewport is { } recorded)
         {
@@ -226,7 +222,8 @@ public static class RecordedPage
         // Slice 5b: the page's frames, written as the plan in "Build plan
         // for 5b" says, and a note for each.
         var inPlace = new List<InPlaceFrameData>();
-        var written = WriteFrames(frames ?? [], tree, servedAtRecordedAddress ? url : null, fontAddress, notes, inPlace, 1);
+        var topPlace = new FramePlace("", Origin(url, null, null), frameNanoseconds, recordingNanoseconds);
+        var written = WriteFrames(frames ?? [], tree, servedAtRecordedAddress ? url : null, fontAddress, notes, inPlace, 1, topPlace);
         var evidence = RecordedEvidence.Create(
             state,
             url,
@@ -252,6 +249,56 @@ public static class RecordedPage
         };
     }
 
+    // What the evidence of any document notes of its recorded state.
+    private static List<string> StateNotes(BrowserDocumentState state)
+    {
+        var notes = new List<string>();
+        if (state.DomCompleteness is not BrowserStateCompleteness.Complete)
+        {
+            notes.Add($"The recorded DOM is {BrowserStateSnapshot.Name(state.DomCompleteness)} at the frame, so nodes may be missing.");
+        }
+        var cut = state.Dom!.Nodes.Values.Count(node => node.Data == DomTreeRebuilder.Cut || node.Attributes.ContainsValue(DomTreeRebuilder.Cut));
+        if (cut > 0)
+        {
+            notes.Add($"{cut} nodes have an attribute value or character data cut in the recording; those values are not built.");
+        }
+        return notes;
+    }
+
+    // Slice 5c: where a document's frames are: its key, its origin, and
+    // the times its evidence is read at.
+    private sealed record FramePlace(string Key, string? Origin, long FrameNanoseconds, long RecordingNanoseconds);
+
+    /// <summary>
+    /// The origin of a document at an address, as the panel's Frames table
+    /// gives it (slice 5c): read from the address for an http or https
+    /// address; its parent's for an about:blank or about:srcdoc document;
+    /// and opaque when its owner is sandboxed without allow-same-origin.
+    /// Null when it cannot be read from the address. The origin is read
+    /// from the recorded address; the recording does not hold it.
+    /// </summary>
+    public static string? Origin(string? url, string? parentOrigin, string? sandbox)
+    {
+        if (sandbox is not null &&
+            !sandbox.Split([' ', '\t', '\n', '\r', '\f'], StringSplitOptions.RemoveEmptyEntries)
+                .Any(item => item.Equals("allow-same-origin", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "opaque";
+        }
+        if (url is null)
+        {
+            return null;
+        }
+        var withoutFragment = url.IndexOf('#') is var hash and >= 0 ? url[..hash] : url;
+        if (withoutFragment is "about:blank" or "about:srcdoc")
+        {
+            return parentOrigin;
+        }
+        return RecreationServer.IsServableAddress(url) && Uri.TryCreate(url, UriKind.Absolute, out var address)
+            ? address.GetLeftPart(UriPartial.Authority).ToLowerInvariant()
+            : null;
+    }
+
     // Slice 5b: the frames of a document, each written as the way it is
     // built: served at its recorded address with a page of its own, built in
     // place by the parent's builder, whose tree goes into the parent's data,
@@ -267,17 +314,24 @@ public static class RecordedPage
         string fontAddress,
         List<string> notes,
         List<InPlaceFrameData> inPlace,
-        int depth)
+        int depth,
+        FramePlace parent)
     {
         var result = new List<RecreationFrame>();
-        foreach (var frame in frames)
+        for (var index = 0; index < frames.Count; index++)
         {
+            var frame = frames[index];
+            var key = parent.Key + "/" + index.ToString(CultureInfo.InvariantCulture);
             parentTree.Nodes.TryGetValue(frame.OwnerNodeId, out var owner);
             var element = owner?.NodeName?.ToLowerInvariant() ?? "unknown";
             var path = owner is null ? null : RecordedPaths.Of(parentTree, frame.OwnerNodeId);
             string? Attribute(string name) => owner is not null && owner.Attributes.TryGetValue(name, out var value) ? value : null;
             var url = frame.Url ?? (frame.DocumentKey is not null ? "about:blank" : null);
             var way = Way(frame, element, url, baseUrl, path, Attribute);
+            var withoutFragment = url is not null && url.IndexOf('#') is var hash and >= 0 ? url[..hash] : url;
+            var inherited = withoutFragment is "about:blank" or "about:srcdoc";
+            var origin = frame.DocumentKey is null ? null : Origin(url, parent.Origin, Attribute("sandbox"));
+            var place = new FramePlace(key, origin, parent.FrameNanoseconds, frame.RecordingNanoseconds ?? parent.RecordingNanoseconds);
             var name = $"The frame of the {element} element {frame.OwnerNodeId.ToString(CultureInfo.InvariantCulture)} at {path?.Display ?? "a node with no path"}, at depth {depth.ToString(CultureInfo.InvariantCulture)}";
             var chosen = frame.DocumentKey is null
                 ? "No document of its frame was recorded by the frame's composition."
@@ -300,10 +354,10 @@ public static class RecordedPage
                     var resources = frame.Resources ?? RecordedPageResources.None;
                     var nonce = RecreationServer.NewToken();
                     var childInPlace = new List<InPlaceFrameData>();
-                    children = WriteFrames(frame.Children, tree, url, fontAddress, notes, childInPlace, depth + 1);
+                    children = WriteFrames(frame.Children, tree, url, fontAddress, notes, childInPlace, depth + 1, place);
                     var compositor = resources.CompositorValues ?? RecordedCompositorValues.None;
                     var markup = Markup(
-                        Tree(state, resources.Faces, fontAddress, null, compositor, resources.StyleSheets, resources.StyleSheetText, childInPlace),
+                        Tree(state, resources.Faces, fontAddress, null, compositor, resources.StyleSheets, resources.StyleSheetText, childInPlace, key),
                         DocumentTypeName(tree, documentId),
                         nonce);
                     written = new RecreationFrame(frame.OwnerNodeId, path, element, "served", url, children)
@@ -324,7 +378,7 @@ public static class RecordedPage
                     var state = frame.State!;
                     var resources = frame.Resources ?? RecordedPageResources.None;
                     var childInPlace = new List<InPlaceFrameData>();
-                    children = WriteFrames(frame.Children, state.Dom!, baseUrl, fontAddress, notes, childInPlace, depth + 1);
+                    children = WriteFrames(frame.Children, state.Dom!, baseUrl, fontAddress, notes, childInPlace, depth + 1, place);
                     var compositor = resources.CompositorValues ?? RecordedCompositorValues.None;
                     inPlace.Add(new InPlaceFrameData(
                         frame.OwnerNodeId,
@@ -343,17 +397,57 @@ public static class RecordedPage
                     break;
                 }
                 default:
-                    frame.Resources?.Dispose();
+                {
+                    // Slice 5c: a frame not built keeps its recorded
+                    // evidence, and its resources while its scripts are
+                    // recorded, so that their text can be shown. Its frames
+                    // are not listed, as in 5b.
                     RecordedFrame.DisposeAll(frame.Children);
+                    var keep = frame.State?.Dom is not null && frame.Resources is { Scripts.Recorded: true };
+                    if (!keep)
+                    {
+                        frame.Resources?.Dispose();
+                    }
                     written = new RecreationFrame(frame.OwnerNodeId, path, element, "not-built", url, [])
                     {
+                        Resources = keep ? frame.Resources : null,
                         Reason = way.Reason,
                         DocumentKey = frame.DocumentKey,
                         SameProcessAsParent = frame.SameProcessAsParent,
                     };
                     notes.Add($"{name}: {chosen} It is not built: {way.Reason}.");
                     break;
+                }
             }
+            // Slice 5c: the frame's own evidence, from its own state and
+            // resources, whether it is built or not; and what the Frames
+            // table gives of it.
+            RecreationEvidence? evidence = null;
+            if (frame.State?.Dom is not null)
+            {
+                var frameNotes = StateNotes(frame.State);
+                frameNotes.Add(notes[^1]);
+                frameNotes.Add("Paths in this document are written as each owner's path from the top document, each followed by /#document, then the path in this document.");
+                evidence = RecordedEvidence.Create(
+                    frame.State,
+                    url,
+                    place.FrameNanoseconds,
+                    place.RecordingNanoseconds,
+                    frame.Basis,
+                    new RecreationFidelity("not-checked", "The recreation is not yet compared with the recording.", []),
+                    frameNotes,
+                    frame.Resources?.Animations ?? RecordedAnimations.None,
+                    frame.Resources?.Scripts ?? RecordedScripts.None);
+            }
+            written = written with
+            {
+                Key = key,
+                Evidence = evidence,
+                Choice = frame.DocumentKey is null ? null : frame.Choice,
+                Basis = frame.DocumentKey is null ? null : frame.Basis,
+                Origin = origin,
+                OriginInherited = frame.DocumentKey is not null && inherited && origin is not null && origin != "opaque",
+            };
             result.Add(written);
         }
         return result;
@@ -652,7 +746,8 @@ public static class RecordedPage
         RecordedCompositorValues? compositorValues = null,
         RecordedStyleSheets? styleSheets = null,
         Func<string, byte[]?>? styleSheetText = null,
-        IReadOnlyList<InPlaceFrameData>? frames = null)
+        IReadOnlyList<InPlaceFrameData>? frames = null,
+        string? frameKey = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var documentId = DocumentNodeId(tree);
@@ -668,6 +763,12 @@ public static class RecordedPage
         }))
         {
             writer.WriteStartObject();
+            // Slice 5c: a served frame's key, which the panel checks before
+            // it selects a node in the frame.
+            if (frameKey is not null)
+            {
+                writer.WriteString("frameKey", frameKey);
+            }
             writer.WritePropertyName("document");
             WriteNode(writer, tree, state.Layout, withoutLayoutObject, compositor, paintWorklet, documentId, documentId, manualSlots, manual: false);
 

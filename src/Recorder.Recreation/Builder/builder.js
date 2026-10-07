@@ -12,6 +12,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Stage 3: the times, from the page's time origin, at which the builder
   // started and finished each part of its work, read by the evidence panel.
   const times = { builderStarted: performance.now() };
+  // Slice 5c: when each frame built in place, at any depth, was started and
+  // built, on this document's clock, for the build report.
+  const inPlaceTimes = [];
   const block = document.getElementById("recorder-recreation-tree");
   const data = JSON.parse(block.textContent);
   times.treeRead = performance.now();
@@ -504,8 +507,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         continue;
       }
       const frameNotes = [];
+      const frameTime = { ownerNodeId: frame.ownerNodeId, started: performance.now() };
+      inPlaceTimes.push(frameTime);
       try {
         await build(frameDocument, frameWindow, frame.tree, frameNotes, {});
+        frameTime.built = performance.now();
       } catch (error) {
         note(frame.ownerNodeId, "frame", `its tree was not built: ${error.message}`);
       }
@@ -586,14 +592,27 @@ document.addEventListener("DOMContentLoaded", async () => {
   await build(document, window, data, notes, times);
   times.builderFinished = performance.now();
   // Read by the recorder over its protocol connection, and by the panel.
+  // Read by the panel; the frame key is the recorder's for a served frame,
+  // and empty for the top document (slice 5c).
+  const frameKey = typeof data.frameKey === "string" ? data.frameKey : "";
   Object.defineProperty(window, "__recorderRecreation", {
-    value: Object.freeze({ built: true, notes: Object.freeze(notes), times }),
+    value: Object.freeze({ built: true, notes: Object.freeze(notes), times, frameKey }),
   });
   // The first frame after the build: the next animation frame's callback
   // runs before that frame is painted, and a task posted from it runs after.
   requestAnimationFrame(() => {
     setTimeout(() => {
       times.firstPaint = performance.now();
+      // Slice 5c: the build report, through the recorder's binding, when
+      // the recorder added it.
+      if (typeof window.__a11yRecorderBuilt === "function") {
+        window.__a11yRecorderBuilt(JSON.stringify({
+          frameKey,
+          timeOrigin: performance.timeOrigin,
+          times,
+          frames: inPlaceTimes,
+        }));
+      }
     }, 0);
   });
 }, { once: true });

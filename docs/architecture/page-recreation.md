@@ -8166,9 +8166,9 @@ step and the time the frames built in place were built are measured. The
 frame-reading cost, most of it opening a resource reader for each frame,
 is not yet assessed against larger pages.
 
-#### Build plan for 5c (proposed, not built)
+#### Build plan for 5c (agreed 2026-10-07)
 
-Proposed 2026-10-07, from the agreed step 5c above, the settled scope
+Proposed and agreed 2026-10-07, from the agreed step 5c above, the settled scope
 (each frame's own timers, listeners, sheets, animations, scripts, and
 notes, for the document chosen in the panel), and the time for each frame
 agreed after the 5b result.
@@ -8294,6 +8294,91 @@ Open questions:
   recording; without it, it is tested in the sandbox only.
 - The times compare documents through the wall clock, as above, and say
   so; no other clock is available to page script.
+
+Settled with the agreement: the case of two cross-site frames with one
+address is tested in the sandbox only for now, and the fixture is not
+extended.
+
+#### 5c as built (2026-10-07, not yet tested on the target machine)
+
+Built as the plan above says, with these details:
+
+- `RecordedPage.Content` gives each frame its key, as the server keys it,
+  its origin (`RecordedPage.Origin`), how its document was chosen and on
+  what basis, and, for each frame whose document has a DOM walk at the
+  frame, its own `RecreationEvidence`. A frame's evidence notes are its
+  state's notes, its own note from the top document's list, and how its
+  paths are written. A frame's timers are read against its own state's
+  cut. The frames of a frame not built are not listed, as in 5b.
+- The server lists the frames, with their evidence, whether or not the
+  page is served at its recorded address; they are built only when it
+  is. `frames.json` adds, for each frame, its parent's key, its owner's
+  path with its scopes, its document key, choice, basis, origin, the
+  address of its evidence, and its times. `evidence/<n>.json` is refused
+  for any place not written as the server writes it.
+- The recorder adds the binding `__a11yRecorderBuilt` and enables
+  `Runtime` in each page and frame session it attaches, before the
+  target runs. The builder calls it after its first paint after the
+  build, with its frame key (written into a served frame's data as
+  `frameKey`), `performance.timeOrigin`, its times, and the start and end
+  of each frame it built in place, at any depth. The server keeps a
+  report only of the top document or a served frame, and of the form the
+  builder writes.
+- A frame built in place is given the end of its build and its parent's
+  first paint, on its builder's clock, with its build's start in the
+  basis text. A srcdoc frame whose build did not finish has no built
+  time.
+- The panel: a "Document shown" list sets the per-document sections,
+  headed "Evidence of" the document, and a frame's "Show evidence" button
+  sets the list and moves focus to that heading. Paths in a frame's
+  evidence have Select only when every frame on the way is built; Copy
+  scopes gives the owners' scopes and the path's. The Frames table is
+  rebuilt only when what the recorder reports changes, and the control
+  that had focus keeps it.
+
+Found while building:
+
+- The 5a recording holds each frame's own scripts and sheets: the
+  scripts note's "Scripts of iframes ... are not recorded" was wrong, and
+  is corrected. But a script is recorded once in each renderer process.
+  V8 reports a top-level script to the debugger at each instantiation
+  (`v8/src/codegen/compiler.cc`, `Compiler::PostInstantiation`, lines 4646
+  to 4663), including one reused from its per-isolate compilation cache
+  (lines 4018 to 4027), and the recorder records only the first record of
+  each script ID in a process (`chromium/recorder_bridge/browser_bridge.cc`,
+  `ClaimScriptParsed`, lines 8019 to 8025). So in the 5a recording the
+  second frame at `child.html?name=twin` has no script, though it ran the
+  same one. The scripts note now says so. Recording a script once in each
+  document would change the protocol, and is not part of this slice.
+
+Sandbox results:
+
+- Unit tests (`RecreationFrameEvidenceTests`): each frame's own timers,
+  listeners, and scripts, in its evidence only, for a frame built or not;
+  origins; keys in the served pages' data; `frames.json`,
+  `evidence/<n>.json`, and refused places; a frame's script answered,
+  built or not, and a digest no document lists refused; times from build
+  reports, and eleven reports not of the builder's form ignored.
+- Integration tests with stock Chromium and `--site-per-process`: every
+  served frame and every frame built in place reported its times; the
+  panel's own Select expression, run in the main frame and in the first
+  frame target at an address, selected a node in a cross-site frame, in
+  that frame's own frame, in a same-origin frame, in a frame built in
+  place, in a srcdoc frame, and in the top document, and was refused in
+  the closed shadow root; of two cross-site frames at one address, one
+  was selected and the other refused for its key.
+- The 5a recording at 10 s, in stock Chromium: all eleven frames have
+  evidence; all eight served frames and both frames built in place
+  reported times (served frames' loads started 177 to 447 ms after the
+  top document's, and were painted 483 to 528 ms after it); nothing
+  reached ports 8765 or 8766. The panel, rendered from that recording's
+  answers with the DevTools API stubbed, listed the documents, showed
+  the nested frame's evidence with its paths through both owners, and
+  asked for the nested frame's node in the cross-site frame, then in the
+  nested frame, by their addresses.
+- The full suite fails the same 61 tests as the 5b commit does (the
+  sandbox environment, and stock Chromium's lack of the recreation
+  mode). The Python tests pass.
 
 ## Slice 3b implementation
 

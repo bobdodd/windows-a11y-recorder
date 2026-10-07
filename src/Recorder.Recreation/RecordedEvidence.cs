@@ -252,7 +252,8 @@ public static class RecordedEvidence
         "Scripts are read from the recording's script-parsed records, made by V8 when it instantiates a script, or fails to compile one, in the document's main thread, once per script. A script is listed when its record is at or before the recording time.",
         "The text is the source V8 compiled, after decoding, shown as text and never run. It is not the bytes the server sent, and not the original of a minified or transpiled script; a source map is named, not recorded.",
         "Compiled is not the same as ran: a script's top level runs after it is compiled, but a function in it may never have been called. A script that failed to compile did not run.",
-        "Scripts compiled while a DevTools protocol command ran, such as expressions typed in the Console, and scripts of DevTools' own world are not recorded. Scripts of iframes, workers, and WebAssembly are not recorded.",
+        "Scripts compiled while a DevTools protocol command ran, such as expressions typed in the Console, and scripts of DevTools' own world are not recorded. Scripts of workers and WebAssembly are not recorded.",
+        "Each frame's scripts are recorded in its own document, and are listed in that document's evidence. A script is recorded once in each renderer process, in the first document that compiled it: V8 can reuse a script it compiled for the same source and address from its cache, and the recorder records each script ID once, so a second document of the process that runs it has no record of its own.",
     ];
 
     private static RecordedScript Script(RecordedScriptState item, RecordedScripts scripts, ScriptDocumentState state, DomDocumentTree tree)

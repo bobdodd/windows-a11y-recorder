@@ -78,6 +78,12 @@ public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
     private readonly Dictionary<string, FrameEntry> _frames = new(StringComparer.Ordinal);
     private readonly HashSet<string> _askedFor = new(StringComparer.Ordinal);
     private readonly HashSet<string> _outOfProcess = new(StringComparer.Ordinal);
+    // Slice 5c: each frame's evidence, by its place among the frames in
+    // the order they are added, and each served document's build report,
+    // by its key.
+    private readonly List<string> _frameOrder = [];
+    private readonly Dictionary<string, byte[]> _frameEvidence = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, BuildReport> _built = new(StringComparer.Ordinal);
 
     private sealed record FrameEntry(
         string Key,
@@ -104,15 +110,14 @@ public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
             : _fontAddress is { } fonts
                 ? RecordedPageContentSecurityPolicy(nonce, fonts)
                 : RecordedPageContentSecurityPolicy(nonce);
+        // Slice 5c: the frames are listed, with their evidence, whether or
+        // not the page is served at its recorded address; they are built
+        // only when it is.
         if (_documentUrl is not null)
         {
             _policy = WithFrameSources(_policy, content.Frames);
-            AddFrames("", content.Frames);
         }
-        else
-        {
-            DisposeFrames(content.Frames);
-        }
+        AddFrames("", content.Frames);
     }
 
     // Slice 5b: a document's frame-src lists the exact address of each of
@@ -175,6 +180,11 @@ public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
                 policy = WithFrameSources(RecordedPageContentSecurityPolicy(nonce, _fontAddress!), frame.Children);
             }
             _frames[key] = new FrameEntry(key, parentKey, frame, page, policy, frame.Resources ?? Recorder.Session.RecordedPageResources.None);
+            _frameOrder.Add(key);
+            if (frame.Evidence is { } evidence)
+            {
+                _frameEvidence[key] = JsonSerializer.SerializeToUtf8Bytes(evidence, EvidenceJson);
+            }
             AddFrames(key, frame.Children);
         }
     }
@@ -231,21 +241,168 @@ public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
         {
             lock (_askedFor)
             {
-                return [.. _frames.Values
-                    .OrderBy(entry => entry.Key, StringComparer.Ordinal)
-                    .Select(entry => new RecreationFrameStatus(
-                        entry.Key,
-                        entry.Frame.OwnerNodeId,
-                        entry.Frame.OwnerPath?.Display,
-                        entry.Frame.Element,
-                        entry.Frame.Way,
-                        entry.Frame.DocumentUrl,
-                        entry.Frame.Reason,
-                        entry.Frame.SameProcessAsParent,
-                        _askedFor.Contains(entry.Key),
-                        _outOfProcess.Contains(entry.Key)))];
+                return [.. _frameOrder
+                    .Select((key, place) => (Entry: _frames[key], Place: place))
+                    .OrderBy(item => item.Entry.Key, StringComparer.Ordinal)
+                    .Select(item => new RecreationFrameStatus(
+                        item.Entry.Key,
+                        item.Entry.Frame.OwnerNodeId,
+                        item.Entry.Frame.OwnerPath?.Display,
+                        item.Entry.Frame.Element,
+                        item.Entry.Frame.Way,
+                        item.Entry.Frame.DocumentUrl,
+                        item.Entry.Frame.Reason,
+                        item.Entry.Frame.SameProcessAsParent,
+                        _askedFor.Contains(item.Entry.Key),
+                        _outOfProcess.Contains(item.Entry.Key))
+                    {
+                        ParentKey = item.Entry.ParentKey,
+                        Owner = item.Entry.Frame.OwnerPath,
+                        DocumentKey = item.Entry.Frame.DocumentKey,
+                        Choice = item.Entry.Frame.Choice,
+                        Basis = item.Entry.Frame.Basis,
+                        Origin = item.Entry.Frame.Origin,
+                        OriginInherited = item.Entry.Frame.OriginInherited,
+                        EvidenceAddress = _frameEvidence.ContainsKey(item.Entry.Key)
+                            ? $"evidence/{item.Place.ToString(CultureInfo.InvariantCulture)}.json"
+                            : null,
+                        Times = TimesOf(item.Entry),
+                    })];
             }
         }
+    }
+
+    // Slice 5c: what a document's builder reports when its first frame
+    // after the build is painted: its key, its performance.timeOrigin, its
+    // builder's times on its own clock, and when each frame it built in
+    // place was started and built.
+    private sealed record BuildReport(
+        double TimeOrigin,
+        IReadOnlyDictionary<string, double> Times,
+        IReadOnlyList<(long OwnerNodeId, double Started, double? Built)> InPlace);
+
+    /// <summary>
+    /// Keeps a document's build report, sent by its builder through the
+    /// recorder's binding (slice 5c). A report not of the form the builder
+    /// writes, or of a key that is not the top document's or a served
+    /// frame's, is ignored, and false is returned.
+    /// </summary>
+    public bool DocumentBuilt(string payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        string key;
+        BuildReport report;
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("frameKey", out var keyValue) || keyValue.ValueKind != JsonValueKind.String ||
+                !root.TryGetProperty("timeOrigin", out var origin) || !Number(origin, out var timeOrigin) ||
+                !root.TryGetProperty("times", out var times) || times.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("frames", out var frames) || frames.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+            key = keyValue.GetString()!;
+            if (key.Length > 0 && !(_frames.TryGetValue(key, out var entry) && entry.Frame.Way == "served"))
+            {
+                return false;
+            }
+            var values = new Dictionary<string, double>(StringComparer.Ordinal);
+            foreach (var property in times.EnumerateObject())
+            {
+                if (Number(property.Value, out var value))
+                {
+                    values[property.Name] = value;
+                }
+            }
+            var inPlace = new List<(long, double, double?)>();
+            foreach (var item in frames.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("ownerNodeId", out var owner) || owner.ValueKind != JsonValueKind.Number || !owner.TryGetInt64(out var ownerNodeId) ||
+                    !item.TryGetProperty("started", out var started) || !Number(started, out var startedValue))
+                {
+                    return false;
+                }
+                double? built = item.TryGetProperty("built", out var builtValue) && Number(builtValue, out var builtNumber)
+                    ? builtNumber
+                    : null;
+                inPlace.Add((ownerNodeId, startedValue, built));
+            }
+            report = new BuildReport(timeOrigin, values, inPlace);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        lock (_askedFor)
+        {
+            _built[key] = report;
+        }
+        return true;
+    }
+
+    private static bool Number(JsonElement value, out double number)
+    {
+        number = 0;
+        return value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out number) && double.IsFinite(number);
+    }
+
+    // The times of a frame, from the build reports, in milliseconds from
+    // the top document's time origin. Called under the lock.
+    private RecreationFrameTimes? TimesOf(FrameEntry entry)
+    {
+        if (!_built.TryGetValue("", out var top))
+        {
+            return null;
+        }
+        double? Get(BuildReport report, string name) => report.Times.TryGetValue(name, out var value) ? value : null;
+        if (entry.Frame.Way == "served")
+        {
+            if (!_built.TryGetValue(entry.Key, out var own))
+            {
+                return null;
+            }
+            var start = own.TimeOrigin - top.TimeOrigin;
+            return new RecreationFrameTimes(
+                start,
+                Get(own, "builderFinished") + start,
+                Get(own, "firstPaint") + start,
+                Get(own, "firstPaint"),
+                "its own time origin, compared with the top document's");
+        }
+        if (entry.Frame.Way is "in-place" or "srcdoc")
+        {
+            // The served document, or the top document, whose builder built
+            // this frame: the nearest ancestor not built in place.
+            var builder = entry.ParentKey;
+            while (builder.Length > 0 && _frames[builder].Frame.Way != "served")
+            {
+                builder = _frames[builder].ParentKey;
+            }
+            if (!_built.TryGetValue(builder, out var parent))
+            {
+                return null;
+            }
+            var offset = parent.TimeOrigin - top.TimeOrigin;
+            foreach (var item in parent.InPlace)
+            {
+                if (item.OwnerNodeId == entry.Frame.OwnerNodeId)
+                {
+                    return new RecreationFrameTimes(
+                        null,
+                        item.Built + offset,
+                        Get(parent, "firstPaint") + offset,
+                        item.Built - item.Started,
+                        builder.Length == 0
+                            ? "built in place by the top document's builder, on its clock, from its start at " + item.Started.ToString("0.0", CultureInfo.InvariantCulture) + " ms; painted with it"
+                            : $"built in place by the builder of frame {builder}, on its clock, from its start at {(item.Started + offset).ToString("0.0", CultureInfo.InvariantCulture)} ms; painted with it");
+                }
+            }
+        }
+        return null;
     }
 
     public string Token { get; }
@@ -553,6 +710,11 @@ public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
                 response.ContentType = "application/json; charset=utf-8";
                 body = JsonSerializer.SerializeToUtf8Bytes(FrameStatuses, EvidenceJson);
                 break;
+            // Slice 5c: a frame's own evidence, by its place in the list.
+            case var frameEvidence when FrameEvidence(frameEvidence) is { } evidence:
+                response.ContentType = "application/json; charset=utf-8";
+                body = evidence;
+                break;
             // Slice 4h: a listed script's recorded text, for the evidence
             // panel's viewer, as plain text, which is never run.
             case var script when script.StartsWith(ScriptResourcePrefix, StringComparison.Ordinal) &&
@@ -578,13 +740,43 @@ public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
     // The UTF-8 text of a script of the document's list, by its digest.
     private byte[]? ScriptText(string digest)
     {
-        if (digest.Length != 64 || !digest.All(Uri.IsHexDigit) ||
-            !_scripts.Scripts.Any(item => item.Digest == digest) ||
-            _scripts.Text(digest) is not { } text)
+        if (digest.Length != 64 || !digest.All(Uri.IsHexDigit))
         {
             return null;
         }
-        return Encoding.UTF8.GetBytes(text);
+        // Slice 5c: a script listed in the top document's evidence or in a
+        // frame's, read through that document's resources.
+        var sources = new[] { _scripts }.Concat(_frames.Values
+            .Where(entry => entry.Frame.Evidence is not null)
+            .Select(entry => entry.Resources.Scripts));
+        foreach (var scripts in sources)
+        {
+            if (scripts.Scripts.Any(item => item.Digest == digest) && scripts.Text(digest) is { } text)
+            {
+                return Encoding.UTF8.GetBytes(text);
+            }
+        }
+        return null;
+    }
+
+    // "evidence/<n>.json": the evidence of the n-th frame added, when it
+    // has evidence.
+    private byte[]? FrameEvidence(string resource)
+    {
+        const string prefix = "evidence/";
+        const string suffix = ".json";
+        if (!resource.StartsWith(prefix, StringComparison.Ordinal) || !resource.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+        var number = resource[prefix.Length..^suffix.Length];
+        if (number.Length == 0 || number.Length > 4 || !number.All(char.IsAsciiDigit) ||
+            !int.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out var place) ||
+            place >= _frameOrder.Count || number != place.ToString(CultureInfo.InvariantCulture))
+        {
+            return null;
+        }
+        return _frameEvidence.TryGetValue(_frameOrder[place], out var evidence) ? evidence : null;
     }
 
     // The path is /<token>/<resource>. The token is compared in constant time.

@@ -71,6 +71,7 @@ internal static class RecordedFrames
                 frame.Omitted)
             {
                 Resources = resources,
+                RecordingNanoseconds = frame.State?.Basis.CutTime,
             };
         }
         catch

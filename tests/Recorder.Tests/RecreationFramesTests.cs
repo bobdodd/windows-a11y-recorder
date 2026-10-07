@@ -31,7 +31,7 @@ public sealed class RecreationFramesTests : IDisposable
         }
     }
 
-    private static readonly byte[] Png = Convert.FromBase64String(
+    internal static readonly byte[] Png = Convert.FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
     private static IReadOnlyDictionary<string, IReadOnlyList<long>> Commits(params (string Token, long Time)[] commits) =>
@@ -106,7 +106,7 @@ public sealed class RecreationFramesTests : IDisposable
     }
 
     // A tree from (id, parent, type, name, data, attributes) rows.
-    private static DomDocumentTree Tree(params (long Id, long? Parent, string Type, string Name, string? Data, (string, string)[]? Attributes)[] rows)
+    internal static DomDocumentTree Tree(params (long Id, long? Parent, string Type, string Name, string? Data, (string, string)[]? Attributes)[] rows)
     {
         var tree = new DomDocumentTree();
         foreach (var (id, parent, type, name, data, attributes) in rows)
@@ -141,10 +141,10 @@ public sealed class RecreationFramesTests : IDisposable
         return tree;
     }
 
-    private static BrowserDocumentState State(string key, DomDocumentTree tree) =>
+    internal static BrowserDocumentState State(string key, DomDocumentTree tree) =>
         new(key) { Dom = tree, DomCompleteness = BrowserStateCompleteness.Complete };
 
-    private static RecordedPageResources Images(params (string Url, byte[] Bytes)[] images) =>
+    internal static RecordedPageResources Images(params (string Url, byte[] Bytes)[] images) =>
         new(
             [],
             images.ToDictionary(item => item.Url, item => new RecordedImage(item.Url, item.Url, 200, "image/png", Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(item.Bytes)))),
@@ -158,7 +158,7 @@ public sealed class RecreationFramesTests : IDisposable
     // frame holding a frame of its own, a frame whose owner asks for another
     // address than its document's, a frame built in place, a srcdoc frame,
     // an object, and a frame sandboxed without allow-scripts.
-    private static (BrowserDocumentState Top, string TopUrl, IReadOnlyList<RecordedFrame> Frames) Page(int portA, int portB)
+    internal static (BrowserDocumentState Top, string TopUrl, IReadOnlyList<RecordedFrame> Frames) Page(int portA, int portB)
     {
         var a = $"http://127.0.0.1:{portA}";
         var b = $"http://localhost:{portB}";
@@ -339,7 +339,7 @@ public sealed class RecreationFramesTests : IDisposable
 
     // Counts the connections made to a loopback port: any is a request that
     // reached the network.
-    private sealed class Listener : IDisposable
+    internal sealed class Listener : IDisposable
     {
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         private int _connections;

@@ -74,6 +74,18 @@ public sealed record RecreationFrame(
     // recorded in its parent's renderer process.
     public string? DocumentKey { get; init; }
     public bool? SameProcessAsParent { get; init; }
+
+    // Slice 5c: the frame's key, as the server keys it; its own evidence,
+    // for a frame whose document has a DOM walk at the frame, built or not;
+    // how its document was chosen and on what basis; and its origin, read
+    // from its address, inherited from its parent for an about:blank or
+    // about:srcdoc document, or "opaque".
+    public string Key { get; init; } = "";
+    public RecreationEvidence? Evidence { get; init; }
+    public string? Choice { get; init; }
+    public string? Basis { get; init; }
+    public string? Origin { get; init; }
+    public bool OriginInherited { get; init; }
 }
 
 // What the evidence panel shows of a frame while the recreation is open
@@ -91,7 +103,34 @@ public sealed record RecreationFrameStatus(
     string? Reason,
     bool? SameProcessAsParentWhenRecorded,
     bool AskedFor,
-    bool OutOfProcess);
+    bool OutOfProcess)
+{
+    // Slice 5c: the parent's key; the owner's path with its scopes, for
+    // Select; the document chosen, how, and on what basis; its origin;
+    // the address of its own evidence; and its times.
+    public string ParentKey { get; init; } = "";
+    public NodePath? Owner { get; init; }
+    public string? DocumentKey { get; init; }
+    public string? Choice { get; init; }
+    public string? Basis { get; init; }
+    public string? Origin { get; init; }
+    public bool OriginInherited { get; init; }
+    public string? EvidenceAddress { get; init; }
+    public RecreationFrameTimes? Times { get; init; }
+}
+
+// Slice 5c: a frame's times, in milliseconds from the top document's time
+// origin: when its load started, for a served frame; when its builder
+// finished, or its build in place did; when its first frame after the
+// build was painted; how long it took, on one clock: a served frame from
+// its own load start to that paint, a frame built in place from its build's
+// start to its end; and on what basis.
+public sealed record RecreationFrameTimes(
+    double? LoadStarted,
+    double? Built,
+    double? FirstPaint,
+    double? Took,
+    string Basis);
 
 // What the recreation control asks of the recorder (slice 5b): the answer
 // to a request of a frame, by the frame's key, the top document's being
@@ -109,6 +148,10 @@ public interface IRecreationAnswers
     bool FrameAskedFor(string key);
 
     void FrameOutOfProcess(string key);
+
+    // Slice 5c: a document's build report, sent by its builder through the
+    // recorder's binding; false when it is ignored.
+    bool DocumentBuilt(string payload);
 }
 
 // The recorder's answer to a request of the recreation's tab: a status, the
