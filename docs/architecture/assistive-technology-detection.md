@@ -150,9 +150,16 @@ Each signal is listed with what it establishes, its source, and its limits.
   another process, and Magnifier's lens and docked views are not the
   full-screen magnifier.
 - ZoomText and SuperNova are found by their modules, as above.
-- Establishes, if a test confirms it: the zoom level and view over time,
-  which the analysis needs to relate the screen capture to what the
-  participant saw.
+- Establishes: the zoom level and view over time, which the analysis
+  needs to relate the screen capture to what the participant saw.
+- Tested 2026-10-07 with Windows Magnifier
+  ([Magnifier capture validation](../validation/magnifier-capture-2026-10-07.md)):
+  read from another process, the transform reported level 2 and its
+  offset in the full screen view and level 1 in the lens and docked
+  views. The recorder's desktop frames show the full screen view
+  unmagnified and the lens and docked views as seen, so without the
+  transform a recording does not show what a participant using full
+  screen magnification saw. A third-party magnifier is not tested.
 
 ### Audio by process
 
@@ -284,8 +291,10 @@ changes), each as an inference with its basis.
 - How often modules of watched processes are listed, and the cost.
 - Whether Chromium's detection and accessibility mode are recorded over
   the bridge, at a protocol change.
-- Whether `MagGetFullscreenTransform` reads another process's
-  magnification, and how Magnifier's lens and docked views are recorded.
+- How the full screen transform is recorded over time, and whether the
+  player shows the magnified part of each frame; Windows Magnifier's
+  transform is readable from another process (tested 2026-10-07), and the
+  lens and docked views are already in the desktop frames.
 - The known list's contents, format, and where it is kept and versioned.
 
 ## Required tests

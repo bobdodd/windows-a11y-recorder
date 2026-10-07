@@ -236,6 +236,8 @@ Support:
 
 Full-display capture should be the default for accessibility testing because it can include browser chrome, screen-reader dialogs, task switching, magnification, and interactions outside the tested tab. Selected-window capture should remain available for privacy-sensitive sessions.
 
+Tested 2026-10-07: Windows Graphics Capture shows Windows Magnifier's lens and docked views but not its full screen view, which it captures unmagnified ([Magnifier capture validation](validation/magnifier-capture-2026-10-07.md)).
+
 #### Requirement: a frame rate parameter (recorded 2026-10-05, not built)
 
 The recorder needs a frame rate parameter that the tester sets for each recording. The default stays at 5 frames per second, which is enough for regular work. It is too slow for pages, applications and games with a lot of animation: in a recording of the animation fixture, a 0.4-second smooth scroll was caught in only two captured frames.
