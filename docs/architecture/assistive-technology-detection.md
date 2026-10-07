@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed 2026-10-07, approach agreed 2026-10-07, not built. This is the first design of
+Proposed 2026-10-07, approach agreed 2026-10-07, not built. Listed in
+[outstanding work](analysis-outstanding-work.md). This is the first design of
 the analysis and inference work that follows release 1.0.0. It records what
 Windows and Chromium make observable about the assistive technology running
 during a recording, what each signal establishes, what cannot be observed,

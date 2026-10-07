@@ -3,7 +3,7 @@
 ## Status
 
 Proposed 2026-10-07, agreed 2026-10-07 with the decisions under
-"Decisions", not built. It accompanies
+"Decisions", not built. Listed in [outstanding work](analysis-outstanding-work.md). It accompanies
 [assistive technology detection](assistive-technology-detection.md), whose
 approach was agreed on 2026-10-07, and takes over that design's Windows
 settings, which are recorded here.
