@@ -7782,6 +7782,9 @@ are those of that checkout.
 - A path into a frame is written as the owner's path, then
   `/#document`, then the path in the child, and "Select in Elements"
   selects the node in the child's document.
+- A time for each frame in the Frames table, agreed with the owner on
+  2026-10-07 after the 5b result: how long its document took to open in
+  the recreation. How it is measured is to be designed with 5c.
 
 #### Required tests
 
