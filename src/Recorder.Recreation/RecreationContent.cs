@@ -30,6 +30,85 @@ public sealed record RecreationContent(string Html, RecreationEvidence Evidence,
     public IDisposable? ScriptsOwner { get; init; }
 
     public string? FontAddress { get; init; }
+
+    // Slice 5b: the frames of the page, each with how it is built. Served
+    // frames are answered by the recorder at their recorded addresses.
+    public IReadOnlyList<RecreationFrame> Frames { get; init; } = [];
+}
+
+// A frame of a recreated page (slice 5b): its owner element, by recorded
+// node ID and path in its parent document, and how it is built. Way is
+// "served", for a document answered at its recorded http or https address
+// with a page of its own; "in-place", for an about:blank document the
+// parent's builder builds in the frame's document; "srcdoc", for one the
+// parent's builder builds after the frame loads its recorded srcdoc
+// markup; or "not-built", with the reason. The parent's markup holds the
+// trees of the frames built in place, and a served frame's page holds the
+// trees of its own.
+public sealed record RecreationFrame(
+    long OwnerNodeId,
+    NodePath? OwnerPath,
+    string Element,
+    string Way,
+    string? DocumentUrl,
+    IReadOnlyList<RecreationFrame> Children)
+{
+    // For a served frame: the address its owner asks for, when it is an
+    // http or https address other than the document's own, which the
+    // recorder answers with a redirect to the document's address.
+    public string? OwnerAddress { get; init; }
+
+    // For a served frame: its page and the nonce of its builder.
+    public string? Html { get; init; }
+    public string? ScriptNonce { get; init; }
+
+    // For a served frame and a frame built in place: the recording's fonts,
+    // images, and style sheets for its document, which the recorder answers
+    // to the frame's requests. The server disposes them.
+    public Recorder.Session.RecordedPageResources? Resources { get; init; }
+
+    // Why the frame is not built, for a frame not built.
+    public string? Reason { get; init; }
+
+    // The recorded document chosen for the frame, and whether it was
+    // recorded in its parent's renderer process.
+    public string? DocumentKey { get; init; }
+    public bool? SameProcessAsParent { get; init; }
+}
+
+// What the evidence panel shows of a frame while the recreation is open
+// (slice 5b): its owner, how it is built, whether the recreation asked for
+// its document, and whether its document is in a renderer process of its
+// own in the recreation, which is known only once a frame target is
+// attached for it.
+public sealed record RecreationFrameStatus(
+    string Key,
+    long OwnerNodeId,
+    string? OwnerPath,
+    string Element,
+    string Way,
+    string? DocumentUrl,
+    string? Reason,
+    bool? SameProcessAsParentWhenRecorded,
+    bool AskedFor,
+    bool OutOfProcess);
+
+// What the recreation control asks of the recorder (slice 5b): the answer
+// to a request of a frame, by the frame's key, the top document's being
+// empty; the key of the frame whose owner has a path among a document's
+// frames; and what the recreation did with its frames, for the panel.
+public interface IRecreationAnswers
+{
+    RecreationAnswer? Answer(string url, string? resourceType, string frameKey);
+
+    string? ChildKey(string parentKey, NodePath ownerPath);
+
+    // Records that a frame's document was asked for, and answers whether
+    // the frame is built: a frame not built has its load refused, which is
+    // not a navigation the recreation blocked.
+    bool FrameAskedFor(string key);
+
+    void FrameOutOfProcess(string key);
 }
 
 // The recorder's answer to a request of the recreation's tab: a status, the

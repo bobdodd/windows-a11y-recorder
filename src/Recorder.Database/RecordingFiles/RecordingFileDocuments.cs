@@ -13,6 +13,28 @@ namespace Recorder.Database.RecordingFiles;
 public sealed record RecordedDocumentChoice(string Key, string Url, bool BrowserInterface, BrowserStateBasis Basis);
 
 /// <summary>
+/// A frame of a recorded document at a frame of the recording (slice 5b):
+/// the owner element that held it, the document chosen for it and why, that
+/// document's address and state at the frame, whether it was recorded in its
+/// parent's renderer process, and its own frames. A frame beyond the limits
+/// has no document and says why it was left out.
+/// </summary>
+/// <param name="Owner">The owner element, in its parent document's state.</param>
+/// <param name="Choice">The chosen document, or null when none was recorded by the frame's composition.</param>
+/// <param name="Url">The address of the navigation that committed the chosen document, or null when none did.</param>
+/// <param name="State">The chosen document's state at the frame.</param>
+/// <param name="SameProcessAsParent">True when the chosen document was recorded in its parent's renderer process; null when either is not known.</param>
+/// <param name="Omitted">Why the frame was left out, when it was.</param>
+public sealed record RecordedFrameAt(
+    FrameOwnerState Owner,
+    FrameDocumentChoice? Choice,
+    string? Url,
+    BrowserDocumentAt? State,
+    bool? SameProcessAsParent,
+    IReadOnlyList<RecordedFrameAt> Children,
+    string? Omitted);
+
+/// <summary>
 /// The browser documents of a recording file, for recreating a page at a
 /// frame. The documents offered are those committed by a navigation of a
 /// primary main frame at or before the frame, which the playback index
@@ -25,6 +47,9 @@ public sealed class RecordingFileDocuments
     private readonly RecordingFileReader _reader;
     private readonly PlaybackIndex _index;
     private readonly List<(long Time, string Token, string Url)> _navigations = [];
+    // Slice 5b: every navigation-completed record's time and address, by the
+    // document token of the document it committed, in any frame.
+    private readonly Dictionary<string, List<long>> _commits = new(StringComparer.Ordinal);
     private readonly string? _filePath;
     private RecordingFileBrowserState? _state;
     private IReadOnlyList<PopupRecord>? _popupRecords;
@@ -43,6 +68,17 @@ public sealed class RecordingFileDocuments
                 continue;
             }
             var payload = item.Payload;
+            if (Text(payload, "url") is { } committedUrl &&
+                payload.TryGetProperty("context", out var committedContext) &&
+                committedContext.ValueKind == JsonValueKind.Object &&
+                Text(committedContext, "documentToken") is { } committedToken)
+            {
+                if (!_commits.TryGetValue(committedToken, out var times))
+                {
+                    _commits[committedToken] = times = [];
+                }
+                times.Add(item.MonotonicNanoseconds);
+            }
             if (Text(payload, "frameType") != "primary-main-frame" ||
                 Text(payload, "url") is not { } url ||
                 !payload.TryGetProperty("context", out var context) ||
@@ -91,6 +127,145 @@ public sealed class RecordingFileDocuments
             .ThenByDescending(choice => choice.Basis.CutTime)
             .ThenBy(choice => choice.Key, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    /// <summary>The most frames a recreation is built with (slice 5b).</summary>
+    public const int MostFrames = 64;
+
+    /// <summary>The deepest frame a recreation is built with, the top document being at depth 0 (slice 5b).</summary>
+    public const int DeepestFrame = 8;
+
+    /// <summary>
+    /// The frames of a document at the frame (slice 5b), each with the
+    /// document it showed at the frame's composition, chosen as
+    /// <see cref="BrowserFrames.Choose"/> says, and that document's own
+    /// frames, to a depth of <see cref="DeepestFrame"/> and at most
+    /// <see cref="MostFrames"/> frames in all, in document order of their
+    /// owners at each level, breadth first. None for a recording before
+    /// protocol 0.55, or one whose index does not hold the frame documents.
+    /// </summary>
+    public IReadOnlyList<RecordedFrameAt> Frames(
+        string key,
+        BrowserDocumentState state,
+        long frameNanoseconds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(state);
+        if (_index.FrameDocuments.Count == 0 || state.Frames.Owners.Count == 0)
+        {
+            return [];
+        }
+        var composition = CompositionTime(frameNanoseconds);
+        var commits = _commits.ToDictionary(
+            item => item.Key,
+            item => (IReadOnlyList<long>)item.Value,
+            StringComparer.Ordinal);
+        var processes = _index.FrameDocuments.ToDictionary(item => item.DocumentKey, item => item.ProcessId, StringComparer.Ordinal);
+        var built = 0;
+        // Breadth first, so that the limit leaves out the deepest frames.
+        var level = new List<(string Key, BrowserDocumentState State, List<RecordedFrameAt> Into)>();
+        var top = new List<RecordedFrameAt>();
+        level.Add((key, state, top));
+        for (var depth = 1; level.Count > 0; depth++)
+        {
+            var next = new List<(string Key, BrowserDocumentState State, List<RecordedFrameAt> Into)>();
+            foreach (var (parentKey, parent, into) in level)
+            {
+                foreach (var owner in OwnersInOrder(parent))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (depth > DeepestFrame || built >= MostFrames)
+                    {
+                        into.Add(new RecordedFrameAt(owner, null, null, null, null, [],
+                            depth > DeepestFrame
+                                ? $"it is deeper than {DeepestFrame} frames"
+                                : $"the recreation is built with at most {MostFrames} frames"));
+                        continue;
+                    }
+                    built++;
+                    var choice = BrowserFrames.Choose(owner.FrameToken, composition, _index.FrameDocuments, commits);
+                    if (choice is null)
+                    {
+                        into.Add(new RecordedFrameAt(owner, null, null, null, null, [], null));
+                        continue;
+                    }
+                    var childKey = choice.Document.DocumentKey;
+                    var found = Document(childKey, frameNanoseconds, cancellationToken);
+                    var children = new List<RecordedFrameAt>();
+                    bool? sameProcess =
+                        processes.GetValueOrDefault(parentKey) is { } parentProcess && choice.Document.ProcessId is { } childProcess
+                            ? parentProcess == childProcess
+                            : null;
+                    into.Add(new RecordedFrameAt(owner, choice, CommittedUrl(childKey, composition), found, sameProcess, children, null));
+                    if (found?.State is { } childState)
+                    {
+                        next.Add((childKey, childState, children));
+                    }
+                }
+            }
+            level = next;
+        }
+        return top;
+    }
+
+    // The owners of a document in the document order of the owner elements
+    // in its recorded tree, then those not in the tree, by node ID.
+    private static IEnumerable<FrameOwnerState> OwnersInOrder(BrowserDocumentState state)
+    {
+        var order = new Dictionary<long, int>();
+        if (state.Dom is { } tree)
+        {
+            var root = tree.Nodes.Values.FirstOrDefault(node => node.NodeType == "document" && node.ParentId is null);
+            var stack = new Stack<long>();
+            if (root is not null)
+            {
+                stack.Push(root.Id);
+            }
+            while (stack.Count > 0)
+            {
+                var id = stack.Pop();
+                if (!tree.Nodes.TryGetValue(id, out var node))
+                {
+                    continue;
+                }
+                order[id] = order.Count;
+                for (var index = node.Children.Count - 1; index >= 0; index--)
+                {
+                    stack.Push(node.Children[index]);
+                }
+                if (node.ShadowRootId is { } shadow)
+                {
+                    stack.Push(shadow);
+                }
+            }
+        }
+        return state.Frames.Owners.Values
+            .OrderBy(owner => order.TryGetValue(owner.OwnerNodeId, out var position) ? position : int.MaxValue)
+            .ThenBy(owner => owner.OwnerNodeId);
+    }
+
+    // The address of the latest navigation that committed a document at or
+    // before a time, or of its first if none was by then.
+    private string? CommittedUrl(string documentKey, long time)
+    {
+        var token = documentKey.Split(' ', 2)[0];
+        var commits = new List<(long Time, string Url)>();
+        foreach (var item in _index.Events)
+        {
+            if (item.EventType == "navigation-completed" && item.Payload.ValueKind == JsonValueKind.Object &&
+                item.Payload.TryGetProperty("context", out var context) && context.ValueKind == JsonValueKind.Object &&
+                Text(context, "documentToken") == token && Text(item.Payload, "url") is { } address)
+            {
+                commits.Add((item.MonotonicNanoseconds, address));
+            }
+        }
+        if (commits.Count == 0)
+        {
+            return null;
+        }
+        var byThen = commits.Where(item => item.Time <= time).ToList();
+        return byThen.Count > 0 ? byThen.MaxBy(item => item.Time).Url : commits.MinBy(item => item.Time).Url;
     }
 
     /// <summary>The recorded state of one document at the frame, and how it was matched.</summary>

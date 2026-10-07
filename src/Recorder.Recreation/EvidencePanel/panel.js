@@ -587,6 +587,83 @@ async function watchBlocked(address) {
   setTimeout(() => watchBlocked(address), 1000);
 }
 
+// Slice 5b: the page's frames, how each was built or why not, and what
+// the recreation browser has done with each, read from the recorder every
+// second while the panel is open. A frame's owner path is in its parent's
+// document, which for a frame of a frame is not the inspected page, so it
+// is shown as text.
+let framesSection = null;
+let framesShown = "";
+
+const frameWays = {
+  "served": "served at its recorded address with a page of its own",
+  "in-place": "built in place in its about:blank document",
+  "srcdoc": "built in place after loading its recorded srcdoc markup",
+  "not-built": "not built",
+};
+
+function yesNo(value, unknown) {
+  return value === true ? "yes" : value === false ? "no" : unknown;
+}
+
+function showFrames(items) {
+  const text = JSON.stringify(items);
+  if (text === framesShown) {
+    return;
+  }
+  framesShown = text;
+  if (!framesSection) {
+    framesSection = element("section");
+    content.appendChild(framesSection);
+  }
+  framesSection.replaceChildren();
+  framesSection.appendChild(element("h2", "Frames"));
+  if (items.length === 0) {
+    framesSection.appendChild(element("p", "The page had no frames at this frame of the recording."));
+    return;
+  }
+  framesSection.appendChild(element("p",
+    "Each frame of the page at this frame of the recording, in its parent's document order, a frame of a frame after its parent. The key is the frame's place: its index among its parent's frames, under its parent's key. Asked for and out of process are what the recreation browser has done so far."));
+  const result = element("table");
+  result.appendChild(element("caption", `Frames: ${items.length}`));
+  const head = element("thead");
+  const headRow = element("tr");
+  for (const heading of ["Key", "Owner path", "Element", "Built", "Document address", "In its parent's process when recorded", "Asked for", "Out of process"]) {
+    headRow.appendChild(element("th", heading, { scope: "col" }));
+  }
+  head.appendChild(headRow);
+  result.appendChild(head);
+  const body = element("tbody");
+  for (const item of items) {
+    const row = element("tr");
+    const way = frameWays[item.way] ?? item.way;
+    row.appendChild(element("td", item.key));
+    row.appendChild(longCell(item.ownerPath ?? "none"));
+    row.appendChild(element("td", `${item.element} ${item.ownerNodeId}`));
+    row.appendChild(longCell(item.reason ? `${way}: ${item.reason}` : way));
+    row.appendChild(longCell(item.documentUrl ?? "none"));
+    row.appendChild(element("td", yesNo(item.sameProcessAsParentWhenRecorded, "not known")));
+    row.appendChild(element("td", yesNo(item.askedFor)));
+    row.appendChild(element("td", yesNo(item.outOfProcess)));
+    body.appendChild(row);
+  }
+  result.appendChild(body);
+  framesSection.appendChild(result);
+}
+
+async function watchFrames(address) {
+  try {
+    const response = await fetch(address, { cache: "no-store" });
+    if (response.ok) {
+      showFrames(await response.json());
+    }
+  } catch (error) {
+    // The recorder has closed this recreation; the panel stops asking.
+    return;
+  }
+  setTimeout(() => watchFrames(address), 1000);
+}
+
 // Stage 3: how long opening the recreation took. The recorder's steps are
 // read from the recorder, and the builder's from the page, which records the
 // times at which it finished each part from the page's time origin. Read
@@ -614,6 +691,7 @@ function showTimings(steps, times) {
       ["styleSheetsLoaded", "The page's linked style sheets were loaded"],
       ["styleSheetsApplied", "The recorded style sheet changes and adopted sheets were applied"],
       ["styleAndLayout", "The first style and layout, with the recorded values, finished"],
+      ["framesBuilt", "The frames built in place were built"],
       ["builderFinished", "The builder finished"],
       ["firstPaint", "The first frame after the build was painted"],
     ];
@@ -661,6 +739,7 @@ async function load() {
     }
     recorderBase = config.evidenceAddress.replace(/evidence\.json$/, "");
     describe(await response.json());
+    watchFrames(config.evidenceAddress.replace(/evidence\.json$/, "frames.json"));
     watchBlocked(config.evidenceAddress.replace(/evidence\.json$/, "blocked.json"));
     watchTimings(config.evidenceAddress.replace(/evidence\.json$/, "timings.json"));
   } catch (error) {

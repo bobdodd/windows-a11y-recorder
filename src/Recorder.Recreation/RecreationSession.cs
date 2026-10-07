@@ -22,6 +22,15 @@ public sealed class RecreationSession : IAsyncDisposable
 
     public int RefusedRequests => _control.RefusedRequests;
 
+    // Slice 5b: the requests the browser's own session refused, the
+    // recorded frame joined to each frame, by frame ID, and what the
+    // recreation did with each recorded frame.
+    public int RefusedByBrowser => _control.RefusedByBrowser;
+
+    public IReadOnlyDictionary<string, string> JoinedFrames => _control.JoinedFrames;
+
+    public IReadOnlyList<RecreationFrameStatus> FrameStatuses => _server.FrameStatuses;
+
     public bool BrowserHasExited => _browser.HasExited;
 
     public IReadOnlyList<BlockedNavigation> Blocked => _server.Blocked;
@@ -46,6 +55,7 @@ public sealed class RecreationSession : IAsyncDisposable
         {
             // The server disposes the content's resources once it holds them.
             content.Resources?.Dispose();
+            RecreationServer.DisposeFrames(content.Frames);
             throw;
         }
         foreach (var timing in earlierTimings ?? [])
@@ -66,7 +76,8 @@ public sealed class RecreationSession : IAsyncDisposable
                 content.Viewport,
                 server.AddBlocked,
                 cancellationToken,
-                server.ServedAtRecordedAddress ? server.Answer : null);
+                server.ServedAtRecordedAddress ? server : null,
+                server.BaseAddress);
             server.AddTiming("Attaching to the tab and asking it to load the page", clock.Elapsed);
             return new RecreationSession(server, browser, control) { DevToolsAddress = address };
         }

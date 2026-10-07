@@ -18,7 +18,7 @@ namespace Recorder.Recreation;
 // is answered only if its Host header names the loopback address and port, so
 // a page on another site cannot reach the server by rebinding a name to
 // 127.0.0.1.
-public sealed class RecreationServer : IAsyncDisposable
+public sealed class RecreationServer : IAsyncDisposable, IRecreationAnswers
 {
     // No page script runs: 'none' for scripts also stops event handler
     // attributes. Nothing is fetched from another origin, so the current
@@ -72,6 +72,20 @@ public sealed class RecreationServer : IAsyncDisposable
     private readonly IDisposable? _scriptsOwner;
     private readonly List<BlockedNavigation> _blocked = [];
     private readonly List<RecreationTiming> _timings = [];
+    // Slice 5b: the frames of the page, by key: the parent's key, a slash,
+    // and the frame's position among its parent's frames. The top
+    // document's key is empty.
+    private readonly Dictionary<string, FrameEntry> _frames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _askedFor = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _outOfProcess = new(StringComparer.Ordinal);
+
+    private sealed record FrameEntry(
+        string Key,
+        string ParentKey,
+        RecreationFrame Frame,
+        byte[]? Page,
+        string? Policy,
+        Recorder.Session.RecordedPageResources Resources);
 
     private RecreationServer(WebApplication application, string token, RecreationContent content)
     {
@@ -90,6 +104,148 @@ public sealed class RecreationServer : IAsyncDisposable
             : _fontAddress is { } fonts
                 ? RecordedPageContentSecurityPolicy(nonce, fonts)
                 : RecordedPageContentSecurityPolicy(nonce);
+        if (_documentUrl is not null)
+        {
+            _policy = WithFrameSources(_policy, content.Frames);
+            AddFrames("", content.Frames);
+        }
+        else
+        {
+            DisposeFrames(content.Frames);
+        }
+    }
+
+    // Slice 5b: a document's frame-src lists the exact address of each of
+    // its served frames, and of the served frames of the frames it builds in
+    // place, whose policy is its own; with the address each such frame's
+    // owner asks for, which is answered with a redirect, and the https form
+    // of each http address, as the top document is answered. A source
+    // expression holds no query or fragment, and a path's semicolons and
+    // commas are escaped (Content Security Policy Level 3, "path-part").
+    // 'none' when there are none.
+    public static string WithFrameSources(string policy, IReadOnlyList<RecreationFrame> frames)
+    {
+        var sources = new SortedSet<string>(StringComparer.Ordinal);
+        void Add(string? url)
+        {
+            if (url is null || !Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return;
+            }
+            var path = uri.AbsolutePath.Replace(";", "%3B", StringComparison.Ordinal).Replace(",", "%2C", StringComparison.Ordinal);
+            var authority = uri.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped);
+            sources.Add(authority + path);
+            if (uri.Scheme == Uri.UriSchemeHttp)
+            {
+                sources.Add("https" + authority["http".Length..] + path);
+            }
+        }
+        void Walk(IReadOnlyList<RecreationFrame> list)
+        {
+            foreach (var frame in list)
+            {
+                if (frame.Way == "served")
+                {
+                    Add(frame.DocumentUrl);
+                    Add(frame.OwnerAddress);
+                }
+                else if (frame.Way is "in-place" or "srcdoc")
+                {
+                    Walk(frame.Children);
+                }
+            }
+        }
+        Walk(frames);
+        var value = sources.Count == 0 ? "'none'" : string.Join(' ', sources);
+        return policy.Replace("frame-src 'none'", "frame-src " + value, StringComparison.Ordinal);
+    }
+
+    private void AddFrames(string parentKey, IReadOnlyList<RecreationFrame> frames)
+    {
+        for (var index = 0; index < frames.Count; index++)
+        {
+            var frame = frames[index];
+            var key = parentKey + "/" + index.ToString(CultureInfo.InvariantCulture);
+            byte[]? page = null;
+            string? policy = null;
+            if (frame is { Way: "served", Html: { } html, ScriptNonce: { } nonce })
+            {
+                page = Encoding.UTF8.GetBytes(html);
+                policy = WithFrameSources(RecordedPageContentSecurityPolicy(nonce, _fontAddress!), frame.Children);
+            }
+            _frames[key] = new FrameEntry(key, parentKey, frame, page, policy, frame.Resources ?? Recorder.Session.RecordedPageResources.None);
+            AddFrames(key, frame.Children);
+        }
+    }
+
+    public static void DisposeFrames(IReadOnlyList<RecreationFrame> frames)
+    {
+        foreach (var frame in frames)
+        {
+            frame.Resources?.Dispose();
+            DisposeFrames(frame.Children);
+        }
+    }
+
+    // The key of the frame whose owner has the path among a document's
+    // frames, or null when it has none. A frame not built has a key, so that
+    // its requests are known to be its own, and are refused.
+    public string? ChildKey(string parentKey, NodePath ownerPath)
+    {
+        ArgumentNullException.ThrowIfNull(parentKey);
+        ArgumentNullException.ThrowIfNull(ownerPath);
+        if (parentKey.Length > 0 && !_frames.ContainsKey(parentKey))
+        {
+            return null;
+        }
+        var display = ownerPath.Display;
+        return _frames.Values
+            .Where(entry => entry.ParentKey == parentKey && entry.Frame.OwnerPath?.Display == display)
+            .Select(entry => entry.Key)
+            .FirstOrDefault();
+    }
+
+    // Records that the recreation asked for a frame's document, or that a
+    // frame target was attached for it, for the panel.
+    public bool FrameAskedFor(string key)
+    {
+        lock (_askedFor)
+        {
+            _askedFor.Add(key);
+        }
+        return !_frames.TryGetValue(key, out var entry) || entry.Frame.Way != "not-built";
+    }
+
+    public void FrameOutOfProcess(string key)
+    {
+        lock (_askedFor)
+        {
+            _outOfProcess.Add(key);
+        }
+    }
+
+    public IReadOnlyList<RecreationFrameStatus> FrameStatuses
+    {
+        get
+        {
+            lock (_askedFor)
+            {
+                return [.. _frames.Values
+                    .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                    .Select(entry => new RecreationFrameStatus(
+                        entry.Key,
+                        entry.Frame.OwnerNodeId,
+                        entry.Frame.OwnerPath?.Display,
+                        entry.Frame.Element,
+                        entry.Frame.Way,
+                        entry.Frame.DocumentUrl,
+                        entry.Frame.Reason,
+                        entry.Frame.SameProcessAsParent,
+                        _askedFor.Contains(entry.Key),
+                        _outOfProcess.Contains(entry.Key)))];
+            }
+        }
     }
 
     public string Token { get; }
@@ -125,27 +281,91 @@ public sealed class RecreationServer : IAsyncDisposable
     // answered with the image's latest recorded status, MIME type, and bytes,
     // and a request of the builder for a font file at the recorder's own
     // address with the file's recorded bytes. Anything else is refused.
-    public RecreationAnswer? Answer(string url, string? resourceType)
+    public RecreationAnswer? Answer(string url, string? resourceType) => Answer(url, resourceType, "");
+
+    // Slice 5b: a request of a frame, by the frame's key. A served frame's
+    // document request is answered with its page and policy at its recorded
+    // address, and with a redirect to that address when it is for the
+    // address its owner asks for; a frame's other requests are answered
+    // from the resources of its own document. The top document's key is
+    // empty.
+    public RecreationAnswer? Answer(string url, string? resourceType, string frameKey)
     {
-        if (resourceType != "Document")
-        {
-            return ResourceAnswer(url, resourceType);
-        }
-        if (_documentUrl is null || !SameDocument(url, _documentUrl))
+        ArgumentNullException.ThrowIfNull(frameKey);
+        FrameEntry? frame = null;
+        if (frameKey.Length > 0 && !_frames.TryGetValue(frameKey, out frame))
         {
             return null;
         }
-        return new RecreationAnswer(200,
-        [
-            new("Content-Type", "text/html; charset=utf-8"),
-            new("Content-Security-Policy", _policy),
-            new("Cache-Control", "no-store"),
-            new("X-Content-Type-Options", "nosniff"),
-            new("Referrer-Policy", "no-referrer"),
-        ], _page);
+        if (resourceType != "Document")
+        {
+            // A frame built in place asks for its resources under its
+            // parent's frame ID, as Chromium 147 reported them in the
+            // development sandbox (2026-10-07), so a document's resources
+            // are answered first, then those of the frames it builds in
+            // place, nearest first.
+            foreach (var resources in InPlaceResources(frameKey, frame is null ? _resources : frame.Resources))
+            {
+                if (ResourceAnswer(url, resourceType, resources) is { } found)
+                {
+                    return found;
+                }
+            }
+            return null;
+        }
+        if (frame is null)
+        {
+            return _documentUrl is not null && SameDocument(url, _documentUrl) ? Page(_page, _policy) : null;
+        }
+        if (frame is not { Frame.Way: "served", Page: { } page, Policy: { } policy, Frame.DocumentUrl: { } address })
+        {
+            return null;
+        }
+        if (SameDocument(url, address))
+        {
+            return Page(page, policy);
+        }
+        if (frame.Frame.OwnerAddress is { } asked && SameDocument(url, asked))
+        {
+            return new RecreationAnswer(302,
+            [
+                new("Location", address),
+                new("Cache-Control", "no-store"),
+                new("Referrer-Policy", "no-referrer"),
+            ], []);
+        }
+        return null;
     }
 
-    private RecreationAnswer? ResourceAnswer(string url, string? resourceType)
+    // A document's resources, then those of the frames it builds in place,
+    // breadth first.
+    private IEnumerable<Recorder.Session.RecordedPageResources> InPlaceResources(string key, Recorder.Session.RecordedPageResources own)
+    {
+        yield return own;
+        var parents = new Queue<string>([key]);
+        while (parents.Count > 0)
+        {
+            var parent = parents.Dequeue();
+            foreach (var entry in _frames.Values
+                .Where(entry => entry.ParentKey == parent && entry.Frame.Way is "in-place" or "srcdoc")
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal))
+            {
+                yield return entry.Resources;
+                parents.Enqueue(entry.Key);
+            }
+        }
+    }
+
+    private static RecreationAnswer Page(byte[] page, string policy) => new(200,
+    [
+        new("Content-Type", "text/html; charset=utf-8"),
+        new("Content-Security-Policy", policy),
+        new("Cache-Control", "no-store"),
+        new("X-Content-Type-Options", "nosniff"),
+        new("Referrer-Policy", "no-referrer"),
+    ], page);
+
+    private RecreationAnswer? ResourceAnswer(string url, string? resourceType, Recorder.Session.RecordedPageResources resources)
     {
         if (_documentUrl is null)
         {
@@ -158,8 +378,8 @@ public sealed class RecreationServer : IAsyncDisposable
             // builds and as "XHR" by the instrumented Chromium on the target
             // machine (2026-10-02), so either is answered.
             if (resourceType is not ("Fetch" or "XHR") || digest.Length != 64 || !digest.All(Uri.IsHexDigit) ||
-                !_resources.Faces.Any(face => face.Digest == digest) ||
-                _resources.FontFile(digest) is not { } file)
+                !resources.Faces.Any(face => face.Digest == digest) ||
+                resources.FontFile(digest) is not { } file)
             {
                 return null;
             }
@@ -175,8 +395,8 @@ public sealed class RecreationServer : IAsyncDisposable
         // arrived with, in UTF-8, as Blink decoded it when it was recorded.
         if (resourceType == "Stylesheet")
         {
-            if (_resources.StyleSheets.ArrivedDigest(url) is not { } sheetDigest ||
-                _resources.StyleSheetText(sheetDigest) is not { } sheetText)
+            if (resources.StyleSheets.ArrivedDigest(url) is not { } sheetDigest ||
+                resources.StyleSheetText(sheetDigest) is not { } sheetText)
             {
                 return null;
             }
@@ -187,8 +407,8 @@ public sealed class RecreationServer : IAsyncDisposable
                 new("X-Content-Type-Options", "nosniff"),
             ], sheetText);
         }
-        if (resourceType != "Image" || _resources.Image(url) is not { } image ||
-            _resources.ImageBytes(image.Digest) is not { } bytes)
+        if (resourceType != "Image" || resources.Image(url) is not { } image ||
+            resources.ImageBytes(image.Digest) is not { } bytes)
         {
             return null;
         }
@@ -201,7 +421,7 @@ public sealed class RecreationServer : IAsyncDisposable
         // Slice 4b sub-step 2a: the frame the image is held at, which the
         // instrumented Chromium reads in the recreation mode. An image with
         // no recorded frame has no header and is held at its first frame.
-        if (_resources.ImageFrames.Frame(url) is { } frame)
+        if (resources.ImageFrames.Frame(url) is { } frame)
         {
             headers.Add(new(ImageFrameHeader, frame.Index.ToString(CultureInfo.InvariantCulture)));
         }
@@ -329,6 +549,10 @@ public sealed class RecreationServer : IAsyncDisposable
                 response.ContentType = "application/json; charset=utf-8";
                 body = JsonSerializer.SerializeToUtf8Bytes(Timings, EvidenceJson);
                 break;
+            case "frames.json":
+                response.ContentType = "application/json; charset=utf-8";
+                body = JsonSerializer.SerializeToUtf8Bytes(FrameStatuses, EvidenceJson);
+                break;
             // Slice 4h: a listed script's recorded text, for the evidence
             // panel's viewer, as plain text, which is never run.
             case var script when script.StartsWith(ScriptResourcePrefix, StringComparison.Ordinal) &&
@@ -390,6 +614,10 @@ public sealed class RecreationServer : IAsyncDisposable
         await _application.StopAsync();
         await _application.DisposeAsync();
         _resources.Dispose();
+        foreach (var frame in _frames.Values)
+        {
+            frame.Resources.Dispose();
+        }
         _scriptsOwner?.Dispose();
     }
 }

@@ -17,6 +17,41 @@ namespace Recorder.Recreation;
 /// </summary>
 public sealed record RecordedPopup(PagePopupAtFrame Popup, BrowserDocumentState? State, string Basis);
 
+/// <summary>
+/// A frame of a recorded document at the frame (slice 5b), as the recorder
+/// chose it: its owner element, the document chosen for it and how, that
+/// document's address, state, and how the state was matched, whether it was
+/// recorded in its parent's renderer process, its own frames, and the
+/// recording's resources for it. A frame left out says why.
+/// </summary>
+public sealed record RecordedFrame(
+    long OwnerNodeId,
+    string FrameToken,
+    string? DocumentKey,
+    string? Url,
+    string Choice,
+    BrowserDocumentState? State,
+    string Basis,
+    bool? SameProcessAsParent,
+    IReadOnlyList<RecordedFrame> Children,
+    string? Omitted = null)
+{
+    public RecordedPageResources? Resources { get; init; }
+
+    /// <summary>Disposes the resources of the frame and of its frames.</summary>
+    public static void DisposeAll(IEnumerable<RecordedFrame> frames)
+    {
+        foreach (var frame in frames)
+        {
+            frame.Resources?.Dispose();
+            DisposeAll(frame.Children);
+        }
+    }
+}
+
+/// <summary>A frame built in place, as the parent's builder reads it (slice 5b).</summary>
+public sealed record InPlaceFrameData(long OwnerNodeId, string Way, string? Url, byte[] Tree);
+
 /// <summary>A popup as the builder reads it: its served markup, its place in the page, and its iframe's label.</summary>
 public sealed record PopupData(string Markup, PopupRect Place, string Kind, long OwnerNodeId, string Label);
 
@@ -68,7 +103,8 @@ public static class RecordedPage
         long recordingNanoseconds,
         string basis,
         RecordedPageResources? resources = null,
-        IReadOnlyList<RecordedPopup>? popups = null)
+        IReadOnlyList<RecordedPopup>? popups = null,
+        IReadOnlyList<RecordedFrame>? frames = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var nonce = RecreationServer.NewToken();
@@ -187,6 +223,10 @@ public static class RecordedPage
                 notes.Add($"The popup was opened with a zoom factor of {open.ZoomFactor.ToString(CultureInfo.InvariantCulture)}, which the recreation does not apply to its iframe.");
             }
         }
+        // Slice 5b: the page's frames, written as the plan in "Build plan
+        // for 5b" says, and a note for each.
+        var inPlace = new List<InPlaceFrameData>();
+        var written = WriteFrames(frames ?? [], tree, servedAtRecordedAddress ? url : null, fontAddress, notes, inPlace, 1);
         var evidence = RecordedEvidence.Create(
             state,
             url,
@@ -198,10 +238,11 @@ public static class RecordedPage
             animations,
             scripts);
         return new RecreationContent(
-            Markup(Tree(state, used.Faces, fontAddress, placed, compositorValues, used.StyleSheets, used.StyleSheetText), DocumentTypeName(tree, documentId), nonce),
+            Markup(Tree(state, used.Faces, fontAddress, placed, compositorValues, used.StyleSheets, used.StyleSheetText, inPlace), DocumentTypeName(tree, documentId), nonce),
             evidence,
             nonce)
         {
+            Frames = written,
             Viewport = viewport,
             DocumentUrl = servedAtRecordedAddress ? url : null,
             Resources = used,
@@ -210,6 +251,191 @@ public static class RecordedPage
             ScriptsOwner = scriptsOwner,
         };
     }
+
+    // Slice 5b: the frames of a document, each written as the way it is
+    // built: served at its recorded address with a page of its own, built in
+    // place by the parent's builder, whose tree goes into the parent's data,
+    // or not built, with the reason; and a note for each. Frames are built
+    // only when the top document is served at its recorded address, where
+    // the recorder answers every request. The base address is that of the
+    // nearest served document, against which an owner's src is resolved;
+    // null when the page is not served at its recorded address.
+    private static List<RecreationFrame> WriteFrames(
+        IReadOnlyList<RecordedFrame> frames,
+        DomDocumentTree parentTree,
+        string? baseUrl,
+        string fontAddress,
+        List<string> notes,
+        List<InPlaceFrameData> inPlace,
+        int depth)
+    {
+        var result = new List<RecreationFrame>();
+        foreach (var frame in frames)
+        {
+            parentTree.Nodes.TryGetValue(frame.OwnerNodeId, out var owner);
+            var element = owner?.NodeName?.ToLowerInvariant() ?? "unknown";
+            var path = owner is null ? null : RecordedPaths.Of(parentTree, frame.OwnerNodeId);
+            string? Attribute(string name) => owner is not null && owner.Attributes.TryGetValue(name, out var value) ? value : null;
+            var url = frame.Url ?? (frame.DocumentKey is not null ? "about:blank" : null);
+            var way = Way(frame, element, url, baseUrl, path, Attribute);
+            var name = $"The frame of the {element} element {frame.OwnerNodeId.ToString(CultureInfo.InvariantCulture)} at {path?.Display ?? "a node with no path"}, at depth {depth.ToString(CultureInfo.InvariantCulture)}";
+            var chosen = frame.DocumentKey is null
+                ? "No document of its frame was recorded by the frame's composition."
+                : $"It showed document {frame.DocumentKey}, {frame.Choice}, at {url}; {frame.Basis}. " +
+                  (frame.SameProcessAsParent switch
+                  {
+                      true => "It was recorded in its parent's renderer process.",
+                      false => "It was recorded in a renderer process other than its parent's.",
+                      null => "Whether it was recorded in its parent's renderer process is not known.",
+                  });
+            var children = new List<RecreationFrame>();
+            RecreationFrame written;
+            switch (way.Way)
+            {
+                case "served":
+                {
+                    var state = frame.State!;
+                    var tree = state.Dom!;
+                    var documentId = DocumentNodeId(tree);
+                    var resources = frame.Resources ?? RecordedPageResources.None;
+                    var nonce = RecreationServer.NewToken();
+                    var childInPlace = new List<InPlaceFrameData>();
+                    children = WriteFrames(frame.Children, tree, url, fontAddress, notes, childInPlace, depth + 1);
+                    var compositor = resources.CompositorValues ?? RecordedCompositorValues.None;
+                    var markup = Markup(
+                        Tree(state, resources.Faces, fontAddress, null, compositor, resources.StyleSheets, resources.StyleSheetText, childInPlace),
+                        DocumentTypeName(tree, documentId),
+                        nonce);
+                    written = new RecreationFrame(frame.OwnerNodeId, path, element, "served", url, children)
+                    {
+                        OwnerAddress = way.OwnerAddress,
+                        Html = markup,
+                        ScriptNonce = nonce,
+                        Resources = resources,
+                        DocumentKey = frame.DocumentKey,
+                        SameProcessAsParent = frame.SameProcessAsParent,
+                    };
+                    notes.Add($"{name}: {chosen} It is served at its recorded address with a page of its own, built by its own builder{(way.OwnerAddress is { } asked ? $"; its owner asks for {asked}, which the recorder answers with a redirect to that address" : "")}.");
+                    break;
+                }
+                case "in-place":
+                case "srcdoc":
+                {
+                    var state = frame.State!;
+                    var resources = frame.Resources ?? RecordedPageResources.None;
+                    var childInPlace = new List<InPlaceFrameData>();
+                    children = WriteFrames(frame.Children, state.Dom!, baseUrl, fontAddress, notes, childInPlace, depth + 1);
+                    var compositor = resources.CompositorValues ?? RecordedCompositorValues.None;
+                    inPlace.Add(new InPlaceFrameData(
+                        frame.OwnerNodeId,
+                        way.Way,
+                        url,
+                        Tree(state, resources.Faces, fontAddress, null, compositor, resources.StyleSheets, resources.StyleSheetText, childInPlace)));
+                    written = new RecreationFrame(frame.OwnerNodeId, path, element, way.Way, url, children)
+                    {
+                        Resources = resources,
+                        DocumentKey = frame.DocumentKey,
+                        SameProcessAsParent = frame.SameProcessAsParent,
+                    };
+                    notes.Add(way.Way == "in-place"
+                        ? $"{name}: {chosen} Its recorded tree is built by its parent's builder in the frame's own about:blank document."
+                        : $"{name}: {chosen} The frame loads its owner's recorded srcdoc markup, whose scripts do not run under its parent's policy, and its parent's builder then builds its recorded tree in that document.");
+                    break;
+                }
+                default:
+                    frame.Resources?.Dispose();
+                    RecordedFrame.DisposeAll(frame.Children);
+                    written = new RecreationFrame(frame.OwnerNodeId, path, element, "not-built", url, [])
+                    {
+                        Reason = way.Reason,
+                        DocumentKey = frame.DocumentKey,
+                        SameProcessAsParent = frame.SameProcessAsParent,
+                    };
+                    notes.Add($"{name}: {chosen} It is not built: {way.Reason}.");
+                    break;
+            }
+            result.Add(written);
+        }
+        return result;
+    }
+
+    // How a frame is built, and why not, as "Build plan for 5b" lists.
+    private static (string Way, string? Reason, string? OwnerAddress) Way(
+        RecordedFrame frame,
+        string element,
+        string? url,
+        string? baseUrl,
+        NodePath? path,
+        Func<string, string?> attribute)
+    {
+        if (frame.Omitted is { } omitted)
+        {
+            return ("not-built", omitted, null);
+        }
+        if (baseUrl is null)
+        {
+            return ("not-built", "the page is not served at its recorded address, so the recorder does not answer its frames", null);
+        }
+        if (element is not ("iframe" or "frame"))
+        {
+            return ("not-built", $"an {element} element's frame is not built", null);
+        }
+        if (path is null)
+        {
+            return ("not-built", "its owner has no path in the recorded tree, so the frame's requests cannot be joined to it", null);
+        }
+        if (frame.DocumentKey is null || url is null)
+        {
+            return ("not-built", "no document of its frame was recorded by the frame's composition", null);
+        }
+        if (frame.State?.Dom is null)
+        {
+            return ("not-built", "no DOM walk of its document was recorded at or before the frame", null);
+        }
+        if (attribute("csp") is not null)
+        {
+            return ("not-built", "its owner has a csp attribute, which would require the document to agree to a policy", null);
+        }
+        var sandboxed = attribute("sandbox") is { } sandbox
+            ? sandbox.Split([' ', '\t', '\n', '\r', '\f'], StringSplitOptions.RemoveEmptyEntries).Select(item => item.ToLowerInvariant()).ToHashSet()
+            : null;
+        var withoutFragment = url.IndexOf('#') is var hash and >= 0 ? url[..hash] : url;
+        if (withoutFragment is "about:blank" or "about:srcdoc")
+        {
+            if (sandboxed is not null && !sandboxed.Contains("allow-same-origin"))
+            {
+                return ("not-built", "its owner is sandboxed without allow-same-origin, so its parent's builder cannot reach its document", null);
+            }
+            if (withoutFragment == "about:srcdoc")
+            {
+                return attribute("srcdoc") is null
+                    ? ("not-built", "its document was a srcdoc document, but its owner has no srcdoc attribute at the frame", null)
+                    : ("srcdoc", null, null);
+            }
+            return attribute("src") is { Length: > 0 } source && !source.Trim().StartsWith("about:blank", StringComparison.OrdinalIgnoreCase)
+                ? ("not-built", $"its document at the frame was an about:blank document, but its owner's src asks for {source}, which the recorder does not answer", null)
+                : ("in-place", null, null);
+        }
+        if (!RecreationServer.IsServableAddress(url))
+        {
+            return ("not-built", $"its address, {Scheme(url)}, is not an http or https address", null);
+        }
+        if (sandboxed is not null && !sandboxed.Contains("allow-scripts"))
+        {
+            return ("not-built", "its owner is sandboxed without allow-scripts, so its builder cannot run", null);
+        }
+        string? ownerAddress = null;
+        if (attribute("src") is { } src &&
+            Uri.TryCreate(new Uri(baseUrl), src.Trim(), out var resolved) &&
+            RecreationServer.IsServableAddress(resolved.AbsoluteUri) &&
+            !RecreationServer.SameDocument(resolved.AbsoluteUri, url))
+        {
+            ownerAddress = resolved.AbsoluteUri;
+        }
+        return ("served", null, ownerAddress);
+    }
+
+    private static string Scheme(string url) => url.IndexOf(':') is var colon and > 0 ? url[..(colon + 1)] + " address" : "an address with no scheme";
 
     /// <summary>
     /// The data-a11y-recorded-paint-worklet attribute of each node with a
@@ -425,7 +651,8 @@ public static class RecordedPage
         IReadOnlyList<PopupData>? popups = null,
         RecordedCompositorValues? compositorValues = null,
         RecordedStyleSheets? styleSheets = null,
-        Func<string, byte[]?>? styleSheetText = null)
+        Func<string, byte[]?>? styleSheetText = null,
+        IReadOnlyList<InPlaceFrameData>? frames = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var documentId = DocumentNodeId(tree);
@@ -581,6 +808,21 @@ public static class RecordedPage
                 writer.WriteEndObject();
                 writer.WriteString("digest", face.Digest);
                 writer.WriteString("url", fontAddress + face.Digest);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+
+            // Slice 5b: the frames the builder builds in place, each with
+            // its owner's recorded node ID and its own tree.
+            writer.WriteStartArray("frames");
+            foreach (var frame in frames ?? [])
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber("ownerNodeId", frame.OwnerNodeId);
+                writer.WriteString("way", frame.Way);
+                WriteText(writer, "url", frame.Url);
+                writer.WritePropertyName("tree");
+                writer.WriteRawValue(frame.Tree, skipInputValidation: true);
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();

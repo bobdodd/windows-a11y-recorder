@@ -1696,15 +1696,23 @@ public partial class MainWindow : Window
                         timings.Add(new RecreationTiming("Choosing the frame of each animated image and the compositor values from the recording's compositor records", imageFrames));
                     }
                     clock.Restart();
+                    RecordedFrame[] frames = [];
                     try
                     {
-                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups);
+                        // Slice 5b: the page's frames, each with the document
+                        // it showed at the frame, its state, and its fonts
+                        // and images.
+                        frames = RecordedFrames.Read(documents, documents.Frames(chosen.Key, found.State, frame), frame, FormatTime);
+                        timings.Add(new RecreationTiming("Reading the page's frames, their states, and their fonts and images from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                        clock.Restart();
+                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames);
                         timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                         return written;
                     }
                     catch
                     {
                         resources.Dispose();
+                        RecordedFrame.DisposeAll(frames);
                         throw;
                     }
                 });

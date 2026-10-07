@@ -7911,7 +7911,7 @@ lazy frame at about 82 seconds, and left for the frameset page at about
   report interval was not written before the browser closed). The 54 new
   records hold 21,571 bytes of payload.
 
-#### Build plan for 5b (proposed, not built)
+#### Build plan for 5b (agreed 2026-10-07)
 
 Proposed 2026-10-07, after checks in the development sandbox with stock
 Chrome for Testing 147.0.7727.15, which has no recreation mode, run with
@@ -8022,6 +8022,112 @@ frame's requests are paused and answered or refused, that nothing reaches
 two logging servers, and that each child is built under its owner. The
 recreation mode's imposed values are not in stock Chromium, so the visual
 check stays on the target machine.
+
+#### As built (5b; not yet run on the target machine)
+
+The owner agreed the plan above on 2026-10-07. As built:
+
+- Index. `PlaybackIndex` version 3 keeps, in `FrameDocuments`, the first
+  `dom-checkpoint-started` record of each document key that names a frame
+  token, with its time, token, main-frame flag, and process ID. A file
+  with an index of version 2 has its index derived again when opened.
+- Choice. `BrowserFrames.Choose` takes a frame token, a time, the index's
+  frame documents, and the `navigation-completed` times by document
+  token. Of the token's documents first walked at or before the time, or
+  committed at or before it, the one committed last is shown, a document
+  with no commit counting from its first walk; of two keys under one
+  token and one commit, the later first walk is shown.
+  `RecordingFileDocuments.Frames` resolves a document's owners in
+  document order, shadow roots included, breadth first, to a depth of 8
+  and 64 frames, at the frame's composition time; a frame beyond the
+  limits is listed with the reason. The address is that of the latest
+  commit of the document token at or before the time.
+- The page. `RecordedPage.Content` takes the frames and writes each as one
+  of the four ways of the plan, with a note for each, as the plan's step 5
+  lists. A frame is not built when the page is not served at its
+  recorded address. A frame whose recorded document was `about:blank` is
+  built in place only when its owner's `src` is absent or `about:blank`:
+  a frame whose owner's `src` asks for another address while its document
+  was still the initial empty document, as the lazy frame of the fixture
+  before it was scrolled to, is not built, as the recorder does not
+  answer that address with an empty document. A served frame whose
+  owner's `src`, resolved against its parent's address, differs from its
+  recorded address is answered at the owner's address with a 302 to the
+  recorded one.
+- Builder. `builder.js` builds in a given document and window; after the
+  parent's style and layout, it builds each frame built in place in the
+  frame's own document, waiting at most 10 seconds for a `srcdoc` frame's
+  load, then records `framesBuilt`, before restoring scroll, selection,
+  and focus.
+- Holding the requests. `RecreationControl` enables `Fetch` for every
+  request in the browser's own session, and auto-attaches to frame
+  targets from each page and frame session, enabling `Fetch` in each
+  before it runs. A frame's request is joined to a frame by
+  `DOM.getFrameOwner` and `Page.getFrameTree` in the session that paused
+  it, and the owner's path, read in an isolated world; the join is kept
+  by frame ID. A main frame's own requests are never joined, as the
+  spike found `DOM.getFrameOwner` on a main frame during its navigation
+  did not answer. A joined frame's document request with no answer is
+  refused as `Aborted`, and listed as a blocked navigation unless the
+  frame is not built.
+- Server. `RecreationServer` keys each frame by its place under its
+  parent, `/0`, `/0/1`, and so on, the top document being the empty key,
+  and answers each frame's requests from its own resources, and serves
+  `frames.json` for the evidence panel.
+- App. Inspecting a page reads the frames, their states, and their fonts
+  and images as one timed step, and disposes their resources if the page
+  cannot be written.
+- Evidence panel. Until the Frames table of 5c, a Frames section lists
+  each frame's key, owner path, element and node ID, how it was built or
+  why not, its address, whether it was in its parent's process when
+  recorded, and whether it has been asked for and is out of process in
+  the recreation, read every second. The timings list the time the
+  frames built in place were built.
+
+Found while building, with Chromium 147 in the development sandbox
+(2026-10-07):
+
+- An image of a frame built in place in an `about:blank` document was
+  asked for under its parent's frame ID, not its own. A document's
+  resources are therefore answered from its own, then from those of the
+  frames it builds in place, nearest first.
+- With network prediction on, the browser opened a connection to the host
+  of each page and frame address the recorder answered, before the paused
+  request, and sent nothing on it. This was also true of a stock browser
+  with only `Fetch` interception, so it predates 5b for the top page. The
+  recreation profile now sets `net.network_prediction_options` to 2,
+  `NetworkPredictionOptions::kDisabled` in
+  `chrome/browser/preloading/preloading_prefs.h`, and no connection was
+  then made.
+- A link followed in a frame, as only DevTools could follow one in the
+  recreation, is refused by the page's exact `frame-src` before any
+  request, and the frame shows the browser's error page. A frame not
+  built whose owner's address is not in its parent's `frame-src` shows
+  the same error page. A frame not built whose address is in the
+  `frame-src`, as the sandboxed frame of the fixture is, since a source
+  expression holds no query, is refused by the control and keeps its
+  initial empty document.
+
+Tests. Unit tests cover the choice of a frame's document, the index's
+frame documents, the ways of building and their notes, the frame sources
+of a policy, and the server's answers by frame. An integration test with
+stock Chromium and `--site-per-process` opens a page with a cross-site
+frame holding a frame of its own, a frame answered with a redirect, a
+frame built in place, a `srcdoc` frame, an `object`, a sandboxed frame, a
+frame in a closed shadow root, and an explicit `about:blank` frame, at
+two loopback ports that count connections. Each frame was built under its
+owner, the cross-site frame and its frame were out of process, no
+connection was made to either port, and the browser's own session refused
+nothing. The 5a recording at 10 seconds, read and opened the same way
+through the app's frame reading, gave 11 frames: 8 served, 3 of them out
+of process, one `srcdoc`, one built in place, the sandboxed frame and the
+lazy frame not built, with no connection to either recorded port.
+Reading the frames, their states, and their fonts and images took about
+2.3 seconds there, most of it opening a resource reader for each frame.
+The full .NET suite has the same 61 failures as before 5b, from the
+sandbox's environment and stock Chromium's lack of the recreation mode,
+and the Python tests pass. The visual check of each frame's area, with
+the recorded values imposed, is on the target machine.
 
 ## Slice 3b implementation
 

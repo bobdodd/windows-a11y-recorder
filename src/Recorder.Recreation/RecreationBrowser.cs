@@ -69,6 +69,18 @@ public sealed class RecreationBrowser : IAsyncDisposable
                 {
                     ["currentDockState"] = "\"undocked\""
                 }
+            },
+            // Slice 5b: no network prediction, so the browser opens no
+            // connection to a recorded page's or frame's host before its
+            // request, which the recorder answers. With prediction on,
+            // Chromium 147 opened a connection, and sent nothing on it, to
+            // the host of each page and frame address the recorder answered,
+            // in the development sandbox (2026-10-07). The value 2 is
+            // NetworkPredictionOptions::kDisabled
+            // (chrome/browser/preloading/preloading_prefs.h).
+            ["net"] = new JsonObject
+            {
+                ["network_prediction_options"] = 2
             }
         };
         File.WriteAllText(Path.Combine(defaultProfile, "Preferences"), preferences.ToJsonString());

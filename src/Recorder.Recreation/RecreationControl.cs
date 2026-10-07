@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
 
@@ -17,37 +18,68 @@ public sealed record BlockedNavigation(string Url, DateTimeOffset Time, bool InR
 // has the keyboard, and its window is sized so that its page area is that
 // viewport. See docs/architecture/page-recreation.md, "Leaving the
 // recreation".
+//
+// Slice 5b: every frame target of a tab, and of a frame, is attached before
+// it runs too, and its requests are paused in its own session, since an out
+// of process frame's own requests are paused nowhere else. The browser's
+// own session pauses every request no frame session answered first, and
+// refuses it unless it is DevTools', an extension's, or the recorder's own
+// loopback address's. A frame's requests are joined to the recorded frame
+// whose owner has the path of the frame's owner element, read in an
+// isolated world, and answered from that frame's document. See "Build plan
+// for 5b".
 public sealed class RecreationControl : IAsyncDisposable
 {
     private readonly DevToolsConnection _connection;
     private readonly string _allowed;
+    private readonly string? _loopback;
     private readonly RecreationViewport? _viewport;
     private readonly Action<BlockedNavigation> _blocked;
-    private readonly Func<string, string?, RecreationAnswer?>? _answer;
+    private readonly IRecreationAnswers? _answers;
     private int _refused;
+    private int _refusedByBrowser;
     private readonly CancellationTokenSource _stop = new();
     private readonly TaskCompletionSource<string> _firstTab = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly Dictionary<string, string> _targets = new(StringComparer.Ordinal);
+    // The target ID of each tab's session, which is its main frame's ID.
+    private readonly ConcurrentDictionary<string, string> _targets = new(StringComparer.Ordinal);
+    // The target ID of each frame target's session, which is its frame's ID.
+    private readonly ConcurrentDictionary<string, string> _frameTargets = new(StringComparer.Ordinal);
+    // The recorded frame's key joined to each frame, by frame ID; empty for
+    // a frame joined to none.
+    private readonly ConcurrentDictionary<string, string> _frameKeys = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<Task, bool> _handling = new();
     private Task? _events;
     private string? _recreationSession;
 
     private RecreationControl(
         DevToolsConnection connection,
         string allowed,
+        string? loopback,
         RecreationViewport? viewport,
         Action<BlockedNavigation> blocked,
-        Func<string, string?, RecreationAnswer?>? answer)
+        IRecreationAnswers? answers)
     {
         _connection = connection;
         _allowed = allowed;
+        _loopback = loopback;
         _viewport = viewport;
         _blocked = blocked;
-        _answer = answer;
+        _answers = answers;
     }
 
-    // How many requests of the tabs, other than refused navigations, were
-    // refused because the recorder had no answer for them (slice 4a).
+    // How many requests of the tabs and their frames, other than refused
+    // navigations, were refused because the recorder had no answer for them
+    // (slice 4a), including those the browser's own session refused.
     public int RefusedRequests => Volatile.Read(ref _refused);
+
+    // How many requests no frame session paused, which the browser's own
+    // session refused (slice 5b).
+    public int RefusedByBrowser => Volatile.Read(ref _refusedByBrowser);
+
+    // The recorded frame's key joined to each frame of the recreation, by
+    // frame ID, for frames joined to one (slice 5b).
+    public IReadOnlyDictionary<string, string> JoinedFrames =>
+        _frameKeys.Where(item => item.Value.Length > 0).ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
 
     // Connects to the browser, attaches to its tab, and opens the page in it.
     // With an answer, the page is served at its recorded address: every
@@ -60,13 +92,20 @@ public sealed class RecreationControl : IAsyncDisposable
         RecreationViewport? viewport,
         Action<BlockedNavigation> blocked,
         CancellationToken cancellationToken,
-        Func<string, string?, RecreationAnswer?>? answer = null)
+        IRecreationAnswers? answers = null,
+        string? loopbackAddress = null)
     {
         var connection = await DevToolsConnection.ConnectAsync(browserAddress, cancellationToken);
-        var control = new RecreationControl(connection, pageAddress, viewport, blocked, answer);
+        var control = new RecreationControl(connection, pageAddress, loopbackAddress, viewport, blocked, answers);
         try
         {
             control._events = Task.Run(control.HandleEventsAsync);
+            // Slice 5b: before any tab is attached, the browser's own session
+            // pauses every request that no frame session answers first.
+            await connection.SendAsync("Fetch.enable", new
+            {
+                patterns = new object[] { new { urlPattern = "*", requestStage = "Request" } }
+            }, null, cancellationToken);
             await connection.SendAsync("Target.setAutoAttach", new
             {
                 autoAttach = true,
@@ -141,6 +180,16 @@ public sealed class RecreationControl : IAsyncDisposable
         ((int)Math.Ceiling(viewport.Width + Math.Max(0, frameWidth)),
          (int)Math.Ceiling(viewport.Height + Math.Max(0, frameHeight)));
 
+    // True for a request the browser's own session lets continue: one of
+    // DevTools, of an extension, such as the evidence panel, of a browser
+    // page, or for the recorder's loopback address (slice 5b).
+    public static bool ContinuesAtBrowser(string url, string? loopbackAddress) =>
+        url.StartsWith("devtools://", StringComparison.Ordinal) ||
+        url.StartsWith("chrome-extension://", StringComparison.Ordinal) ||
+        url.StartsWith("chrome://", StringComparison.Ordinal) ||
+        url.StartsWith("chrome-untrusted://", StringComparison.Ordinal) ||
+        (loopbackAddress is not null && url.StartsWith(loopbackAddress, StringComparison.Ordinal));
+
     // True for an address the recreation may load: its own, or DevTools.
     public static bool IsAllowed(string url, string pageAddress) =>
         url.StartsWith(pageAddress, StringComparison.Ordinal) ||
@@ -163,11 +212,18 @@ public sealed class RecreationControl : IAsyncDisposable
                         case "Target.detachedFromTarget":
                             if (item.Parameters.TryGetProperty("sessionId", out var gone) && gone.GetString() is { } id)
                             {
-                                _targets.Remove(id);
+                                _targets.TryRemove(id, out _);
+                                _frameTargets.TryRemove(id, out _);
                             }
                             break;
+                        // Each paused request is handled on its own, since
+                        // joining a frame's request to its owner takes
+                        // several commands, whose answers this loop reads.
                         case "Fetch.requestPaused" when item.SessionId is { } session:
-                            await PausedAsync(session, item.Parameters);
+                            Handle(PausedAsync(session, item.Parameters));
+                            break;
+                        case "Fetch.requestPaused":
+                            Handle(PausedAtBrowserAsync(item.Parameters));
                             break;
                     }
                 }
@@ -180,6 +236,31 @@ public sealed class RecreationControl : IAsyncDisposable
         catch (OperationCanceledException)
         {
         }
+    }
+
+    private void Handle(Task task)
+    {
+        _handling[task] = true;
+        _ = task.ContinueWith(done =>
+        {
+            _ = done.Exception;
+            _handling.TryRemove(done, out _);
+        }, TaskScheduler.Default);
+    }
+
+    private async Task PausedAtBrowserAsync(JsonElement parameters)
+    {
+        var requestId = parameters.GetProperty("requestId").GetString()!;
+        var url = parameters.GetProperty("request").GetProperty("url").GetString() ?? "";
+        var token = _stop.Token;
+        if (ContinuesAtBrowser(url, _loopback))
+        {
+            await _connection.SendAsync("Fetch.continueRequest", new { requestId }, null, token);
+            return;
+        }
+        Interlocked.Increment(ref _refused);
+        Interlocked.Increment(ref _refusedByBrowser);
+        await _connection.SendAsync("Fetch.failRequest", new { requestId, errorReason = "BlockedByClient" }, null, token);
     }
 
     private void Attached(JsonElement parameters)
@@ -197,16 +278,43 @@ public sealed class RecreationControl : IAsyncDisposable
         // release is answered only once the tab's first request is paused
         // and handled, which this loop does.
         var commands = new List<Task>();
-        if (type == "page" && !url.StartsWith("devtools://", StringComparison.Ordinal))
+        var frame = type == "iframe";
+        if ((type == "page" && !url.StartsWith("devtools://", StringComparison.Ordinal)) || frame)
         {
-            _targets[session] = targetId;
+            if (frame)
+            {
+                _frameTargets[session] = targetId;
+                // A frame target's ID is its frame's: one joined when its
+                // document was asked for is in a process of its own.
+                if (_answers is not null && _frameKeys.TryGetValue(targetId, out var joined) && joined.Length > 0)
+                {
+                    _answers.FrameOutOfProcess(joined);
+                }
+            }
+            else
+            {
+                _targets[session] = targetId;
+            }
             commands.Add(_connection.SendAsync("Fetch.enable", new
             {
-                patterns = _answer is null
+                patterns = _answers is null
                     ? new object[] { new { urlPattern = "*", resourceType = "Document", requestStage = "Request" } }
                     : new object[] { new { urlPattern = "*", requestStage = "Request" } }
             }, session, token));
-            if (_recreationSession is null)
+            // Slice 5b: the frame targets of this tab or frame are attached
+            // before they run, as tabs are.
+            commands.Add(_connection.SendAsync("Target.setAutoAttach", new
+            {
+                autoAttach = true,
+                waitForDebuggerOnStart = true,
+                flatten = true,
+                filter = new object[]
+                {
+                    new { type = "iframe", exclude = false },
+                    new { exclude = true }
+                }
+            }, session, token));
+            if (!frame && _recreationSession is null)
             {
                 _recreationSession = session;
                 commands.Add(_connection.SendAsync("Page.enable", null, session, token));
@@ -244,30 +352,53 @@ public sealed class RecreationControl : IAsyncDisposable
         var requestId = parameters.GetProperty("requestId").GetString()!;
         var url = parameters.GetProperty("request").GetProperty("url").GetString() ?? "";
         var token = _stop.Token;
-        if (_answer is not null)
+        if (_answers is not null)
         {
             var requested = parameters.TryGetProperty("resourceType", out var requestedType) ? requestedType.GetString() : null;
-            // An answer may read bytes from the recording file, so it is not
-            // made on the thread that reads the DevTools connection.
-            if (await Task.Run(() => _answer(url, requested), token) is { } answer)
+            var frameId = parameters.TryGetProperty("frameId", out var frame) ? frame.GetString() : null;
+            var key = await FrameKeyAsync(session, frameId, 0, token);
+            if (key is not null)
             {
-                await _connection.SendAsync("Fetch.fulfillRequest", new
+                var built = true;
+                if (requested == "Document" && key.Length > 0)
                 {
-                    requestId,
-                    responseCode = answer.Status,
-                    responseHeaders = answer.Headers.Select(header => new { name = header.Key, value = header.Value }).ToArray(),
-                    body = Convert.ToBase64String(answer.Body)
-                }, session, token);
-                return;
+                    built = _answers.FrameAskedFor(key);
+                }
+                // An answer may read bytes from the recording file, so it is
+                // not made on the thread that reads the DevTools connection.
+                if (await Task.Run(() => _answers.Answer(url, requested, key), token) is { } answer)
+                {
+                    await _connection.SendAsync("Fetch.fulfillRequest", new
+                    {
+                        requestId,
+                        responseCode = answer.Status,
+                        responseHeaders = answer.Headers.Select(header => new { name = header.Key, value = header.Value }).ToArray(),
+                        body = Convert.ToBase64String(answer.Body)
+                    }, session, token);
+                    return;
+                }
+                // A joined frame's navigation the recorder does not answer,
+                // such as a followed link, is refused as the tab's own is,
+                // so the frame keeps its document.
+                if (requested == "Document" && key.Length > 0)
+                {
+                    await _connection.SendAsync("Fetch.failRequest", new { requestId, errorReason = "Aborted" }, session, token);
+                    // A frame not built keeps its initial empty document,
+                    // and is listed in the evidence panel's frames, not as
+                    // a blocked navigation.
+                    if (built)
+                    {
+                        _blocked(new BlockedNavigation(url, DateTimeOffset.Now, true));
+                    }
+                    return;
+                }
             }
             // A request that is not a tab's own navigation, such as an
-            // image, a style sheet, or an iframe's document, is refused
+            // image, a style sheet, or a frame's document, is refused
             // without a page of its own, and is listed only in DevTools'
             // Network panel. The main frame's ID is its tab's target ID.
-            var resourceType = parameters.TryGetProperty("resourceType", out var type) ? type.GetString() : null;
-            var frameId = parameters.TryGetProperty("frameId", out var frame) ? frame.GetString() : null;
             var mainFrame = _targets.TryGetValue(session, out var tabTarget) && frameId == tabTarget;
-            if (resourceType != "Document" || !mainFrame)
+            if (requested != "Document" || !mainFrame)
             {
                 Interlocked.Increment(ref _refused);
                 await _connection.SendAsync("Fetch.failRequest", new { requestId, errorReason = "BlockedByClient" }, session, token);
@@ -290,10 +421,197 @@ public sealed class RecreationControl : IAsyncDisposable
         }
     }
 
+    // The key of the recorded frame joined to a frame (slice 5b): empty for
+    // a tab's main frame; for another frame, the key of the frame whose
+    // owner has the path of the frame's owner element among the frames of
+    // the recorded frame joined to the frame's parent. Null when none is
+    // joined. A frame's join is kept, since a frame keeps its ID across
+    // navigations; a frame whose owner is in another process, such as the
+    // main frame of a frame target, is joined when its document is asked
+    // for in its parent's session.
+    private async Task<string?> FrameKeyAsync(string session, string? frameId, int depth, CancellationToken token)
+    {
+        if (frameId is null || _answers is null || depth > 16)
+        {
+            return null;
+        }
+        if (_targets.TryGetValue(session, out var tab) && tab == frameId)
+        {
+            return "";
+        }
+        if (_frameKeys.TryGetValue(frameId, out var known))
+        {
+            return known.Length > 0 ? known : null;
+        }
+        string? key = null;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            var owner = await _connection.SendAsync("DOM.getFrameOwner", new { frameId }, session, timeout.Token);
+            var backendNodeId = owner.GetProperty("backendNodeId").GetInt64();
+            var tree = await _connection.SendAsync("Page.getFrameTree", null, session, timeout.Token);
+            if (ParentOf(tree.GetProperty("frameTree"), frameId, null) is { } parentId &&
+                await FrameKeyAsync(session, parentId, depth + 1, token) is { } parentKey &&
+                await OwnerPathAsync(session, parentId, backendNodeId, timeout.Token) is { } path)
+            {
+                key = _answers.ChildKey(parentKey, path);
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or
+            OperationCanceledException or JsonException or ArgumentException)
+        {
+            if (token.IsCancellationRequested)
+            {
+                throw;
+            }
+        }
+        return (_frameKeys.GetOrAdd(frameId, key ?? "")) is { Length: > 0 } joined ? joined : null;
+    }
+
+    // The ID of a frame's parent in a session's frame tree.
+    private static string? ParentOf(JsonElement node, string frameId, string? parentId)
+    {
+        if (node.GetProperty("frame").GetProperty("id").GetString() == frameId)
+        {
+            return parentId;
+        }
+        if (node.TryGetProperty("childFrames", out var children))
+        {
+            var id = node.GetProperty("frame").GetProperty("id").GetString();
+            foreach (var child in children.EnumerateArray())
+            {
+                if (ParentOf(child, frameId, id) is { } found)
+                {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    // The path of a frame's owner element, read in an isolated world of its
+    // parent frame, so that nothing of the page's own can change what the
+    // path is read from: one positional XPath expression for each tree scope,
+    // as RecordedPaths writes them. Null when it has none.
+    private async Task<NodePath?> OwnerPathAsync(string session, string parentId, long backendNodeId, CancellationToken token)
+    {
+        var world = await _connection.SendAsync("Page.createIsolatedWorld", new
+        {
+            frameId = parentId,
+            worldName = "Windows A11y Recorder frame owners",
+            grantUniveralAccess = false
+        }, session, token);
+        var resolved = await _connection.SendAsync("DOM.resolveNode", new
+        {
+            backendNodeId,
+            executionContextId = world.GetProperty("executionContextId").GetInt32()
+        }, session, token);
+        var objectId = resolved.GetProperty("object").GetProperty("objectId").GetString();
+        try
+        {
+            var result = await _connection.SendAsync("Runtime.callFunctionOn", new
+            {
+                objectId,
+                functionDeclaration = OwnerPathFunction,
+                returnByValue = true
+            }, session, token);
+            var value = result.GetProperty("result");
+            if (!value.TryGetProperty("value", out var path) || path.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+            return NodePath.Create(
+                [.. path.GetProperty("scopes").EnumerateArray().Select(item => item.GetString()!)],
+                [.. path.GetProperty("modes").EnumerateArray().Select(item => item.GetString()!)]);
+        }
+        finally
+        {
+            await _connection.SendAsync("Runtime.releaseObject", new { objectId }, session, token);
+        }
+    }
+
+    // Reads a node's path as RecordedPaths.Of writes it from the recorded
+    // tree: an element in the HTML namespace of an HTML document, named in
+    // capitals, by its lower case name, any other by a local name test, text
+    // by text(), a comment by comment(), with positions counted among the
+    // siblings that match the same test, and a new scope at each shadow
+    // root, whose mode is recorded.
+    public const string OwnerPathFunction = """
+        function () {
+          const test = (node) => {
+            if (node.nodeType === 1) {
+              const name = node.nodeName;
+              return name !== name.toLowerCase() && name === name.toUpperCase()
+                ? name.toLowerCase()
+                : `*[local-name()='${name}']`;
+            }
+            if (node.nodeType === 3) {
+              return "text()";
+            }
+            if (node.nodeType === 8) {
+              return "comment()";
+            }
+            return null;
+          };
+          const join = (steps) => steps.length === 0 ? "" : "/" + steps.slice().reverse().join("/");
+          const scopes = [];
+          const modes = [];
+          let steps = [];
+          let node = this;
+          for (;;) {
+            if (node.nodeType === 9) {
+              scopes.push(join(steps));
+              break;
+            }
+            if (node.nodeType === 11 && node.host) {
+              if (node.mode !== "open" && node.mode !== "closed") {
+                return null;
+              }
+              scopes.push(join(steps));
+              modes.push(node.mode);
+              steps = [];
+              node = node.host;
+              continue;
+            }
+            const parent = node.parentNode;
+            const own = test(node);
+            if (!parent || own === null) {
+              return null;
+            }
+            let position = 0;
+            for (const sibling of parent.childNodes) {
+              if (test(sibling) === own) {
+                position++;
+              }
+              if (sibling === node) {
+                break;
+              }
+            }
+            steps.push(`${own}[${position}]`);
+            node = parent;
+          }
+          if (scopes.some((scope) => scope.length === 0)) {
+            return null;
+          }
+          scopes.reverse();
+          modes.reverse();
+          return { scopes, modes };
+        }
+        """;
+
     public async ValueTask DisposeAsync()
     {
         _stop.Cancel();
         await _connection.DisposeAsync();
+        try
+        {
+            await Task.WhenAll(_handling.Keys);
+        }
+        catch (Exception)
+        {
+            // A request being handled when the browser closed has nothing to answer.
+        }
         if (_events is not null)
         {
             try

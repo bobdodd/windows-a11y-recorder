@@ -76,4 +76,58 @@ public static class BrowserFrames
             .ThenBy(item => item.owner.OwnerNodeId)
             .ToList();
     }
+
+    /// <summary>
+    /// The document a frame shows at a time (slice 5b): of the documents
+    /// whose DOM walks named the frame's token, the one committed last at or
+    /// before the time, by a navigation-completed record with its document
+    /// token. A document no navigation committed by then counts from its
+    /// first DOM walk, as a frame's initial empty document does. Of two
+    /// documents that count from the same time, as two documents recorded
+    /// under one document token can, the one with the later first walk is
+    /// chosen, then the later key. Null when no document counts by then.
+    /// </summary>
+    /// <param name="commits">The times of the navigation-completed records, by document token, in any order.</param>
+    public static FrameDocumentChoice? Choose(
+        string frameToken,
+        long time,
+        IEnumerable<FrameDocumentRecord> documents,
+        IReadOnlyDictionary<string, IReadOnlyList<long>> commits)
+    {
+        ArgumentNullException.ThrowIfNull(frameToken);
+        ArgumentNullException.ThrowIfNull(documents);
+        ArgumentNullException.ThrowIfNull(commits);
+        FrameDocumentChoice? chosen = null;
+        foreach (var document in documents)
+        {
+            if (document.FrameToken != frameToken)
+            {
+                continue;
+            }
+            var token = document.DocumentKey.Split(' ', 2)[0];
+            long? committed = commits.TryGetValue(token, out var times)
+                ? times.Where(item => item <= time).Select(item => (long?)item).Max()
+                : null;
+            if (committed is null && document.Time > time)
+            {
+                continue;
+            }
+            var candidate = new FrameDocumentChoice(document, committed ?? document.Time, committed is not null);
+            if (chosen is null ||
+                candidate.From > chosen.From ||
+                (candidate.From == chosen.From && candidate.Document.Time > chosen.Document.Time) ||
+                (candidate.From == chosen.From && candidate.Document.Time == chosen.Document.Time &&
+                    string.CompareOrdinal(candidate.Document.DocumentKey, chosen.Document.DocumentKey) > 0))
+            {
+                chosen = candidate;
+            }
+        }
+        return chosen;
+    }
 }
+
+/// <summary>
+/// The document chosen for a frame at a time (slice 5b), the time it counts
+/// from, and whether that is the time a navigation committed it.
+/// </summary>
+public sealed record FrameDocumentChoice(FrameDocumentRecord Document, long From, bool Committed);

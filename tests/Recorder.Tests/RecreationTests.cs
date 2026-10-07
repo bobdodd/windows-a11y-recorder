@@ -175,6 +175,8 @@ public sealed class RecreationTests : IDisposable
             Assert.Equal(
                 "\"undocked\"",
                 preferences.RootElement.GetProperty("devtools").GetProperty("preferences").GetProperty("currentDockState").GetString());
+            // Slice 5b: network prediction is off.
+            Assert.Equal(2, preferences.RootElement.GetProperty("net").GetProperty("network_prediction_options").GetInt32());
         }
 
         var start = RecreationBrowser.CreateStartInfo("chrome.exe", profile, extension);

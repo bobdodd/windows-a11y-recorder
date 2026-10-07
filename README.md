@@ -421,6 +421,13 @@ recorded as it happens. The token names a frame in every renderer, so an
 owner is joined to its frame's documents in the same process or in
 another. See "Slice 5" in [page recreation](docs/architecture/page-recreation.md).
 
+The recreation builds the frames of a recorded page (slice 5b): each
+frame's document at the frame is served at its recorded address with a
+page of its own, or built in place in its `about:blank` or `srcdoc`
+document, or not built, with the reason in the evidence panel. Each
+frame's requests are held in its own DevTools session, a cross-site frame's
+included, and answered from its own document's resources.
+
 Protocol 0.54 records the source of each script V8 instantiates, or fails
 to compile, in a document's main thread, on a new channel, `browser.script`:
 a `script-parsed` record for each script, with its kind, world, URL, start

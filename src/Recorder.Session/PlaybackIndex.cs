@@ -15,8 +15,9 @@ namespace Recorder.Session;
 public sealed record PlaybackIndex
 {
     // Version 2 keeps the page popup and popup widget records (protocol
-    // 0.43 and 0.44) whole.
-    public const int CurrentVersion = 2;
+    // 0.43 and 0.44) whole. Version 3 adds the frame documents (protocol
+    // 0.55, slice 5b).
+    public const int CurrentVersion = 3;
 
     public required int Version { get; init; }
 
@@ -47,7 +48,21 @@ public sealed record PlaybackIndex
     public required IReadOnlyList<BrowserPresentedCheckpoint> PresentedCheckpoints { get; init; }
 
     public required IReadOnlyList<CapturedFrameComposition> FrameCompositions { get; init; }
+
+    /// <summary>
+    /// The first DOM walk of each document that named its frame (protocol
+    /// 0.55, slice 5b), so that the documents of a frame are found without
+    /// reading every document's state.
+    /// </summary>
+    public IReadOnlyList<FrameDocumentRecord> FrameDocuments { get; init; } = [];
 }
+
+/// <summary>
+/// The first DOM walk of a document that named its frame (protocol 0.55):
+/// when it started, the document's key, the DevTools token of its frame,
+/// whether that is a main frame, and the renderer process it was recorded in.
+/// </summary>
+public sealed record FrameDocumentRecord(long Time, string DocumentKey, string FrameToken, bool? MainFrame, int? ProcessId);
 
 /// <summary>An event kept whole in a playback index, with the payload properties playback reads.</summary>
 public sealed record PlaybackIndexEvent(
@@ -100,6 +115,7 @@ public sealed class PlaybackIndexBuilder
     private readonly PriorityQueue<(long Time, int Key), long> _pending = new();
     private readonly Dictionary<(long Segment, int Key), int> _segmentCounts = [];
     private readonly List<CapturedFrameComposition> _compositions = [];
+    private readonly Dictionary<string, FrameDocumentRecord> _frameDocuments = new(StringComparer.Ordinal);
     private readonly List<LayoutCompletion> _completions = [];
     // Protocol 0.46: a change set read for the rendering update its named
     // checkpoint recorded, by browser instance, process, and change set,
@@ -220,6 +236,8 @@ public sealed class PlaybackIndexBuilder
             Keep(eventKey, record);
         }
 
+        AddFrameDocument(channel, record.EventType, time, payload);
+
         CollectPresentation(eventKey, record);
         var context = payload.TryGetProperty("context", out var value) && value.ValueKind == JsonValueKind.Object
             ? value
@@ -272,8 +290,35 @@ public sealed class PlaybackIndexBuilder
                 .ToArray(),
             BrowserCountsExact = _exact,
             PresentedCheckpoints = PresentedCheckpoints(),
-            FrameCompositions = [.. _compositions]
+            FrameCompositions = [.. _compositions],
+            FrameDocuments = [.. _frameDocuments.Values
+                .OrderBy(item => item.Time)
+                .ThenBy(item => item.DocumentKey, StringComparer.Ordinal)]
         };
+    }
+
+    // Slice 5b: the earliest DOM walk of each document that named its frame
+    // token. Events may arrive out of order, so the earliest is kept.
+    private void AddFrameDocument(string channel, string eventType, long time, JsonElement payload)
+    {
+        if (channel != "browser.dom" || eventType != "dom-checkpoint-started" ||
+            !payload.TryGetProperty("frameToken", out var token) || token.ValueKind != JsonValueKind.String ||
+            token.GetString() is not { Length: > 0 } frameToken ||
+            DomTreeRebuilder.DocumentKey(payload) is not { } key)
+        {
+            return;
+        }
+        if (_frameDocuments.TryGetValue(key, out var known) && known.Time <= time)
+        {
+            return;
+        }
+        var context = payload.TryGetProperty("context", out var value) && value.ValueKind == JsonValueKind.Object ? value : default;
+        _frameDocuments[key] = new FrameDocumentRecord(
+            time,
+            key,
+            frameToken,
+            payload.TryGetProperty("mainFrame", out var main) && main.ValueKind is JsonValueKind.True or JsonValueKind.False ? main.GetBoolean() : null,
+            ReadInt32(context, "processId"));
     }
 
     private void Keep(long eventKey, RecorderEvent record) =>
