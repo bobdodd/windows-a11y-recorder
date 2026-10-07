@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.36";
+    public const string CurrentVersion = "0.55";
 }
 
 public static class BrowserEvidenceChannels
@@ -20,6 +20,10 @@ public static class BrowserEvidenceChannels
     public const string Layout = "browser.layout";
     public const string Presentation = "browser.presentation";
     public const string Network = "browser.network";
+    public const string Resources = "browser.resources";
+    public const string Compositor = "browser.compositor";
+    public const string Animation = "browser.animation";
+    public const string Script = "browser.script";
 }
 
 public static class BrowserEvidenceEventTypes
@@ -37,10 +41,16 @@ public static class BrowserEvidenceEventTypes
     public const string TimerScheduled = "timer-scheduled";
     public const string TimerFired = "timer-fired";
     public const string TimerCancelled = "timer-cancelled";
+    public const string TimerOrigin = "timer-origin";
+    public const string ScriptCompiled = "script-compiled";
+    public const string ScriptParsed = "script-parsed";
+    public const string ScriptText = "script-text";
     public const string WakeUpDeferred = "wake-up-deferred";
     public const string NavigationStarted = "navigation-started";
     public const string NavigationCompleted = "navigation-completed";
     public const string DomCheckpointStarted = "dom-checkpoint-started";
+    public const string DomCheckpointFrameOwner = "dom-checkpoint-frame-owner";
+    public const string DomFrameOwnerChanged = "dom-frame-owner-changed";
     public const string DomCheckpointNode = "dom-checkpoint-node";
     public const string DomCheckpointNodeAttribute = "dom-checkpoint-node-attribute";
     public const string DomCheckpointNodeCharacterData = "dom-checkpoint-node-character-data";
@@ -77,6 +87,16 @@ public static class BrowserEvidenceEventTypes
     public const string TextControlValueChanged = "text-control-value-changed";
     public const string ActiveDescendantReferenceSet =
         "active-descendant-reference-set";
+    public const string PagePopupOpened = "page-popup-opened";
+    public const string PagePopupWindowRect = "page-popup-window-rect";
+    public const string PagePopupClosed = "page-popup-closed";
+    public const string PopupWidgetCreated = "popup-widget-created";
+    public const string PopupWidgetShown = "popup-widget-shown";
+    public const string PopupWidgetBoundsRequested =
+        "popup-widget-bounds-requested";
+    public const string PopupWidgetScreenRects = "popup-widget-screen-rects";
+    public const string PopupWidgetHidden = "popup-widget-hidden";
+    public const string OptionSelectednessChanged = "option-selectedness-changed";
     public const string InteractionCheckpointStarted =
         "interaction-checkpoint-started";
     public const string InteractionCheckpointTextControl =
@@ -95,6 +115,23 @@ public static class BrowserEvidenceEventTypes
     public const string PresentationNotSwapped = "presentation-not-swapped";
     public const string PresentationSwapped = "presentation-swapped";
     public const string PresentationFeedback = "presentation-feedback";
+    public const string CompositorAnimationStarted = "compositor-animation-started";
+    public const string CompositorAnimationEnded = "compositor-animation-ended";
+    public const string AnimationUpdated = "animation-updated";
+    public const string AnimationRemoved = "animation-removed";
+    public const string CompositorFrame = "compositor-frame";
+    public const string CompositorFramePresented = "compositor-frame-presented";
+    public const string PaintWorkletPainted = "paint-worklet-painted";
+    public const string FontFile = "font-file";
+    public const string FontFaceAdded = "font-face-added";
+    public const string FontFaceLoaded = "font-face-loaded";
+    public const string FontFaceRemoved = "font-face-removed";
+    public const string ImageResource = "image-resource";
+    public const string ImageData = "image-data";
+    public const string ImagePaintImage = "image-paint-image";
+    public const string StyleSheetResource = "style-sheet-resource";
+    public const string StyleSheetText = "style-sheet-text";
+    public const string StyleSheetsUpdated = "style-sheets-updated";
     public const string NetworkRequestWillBeSent = "request-will-be-sent";
     public const string NetworkResponseReceived = "response-received";
     public const string NetworkRequestFinished = "request-finished";
@@ -268,6 +305,73 @@ public sealed record BrowserTimerPayload(
     string? CancellationReason,
     bool? DidTimeout);
 
+// One frame of the script stack at a call (protocol 0.52, slice 4f): the V8
+// script ID as a decimal string, the script's URL, the function's name, the
+// one-based line and column, and whether it is eval code. Unobserved values
+// are null.
+public sealed record BrowserScriptFrame(
+    string? ScriptId,
+    string? Url,
+    string? FunctionName,
+    int? Line,
+    int? Column,
+    bool IsEval);
+
+// Who scheduled a window timer (protocol 0.52), recorded after its
+// timer-scheduled record: the world current at the call, or null when no
+// script was running, the script stack, innermost first and at most 16
+// frames, and whether the handler is a function or a string.
+public sealed record BrowserTimerOriginPayload(
+    BrowserContext Context,
+    string TimerId,
+    BrowserExecutionWorld? World,
+    IReadOnlyList<BrowserScriptFrame> Stack,
+    string Handler);
+
+// The markup a V8 script came from (protocol 0.52): a script element's
+// classic or module script, or an on... attribute's handler, with the
+// element's node ID, the attribute's name, the script's URL (null for an
+// inline script), and its one-based start line and column. Script IDs are
+// per renderer process.
+public sealed record BrowserScriptCompiledPayload(
+    BrowserContext Context,
+    string ScriptId,
+    string Kind,
+    long? ElementNodeId,
+    string? AttributeName,
+    string? Url,
+    int? Line,
+    int? Column);
+
+// A script V8 instantiated, or failed to compile, in a document of the main
+// thread (protocol 0.54, slice 4h), on browser.script, once per script ID in
+// the renderer process. Kind is "classic", "module", "eval", or "function"
+// (a function made by new Function or wrapped by Blink, such as an attribute
+// handler). Url is V8's script name, SourceUrl and SourceMapUrl the
+// script's own sourceURL and sourceMappingURL comments, null when absent.
+// Line and Column are the one-based start of the script in its resource.
+// EvalFromScriptId is the script ID of the code that called eval, when V8
+// kept it. Digest is the SHA-256 of the UTF-8 source, in lowercase
+// hexadecimal, and Size its byte count as a decimal string; the source is
+// the script-text record of that digest (BrowserResourceBytesPayload),
+// written the first time the renderer met the digest. TextRecorded is
+// false when that record could not be queued.
+public sealed record BrowserScriptParsedPayload(
+    BrowserContext Context,
+    BrowserExecutionWorld? World,
+    string ScriptId,
+    string Kind,
+    string? Url,
+    string? SourceUrl,
+    string? SourceMapUrl,
+    int? Line,
+    int? Column,
+    string? EvalFromScriptId,
+    bool CompileError,
+    string Digest,
+    string Size,
+    bool TextRecorded);
+
 public sealed record BrowserSchedulerPayload(
     BrowserContext Context,
     string QueueName,
@@ -299,14 +403,45 @@ public sealed record BrowserNavigationPayload(
 
 // WalkReason (protocol 0.35) says why the document was walked: "first" when it
 // had no walk yet, "after-loss" when a DOM record was lost since its last
-// walk, "check" at the recording's full walk interval, or "finished-parsing"
-// for a finished parse, which is always walked.
+// walk, "check" at the recording's full walk interval, or "started-parsing"
+// (protocol 0.42) or "finished-parsing" for the start or the end of a parse,
+// which is always walked. Reason is "started-parsing", "finished-parsing", or
+// "post-mutation". FrameToken (protocol 0.55, slice 5a) is the DevTools
+// frame token of the walked document's frame, 32 uppercase hexadecimal
+// digits, which every renderer gives the same frame, and MainFrame whether
+// that frame is a main frame; both are null for a document with no frame, and
+// absent before protocol 0.55.
 public sealed record BrowserDomCheckpointStartedPayload(
     BrowserContext Context,
     string CheckpointId,
     string Reason,
     string WalkReason,
-    int MaximumNodes);
+    int MaximumNodes,
+    string? FrameToken = null,
+    bool? MainFrame = null);
+
+// A frame owner element of a walked document (iframe, frame, object, embed, or
+// fencedframe) and the frame it held at the walk (protocol 0.55, slice 5a),
+// after the owner's node record in the same checkpoint. FrameLocation is
+// "local" when the frame was in the walking renderer and "remote" when it was
+// in another. An owner holding no frame has no record.
+public sealed record BrowserDomCheckpointFrameOwnerPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    long OwnerNodeId,
+    string FrameToken,
+    string FrameLocation);
+
+// A frame owner element given a frame or losing it (protocol 0.55, slice 5a),
+// from HTMLFrameOwnerElement::SetContentFrame and ClearContentFrame. A lost
+// frame has null FrameToken and FrameLocation. A swap of a frame between local
+// and remote is a loss followed by the same token. Not a DOM transition: it
+// takes no transition ID.
+public sealed record BrowserDomFrameOwnerChangedPayload(
+    BrowserContext Context,
+    long OwnerNodeId,
+    string? FrameToken,
+    string? FrameLocation);
 
 public sealed record BrowserDomCheckpointNodePayload(
     BrowserContext Context,
@@ -421,7 +556,8 @@ public sealed record BrowserDomCharacterDataChangedPayload(
 
 // Structural DOM changes (protocol 0.34), recorded as DOM transitions in the
 // order Blink makes them, from the time a document's finished-parsing
-// checkpoint is recorded. An insertion names its container, the inserted node,
+// checkpoint is recorded, and from protocol 0.42 from its started-parsing
+// checkpoint, the parser's changes included. An insertion names its container, the inserted node,
 // and the node's previous sibling when it was recorded, or null for none.
 // InsertionKind is "child", or "shadow-root" for a shadow root attached to a
 // connected host, which has no previous sibling. The inserted subtree follows
@@ -791,6 +927,126 @@ public sealed record BrowserActiveDescendantReferenceSetPayload(
     BrowserScriptLocation? Location,
     BrowserExecutionWorld? World);
 
+// Page popup records (protocol 0.43). A select drawn as a menu list, and a
+// date, time, or colour picker, opens a page popup: a page of its own, with its
+// own document and widget. The context names the popup's document. Rectangles
+// are in screen DIPs, except the owner's visible bounds, which are in its local
+// root.
+public sealed record BrowserPagePopupRect(int X, int Y, int Width, int Height);
+
+// Kind is "select-list", "date-time", "color", or "other", from the owner
+// element. The anchor and the first window rectangle are those the popup was
+// shown with. The owner frame token (protocol 0.44) is the local frame token
+// of the owner document's frame, which the browser's popup-widget-created
+// record names as its opener.
+public sealed record BrowserPagePopupOpenedPayload(
+    BrowserContext Context,
+    string Kind,
+    string OwnerDocumentId,
+    string OwnerDocumentToken,
+    string OwnerFrameToken,
+    int OwnerNodeId,
+    BrowserPagePopupRect OwnerVisibleBoundsInLocalRoot,
+    BrowserPagePopupRect OwnerLocalRootRectInScreen,
+    BrowserPagePopupRect AnchorRectInScreen,
+    BrowserPagePopupRect InitialWindowRect,
+    double ZoomFactor);
+
+// A window rectangle the popup asked for, deferred when asked for before the
+// popup was shown. Where the browser put the window is recorded by the popup
+// widget records (protocol 0.44).
+public sealed record BrowserPagePopupWindowRectPayload(
+    BrowserContext Context,
+    bool Deferred,
+    BrowserPagePopupRect WindowRect);
+
+// ClosedBy is "renderer" or "browser".
+public sealed record BrowserPagePopupClosedPayload(
+    BrowserContext Context,
+    string ClosedBy);
+
+// Popup widget records (protocol 0.44), made by the browser process. A popup
+// widget is named by its frame sink, written clientId:sinkId. The created
+// record's context names the opener frame's document, and its opener frame
+// token is the page popup's owner frame token; the other records carry the
+// browser process's context and join to it by the frame sink. Rectangles are
+// in screen DIPs, except the native window's rectangles, which are in screen
+// pixels as Windows holds them.
+public sealed record BrowserPopupWidgetCreatedPayload(
+    BrowserContext Context,
+    int? RendererProcessId,
+    string OpenerFrameToken,
+    string FrameSinkId);
+
+// Outcome is "shown", or the reason WebContentsImpl::ShowCreatedWidget refused
+// the popup: "window-not-active", "not-visible", or "permission-exclusion". A
+// rectangle not reached before a refusal is null; the view's bounds are
+// present only for a shown popup.
+public sealed record BrowserPopupWidgetShownPayload(
+    BrowserContext Context,
+    string FrameSinkId,
+    string Outcome,
+    BrowserPagePopupRect ReceivedRect,
+    BrowserPagePopupRect ReceivedAnchorRect,
+    BrowserPagePopupRect? TransformedRect,
+    BrowserPagePopupRect? TransformedAnchorRect,
+    BrowserPagePopupRect? ConstrainedRect,
+    BrowserPagePopupRect? ViewBounds,
+    BrowserWindowsAnimationSettings WindowsAnimationSettings);
+
+// The Windows animation settings read with SystemParametersInfo in the
+// browser process as a popup window is shown (protocol 0.47), each null when
+// the call failed. Which of them governs a desktop compositor transition of
+// the window is not documented; they are recorded, not interpreted.
+public sealed record BrowserWindowsAnimationSettings(
+    bool? ClientAreaAnimation,
+    bool? UiEffects,
+    bool? MenuAnimation,
+    bool? MenuFade,
+    bool? ComboBoxAnimation);
+
+// A bounds request from the renderer. The set rectangle is the one given to
+// the view after ConstrainPopupBounds and the display clamp, or null when the
+// request was ignored while a screen rectangle update was unacknowledged.
+public sealed record BrowserPopupWidgetBoundsRequestedPayload(
+    BrowserContext Context,
+    string FrameSinkId,
+    BrowserPagePopupRect RequestedRect,
+    BrowserPagePopupRect? SetRect);
+
+// The screen rectangles sent to a popup widget, the native window's rectangle
+// and client area when Windows answered, and the view's device scale factor.
+public sealed record BrowserPopupWidgetScreenRectsPayload(
+    BrowserContext Context,
+    string FrameSinkId,
+    BrowserPagePopupRect ViewRect,
+    BrowserPagePopupRect WindowRect,
+    BrowserPagePopupRect? NativeWindowRect,
+    BrowserPagePopupRect? NativeClientRect,
+    double DeviceScaleFactor);
+
+// A popup widget's view hiding its window (protocol 0.45). Cause is
+// "hidden", RenderWidgetHostViewAura::Hide, or "destroyed", the view's
+// clean-up before it is destroyed; each is recorded just after the view's
+// window was hidden, and only when it had been shown. NativeWindowVisible is
+// whether Windows still showed the popup's native window then, or null when
+// it has none or Windows did not know it.
+public sealed record BrowserPopupWidgetHiddenPayload(
+    BrowserContext Context,
+    string FrameSinkId,
+    string Cause,
+    bool? NativeWindowVisible);
+
+// A change of an option's selectedness, which sets no attribute. In an open
+// select list the highlighted item is the popup listbox's selected option.
+public sealed record BrowserOptionSelectednessChangedPayload(
+    BrowserContext Context,
+    int NodeId,
+    int? SelectNodeId,
+    bool Selected,
+    BrowserScriptLocation? Location,
+    BrowserExecutionWorld? World);
+
 // Interaction checkpoint records report the interaction state Blink held for a
 // document immediately after a DOM or layout checkpoint completed, read
 // without requesting any lifecycle update. SourceCheckpointId names that
@@ -888,12 +1144,170 @@ public sealed record BrowserLayoutPseudoElement(
     int GeneratedTextLength,
     bool GeneratedTextTruncated);
 
+// Box fragments (protocol 0.38). Every length is a Blink layout unit written as
+// a number: physical, not logical, and zoomed, so dividing by EffectiveZoom
+// gives CSS pixels. A box fragment holds its border-box size, the break token
+// it continues from when the box continues in a later fragment, its scrollable
+// overflow when it has any, and its child links in order.
+public sealed record BrowserLayoutBreakToken(
+    double ConsumedBlockSize,
+    bool BreakBefore,
+    int? SequenceNumber,
+    bool AtBlockEnd);
+
+// One child link: Kind is "box" for a box with a DOM node, named by NodeId,
+// FragmentIndex naming which of that node's fragments it is; "anonymous",
+// "column", or "page" for a box with no node, which holds its own Fragment;
+// or "line" for a line box. X and Y are its offset in the parent fragment.
+public sealed record BrowserLayoutFragmentChild(
+    string Kind,
+    double X,
+    double Y,
+    long? NodeId,
+    int? FragmentIndex,
+    BrowserLayoutBoxFragment? Fragment);
+
+// The font of a glyph run (protocol 0.39), as Blink's platform font data
+// holds it; fonts are recorded by name.
+public sealed record BrowserLayoutFont(
+    string Family,
+    string PostScriptName,
+    double Size,
+    bool SyntheticBold,
+    bool SyntheticItalic);
+
+// A run of glyphs with one font, orientation, and rotation (protocol 0.39).
+// Glyphs is base64 of packed little-endian glyphs, 18 bytes each: the glyph
+// identifier (2 bytes), the character index into the block's text content (4),
+// the total advance before the glyph, and its offset x and y (4-byte floats).
+public sealed record BrowserLayoutGlyphRun(
+    BrowserLayoutFont Font,
+    bool Horizontal,
+    int Rotation,
+    string Glyphs,
+    BrowserLayoutFontFile? FontFile = null);
+
+// The font file of a glyph run's typeface (protocol 0.40): the SHA-256 digest
+// of the file's bytes in lowercase hexadecimal, which a font-file record of the
+// same renderer holds, the typeface's index in a font collection, and its
+// variation position. Null when Skia gave no readable file for the typeface.
+public sealed record BrowserLayoutFontFile(
+    string Digest,
+    int Index,
+    IReadOnlyList<BrowserLayoutFontVariation> Variations);
+
+// One variation axis: its four-character OpenType tag, or the tag's number in
+// decimal when it is not four printable ASCII characters, and its value.
+public sealed record BrowserLayoutFontVariation(string Axis, double Value);
+
+// One glyph of a glyph run, as Blink's shaping reports it.
+public readonly record struct BrowserLayoutGlyph(
+    ushort Glyph,
+    uint CharacterIndex,
+    float TotalAdvance,
+    float OffsetX,
+    float OffsetY);
+
+// Reads a glyph run's packed glyphs.
+public static class BrowserLayoutGlyphs
+{
+    public const int PackedGlyphBytes = 18;
+
+    public static IReadOnlyList<BrowserLayoutGlyph> Unpack(string glyphs)
+    {
+        var bytes = Convert.FromBase64String(glyphs);
+        if (bytes.Length % PackedGlyphBytes != 0)
+        {
+            throw new FormatException("Glyphs must be whole packed glyphs of 18 bytes.");
+        }
+        var span = bytes.AsSpan();
+        var result = new BrowserLayoutGlyph[bytes.Length / PackedGlyphBytes];
+        for (var index = 0; index < result.Length; index++)
+        {
+            var glyph = span.Slice(index * PackedGlyphBytes, PackedGlyphBytes);
+            result[index] = new BrowserLayoutGlyph(
+                System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(glyph),
+                System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(glyph[2..]),
+                System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(glyph[6..]),
+                System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(glyph[10..]),
+                System.Buffers.Binary.BinaryPrimitives.ReadSingleLittleEndian(glyph[14..]));
+        }
+        return result;
+    }
+}
+
+// One fragment item of a block fragment (protocol 0.39), in Blink's pre-order:
+// Type is "line", "text", "generated-text", or "box"; the rectangle is in the
+// fragment, in layout units. DescendantsCount, for a line or box item, counts
+// the item and those it spans. Start and End, for a text item, are its range of
+// the block's text content. A text or generated-text item has FirstLineStyle,
+// Direction, HiddenForPaint, and GlyphRuns; a generated-text item has
+// GeneratedText. Members that do not apply are null.
+public sealed record BrowserLayoutFragmentItem(
+    string Type,
+    double X,
+    double Y,
+    double Width,
+    double Height,
+    int? DescendantsCount,
+    long? NodeId,
+    int? Start,
+    int? End,
+    bool? FirstLineStyle,
+    string? Direction,
+    bool? HiddenForPaint,
+    IReadOnlyList<BrowserLayoutGlyphRun>? GlyphRuns,
+    string? GeneratedText);
+
+// Items (protocol 0.39) is null for a fragment that holds no lines.
+// TextContent and FirstLineText are the text a fragment held by a child link,
+// such as an anonymous block, lays out, which its items index; a node's own
+// fragments leave them null, their text being the node's.
+public sealed record BrowserLayoutBoxFragment(
+    double Width,
+    double Height,
+    BrowserLayoutBreakToken? BreakToken,
+    BrowserLayoutRect? ScrollableOverflow,
+    IReadOnlyList<BrowserLayoutFragmentChild> Children,
+    IReadOnlyList<BrowserLayoutFragmentItem>? Items = null,
+    string? TextContent = null,
+    string? FirstLineText = null);
+
+// A replaced element's natural dimensions, in zoomed CSS pixels as Blink holds
+// them.
+public sealed record BrowserLayoutNaturalSize(
+    double Width,
+    double Height,
+    bool HasWidth,
+    bool HasHeight,
+    double AspectRatioWidth,
+    double AspectRatioHeight);
+
+// The fragments of a node whose layout object is a layout box. NaturalSize is
+// null except for a replaced element. TextContent (protocol 0.39) is a block's
+// text as laid out, which its items' ranges index, and FirstLineText its
+// ::first-line text when Blink holds one; both are null for a box without
+// items. In a change record, TextContentUnchanged states that the text equals
+// the node's last record and is left out, both being null.
+public sealed record BrowserLayoutBoxFragments(
+    double EffectiveZoom,
+    IReadOnlyList<BrowserLayoutBoxFragment> Fragments,
+    BrowserLayoutNaturalSize? NaturalSize,
+    string? TextContent = null,
+    string? FirstLineText = null,
+    bool TextContentUnchanged = false);
+
 // Records one element, laid-out text node, or pseudo-element.
 // BoundingClientRect is null when the node has no layout object. ComputedStyle
 // maps each listed property to its resolved value, or to null when Blink
 // produced none, and is null for a text node or an element without a current
 // computed style. ShadowHostNodeId and ShadowRootMode name the host and mode of
 // the shadow tree that contains the node, and are null in a document tree.
+// CustomProperties (protocol 0.37) maps each custom property of the computed
+// style to its value, and is null when ComputedStyle is; ComputedStyle then
+// holds every property getComputedStyle() lists. BoxFragments (protocol
+// 0.38) holds the node's box fragments, and is null when its layout object is
+// not a layout box.
 public sealed record BrowserLayoutCheckpointNodePayload(
     BrowserContext Context,
     string CheckpointId,
@@ -907,7 +1321,9 @@ public sealed record BrowserLayoutCheckpointNodePayload(
     IReadOnlyDictionary<string, string?>? ComputedStyle,
     BrowserLayoutPseudoElement? PseudoElement = null,
     long? ShadowHostNodeId = null,
-    string? ShadowRootMode = null);
+    string? ShadowRootMode = null,
+    IReadOnlyDictionary<string, string?>? CustomProperties = null,
+    BrowserLayoutBoxFragments? BoxFragments = null);
 
 public sealed record BrowserLayoutCheckpointCompletedPayload(
     BrowserContext Context,
@@ -926,10 +1342,14 @@ public sealed record BrowserLayoutCheckpointCompletedPayload(
 // previous change set, if any. ViewTransformNodeId is the transform node of
 // the layout view's local border box, and ViewPaintOffset the view's paint
 // offset in it, in physical pixels.
+// CheckpointUpdate (protocol 0.46) is true when the change set was read for
+// the rendering update its named checkpoint recorded, and so is part of the
+// walked update presented through that checkpoint.
 public sealed record BrowserLayoutChangesStartedPayload(
     BrowserContext Context,
     string ChangeSetId,
     string? LayoutCheckpointId,
+    bool CheckpointUpdate,
     string ViewTransformNodeId,
     BrowserLayoutPoint ViewPaintOffset,
     double LayoutZoomFactor);
@@ -968,6 +1388,12 @@ public sealed record BrowserLayoutNodeGeometry(
 // One noted node whose record changed. Reasons lists why it was noted:
 // "style", "layout", or "paint-properties". The node fields are those of a
 // checkpoint node record, and Geometry replaces its viewport rectangle.
+// ComputedStyleComplete (protocol 0.37) is true when ComputedStyle and
+// CustomProperties hold every value, as in a node's first record, and false
+// when they hold only the values that changed since the node's last record,
+// RemovedCustomProperties then naming the custom properties that record held
+// and this one does not. Both are null when ComputedStyle is. BoxFragments
+// (protocol 0.38) is always whole, as in a checkpoint node record.
 public sealed record BrowserLayoutNodeChangedPayload(
     BrowserContext Context,
     string ChangeSetId,
@@ -981,7 +1407,11 @@ public sealed record BrowserLayoutNodeChangedPayload(
     IReadOnlyDictionary<string, string?>? ComputedStyle,
     BrowserLayoutPseudoElement? PseudoElement = null,
     long? ShadowHostNodeId = null,
-    string? ShadowRootMode = null);
+    string? ShadowRootMode = null,
+    bool? ComputedStyleComplete = null,
+    IReadOnlyDictionary<string, string?>? CustomProperties = null,
+    IReadOnlyList<string>? RemovedCustomProperties = null,
+    BrowserLayoutBoxFragments? BoxFragments = null);
 
 public sealed record BrowserLayoutChangesCompletedPayload(
     BrowserContext Context,
@@ -998,7 +1428,10 @@ public sealed record BrowserLayoutChangesCompletedPayload(
 // offset Blink holds, in physical pixels; WebExposedScrollOffset is the value
 // scrollLeft and scrollTop divide by EffectiveZoom; ScrollOrigin is the
 // position of offset zero. ScrollTranslationNodeId is the transform node the
-// offset moves, or null when the scroller has none.
+// offset moves, or null when the scroller has none. From protocol 0.49 (slice
+// 4b sub-step 2b-ii), ScrollElementId is the scroller's compositor element ID
+// as decimal text, which the compositor-frame records name its scroll offset
+// by, or null when it has none; it is absent before 0.49.
 public sealed record BrowserLayoutScrollOffsetChangedPayload(
     BrowserContext Context,
     string ChangeSetId,
@@ -1007,7 +1440,8 @@ public sealed record BrowserLayoutScrollOffsetChangedPayload(
     BrowserLayoutPoint WebExposedScrollOffset,
     BrowserLayoutPoint ScrollOrigin,
     double EffectiveZoom,
-    string? ScrollTranslationNodeId);
+    string? ScrollTranslationNodeId,
+    string? ScrollElementId = null);
 
 // Presentation records follow the compositor frame that carries one layout
 // checkpoint's rendering update, or, from protocol 0.35, one layout change
@@ -1016,13 +1450,16 @@ public sealed record BrowserLayoutScrollOffsetChangedPayload(
 // follows: a not-swapped record whose action is "broken", or a swapped record
 // and then, when viz reports it, feedback for the same frame token. Frame
 // tokens are unsigned 32-bit decimal strings numbered per frame sink, and the
-// frame sink is written "clientId:sinkId". Every tick field is a decimal
+// frame sink is written "clientId:sinkId". From protocol 0.43 WidgetKind is
+// "frame" for a frame widget or "page-popup" for a page popup's widget, whose
+// frame sink the renderer is not told, so its FrameSinkId is null. Every tick field is a decimal
 // QueryPerformanceCounter value, the clock the record envelope's native
 // timestamp uses, or null when Chromium reported no time or its clock was not
 // high resolution.
 public sealed record BrowserPresentationRequestedPayload(
     BrowserContext Context,
     string RequestId,
+    string? WidgetKind,
     string? FrameSinkId,
     string? LocalRootFrameToken,
     string? LayoutCheckpointId,
@@ -1037,7 +1474,8 @@ public sealed record BrowserPresentationRequestedPayload(
 public sealed record BrowserPresentationNotSwappedPayload(
     BrowserContext Context,
     string RequestId,
-    string FrameSinkId,
+    string WidgetKind,
+    string? FrameSinkId,
     string LocalRootFrameToken,
     string Reason,
     string Action,
@@ -1049,7 +1487,8 @@ public sealed record BrowserPresentationNotSwappedPayload(
 public sealed record BrowserPresentationSwappedPayload(
     BrowserContext Context,
     string RequestId,
-    string FrameSinkId,
+    string WidgetKind,
+    string? FrameSinkId,
     string LocalRootFrameToken,
     string FrameToken,
     int NotSwappedCount);
@@ -1057,7 +1496,8 @@ public sealed record BrowserPresentationSwappedPayload(
 public sealed record BrowserPresentationFeedbackPayload(
     BrowserContext Context,
     string RequestId,
-    string FrameSinkId,
+    string WidgetKind,
+    string? FrameSinkId,
     string LocalRootFrameToken,
     string FrameToken,
     string? PresentedTicks,
@@ -1070,6 +1510,308 @@ public sealed record BrowserPresentationFeedbackPayload(
     string? SwapEndTicks,
     bool HighResolutionTicks,
     int NotSwappedCount);
+
+// Compositor records (protocol 0.48, slice 4b), on browser.compositor. A
+// compositor is named by its cc::LayerTreeHost ID, unique in its renderer
+// process, and by the widget its presentation requests name (null before
+// the first). Element IDs are cc::ElementId values as decimal strings.
+
+// An animation started on the compositor, from Blink's main thread: its
+// target node, cc animation ID, and keyframe models.
+public sealed record BrowserCompositorAnimationStartedPayload(
+    BrowserContext Context,
+    int NodeId,
+    int? CompositorAnimationId,
+    IReadOnlyList<BrowserCompositorKeyframeModel> KeyframeModels);
+
+// One keyframe model: its ID, cc::TargetProperty name, the element ID it
+// animates, and that ID's Blink namespace name.
+public sealed record BrowserCompositorKeyframeModel(
+    int KeyframeModelId,
+    string TargetProperty,
+    string ElementId,
+    string ElementIdNamespace);
+
+// An animation's keyframe models removed from the compositor, cancelled or
+// finished.
+public sealed record BrowserCompositorAnimationEndedPayload(
+    BrowserContext Context,
+    int? NodeId,
+    int? CompositorAnimationId,
+    IReadOnlyList<int> KeyframeModelIds);
+
+// A Blink animation (protocol 0.53, slice 4g), from Animation::NotifyProbe
+// on the main thread: recorded at its first call and at each call in which
+// anything other than its current time, progress, and current iteration
+// changed. The sequence number is Blink's, a decimal string unique in the
+// renderer process. Kind is "css-animation", "css-transition", or
+// "web-animation"; Name is the id, else the animation name, else the
+// transitioned property. Play state is Blink's, "idle", "running",
+// "paused", or "finished", with Pending true while a play or pause is
+// pending. Times are milliseconds on the animation's timeline; an
+// unresolved time is null. Effect is null for an animation with no effect.
+public sealed record BrowserAnimationUpdatedPayload(
+    BrowserContext Context,
+    string SequenceNumber,
+    string Kind,
+    string? Name,
+    string? Id,
+    int? TargetNodeId,
+    string? PseudoElement,
+    string PlayState,
+    bool Pending,
+    double? PlaybackRate,
+    double? StartTimeMilliseconds,
+    double? CurrentTimeMilliseconds,
+    BrowserAnimationTimeline Timeline,
+    BrowserAnimationEffect? Effect,
+    int? CompositorAnimationId);
+
+// An animation's timeline. Kind is "document", "scroll", "view", "other", or
+// "none". A document timeline's zero time is given in the clock's counter
+// ticks, as a decimal string, null when the clock is not high resolution,
+// and as TimeTicks microseconds; its playback rate is the timeline's own. A
+// scroll or view timeline names its source node, its axis ("horizontal" or
+// "vertical"), and a view timeline its subject.
+public sealed record BrowserAnimationTimeline(
+    string Kind,
+    string? ZeroTicks,
+    string? ZeroTimeTicksMicroseconds,
+    double? PlaybackRate,
+    int? SourceNodeId,
+    int? SubjectNodeId,
+    string? Axis);
+
+// An animation's effect timing, normalized as Blink holds it: the delays and
+// iteration duration in milliseconds, iterations null when infinite, the
+// direction and fill as their Web Animations keywords, and the easing as
+// Blink writes it. Progress and current iteration are Blink's computed
+// values at the call, the progress after the easing, null when not in
+// effect.
+public sealed record BrowserAnimationEffect(
+    double? DelayMilliseconds,
+    double? EndDelayMilliseconds,
+    double? IterationStart,
+    double? Iterations,
+    double? DurationMilliseconds,
+    string Direction,
+    string Fill,
+    string Easing,
+    double? Progress,
+    double? CurrentIteration);
+
+// An animation recorded before was released, or its document's context was
+// destroyed.
+public sealed record BrowserAnimationRemovedPayload(
+    BrowserContext Context,
+    string SequenceNumber);
+
+// The compositor's widget, as its presentation records name it.
+public sealed record BrowserCompositorWidget(
+    string WidgetKind,
+    string? FrameSinkId,
+    string LocalRootFrameToken);
+
+// A submitted compositor frame, from LayerTreeHostImpl::DrawLayers, with the
+// active tree's values that changed since the compositor's last recorded
+// frame. Value is, by property: transform, the 16 matrix entries row by row;
+// opacity, a number; filter and backdrop-filter, the operations;
+// scroll-offset, x and y; background-color-progress and
+// clip-path-progress, an object whose progress is the compositor progress the
+// drawn paint worklet record was painted with, or null when it was painted
+// with none; and image-frame, the frame index an animated paint image is
+// drawn at. A null value means the element's node or paint worklet is no
+// longer in the drawn tree, or the paint image is no longer held by the
+// image animation controller.
+public sealed record BrowserCompositorFramePayload(
+    BrowserContext Context,
+    int LayerTreeHostId,
+    BrowserCompositorWidget? Widget,
+    string FrameToken,
+    int SourceFrameNumber,
+    string? BeginFrameTicks,
+    string? BeginFrameTimeTicksMicroseconds,
+    bool HighResolutionTicks,
+    IReadOnlyList<BrowserCompositorChange> Changes);
+
+// ElementId names the compositor element, and is null for image-frame, whose
+// PaintImageId names the paint image instead.
+public sealed record BrowserCompositorChange(
+    string? ElementId,
+    string Property,
+    System.Text.Json.JsonElement Value,
+    string? PaintImageId = null);
+
+// A cc::FilterOperation: its type and numbers, as the bridge README states.
+public sealed record BrowserCompositorFilterOperation(
+    string Type,
+    IReadOnlyList<double> Numbers);
+
+// What a native paint worklet painted, on the worklet's thread: the
+// compositor element and property (background-color or clip-path), the
+// compositor progress it was given, or null, and the value drawn.
+public sealed record BrowserPaintWorkletPaintedPayload(
+    BrowserContext Context,
+    string ElementId,
+    string Property,
+    double? Progress,
+    BrowserPaintWorkletPaintedValue Value);
+
+// A painted background color is Color, four floats (SkColor4f). A painted
+// clip path is the SkPath's fill type, verbs, points (x, y, ...), and conic
+// weights, the translation the paint applied, and whether it was drawn as a
+// rounded rectangle.
+public sealed record BrowserPaintWorkletPaintedValue(
+    IReadOnlyList<double>? Color,
+    string? FillType,
+    IReadOnlyList<string>? Verbs,
+    IReadOnlyList<double>? Points,
+    IReadOnlyList<double>? ConicWeights,
+    BrowserPaintWorkletTranslation? Translation,
+    bool? DrawnAsRoundedRect);
+
+public sealed record BrowserPaintWorkletTranslation(double X, double Y);
+
+// Viz's presentation of a recorded compositor frame, on the clock of the
+// presentation records, or its failure.
+public sealed record BrowserCompositorFramePresentedPayload(
+    BrowserContext Context,
+    int LayerTreeHostId,
+    BrowserCompositorWidget? Widget,
+    string FrameToken,
+    bool Failed,
+    string? PresentedTicks,
+    string? PresentedTimeTicksMicroseconds,
+    bool HighResolutionTicks);
+
+// Page resource records (protocol 0.40), on browser.resources. A font file or
+// an image is identified by the SHA-256 digest of its bytes, in lowercase
+// hexadecimal, and a renderer records the bytes once for each digest, in a
+// font-file or image-data record. Size is the byte count as a decimal string,
+// and Bytes the bytes in base64. These records carry no document.
+public sealed record BrowserResourceBytesPayload(
+    BrowserContext Context,
+    string Digest,
+    string Size,
+    string Bytes);
+
+// A FontFace joining or leaving its document's set of faces. FaceNumber is
+// unique in the renderer, as a decimal string.
+public sealed record BrowserFontFacePayload(
+    BrowserContext Context,
+    string FaceNumber);
+
+// A face's descriptors as Blink's FontFace getters serialize them.
+public sealed record BrowserFontFaceDescriptors(
+    string Style,
+    string Weight,
+    string Stretch,
+    string UnicodeRange,
+    string Variant,
+    string FeatureSettings,
+    string Display,
+    string AscentOverride,
+    string DescentOverride,
+    string LineGapOverride,
+    string SizeAdjust);
+
+// The source a face loaded from: "url", with its URL; "data-url", whose bytes
+// are the face's font file; "binary", from script; or "local", an installed
+// font, for which Blink holds no file.
+public sealed record BrowserFontFaceSource(string Kind, string? Url);
+
+// The font file a face loaded, by digest, and its collection index.
+public sealed record BrowserFontFaceFontFile(string Digest, int Index);
+
+// A FontFace of a document that finished loading.
+public sealed record BrowserFontFaceLoadedPayload(
+    BrowserContext Context,
+    string FaceNumber,
+    string Family,
+    BrowserFontFaceDescriptors Descriptors,
+    BrowserFontFaceSource? Source,
+    BrowserFontFaceFontFile? FontFile);
+
+// An image resource that finished loading: the URL requested, the response's
+// URL, status, and MIME type, and the size and digest of its encoded bytes.
+// DataRecorded is false when the bytes' image-data record could not be queued.
+// ImageId (protocol 0.48) is the Blink image's own ID the bytes were given to,
+// as a decimal string, or null when no image was made.
+public sealed record BrowserImageResourcePayload(
+    BrowserContext Context,
+    string Url,
+    string? ResponseUrl,
+    int Status,
+    string MimeType,
+    string Size,
+    string Digest,
+    bool DataRecorded,
+    string? ImageId);
+
+// A style sheet resource Blink parsed (protocol 0.51, slice 4e): the URL
+// requested, the response's URL, status, and MIME type, and the size and
+// digest of the decoded text in UTF-8, whose bytes are in a style-sheet-text
+// record (BrowserResourceBytesPayload). TextRecorded is false when that
+// record could not be queued. These records carry no document.
+public sealed record BrowserStyleSheetResourcePayload(
+    BrowserContext Context,
+    string Url,
+    string? ResponseUrl,
+    int Status,
+    string MimeType,
+    string Size,
+    string Digest,
+    bool TextRecorded);
+
+// One style sheet at an update of a document's active style sheets
+// (protocol 0.51). Sheet is the sheet's number in the renderer, as a decimal
+// string. The other members are present only when the sheet is new or its
+// state changed since the document's last record. Kind is "link", "style",
+// "import", "constructed", "processing-instruction", or "other"; an import
+// names its parent sheet and the index of its import rule. TextSource is
+// "arrived" (the resource's text, by TextDigest), "element" (the owner
+// element's text, in the DOM), "cssom" (the CSSOM text, by TextDigest), or
+// "none".
+public sealed record BrowserStyleSheetEntry(
+    string Sheet,
+    string? Kind,
+    int? OwnerNodeId,
+    string? ParentSheet,
+    int? RuleIndex,
+    string? Href,
+    string? Media,
+    string? Title,
+    bool? Disabled,
+    bool? Active,
+    string? TextSource,
+    string? TextDigest);
+
+// A tree scope's sheets: the scope's root node (the document or a shadow
+// root), its sheets in document.styleSheets order with each import after the
+// sheet that imports it, and its adopted sheets in order.
+public sealed record BrowserStyleSheetScope(
+    int ScopeNodeId,
+    IReadOnlyList<BrowserStyleSheetEntry> Sheets,
+    IReadOnlyList<BrowserStyleSheetEntry> Adopted);
+
+// The tree scopes an update of a document's active style sheets touched
+// (protocol 0.51).
+public sealed record BrowserStyleSheetsUpdatedPayload(
+    BrowserContext Context,
+    IReadOnlyList<BrowserStyleSheetScope> Scopes);
+
+// A paint image Blink made from an image (protocol 0.48), the first time the
+// renderer made one with its ID: the image's own ID, the paint image's ID,
+// its animation sequence (shared, the image's, or own, an element's), the
+// node it was made for, or null, and the paint image whose animation it is
+// synchronised to, or null. IDs are decimal strings.
+public sealed record BrowserImagePaintImagePayload(
+    BrowserContext Context,
+    string ImageId,
+    string PaintImageId,
+    string Sequence,
+    int? NodeId,
+    string? SyncTargetPaintImageId);
 
 // Network records report request and response metadata as the Blink loader and
 // the browser's network service observer already hold it. No record carries a

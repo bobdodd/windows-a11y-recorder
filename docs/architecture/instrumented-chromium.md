@@ -234,7 +234,8 @@ records the accepted requested delay, Blink's effective delay, and nesting
 level. The timer event timestamp is the observed callback-entry time; it does
 not claim callback completion or resulting page effects. Throttling is null,
 page lifecycle state is `unknown`, and callback location is null until those
-facts have dedicated instrumentation. Implicit one-shot retirement and
+facts have dedicated instrumentation (protocol 0.52 records the callback
+location of window timers). Implicit one-shot retirement and
 execution-context destruction are not reported as explicit cancellation.
 Animation frames, idle callbacks, worker timers, and browser-process task
 scheduling remain outside this slice. Live 0.5 connections require an exact
@@ -619,6 +620,59 @@ Four record types are emitted:
   attribute state that the DOM records report, so this record is the only
   account of the reference. It carries the element's node and the referenced
   node.
+- `page-popup-opened` (protocol 0.43): a page popup, such as the list of an
+  open select or a date, time, or colour picker, once `WebPagePopupImpl` has
+  installed its document. Its context names the popup's own document. It
+  carries the kind (`select-list`, `date-time`, `color`, or `other`), the
+  owner element's node and document, the owner frame's local frame token
+  (protocol 0.44), the owner's visible bounds in its local
+  root, the owner's local root view and the anchor in screen DIPs, the first
+  window rectangle, and the zoom factor.
+- `page-popup-window-rect` (protocol 0.43): a window rectangle the popup asked
+  for in `WebPagePopupImpl::SetWindowRect`, with `deferred` true when asked
+  for before the popup was shown. Protocol 0.44 removed its `source` and
+  `widgetRect` and the `placed` record from
+  `WebPagePopupImpl::SetScreenRects`, which Chromium does not call on the
+  browser's path; the popup widget records below hold where the window was
+  put.
+- `page-popup-closed` (protocol 0.43): the popup closing, by the `renderer` or
+  the `browser`, written from `WebPagePopupImpl::ClosePopup`, or from
+  `WebPagePopupImpl::Close` when the popup client's cancel did not reach
+  `ClosePopup`.
+- `option-selectedness-changed` (protocol 0.43): an option's selectedness
+  after `HTMLOptionElement::SetSelectedState` changed it, with its select's
+  node when it has one. Selectedness sets no attribute, so no DOM record
+  reports it. In an open select list the highlighted item is the popup
+  listbox's selected option.
+- `popup-widget-created` (protocol 0.44): a popup widget the browser made for
+  a frame's request, written from `RenderFrameHostImpl::CreateNewPopupWidget`.
+  Its context is the opener frame's navigation context. It carries the
+  renderer's process ID, the opener frame's local frame token, and the
+  widget's frame sink, written `clientId:sinkId`.
+- `popup-widget-shown` (protocol 0.44): `WebContentsImpl::ShowCreatedWidget`
+  for a popup widget, with the browser process's context and the frame sink.
+  It carries the rectangle and anchor as received, after the transform for
+  nested web contents, and the rectangle after `ConstrainPopupBounds`, and
+  its `outcome`: `shown`, with the view's bounds after `InitAsPopup`, or the
+  reason it refused the popup, `window-not-active` (before the transform, so
+  the later rectangles are null), `not-visible`, or `permission-exclusion`.
+- `popup-widget-bounds-requested` (protocol 0.44):
+  `RenderWidgetHostImpl::SetPopupBounds`, with the rectangle requested and the
+  rectangle set on the view after `ConstrainPopupBounds` and the display
+  clamp, or null when the request was ignored while a screen rectangle update
+  was unacknowledged.
+- `popup-widget-screen-rects` (protocol 0.44): the view and window bounds in
+  screen DIPs that `RenderWidgetHostImpl::SendScreenRects` sent to a popup
+  widget, the native window's rectangle and client area in screen pixels as
+  Windows returned them when the record was made, or null when it did not
+  answer, and the view's device scale factor.
+- `popup-widget-hidden` (protocol 0.45): the popup widget's view hiding its
+  window, written from `RenderWidgetHostViewAura::Hide` (`cause` `hidden`)
+  or from `RenderWidgetHostViewAura::CleanUpHostObservers` before the view
+  is destroyed (`cause` `destroyed`), just after the window is hidden and
+  only when it had been shown. It carries the frame sink and
+  `nativeWindowVisible`, whether Windows still showed the popup's native
+  window when the record was made, or null when there was none.
 
 The recorded facts are bounded as follows:
 
@@ -965,7 +1019,159 @@ record's transform node space, and null otherwise. A rectangle derived under
 a transform that rotates or skews is the union of the bounds of each mapped
 quad. The design is in [change-driven recording](change-driven-recording.md).
 
-Live 0.36 connections require an exact protocol-version match.
+Protocol version 0.37 records every computed-style property
+`getComputedStyle()` lists, read at run time in place of the fixed list of
+283, and each element's custom properties as `customProperties`, in layout
+checkpoint nodes and `layout-node-changed` records. After a node's first
+change record, a record holds only the style values and custom properties
+that changed, states `computedStyleComplete` false, and lists the custom
+properties removed in `removedCustomProperties`. The design is in
+[page recreation](page-recreation.md), "2a as built".
+
+Protocol version 0.38 adds `boxFragments` to layout checkpoint nodes and
+`layout-node-changed` records: for a node whose layout object is a layout
+box, its effective zoom, each of its physical fragments with its
+border-box size, break token, scrollable overflow, and child links, and a
+replaced element's natural size, in Blink's layout units; null for any
+other node. The design is in [page recreation](page-recreation.md), "2b
+design" and "2b as built".
+
+Protocol version 0.39 adds, in `boxFragments`, each fragment's `items`
+when it holds lines, with each text item's `glyphRuns`, and the node's
+`textContent`, `firstLineText`, and `textContentUnchanged`; a fragment held
+by a child link records its own text. The design is in
+[page recreation](page-recreation.md), "2c design" and "2c as built".
+
+Protocol version 0.40 adds the topic `browser.resources`: each font file a
+glyph run uses and each image resource a renderer finished loading, by the
+SHA-256 digest of its bytes, with the bytes recorded once for each digest
+in a renderer; and each `FontFace` of a document as it joins, loads, and
+leaves the document's set of faces. Each glyph run gains `fontFile`, the
+digest, collection index, and variation position of its typeface's file.
+The design is in [page recreation](page-recreation.md), "Slice 4a" and
+"Sub-step 2 as built".
+
+Protocol version 0.41 records, in a layout change set, an element or text
+node whose layout object Blink destroyed in `Node::DetachLayoutTree`, so
+that a text node under an element that became `display: none` states that
+it has no layout object. A `layout-node-changed` record of a text node may
+state no layout object; a checkpoint still leaves such a text node out. See
+"Sub-step 3 on the target machine" in [page recreation](page-recreation.md).
+
+Protocol version 0.42 requests a DOM checkpoint with `reason`
+`started-parsing` when `Document::ImplicitOpen` creates the parser, which
+the bridge always walks (its `walkReason` is `first`, `after-loss`, `check`,
+or `started-parsing`), and records the document's structural changes,
+parser text appends to connected nodes, and mutation deliveries while it
+parses, as it does after parsing. The design is in
+[page recreation](page-recreation.md), "Slice 4c".
+
+Protocol version 0.43 adds four `browser.interaction` records, written from
+`WebPagePopupImpl` and `HTMLOptionElement::SetSelectedState`:
+`page-popup-opened`, `page-popup-window-rect`, `page-popup-closed`, and
+`option-selectedness-changed`. A layout checkpoint or change set of a page
+popup's document requests its presentation from the popup's `WidgetBase`
+rather than recording `no-widget`. Every presentation record names its
+widget's kind, `frame` or `page-popup`, in `widgetKind`; a page popup's
+widget is not told its frame sink, so its `frameSinkId` is null and its
+`isMainFrameWidget` is false. The design is in
+[page recreation](page-recreation.md), "Slice 4d".
+
+Protocol version 0.44 adds four `browser.interaction` records written by the
+browser process: `popup-widget-created`, `popup-widget-shown`,
+`popup-widget-bounds-requested`, and `popup-widget-screen-rects`. All four
+name the popup widget's frame sink. `page-popup-opened` gains
+`ownerFrameToken`, which matches the created record's `openerFrameToken`, and
+`page-popup-window-rect` records only requested rectangles. The design is in
+[page recreation](page-recreation.md), "Sub-step 1b".
+
+Protocol version 0.45 adds the browser process's `popup-widget-hidden`
+record on `browser.interaction`, named by the popup widget's frame sink, so
+that a popup is matched to the time its window left the screen. The design
+is in [page recreation](page-recreation.md), "Popup on screen".
+
+Protocol version 0.46 adds `checkpointUpdate` to `layout-changes-started`:
+true when the change set was read for the rendering update its named
+checkpoint recorded, which is presented through that checkpoint, and false
+otherwise. The design is in [page recreation](page-recreation.md), "Layout
+of a walked rendering update".
+
+Protocol version 0.47 adds `windowsAnimationSettings` to
+`popup-widget-shown`: five Windows animation settings read with
+`SystemParametersInfo` in the browser process as the popup window is
+shown, each null when the call fails. They are recorded, not interpreted.
+The design is in [page recreation](page-recreation.md), "Window fade of a
+popup".
+
+Protocol version 0.48 adds the `browser.compositor` channel, with
+`compositor-animation-started` and `compositor-animation-ended` from
+Blink's main thread, and `compositor-frame` and
+`compositor-frame-presented` from the compositor thread, and
+`paint-worklet-painted` from the paint worklet's thread. It adds
+`image-paint-image` to the `browser.resources` channel and `imageId` to
+`image-resource`. They are
+written by the hooks of slice 4b sub-step 1 in `cc/trees/layer_tree_host_impl.cc`,
+`image_animation_controller.h`,
+`client_layer_tree_host_impl.cc`, `compositor_animations.cc`,
+`keyframe_effect.cc`, `background_color_paint_definition.cc`,
+`clip_path_paint_definition.cc`, `image_resource.cc`, and
+`bitmap_image.cc`. The design is in
+[page recreation](page-recreation.md), "Slice 4b".
+
+In the recreation mode only, slice 4b sub-step 2a holds each animated image
+at the frame the recorder names in its answer's
+`X-A11y-Recorder-Image-Frame` header, with hooks in `image_resource.cc`,
+`image_animation_controller.h`, and `cc/trees/image_animation_controller.cc`;
+it records nothing, and the protocol stays 0.48. The design is in
+[page recreation](page-recreation.md), "Sub-step 2a".
+
+Protocol version 0.49 adds `scrollElementId` to
+`layout-scroll-offset-changed`: the scroller's compositor element ID, which
+the `compositor-frame` records name its drawn scroll offset by. The design
+is in [page recreation](page-recreation.md), "Sub-step 2b-ii design".
+
+Protocol version 0.50 adds, to each `scroll-offset` value of
+`compositor-frame`, whether the compositor scrolls the node
+(`isComposited`) and the reasons Chromium gives for repainting it on the
+main thread (`mainThreadRepaintReasons`). The design is in
+[page recreation](page-recreation.md), "Sub-step 2b-iii design".
+
+Protocol version 0.51 adds `style-sheet-resource`, `style-sheet-text`, and
+`style-sheets-updated` on `browser.resources`: the text each linked or
+imported sheet arrived with, and each tree scope's sheets and adopted
+sheets at each update of the document's active style sheets, with the
+CSSOM text of a sheet script changed or constructed. The design is in
+[page recreation](page-recreation.md), "Slice 4e".
+
+Protocol version 0.52 adds `timer-origin` and `script-compiled` on
+`browser.timer`, and fills `callbackLocation` in the window timer records:
+the world and script stack of the call that scheduled a timer, where its
+callback is defined, and the script element or on... attribute each script ID
+came from. The design is in [page recreation](page-recreation.md), "Slice
+4f: who scheduled each timer".
+
+Protocol version 0.53 adds the `browser.animation` channel, with
+`animation-updated` and `animation-removed`: each Blink animation, from
+`Animation::NotifyProbe`, recorded when it starts and when anything other
+than its current time changes, and its release. The design is in
+[page recreation](page-recreation.md), "Slice 4g: running animations in the
+evidence panel".
+
+Protocol version 0.54 adds the `browser.script` channel, with
+`script-parsed` and `script-text`: each script V8 instantiates, or fails to
+compile, in a document's main thread, and its source once per digest. The
+design is in [page recreation](page-recreation.md), "Slice 4h: the page's
+script source".
+
+Protocol version 0.55 adds `frameToken` and `mainFrame` to
+`dom-checkpoint-started`, and two `browser.dom` records:
+`dom-checkpoint-frame-owner`, in a walk, for each frame owner element that
+holds a frame, and `dom-frame-owner-changed`, when an owner is given a frame
+or loses it. Frames are named by their DevTools frame token, which every
+renderer gives the same frame. The design is in
+[page recreation](page-recreation.md), "Slice 5: the documents of frames".
+
+Live 0.55 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

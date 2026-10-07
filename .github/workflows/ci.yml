@@ -21,6 +21,16 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Cache PostgreSQL binaries
+        uses: actions/cache@v4
+        with:
+          path: .postgres
+          key: postgres-${{ hashFiles('scripts/Get-PostgresBinaries.ps1') }}
+
+      - name: Fetch PostgreSQL binaries
+        shell: pwsh
+        run: .\scripts\Get-PostgresBinaries.ps1
+
       - name: Restore managed dependencies
         run: dotnet restore .\windows-a11y-recorder.slnx
 

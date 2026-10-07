@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The recreation of a page at a captured frame, opened in the
+       instrumented Chromium with DevTools and the evidence panel. See
+       docs/architecture/page-recreation.md, "Slice 3 design". -->
+  <ItemGroup>
+    <!-- Kestrel serves the recreation on the loopback interface. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="EvidencePanel\*" LogicalName="EvidencePanel.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Builder\*" LogicalName="Builder.%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Recorder.Tests" />
+  </ItemGroup>
+</Project>

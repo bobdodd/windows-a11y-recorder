@@ -16,7 +16,11 @@ namespace Recorder.Database.RecordingFiles;
 public sealed record RecordingFilePlaybackResult(
     SessionPlaybackArchive Archive,
     string? Incomplete,
-    string? IndexDerived);
+    string? IndexDerived)
+{
+    /// <summary>The recording's browser documents, for recreating a page at a frame.</summary>
+    public RecordingFileDocuments? Documents { get; init; }
+}
 
 /// <summary>
 /// Opens a recording for playback from its recording file. The file's
@@ -82,7 +86,10 @@ public static class RecordingFilePlayback
                 Timeline = timeline,
                 RecordSource = timeline
             };
-            return new RecordingFilePlaybackResult(archive, reader.Incomplete, derived);
+            return new RecordingFilePlaybackResult(archive, reader.Incomplete, derived)
+            {
+                Documents = new RecordingFileDocuments(reader, index, filePath)
+            };
         }
         catch
         {
@@ -93,7 +100,7 @@ public static class RecordingFilePlayback
 
     // The index stored in the file, or one derived from its chunks, and why
     // it was derived.
-    private static (PlaybackIndex Index, string? Derived) ReadIndex(
+    internal static (PlaybackIndex Index, string? Derived) ReadIndex(
         RecordingFileReader reader,
         CancellationToken cancellationToken)
     {
@@ -135,7 +142,7 @@ public static class RecordingFilePlayback
                 ? value
                 : throw new InvalidDataException("The recording file does not state its clock frequency.");
         var chunks = reader.Chunks
-            .Where(chunk => chunk.Stream != "recorder")
+            .Where(chunk => chunk.Stream is not ("recorder" or RecordingFileStateRecorder.SnapshotStream or RecordingFileStateRecorder.IndexStream))
             .ToArray();
         var builder = new PlaybackIndexBuilder(frequency, TimeSpan.Zero);
         var starts = new List<long>();
@@ -155,7 +162,7 @@ public static class RecordingFilePlayback
         ForEachGroup(
             reader,
             chunks,
-            topic => topic != RecordingFileBatchTarget.WriterTopic,
+            RecordingFileBatchTarget.IsEventTopic,
             stored => builder.Add(stored.EventKey, stored.Event),
             cancellationToken);
         return builder.Build();

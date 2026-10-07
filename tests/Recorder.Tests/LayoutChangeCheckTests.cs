@@ -191,6 +191,237 @@ public sealed class LayoutChangeCheckTests
         Assert.Equal(LayoutDerivationFailure.NodeNotRecorded, unrecorded);
     }
 
+    // A node record with the given style fields (protocol 0.37), at the
+    // geometry of Changed(42, 2, 10, 400, 150, 25).
+    private static JsonElement ChangedStyle(int set, string style, string custom, bool complete, string removed,
+        string? fragments = null) => Json($$"""
+        {"context":{{Context}},"changeSetId":"layout-changes-{{set}}","reasons":["style"],"nodeId":42,
+         "nodeType":"element","nodeName":"DIV","layoutObjectPresent":true,"displayLocked":false,
+         "geometry":{"transformNodeId":"layout-transform-2",
+           "localRect":{"x":10,"y":400,"width":150,"height":25},"localQuadRects":null,
+           "clientRectEmpty":false,"localRectMapped":true,"clientRectScale":0.8},
+         "computedStyle":{{style}},"computedStyleComplete":{{(complete ? "true" : "false")}},
+         "customProperties":{{custom}},"removedCustomProperties":{{removed}},
+         "pseudoElement":null,"shadowHostNodeId":null,"shadowRootMode":null
+         {{(fragments is null ? "" : $",\"boxFragments\":{fragments}")}} }
+        """);
+
+    private static JsonElement CheckpointStyleNode(int id, string style, string custom,
+        string? fragments = null) => Json($$"""
+        {"context":{{Context}},"checkpointId":"layout-checkpoint-{{id}}","nodeIndex":0,"nodeId":42,
+         "nodeType":"element","nodeName":"DIV","layoutObjectPresent":true,"displayLocked":false,
+         "boundingClientRect":{"x":8,"y":80,"width":120,"height":20},
+         "computedStyle":{{style}},"customProperties":{{custom}}
+         {{(fragments is null ? "" : $",\"boxFragments\":{fragments}")}} }
+        """);
+
+    // Box fragments (protocol 0.38) of one fragment of the given width with
+    // one child box.
+    private static string Fragments(double width) => $$"""
+        {"effectiveZoom":1,"fragments":[{"width":{{width}},"height":20,"breakToken":null,
+         "scrollableOverflow":null,"children":[{"kind":"box","x":0,"y":0,"nodeId":43,
+         "fragmentIndex":0,"fragment":null}]}],"naturalSize":null}
+        """;
+
+    // A paragraph's box fragments with one line of text (protocol 0.39), its
+    // text stated, or left out as unchanged when text is null.
+    private static string TextFragments(string? text, int end = 2)
+    {
+        var textContent = text is null ? "null" : JsonSerializer.Serialize(text);
+        var unchanged = text is null ? "true" : "false";
+        return $$"""
+            {"effectiveZoom":1,"fragments":[{"width":100,"height":20,"breakToken":null,
+             "scrollableOverflow":null,"children":[],"items":[
+              {"type":"line","x":0,"y":0,"width":100,"height":20,"descendantsCount":2,
+               "nodeId":null,"start":null,"end":null,"firstLineStyle":null,"direction":null,
+               "hiddenForPaint":null,"glyphRuns":null,"generatedText":null},
+              {"type":"text","x":0,"y":0,"width":17,"height":20,"descendantsCount":null,
+               "nodeId":43,"start":0,"end":{{end}},"firstLineStyle":false,"direction":"ltr",
+               "hiddenForPaint":false,"glyphRuns":[],"generatedText":null}],
+             "textContent":null,"firstLineText":null}],"naturalSize":null,
+             "textContent":{{textContent}},"firstLineText":null,"textContentUnchanged":{{unchanged}}}
+            """;
+    }
+
+    private static void StyleChangeSet(LayoutChangeCheck check, int set, JsonElement node)
+    {
+        check.Add("layout-changes-started", ChangesStarted(set, $"layout-checkpoint-{set}"));
+        if (set == 1)
+        {
+            check.Add("layout-transform-node", Transform(1, null, Translation(0, 0)));
+            check.Add("layout-transform-node", Transform(2, 1, Translation(0, -300)));
+        }
+        check.Add("layout-node-changed", node);
+        check.Add("layout-changes-completed", ChangesCompleted(set));
+    }
+
+    [Fact]
+    public void MergesStyleChangesIntoTheNodesLastRecord()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointStyleNode(1,
+            """{"color":"red","display":"block"}""", """{"--gap":"4px","--old":"1"}"""));
+        StyleChangeSet(check, 1, ChangedStyle(1,
+            """{"color":"red","display":"block"}""", """{"--gap":"4px","--old":"1"}""", true, "null"));
+        Checkpoint(check, 2, CheckpointStyleNode(2,
+            """{"color":"blue","display":"block"}""", """{"--gap":"8px","--accent":"green"}"""));
+        StyleChangeSet(check, 2, ChangedStyle(2,
+            """{"color":"blue"}""", """{"--gap":"8px","--accent":"green"}""", false, """["--old"]"""));
+        check.Finish();
+
+        Assert.Equal(2, check.CheckpointsCompared);
+        Assert.Equal(2, check.NodesMatched);
+        Assert.Empty(check.Differences);
+    }
+
+    [Fact]
+    public void TheMergedRecordIsWholeOnlyAfterAWholeRecord()
+    {
+        var state = new LayoutChangeState();
+        state.Apply("layout-changes-started", ChangesStarted(1, null));
+        state.Apply("layout-node-changed", ChangedStyle(1,
+            """{"color":"blue"}""", """{"--accent":"green"}""", false, "[]"));
+        var merged = state.Documents[Token].Nodes[42];
+        Assert.False(merged.GetProperty("computedStyleComplete").GetBoolean());
+        Assert.Equal("blue", merged.GetProperty("computedStyle").GetProperty("color").GetString());
+
+        state.Apply("layout-node-changed", ChangedStyle(1,
+            """{"color":"red","display":"block"}""", """{"--gap":"4px"}""", true, "null"));
+        state.Apply("layout-node-changed", ChangedStyle(2,
+            """{"display":"none"}""", """{}""", false, """["--gap"]"""));
+        merged = state.Documents[Token].Nodes[42];
+        Assert.True(merged.GetProperty("computedStyleComplete").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, merged.GetProperty("removedCustomProperties").ValueKind);
+        Assert.Equal(
+            """{"color":"red","display":"none"}""",
+            merged.GetProperty("computedStyle").GetRawText());
+        Assert.Equal("{}", merged.GetProperty("customProperties").GetRawText());
+        Assert.Equal(400, merged.GetProperty("geometry").GetProperty("localRect").GetProperty("y").GetDouble());
+    }
+
+    [Fact]
+    public void ComparesBoxFragmentsThroughARecordOfStyleChanges()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointStyleNode(1, """{"color":"red"}""", "{}", Fragments(120)));
+        StyleChangeSet(check, 1, ChangedStyle(1, """{"color":"red"}""", "{}", true, "null", Fragments(120)));
+        // A record of style changes carries the node's whole box fragments.
+        Checkpoint(check, 2, CheckpointStyleNode(2, """{"color":"blue"}""", "{}", Fragments(150)));
+        StyleChangeSet(check, 2, ChangedStyle(2, """{"color":"blue"}""", "{}", false, "[]", Fragments(150)));
+        check.Finish();
+
+        Assert.Equal(2, check.BoxFragmentsCompared);
+        Assert.Equal(2, check.NodesMatched);
+        Assert.Empty(check.Differences);
+        Assert.Contains("box fragments were compared, null ones included: 2", check.Report());
+    }
+
+    [Fact]
+    public void ReportsBoxFragmentsThatDiffer()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointStyleNode(1, """{"color":"red"}""", "{}", Fragments(150)));
+        StyleChangeSet(check, 1, ChangedStyle(1, """{"color":"red"}""", "{}", true, "null", Fragments(120)));
+        Checkpoint(check, 2, CheckpointStyleNode(2, """{"color":"red"}""", "{}", Fragments(120)));
+        StyleChangeSet(check, 2, ChangedStyle(2, """{"color":"red"}""", "{}", false, "[]"));
+        check.Finish();
+
+        Assert.Equal(0, check.NodesMatched);
+        Assert.Equal(2, check.Differences["box-fragments"]);
+    }
+
+    [Fact]
+    public void AMergedRecordHoldsTheBoxFragmentsOfTheChanges()
+    {
+        var state = new LayoutChangeState();
+        state.Apply("layout-changes-started", ChangesStarted(1, null));
+        state.Apply("layout-node-changed", ChangedStyle(1,
+            """{"color":"red"}""", "{}", true, "null", Fragments(120)));
+        state.Apply("layout-node-changed", ChangedStyle(2,
+            """{"color":"blue"}""", "{}", false, "[]", Fragments(150)));
+        var merged = state.Documents[Token].Nodes[42];
+
+        Assert.True(JsonElement.DeepEquals(Json(Fragments(150)), merged.GetProperty("boxFragments")));
+    }
+
+    [Fact]
+    public void ComparesTextLeftOutAsUnchangedWithTheFullWalk()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointStyleNode(1, """{"color":"red"}""", "{}", TextFragments("Hi")));
+        StyleChangeSet(check, 1, ChangedStyle(1, """{"color":"red"}""", "{}", true, "null", TextFragments("Hi")));
+        // The second record's items changed and its text did not.
+        Checkpoint(check, 2, CheckpointStyleNode(2, """{"color":"blue"}""", "{}", TextFragments("Hi", end: 1)));
+        StyleChangeSet(check, 2, ChangedStyle(2, """{"color":"blue"}""", "{}", false, "[]", TextFragments(null, end: 1)));
+        check.Finish();
+
+        Assert.Equal(2, check.NodesMatched);
+        Assert.Empty(check.Differences);
+    }
+
+    [Fact]
+    public void ReportsTextLeftOutThatWasNeverRecorded()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointStyleNode(1, """{"color":"red"}""", "{}", TextFragments("Hi")));
+        StyleChangeSet(check, 1, ChangedStyle(1, """{"color":"red"}""", "{}", true, "null", TextFragments(null)));
+        check.Finish();
+
+        Assert.Equal(0, check.NodesMatched);
+        Assert.Equal(1, check.Differences["text-content-incomplete"]);
+    }
+
+    [Fact]
+    public void TheStatePutsBackTextLeftOutAsUnchanged()
+    {
+        var state = new LayoutChangeState();
+        state.Apply("layout-changes-started", ChangesStarted(1, null));
+        state.Apply("layout-node-changed", ChangedStyle(1,
+            """{"color":"red"}""", "{}", true, "null", TextFragments(null)));
+        var unrestored = state.Documents[Token].Nodes[42].GetProperty("boxFragments");
+        Assert.True(unrestored.GetProperty("textContentUnchanged").GetBoolean());
+
+        state.Apply("layout-node-changed", ChangedStyle(1,
+            """{"color":"red"}""", "{}", true, "null", TextFragments("Hi")));
+        state.Apply("layout-node-changed", ChangedStyle(2,
+            """{"color":"blue"}""", "{}", false, "[]", TextFragments(null, end: 1)));
+        var merged = state.Documents[Token].Nodes[42];
+
+        Assert.True(JsonElement.DeepEquals(
+            Json(TextFragments("Hi", end: 1)), merged.GetProperty("boxFragments")));
+        Assert.Equal("blue", merged.GetProperty("computedStyle").GetProperty("color").GetString());
+    }
+
+    [Fact]
+    public void ASnapshotKeepsAMergedRecordAsItIs()
+    {
+        var state = new LayoutChangeState();
+        state.Apply("layout-changes-started", ChangesStarted(1, null));
+        state.Apply("layout-node-changed", ChangedStyle(1,
+            """{"color":"blue"}""", """{"--accent":"green"}""", false, "[]"));
+        var merged = state.Documents[Token].Nodes[42];
+
+        var restored = new LayoutChangeState();
+        restored.Apply("layout-changes-started", ChangesStarted(1, null));
+        restored.Documents[Token].Load(null, [], [merged], []);
+
+        Assert.Equal(merged.GetRawText(), restored.Documents[Token].Nodes[42].GetRawText());
+    }
+
+    [Fact]
+    public void ReportsCustomPropertiesAndAStyleNeverRecordedWhole()
+    {
+        var check = new LayoutChangeCheck();
+        Checkpoint(check, 1, CheckpointStyleNode(1, """{"color":"blue"}""", """{"--gap":"4px"}"""));
+        StyleChangeSet(check, 1, ChangedStyle(1,
+            """{"color":"blue"}""", """{"--gap":"5px"}""", false, "[]"));
+        check.Finish();
+
+        Assert.Equal(0, check.NodesMatched);
+        Assert.Equal(1, check.Differences["custom-properties"]);
+        Assert.Equal(1, check.Differences["computed-style-incomplete"]);
+    }
+
     [Fact]
     public void ComparesACheckpointWithTheChangeSetOfItsUpdate()
     {
@@ -324,7 +555,7 @@ public sealed class LayoutChangeCheckTests
         check.Finish();
 
         Assert.Equal(2, check.ChangeSets);
-        Assert.Equal(3, check.ChangedNodeRecords);
+        Assert.Equal(6, check.ChangedNodeRecords);
         Assert.Equal(2, check.TransformNodeRecords);
     }
 }

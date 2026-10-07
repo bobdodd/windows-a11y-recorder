@@ -190,6 +190,178 @@ internal static class BrowserInteractionPayloads
         }
         """;
 
+    // Protocol 0.43: a select's list opened in a page popup. The context
+    // names the popup's own document.
+    private const string PopupContextJson = """
+        {
+          "browserInstanceId": "browser-1",
+          "processId": 3440,
+          "processType": "renderer",
+          "profileId": null,
+          "browserContextId": null,
+          "pageId": null,
+          "frameId": null,
+          "documentId": "dom-document-10394",
+          "executionWorldId": null,
+          "documentToken": "0B1C2D3E4F5A46B7C8D9E0F1A2B3C4D5"
+        }
+        """;
+
+    public static readonly string PagePopupOpened = $$"""
+        {
+          "context": {{PopupContextJson}},
+          "kind": "select-list",
+          "ownerDocumentId": "dom-document-2486",
+          "ownerDocumentToken": "970C31312F7139126377C8D77F4167A7",
+          "ownerFrameToken": "2C6A0F9B4E1D47A8B3C5D7E9F1A3B5C7",
+          "ownerNodeId": 418,
+          "ownerVisibleBoundsInLocalRoot": { "x": 508, "y": 360, "width": 262, "height": 48 },
+          "ownerLocalRootRectInScreen": { "x": 8, "y": 111, "width": 1904, "height": 921 },
+          "anchorRectInScreen": { "x": 516, "y": 471, "width": 262, "height": 48 },
+          "initialWindowRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "zoomFactor": 1
+        }
+        """;
+
+    public static readonly string PagePopupRequestedRect = $$"""
+        {
+          "context": {{PopupContextJson}},
+          "deferred": true,
+          "windowRect": { "x": 516, "y": 519, "width": 262, "height": 340 }
+        }
+        """;
+
+    public static readonly string PagePopupClosed = $$"""
+        {
+          "context": {{PopupContextJson}},
+          "closedBy": "renderer"
+        }
+        """;
+
+    // Protocol 0.44: the browser's popup widget records. The created record
+    // names the opener frame's document; the others carry the browser
+    // process's context and join to it by the frame sink.
+    private const string OpenerContextJson = """
+        {
+          "browserInstanceId": "browser-1",
+          "processId": 1200,
+          "processType": "browser",
+          "profileId": null,
+          "browserContextId": null,
+          "pageId": "frame-1",
+          "frameId": "frame-1",
+          "documentId": "document-navigation-3",
+          "executionWorldId": null,
+          "documentToken": "970C31312F7139126377C8D77F4167A7"
+        }
+        """;
+
+    private const string BrowserProcessContextJson = """
+        {
+          "browserInstanceId": "browser-1",
+          "processId": 1200,
+          "processType": "browser",
+          "profileId": null,
+          "browserContextId": null,
+          "pageId": null,
+          "frameId": null,
+          "documentId": null,
+          "executionWorldId": null,
+          "documentToken": null
+        }
+        """;
+
+    public static readonly string PopupWidgetCreated = $$"""
+        {
+          "context": {{OpenerContextJson}},
+          "rendererProcessId": 3440,
+          "openerFrameToken": "2C6A0F9B4E1D47A8B3C5D7E9F1A3B5C7",
+          "frameSinkId": "4:12"
+        }
+        """;
+
+    public static readonly string PopupWidgetShown = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "outcome": "shown",
+          "receivedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "receivedAnchorRect": { "x": 516, "y": 471, "width": 262, "height": 48 },
+          "transformedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "transformedAnchorRect": { "x": 516, "y": 471, "width": 262, "height": 48 },
+          "constrainedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "viewBounds": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "windowsAnimationSettings": { "clientAreaAnimation": true, "uiEffects": true, "menuAnimation": true, "menuFade": true, "comboBoxAnimation": true }
+        }
+        """;
+
+    public static readonly string PopupWidgetRefused = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:13",
+          "outcome": "window-not-active",
+          "receivedRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "receivedAnchorRect": { "x": 516, "y": 471, "width": 262, "height": 48 },
+          "transformedRect": null,
+          "transformedAnchorRect": null,
+          "constrainedRect": null,
+          "viewBounds": null,
+          "windowsAnimationSettings": { "clientAreaAnimation": null, "uiEffects": false, "menuAnimation": false, "menuFade": false, "comboBoxAnimation": false }
+        }
+        """;
+
+    public static readonly string PopupWidgetBoundsRequested = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "requestedRect": { "x": 516, "y": 519, "width": 262, "height": 300 },
+          "setRect": { "x": 516, "y": 519, "width": 262, "height": 300 }
+        }
+        """;
+
+    public static readonly string PopupWidgetBoundsIgnored = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "requestedRect": { "x": 516, "y": 519, "width": 262, "height": 300 },
+          "setRect": null
+        }
+        """;
+
+    public static readonly string PopupWidgetScreenRects = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "viewRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "windowRect": { "x": 516, "y": 519, "width": 262, "height": 340 },
+          "nativeWindowRect": { "x": 774, "y": 778, "width": 393, "height": 510 },
+          "nativeClientRect": { "x": 774, "y": 778, "width": 393, "height": 510 },
+          "deviceScaleFactor": 1.5
+        }
+        """;
+
+    // Protocol 0.45: the popup's view hid its window before it was destroyed.
+    public static readonly string PopupWidgetHidden = $$"""
+        {
+          "context": {{BrowserProcessContextJson}},
+          "frameSinkId": "4:12",
+          "cause": "destroyed",
+          "nativeWindowVisible": false
+        }
+        """;
+
+    // The highlight moved by an arrow key: no script made the change.
+    public static readonly string OptionSelected = $$"""
+        {
+          "context": {{UserContextJson}},
+          "nodeId": 61,
+          "selectNodeId": 58,
+          "selected": true,
+          "location": null,
+          "world": null
+        }
+        """;
+
     // A snapshot taken after a layout checkpoint while a listbox holds focus
     // and names an active descendant.
     public static readonly string LayoutCheckpointStarted = $$"""
@@ -281,5 +453,16 @@ internal static class BrowserInteractionPayloads
         yield return ("text-control-value-changed", UserEditedValue);
         yield return ("text-control-value-changed", ScriptSetValue);
         yield return ("active-descendant-reference-set", ActiveDescendantReferenceSet);
+        yield return ("page-popup-opened", PagePopupOpened);
+        yield return ("page-popup-window-rect", PagePopupRequestedRect);
+        yield return ("page-popup-closed", PagePopupClosed);
+        yield return ("popup-widget-created", PopupWidgetCreated);
+        yield return ("popup-widget-shown", PopupWidgetShown);
+        yield return ("popup-widget-shown", PopupWidgetRefused);
+        yield return ("popup-widget-bounds-requested", PopupWidgetBoundsRequested);
+        yield return ("popup-widget-bounds-requested", PopupWidgetBoundsIgnored);
+        yield return ("popup-widget-screen-rects", PopupWidgetScreenRects);
+        yield return ("popup-widget-hidden", PopupWidgetHidden);
+        yield return ("option-selectedness-changed", OptionSelected);
     }
 }

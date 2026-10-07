@@ -27,7 +27,11 @@ internal static class EventPayloadValidator
         "browser.interaction",
         "browser.layout",
         "browser.presentation",
-        "browser.network"
+        "browser.network",
+        "browser.resources",
+        "browser.compositor",
+        "browser.animation",
+        "browser.script"
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -148,6 +152,12 @@ internal static class EventPayloadValidator
             case ("browser.timer", "timer-cancelled"):
                 ValidateBrowserTimer(payload, issues);
                 break;
+            case ("browser.timer", "timer-origin"):
+                ValidateBrowserTimerOrigin(payload, issues);
+                break;
+            case ("browser.timer", "script-compiled"):
+                ValidateBrowserScriptCompiled(payload, issues);
+                break;
             case ("browser.scheduler", "wake-up-deferred"):
                 ValidateBrowserScheduler(payload, issues);
                 break;
@@ -165,6 +175,12 @@ internal static class EventPayloadValidator
                 break;
             case ("browser.dom", "dom-checkpoint-started"):
                 ValidateBrowserDomCheckpointStarted(payload, issues);
+                break;
+            case ("browser.dom", "dom-checkpoint-frame-owner"):
+                ValidateBrowserDomCheckpointFrameOwner(payload, issues);
+                break;
+            case ("browser.dom", "dom-frame-owner-changed"):
+                ValidateBrowserDomFrameOwnerChanged(payload, issues);
                 break;
             case ("browser.dom", "dom-checkpoint-node"):
                 ValidateBrowserDomCheckpointNode(payload, issues);
@@ -296,6 +312,33 @@ internal static class EventPayloadValidator
                 ValidateBrowserActiveDescendantReferenceSet(
                     payload, issues);
                 break;
+            case ("browser.interaction", "page-popup-opened"):
+                ValidateBrowserPagePopupOpened(payload, issues);
+                break;
+            case ("browser.interaction", "page-popup-window-rect"):
+                ValidateBrowserPagePopupWindowRect(payload, issues);
+                break;
+            case ("browser.interaction", "page-popup-closed"):
+                ValidateBrowserPagePopupClosed(payload, issues);
+                break;
+            case ("browser.interaction", "popup-widget-created"):
+                ValidateBrowserPopupWidgetCreated(payload, issues);
+                break;
+            case ("browser.interaction", "popup-widget-shown"):
+                ValidateBrowserPopupWidgetShown(payload, issues);
+                break;
+            case ("browser.interaction", "popup-widget-bounds-requested"):
+                ValidateBrowserPopupWidgetBoundsRequested(payload, issues);
+                break;
+            case ("browser.interaction", "popup-widget-screen-rects"):
+                ValidateBrowserPopupWidgetScreenRects(payload, issues);
+                break;
+            case ("browser.interaction", "popup-widget-hidden"):
+                ValidateBrowserPopupWidgetHidden(payload, issues);
+                break;
+            case ("browser.interaction", "option-selectedness-changed"):
+                ValidateBrowserOptionSelectednessChanged(payload, issues);
+                break;
             case ("browser.interaction", "interaction-checkpoint-started"):
                 ValidateBrowserInteractionCheckpointStarted(
                     payload, issues);
@@ -343,6 +386,64 @@ internal static class EventPayloadValidator
                 break;
             case ("browser.presentation", "presentation-feedback"):
                 ValidateBrowserPresentationFeedback(payload, issues);
+                break;
+            case ("browser.animation", "animation-updated"):
+                ValidateBrowserAnimationUpdated(payload, issues);
+                break;
+            case ("browser.script", "script-parsed"):
+                ValidateBrowserScriptParsed(payload, issues);
+                break;
+            case ("browser.script", "script-text"):
+                ValidateBrowserResourceBytes(payload, issues);
+                break;
+            case ("browser.animation", "animation-removed"):
+                ValidateShape(
+                    payload,
+                    [
+                        RequiredObject("context"),
+                        RequiredDecimalText("sequenceNumber")
+                    ],
+                    issues);
+                ValidateCompositorRendererContext(payload, false, issues);
+                break;
+            case ("browser.compositor", "compositor-animation-started"):
+                ValidateBrowserCompositorAnimationStarted(payload, issues);
+                break;
+            case ("browser.compositor", "compositor-animation-ended"):
+                ValidateBrowserCompositorAnimationEnded(payload, issues);
+                break;
+            case ("browser.compositor", "compositor-frame"):
+                ValidateBrowserCompositorFrame(payload, issues);
+                break;
+            case ("browser.compositor", "compositor-frame-presented"):
+                ValidateBrowserCompositorFramePresented(payload, issues);
+                break;
+            case ("browser.compositor", "paint-worklet-painted"):
+                ValidateBrowserPaintWorkletPainted(payload, issues);
+                break;
+            case ("browser.resources", "font-file"):
+            case ("browser.resources", "image-data"):
+            case ("browser.resources", "style-sheet-text"):
+                ValidateBrowserResourceBytes(payload, issues);
+                break;
+            case ("browser.resources", "font-face-added"):
+            case ("browser.resources", "font-face-removed"):
+                ValidateBrowserFontFace(payload, issues);
+                break;
+            case ("browser.resources", "font-face-loaded"):
+                ValidateBrowserFontFaceLoaded(payload, issues);
+                break;
+            case ("browser.resources", "image-resource"):
+                ValidateBrowserImageResource(payload, issues);
+                break;
+            case ("browser.resources", "image-paint-image"):
+                ValidateBrowserImagePaintImage(payload, issues);
+                break;
+            case ("browser.resources", "style-sheet-resource"):
+                ValidateBrowserStyleSheetResource(payload, issues);
+                break;
+            case ("browser.resources", "style-sheets-updated"):
+                ValidateBrowserStyleSheetsUpdated(payload, issues);
                 break;
             case ("browser.network", "request-will-be-sent"):
                 ValidateBrowserNetworkRequestWillBeSent(payload, issues);
@@ -406,6 +507,10 @@ internal static class EventPayloadValidator
             case ("browser.layout", "collector-omission"):
             case ("browser.presentation", "collector-omission"):
             case ("browser.network", "collector-omission"):
+            case ("browser.resources", "collector-omission"):
+            case ("browser.compositor", "collector-omission"):
+            case ("browser.animation", "collector-omission"):
+            case ("browser.script", "collector-omission"):
                 ValidateBrowserOmission(payload, issues);
                 break;
             default:
@@ -1205,6 +1310,125 @@ internal static class EventPayloadValidator
             "callbackLocation");
     }
 
+    // Protocol 0.52 (slice 4f): who scheduled a timer.
+    private static void ValidateBrowserTimerOrigin(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("timerId"),
+                NullableObject("world"),
+                RequiredObjectArray("stack"),
+                RequiredEnum("handler", "function", "string")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
+        if (!payload.TryGetProperty("stack", out var stack) || stack.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        if (stack.GetArrayLength() > 16)
+        {
+            AddError(
+                issues,
+                "browser-timer-origin-stack",
+                "#/payload/stack",
+                "a timer origin carries at most 16 stack frames");
+        }
+        var index = 0;
+        foreach (var frame in stack.EnumerateArray())
+        {
+            var pointer = $"#/payload/stack/{index}";
+            index++;
+            if (frame.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            ValidateShape(
+                frame,
+                [
+                    NullableDecimalText("scriptId"),
+                    NullableString("url"),
+                    NullableString("functionName"),
+                    NullableInteger("line", positive: true),
+                    NullableInteger("column", positive: true),
+                    RequiredBoolean("isEval")
+                ],
+                issues,
+                pointer);
+        }
+    }
+
+    // Protocol 0.52: the markup a V8 script came from.
+    private static void ValidateBrowserScriptCompiled(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredDecimalText("scriptId"),
+                RequiredEnum("kind", "classic", "module", "event-handler-attribute"),
+                NullableInteger("elementNodeId", positive: true),
+                NullableString("attributeName"),
+                NullableString("url"),
+                NullableInteger("line", positive: true),
+                NullableInteger("column", positive: true)
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        var attribute = ReadString(payload, "kind") == "event-handler-attribute";
+        if (attribute != HasNonnullProperty(payload, "attributeName"))
+        {
+            AddError(
+                issues,
+                "browser-script-compiled-attribute",
+                "#/payload/attributeName",
+                "An attribute handler names its attribute, and no other script does.");
+        }
+    }
+
+    // Protocol 0.54 (slice 4h).
+    private static void ValidateBrowserScriptParsed(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableObject("world"),
+                RequiredDecimalText("scriptId"),
+                RequiredEnum("kind", "classic", "module", "eval", "function"),
+                NullableString("url"),
+                NullableString("sourceUrl"),
+                NullableString("sourceMapUrl"),
+                NullableInteger("line", positive: true),
+                NullableInteger("column", positive: true),
+                NullableDecimalText("evalFromScriptId"),
+                RequiredBoolean("compileError"),
+                DigestRule("digest"),
+                RequiredDecimalText("size"),
+                RequiredBoolean("textRecorded")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserExecutionWorldProperty(payload, issues);
+        if (HasNonnullProperty(payload, "evalFromScriptId") && ReadString(payload, "kind") != "eval")
+        {
+            AddError(
+                issues,
+                "browser-script-parsed-eval-from",
+                "#/payload/evalFromScriptId",
+                "Only eval code names the script that called eval.");
+        }
+    }
+
     private static void ValidateBrowserScheduler(
         JsonElement payload,
         ICollection<EventValidationIssue> issues)
@@ -1457,6 +1681,347 @@ internal static class EventPayloadValidator
         ValidateInteractionCommon(payload, issues);
     }
 
+    // Page popups (protocol 0.43). A popup record names the popup's own
+    // document in its context; the rectangles are in screen DIPs, or in the
+    // owner's local root, as Blink's gfx::Rect holds them.
+    private static readonly PropertyRule[] PagePopupRectRules =
+    [
+        RequiredInteger("x"),
+        RequiredInteger("y"),
+        RequiredInteger("width", nonnegative: true),
+        RequiredInteger("height", nonnegative: true)
+    ];
+
+    private static void ValidatePagePopupRect(
+        JsonElement payload,
+        string name,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (payload.TryGetProperty(name, out var rect) &&
+            rect.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(rect, PagePopupRectRules, issues, $"#/payload/{name}");
+        }
+    }
+
+    private static void ValidateBrowserPagePopupOpened(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("kind", "select-list", "date-time", "color", "other"),
+                RequiredString("ownerDocumentId"),
+                RequiredString("ownerDocumentToken"),
+                RequiredString("ownerFrameToken"),
+                RequiredInteger("ownerNodeId", positive: true),
+                RequiredObject("ownerVisibleBoundsInLocalRoot"),
+                RequiredObject("ownerLocalRootRectInScreen"),
+                RequiredObject("anchorRectInScreen"),
+                RequiredObject("initialWindowRect"),
+                RequiredNumber("zoomFactor", positive: true)
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        foreach (var name in new[]
+                 {
+                     "ownerVisibleBoundsInLocalRoot", "ownerLocalRootRectInScreen",
+                     "anchorRectInScreen", "initialWindowRect"
+                 })
+        {
+            ValidatePagePopupRect(payload, name, issues);
+        }
+
+        var ownerDocument = ReadString(payload, "ownerDocumentId");
+        if (ownerDocument is not null &&
+            !IsCheckpointIdentity(ownerDocument, "dom-document-"))
+        {
+            AddError(
+                issues,
+                "browser-page-popup-owner-document-invalid",
+                "#/payload/ownerDocumentId",
+                $"'{ownerDocument}' is not a DOM document identity.");
+        }
+
+        if (ReadString(payload, "ownerDocumentToken") is { } token &&
+            string.IsNullOrWhiteSpace(token))
+        {
+            AddError(
+                issues,
+                "browser-page-popup-owner-token-empty",
+                "#/payload/ownerDocumentToken",
+                "A popup's owner document must carry a nonempty token.");
+        }
+
+        if (ReadString(payload, "ownerFrameToken") is { } frameToken &&
+            string.IsNullOrWhiteSpace(frameToken))
+        {
+            AddError(
+                issues,
+                "browser-page-popup-owner-frame-token-empty",
+                "#/payload/ownerFrameToken",
+                "A popup's owner frame must carry a nonempty token.");
+        }
+    }
+
+    private static void ValidateBrowserPagePopupWindowRect(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredBoolean("deferred"),
+                RequiredObject("windowRect")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        ValidatePagePopupRect(payload, "windowRect", issues);
+    }
+
+    // Popup widget records (protocol 0.44) are made by the browser process.
+    private static void ValidateBrowserProcessContext(
+        JsonElement payload,
+        bool requiresFrame,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (!payload.TryGetProperty("context", out var context) ||
+            context.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        if (ReadString(context, "processType") != "browser" ||
+            (requiresFrame && (ReadString(context, "pageId") is null ||
+                               ReadString(context, "frameId") is null)))
+        {
+            AddError(
+                issues,
+                "browser-popup-widget-context-invalid",
+                "#/payload/context",
+                requiresFrame
+                    ? "A created popup widget must have browser-process " +
+                        "provenance and name its opener's page and frame."
+                    : "Popup widget evidence must have browser-process " +
+                        "provenance.");
+        }
+    }
+
+    private static void ValidateBrowserPopupWidgetCreated(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableInteger("rendererProcessId", positive: true),
+                RequiredString("openerFrameToken"),
+                RequiredFrameSinkId("frameSinkId")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, true, issues);
+        if (ReadString(payload, "openerFrameToken") is { } token &&
+            string.IsNullOrWhiteSpace(token))
+        {
+            AddError(
+                issues,
+                "browser-popup-widget-opener-token-empty",
+                "#/payload/openerFrameToken",
+                "A created popup widget must name its opener frame's token.");
+        }
+    }
+
+    private static void ValidateBrowserPopupWidgetShown(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredFrameSinkId("frameSinkId"),
+                RequiredEnum(
+                    "outcome", "shown", "window-not-active", "not-visible",
+                    "permission-exclusion"),
+                RequiredObject("receivedRect"),
+                RequiredObject("receivedAnchorRect"),
+                NullableObject("transformedRect"),
+                NullableObject("transformedAnchorRect"),
+                NullableObject("constrainedRect"),
+                NullableObject("viewBounds"),
+                RequiredObject("windowsAnimationSettings")
+            ],
+            issues);
+        if (payload.TryGetProperty("windowsAnimationSettings", out var settings) &&
+            settings.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                settings,
+                [
+                    NullableBoolean("clientAreaAnimation"),
+                    NullableBoolean("uiEffects"),
+                    NullableBoolean("menuAnimation"),
+                    NullableBoolean("menuFade"),
+                    NullableBoolean("comboBoxAnimation")
+                ],
+                issues,
+                "#/payload/windowsAnimationSettings");
+        }
+
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues);
+        foreach (var name in new[]
+                 {
+                     "receivedRect", "receivedAnchorRect", "transformedRect",
+                     "transformedAnchorRect", "constrainedRect", "viewBounds"
+                 })
+        {
+            ValidatePagePopupRect(payload, name, issues);
+        }
+
+        // A popup refused because its window was not active is refused before
+        // the transform; the others after the transform and the constraint.
+        var outcome = ReadString(payload, "outcome");
+        var transformed = HasNonnullProperty(payload, "transformedRect");
+        var transformedAnchor =
+            HasNonnullProperty(payload, "transformedAnchorRect");
+        var constrained = HasNonnullProperty(payload, "constrainedRect");
+        var viewBounds = HasNonnullProperty(payload, "viewBounds");
+        var consistent = outcome switch
+        {
+            "window-not-active" =>
+                !transformed && !transformedAnchor && !constrained && !viewBounds,
+            "not-visible" or "permission-exclusion" =>
+                transformed && transformedAnchor && constrained && !viewBounds,
+            "shown" => transformed && transformedAnchor && constrained && viewBounds,
+            _ => true
+        };
+        if (!consistent)
+        {
+            AddError(
+                issues,
+                "browser-popup-widget-shown-inconsistent",
+                "#/payload",
+                "A popup refused for an inactive window has no transformed, " +
+                    "constrained, or view rectangle; one refused later has " +
+                    "the transformed and constrained rectangles; a shown " +
+                    "popup has all of them.");
+        }
+    }
+
+    private static void ValidateBrowserPopupWidgetBoundsRequested(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredFrameSinkId("frameSinkId"),
+                RequiredObject("requestedRect"),
+                NullableObject("setRect")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues);
+        ValidatePagePopupRect(payload, "requestedRect", issues);
+        ValidatePagePopupRect(payload, "setRect", issues);
+    }
+
+    private static void ValidateBrowserPopupWidgetScreenRects(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredFrameSinkId("frameSinkId"),
+                RequiredObject("viewRect"),
+                RequiredObject("windowRect"),
+                NullableObject("nativeWindowRect"),
+                NullableObject("nativeClientRect"),
+                RequiredNumber("deviceScaleFactor", positive: true)
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues);
+        foreach (var name in new[]
+                 {
+                     "viewRect", "windowRect", "nativeWindowRect",
+                     "nativeClientRect"
+                 })
+        {
+            ValidatePagePopupRect(payload, name, issues);
+        }
+        if (HasNonnullProperty(payload, "nativeWindowRect") !=
+            HasNonnullProperty(payload, "nativeClientRect"))
+        {
+            AddError(
+                issues,
+                "browser-popup-widget-native-rects-inconsistent",
+                "#/payload",
+                "The native window rectangle and client area are recorded " +
+                    "together or not at all.");
+        }
+    }
+
+    private static void ValidateBrowserPopupWidgetHidden(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredFrameSinkId("frameSinkId"),
+                RequiredEnum("cause", "hidden", "destroyed"),
+                NullableBoolean("nativeWindowVisible")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues);
+    }
+
+    private static void ValidateBrowserPagePopupClosed(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("closedBy", "renderer", "browser")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+    }
+
+    private static void ValidateBrowserOptionSelectednessChanged(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("nodeId", positive: true),
+                NullableInteger("selectNodeId", positive: true),
+                RequiredBoolean("selected"),
+                NullableObject("location"),
+                NullableObject("world")
+            ],
+            issues);
+        ValidateInteractionCommon(payload, issues);
+    }
+
     // Checkpoint identities are "<prefix><sequence>" with a positive decimal
     // sequence, as the bridge formats them.
     private static bool IsCheckpointIdentity(string? value, string prefix) =>
@@ -1495,8 +2060,8 @@ internal static class EventPayloadValidator
                 NullableString("sourceChangeSetId"),
                 RequiredEnum("sourceChannel", "browser.dom", "browser.layout"),
                 RequiredEnum(
-                    "reason", "finished-parsing", "post-mutation",
-                    "rendering-update"),
+                    "reason", "started-parsing", "finished-parsing",
+                    "post-mutation", "rendering-update"),
                 RequiredBoolean("documentHasFocus"),
                 NullableInteger("focusedNodeId", positive: true),
                 RequiredBoolean("focusVisible"),
@@ -1522,7 +2087,7 @@ internal static class EventPayloadValidator
         var (sourcePrefix, sourceReasons) = sourceChannel switch
         {
             "browser.dom" =>
-                ("dom-checkpoint-", new[] { "finished-parsing", "post-mutation" }),
+                ("dom-checkpoint-", new[] { "started-parsing", "finished-parsing", "post-mutation" }),
             "browser.layout" =>
                 ("layout-checkpoint-", new[] { "rendering-update" }),
             _ => ((string?)null, Array.Empty<string>())
@@ -2630,14 +3195,18 @@ internal static class EventPayloadValidator
                             entry.Value.ValueKind is
                                 JsonValueKind.String or JsonValueKind.Null),
                     "must be an object of string or null values, or null"),
+                CustomPropertiesRule(),
                 NullableObject("pseudoElement"),
                 NullableInteger("shadowHostNodeId", positive: true),
-                NullableEnum("shadowRootMode", "open", "closed", "user-agent")
+                NullableEnum("shadowRootMode", "open", "closed", "user-agent"),
+                BoxFragmentsRule()
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererDocumentContext(payload, issues);
         ValidateBrowserLayoutPseudoElement(payload, issues);
+        ValidateBrowserLayoutStyleCompleteness(payload, changeRecord: false, issues);
+        ValidateBrowserLayoutBoxFragments(payload, issues);
         if (HasNonnullProperty(payload, "shadowHostNodeId") !=
             HasNonnullProperty(payload, "shadowRootMode"))
         {
@@ -2780,6 +3349,497 @@ internal static class EventPayloadValidator
     private static readonly string[] LayoutChangeReasons =
         ["style", "layout", "paint-properties"];
 
+    // Custom properties (protocol 0.37): each name with its value, or null
+    // with no computed style. Absent from records of earlier versions.
+    private static PropertyRule CustomPropertiesRule() =>
+        new(
+            "customProperties",
+            false,
+            true,
+            value => value.ValueKind == JsonValueKind.Object &&
+                value.EnumerateObject().All(entry =>
+                    entry.Name.StartsWith("--", StringComparison.Ordinal) &&
+                    entry.Name.Length > 2 &&
+                    entry.Value.ValueKind is
+                        JsonValueKind.String or JsonValueKind.Null),
+            "must be an object of custom property values, or null");
+
+    // A record with no computed style states no custom properties and, for
+    // a change record, no completeness or removals. A change record whose
+    // style is not complete holds the changed values and names the removed
+    // custom properties; a complete one names none.
+    private static void ValidateBrowserLayoutStyleCompleteness(
+        JsonElement payload,
+        bool changeRecord,
+        ICollection<EventValidationIssue> issues)
+    {
+        var hasStyle = HasNonnullProperty(payload, "computedStyle");
+        if (!hasStyle && HasNonnullProperty(payload, "customProperties"))
+        {
+            AddError(
+                issues,
+                "browser-layout-custom-properties-without-style",
+                "#/payload/customProperties",
+                "Custom properties are recorded only with a computed style.");
+        }
+        if (!changeRecord)
+        {
+            return;
+        }
+        var hasComplete = HasNonnullProperty(payload, "computedStyleComplete");
+        var hasRemoved = HasNonnullProperty(payload, "removedCustomProperties");
+        if (!hasStyle && (hasComplete || hasRemoved))
+        {
+            AddError(
+                issues,
+                "browser-layout-style-completeness-without-style",
+                "#/payload/computedStyleComplete",
+                "Style completeness and removals are recorded only with a computed style.");
+            return;
+        }
+        if (hasComplete &&
+            payload.GetProperty("computedStyleComplete").ValueKind == JsonValueKind.False)
+        {
+            if (!hasRemoved || !HasNonnullProperty(payload, "customProperties"))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-style-changes-incomplete",
+                    "#/payload/removedCustomProperties",
+                    "A record of changed style values names its custom properties and their removals.");
+            }
+        }
+        else if (hasRemoved)
+        {
+            AddError(
+                issues,
+                "browser-layout-style-removals-in-complete-style",
+                "#/payload/removedCustomProperties",
+                "A complete computed style names no removed custom properties.");
+        }
+    }
+
+    // Box fragments (protocol 0.38): an object, or null for a node whose
+    // layout object is not a box. Absent from records of earlier versions.
+    private static PropertyRule BoxFragmentsRule() =>
+        new(
+            "boxFragments",
+            false,
+            true,
+            value => value.ValueKind == JsonValueKind.Object,
+            "must be an object, or null");
+
+    private static readonly string[] FragmentChildKinds =
+        ["box", "anonymous", "column", "page", "line"];
+
+    // A node's box fragments: the effective zoom, each fragment, and a
+    // replaced element's natural size. Only a node with a layout object other
+    // than text has them.
+    private static void ValidateBrowserLayoutBoxFragments(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (!payload.TryGetProperty("boxFragments", out var fragments) ||
+            fragments.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        const string pointer = "#/payload/boxFragments";
+        var hasLayoutObject = payload.TryGetProperty("layoutObjectPresent", out var layoutObject) &&
+            layoutObject.ValueKind == JsonValueKind.True;
+        if (!hasLayoutObject || ReadString(payload, "nodeType") == "text")
+        {
+            AddError(
+                issues,
+                "browser-layout-box-fragments-without-box",
+                pointer,
+                "Box fragments are recorded only for a node whose layout object is a box.");
+        }
+        ValidateShape(
+            fragments,
+            [
+                RequiredNumber("effectiveZoom", positive: true),
+                RequiredObjectArray("fragments"),
+                NullableObject("naturalSize"),
+                OptionalNullableText("textContent"),
+                OptionalNullableText("firstLineText"),
+                OptionalBoolean("textContentUnchanged")
+            ],
+            issues,
+            pointer);
+        var unchanged = fragments.TryGetProperty("textContentUnchanged", out var unchangedValue) &&
+            unchangedValue.ValueKind == JsonValueKind.True;
+        var text = ReadString(fragments, "textContent");
+        if ((unchanged && (text is not null || HasNonnullProperty(fragments, "firstLineText"))) ||
+            (text is null && HasNonnullProperty(fragments, "firstLineText")))
+        {
+            AddError(
+                issues,
+                "browser-layout-text-content-inconsistent",
+                pointer,
+                "Text left out as unchanged is null, and a first-line text comes only with a text content.");
+        }
+        var ownItems = false;
+        if (fragments.TryGetProperty("fragments", out var list) &&
+            list.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var fragment in list.EnumerateArray())
+            {
+                if (fragment.ValueKind == JsonValueKind.Object)
+                {
+                    ownItems |= HasNonnullProperty(fragment, "items");
+                    ValidateBrowserLayoutBoxFragment(
+                        fragment,
+                        $"{pointer}/fragments/{index}",
+                        issues,
+                        heldByLink: false,
+                        nodeTextLength: text?.Length);
+                }
+                index++;
+            }
+        }
+        if (ownItems != (text is not null || unchanged))
+        {
+            AddError(
+                issues,
+                "browser-layout-text-content-inconsistent",
+                pointer,
+                "A node states its text content, or that it is unchanged, exactly when one of its fragments holds items.");
+        }
+        if (fragments.TryGetProperty("naturalSize", out var natural) &&
+            natural.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                natural,
+                [
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true),
+                    RequiredBoolean("hasWidth"),
+                    RequiredBoolean("hasHeight"),
+                    RequiredNumber("aspectRatioWidth", nonnegative: true),
+                    RequiredNumber("aspectRatioHeight", nonnegative: true)
+                ],
+                issues,
+                $"{pointer}/naturalSize");
+        }
+    }
+
+    private static void ValidateBrowserLayoutBoxFragment(
+        JsonElement fragment,
+        string pointer,
+        ICollection<EventValidationIssue> issues,
+        bool heldByLink,
+        int? nodeTextLength)
+    {
+        ValidateShape(
+            fragment,
+            [
+                RequiredNumber("width", nonnegative: true),
+                RequiredNumber("height", nonnegative: true),
+                NullableObject("breakToken"),
+                NullableObject("scrollableOverflow"),
+                RequiredObjectArray("children"),
+                OptionalNullableObjectArray("items"),
+                OptionalNullableText("textContent"),
+                OptionalNullableText("firstLineText")
+            ],
+            issues,
+            pointer);
+        var ownText = ReadString(fragment, "textContent");
+        var hasItems = HasNonnullProperty(fragment, "items");
+        if ((heldByLink ? hasItems != (ownText is not null) : ownText is not null) ||
+            (ownText is null && HasNonnullProperty(fragment, "firstLineText")))
+        {
+            AddError(
+                issues,
+                "browser-layout-text-content-inconsistent",
+                pointer,
+                "A fragment held by a child link states its text exactly when it holds items; a node's own fragments leave their text to the node.");
+        }
+        if (hasItems && fragment.TryGetProperty("items", out var items))
+        {
+            ValidateBrowserLayoutFragmentItems(
+                items,
+                $"{pointer}/items",
+                issues,
+                heldByLink ? ownText?.Length : nodeTextLength);
+        }
+        if (fragment.TryGetProperty("breakToken", out var token) &&
+            token.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                token,
+                [
+                    RequiredNumber("consumedBlockSize", nonnegative: true),
+                    RequiredBoolean("breakBefore"),
+                    NullableInteger("sequenceNumber", nonnegative: true),
+                    RequiredBoolean("atBlockEnd")
+                ],
+                issues,
+                $"{pointer}/breakToken");
+            var breakBefore = token.TryGetProperty("breakBefore", out var before) &&
+                before.ValueKind == JsonValueKind.True;
+            if (breakBefore == HasNonnullProperty(token, "sequenceNumber"))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-break-token-inconsistent",
+                    $"{pointer}/breakToken",
+                    "A break token states a sequence number exactly when it is not a break before.");
+            }
+        }
+        if (fragment.TryGetProperty("scrollableOverflow", out var overflow) &&
+            overflow.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                overflow,
+                [
+                    RequiredNumber("x"),
+                    RequiredNumber("y"),
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true)
+                ],
+                issues,
+                $"{pointer}/scrollableOverflow");
+        }
+        if (!fragment.TryGetProperty("children", out var children) ||
+            children.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        var index = 0;
+        foreach (var child in children.EnumerateArray())
+        {
+            if (child.ValueKind != JsonValueKind.Object)
+            {
+                index++;
+                continue;
+            }
+            var childPointer = $"{pointer}/children/{index}";
+            ValidateShape(
+                child,
+                [
+                    RequiredEnum("kind", FragmentChildKinds),
+                    RequiredNumber("x"),
+                    RequiredNumber("y"),
+                    NullableInteger("nodeId", positive: true),
+                    NullableInteger("fragmentIndex", nonnegative: true),
+                    NullableObject("fragment")
+                ],
+                issues,
+                childPointer);
+            var kind = ReadString(child, "kind");
+            var isBox = kind == "box";
+            if (isBox != HasNonnullProperty(child, "nodeId") ||
+                (!isBox && HasNonnullProperty(child, "fragmentIndex")))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-fragment-child-node-inconsistent",
+                    childPointer,
+                    "A child link names a node and its fragment index only when it is a box with a node.");
+            }
+            var holdsFragment = kind is "anonymous" or "column" or "page";
+            var hasFragment = child.TryGetProperty("fragment", out var nested) &&
+                nested.ValueKind == JsonValueKind.Object;
+            if (kind is not null && holdsFragment != hasFragment)
+            {
+                AddError(
+                    issues,
+                    "browser-layout-fragment-child-fragment-inconsistent",
+                    childPointer,
+                    "A child link holds its own fragment exactly when it has no node: an anonymous box, column, or page.");
+            }
+            if (hasFragment)
+            {
+                ValidateBrowserLayoutBoxFragment(
+                    nested,
+                    $"{childPointer}/fragment",
+                    issues,
+                    heldByLink: true,
+                    nodeTextLength: null);
+            }
+            index++;
+        }
+    }
+
+    private static readonly string[] FragmentItemTypes =
+        ["line", "text", "generated-text", "box"];
+
+    // The items of a fragment that holds lines (protocol 0.39), in pre-order.
+    // textLength is the length of the text their ranges index, in UTF-16 code
+    // units, or null when it is not in the record, being unchanged.
+    private static void ValidateBrowserLayoutFragmentItems(
+        JsonElement items,
+        string pointer,
+        ICollection<EventValidationIssue> issues,
+        int? textLength)
+    {
+        var count = items.GetArrayLength();
+        var index = 0;
+        foreach (var item in items.EnumerateArray())
+        {
+            var itemPointer = $"{pointer}/{index}";
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                index++;
+                continue;
+            }
+            ValidateShape(
+                item,
+                [
+                    RequiredEnum("type", FragmentItemTypes),
+                    RequiredNumber("x"),
+                    RequiredNumber("y"),
+                    RequiredNumber("width", nonnegative: true),
+                    RequiredNumber("height", nonnegative: true),
+                    NullableInteger("descendantsCount", positive: true),
+                    NullableInteger("nodeId", positive: true),
+                    NullableInteger("start", nonnegative: true),
+                    NullableInteger("end", nonnegative: true),
+                    NullableBoolean("firstLineStyle"),
+                    NullableEnum("direction", "ltr", "rtl"),
+                    NullableBoolean("hiddenForPaint"),
+                    NullableObjectArray("glyphRuns"),
+                    NullableText("generatedText")
+                ],
+                issues,
+                itemPointer);
+            var type = ReadString(item, "type");
+            var container = type is "line" or "box";
+            var textLike = type is "text" or "generated-text";
+            var spans = item.TryGetProperty("descendantsCount", out var descendants) &&
+                descendants.ValueKind == JsonValueKind.Number &&
+                descendants.TryGetInt32(out var spanned)
+                    ? spanned
+                    : (int?)null;
+            var hasStart = item.TryGetProperty("start", out var startValue) &&
+                startValue.ValueKind == JsonValueKind.Number;
+            var hasEnd = item.TryGetProperty("end", out var endValue) &&
+                endValue.ValueKind == JsonValueKind.Number;
+            if (type is not null &&
+                (container != HasNonnullProperty(item, "descendantsCount") ||
+                 (spans is { } span && index + span > count) ||
+                 (type == "text") != hasStart ||
+                 hasStart != hasEnd ||
+                 (type == "generated-text") != HasNonnullProperty(item, "generatedText") ||
+                 textLike != HasNonnullProperty(item, "firstLineStyle") ||
+                 textLike != HasNonnullProperty(item, "direction") ||
+                 textLike != HasNonnullProperty(item, "hiddenForPaint") ||
+                 textLike != HasNonnullProperty(item, "glyphRuns")))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-fragment-item-inconsistent",
+                    itemPointer,
+                    "An item states what its type has: a line or box the items it spans, within the list; a text item its range; text and generated text their glyph runs; generated text its text.");
+            }
+            if (hasStart && hasEnd &&
+                startValue.TryGetInt64(out var start) && endValue.TryGetInt64(out var end) &&
+                (start > end || (textLength is { } length && end > length)))
+            {
+                AddError(
+                    issues,
+                    "browser-layout-fragment-item-range-outside-text",
+                    itemPointer,
+                    "A text item's range lies within the text content.");
+            }
+            if (item.TryGetProperty("glyphRuns", out var runs) &&
+                runs.ValueKind == JsonValueKind.Array)
+            {
+                var runIndex = 0;
+                foreach (var run in runs.EnumerateArray())
+                {
+                    if (run.ValueKind == JsonValueKind.Object)
+                    {
+                        ValidateBrowserLayoutGlyphRun(
+                            run, $"{itemPointer}/glyphRuns/{runIndex}", issues);
+                    }
+                    runIndex++;
+                }
+            }
+            index++;
+        }
+    }
+
+    private static void ValidateBrowserLayoutGlyphRun(
+        JsonElement run,
+        string pointer,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            run,
+            [
+                RequiredObject("font"),
+                RequiredBoolean("horizontal"),
+                RequiredInteger("rotation", nonnegative: true),
+                RequiredText("glyphs"),
+                OptionalNullableObject("fontFile")
+            ],
+            issues,
+            pointer);
+        if (run.TryGetProperty("fontFile", out var fontFile) &&
+            fontFile.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                fontFile,
+                [
+                    DigestRule("digest"),
+                    RequiredInteger("index", nonnegative: true),
+                    RequiredObjectArray("variations")
+                ],
+                issues,
+                $"{pointer}/fontFile");
+            if (fontFile.TryGetProperty("variations", out var variations) &&
+                variations.ValueKind == JsonValueKind.Array)
+            {
+                var index = 0;
+                foreach (var variation in variations.EnumerateArray())
+                {
+                    if (variation.ValueKind == JsonValueKind.Object)
+                    {
+                        ValidateShape(
+                            variation,
+                            [RequiredText("axis"), RequiredNumber("value")],
+                            issues,
+                            $"{pointer}/fontFile/variations/{index}");
+                    }
+                    index++;
+                }
+            }
+        }
+        if (run.TryGetProperty("font", out var font) && font.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                font,
+                [
+                    RequiredText("family"),
+                    RequiredText("postScriptName"),
+                    RequiredNumber("size", nonnegative: true),
+                    RequiredBoolean("syntheticBold"),
+                    RequiredBoolean("syntheticItalic")
+                ],
+                issues,
+                $"{pointer}/font");
+        }
+        var glyphs = ReadString(run, "glyphs");
+        if (glyphs is null)
+        {
+            return;
+        }
+        var buffer = new byte[(glyphs.Length + 3) / 4 * 3];
+        if (!Convert.TryFromBase64String(glyphs, buffer, out var written) ||
+            written % Recorder.Contracts.BrowserLayoutGlyphs.PackedGlyphBytes != 0)
+        {
+            AddError(
+                issues,
+                "browser-layout-glyphs-invalid",
+                $"{pointer}/glyphs",
+                "Glyphs are base64 of whole packed glyphs, 18 bytes each.");
+        }
+    }
+
     private static PropertyRule ComputedStyleRule() =>
         new(
             "computedStyle",
@@ -2835,6 +3895,7 @@ internal static class EventPayloadValidator
                 RequiredObject("context"),
                 RequiredString("changeSetId"),
                 NullableString("layoutCheckpointId"),
+                RequiredBoolean("checkpointUpdate"),
                 RequiredString("viewTransformNodeId"),
                 RequiredObject("viewPaintOffset"),
                 RequiredNumber("layoutZoomFactor", positive: true)
@@ -2847,6 +3908,16 @@ internal static class EventPayloadValidator
             "layout-checkpoint-",
             "browser-layout-change-checkpoint-id-invalid",
             issues);
+        if (payload.TryGetProperty("checkpointUpdate", out var update) &&
+            update.ValueKind == JsonValueKind.True &&
+            !HasNonnullProperty(payload, "layoutCheckpointId"))
+        {
+            AddError(
+                issues,
+                "browser-layout-change-checkpoint-update-inconsistent",
+                "#/payload/checkpointUpdate",
+                "A change set of a checkpoint's update names that checkpoint.");
+        }
         ValidateLayoutIdentity(
             payload,
             "viewTransformNodeId",
@@ -2943,13 +4014,30 @@ internal static class EventPayloadValidator
                 RequiredBoolean("displayLocked"),
                 NullableObject("geometry"),
                 ComputedStyleRule(),
+                OptionalNullableBoolean("computedStyleComplete"),
+                CustomPropertiesRule(),
+                new PropertyRule(
+                    "removedCustomProperties",
+                    false,
+                    true,
+                    value => value.ValueKind == JsonValueKind.Array &&
+                        value.EnumerateArray().All(item =>
+                            item.ValueKind == JsonValueKind.String &&
+                            item.GetString()!.StartsWith("--", StringComparison.Ordinal)) &&
+                        value.EnumerateArray().Select(item => item.GetString())
+                            .Distinct(StringComparer.Ordinal).Count() ==
+                            value.GetArrayLength(),
+                    "must be an array of distinct custom property names, or null"),
                 NullableObject("pseudoElement"),
                 NullableInteger("shadowHostNodeId", positive: true),
-                NullableEnum("shadowRootMode", "open", "closed", "user-agent")
+                NullableEnum("shadowRootMode", "open", "closed", "user-agent"),
+                BoxFragmentsRule()
             ],
             issues);
         ValidateLayoutChangeSetIdentity(payload, issues);
         ValidateBrowserLayoutPseudoElement(payload, issues);
+        ValidateBrowserLayoutStyleCompleteness(payload, changeRecord: true, issues);
+        ValidateBrowserLayoutBoxFragments(payload, issues);
         if (HasNonnullProperty(payload, "shadowHostNodeId") !=
             HasNonnullProperty(payload, "shadowRootMode"))
         {
@@ -3059,17 +4147,16 @@ internal static class EventPayloadValidator
         {
             var hasStyle = payload.TryGetProperty("computedStyle", out var style) &&
                 style.ValueKind != JsonValueKind.Null;
-            var hasLayoutObject =
-                payload.TryGetProperty("layoutObjectPresent", out var textLayout) &&
-                IsBoolean(textLayout) && textLayout.GetBoolean();
-            if (hasStyle || !hasLayoutObject)
+            // From protocol 0.41 a text node whose layout object was
+            // destroyed is recorded with none, so a text node change record
+            // need not state a layout object.
+            if (hasStyle)
             {
                 AddError(
                     issues,
                     "browser-layout-text-node-inconsistent",
                     "#/payload/nodeType",
-                    "A text node record must have a layout object and no " +
-                        "computed style.");
+                    "A text node record must have no computed style.");
             }
         }
     }
@@ -3088,7 +4175,15 @@ internal static class EventPayloadValidator
                 RequiredObject("webExposedScrollOffset"),
                 RequiredObject("scrollOrigin"),
                 RequiredNumber("effectiveZoom", positive: true),
-                NullableString("scrollTranslationNodeId")
+                NullableString("scrollTranslationNodeId"),
+                // Protocol 0.49: absent from earlier recordings.
+                new PropertyRule(
+                    "scrollElementId",
+                    false,
+                    true,
+                    value => value.ValueKind == JsonValueKind.String &&
+                        IsPositiveDecimal(value.GetString(), ulong.MaxValue),
+                    "must be a positive decimal integer string or null")
             ],
             issues);
         ValidateLayoutChangeSetIdentity(payload, issues);
@@ -3225,6 +4320,15 @@ internal static class EventPayloadValidator
                 IsNonnegativeDecimal(value.GetString()),
             "must be a nonnegative decimal integer string");
 
+    private static PropertyRule NullableDecimalText(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsNonnegativeDecimal(value.GetString()),
+            "must be a nonnegative decimal integer string or null");
+
     private static PropertyRule NullablePositiveDecimalText(string name) =>
         new(
             name,
@@ -3234,13 +4338,16 @@ internal static class EventPayloadValidator
                 IsPositiveDecimal(value.GetString(), long.MaxValue),
             "must be a positive decimal integer string or null");
 
+    // From protocol 0.43 a widget is a frame widget, named by its frame sink,
+    // or a page popup's widget, which is not told its frame sink.
     private static PropertyRule[] PresentationBaseRules(bool widgetRequired) =>
     [
         RequiredObject("context"),
         RequiredString("requestId"),
         widgetRequired
-            ? RequiredFrameSinkId("frameSinkId")
-            : NullableFrameSinkId("frameSinkId"),
+            ? RequiredEnum("widgetKind", "frame", "page-popup")
+            : NullableEnum("widgetKind", "frame", "page-popup"),
+        NullableFrameSinkId("frameSinkId"),
         widgetRequired
             ? RequiredString("localRootFrameToken")
             : NullableString("localRootFrameToken")
@@ -3271,6 +4378,27 @@ internal static class EventPayloadValidator
                 "browser-presentation-frame-token-empty",
                 "#/payload/localRootFrameToken",
                 "A named local root must carry a nonempty frame token.");
+        }
+
+        var kind = ReadString(payload, "widgetKind");
+        var hasSink = HasNonnullProperty(payload, "frameSinkId");
+        var hasToken = HasNonnullProperty(payload, "localRootFrameToken");
+        var widgetConsistent = kind switch
+        {
+            "frame" => hasSink && hasToken,
+            "page-popup" => !hasSink && hasToken,
+            null => !hasSink && !hasToken,
+            _ => true
+        };
+        if (!widgetConsistent)
+        {
+            AddError(
+                issues,
+                "browser-presentation-widget-inconsistent",
+                "#/payload/widgetKind",
+                "A frame widget names its frame sink and local root; a page " +
+                    "popup's widget names its local root only; a request " +
+                    "without a widget names neither.");
         }
     }
 
@@ -3330,7 +4458,7 @@ internal static class EventPayloadValidator
         }
         var queued = queuedValue.GetBoolean();
         var reason = ReadString(payload, "notQueuedReason");
-        var hasWidget = HasNonnullProperty(payload, "frameSinkId");
+        var hasWidget = HasNonnullProperty(payload, "widgetKind");
         var hasToken = HasNonnullProperty(payload, "localRootFrameToken");
         var hasFrameNumber = HasNonnullProperty(payload, "sourceFrameNumber");
         var hasMainFrame = HasNonnullProperty(payload, "isMainFrameWidget");
@@ -3416,6 +4544,333 @@ internal static class EventPayloadValidator
         }
     }
 
+    // Page resource records (protocol 0.40).
+    private static PropertyRule DigestRule(string name) =>
+        new(
+            name,
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsSha256Digest(value.GetString()),
+            "must be a SHA-256 digest in lowercase hexadecimal");
+
+    private static PropertyRule FaceNumberRule() =>
+        new(
+            "faceNumber",
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.String &&
+                IsPositiveDecimal(value.GetString(), ulong.MaxValue),
+            "must be a positive decimal integer string");
+
+    private static bool IsSha256Digest(string? value) =>
+        value is { Length: 64 } &&
+        value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    private static void ValidateBrowserResourceBytes(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                DigestRule("digest"),
+                RequiredDecimalText("size"),
+                RequiredString("bytes")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        var bytes = ReadString(payload, "bytes");
+        var size = ReadString(payload, "size");
+        if (bytes is null || size is null ||
+            !long.TryParse(size, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var count))
+        {
+            return;
+        }
+        // The size of what the base64 decodes to, from its length and padding,
+        // without decoding what may be many megabytes.
+        var padding = bytes.EndsWith("==", StringComparison.Ordinal) ? 2 :
+            bytes.EndsWith('=') ? 1 : 0;
+        if (bytes.Length % 4 != 0 || (long)bytes.Length / 4 * 3 - padding != count)
+        {
+            AddError(
+                issues,
+                "browser-resource-bytes-invalid",
+                "#/payload/bytes",
+                "Bytes must be base64 of exactly size bytes.");
+        }
+    }
+
+    private static void ValidateBrowserFontFace(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                FaceNumberRule()
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+    }
+
+    private static void ValidateBrowserFontFaceLoaded(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                FaceNumberRule(),
+                RequiredString("family"),
+                RequiredObject("descriptors"),
+                NullableObject("source"),
+                NullableObject("fontFile")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        if (payload.TryGetProperty("descriptors", out var descriptors) &&
+            descriptors.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                descriptors,
+                [
+                    RequiredString("style"),
+                    RequiredString("weight"),
+                    RequiredString("stretch"),
+                    RequiredString("unicodeRange"),
+                    RequiredString("variant"),
+                    RequiredString("featureSettings"),
+                    RequiredString("display"),
+                    RequiredString("ascentOverride"),
+                    RequiredString("descentOverride"),
+                    RequiredString("lineGapOverride"),
+                    RequiredString("sizeAdjust")
+                ],
+                issues,
+                "#/payload/descriptors");
+        }
+        if (payload.TryGetProperty("source", out var source) &&
+            source.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                source,
+                [
+                    RequiredEnum("kind", "url", "data-url", "binary", "local"),
+                    NullableText("url")
+                ],
+                issues,
+                "#/payload/source");
+            var kind = ReadString(source, "kind");
+            if (kind is not null &&
+                (kind == "url") != HasNonnullProperty(source, "url"))
+            {
+                AddError(
+                    issues,
+                    "browser-font-face-source-url",
+                    "#/payload/source/url",
+                    "A url source carries its URL, and no other source does.");
+            }
+        }
+        if (payload.TryGetProperty("fontFile", out var fontFile) &&
+            fontFile.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                fontFile,
+                [
+                    DigestRule("digest"),
+                    RequiredInteger("index", nonnegative: true)
+                ],
+                issues,
+                "#/payload/fontFile");
+        }
+    }
+
+    private static void ValidateBrowserImageResource(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredText("url"),
+                NullableString("responseUrl"),
+                RequiredInteger("status", nonnegative: true),
+                RequiredString("mimeType"),
+                RequiredDecimalText("size"),
+                DigestRule("digest"),
+                RequiredBoolean("dataRecorded"),
+                NullableDecimalText("imageId")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+    }
+
+    // Protocol 0.51 (slice 4e).
+    private static void ValidateBrowserStyleSheetResource(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("url"),
+                NullableString("responseUrl"),
+                RequiredInteger("status", nonnegative: true),
+                RequiredText("mimeType"),
+                RequiredDecimalText("size"),
+                DigestRule("digest"),
+                RequiredBoolean("textRecorded")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+    }
+
+    private static PropertyRule NullableDigestRule(string name) =>
+        new(
+            name,
+            true,
+            true,
+            value => value.ValueKind == JsonValueKind.Null ||
+                (value.ValueKind == JsonValueKind.String && IsSha256Digest(value.GetString())),
+            "must be null or a SHA-256 digest in lowercase hexadecimal");
+
+    private static readonly string[] StyleSheetKinds =
+        ["link", "style", "import", "constructed", "processing-instruction", "other"];
+
+    private static void ValidateBrowserStyleSheetsUpdated(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredObjectArray("scopes")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        if (!payload.TryGetProperty("scopes", out var scopes) || scopes.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        var scopeIndex = 0;
+        foreach (var scope in scopes.EnumerateArray())
+        {
+            var scopePointer = $"#/payload/scopes/{scopeIndex}";
+            scopeIndex++;
+            if (scope.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            ValidateShape(
+                scope,
+                [
+                    RequiredInteger("scopeNodeId", positive: true),
+                    RequiredObjectArray("sheets"),
+                    RequiredObjectArray("adopted")
+                ],
+                issues,
+                scopePointer);
+            foreach (var list in new[] { "sheets", "adopted" })
+            {
+                if (!scope.TryGetProperty(list, out var entries) || entries.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+                var entryIndex = 0;
+                foreach (var entry in entries.EnumerateArray())
+                {
+                    var pointer = $"{scopePointer}/{list}/{entryIndex}";
+                    entryIndex++;
+                    if (entry.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+                    if (!entry.TryGetProperty("kind", out _))
+                    {
+                        // A sheet unchanged since the document's last record.
+                        ValidateShape(entry, [RequiredDecimalText("sheet")], issues, pointer);
+                        continue;
+                    }
+                    ValidateShape(
+                        entry,
+                        [
+                            RequiredDecimalText("sheet"),
+                            RequiredEnum("kind", StyleSheetKinds),
+                            NullableInteger("ownerNodeId", positive: true),
+                            NullableDecimalText("parentSheet"),
+                            NullableInteger("ruleIndex", nonnegative: true),
+                            NullableString("href"),
+                            RequiredText("media"),
+                            RequiredText("title"),
+                            RequiredBoolean("disabled"),
+                            RequiredBoolean("active"),
+                            RequiredEnum("textSource", "arrived", "element", "cssom", "none"),
+                            NullableDigestRule("textDigest")
+                        ],
+                        issues,
+                        pointer);
+                    var kind = ReadString(entry, "kind");
+                    var hasParent = HasNonnullProperty(entry, "parentSheet");
+                    if ((kind == "import") != hasParent || hasParent != HasNonnullProperty(entry, "ruleIndex"))
+                    {
+                        AddError(
+                            issues,
+                            "browser-style-sheet-import-parent",
+                            pointer + "/parentSheet",
+                            "An import names its parent sheet and rule index, and no other sheet does.");
+                    }
+                    var source = ReadString(entry, "textSource");
+                    if ((source is "arrived" or "cssom") != HasNonnullProperty(entry, "textDigest"))
+                    {
+                        AddError(
+                            issues,
+                            "browser-style-sheet-text-digest",
+                            pointer + "/textDigest",
+                            "Arrived and CSSOM text is named by its digest, and no other text source is.");
+                    }
+                }
+            }
+        }
+    }
+
+    private static void ValidateBrowserImagePaintImage(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredDecimalText("imageId"),
+                RequiredDecimalText("paintImageId"),
+                RequiredEnum("sequence", "shared", "own"),
+                NullableInteger("nodeId", positive: true),
+                NullableDecimalText("syncTargetPaintImageId")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        if (ReadString(payload, "sequence") == "own" &&
+            payload.TryGetProperty("nodeId", out var nodeId) &&
+            nodeId.ValueKind == JsonValueKind.Null)
+        {
+            AddError(
+                issues,
+                "browser-image-paint-image-node-missing",
+                "#/payload/nodeId",
+                "A paint image with its own animation sequence is made for a node.");
+        }
+    }
+
     private static void ValidateBrowserPresentationSwapped(
         JsonElement payload,
         ICollection<EventValidationIssue> issues)
@@ -3429,6 +4884,491 @@ internal static class EventPayloadValidator
             ],
             issues);
         ValidatePresentationBase(payload, issues);
+    }
+
+    // Compositor records (protocol 0.48, slice 4b).
+    private static readonly string[] CompositorTargetProperties =
+    [
+        "transform", "scale", "rotate", "translate", "opacity", "filter",
+        "scroll-offset", "background-color", "bounds", "css-custom-property",
+        "native-property", "backdrop-filter", "other"
+    ];
+
+    private static readonly string[] CompositorElementIdNamespaces =
+    [
+        "primary-effect", "primary-transform", "effect-filter", "scale-transform",
+        "rotate-transform", "translate-transform", "scroll", "primary", "other", "none"
+    ];
+
+    // Protocol 0.50: whether the compositor scrolls the node, and the reasons
+    // Chromium gives for repainting it on the main thread, each named once.
+    private static readonly string[] ScrollRepaintReasons =
+    [
+        "has-background-attachment-fixed-objects", "not-opaque-for-text-and-lcd-text",
+        "prefer-non-composited-scrolling", "background-needs-repaint-on-scroll",
+    ];
+
+    private static bool IsScrollCompositing(JsonElement value) =>
+        value.EnumerateObject().Count() == 4 &&
+        value.TryGetProperty("isComposited", out var composited) &&
+        (composited.ValueKind is JsonValueKind.True or JsonValueKind.False) &&
+        value.TryGetProperty("mainThreadRepaintReasons", out var reasons) &&
+        reasons.ValueKind == JsonValueKind.Array &&
+        reasons.EnumerateArray().All(reason =>
+            reason.ValueKind == JsonValueKind.String && ScrollRepaintReasons.Contains(reason.GetString(), StringComparer.Ordinal)) &&
+        reasons.EnumerateArray().Select(reason => reason.GetString()).Distinct(StringComparer.Ordinal).Count() == reasons.GetArrayLength();
+
+    private static readonly string[] CompositorFilterTypes =
+    [
+        "grayscale", "sepia", "saturate", "hue-rotate", "invert", "brightness",
+        "contrast", "opacity", "blur", "drop-shadow", "color-matrix", "zoom",
+        "reference", "saturating-brightness", "alpha-threshold", "offset", "unknown"
+    ];
+
+    private static void ValidateCompositorRendererContext(
+        JsonElement payload,
+        bool requiresDocument,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateBrowserContextProperty(payload, issues);
+        if (requiresDocument)
+        {
+            ValidateRendererDocumentContext(payload, issues);
+            return;
+        }
+        if (payload.TryGetProperty("context", out var context) &&
+            context.ValueKind == JsonValueKind.Object &&
+            ReadString(context, "processType") != "renderer")
+        {
+            AddError(
+                issues,
+                "browser-compositor-context-invalid",
+                "#/payload/context",
+                "Compositor evidence must have renderer-process provenance.");
+        }
+    }
+
+    private static void ValidateCompositorWidget(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        if (!payload.TryGetProperty("widget", out var widget) ||
+            widget.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        ValidateShape(
+            widget,
+            [
+                RequiredEnum("widgetKind", "frame", "page-popup"),
+                NullableFrameSinkId("frameSinkId"),
+                RequiredString("localRootFrameToken")
+            ],
+            issues,
+            "#/payload/widget");
+    }
+
+    private static readonly string[] AnimationKinds = ["css-animation", "css-transition", "web-animation"];
+    private static readonly string[] AnimationPlayStates = ["idle", "pending", "running", "paused", "finished"];
+    private static readonly string[] AnimationTimelineKinds = ["document", "scroll", "view", "other", "none"];
+    private static readonly string[] AnimationDirections = ["normal", "reverse", "alternate", "alternate-reverse"];
+    private static readonly string[] AnimationFills = ["none", "forwards", "backwards", "both", "auto"];
+
+    // Protocol 0.53 (slice 4g): a Blink animation.
+    private static void ValidateBrowserAnimationUpdated(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredDecimalText("sequenceNumber"),
+                RequiredEnum("kind", AnimationKinds),
+                NullableString("name"),
+                NullableString("id"),
+                NullableInteger("targetNodeId", positive: true),
+                NullableString("pseudoElement"),
+                RequiredEnum("playState", AnimationPlayStates),
+                RequiredBoolean("pending"),
+                RequiredNullableNumber("playbackRate"),
+                RequiredNullableNumber("startTimeMilliseconds"),
+                RequiredNullableNumber("currentTimeMilliseconds"),
+                RequiredObject("timeline"),
+                NullableObject("effect"),
+                NullableInteger("compositorAnimationId", positive: true)
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, true, issues);
+        if (payload.TryGetProperty("timeline", out var timeline) && timeline.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                timeline,
+                [
+                    RequiredEnum("kind", AnimationTimelineKinds),
+                    NullablePositiveDecimalText("zeroTicks"),
+                    NullablePositiveDecimalText("zeroTimeTicksMicroseconds"),
+                    RequiredNullableNumber("playbackRate"),
+                    NullableInteger("sourceNodeId", positive: true),
+                    NullableInteger("subjectNodeId", positive: true),
+                    NullableEnum("axis", "horizontal", "vertical")
+                ],
+                issues,
+                "#/payload/timeline");
+        }
+        if (payload.TryGetProperty("effect", out var effect) && effect.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                effect,
+                [
+                    RequiredNullableNumber("delayMilliseconds"),
+                    RequiredNullableNumber("endDelayMilliseconds"),
+                    RequiredNullableNumber("iterationStart", nonnegative: true),
+                    RequiredNullableNumber("iterations", nonnegative: true),
+                    RequiredNullableNumber("durationMilliseconds", nonnegative: true),
+                    RequiredEnum("direction", AnimationDirections),
+                    RequiredEnum("fill", AnimationFills),
+                    RequiredString("easing"),
+                    RequiredNullableNumber("progress"),
+                    RequiredNullableNumber("currentIteration")
+                ],
+                issues,
+                "#/payload/effect");
+        }
+    }
+
+    private static void ValidateBrowserCompositorAnimationStarted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("nodeId", positive: true),
+                NullableInteger("compositorAnimationId", positive: true),
+                RequiredObjectArray("keyframeModels")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, true, issues);
+        if (!payload.TryGetProperty("keyframeModels", out var models) ||
+            models.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        if (models.GetArrayLength() == 0)
+        {
+            AddError(
+                issues,
+                "browser-compositor-keyframe-models-empty",
+                "#/payload/keyframeModels",
+                "An animation started on the compositor has at least one keyframe model.");
+        }
+        var index = 0;
+        foreach (var model in models.EnumerateArray())
+        {
+            if (model.ValueKind == JsonValueKind.Object)
+            {
+                ValidateShape(
+                    model,
+                    [
+                        RequiredInteger("keyframeModelId", positive: true),
+                        RequiredEnum("targetProperty", CompositorTargetProperties),
+                        RequiredDecimalText("elementId"),
+                        RequiredEnum("elementIdNamespace", CompositorElementIdNamespaces)
+                    ],
+                    issues,
+                    $"#/payload/keyframeModels/{index}");
+            }
+            index++;
+        }
+    }
+
+    private static void ValidateBrowserCompositorAnimationEnded(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                NullableInteger("nodeId", positive: true),
+                NullableInteger("compositorAnimationId", positive: true),
+                RequiredIntegerArray("keyframeModelIds")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, false, issues);
+        if (payload.TryGetProperty("keyframeModelIds", out var ids) &&
+            ids.ValueKind == JsonValueKind.Array &&
+            (ids.GetArrayLength() == 0 ||
+             ids.EnumerateArray().Any(id => !IsInteger(id) || id.GetInt64() <= 0)))
+        {
+            AddError(
+                issues,
+                "browser-compositor-keyframe-model-ids-invalid",
+                "#/payload/keyframeModelIds",
+                "An ended animation names at least one positive keyframe model ID.");
+        }
+    }
+
+    private static PropertyRule RequiredIntegerArray(string name) =>
+        new(
+            name,
+            true,
+            false,
+            value => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(IsInteger),
+            "must be an array of integers");
+
+    private static bool IsFiniteNumber(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number &&
+        value.TryGetDouble(out var number) &&
+        double.IsFinite(number);
+
+    private static bool IsFiniteNumberArray(JsonElement value, int? length) =>
+        value.ValueKind == JsonValueKind.Array &&
+        (length is null || value.GetArrayLength() == length) &&
+        value.EnumerateArray().All(IsFiniteNumber);
+
+    private static bool IsCompositorValue(string? property, JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return property is "transform" or "opacity" or "filter" or "backdrop-filter" or
+                "background-color-progress" or "clip-path-progress" or "image-frame";
+        }
+        switch (property)
+        {
+            case "transform":
+                return IsFiniteNumberArray(value, 16);
+            case "opacity":
+                return IsFiniteNumber(value);
+            case "image-frame":
+                return IsInteger(value) && value.GetInt64() >= 0;
+            case "scroll-offset":
+                return value.ValueKind == JsonValueKind.Object &&
+                    value.TryGetProperty("x", out var x) && IsFiniteNumber(x) &&
+                    value.TryGetProperty("y", out var y) && IsFiniteNumber(y) &&
+                    (value.EnumerateObject().Count() == 2 || IsScrollCompositing(value));
+            case "background-color-progress":
+            case "clip-path-progress":
+                return value.ValueKind == JsonValueKind.Object &&
+                    value.EnumerateObject().Count() == 1 &&
+                    value.TryGetProperty("progress", out var progress) &&
+                    (progress.ValueKind == JsonValueKind.Null || IsFiniteNumber(progress));
+            case "filter":
+            case "backdrop-filter":
+                return value.ValueKind == JsonValueKind.Array &&
+                    value.EnumerateArray().All(operation =>
+                        operation.ValueKind == JsonValueKind.Object &&
+                        operation.EnumerateObject().Count() == 2 &&
+                        operation.TryGetProperty("type", out var type) &&
+                        type.ValueKind == JsonValueKind.String &&
+                        CompositorFilterTypes.Contains(type.GetString(), StringComparer.Ordinal) &&
+                        operation.TryGetProperty("numbers", out var numbers) &&
+                        IsFiniteNumberArray(numbers, null));
+            default:
+                return false;
+        }
+    }
+
+    private static void ValidateBrowserCompositorFrame(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("layerTreeHostId", positive: true),
+                NullableObject("widget"),
+                RequiredFrameToken("frameToken"),
+                RequiredInteger("sourceFrameNumber"),
+                NullablePositiveDecimalText("beginFrameTicks"),
+                NullablePositiveDecimalText("beginFrameTimeTicksMicroseconds"),
+                RequiredBoolean("highResolutionTicks"),
+                RequiredObjectArray("changes")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, false, issues);
+        ValidateCompositorWidget(payload, issues);
+        if (!payload.TryGetProperty("changes", out var changes) ||
+            changes.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+        if (changes.GetArrayLength() == 0)
+        {
+            AddError(
+                issues,
+                "browser-compositor-frame-empty",
+                "#/payload/changes",
+                "A compositor frame is recorded only when a drawn value changed.");
+        }
+        var index = 0;
+        foreach (var change in changes.EnumerateArray())
+        {
+            if (change.ValueKind != JsonValueKind.Object)
+            {
+                index++;
+                continue;
+            }
+            // An animated image's frame names its paint image; every other
+            // change names its compositor element.
+            var imageFrame = ReadString(change, "property") == "image-frame";
+            ValidateShape(
+                change,
+                [
+                    RequiredDecimalText(imageFrame ? "paintImageId" : "elementId"),
+                    RequiredEnum("property", "transform", "opacity", "filter",
+                        "backdrop-filter", "scroll-offset", "background-color-progress",
+                        "clip-path-progress", "image-frame"),
+                    new PropertyRule("value", true, true, _ => true, "must be present")
+                ],
+                issues,
+                $"#/payload/changes/{index}");
+            if (change.TryGetProperty("value", out var value) &&
+                !IsCompositorValue(ReadString(change, "property"), value))
+            {
+                AddError(
+                    issues,
+                    "browser-compositor-value-invalid",
+                    $"#/payload/changes/{index}/value",
+                    "A compositor value must have its property's shape: 16 matrix " +
+                        "entries, a number, filter operations, x and y, a progress, " +
+                        "or a frame index.");
+            }
+            index++;
+        }
+    }
+
+    private static readonly string[] PaintWorkletPathVerbs =
+        ["move", "line", "quad", "conic", "cubic", "close"];
+
+    // Points each Skia path verb takes, as SkPath stores them.
+    private static int PathVerbPoints(string? verb) => verb switch
+    {
+        "move" or "line" => 1,
+        "quad" or "conic" => 2,
+        "cubic" => 3,
+        _ => 0
+    };
+
+    private static void ValidateBrowserPaintWorkletPainted(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredDecimalText("elementId"),
+                RequiredEnum("property", "background-color", "clip-path"),
+                new PropertyRule(
+                    "progress",
+                    true,
+                    true,
+                    value => value.ValueKind == JsonValueKind.Null || IsFiniteNumber(value),
+                    "must be a finite number or null"),
+                RequiredObject("value")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, false, issues);
+        if (!payload.TryGetProperty("value", out var value) ||
+            value.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+        var valid = ReadString(payload, "property") switch
+        {
+            "background-color" =>
+                value.EnumerateObject().Count() == 1 &&
+                value.TryGetProperty("color", out var color) &&
+                IsFiniteNumberArray(color, 4),
+            "clip-path" => IsPaintedClipPath(value),
+            _ => true
+        };
+        if (!valid)
+        {
+            AddError(
+                issues,
+                "browser-paint-worklet-value-invalid",
+                "#/payload/value",
+                "A painted background color is four floats; a painted clip path is " +
+                    "its fill type, verbs, points, conic weights, translation, and " +
+                    "whether it was drawn as a rounded rectangle.");
+        }
+    }
+
+    private static bool IsPaintedClipPath(JsonElement value)
+    {
+        if (value.EnumerateObject().Count() != 6 ||
+            !value.TryGetProperty("fillType", out var fillType) ||
+            fillType.ValueKind != JsonValueKind.String ||
+            fillType.GetString() is not ("winding" or "even-odd" or "inverse-winding" or
+                "inverse-even-odd") ||
+            !value.TryGetProperty("verbs", out var verbs) ||
+            verbs.ValueKind != JsonValueKind.Array ||
+            !value.TryGetProperty("points", out var points) ||
+            !IsFiniteNumberArray(points, null) ||
+            !value.TryGetProperty("conicWeights", out var weights) ||
+            !IsFiniteNumberArray(weights, null) ||
+            !value.TryGetProperty("translation", out var translation) ||
+            translation.ValueKind != JsonValueKind.Object ||
+            translation.EnumerateObject().Count() != 2 ||
+            !translation.TryGetProperty("x", out var x) || !IsFiniteNumber(x) ||
+            !translation.TryGetProperty("y", out var y) || !IsFiniteNumber(y) ||
+            !value.TryGetProperty("drawnAsRoundedRect", out var rounded) ||
+            rounded.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+        var pointCount = 0;
+        var conicCount = 0;
+        foreach (var verb in verbs.EnumerateArray())
+        {
+            if (verb.ValueKind != JsonValueKind.String ||
+                !PaintWorkletPathVerbs.Contains(verb.GetString(), StringComparer.Ordinal))
+            {
+                return false;
+            }
+            pointCount += PathVerbPoints(verb.GetString());
+            conicCount += verb.GetString() == "conic" ? 1 : 0;
+        }
+        return points.GetArrayLength() == pointCount * 2 &&
+            weights.GetArrayLength() == conicCount;
+    }
+
+    private static void ValidateBrowserCompositorFramePresented(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("layerTreeHostId", positive: true),
+                NullableObject("widget"),
+                RequiredFrameToken("frameToken"),
+                RequiredBoolean("failed"),
+                NullablePositiveDecimalText("presentedTicks"),
+                NullablePositiveDecimalText("presentedTimeTicksMicroseconds"),
+                RequiredBoolean("highResolutionTicks")
+            ],
+            issues);
+        ValidateCompositorRendererContext(payload, false, issues);
+        ValidateCompositorWidget(payload, issues);
+        if (payload.TryGetProperty("failed", out var failed) &&
+            failed.ValueKind == JsonValueKind.True &&
+            (ReadString(payload, "presentedTicks") is not null ||
+             ReadString(payload, "presentedTimeTicksMicroseconds") is not null))
+        {
+            AddError(
+                issues,
+                "browser-compositor-presentation-invalid",
+                "#/payload",
+                "A failed presentation has no presentation time.");
+        }
     }
 
     private static void ValidateBrowserPresentationFeedback(
@@ -4097,6 +6037,64 @@ internal static class EventPayloadValidator
         }
     }
 
+    // Protocol 0.55 (slice 5a): the frame a walked frame owner element held.
+    private static void ValidateBrowserDomCheckpointFrameOwner(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("ownerNodeId", positive: true),
+                FrameTokenRule("frameToken", required: true, nullable: false),
+                RequiredEnum("frameLocation", "local", "remote")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+    }
+
+    // Protocol 0.55 (slice 5a): a frame owner element given a frame or losing
+    // it. A lost frame has neither a token nor a location.
+    private static void ValidateBrowserDomFrameOwnerChanged(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("ownerNodeId", positive: true),
+                FrameTokenRule("frameToken", required: true, nullable: true),
+                NullableEnum("frameLocation", "local", "remote")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        if (HasNonnullProperty(payload, "frameToken") != HasNonnullProperty(payload, "frameLocation"))
+        {
+            AddError(
+                issues,
+                "browser-dom-frame-owner-inconsistent",
+                "#/payload/frameLocation",
+                "An owner given a frame names its token and location; an owner that lost its frame names neither.");
+        }
+    }
+
+    // A DevTools frame token as Chromium writes base::UnguessableToken: 32
+    // uppercase hexadecimal digits.
+    private static PropertyRule FrameTokenRule(string name, bool required, bool nullable) =>
+        new(
+            name,
+            required,
+            nullable,
+            value => value.ValueKind == JsonValueKind.String &&
+                value.GetString() is { Length: 32 } token &&
+                token.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F'),
+            "must be a DevTools frame token of 32 uppercase hexadecimal digits");
+
     private static void ValidateBrowserDomCheckpointStarted(
         JsonElement payload,
         ICollection<EventValidationIssue> issues)
@@ -4106,25 +6104,39 @@ internal static class EventPayloadValidator
             [
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
-                RequiredEnum("reason", "finished-parsing", "post-mutation"),
+                RequiredEnum("reason", "started-parsing", "finished-parsing", "post-mutation"),
                 RequiredEnum(
                     "walkReason", "first", "after-loss", "check",
-                    "finished-parsing"),
-                RequiredInteger("maximumNodes", positive: true)
+                    "started-parsing", "finished-parsing"),
+                RequiredInteger("maximumNodes", positive: true),
+                // Protocol 0.55 (slice 5a); absent before it.
+                FrameTokenRule("frameToken", required: false, nullable: true),
+                OptionalNullableBoolean("mainFrame")
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererDocumentContext(payload, issues);
+        if (HasNonnullProperty(payload, "frameToken") != HasNonnullProperty(payload, "mainFrame"))
+        {
+            AddError(
+                issues,
+                "browser-dom-checkpoint-frame-inconsistent",
+                "#/payload/mainFrame",
+                "A walked document with a frame names its token and whether it is a main frame; one with no frame names neither.");
+        }
         // From protocol 0.35 a document is walked at a mutation delivery only
-        // for a reason of its own; only a finished parse is always walked.
-        if (ReadString(payload, "reason") == "post-mutation" &&
-            ReadString(payload, "walkReason") == "finished-parsing")
+        // for a reason of its own; only a finished parse, and from protocol
+        // 0.42 the start of a parse, is always walked, and names itself.
+        var walkReason = ReadString(payload, "walkReason");
+        if (walkReason is "started-parsing" or "finished-parsing" &&
+            ReadString(payload, "reason") is { } requested &&
+            requested != walkReason)
         {
             AddError(
                 issues,
                 "browser-dom-checkpoint-walk-reason-inconsistent",
                 "#/payload/walkReason",
-                "A post-mutation checkpoint is walked for a first walk, a loss, or a check.");
+                "A checkpoint is walked for the start or the end of parsing only when it was requested for it; otherwise for a first walk, a loss, or a check.");
         }
     }
 
@@ -4470,7 +6482,7 @@ internal static class EventPayloadValidator
             [
                 RequiredObject("context"),
                 RequiredString("checkpointId"),
-                RequiredEnum("reason", "finished-parsing", "post-mutation"),
+                RequiredEnum("reason", "started-parsing", "finished-parsing", "post-mutation"),
                 RequiredInteger("nodeCount", nonnegative: true),
                 RequiredBoolean("truncated"),
                 RequiredInteger("maximumNodes", positive: true),
@@ -5257,6 +7269,12 @@ internal static class EventPayloadValidator
     private static PropertyRule NullableBoolean(string name) =>
         new(name, true, true, IsBoolean, "must be a boolean or null");
 
+    private static PropertyRule OptionalBoolean(string name) =>
+        new(name, false, false, IsBoolean, "must be a boolean");
+
+    private static PropertyRule OptionalNullableText(string name) =>
+        new(name, false, true, IsString, "must be a string or null");
+
     private static PropertyRule OptionalNullableBoolean(string name) =>
         new(name, false, true, IsBoolean, "must be a boolean or null");
 
@@ -5277,6 +7295,16 @@ internal static class EventPayloadValidator
                 value.EnumerateArray().All(
                     item => item.ValueKind == JsonValueKind.Object),
             "must be an array of objects");
+
+    private static PropertyRule OptionalNullableObjectArray(string name) =>
+        new(
+            name,
+            false,
+            true,
+            value => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(
+                    item => item.ValueKind == JsonValueKind.Object),
+            "must be an array of objects or null");
 
     private static PropertyRule NullableObjectArray(string name) =>
         new(

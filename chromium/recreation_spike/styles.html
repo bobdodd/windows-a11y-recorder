@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!--
+  Recreation mode, feasibility step 1a: recorded styles. See
+  docs/architecture/page-recreation.md, "The feasibility step".
+
+  Each element with a data-a11y-recorded-style attribute has a style sheet
+  value and a different recorded value for each property it lists. Opened
+  in the instrumented Chromium with --a11y-recorder-recreation, the recorded
+  values are the computed style; opened without it, the style sheet values
+  are. The recorded values are written as getComputedStyle() reports them,
+  so they can be compared as text.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Recreation mode step 1a: recorded styles</title>
+<style>
+  body { font-family: serif; margin: 16px; }
+  #box { width: 100px; height: 50px; background-color: rgb(200, 0, 0); }
+  #text { color: rgb(255, 0, 0); font-size: 14px; font-family: serif; font-weight: 400; line-height: 16px; }
+  #hidden { visibility: visible; }
+  #attribute { height: 20px; background-color: rgb(0, 128, 0); }
+  @keyframes pulse { from { background-color: rgb(255, 255, 0); } to { background-color: rgb(255, 0, 255); } }
+  #animated { width: 120px; height: 30px; animation: pulse 1s infinite alternate; }
+  #parent { color: rgb(255, 0, 0); }
+  #removed { display: block; }
+</style>
+</head>
+<body>
+<h1>Recreation mode step 1a: recorded styles</h1>
+<p>Each block below says what its recorded values are. Under the recreation switch they are the computed style; without it, the style sheet's are.</p>
+
+<div id="box" data-a11y-recorded-style="width: 237.5px; height: 91.25px; background-color: rgb(0, 90, 160);"></div>
+<p>Box: recorded 237.5 by 91.25 CSS pixels, blue. Style sheet: 100 by 50, red.</p>
+
+<p id="text" data-a11y-recorded-style="color: rgb(20, 20, 20); font-size: 22.5px; font-family: Arial; font-weight: 700; line-height: 30px;">Text: recorded dark grey, 22.5px bold Arial, line height 30px. Style sheet: red, 14px serif, line height 16px.</p>
+
+<p><span id="hidden" data-a11y-recorded-style="visibility: hidden;">Hidden text.</span> Before this sentence, text is recorded as hidden. Style sheet: visible.</p>
+
+<div id="attribute" style="width: 50px;" data-a11y-recorded-style="width: 180px;"></div>
+<p>Style attribute: recorded 180px wide, over the element's own style attribute of 50px.</p>
+
+<div id="animated" data-a11y-recorded-style="background-color: rgb(0, 160, 90);"></div>
+<p>Animation: recorded green and still. Style sheet: an animation between yellow and magenta.</p>
+
+<div id="parent" data-a11y-recorded-style="color: rgb(0, 0, 200);"><p id="child">Inherited: this paragraph has no recorded style and inherits its parent's recorded blue. Style sheet: red.</p></div>
+
+<p id="removed" data-a11y-recorded-style="display: none;">Display: this paragraph is recorded as not displayed. If it can be read, the recorded value was not applied.</p>
+</body>
+</html>

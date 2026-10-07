@@ -1,7 +1,7 @@
 # Chromium Recorder Bridge
 
 This directory is copied into the Chromium source checkout as
-`//chromium/recorder_bridge`. It mirrors version `0.36` of the recorder-side
+`//chromium/recorder_bridge`. It mirrors version `0.37` of the recorder-side
 protocol implemented by `Recorder.Collectors.Browser`.
 
 Run the integration and build from a Windows PowerShell prompt:
@@ -412,6 +412,248 @@ outcome from the previous, requested, and resulting node identities, checks
 every enumerated value, and drops a call it cannot represent. Script origin is
 read with the same helper the cookie records use. The record types and their
 limits are described in `docs/architecture/instrumented-chromium.md`.
+
+Protocol 0.43 adds the page popup records. The hooks in
+`web_page_popup_impl.cc` call `RecordBlinkPagePopupOpened`,
+`RecordBlinkPagePopupWindowRect`, and `RecordBlinkPagePopupClosed`, and the
+hook in `html_option_element.cc` calls `RecordBlinkOptionSelectednessChanged`.
+A presentation widget identity with `page_popup` set names a page popup's
+widget, which has no frame sink the renderer knows, so the bridge writes its
+`frameSinkId` as null and its `widgetKind` as `page-popup`.
+
+Protocol 0.44 adds the browser's popup widget records. The hook in
+`render_frame_host_impl.cc` calls `RecordBrowserPopupWidgetCreated`, the hooks
+in `web_contents_impl.cc` call `RecordBrowserPopupWidgetShown`, and the hooks
+in `render_widget_host_impl.cc` call `RecordBrowserPopupWidgetBoundsRequested`
+and `RecordBrowserPopupWidgetScreenRects`. The last is passed the popup's
+HWND and reads its window rectangle and client area with `GetWindowRect`,
+`GetClientRect`, and `ClientToScreen`, so `render_widget_host_impl.cc` does not
+include `windows.h`. `RecordBlinkPagePopupOpened` gains the owner frame's
+token, and `RecordBlinkPagePopupWindowRect` records only a requested
+rectangle; the integration script removes the 0.43 hook in
+`WebPagePopupImpl::SetScreenRects` from a checkout it patched before.
+
+In the recreation mode, input is refused only in recorded content.
+`IsRecreationBrowserPageScheme` (from `recreation_input.h`, tested by
+`recreation_input_test.cc`) names the browser page schemes, devtools,
+chrome, chrome-untrusted, and chrome-extension; `Document::ImplicitOpen`
+calls `MarkRecreationBrowserPageProcess` for such a page, and the
+compositor thread's hook refuses input only while
+`RecreationRefusesCompositorInput()` is true. See "Input refused only in
+the recreation" in the page recreation design. The scrollbars and the wheel
+still scroll: mouse events reach cc's scrollbar controller, wheel events
+are dropped so that the browser sends its scroll gestures, and scroll
+gestures of the devices `kScrollbar` and `kTouchpad` are handled on both
+threads ("Scrollbars take input" and "The wheel scrolls" in the page
+recreation design).
+
+In the recreation mode, animated images are held at their recorded frame
+(slice 4b sub-step 2a). `ImageResource::Finish` passes the value of the
+recorder's `X-A11y-Recorder-Image-Frame` response header and the image's
+paint image ID to `HoldRecreationImageFrame`, which parses it with
+`ParseRecreationImageFrame` and keeps it in a `HeldImageFrames` (both in
+`recreation_image_frames.h`, tested by `recreation_image_frames_test.cc`).
+`ImageAnimationController::UpdateAnimatedImage` reads it with
+`RecreationHeldImageFrame` on the compositor thread and sets the image's
+frame, the first when none is held, and
+`ImageAnimationController::AnimationState::ShouldAnimate` is false, so no
+image advances. Both functions do nothing outside the recreation mode. See
+"Sub-step 2a" in the page recreation design.
+
+In the recreation mode, the page is held at the recorded moment and the
+compositor values recorded at the frame are imposed (slice 4b sub-step
+2b-i). `RecreationHoldsTime()` is true in a recreation process that shows no
+browser page, so DevTools still runs its own animations. While it is true,
+`CSSAnimations::CalculateAnimationUpdate` and
+`CSSAnimations::CalculateTransitionUpdate` return before they make any
+update. The app writes each element's values in its
+`data-a11y-recorded-compositor` attribute, which
+`RecreationCompositorValuesOf` parses with
+`ParseRecreationCompositorValues` (in `recreation_compositor_values.h`,
+tested by `recreation_compositor_values_test.cc`); malformed text gives no
+values. `FragmentPaintPropertyTreeBuilder::UpdateIndividualTransform`
+replaces the matrix of each transform node with a recorded value of its
+namespace, `UpdateFilterEffect` and `PopulateBackdropFilterIfNeeded`
+replace the numbers of filter operations of the recorded types, and the
+style resolution hook adds the recorded opacity after the recorded style.
+A value that cannot be imposed is named in the Console of the element's
+document. See "Sub-step 2b-i" in the page recreation design.
+
+The native paint worklets' recorded background colors and clip paths are
+imposed in the same mode (slice 4b sub-step 2c). The app writes each
+element's values in its `data-a11y-recorded-paint-worklet` attribute, which
+`RecreationPaintWorkletValuesOf` parses with
+`ParseRecreationPaintWorkletValues` (in `recreation_paint_worklet_values.h`,
+tested by `recreation_paint_worklet_values_test.cc`); malformed text gives no
+values. The style resolution hook adds the background color after the
+opacity, as `color(srgb r g b / a)` of the recorded number text.
+`ClipPathClipper::PathBasedClip` gives the recorded path at the paint offset
+it is passed, and `ClipPathClipper::LocalClipPathBoundingBox` its bounds
+without it, for an element whose style has a basic shape clip path. When the
+paint offset is not the recorded origin of the element's border box, the
+path is moved by the difference and the Console of the element's document
+says so. See "Sub-step 2c" in the page recreation design.
+
+Protocol 0.49 (slice 4b sub-step 2b-ii) adds `scrollElementId` to
+`layout-scroll-offset-changed`: the layout change set's hook reads the
+scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
+`scroll_element_id`, and the bridge writes it as decimal text, or null for
+zero.
+
+Protocol 0.55 (slice 5a) records frames on `browser.dom`. The DOM walk
+helper in `document.cc` passes `BeginBlinkDomCheckpoint` the walked
+document's frame's `GetDevToolsFrameToken().ToString()` and `IsMainFrame()`,
+or an empty token for a document with no frame, and follows the node record
+of each `HTMLFrameOwnerElement` with a `ContentFrame()` with
+`RecordBlinkDomCheckpointFrameOwner`. `HTMLFrameOwnerElement::SetContentFrame`
+and `ClearContentFrame` call `RecordBlinkDomFrameOwnerChanged`, with an empty
+token when the frame is cleared. `integrate.py` upgrades a helper patched for
+protocols 0.35 to 0.54 in place.
+
+Protocol 0.54 (slice 4h) adds the `browser.script` channel. `integrate.py`
+patches V8: `Debug::OnAfterCompile` and
+`PendingCompilationErrorHandler::ThrowPendingError` call
+`A11yRecorderReportScript`, written into `debug.cc`, which gives each normal
+script with a string source to the hook declared in `v8_script_hook.h`,
+before the debugger's own checks. The hook's setter and getter are defined in
+V8, so they link only in a build that is not a component build. Blink sets
+the hook in `V8Initializer::InitializeV8Common` for the main thread; the
+hook skips scripts compiled while `DevToolsSession` dispatches a command
+(`EnterDevToolsCommand` and `LeaveDevToolsCommand`) and scripts of DevTools'
+isolated world, claims each script ID once (`ClaimScriptParsed`), copies the
+source to UTF-8, and calls `RecordScriptParsed`, which writes `script-text`
+through the resource bytes queue the first time the process meets the
+source's digest, and `script-parsed`.
+
+Protocol 0.53 (slice 4g) adds the `browser.animation` channel.
+`Animation::NotifyProbe`, after its `probe::AnimationUpdated` call, fills an
+`AnimationFacts` with the animation's kind, name, target, play state, times,
+timeline, effect timing, Blink's computed progress, and compositor animation
+ID, and calls `RecordAnimationUpdated`, which writes `animation-updated` for
+an animation's first call and for each call in which anything other than its
+current time, progress, and current iteration changed, keeping the last
+description of each animation by sequence number. `Animation::Dispose` and
+`Animation::ContextDestroyed` call `RecordAnimationRemoved`, which writes
+`animation-removed` for an animation recorded before. A document timeline's
+zero time is written in counter ticks, as the presentation records' times
+are.
+
+Protocol 0.52 (slice 4f) adds two `browser.timer` records and fills a
+timer's `callbackLocation`. `NoteBlinkTimerOrigin` is called from the
+`DOMTimer` constructor, before `RecordBlinkTimerScheduled`, with the world
+current at the call, up to 16 frames of the V8 stack, and the callback
+function's own position; `RecordBlinkTimerScheduled` writes the callback
+location into `timer-scheduled` and follows it with `timer-origin`.
+`script-compiled` joins a V8 script ID to its markup: `PushBlinkScriptElement`
+and `PopBlinkScriptElement` bracket `script->RunScript` in
+`PendingScript::ExecuteScriptBlockInternal`, and
+`RecordBlinkClassicScriptCompiled`, called from
+`V8ScriptRunner::CompileAndRunScript` after the compile, records a classic
+script with its element; a module script is recorded from its module record
+before the run; and `RecordBlinkScriptSource` is called from
+`JSEventHandlerForContentAttribute::GetCompiledHandler` for each compiled
+on... attribute.
+
+Protocol 0.51 (slice 4e) adds three `browser.resources` records.
+`RecordBlinkStyleSheetResource` is called from
+`StyleSheetContents::ParseAuthorStyleSheet` once a linked or imported
+sheet's text is decoded, and writes `style-sheet-resource` with a
+`style-sheet-text` record of the text in UTF-8 the first time the renderer
+meets its digest. `RecordBlinkStyleSheetsUpdated` is called from
+`StyleEngine::UpdateActiveStyleSheets`, before
+`probe::ActiveStyleSheetsUpdated`, and writes `style-sheets-updated`: each
+touched tree scope's sheets and adopted sheets, each named by a number from
+`AssignStyleSheetNumber` and given in full only when new or changed.
+
+Protocol 0.50 (slice 4b sub-step 2b-iii) extends each `scroll-offset`
+`CompositorDrawnValue` to four numbers: x, y, 1 or 0 for
+`ScrollNode::is_composited`, and a bitmask of the node's
+`main_thread_repaint_reasons`. The bridge writes `isComposited` and the
+reasons by name.
+
+Protocol 0.48 adds the `browser.compositor` channel (slice 4b sub-step 1).
+`RegisterCompositorWidget` is called where each presentation request is
+made, and names the widget of the compositor with that `LayerTreeHost` ID.
+`RecordCompositorAnimationStarted` and `RecordCompositorAnimationEnded` are
+called on Blink's main thread. `RecordCompositorFrame` is called in
+`LayerTreeHostImpl::DrawLayers` for each frame of a page's compositor about
+to be submitted, with the active tree's values for each element the
+compositor's animations mutated and for every scroll node; the bridge
+keeps each compositor's last recorded values and writes only those that
+changed, and nothing when none did. `RecordCompositorFramePresented` writes
+the presentation of a recorded frame only. What is recorded, by property:
+
+- transform: the transform node's `local` matrix, its 16 entries row by
+  row, as `gfx::Transform::rc` gives them;
+- opacity: the effect node's `opacity`;
+- filter and backdrop filter: the effect node's `filters` or
+  `backdrop_filters`, each operation as its type and numbers: an amount;
+  for a drop shadow, its standard deviation, offset x and y, and color as
+  four floats; for a color matrix, its 20 entries; for a zoom, its amount
+  and inset; for an offset, x and y; for an alpha threshold, each
+  rectangle as x, y, width, and height; for a reference filter, none;
+- scroll offset: the scroll tree's current offset, x and y.
+
+- background color progress and clip path progress (part 1b): for each
+  native paint worklet record of the active tree, the compositor progress
+  it was painted with, as `{"progress": p}`, or `{"progress": null}` when
+  it was painted from the main thread's value. Each result is noted by its
+  record's buffer in `ClientLayerTreeHostImpl::OnPaintWorkletResultsReady`.
+- image frame (part 1c): for each paint image the compositor's
+  `ImageAnimationController` holds, the frame index the active tree draws
+  (`active_index()`, read through the accessor `RecorderActiveFrameIndexes`
+  the integration adds), written as `{"paintImageId", "property":
+  "image-frame", "value"}`, with no `elementId`.
+
+`RecordPaintWorkletPainted` writes `paint-worklet-painted` on the worklet's
+thread, from `BackgroundColorPaintDefinition::Paint` and
+`ClipPathPaintDefinition::Paint`: the element, the property, the progress
+given, and the color as four floats, or the clip path's fill type, verbs,
+points, conic weights, translation, and whether it was drawn as a rounded
+rectangle.
+
+Part 1c ties a drawn image frame to its image. `RecordBlinkImageResource`
+is called once the bytes were given to the image, and `image-resource`
+gains `imageId`, the Blink image's own ID (`Image::paint_image_id()`), or
+null. `RecordBlinkImagePaintImage` writes `image-paint-image` from
+`BitmapImage::PaintImageForCurrentFrameWithInfo` when Blink makes a paint
+image, once per paint image ID in the renderer: the image's ID, the paint
+image's ID, its animation sequence (`shared` or `own`), the node it was
+made for (the `DOMNodeId` its frames are cached by), or null, and the paint
+image it is synchronised to, or null. Paint image IDs start at 0.
+
+`A11Y_RECORDER_HOOK_COST(name)` (`RegisterHookCostKind`, `StartHookCost`,
+`StopHookCost`) times a hook's whole work, before and including its bridge
+call, as a kind of its own in the cost lines: `hook:compositor-frame`,
+`hook:paint-worklet-results`, `hook:background-color-painted`,
+`hook:clip-path-painted`, `hook:image-resource` (the copy of the bytes),
+and `hook:image-paint-image`.
+
+A transform or effect node, or a paint worklet, no longer in the drawn
+tree, or a paint image the controller no longer holds, is written once as
+a null value. Values are not rounded. The browser's own compositor
+(`is_layer_tree_for_ui`) is not recorded.
+
+Protocol 0.47 adds `windowsAnimationSettings` to `popup-widget-shown`.
+`RecordBrowserPopupWidgetShown` reads `SPI_GETCLIENTAREAANIMATION`,
+`SPI_GETUIEFFECTS`, `SPI_GETMENUANIMATION`, `SPI_GETMENUFADE`, and
+`SPI_GETCOMBOBOXANIMATION` with `SystemParametersInfoW`, through
+`ReadWindowsAnimationSettings` in `animation_settings.h`, which names the
+fields and records a failed call as null; `animation_settings_test.cc`
+checks it without a Chromium build.
+
+Protocol 0.46 adds `checkpointUpdate` to `layout-changes-started`.
+`RecordBlinkLayoutChanges` sets it with `IsCheckpointUpdateChangeSet` in
+`full_walks.h`: true when the update state the named checkpoint left had
+not yet been read by a change set, the same condition under which it makes
+no presentation request for the change set.
+
+Protocol 0.45 adds `RecordBrowserPopupWidgetHidden`, called from the hooks in
+`render_widget_host_view_aura.cc` in `RenderWidgetHostViewAura::Hide` and
+`RenderWidgetHostViewAura::CleanUpHostObservers`, after the popup view's
+window is hidden and only when it had been shown. The hooks pass the popup's
+HWND, read from its window tree host, and the bridge asks `IsWindowVisible`
+whether Windows still shows it.
 
 Protocol 0.25 records layout geometry and computed styles on the
 `browser.layout` channel. The Blink hook in `local_frame_view.cc` runs after

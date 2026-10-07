@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="../Recorder.Coordinator/Recorder.Coordinator.csproj" />
     <ProjectReference Include="../Recorder.Database/Recorder.Database.csproj" />
+    <ProjectReference Include="../Recorder.Recreation/Recorder.Recreation.csproj" />
     <ProjectReference Include="../Recorder.Session/Recorder.Session.csproj" />
     <ProjectReference Include="../Recorder.WindowsCapture/Recorder.WindowsCapture.csproj" />
   </ItemGroup>

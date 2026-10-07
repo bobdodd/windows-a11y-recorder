@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.36"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.36"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.55"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.55"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -2180,11 +2180,13 @@ class IntegrateTests(unittest.TestCase):
             self.assertIn("Token().ToString()", first)
             for include in INTEGRATE.BLINK_DOM_CHECKPOINT_INCLUDES:
                 self.assertIn(include, first)
+            # Protocol 0.42: a change queues a delivery in every parsing state.
             self.assertIn(
-                "if (HasFinishedParsing())\n"
-                "    MutationObserver::EnqueueRecorderDomCheckpoint(*this)",
+                "    const ContainerNode::ChildrenChange& change) {\n"
+                "  MutationObserver::EnqueueRecorderDomCheckpoint(*this);\n",
                 first,
             )
+            self.assertNotIn("if (HasFinishedParsing())", first)
             self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, first)
 
     def test_patches_mutation_delivery_idempotently(self):
@@ -2283,7 +2285,8 @@ class IntegrateTests(unittest.TestCase):
                 "recorder_mutated_documents_.empty()",
                 first,
             )
-            self.assertIn("recorder_document->HasFinishedParsing()", first)
+            # Protocol 0.42: a document that parses is delivered too.
+            self.assertNotIn("recorder_document->HasFinishedParsing()", first)
             self.assertIn("recorder_document->IsActive()", first)
             self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, first)
 
@@ -2828,10 +2831,118 @@ class IntegrateTests(unittest.TestCase):
             first.index("void Document::FinishedParsing() {"),
         )
 
+    def test_upgrades_hooks_that_skip_a_document_while_it_parses(self):
+        # Protocol 0.42: a checkout patched at 0.41 records nothing while a
+        # document parses; each of its hooks is upgraded.
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "document.cc"
+            document.write_text(
+                '#include "third_party/blink/renderer/core/dom/document.h"\n'
+                '#include "third_party/blink/renderer/core/dom/element.h"\n'
+                '#include "third_party/blink/renderer/core/dom/node_traversal.h"\n'
+                "\n"
+                "void Document::FinishedParsing() {\n"
+                "  SetParsingState(kInDOMContentLoaded);\n"
+                "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+                "\n"
+                "  DispatchEvent();\n"
+                "}\n"
+                "\n"
+                "void Document::NotifyChangeChildren(\n"
+                "    const ContainerNode& container,\n"
+                "    const ContainerNode::ChildrenChange& change) {\n"
+                "  NotifySelection();\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_document(document)
+            current = document.read_text(encoding="utf-8")
+            legacy = current.replace(
+                INTEGRATE.BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+                + INTEGRATE.BLINK_DOCUMENT_MUTATION_HOOK,
+                INTEGRATE.BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+                + INTEGRATE.LEGACY_FINISHED_ONLY_BLINK_DOCUMENT_MUTATION_HOOK,
+            ).replace(
+                INTEGRATE.BLINK_DOM_CHANGE_HELPER_PARSING_INCLUDED,
+                INTEGRATE.BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED,
+            )
+            self.assertNotEqual(current, legacy)
+            self.assertIn(
+                INTEGRATE.LEGACY_PARSING_EXCLUDED_BLINK_DOM_CHANGE_HELPER, legacy
+            )
+            document.write_text(legacy, encoding="utf-8")
+            INTEGRATE.patch_blink_document(document)
+            self.assertEqual(current, document.read_text(encoding="utf-8"))
+
+            character_data = Path(directory) / "character_data.cc"
+            character_data.write_text(
+                '#include "third_party/blink/renderer/core/dom/character_data.h"\n'
+                "\n"
+                "void CharacterData::SetDataAndUpdate() {\n"
+                "  String old_data = this->data();\n"
+                "  data_ = new_data;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_character_data(character_data)
+            current = character_data.read_text(encoding="utf-8")
+            legacy = current.replace(
+                INTEGRATE.BLINK_CHARACTER_DATA_MUTATION_HOOK,
+                INTEGRATE.LEGACY_PARSE_TIME_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK,
+            )
+            self.assertNotEqual(current, legacy)
+            character_data.write_text(legacy, encoding="utf-8")
+            INTEGRATE.patch_blink_character_data(character_data)
+            self.assertEqual(current, character_data.read_text(encoding="utf-8"))
+
+    def test_walks_the_dom_when_the_parser_is_created(self):
+        # Protocol 0.42: Document::ImplicitOpen walks the DOM once it has
+        # created the parser, after its declaration of the walk.
+        source = (
+            "void Document::open() {\n"
+            "  ImplicitOpen(kForceSynchronousParsing);\n"
+            "}\n"
+            "\n"
+            "DocumentParser* Document::ImplicitOpen(\n"
+            "    ParserSynchronizationPolicy parser_sync_policy) {\n"
+            "  RemoveChildren();\n"
+            "  parser_ = CreateParser();\n"
+            "  DocumentParserTiming::From(*this).MarkParserStart();\n"
+            "  SetParsingState(kParsing);\n"
+            "  SetReadyState(kLoading);\n"
+            "  return parser_.Get();\n"
+            "}\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "document.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_document_started_parsing(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_document_started_parsing(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            self.assertIn(
+                "  SetParsingState(kParsing);\n"
+                "  // Windows A11y Recorder (protocol 0.42): the DOM when the parser is\n"
+                "  // created, the state the parser's changes apply to.\n"
+                "  if (IsActive())\n"
+                '    RecorderRecordDomCheckpoint(*this, "started-parsing");\n',
+                first,
+            )
+            # The walk is followed by the recreation's browser page mark.
+            self.assertIn(
+                INTEGRATE.BLINK_DOCUMENT_STARTED_PARSING_HOOK + "  SetReadyState(kLoading);\n",
+                first,
+            )
+            self.assertLess(
+                first.index("void RecorderRecordDomCheckpoint("),
+                first.index("DocumentParser* Document::ImplicitOpen("),
+            )
+            self.assertEqual(1, first.count("void RecorderRecordDomCheckpoint("))
+
     def test_dom_change_helper_records_what_the_design_states(self):
         helper = INTEGRATE.BLINK_DOM_CHANGE_HELPER
-        # Changes are recorded once the document stops parsing.
-        self.assertIn("!recorder_document.Parsing()", helper)
+        # Protocol 0.42: changes are recorded while the document parses too.
+        self.assertNotIn("Parsing()", helper)
         self.assertNotIn("HasFinishedParsing()", helper)
         # Every child list change type is handled explicitly.
         for change_type in (
@@ -3250,8 +3361,7 @@ class IntegrateTests(unittest.TestCase):
                 1, first.count("RecordBlinkDomCharacterDataChanged(")
             )
             self.assertIn(
-                "  if (source != kUpdateFromParser ||\n"
-                "      (isConnected() && !GetDocument().Parsing())) {\n",
+                "  if (source != kUpdateFromParser || isConnected()) {\n",
                 first,
             )
             self.assertIn("kRecorderMaximumDomValueLength = 2147483647", first)
@@ -4571,6 +4681,50 @@ class CookieIntegrationTests(unittest.TestCase):
             )
             subprocess.run([str(binary)], check=True)
 
+    def test_animation_settings_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "animation_settings_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "animation_settings_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_popup_widget_shown_records_the_windows_animation_settings(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"animation_settings.h",', build)
+        for action in (
+            "SPI_GETCLIENTAREAANIMATION",
+            "SPI_GETUIEFFECTS",
+            "SPI_GETMENUANIMATION",
+            "SPI_GETMENUFADE",
+            "SPI_GETCOMBOBOXANIMATION",
+        ):
+            self.assertIn(action, source)
+        self.assertIn(
+            'payload.Set("windowsAnimationSettings", WindowsAnimationSettingsValue());',
+            source,
+        )
+
     def test_bridge_walks_documents_only_where_the_schedule_asks(self):
         bridge = MODULE_PATH.parent / "recorder_bridge"
         source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
@@ -5167,6 +5321,273 @@ class InteractionIntegrationTests(unittest.TestCase):
             ),
         )
 
+    def test_patches_option_selectedness_idempotently(self):
+        patched = self.assert_patched(
+            "html_option_element.cc",
+            '#include "third_party/blink/renderer/core/html/forms/'
+            'html_option_element.h"\n',
+            (
+                INTEGRATE.BLINK_OPTION_SELECTEDNESS_HELPER_ANCHOR,
+                INTEGRATE.BLINK_OPTION_SELECTEDNESS_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_option_element,
+            (INTEGRATE.BLINK_OPTION_SELECTEDNESS_HOOK,),
+            (
+                INTEGRATE.BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+                INTEGRATE.BLINK_OPTION_SELECTEDNESS_HELPER_MARKER,
+            ),
+        )
+        # The record follows the state change, after the early return for an
+        # unchanged state.
+        hook = INTEGRATE.BLINK_OPTION_SELECTEDNESS_HOOK
+        self.assertLess(
+            hook.index("is_selected_ = selected;"),
+            hook.index("RecorderRecordOptionSelectedness("),
+        )
+
+    def test_patches_the_page_popup_idempotently(self):
+        # In the order Chromium's file holds them.
+        hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
+        anchors = [INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR, hooks[0],
+                   hooks[1], INTEGRATE.BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+                   *hooks[2:]]
+        source = cookie_source(
+            INTEGRATE.BLINK_PAGE_POPUP_OWN_INCLUDE + "\n", *anchors
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "web_page_popup_impl.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_page_popup(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_page_popup(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        for _, hook in INTEGRATE.BLINK_PAGE_POPUP_HOOKS:
+            with self.subTest(hook=hook.splitlines()[0]):
+                self.assertEqual(1, first.count(hook))
+        for include_line in INTEGRATE.BLINK_PAGE_POPUP_INCLUDES:
+            with self.subTest(include=include_line):
+                self.assertEqual(1, first.count(include_line + "\n"))
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_PAGE_POPUP_HELPER_MARKER)
+        )
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_PAGE_POPUP_REQUEST_MARKER)
+        )
+        self.assert_bridge_calls_match(first)
+        # The helpers come before the chrome client that uses them, and the
+        # request after it.
+        self.assertLess(
+            first.index(INTEGRATE.BLINK_PAGE_POPUP_HELPER_MARKER),
+            first.index(INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR),
+        )
+        self.assertLess(
+            first.index(INTEGRATE.BLINK_PAGE_POPUP_CLIENT_HOOK),
+            first.index(INTEGRATE.BLINK_PAGE_POPUP_REQUEST_MARKER),
+        )
+
+    def test_a_2a3939b_popup_type_read_is_upgraded(self):
+        hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
+        anchors = [INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR, hooks[0],
+                   hooks[1], INTEGRATE.BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+                   *hooks[2:]]
+        legacy_helper = INTEGRATE.BLINK_PAGE_POPUP_HELPER.replace(
+            INTEGRATE.STAGE_2A3939B_PAGE_POPUP_TYPE_FIX,
+            INTEGRATE.STAGE_2A3939B_PAGE_POPUP_TYPE_READ,
+        )
+        self.assertNotEqual(legacy_helper, INTEGRATE.BLINK_PAGE_POPUP_HELPER)
+        source = cookie_source(
+            INTEGRATE.BLINK_PAGE_POPUP_OWN_INCLUDE + "\n", *anchors
+        ).replace(
+            INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR,
+            legacy_helper + INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "web_page_popup_impl.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_page_popup(path)
+            patched = path.read_text(encoding="utf-8")
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PAGE_POPUP_HELPER))
+        self.assertNotIn("recorder_input->FormControlTypeAsString()", patched)
+
+    def test_the_page_popup_patch_fails_when_an_anchor_is_absent(self):
+        # In the order Chromium's file holds them.
+        hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
+        anchors = [INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR, hooks[0],
+                   hooks[1], INTEGRATE.BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+                   *hooks[2:]]
+        for missing in range(len(anchors)):
+            kept = anchors[:missing] + anchors[missing + 1:]
+            with self.subTest(missing=anchors[missing].splitlines()[0]):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "web_page_popup_impl.cc"
+                    path.write_text(
+                        cookie_source(
+                            INTEGRATE.BLINK_PAGE_POPUP_OWN_INCLUDE + "\n",
+                            *kept,
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaises(RuntimeError):
+                        INTEGRATE.patch_blink_page_popup(path)
+
+    def test_a_043_page_popup_is_upgraded_to_044(self):
+        # A checkout patched by protocol 0.43 has the owner record without the
+        # owner frame token, the requested rectangle with its source, and the
+        # placed hook in SetScreenRects, which 0.44 removes.
+        hooks = [anchor for anchor, _ in INTEGRATE.BLINK_PAGE_POPUP_HOOKS]
+        anchors = [INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR, hooks[0],
+                   hooks[1], INTEGRATE.BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+                   *hooks[2:]]
+        legacy_helper = INTEGRATE.BLINK_PAGE_POPUP_HELPER.replace(
+            INTEGRATE.STAGE_044_PAGE_POPUP_OPENED_FN,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_OPENED_FN,
+        ).replace(
+            INTEGRATE.STAGE_044_PAGE_POPUP_WINDOW_RECT_FN,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_WINDOW_RECT_FN,
+        )
+        self.assertNotIn("GetLocalFrameToken", legacy_helper)
+        source = cookie_source(
+            INTEGRATE.BLINK_PAGE_POPUP_OWN_INCLUDE + "\n",
+            *anchors,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL,
+        ).replace(
+            INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR,
+            legacy_helper + INTEGRATE.BLINK_PAGE_POPUP_HELPER_ANCHOR,
+        ).replace(
+            INTEGRATE.BLINK_PAGE_POPUP_WINDOW_RECT_ANCHOR,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_WINDOW_RECT_HOOK,
+        ).replace(
+            INTEGRATE.LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL,
+            INTEGRATE.LEGACY_043_PAGE_POPUP_SCREEN_RECTS_HOOK,
+        )
+        patched = self.patch_twice(
+            "web_page_popup_impl.cc", source, INTEGRATE.patch_blink_page_popup
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PAGE_POPUP_HELPER))
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_PAGE_POPUP_WINDOW_RECT_HOOK)
+        )
+        self.assertNotIn('"placed"', patched)
+        self.assertNotIn('"requested"', patched)
+        self.assertEqual(
+            1,
+            patched.count(
+                INTEGRATE.LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL
+            ),
+        )
+        self.assert_bridge_calls_match(patched)
+
+    def browser_popup_widget_cases(self):
+        return (
+            (
+                "render_frame_host_impl.cc",
+                '#include "content/browser/renderer_host/'
+                'render_frame_host_impl.h"\n',
+                (INTEGRATE.CONTENT_POPUP_WIDGET_CREATED_ANCHOR,),
+                INTEGRATE.patch_content_popup_widget_created,
+            ),
+            (
+                "web_contents_impl.cc",
+                '#include "content/browser/web_contents/web_contents_impl.h"\n',
+                (
+                    INTEGRATE.CONTENT_POPUP_WIDGET_SHOWN_HELPER_ANCHOR,
+                    *(a for a, _ in INTEGRATE.CONTENT_POPUP_WIDGET_SHOWN_HOOKS),
+                ),
+                INTEGRATE.patch_content_popup_widget_shown,
+            ),
+            (
+                "render_widget_host_impl.cc",
+                INTEGRATE.CONTENT_WIDGET_HOST_OWN_INCLUDE + "\n",
+                (
+                    INTEGRATE.CONTENT_WIDGET_HOST_HELPER_ANCHOR,
+                    *(a for a, _ in INTEGRATE.CONTENT_WIDGET_HOST_HOOKS),
+                ),
+                INTEGRATE.patch_content_render_widget_host,
+            ),
+            (
+                "render_widget_host_view_aura.cc",
+                INTEGRATE.CONTENT_WIDGET_VIEW_OWN_INCLUDE + "\n",
+                tuple(a for a, _ in INTEGRATE.CONTENT_WIDGET_VIEW_HOOKS),
+                INTEGRATE.patch_content_render_widget_host_view,
+            ),
+        )
+
+    def test_a_popup_window_is_recorded_hidden_only_when_it_was_shown(self):
+        # Protocol 0.45: each hook reads whether the window was shown before
+        # hiding it, and records after it is hidden.
+        for anchor, hook in INTEGRATE.CONTENT_WIDGET_VIEW_HOOKS:
+            with self.subTest(hook=hook[:40]):
+                self.assertLess(
+                    hook.index("window_->TargetVisibility()"),
+                    hook.index("window_->Hide();"),
+                )
+                self.assertLess(
+                    hook.index("window_->Hide();"),
+                    hook.index("RecorderRecordPopupWidgetHidden("),
+                )
+                self.assertIn("widget_type_ == WidgetType::kPopup", hook)
+        self.assertIn('"hidden");', INTEGRATE.CONTENT_WIDGET_VIEW_HIDE_HOOK)
+        self.assertIn(
+            '"destroyed");', INTEGRATE.CONTENT_WIDGET_VIEW_CLEAN_UP_HOOK
+        )
+
+    def test_the_browser_popup_widget_hooks_are_written_once(self):
+        for name, include, anchors, patch in self.browser_popup_widget_cases():
+            with self.subTest(name=name):
+                patched = self.patch_twice(
+                    name, cookie_source(include, *anchors), patch
+                )
+                self.assertEqual(
+                    1, patched.count(INTEGRATE.CONTENT_NAVIGATION_INCLUDE)
+                )
+                self.assert_bridge_calls_match(patched)
+
+    def test_the_browser_popup_widget_patch_fails_when_an_anchor_is_absent(
+        self,
+    ):
+        for name, include, anchors, patch in self.browser_popup_widget_cases():
+            for missing in range(len(anchors)):
+                kept = anchors[:missing] + anchors[missing + 1:]
+                with self.subTest(name=name, missing=missing):
+                    with tempfile.TemporaryDirectory() as directory:
+                        path = Path(directory) / name
+                        path.write_text(
+                            cookie_source(include, *kept), encoding="utf-8"
+                        )
+                        with self.assertRaises(RuntimeError):
+                            patch(path)
+
+    def test_a_refused_popup_is_recorded_before_it_is_destroyed(self):
+        for hook in (
+            INTEGRATE.CONTENT_POPUP_WIDGET_INACTIVE_HOOK,
+            INTEGRATE.CONTENT_POPUP_WIDGET_NOT_VISIBLE_HOOK,
+            INTEGRATE.CONTENT_POPUP_WIDGET_EXCLUSION_HOOK,
+        ):
+            self.assertLess(
+                hook.index("RecorderRecordPopupWidgetShown("),
+                hook.index("ShutdownAndDestroyWidget(true);"),
+            )
+        # The transformed rectangle is kept before ConstrainPopupBounds
+        # replaces it.
+        constrain = INTEGRATE.CONTENT_POPUP_WIDGET_CONSTRAIN_HOOK
+        self.assertLess(
+            constrain.index("recorder_transformed_rect = transformed_rect;"),
+            constrain.index("ConstrainPopupBounds(transformed_rect)"),
+        )
+
+    def test_a_popup_is_closed_once_whichever_path_runs(self):
+        # Close records only when its cancel left the page in place, which is
+        # when ClosePopup, and so its record, did not run.
+        hook = INTEGRATE.BLINK_PAGE_POPUP_BROWSER_CLOSE_HOOK
+        self.assertLess(
+            hook.index("ClearPagePopupClient();"),
+            hook.index('RecorderRecordPagePopupClosed(page_.Get(), "browser");'),
+        )
+        self.assertIn(
+            'running_inside_close ? "browser" : "renderer"',
+            INTEGRATE.BLINK_PAGE_POPUP_CLOSE_HOOK,
+        )
+
     def test_an_interaction_hook_fails_when_its_anchor_is_absent(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "frame_selection.cc"
@@ -5320,6 +5741,11 @@ class LayoutIntegrationTests(unittest.TestCase):
                 "text.cc",
                 INTEGRATE.BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
                 INTEGRATE.BLINK_TEXT_LAYOUT_CHANGE_HOOKS,
+            ),
+            (
+                "node.cc",
+                INTEGRATE.BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+                INTEGRATE.BLINK_NODE_LAYOUT_CHANGE_HOOKS,
             ),
             (
                 "style_engine.cc",
@@ -5521,7 +5947,7 @@ class LayoutIntegrationTests(unittest.TestCase):
                 self.assertNotIn(forcing, helper)
 
     def test_upgrades_a_helper_that_indexes_the_property_array(self):
-        legacy_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        legacy_helper = INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER
         for legacy, current in INTEGRATE.BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS:
             legacy_helper = legacy_helper.replace(current, legacy, 1)
         self.assertRegex(legacy_helper, r"kRecorderLayoutStyleProperties\[\w")
@@ -5555,13 +5981,16 @@ class LayoutIntegrationTests(unittest.TestCase):
             + "};\n"
         )
         current_helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
-        earlier_helper = current_helper.replace(
+        fixed_list_helper = (
+            INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER
+        )
+        earlier_helper = fixed_list_helper.replace(
             INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY, earlier_array, 1
         )
         indexed_helper = earlier_helper
         for legacy, current in INTEGRATE.BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS:
             indexed_helper = indexed_helper.replace(current, legacy, 1)
-        self.assertNotEqual(current_helper, earlier_helper)
+        self.assertNotEqual(fixed_list_helper, earlier_helper)
         self.assertNotEqual(earlier_helper, indexed_helper)
         source = cookie_source(
             self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
@@ -5574,7 +6003,7 @@ class LayoutIntegrationTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
             INTEGRATE.patch_blink_local_frame_view(path)
             current = path.read_text(encoding="utf-8")
-            for older_helper in (earlier_helper, indexed_helper):
+            for older_helper in (fixed_list_helper, earlier_helper, indexed_helper):
                 with self.subTest(indexed=older_helper is indexed_helper):
                     path.write_text(
                         current.replace(current_helper, older_helper, 1),
@@ -5583,28 +6012,16 @@ class LayoutIntegrationTests(unittest.TestCase):
                     INTEGRATE.patch_blink_local_frame_view(path)
                     self.assertEqual(current, path.read_text(encoding="utf-8"))
 
-    def test_a_patched_tree_holds_exactly_one_property_array(self):
-        source = cookie_source(
-            self.LOCAL_FRAME_VIEW_INCLUDE + "\n",
-            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER_ANCHOR,
-            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_ANCHOR,
-                BLINK_NAMESPACE_END,
+    def test_the_helper_holds_no_fixed_property_array(self):
+        # Protocol 0.37 reads the list getComputedStyle() uses at run time,
+        # and a checkout holding the fixed array is upgraded whole.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertNotIn("kRecorderLayoutStyleProperties", helper)
+        self.assertNotIn("CSSPropertyID::k", helper)
+        self.assertIn(
+            "kRecorderLayoutStyleProperties[] = {",
+            INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER,
         )
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "local_frame_view.cc"
-            path.write_text(source, encoding="utf-8")
-            INTEGRATE.patch_blink_local_frame_view(path)
-            current = path.read_text(encoding="utf-8")
-            path.write_text(
-                current.replace(
-                    INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
-                    INTEGRATE.BLINK_LAYOUT_STYLE_PROPERTY_ARRAY * 2,
-                    1,
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaises(RuntimeError):
-                INTEGRATE.patch_blink_local_frame_view(path)
 
     def test_the_layout_checkpoint_is_followed_by_an_interaction_checkpoint(
         self,
@@ -5693,9 +6110,236 @@ class LayoutIntegrationTests(unittest.TestCase):
                 self.assertNotIn(forcing_call, helper)
         self.assertIn("GetBoundingClientRectNoLifecycleUpdate()", helper)
 
-    def test_the_helper_records_the_documented_property_list(self):
+    def test_the_helper_records_every_computable_property(self):
         helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
-        identifiers = re.findall(r"CSSPropertyID::(k[A-Za-z]+),", helper)
+        self.assertIn(
+            "CSSComputedStyleDeclaration::ComputableProperties(\n"
+            "      recorder_document.GetExecutionContext());",
+            helper,
+        )
+        self.assertIn(
+            "RecorderLayoutStylePropertyNames(*recorder_document)", helper
+        )
+        self.assertIn(
+            "RecorderReadCustomProperties(*recorder_document, *recorder_style,\n"
+            "                                   recorder_record.custom_properties);",
+            helper,
+        )
+        # ComputedStyleCSSValueMapping::Get is private in the reference
+        # checkout; GetVariables is its public reader.
+        self.assertIn(
+            "ComputedStyleCSSValueMapping::GetVariables(\n"
+            "          recorder_style, recorder_document.GetPropertyRegistry(),\n"
+            "          CSSValuePhase::kResolvedValue);",
+            helper,
+        )
+        self.assertNotIn("ComputedStyleCSSValueMapping::Get(", helper)
+        self.assertIn("CodeUnitCompareLessThan(recorder_a, recorder_b)", helper)
+        self.assertIn("CSSValuePhase::kResolvedValue", helper)
+        definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertIn(INTEGRATE.BLINK_LAYOUT_CHANGES_COMPUTABLE_STYLE, definition)
+        self.assertNotIn("kRecorderLayoutStyleProperties", definition)
+        self.assertIn(
+            INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHANGES_DEFINITION,
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS,
+        )
+
+    def test_both_readings_record_box_fragments(self):
+        # Protocol 0.38: the checkpoint and the change set read each node's
+        # box fragments with the one reader, after its other fields.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertEqual(1, helper.count("void RecorderReadBoxFragments("))
+        self.assertEqual(1, helper.count("void RecorderReadBoxFragment("))
+        call = "RecorderReadBoxFragments(recorder_layout_object, recorder_record);"
+        self.assertEqual(1, helper.count(call))
+        self.assertLess(
+            helper.index("void RecorderReadBoxFragments("),
+            helper.index("RecorderRecordLayoutCheckpoint("),
+        )
+        self.assertLess(
+            helper.index(call),
+            helper.index("a11y_recorder::RecordBlinkLayoutCheckpointNode("),
+        )
+        for reading in (
+            "recorder_box->PhysicalFragments()",
+            "recorder_fragment.PostLayoutChildren()",
+            "recorder_fragment.GetBreakToken()",
+            "recorder_fragment.HasScrollableOverflow()",
+            "recorder_replaced->ComputeNaturalSizingInfo()",
+            "recorder_box->StyleRef().EffectiveZoom()",
+        ):
+            with self.subTest(reading=reading):
+                self.assertIn(reading, helper)
+        # A break before has no sequence number to read.
+        self.assertIn(
+            "    if (!recorder_token->IsBreakBefore()) {\n"
+            "      recorder_out.sequence_number = recorder_token->SequenceNumber();",
+            helper,
+        )
+        definition = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertEqual(1, definition.count(call))
+        self.assertNotIn(
+            call, INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION
+        )
+        self.assertEqual(
+            INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION,
+            INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[2],
+        )
+        for include in (
+            "layout/block_break_token.h",
+            "layout/layout_replaced.h",
+            "layout/natural_sizing_info.h",
+            "physical_fragment_link.h",
+        ):
+            with self.subTest(include=include):
+                self.assertTrue(
+                    any(include in line
+                        for line in INTEGRATE.BLINK_LAYOUT_CHANGES_INCLUDES)
+                )
+
+    def test_box_fragments_hold_their_items_text_and_glyphs(self):
+        # Protocol 0.39: a fragment that holds lines records its items, each
+        # text item its glyph runs, and the block its text content, read from
+        # the first such fragment.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        for definition in (
+            "void RecorderReadGlyph(",
+            "void RecorderReadFragmentItems(",
+        ):
+            with self.subTest(definition=definition):
+                self.assertEqual(1, helper.count(definition))
+                self.assertLess(
+                    helper.index(definition),
+                    helper.index("void RecorderReadBoxFragment("),
+                )
+        for reading in (
+            "recorder_fragment.Items()",
+            "recorder_items.Items()",
+            "recorder_item.RectInContainerFragment()",
+            "recorder_item.DescendantsCount()",
+            "recorder_item.StartOffset()",
+            "recorder_item.GeneratedText()",
+            "recorder_item.ResolvedDirection()",
+            "recorder_item.IsHiddenForPaint()",
+            "recorder_item.UsesFirstLineStyle()",
+            "recorder_shape->ForEachGlyph(0, RecorderReadGlyph, "
+            "&recorder_reading)",
+            "recorder_platform.FontFamilyName()",
+            "recorder_typeface->getPostScriptName(&recorder_name)",
+            "recorder_items.NormalText()",
+            "recorder_items.FirstLineText()",
+        ):
+            with self.subTest(reading=reading):
+                self.assertIn(reading, helper)
+        # The glyph reading holds a garbage-collected font by a raw pointer,
+        # which Blink's garbage-collection plugin allows only on the stack.
+        self.assertIn(
+            "struct RecorderGlyphReading {\n  STACK_ALLOCATED();\n\n public:\n",
+            helper,
+        )
+        # Only a text item, not generated text, has a range of the text.
+        self.assertIn(
+            "    if (recorder_item.Type() == FragmentItem::kText) {\n"
+            "      recorder_record.range_present = true;",
+            helper,
+        )
+        # The node's text is taken once, from its first fragment with items,
+        # and its own fragments keep none.
+        self.assertIn(
+            "if (recorder_read.text_present && !recorder_fragments.text_present) {",
+            helper,
+        )
+        self.assertIn("    recorder_read.text_present = false;\n", helper)
+        for include in (
+            "shaping/shape_result_view.h",
+            "fonts/simple_font_data.h",
+            "fonts/font_platform_data.h",
+            "fonts/canvas_rotation_in_vertical.h",
+            "fonts/glyph.h",
+            "core/SkTypeface.h",
+            "core/SkString.h",
+        ):
+            with self.subTest(include=include):
+                self.assertTrue(
+                    any(include in line
+                        for line in INTEGRATE.BLINK_LAYOUT_CHANGES_INCLUDES)
+                )
+
+    def test_a_checkout_at_protocol_0_37_takes_the_box_fragment_reading(self):
+        # The definition a 0.37 checkout holds is the first one recognised,
+        # and only the node reader's end differs from the current one.
+        legacy = INTEGRATE.LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertNotIn(legacy, current)
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END,
+                INTEGRATE.BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END.replace(
+                    "  return recorder_changed;",
+                    "  RecorderReadBoxFragments(recorder_layout_object, "
+                    "recorder_record);\n  return recorder_changed;",
+                ),
+            ),
+        )
+
+    def test_a_change_set_records_a_text_node_without_a_layout_object(self):
+        # Protocol 0.41: a checkout at 0.40 holds the definition that left
+        # such a node out, and is upgraded; only the skip differs.
+        legacy = INTEGRATE.LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertEqual(
+            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[1]
+        )
+        self.assertIn(INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP, legacy)
+        self.assertNotIn(INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP, current)
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_SKIP,
+                INTEGRATE.BLINK_LAYOUT_CHANGES_TEXT_RECORDED,
+            ),
+        )
+        self.assertNotIn("IsTextNode() && !recorder_node.GetLayoutObject()", current)
+
+    def test_a_scroll_offset_records_its_scroll_element_id(self):
+        # Protocol 0.49: a checkout at 0.48 holds the definition without the
+        # scroller's compositor element ID, and is upgraded; only that differs.
+        legacy = INTEGRATE.LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION
+        current = INTEGRATE.BLINK_LAYOUT_CHANGES_DEFINITION
+        self.assertEqual(
+            legacy, INTEGRATE.BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS[0]
+        )
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.BLINK_LAYOUT_CHANGES_SCROLL_PUSH,
+                INTEGRATE.BLINK_LAYOUT_CHANGES_SCROLL_ELEMENT_ID,
+            ),
+        )
+        self.assertEqual(
+            1,
+            current.count(
+                "recorder_scroll.scroll_element_id =\n"
+                "        recorder_area->GetScrollElementId().GetInternalValue();\n"
+                "    recorder_scroll_offsets.push_back(std::move(recorder_scroll));"
+            ),
+        )
+        bridge = (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('payload.Set("scrollElementId",', bridge)
+        self.assertIn("scroll.scroll_element_id == 0\n                    ? base::Value()", bridge)
+        layout = (MODULE_PATH.parent / "recorder_bridge" / "layout_changes.h").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("  uint64_t scroll_element_id = 0;\n};", layout)
+
+    def test_the_fixed_list_before_protocol_0_37_stays_documented(self):
+        # The list recorded before protocol 0.37 is kept to recognise the
+        # helpers written with it.
+        legacy = INTEGRATE.LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER
+        identifiers = re.findall(r"CSSPropertyID::(k[A-Za-z]+),", legacy)
         expected = [
             "k" + "".join(word.capitalize() for word in name.split("-"))
             for name in INTEGRATE.LAYOUT_STYLE_PROPERTIES
@@ -5710,13 +6354,9 @@ class LayoutIntegrationTests(unittest.TestCase):
             root / "docs" / "architecture"
             / "layout-and-style-checkpoint-evidence-model.md"
         ).read_text(encoding="utf-8")
-        verifier = (
-            root / "scripts" / "Verify-BlinkEvidence.ps1"
-        ).read_text(encoding="utf-8")
         for name in INTEGRATE.LAYOUT_STYLE_PROPERTIES:
             with self.subTest(property=name):
                 self.assertIn(f"`{name}`", document)
-                self.assertIn(f"'{name}'", verifier)
 
 
 class PresentationIntegrationTests(unittest.TestCase):
@@ -5740,6 +6380,7 @@ class PresentationIntegrationTests(unittest.TestCase):
     def header_source(self):
         return cookie_source(
             '#include "base/time/time.h"\n',
+            INTEGRATE.BLINK_PRESENTATION_FREE_DECLARATION_ANCHOR,
             INTEGRATE.BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION_ANCHOR,
             INTEGRATE.BLINK_PRESENTATION_WIDGET_HEADER_FRIEND_ANCHOR,
         )
@@ -5769,6 +6410,15 @@ class PresentationIntegrationTests(unittest.TestCase):
             patched.index("friend class ReportTimeSwapPromise;"),
             patched.index("friend class RecorderPresentationSwapPromise;"),
         )
+        # Protocol 0.43: the widget-level request is declared once, at
+        # namespace scope, before the widget class.
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_PRESENTATION_FREE_DECLARATION)
+        )
+        self.assertLess(
+            patched.index("void RecorderRequestWidgetPresentation("),
+            patched.index("class CORE_EXPORT WebFrameWidgetImpl"),
+        )
 
     def test_patches_the_widget_idempotently(self):
         patched = self.patch_twice(
@@ -5776,19 +6426,72 @@ class PresentationIntegrationTests(unittest.TestCase):
             cookie_source(
                 self.WIDGET_INCLUDE + "\n",
                 INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                INTEGRATE.BLINK_WIDGET_INPUT_ANCHOR,
             ),
             INTEGRATE.patch_blink_web_frame_widget,
         )
         self.assertEqual(
-            1, patched.count(INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK)
+            1, patched.count(INTEGRATE.blink_registered_presentation_widget_block())
         )
         self.assertLess(
-            patched.index(INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK),
+            patched.index(INTEGRATE.blink_registered_presentation_widget_block()),
             patched.index(INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR),
         )
         for include_line in INTEGRATE.BLINK_PRESENTATION_WIDGET_INCLUDES:
             with self.subTest(include=include_line):
                 self.assertEqual(1, patched.count(include_line + "\n"))
+
+    def test_a_042_swap_promise_is_upgraded_whole(self):
+        source = cookie_source(
+            self.WIDGET_INCLUDE + "\n",
+            INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+            INTEGRATE.BLINK_WIDGET_INPUT_ANCHOR,
+        ).replace(
+            INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+            INTEGRATE.STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK
+            + INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+        )
+        patched = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            source,
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(
+            1, patched.count(INTEGRATE.blink_registered_presentation_widget_block())
+        )
+        self.assertNotIn(
+            INTEGRATE.STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK, patched
+        )
+        self.assertNotIn("MakeCrossThreadWeakHandle(widget)", patched)
+
+    def test_an_unrecognised_swap_promise_is_refused(self):
+        source = cookie_source(
+            self.WIDGET_INCLUDE + "\n",
+            "class RecorderPresentationSwapPromise : public cc::SwapPromise {};\n"
+            + INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "web_frame_widget_impl.cc"
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                INTEGRATE.patch_blink_web_frame_widget(path)
+
+    def test_a_page_popup_shares_the_widget_request(self):
+        block = INTEGRATE.BLINK_PRESENTATION_WIDGET_BLOCK
+        # The promise reaches its widget through a weak WidgetBase pointer,
+        # so a page popup, which is not garbage collected, can use it.
+        self.assertIn("base::WeakPtr<WidgetBase> widget_base", block)
+        self.assertIn("widget_base->GetWeakPtr()", block)
+        self.assertIn("void RecorderRequestWidgetPresentation(", block)
+        self.assertIn(
+            "RecorderRequestPagePopupPresentation(",
+            INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER,
+        )
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        self.assertLess(
+            helper.index("RecorderRequestPagePopupPresentation("),
+            helper.index("FrameWidgetImpl() : nullptr;"),
+        )
 
     def test_the_widget_patches_fail_when_an_anchor_is_absent(self):
         cases = (
@@ -5865,6 +6568,262 @@ class PresentationIntegrationTests(unittest.TestCase):
                         label, getattr(INTEGRATE, label), signatures
                     ),
                 )
+
+
+
+class RecreationInputIntegrationTests(unittest.TestCase):
+    """Proves the recreation's input hooks are written once, where they act."""
+
+    WIDGET_INCLUDE = PresentationIntegrationTests.WIDGET_INCLUDE
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def proxy_source(self):
+        return cookie_source(
+            INTEGRATE.BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE + "\n",
+            "EventDisposition InputHandlerProxy::RouteToTypeSpecificHandler(\n"
+            + INTEGRATE.BLINK_INPUT_HANDLER_PROXY_ANCHOR,
+        )
+
+    def test_the_compositor_thread_drops_all_but_mouse_events_once(self):
+        patched = self.patch_twice(
+            "input_handler_proxy.cc",
+            self.proxy_source(),
+            INTEGRATE.patch_blink_input_handler_proxy,
+        )
+        self.assertEqual(
+            1, patched.count("a11y_recorder::RecreationRefusesCompositorInput()")
+        )
+        self.assertNotIn("a11y_recorder::IsRecreationMode()", patched)
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        # The check comes before any scroll handling of the event.
+        self.assertLess(
+            patched.index("a11y_recorder::RecreationRefusesCompositorInput()"),
+            patched.index("if (event.IsGestureScroll() &&"),
+        )
+        # Mouse events reach cc's scrollbar controller, and the scroll
+        # gestures cc makes for a scrollbar are handled; the rest is dropped.
+        self.assertIn("!WebInputEvent::IsMouseEventType(event.GetType()) &&", patched)
+        self.assertIn(
+            "        (static_cast<const WebGestureEvent&>(event).SourceDevice() ==\n"
+            "             WebGestureDevice::kScrollbar ||\n"
+            "         static_cast<const WebGestureEvent&>(event).SourceDevice() ==\n"
+            "             WebGestureDevice::kTouchpad))) {\n"
+            "    return DROP_EVENT;",
+            patched,
+        )
+        # The wheel event itself is still dropped, before the page sees it.
+        self.assertNotIn("kMouseWheel", INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK)
+        self.assertNotIn("DID_NOT_HANDLE", INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK)
+
+    def test_the_main_thread_shows_only_the_context_menu_once(self):
+        patched = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                "devtools->HandleInputEvent(input_event);\n"
+                + INTEGRATE.BLINK_WIDGET_INPUT_ANCHOR
+                + "  return WidgetEventHandler::HandleInputEvent(coalesced_event,\n",
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
+        hook = patched.index("a11y_recorder::IsRecreationMode()")
+        # After the DevTools overlay has had the event, before the page does.
+        self.assertLess(patched.index("devtools->HandleInputEvent(input_event);"), hook)
+        self.assertLess(hook, patched.index("WidgetEventHandler::HandleInputEvent("))
+        block = INTEGRATE.BLINK_WIDGET_INPUT_HOOK
+        self.assertIn("WebMouseEvent::Button::kRight", block)
+        self.assertIn("GetShowContextMenuOnMouseUp()", block)
+        self.assertIn("MouseContextMenu(recorder_mouse);", block)
+        self.assertIn("return WebInputEventResult::kHandledSuppressed;", block)
+        # A scroll gesture cc made for a scrollbar is not refused.
+        self.assertIn(
+            "!(input_event.IsGestureScroll() &&\n"
+            "        (static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==\n"
+            "             WebGestureDevice::kScrollbar ||\n"
+            "         static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==\n"
+            "             WebGestureDevice::kTouchpad)) &&",
+            block,
+        )
+        # A browser page's widget takes input: the refusal tests the local
+        # root document's scheme.
+        self.assertIn(
+            "a11y_recorder::IsRecreationBrowserPageScheme(\n"
+            "            String(LocalRootImpl()->GetFrame()->GetDocument()->Url().Protocol())",
+            block,
+        )
+
+    def test_hooks_of_the_first_input_refusal_are_upgraded(self):
+        proxy = self.proxy_source().replace(
+            INTEGRATE.BLINK_INPUT_HANDLER_PROXY_ANCHOR,
+            INTEGRATE.STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK,
+        )
+        patched = self.patch_twice(
+            "input_handler_proxy.cc", proxy, INTEGRATE.patch_blink_input_handler_proxy
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK, patched)
+        widget = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                "devtools->HandleInputEvent(input_event);\n"
+                + INTEGRATE.STAGE_045_BLINK_WIDGET_INPUT_HOOK
+                + "  return WidgetEventHandler::HandleInputEvent(coalesced_event,\n",
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(1, widget.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_045_BLINK_WIDGET_INPUT_HOOK, widget)
+
+    def test_hooks_that_refused_the_scrollbars_are_upgraded(self):
+        proxy = self.proxy_source().replace(
+            INTEGRATE.BLINK_INPUT_HANDLER_PROXY_ANCHOR,
+            INTEGRATE.STAGE_0172_BLINK_INPUT_HANDLER_PROXY_HOOK,
+        )
+        patched = self.patch_twice(
+            "input_handler_proxy.cc", proxy, INTEGRATE.patch_blink_input_handler_proxy
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_0172_BLINK_INPUT_HANDLER_PROXY_HOOK, patched)
+        widget = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                "devtools->HandleInputEvent(input_event);\n"
+                + INTEGRATE.STAGE_0172_BLINK_WIDGET_INPUT_HOOK
+                + "  return WidgetEventHandler::HandleInputEvent(coalesced_event,\n",
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(1, widget.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_0172_BLINK_WIDGET_INPUT_HOOK, widget)
+
+    def test_hooks_that_refused_the_wheel_are_upgraded(self):
+        proxy = self.proxy_source().replace(
+            INTEGRATE.BLINK_INPUT_HANDLER_PROXY_ANCHOR,
+            INTEGRATE.STAGE_6A83_BLINK_INPUT_HANDLER_PROXY_HOOK,
+        )
+        patched = self.patch_twice(
+            "input_handler_proxy.cc", proxy, INTEGRATE.patch_blink_input_handler_proxy
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_INPUT_HANDLER_PROXY_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_6A83_BLINK_INPUT_HANDLER_PROXY_HOOK, patched)
+        widget = self.patch_twice(
+            "web_frame_widget_impl.cc",
+            cookie_source(
+                self.WIDGET_INCLUDE + "\n",
+                INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                "devtools->HandleInputEvent(input_event);\n"
+                + INTEGRATE.STAGE_6A83_BLINK_WIDGET_INPUT_HOOK
+                + "  return WidgetEventHandler::HandleInputEvent(coalesced_event,\n",
+            ),
+            INTEGRATE.patch_blink_web_frame_widget,
+        )
+        self.assertEqual(1, widget.count(INTEGRATE.BLINK_WIDGET_INPUT_HOOK))
+        self.assertNotIn(INTEGRATE.STAGE_6A83_BLINK_WIDGET_INPUT_HOOK, widget)
+
+    def test_a_browser_pages_parser_marks_its_process_once(self):
+        hook = INTEGRATE.BLINK_DOCUMENT_STARTED_PARSING_HOOK
+        self.assertIn("a11y_recorder::MarkRecreationBrowserPageProcess();", hook)
+        self.assertIn("a11y_recorder::IsRecreationBrowserPageScheme(", hook)
+        source = (
+            "DocumentParser* Document::ImplicitOpen(\n"
+            + INTEGRATE.BLINK_DOCUMENT_STARTED_PARSING_ANCHOR
+            + INTEGRATE.STAGE_045_BLINK_DOCUMENT_STARTED_PARSING_HOOK
+        )
+        patched = self.patch_twice(
+            "document.cc", source, INTEGRATE.patch_blink_document_started_parsing
+        )
+        self.assertEqual(1, patched.count(hook))
+        self.assertEqual(1, patched.count("MarkRecreationBrowserPageProcess"))
+
+    def test_the_browser_page_schemes_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_input.h",', build)
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        self.assertIn("return IsBrowserPageScheme(scheme);", source)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_input_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_input_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_the_platform_component_gains_the_bridge_once(self):
+        source = (
+            'component("other") {\n  deps = [\n    "//base",\n  ]\n}\n'
+            'component("platform") {\n'
+            "  public_deps = [\n    \":platform_export\",\n  ]\n"
+            "  deps = [\n    \"//base\",\n  ]\n}\n"
+        )
+        patched = self.patch_twice(
+            "BUILD.gn", source, INTEGRATE.patch_blink_platform_build
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PLATFORM_DEP))
+        self.assertLess(
+            patched.index('component("platform")'),
+            patched.index(INTEGRATE.BLINK_PLATFORM_DEP),
+        )
+
+    def test_the_input_patches_fail_when_an_anchor_is_absent(self):
+        cases = (
+            (
+                "input_handler_proxy.cc",
+                INTEGRATE.BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE + "\n",
+                INTEGRATE.patch_blink_input_handler_proxy,
+            ),
+            (
+                "web_frame_widget_impl.cc",
+                cookie_source(
+                    self.WIDGET_INCLUDE + "\n",
+                    INTEGRATE.BLINK_PRESENTATION_WIDGET_ANCHOR,
+                ),
+                INTEGRATE.patch_blink_web_frame_widget,
+            ),
+            (
+                "BUILD.gn",
+                'component("other") {\n  deps = [\n  ]\n}\n',
+                INTEGRATE.patch_blink_platform_build,
+            ),
+        )
+        for name, source, patch in cases:
+            with self.subTest(file=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / name
+                    path.write_text(source, encoding="utf-8")
+                    with self.assertRaises(RuntimeError):
+                        patch(path)
 
 
 class RealtimeIntegrationTests(unittest.TestCase):
@@ -6200,5 +7159,2424 @@ class NetworkServiceCookieNameTests(unittest.TestCase):
         self.assertIn('public_deps = [ ":cookie_names" ]', build)
 
 
+
+class CompositorRecordIntegrationTests(unittest.TestCase):
+    """Protocol 0.48 (slice 4b sub-step 1): the compositor's drawn values."""
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def host_impl_source(self):
+        return (
+            INTEGRATE.CC_LAYER_TREE_HOST_IMPL_OWN_INCLUDE
+            + "\n\n#include <map>\n\nnamespace cc {\n\n"
+            + INTEGRATE.CC_PRESENTED_ANCHOR
+            + "}\n\n"
+            + INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_ANCHOR
+            + "  auto compositor_frame = GenerateCompositorFrame(frame);\n"
+            + INTEGRATE.CC_DRAW_LAYERS_ANCHOR
+            + "  layer_tree_frame_sink_->SubmitCompositorFrame(\n}\n\n"
+            + "".join(anchor + "}\n\n" for anchor, _ in INTEGRATE.CC_MUTATED_HOOKS)
+            + "}  // namespace cc\n"
+        )
+
+    def test_the_compositor_records_each_submitted_frame_once(self):
+        patched = self.patch_twice(
+            "layer_tree_host_impl.cc",
+            self.host_impl_source(),
+            INTEGRATE.patch_cc_layer_tree_host_impl,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, patched.count("#include <set>\n"))
+        self.assertEqual(1, patched.count(INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS))
+        self.assertEqual(1, patched.count(INTEGRATE.CC_DRAW_LAYERS_HOOK))
+        self.assertEqual(1, patched.count(INTEGRATE.CC_PRESENTED_HOOK))
+        # The helpers come before DrawLayers, and the frame is recorded once
+        # its token is known, before it is submitted.
+        self.assertLess(
+            patched.index("void RecorderRecordCompositorFrame("),
+            patched.index("LayerTreeHostImpl::DrawLayers(FrameData* frame) {"),
+        )
+        self.assertLess(
+            patched.index("frame->frame_token = frame_token;"),
+            patched.index("RecorderRecordCompositorFrame(id_, active_tree()"),
+        )
+        self.assertLess(
+            patched.index("RecorderRecordCompositorFrame(id_, active_tree()"),
+            patched.index("SubmitCompositorFrame("),
+        )
+        for anchor, property_name in INTEGRATE.CC_MUTATED_HOOKS:
+            with self.subTest(property_name=property_name):
+                self.assertEqual(
+                    1, patched.count(INTEGRATE.cc_mutated_hook(anchor, property_name))
+                )
+        helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+        # The browser's own compositor is not recorded.
+        self.assertIn("if (!settings_.is_layer_tree_for_ui) {", INTEGRATE.CC_DRAW_LAYERS_HOOK)
+        self.assertIn("if (!settings_.is_layer_tree_for_ui) {", INTEGRATE.CC_PRESENTED_HOOK)
+        self.assertIn("node->local.rc(row, column)", helpers)
+        self.assertIn("scroll_tree.current_scroll_offset(node.element_id)", helpers)
+        self.assertIn("a11y_recorder::RecordCompositorFrame(", helpers)
+        self.assertIn(
+            "a11y_recorder::RecordCompositorFramePresented(", INTEGRATE.CC_PRESENTED_HOOK
+        )
+
+    def test_a_tree_patched_by_part_1a_is_upgraded_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "layer_tree_host_impl.cc"
+            path.write_text(self.host_impl_source(), encoding="utf-8")
+            helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+            hook = INTEGRATE.CC_DRAW_LAYERS_HOOK
+            try:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = (
+                    INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1A
+                )
+                INTEGRATE.CC_DRAW_LAYERS_HOOK = INTEGRATE.CC_DRAW_LAYERS_HOOK_1A
+                INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            finally:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = helpers
+                INTEGRATE.CC_DRAW_LAYERS_HOOK = hook
+            INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            upgraded = path.read_text(encoding="utf-8")
+        fresh = self.patch_twice(
+            "layer_tree_host_impl.cc",
+            self.host_impl_source(),
+            INTEGRATE.patch_cc_layer_tree_host_impl,
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertNotIn(INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1A, upgraded)
+        self.assertNotIn(INTEGRATE.CC_DRAW_LAYERS_HOOK_1A, upgraded)
+        self.assertEqual(1, upgraded.count("void RecorderRecordCompositorFrame("))
+
+    def test_a_tree_patched_at_protocol_0_49_records_whether_a_scroll_is_composited(self):
+        # Protocol 0.50: the helpers as 0.48 and 0.49 inserted them are
+        # replaced in place; only the scroll offset's numbers differ.
+        legacy = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_0_49
+        current = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+        self.assertEqual(
+            current,
+            legacy.replace(
+                INTEGRATE.CC_FRAME_SCROLL_NUMBERS,
+                INTEGRATE.CC_FRAME_SCROLL_COMPOSITED_NUMBERS,
+            ),
+        )
+        self.assertIn("node.is_composited ? 1.0 : 0.0", current)
+        for reason in (
+            "kHasBackgroundAttachmentFixedObjects",
+            "kNotOpaqueForTextAndLCDText",
+            "kPreferNonCompositedScrolling",
+            "kBackgroundNeedsRepaintOnScroll",
+        ):
+            self.assertEqual(1, current.count("MainThreadRepaintReason::" + reason))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "layer_tree_host_impl.cc"
+            path.write_text(self.host_impl_source(), encoding="utf-8")
+            try:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = legacy
+                INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            finally:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = current
+            INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            upgraded = path.read_text(encoding="utf-8")
+        fresh = self.patch_twice(
+            "layer_tree_host_impl.cc",
+            self.host_impl_source(),
+            INTEGRATE.patch_cc_layer_tree_host_impl,
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertEqual(1, upgraded.count(INTEGRATE.CC_FRAME_SCROLL_COMPOSITED_NUMBERS))
+        bridge = (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('offset.Set("isComposited", value.numbers[2] != 0);', bridge)
+        self.assertIn('offset.Set("mainThreadRepaintReasons", std::move(reasons));', bridge)
+
+    def test_each_frame_names_the_progress_its_paint_worklet_records_were_painted_with(self):
+        helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+        # The paint worklet helpers come before the frame recorder that
+        # calls them, which reads the active tree and keeps the pending
+        # tree's results.
+        self.assertTrue(helpers.startswith(INTEGRATE.CC_PAINT_WORKLET_HELPERS))
+        self.assertIn(INTEGRATE.CC_FRAME_SIGNATURE, helpers)
+        self.assertNotIn(INTEGRATE.CC_FRAME_SIGNATURE_1A, helpers)
+        self.assertLess(
+            helpers.index("RecorderReadPaintWorkletProgress(host_id, tree, pending_tree, &values);"),
+            helpers.index(INTEGRATE.CC_FRAME_SCROLL_COMMENT),
+        )
+        self.assertIn("pending_tree(),", INTEGRATE.CC_DRAW_LAYERS_HOOK)
+        self.assertIn('"background-color-progress"', helpers)
+        self.assertIn('"clip-path-progress"', helpers)
+        self.assertIn("value.present = false;", helpers)
+        source = (
+            INTEGRATE.CC_CLIENT_OWN_INCLUDE
+            + "\n\nnamespace cc {\n\n"
+            + INTEGRATE.CC_CLIENT_DECLARATION_ANCHOR
+            + "#if DCHECK_IS_ON()\n#endif\n\n"
+            + INTEGRATE.CC_CLIENT_RESULTS_ANCHOR
+            + "    }\n  }\n}\n\n}  // namespace cc\n"
+        )
+        patched = self.patch_twice(
+            "client_layer_tree_host_impl.cc",
+            source,
+            INTEGRATE.patch_cc_client_layer_tree_host_impl,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.CC_CLIENT_DECLARATION))
+        self.assertEqual(1, patched.count(INTEGRATE.CC_CLIENT_RESULTS_HOOK))
+        self.assertLess(
+            patched.index("RecorderNotePaintWorkletResults(id(), results);"),
+            patched.index("FindPendingTreeLayerById"),
+        )
+
+    def test_what_the_native_paint_worklets_painted_is_recorded_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            csspaint = Path(directory) / "csspaint"
+            nativepaint = csspaint / "nativepaint"
+            nativepaint.mkdir(parents=True)
+            (nativepaint / "background_color_paint_definition.cc").write_text(
+                INTEGRATE.BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE
+                + "\n\nPaintRecord BackgroundColorPaintDefinition::Paint() {\n"
+                + INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR
+                + "}\n",
+                encoding="utf-8",
+            )
+            (nativepaint / "clip_path_paint_definition.cc").write_text(
+                INTEGRATE.BLINK_CLIP_PATH_PAINT_OWN_INCLUDE
+                + "\n\nclass ClipPathPaintWorkletInput {\n"
+                + INTEGRATE.BLINK_CLIP_PATH_TRANSLATION_ANCHOR
+                + "};\n\nPaintRecord ClipPathPaintDefinition::Paint() {\n"
+                + INTEGRATE.BLINK_CLIP_PATH_PAINTED_ANCHOR
+                + "}\n",
+                encoding="utf-8",
+            )
+            (csspaint / "BUILD.gn").write_text(
+                'blink_modules_sources("csspaint") {\n  sources = [\n  ]\n\n'
+                + INTEGRATE.BLINK_CSSPAINT_BUILD_ANCHOR,
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_native_paint_definitions(csspaint)
+            files = sorted(path for path in csspaint.rglob("*") if path.is_file())
+            first = [path.read_text(encoding="utf-8") for path in files]
+            INTEGRATE.patch_blink_native_paint_definitions(csspaint)
+            self.assertEqual(first, [path.read_text(encoding="utf-8") for path in files])
+        build, background, clip = first
+        self.assertEqual(1, build.count('"//chromium/recorder_bridge"'))
+        for patched in (background, clip):
+            self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+            self.assertEqual(1, patched.count("a11y_recorder::RecordPaintWorkletPainted("))
+        self.assertEqual(1, background.count(INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_HOOK))
+        self.assertEqual(1, clip.count(INTEGRATE.BLINK_CLIP_PATH_TRANSLATION_HOOK))
+        self.assertEqual(1, clip.count(INTEGRATE.BLINK_CLIP_PATH_PAINTED_HOOK))
+        # The path is recorded as drawn, before it is painted.
+        self.assertLess(
+            clip.index("RecordPaintWorkletPainted("),
+            clip.index("cc::InspectablePaintRecorder paint_recorder;"),
+        )
+
+    def test_a_tree_patched_by_part_1b_is_upgraded_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "layer_tree_host_impl.cc"
+            path.write_text(self.host_impl_source(), encoding="utf-8")
+            helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+            hook = INTEGRATE.CC_DRAW_LAYERS_HOOK
+            try:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = (
+                    INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1B
+                )
+                INTEGRATE.CC_DRAW_LAYERS_HOOK = INTEGRATE.CC_DRAW_LAYERS_HOOK_1B
+                INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            finally:
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS = helpers
+                INTEGRATE.CC_DRAW_LAYERS_HOOK = hook
+            self.assertIn(
+                INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1B,
+                path.read_text(encoding="utf-8"),
+            )
+            INTEGRATE.patch_cc_layer_tree_host_impl(path)
+            upgraded = path.read_text(encoding="utf-8")
+        fresh = self.patch_twice(
+            "layer_tree_host_impl.cc",
+            self.host_impl_source(),
+            INTEGRATE.patch_cc_layer_tree_host_impl,
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertNotIn(INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS_1B, upgraded)
+        self.assertNotIn(INTEGRATE.CC_DRAW_LAYERS_HOOK_1B, upgraded)
+        self.assertEqual(1, upgraded.count("void RecorderRecordCompositorFrame("))
+        self.assertEqual(1, upgraded.count("void RecorderReadImageFrames("))
+
+    def test_each_frame_names_the_frame_each_animated_image_is_drawn_at(self):
+        helpers = INTEGRATE.CC_COMPOSITOR_FRAME_HELPERS
+        self.assertTrue(
+            helpers.startswith(
+                INTEGRATE.CC_PAINT_WORKLET_HELPERS + INTEGRATE.CC_IMAGE_FRAME_HELPERS
+            )
+        )
+        self.assertIn(INTEGRATE.CC_FRAME_SIGNATURE, helpers)
+        self.assertNotIn(INTEGRATE.CC_FRAME_SIGNATURE_1B, helpers)
+        self.assertLess(
+            helpers.index("RecorderReadImageFrames(host_id, images, &values);"),
+            helpers.index(INTEGRATE.CC_FRAME_SCROLL_COMMENT),
+        )
+        self.assertIn('"image-frame"', helpers)
+        self.assertIn("images->RecorderActiveFrameIndexes()", helpers)
+        self.assertIn("image_animation_controller_.get(),", INTEGRATE.CC_DRAW_LAYERS_HOOK)
+        # The frame hook is timed whole, after the check that the recorder is
+        # connected, and so is the paint worklet results hook.
+        self.assertLess(
+            helpers.index(INTEGRATE.CC_FRAME_CLIENT_CHECK),
+            helpers.index('A11Y_RECORDER_HOOK_COST("hook:compositor-frame");'),
+        )
+        self.assertEqual(1, helpers.count('A11Y_RECORDER_HOOK_COST("hook:compositor-frame");'))
+        self.assertEqual(
+            1, helpers.count('A11Y_RECORDER_HOOK_COST("hook:paint-worklet-results");')
+        )
+        header = self.patch_twice(
+            "image_animation_controller.h",
+            "class ImageAnimationController {\n public:\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR
+            + "\n private:\n  class AnimationState {\n   public:\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_STATE_ANCHOR
+            + "  };\n  AnimationStateMap animation_state_map_;\n};\n",
+            INTEGRATE.patch_cc_image_animation_controller,
+        )
+        self.assertEqual(1, header.count(INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR))
+        self.assertIn("state.active_index()", header)
+
+    def test_paint_worklet_hooks_of_part_1b_are_upgraded_and_timed(self):
+        def tree(background_hook, clip_hook):
+            directory = tempfile.mkdtemp()
+            csspaint = Path(directory) / "csspaint"
+            nativepaint = csspaint / "nativepaint"
+            nativepaint.mkdir(parents=True)
+            (nativepaint / "background_color_paint_definition.cc").write_text(
+                INTEGRATE.BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE
+                + "\n\nPaintRecord BackgroundColorPaintDefinition::Paint() {\n"
+                + background_hook
+                + "}\n",
+                encoding="utf-8",
+            )
+            (nativepaint / "clip_path_paint_definition.cc").write_text(
+                INTEGRATE.BLINK_CLIP_PATH_PAINT_OWN_INCLUDE
+                + "\n\nclass ClipPathPaintWorkletInput {\n"
+                + INTEGRATE.BLINK_CLIP_PATH_TRANSLATION_ANCHOR
+                + "};\n\nPaintRecord ClipPathPaintDefinition::Paint() {\n"
+                + clip_hook
+                + "}\n",
+                encoding="utf-8",
+            )
+            (csspaint / "BUILD.gn").write_text(
+                'blink_modules_sources("csspaint") {\n  sources = [\n  ]\n\n'
+                + INTEGRATE.BLINK_CSSPAINT_BUILD_ANCHOR,
+                encoding="utf-8",
+            )
+            INTEGRATE.patch_blink_native_paint_definitions(csspaint)
+            INTEGRATE.patch_blink_native_paint_definitions(csspaint)
+            files = sorted(path for path in csspaint.rglob("*") if path.is_file())
+            return [path.read_text(encoding="utf-8") for path in files]
+
+        fresh = tree(
+            INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR,
+            INTEGRATE.BLINK_CLIP_PATH_PAINTED_ANCHOR,
+        )
+        upgraded = tree(
+            INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B,
+            INTEGRATE.BLINK_CLIP_PATH_PAINTED_HOOK_1B,
+        )
+        self.assertEqual(fresh, upgraded)
+        _, background, clip = fresh
+        self.assertNotIn(INTEGRATE.BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B, background)
+        self.assertNotIn(INTEGRATE.BLINK_CLIP_PATH_PAINTED_HOOK_1B, clip)
+        self.assertEqual(
+            1, background.count('A11Y_RECORDER_HOOK_COST("hook:background-color-painted");')
+        )
+        self.assertEqual(1, clip.count('A11Y_RECORDER_HOOK_COST("hook:clip-path-painted");'))
+
+    def test_the_cc_component_depends_on_the_bridge_once(self):
+        source = (
+            'cc_component("cc") {\n  sources = [\n  ]\n\n'
+            '  deps = [\n    "//base",\n  ]\n}\n'
+        )
+        patched = self.patch_twice("BUILD.gn", source, INTEGRATE.patch_cc_build)
+        self.assertEqual(1, patched.count(INTEGRATE.CC_BUILD_DEP))
+
+    def test_an_animation_started_on_the_compositor_is_recorded_once(self):
+        source = (
+            INTEGRATE.BLINK_COMPOSITOR_ANIMATIONS_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_COMPOSITOR_ANIMATION_HELPERS_ANCHOR
+            + "    const Element& element) {\n"
+            + INTEGRATE.BLINK_COMPOSITOR_ANIMATION_STARTED_ANCHOR
+            + "}\n\n}  // namespace blink\n"
+        )
+        patched = self.patch_twice(
+            "compositor_animations.cc",
+            source,
+            INTEGRATE.patch_blink_compositor_animations,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_COMPOSITOR_ANIMATION_STARTED_HOOK))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_COMPOSITOR_ANIMATION_HELPERS))
+        # The models are read before the loop moves them to the compositor.
+        self.assertLess(
+            patched.index("a11y_recorder::RecordCompositorAnimationStarted("),
+            patched.index("compositor_animation.AddKeyframeModel(std::move(keyframe_model));"),
+        )
+
+    def test_an_animation_leaving_the_compositor_is_recorded_once(self):
+        source = (
+            INTEGRATE.BLINK_KEYFRAME_EFFECT_OWN_INCLUDE
+            + "\n\nbool KeyframeEffect::CancelAnimationOnCompositor(\n"
+            + "    CompositorAnimation* compositor_animation) {\n"
+            + INTEGRATE.BLINK_COMPOSITOR_ANIMATION_ENDED_ANCHOR
+            + "  compositor_keyframe_model_ids_.clear();\n}\n"
+        )
+        patched = self.patch_twice(
+            "keyframe_effect.cc", source, INTEGRATE.patch_blink_keyframe_effect
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_COMPOSITOR_ANIMATION_ENDED_HOOK))
+        self.assertLess(
+            patched.index("a11y_recorder::RecordCompositorAnimationEnded("),
+            patched.index("compositor_keyframe_model_ids_.clear();"),
+        )
+
+    def test_each_animation_and_its_removal_are_recorded_once(self):
+        source = (
+            INTEGRATE.BLINK_ANIMATION_OWN_INCLUDE
+            + "\n\n#include <limits>\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_ANIMATION_DISPOSE_ANCHOR
+            + "  DisassociateTriggers();\n}\n\n"
+            + INTEGRATE.BLINK_ANIMATION_CONTEXT_DESTROYED_ANCHOR
+            + "  inactive_ = true;\n}\n\n"
+            + "void Animation::NotifyProbe() {\n"
+            + INTEGRATE.BLINK_ANIMATION_UPDATED_ANCHOR
+            + "}\n\n}  // namespace blink\n"
+        )
+        patched = self.patch_twice(
+            "animation.cc", source, INTEGRATE.patch_blink_animation
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_ANIMATION_UPDATED_HOOK))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_ANIMATION_DISPOSE_HOOK))
+        self.assertEqual(
+            1, patched.count(INTEGRATE.BLINK_ANIMATION_CONTEXT_DESTROYED_HOOK)
+        )
+        for include in INTEGRATE.BLINK_ANIMATION_INCLUDES:
+            with self.subTest(include=include):
+                self.assertEqual(1, patched.count(include + "\n"))
+        # The record follows the probe DevTools is fed from, and is made
+        # only while the recorder is connected.
+        self.assertLess(
+            patched.index("probe::AnimationUpdated(document_, this);"),
+            patched.index("a11y_recorder::RecordAnimationUpdated("),
+        )
+        self.assertEqual(3, patched.count("a11y_recorder::IsRecorderActive()"))
+        self.assertEqual(
+            1, patched.count('A11Y_RECORDER_HOOK_COST("hook:animation-updated");')
+        )
+
+    def test_the_bridge_holds_the_animation_records(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        for event_type in ("animation-updated", "animation-removed"):
+            with self.subTest(event_type=event_type):
+                self.assertIn(
+                    f'SendBlinkEvidence("browser.animation", "{event_type}",', source
+                )
+        # An animation is recorded again only when its description changed,
+        # and its current time and progress are not part of that comparison.
+        compare = source[source.index("bool SameAnimationDescription("):]
+        compare = compare[: compare.index("\n}\n")]
+        for field in ("current_time_milliseconds", "progress", "current_iteration"):
+            with self.subTest(field=field):
+                self.assertNotIn(f"a.{field} ", compare)
+                self.assertNotIn(f"a.{field} ==", compare)
+        self.assertIn("a.play_state == b.play_state", compare)
+
+    def test_each_presentation_request_names_its_compositors_widget(self):
+        block = INTEGRATE.blink_registered_presentation_widget_block()
+        self.assertEqual(1, block.count("a11y_recorder::RegisterCompositorWidget("))
+        self.assertLess(
+            block.index("a11y_recorder::RegisterCompositorWidget("),
+            block.index("a11y_recorder::BeginBlinkPresentationRequest(\n          document_node_id, document_token"),
+        )
+
+    def test_the_bridge_holds_the_compositor_records(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        for event_type in (
+            "compositor-animation-started",
+            "compositor-animation-ended",
+            "compositor-frame",
+            "compositor-frame-presented",
+        ):
+            with self.subTest(event_type=event_type):
+                self.assertIn(
+                    f'SendBlinkEvidence("browser.compositor", "{event_type}",', source
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecreationIntegrationTests(unittest.TestCase):
+    """The recreation mode's switch and its recorded styles hook."""
+
+    STYLE_RESOLVER_SOURCE = (
+        '#include "third_party/blink/renderer/core/css/resolver/'
+        'style_resolver.h"\n'
+        "\n"
+        "#include <optional>\n"
+        "\n"
+        "void StyleResolver::MatchAllRules(StyleResolverState& state,\n"
+        "                                  ElementRuleCollector& collector,\n"
+        "                                  bool include_smil_properties) {\n"
+        "  Element& element = state.GetElement();\n"
+        "  MatchAuthorRules(element, collector);\n"
+        "\n"
+        "  if (element.IsStyledElement() && !state.IsForPseudoElement()) {\n"
+        "    collector.BeginAddingAuthorRulesForTreeScope("
+        "element.GetTreeScope());\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "const ComputedStyle& StyleResolver::StyleForViewport() {\n"
+        "  return *builder.TakeStyle();\n"
+        "}\n"
+    )
+
+    def test_adds_recorded_styles_last_in_rule_matching_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(self.STYLE_RESOLVER_SOURCE, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_STYLE_HOOK))
+        for include in INTEGRATE.BLINK_RECREATION_STYLE_INCLUDES:
+            self.assertEqual(1, first.count(include + "\n"))
+        # The recorded declarations come after every other author rule of
+        # the element, at the end of MatchAllRules.
+        match_all_rules = first.index("void StyleResolver::MatchAllRules(")
+        author_rules = first.index("MatchAuthorRules(element, collector);")
+        hook = first.index(INTEGRATE.BLINK_RECREATION_STYLE_HOOK)
+        viewport = first.index("StyleResolver::StyleForViewport()")
+        self.assertLess(match_all_rules, author_rules)
+        self.assertLess(author_rules, hook)
+        self.assertLess(hook, viewport)
+        self.assertEqual(
+            "\n}\n\nconst ComputedStyle& StyleResolver::StyleForViewport()",
+            first[
+                hook + len(INTEGRATE.BLINK_RECREATION_STYLE_HOOK) : viewport
+                + len("StyleResolver::StyleForViewport()")
+            ],
+        )
+        # Only under the switch, important, attached to the element, and not
+        # kept in the matched properties cache.
+        hook_text = INTEGRATE.BLINK_RECREATION_STYLE_HOOK
+        self.assertIn("a11y_recorder::IsRecreationMode()", hook_text)
+        self.assertIn("/*important=*/true", hook_text)
+        self.assertIn("/*is_inline_style=*/true", hook_text)
+        self.assertIn("/*is_cacheable=*/false", hook_text)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(0, signatures["IsRecreationMode"])
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", first, signatures),
+        )
+
+    def test_upgrades_the_first_compositor_opacity_style_hook(self):
+        legacy = INTEGRATE.STAGE_1E0B_BLINK_RECREATION_STYLE_HOOK
+        self.assertIn("String::FromUTF8(", legacy)
+        self.assertNotIn("String::FromUTF8(", INTEGRATE.BLINK_RECREATION_STYLE_HOOK)
+        self.assertIn(
+            '("opacity: " + *recorder_compositor_opacity).c_str()));',
+            INTEGRATE.BLINK_RECREATION_STYLE_HOOK,
+        )
+        source = self.STYLE_RESOLVER_SOURCE.replace(
+            INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            legacy + INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_STYLE_HOOK))
+
+    def test_upgrades_the_inferred_display_style_hook_to_the_compositor_opacity(self):
+        self.assertNotIn(
+            INTEGRATE.STAGE_9915_BLINK_RECREATION_STYLE_HOOK,
+            INTEGRATE.BLINK_RECREATION_STYLE_HOOK,
+        )
+        source = self.STYLE_RESOLVER_SOURCE.replace(
+            INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            INTEGRATE.STAGE_9915_BLINK_RECREATION_STYLE_HOOK
+            + INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(INTEGRATE.STAGE_9915_BLINK_RECREATION_STYLE_HOOK, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_STYLE_HOOK))
+        hook = INTEGRATE.BLINK_RECREATION_STYLE_HOOK
+        # The compositor's opacity is set last, as recorded, and never on a
+        # user agent shadow copy.
+        self.assertIn('AtomicString("data-a11y-recorded-compositor")', hook)
+        self.assertIn("!element.IsInUserAgentShadowRoot()) {\n      recorder_compositor_opacity =", hook)
+        self.assertLess(
+            hook.index("recorder_impose(recorder_inferred_display);"),
+            hook.index('("opacity: " + *recorder_compositor_opacity)'),
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", first, signatures)
+        )
+
+    def test_upgrades_the_stage_1a_style_hook_to_the_inferred_display(self):
+        self.assertNotIn(
+            INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK,
+            INTEGRATE.BLINK_RECREATION_STYLE_HOOK,
+        )
+        source = self.STYLE_RESOLVER_SOURCE.replace(
+            INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK
+            + INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            1,
+        )
+        self.assertIn(INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK, source)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(INTEGRATE.STAGE_1A_BLINK_RECREATION_STYLE_HOOK, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_STYLE_HOOK))
+        hook = INTEGRATE.BLINK_RECREATION_STYLE_HOOK
+        # Only the two inferred values are accepted, and the inferred display
+        # is set after the recorded style, so it replaces a recorded display.
+        self.assertIn('"data-a11y-recorded-no-layout-object"', hook)
+        self.assertIn('recorder_no_layout_object == "none"     ? "display: none"', hook)
+        self.assertIn("element.IsInUserAgentShadowRoot()         ? nullptr", hook)
+        self.assertIn('recorder_no_layout_object == "contents" ? "display: contents"', hook)
+        self.assertLess(
+            hook.index("recorder_impose(recorder_recorded_style);"),
+            hook.index("recorder_impose(recorder_inferred_display);"),
+        )
+        self.assertIn("/*important=*/true", hook)
+        # Blink's String names its prefix test starts_with; the hook uses no
+        # such call, and no Node type.
+        self.assertNotIn("StartsWith", hook)
+
+    def test_the_switch_is_passed_to_renderers_without_a_recorder(self):
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        switches = (bridge / "recorder_switches.h").read_text(encoding="utf-8")
+        self.assertIn(
+            'inline constexpr char kRecreationSwitch[] = '
+            '"a11y-recorder-recreation";',
+            switches,
+        )
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        start = source.index("bool AppendRecorderBootstrapToChildProcess(")
+        end = source.index("\n}\n", start)
+        function = source[start:end]
+        appended = function.index("command_line->AppendSwitch(kRecreationSwitch);")
+        # Passed before the bootstrap metadata is looked for, so a browser
+        # started without a recorder passes it too, and only to renderers.
+        self.assertLess(
+            appended, function.index("kChildBootstrapMetadataEnvironment")
+        )
+        condition = function[: appended]
+        self.assertIn("process_type == kChromiumRendererProcess", condition)
+        self.assertIn(
+            "base::CommandLine::ForCurrentProcess()->HasSwitch(kRecreationSwitch)",
+            condition,
+        )
+
+    INSPECTOR_CSS_AGENT_SOURCE = (
+        '#include "third_party/blink/renderer/core/inspector/'
+        'inspector_css_agent.h"\n'
+        "\n"
+        "namespace blink {\n"
+        "\n"
+        "protocol::Response InspectorCSSAgent::getMatchedStylesForNode(\n"
+        "    int node_id) {\n"
+        "  // Matched rules.\n"
+        "  *matched_css_rules = BuildArrayForMatchedRuleList(\n"
+        "      resolver.MatchedRules(), element, ghost_rules, "
+        "element_pseudo_id,\n"
+        "      pseudo_argument);\n"
+        "\n"
+        "  // Inherited styles.\n"
+        "  *inherited_entries =\n"
+        "      std::make_unique<protocol::Array<"
+        "protocol::CSS::InheritedStyleEntry>>();\n"
+        "  for (InspectorCSSMatchedRules* match : resolver.ParentRules()) {\n"
+        "    std::unique_ptr<protocol::CSS::InheritedStyleEntry> entry;\n"
+        "    (*inherited_entries)->emplace_back(std::move(entry));\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "}  // namespace blink\n"
+    )
+
+    def test_reports_recorded_styles_to_devtools_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inspector_css_agent.cc"
+            path.write_text(self.INSPECTOR_CSS_AGENT_SOURCE, encoding="utf-8")
+            INTEGRATE.patch_blink_inspector_css_agent(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_inspector_css_agent(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+
+        for hook in (
+            INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER,
+            INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK,
+            INTEGRATE.BLINK_RECREATION_INSPECTOR_INHERITED_HOOK,
+            INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER,
+            INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_HOOK,
+        ):
+            self.assertEqual(1, first.count(hook))
+        # The inferred display is a rule of its own, defined after the
+        # recorded style's helper and reported after its rule, so DevTools
+        # shows it first; it is not reported for ancestors.
+        inferred_helper = first.index(INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER)
+        inferred_rule = first.index(INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_HOOK)
+        self.assertLess(first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER), inferred_helper)
+        self.assertLess(inferred_helper, first.index("InspectorCSSAgent::getMatchedStylesForNode("))
+        self.assertLess(first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK), inferred_rule)
+        self.assertLess(inferred_rule, first.index("  // Inherited styles."))
+        self.assertIn(
+            '.setText("No layout object recorded")',
+            INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER,
+        )
+        self.assertIn(
+            "element->IsInUserAgentShadowRoot()",
+            INTEGRATE.BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER,
+        )
+        self.assertNotIn(
+            "RecorderNoLayoutObjectMatch(match->element)",
+            first,
+        )
+        for include in INTEGRATE.BLINK_RECREATION_INSPECTOR_INCLUDES:
+            self.assertEqual(1, first.count(include + "\n"))
+        # The helper is defined before its use; the element's block follows
+        # every matched rule; each ancestor's block is added to its entry
+        # before the entry is kept.
+        helper = first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER)
+        function = first.index("InspectorCSSAgent::getMatchedStylesForNode(")
+        matched = first.index("*matched_css_rules = BuildArrayForMatchedRuleList(")
+        own = first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK)
+        inherited_list = first.index("  // Inherited styles.")
+        inherited = first.index(INTEGRATE.BLINK_RECREATION_INSPECTOR_INHERITED_HOOK)
+        kept = first.index("(*inherited_entries)->emplace_back(std::move(entry));")
+        self.assertLess(helper, function)
+        self.assertLess(matched, own)
+        self.assertLess(own, inherited_list)
+        self.assertLess(inherited_list, inherited)
+        self.assertLess(inherited, kept)
+        helper_text = INTEGRATE.BLINK_RECREATION_INSPECTOR_HELPER
+        self.assertIn("a11y_recorder::IsRecreationMode()", helper_text)
+        self.assertIn('.setText("Recorded style")', helper_text)
+        self.assertIn("/*important=*/true", helper_text)
+        self.assertIn("StyleSheetOriginEnum::Regular", helper_text)
+        self.assertNotIn("setStyleSheetId", helper_text)
+        self.assertIn(
+            "element_pseudo_id == kPseudoIdNone",
+            INTEGRATE.BLINK_RECREATION_INSPECTOR_MATCHED_HOOK,
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", first, signatures),
+        )
+
+    BOX_FRAGMENT_BUILDER_SOURCE = (
+        '#include "third_party/blink/renderer/core/layout/'
+        'box_fragment_builder.h"\n'
+        "\n"
+        "namespace blink {\n"
+        "\n"
+        "const LayoutResult* BoxFragmentBuilder::ToBoxFragment(\n"
+        "    WritingMode block_or_line_writing_mode) {\n"
+        "  Finalize();\n"
+        "\n"
+        "  if (box_type_ == PhysicalFragment::kNormalBox && node_ &&\n"
+        "      node_.IsBlockInInline()) [[unlikely]] {\n"
+        "    SetIsBlockInInline();\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "}  // namespace blink\n"
+    )
+
+    def test_imposes_recorded_box_fragments_before_finalizing_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box_fragment_builder.cc"
+            path.write_text(self.BOX_FRAGMENT_BUILDER_SOURCE, encoding="utf-8")
+            INTEGRATE.patch_blink_box_fragment_builder(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_box_fragment_builder(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            1, first.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER)
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+        for include in INTEGRATE.BLINK_RECREATION_FRAGMENT_INCLUDES:
+            self.assertEqual(1, first.count(include + "\n"))
+        # The helper precedes the function, and the recorded values are set
+        # before the builder is finalized.
+        helper = first.index(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER)
+        function = first.index("BoxFragmentBuilder::ToBoxFragment(")
+        hook = first.index(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK)
+        finalize = first.index("  Finalize();")
+        self.assertLess(helper, function)
+        self.assertLess(function, hook)
+        self.assertLess(hook, finalize)
+        hook_text = INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK
+        self.assertIn("a11y_recorder::IsRecreationMode()", hook_text)
+        self.assertIn("GetWritingDirection().IsHorizontalLtr()", hook_text)
+        self.assertIn("GetConstraintSpace().HasBlockFragmentation()", hook_text)
+        # Slice 4a: children are matched to the recorded links by node, and
+        # lines and anonymous boxes in order.
+        self.assertIn("RecorderRecordedNodeId(recorder_child_node)", hook_text)
+        self.assertIn("recorder_box_links.find(", hook_text)
+        self.assertIn("recorder_lines == recorder_line_links.size()", hook_text)
+        self.assertIn(
+            "recorder_anonymous == recorder_anonymous_links.size()", hook_text
+        )
+        # In a BoxFragmentBuilder member, the Node class is hidden by Node().
+        self.assertNotIn("const Node*", hook_text)
+        self.assertIn("SetChildOffset(recorder_index,", hook_text)
+        self.assertIn("RecorderReportNotImposed(", hook_text)
+        helper = INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER
+        self.assertIn('"data-a11y-recorded-layout"', helper)
+        self.assertIn("int RecorderRecordedNodeId(const Node* node)", helper)
+        self.assertIn('kRecorderPrefix[] = "{\\"node\\":"', helper)
+        self.assertIn("JSONObject::From(ParseJSON(", helper)
+        self.assertIn("/*discard_duplicates=*/true", helper)
+        self.assertNotIn('"data-a11y-recorded-fragment"', first)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", first, signatures),
+        )
+
+    def patch_source_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def test_imposes_recorded_items_after_conversion_once(self):
+        source = (
+            '#include "third_party/blink/renderer/core/layout/inline/'
+            'fragment_items_builder.h"\n'
+            "\n"
+            "namespace blink {\n"
+            "\n"
+            "void FragmentItemsBuilder::ConvertToPhysical("
+            "const PhysicalSize& outer_size) {\n"
+            "  if (is_converted_to_physical_)\n"
+            "    return;\n"
+            "\n"
+            "  is_converted_to_physical_ = true;\n"
+            "}\n"
+            "\n"
+            "void FragmentItemsBuilder::MoveChildrenInDirection("
+            "LayoutUnit offset,\n"
+            "                                                   bool b) {}\n"
+            "\n"
+            "}  // namespace blink\n"
+        )
+        patched = self.patch_source_twice(
+            "fragment_items_builder.cc",
+            source,
+            INTEGRATE.patch_blink_fragment_items_builder,
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_RECREATION_ITEMS_HELPER))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK))
+        for include in INTEGRATE.BLINK_RECREATION_ITEMS_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        # The helper precedes the function; the recorded items are set after
+        # every item is converted, before the builder is marked converted.
+        self.assertLess(
+            patched.index(INTEGRATE.BLINK_RECREATION_ITEMS_HELPER),
+            patched.index("void FragmentItemsBuilder::ConvertToPhysical("),
+        )
+        hook = patched.index(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK)
+        self.assertLess(patched.index("    return;\n"), hook)
+        self.assertLess(hook, patched.index("  is_converted_to_physical_ = true;"))
+        hook_text = INTEGRATE.BLINK_RECREATION_ITEMS_HOOK
+        for expected in (
+            "a11y_recorder::IsRecreationMode()",
+            "GetWritingDirection().IsHorizontalLtr()",
+            "RecorderRecordedItemsFragment(",
+            "recorder_recorded_items->size() == items_.size()",
+            "recorder_text == text_content_",
+            "recorder_type == RecorderItemType(recorder_item)",
+            "RecorderShapeFromRecordedGlyphs(",
+            "recorder_item.RecorderSetTextShapeResult(",
+            "RecorderReportNotImposed(",
+        ):
+            self.assertIn(expected, hook_text)
+        helper = INTEGRATE.BLINK_RECREATION_ITEMS_HELPER
+        for expected in (
+            '"data-a11y-recorded-layout"',
+            'recorder_kind != "anonymous"',
+            'GetJSONObject("fontFile")',
+            'GetString("digest", &recorder_digest)',
+            "recorder_typeface.openStream(recorder_index)",
+            "String::FromUtf8(recorder_chosen_digest) != recorder_digest",
+            "recorder_chosen_index != recorder_file_index",
+            "recorder_platform.size() - recorder_size",
+            "Base64Decode(recorder_packed, recorder_bytes)",
+            "ShapeResult::CreateFromRecordedGlyphs(",
+        ):
+            self.assertIn(expected, helper)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches("patched", patched, signatures),
+        )
+
+    def test_items_helper_upgrades_to_font_file_matching(self):
+        # Sub-step 3: a checkout patched with the stage 3 helper, which
+        # compared PostScript names, is upgraded to the helper that compares
+        # font files by digest.
+        old = INTEGRATE.PRE_FONT_FILE_BLINK_RECREATION_ITEMS_HELPER
+        self.assertIn('"postScriptName"', old)
+        self.assertNotIn('"postScriptName"', INTEGRATE.BLINK_RECREATION_ITEMS_HELPER)
+        upgraded = INTEGRATE.upgrade_legacy_hooks(
+            "before\n" + old + "after\n",
+            (
+                (
+                    INTEGRATE.PRE_FONT_FILE_BLINK_RECREATION_ITEMS_HELPER,
+                    INTEGRATE.BLINK_RECREATION_ITEMS_HELPER,
+                ),
+            ),
+            Path("fragment_items_builder.cc"),
+        )
+        self.assertEqual(
+            "before\n" + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER + "after\n",
+            upgraded,
+        )
+        # Its glyph check also compares the size before reading the file.
+        helper = INTEGRATE.BLINK_RECREATION_ITEMS_HELPER
+        self.assertLess(
+            helper.index("std::abs(recorder_platform.size() - recorder_size)"),
+            helper.index("!RecorderRecreationFontFile(*recorder_typeface"),
+        )
+
+    def test_glyph_runs_record_their_font_file(self):
+        # Protocol 0.40: each glyph run's typeface gives its font file, read
+        # once in the renderer through Skia's openStream, and its variation
+        # position.
+        helper = INTEGRATE.BLINK_LAYOUT_CHECKPOINT_HELPER
+        for expected in (
+            "bool RecorderFontFile(const SkTypeface& recorder_typeface,",
+            "a11y_recorder::LookUpFontFile(recorder_typeface.uniqueID(),",
+            "recorder_typeface.openStream(recorder_index)",
+            "a11y_recorder::RecordFontFile(",
+            "RecorderReadRunFontFile(*recorder_typeface, recorder_run);",
+            "getVariationDesignPosition(recorder_coordinates)",
+        ):
+            with self.subTest(expected=expected):
+                self.assertEqual(1, helper.count(expected))
+        self.assertLess(
+            helper.index("void RecorderReadRunFontFile("),
+            helper.index("void RecorderReadGlyph("),
+        )
+        self.assertIn(
+            '#include "third_party/skia/include/core/SkStream.h"',
+            INTEGRATE.BLINK_LAYOUT_CHANGES_INCLUDES,
+        )
+
+    def test_font_faces_record_joining_loading_and_leaving_once(self):
+        header = self.patch_source_twice(
+            "font_custom_platform_data.h",
+            "class FontCustomPlatformData {\n public:\n"
+            + INTEGRATE.BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_ANCHOR
+            + "\n private:\n  sk_sp<SkTypeface> base_typeface_;\n};\n",
+            INTEGRATE.patch_blink_font_custom_platform_data_header,
+        )
+        self.assertEqual(
+            1, header.count(INTEGRATE.BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR)
+        )
+        self.assertLess(
+            header.index("RecorderBaseTypeface()"), header.index(" private:")
+        )
+        face_header = self.patch_source_twice(
+            "font_face.h",
+            "class FontFace {\n public:\n"
+            + INTEGRATE.BLINK_FONT_FACE_PUBLIC_ANCHOR
+            + "\n private:\n"
+            + INTEGRATE.BLINK_FONT_FACE_PRIVATE_ANCHOR
+            + "};\n",
+            INTEGRATE.patch_blink_font_face_header,
+        )
+        self.assertEqual(1, face_header.count(INTEGRATE.BLINK_FONT_FACE_PUBLIC))
+        self.assertLess(
+            face_header.index("void RecorderNoteRemoved();"),
+            face_header.index(" private:"),
+        )
+        self.assertGreater(
+            face_header.index("uint64_t recorder_face_number_ = 0;"),
+            face_header.index(" private:"),
+        )
+        definition = self.patch_source_twice(
+            "font_face.cc",
+            '#include "third_party/blink/renderer/core/css/font_face.h"\n'
+            "\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_FONT_FACE_DEFINITIONS_ANCHOR
+            + "  status_ = status;\n"
+            + INTEGRATE.BLINK_FONT_FACE_LOADED_ANCHOR
+            + "  }\n}\n\n}  // namespace blink\n",
+            INTEGRATE.patch_blink_font_face,
+        )
+        self.assertEqual(1, definition.count(INTEGRATE.BLINK_FONT_FACE_DEFINITIONS))
+        self.assertEqual(1, definition.count(INTEGRATE.BLINK_FONT_FACE_LOADED_HOOK))
+        self.assertLess(
+            definition.index("void FontFace::RecorderNoteLoaded() {"),
+            definition.index("void FontFace::SetLoadStatus("),
+        )
+        for expected in (
+            "css_font_face_->FrontSource()",
+            "recorder_source->GetCustomPlaftormData()",
+            "recorder_data->RecorderBaseTypeface()",
+            "DynamicTo<LocalDOMWindow>(recorder_context)",
+            "a11y_recorder::RecordBlinkFontFaceLoaded(",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, definition)
+        cache = self.patch_source_twice(
+            "font_face_cache.cc",
+            "void FontFaceCache::AddFontFace(FontFace* font_face, bool css_connected) {\n"
+            + INTEGRATE.BLINK_FONT_FACE_CACHE_ADD_ANCHOR
+            + "}\nbool FontFaceCache::RemoveFontFace(FontFace* font_face, bool c) {\n"
+            + INTEGRATE.BLINK_FONT_FACE_CACHE_REMOVE_ANCHOR
+            + "  return true;\n}\nvoid FontFaceCache::ClearAll() {\n"
+            + INTEGRATE.BLINK_FONT_FACE_CACHE_CLEAR_ANCHOR
+            + "}\n",
+            INTEGRATE.patch_blink_font_face_cache,
+        )
+        self.assertEqual(1, cache.count("font_face->RecorderNoteAdded();"))
+        self.assertEqual(1, cache.count("font_face->RecorderNoteRemoved();"))
+        self.assertEqual(1, cache.count("recorder_face->RecorderNoteRemoved();"))
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "font_face.cc", definition, signatures
+            ),
+        )
+
+    def test_image_resources_record_their_bytes_before_they_are_cleared(self):
+        source = self.patch_source_twice(
+            "image_resource.cc",
+            '#include "third_party/blink/renderer/core/loader/resource/'
+            'image_resource.h"\n\nvoid ImageResource::Finish() {\n'
+            "  if (a) {\n"
+            + INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR
+            + "    ClearData();\n  }\n}\n",
+            INTEGRATE.patch_blink_image_resource,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK))
+        self.assertIn(INTEGRATE.BLINK_BRIDGE_INCLUDE, source)
+        # Protocol 0.48: the bytes are copied before the image is updated,
+        # and recorded after it, with the image's own ID.
+        self.assertLess(
+            source.index("recorder_image->bytes.append("),
+            source.index("UpdateImage(Data()"),
+        )
+        self.assertLess(
+            source.index("UpdateImage(Data()"),
+            source.index("a11y_recorder::RecordBlinkImageResource("),
+        )
+        self.assertLess(
+            source.index("GetImage()->paint_image_id()"),
+            source.index("a11y_recorder::RecordBlinkImageResource("),
+        )
+        self.assertEqual(1, source.count('A11Y_RECORDER_HOOK_COST("hook:image-resource");'))
+        self.assertEqual(1, source.count("UpdateImage(Data()"))
+        self.assertLess(
+            source.index("UpdateImage(Data()"), source.index("ClearData();")
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "image_resource.cc", source, signatures
+            ),
+        )
+
+    def test_an_image_resource_hook_of_protocol_0_40_is_upgraded_in_place(self):
+        original = (
+            '#include "third_party/blink/renderer/core/loader/resource/'
+            'image_resource.h"\n\nvoid ImageResource::Finish() {\n'
+            "  if (a) {\n"
+            + INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR
+            + "    ClearData();\n  }\n}\n"
+        )
+        fresh = self.patch_source_twice(
+            "image_resource.cc", original, INTEGRATE.patch_blink_image_resource
+        )
+        earlier = original.replace(
+            INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR,
+            INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK_0_40,
+        )
+        upgraded = self.patch_source_twice(
+            "image_resource.cc", earlier, INTEGRATE.patch_blink_image_resource
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertNotIn(INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK_0_40, upgraded)
+
+    def test_an_image_resource_hook_of_part_1c_is_upgraded_in_place(self):
+        original = (
+            '#include "third_party/blink/renderer/core/loader/resource/'
+            'image_resource.h"\n\nvoid ImageResource::Finish() {\n'
+            "  if (a) {\n"
+            + INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR
+            + "    ClearData();\n  }\n}\n"
+        )
+        fresh = self.patch_source_twice(
+            "image_resource.cc", original, INTEGRATE.patch_blink_image_resource
+        )
+        earlier = original.replace(
+            INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR,
+            INTEGRATE.BLINK_IMAGE_RESOURCE_HOOK_1C,
+        )
+        upgraded = self.patch_source_twice(
+            "image_resource.cc", earlier, INTEGRATE.patch_blink_image_resource
+        )
+        self.assertEqual(fresh, upgraded)
+        self.assertEqual(1, upgraded.count("X-A11y-Recorder-Image-Frame"))
+
+    def test_the_recreation_holds_an_image_at_the_frame_its_answer_names(self):
+        source = self.patch_source_twice(
+            "image_resource.cc",
+            '#include "third_party/blink/renderer/core/loader/resource/'
+            'image_resource.h"\n\nvoid ImageResource::Finish() {\n'
+            "  if (a) {\n"
+            + INTEGRATE.BLINK_IMAGE_RESOURCE_ANCHOR
+            + "    ClearData();\n  }\n}\n",
+            INTEGRATE.patch_blink_image_resource,
+        )
+        # Held once the image has its bytes, only in the recreation mode, by
+        # the image's own paint image ID, before the bytes are cleared.
+        self.assertEqual(1, source.count("a11y_recorder::HoldRecreationImageFrame("))
+        self.assertLess(
+            source.index("UpdateImage(Data()"),
+            source.index("a11y_recorder::HoldRecreationImageFrame("),
+        )
+        self.assertLess(
+            source.index("a11y_recorder::HoldRecreationImageFrame("),
+            source.index("ClearData();"),
+        )
+        self.assertIn(
+            "if (a11y_recorder::IsRecreationMode() && GetContent()->HasImage()) {",
+            source,
+        )
+        self.assertIn('AtomicString("X-A11y-Recorder-Image-Frame")', source)
+        header = self.patch_source_twice(
+            "image_animation_controller.h",
+            "class ImageAnimationController {\n public:\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR
+            + "\n private:\n  class AnimationState {\n   public:\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_STATE_ANCHOR
+            + "   private:\n    std::vector<FrameMetadata> frames_;\n  };\n"
+            "  AnimationStateMap animation_state_map_;\n};\n",
+            INTEGRATE.patch_cc_image_animation_controller,
+        )
+        self.assertEqual(1, header.count(INTEGRATE.CC_IMAGE_ANIMATION_STATE_HOLD))
+        self.assertEqual(1, header.count(INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR))
+        # The hold is a member of AnimationState, beside its index accessor.
+        self.assertLess(
+            header.index("class AnimationState"), header.index("void RecorderHoldFrame(")
+        )
+        self.assertIn("if (index >= frames_.size()) {", header)
+        controller = self.patch_source_twice(
+            "image_animation_controller.cc",
+            INTEGRATE.CC_IMAGE_ANIMATION_CONTROLLER_OWN_INCLUDE
+            + "\n\nvoid ImageAnimationController::UpdateAnimatedImage(\n"
+            "    const DiscardableImageMap::AnimatedImageMetadata& data) {\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_UPDATE_ANCHOR
+            + "}\n\n"
+            + INTEGRATE.CC_IMAGE_ANIMATION_SHOULD_ANIMATE_ANCHOR
+            + "  return ShouldAnimate(0, 0);\n}\n",
+            INTEGRATE.patch_cc_image_animation_controller_source,
+        )
+        self.assertEqual(1, controller.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, controller.count(INTEGRATE.CC_IMAGE_ANIMATION_UPDATE_HOOK))
+        self.assertEqual(
+            1, controller.count(INTEGRATE.CC_IMAGE_ANIMATION_SHOULD_ANIMATE_HOOK)
+        )
+        # The hold follows the metadata, which may reset the image's indexes.
+        self.assertLess(
+            controller.index("animation_state.UpdateMetadata("),
+            controller.index("animation_state.RecorderHoldFrame("),
+        )
+        self.assertLess(
+            controller.index("if (a11y_recorder::IsRecreationMode()) {\n    return false;"),
+            controller.index("return ShouldAnimate(0, 0);"),
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        for name, text in (
+            ("image_resource.cc", source),
+            ("image_animation_controller.cc", controller),
+        ):
+            self.assertEqual(
+                [], INTEGRATE.describe_signature_mismatches(name, text, signatures)
+            )
+
+    def test_the_held_image_frames_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_image_frames.h",', build)
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        self.assertIn("HeldImageFrames<base::Lock, base::AutoLock>", source)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_image_frames_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-pthread",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_image_frames_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_the_compositor_values_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_compositor_values.h",', build)
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        self.assertIn("RecreationCompositorValues RecreationCompositorValuesOf(", source)
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_compositor_values_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_compositor_values_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_the_paint_worklet_values_pass_their_native_tests(self):
+        import shutil
+        import subprocess
+
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("no C++ compiler is available")
+        bridge = MODULE_PATH.parent / "recorder_bridge"
+        build = (bridge / "BUILD.gn").read_text(encoding="utf-8")
+        self.assertIn('"recreation_paint_worklet_values.h",', build)
+        header = (bridge / "browser_bridge.h").read_text(encoding="utf-8")
+        self.assertIn(
+            '#include "chromium/recorder_bridge/recreation_paint_worklet_values.h"',
+            header,
+        )
+        source = (bridge / "browser_bridge.cc").read_text(encoding="utf-8")
+        self.assertIn(
+            "RecreationPaintWorkletValues RecreationPaintWorkletValuesOf(\n", source
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "recreation_paint_worklet_values_test"
+            subprocess.run(
+                [
+                    compiler,
+                    "-std=c++20",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{MODULE_PATH.parent.parent}",
+                    str(bridge / "recreation_paint_worklet_values_test.cc"),
+                    "-o",
+                    str(binary),
+                ],
+                check=True,
+            )
+            subprocess.run([str(binary)], check=True)
+
+    def test_upgrades_the_compositor_opacity_style_hook_to_the_paint_worklet_color(self):
+        legacy = INTEGRATE.STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK
+        hook = INTEGRATE.BLINK_RECREATION_STYLE_HOOK
+        self.assertNotEqual(legacy, hook)
+        self.assertNotIn("data-a11y-recorded-paint-worklet", legacy)
+        source = self.STYLE_RESOLVER_SOURCE.replace(
+            INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            legacy + INTEGRATE.BLINK_RECREATION_STYLE_ANCHOR,
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "style_resolver.cc"
+            path.write_text(source, encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            first = path.read_text(encoding="utf-8")
+            INTEGRATE.patch_blink_style_resolver(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(hook))
+        # The paint worklet's color is read from the element's own attribute,
+        # never a user agent shadow copy's, and set last, after the opacity.
+        self.assertIn('AtomicString("data-a11y-recorded-paint-worklet")', hook)
+        self.assertIn(
+            "!element.IsInUserAgentShadowRoot()) {\n      recorder_worklet_color =",
+            hook,
+        )
+        self.assertIn(
+            "recorder_compositor_opacity || recorder_worklet_color) {", hook
+        )
+        self.assertLess(
+            hook.index('("opacity: " + *recorder_compositor_opacity)'),
+            hook.index('"background-color: color(srgb "'),
+        )
+        self.assertLess(
+            hook.index('"background-color: color(srgb "'),
+            hook.index("collector.BeginAddingAuthorRulesForTreeScope("),
+        )
+        self.assertIn('recorder_color[2] + " / " +', hook)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(1, signatures["RecreationPaintWorkletValuesOf"])
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", first, signatures)
+        )
+
+    # Slice 4e (protocol 0.51): page style sheets as they arrive.
+    CSS_STYLE_SHEET_HEADER_SOURCE = (
+        "class CORE_EXPORT CSSStyleSheet final : public StyleSheet {\n"
+        " public:\n"
+        "  void Trace(Visitor*) const override;\n"
+        "\n"
+        " private:\n"
+        "  friend class QuietMutationScope;\n"
+        "};\n"
+    )
+    CSS_STYLE_SHEET_SOURCE = (
+        '#include "third_party/blink/renderer/core/css/css_style_sheet.h"\n'
+        "\n"
+        "namespace blink {\n"
+        "\n"
+        "void CSSStyleSheet::DidMutate(Mutation mutation) {\n"
+        "  if (mutation == Mutation::kRules) {\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "bool CSSStyleSheet::CanAccessRules() const {\n"
+        "  return enable_rule_access_for_inspector_ || contents_->IsOriginClean();\n"
+        "}\n"
+        "\n"
+        "void CSSStyleSheet::SetText(const String& text, CSSImportRules import_rules) {\n"
+        "  DetachCSSOMWrappers();\n"
+        "}\n"
+        "\n"
+        "void CSSStyleSheet::Trace(Visitor* visitor) const {\n"
+        "}\n"
+        "\n"
+        "}  // namespace blink\n"
+    )
+    STYLE_SHEET_CONTENTS_HEADER_SOURCE = (
+        "class CORE_EXPORT StyleSheetContents final {\n"
+        " public:\n"
+        "  void Trace(Visitor*) const;\n"
+        "\n"
+        " private:\n"
+        "  StyleSheetContents& operator=(const StyleSheetContents&) = delete;\n"
+        "};\n"
+    )
+    STYLE_SHEET_CONTENTS_SOURCE = (
+        '#include "third_party/blink/renderer/core/css/style_sheet_contents.h"\n'
+        "\n"
+        "void StyleSheetContents::ParseAuthorStyleSheet(\n"
+        "    const CSSStyleSheetResource* cached_style_sheet) {\n"
+        "  const ResourceResponse& response = cached_style_sheet->GetResponse();\n"
+        "  String sheet_text =\n"
+        "      cached_style_sheet->SheetText(parser_context_, mime_type_check);\n"
+        "  CSSParser::ParseSheet(context, this, sheet_text);\n"
+        "}\n"
+    )
+    STYLE_ENGINE_SOURCE = (
+        '#include "third_party/blink/renderer/core/css/style_engine.h"\n'
+        "\n"
+        "namespace blink {\n"
+        "\n"
+        "void StyleEngine::UpdateActiveStyleSheets() {\n"
+        "  probe::ActiveStyleSheetsUpdated(document_);\n"
+        "\n"
+        "  dirty_tree_scopes_.clear();\n"
+        "}\n"
+        "\n"
+        "}  // namespace blink\n"
+    )
+
+    def test_records_style_sheet_changes_once(self):
+        header = self.patch_source_twice(
+            "css_style_sheet.h",
+            self.CSS_STYLE_SHEET_HEADER_SOURCE,
+            INTEGRATE.patch_blink_css_style_sheet_header,
+        )
+        self.assertEqual(1, header.count(INTEGRATE.BLINK_CSS_STYLE_SHEET_HEADER))
+        # The members are public, before the private section.
+        self.assertLess(
+            header.index("uint64_t recorder_sheet_number_ = 0;"),
+            header.index(" private:"),
+        )
+        source = self.patch_source_twice(
+            "css_style_sheet.cc",
+            self.CSS_STYLE_SHEET_SOURCE,
+            INTEGRATE.patch_blink_css_style_sheet,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        for hook in (
+            INTEGRATE.BLINK_CSS_STYLE_SHEET_DID_MUTATE_HOOK,
+            INTEGRATE.BLINK_CSS_STYLE_SHEET_SET_TEXT_HOOK,
+            INTEGRATE.BLINK_CSS_STYLE_SHEET_CAN_ACCESS_HOOK,
+            INTEGRATE.BLINK_CSS_STYLE_SHEET_DEFINITIONS,
+        ):
+            self.assertEqual(1, source.count(hook))
+        # A change of the sheet's disabled state alone is not a change of its
+        # rules; replace() and replaceSync() are.
+        self.assertIn(
+            "if (mutation != Mutation::kSheet) {\n    recorder_cssom_changed_ = true;",
+            source,
+        )
+        # Rules are reachable by the builder only in the recreation mode.
+        self.assertIn(
+            "if (a11y_recorder::IsRecreationMode()) {\n    return true;\n  }",
+            source,
+        )
+        # The CSSOM text is built as DevTools builds it.
+        self.assertIn("recorder_builder.Append(ItemInternal(i)->cssText());", source)
+
+    def test_records_the_text_a_style_sheet_arrived_with_once(self):
+        header = self.patch_source_twice(
+            "style_sheet_contents.h",
+            self.STYLE_SHEET_CONTENTS_HEADER_SOURCE,
+            INTEGRATE.patch_blink_style_sheet_contents_header,
+        )
+        self.assertEqual(1, header.count("String recorder_arrived_digest_;"))
+        source = self.patch_source_twice(
+            "style_sheet_contents.cc",
+            self.STYLE_SHEET_CONTENTS_SOURCE,
+            INTEGRATE.patch_blink_style_sheet_contents,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK))
+        # Recorded after the text is decoded and before it is parsed.
+        self.assertLess(
+            source.index("RecordBlinkStyleSheetResource"),
+            source.index("CSSParser::ParseSheet"),
+        )
+        self.assertIn("recorder_sheet.text = sheet_text.Utf8();", source)
+
+    def test_records_each_active_style_sheet_update_once(self):
+        source = self.patch_source_twice(
+            "style_engine.cc",
+            self.STYLE_ENGINE_SOURCE,
+            INTEGRATE.patch_blink_style_engine_style_sheets,
+        )
+        for include in INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS))
+        self.assertEqual(1, source.count("a11y_recorder::RecordBlinkStyleSheetsUpdated("))
+        # The helpers come before the update, and the record before the probe,
+        # while the dirty tree scopes are still known.
+        self.assertLess(
+            source.index("void RecorderAppendStyleSheet("),
+            source.index("void StyleEngine::UpdateActiveStyleSheets() {"),
+        )
+        self.assertLess(
+            source.index("RecordBlinkStyleSheetsUpdated("),
+            source.index("probe::ActiveStyleSheetsUpdated(document_);"),
+        )
+        self.assertLess(
+            source.index("probe::ActiveStyleSheetsUpdated(document_);"),
+            source.index("dirty_tree_scopes_.clear();"),
+        )
+        helpers = INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS
+        # Only a sheet script changed, or a constructed one, is serialized,
+        # and only when its rules changed since it last was.
+        self.assertIn(
+            "if (sheet.recorder_cssom_changed_ || sheet.recorder_cssom_digest_.empty()) {",
+            helpers,
+        )
+        self.assertIn("sheet.IsConstructed() || (contents && contents->IsMutable())", helpers)
+        # Imports follow the sheet that imports them.
+        self.assertIn("DynamicTo<CSSImportRule>(sheet.ItemInternal(i))", helpers)
+        self.assertIn("for (CSSStyleSheet* sheet : *tree_scope.AdoptedStyleSheets())", helpers)
+
+    def test_upgrades_the_first_style_sheet_hooks(self):
+        # blink::String has FromUtf8 of a byte span, not FromUTF8.
+        self.assertIn("String::FromUTF8(", INTEGRATE.STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK)
+        self.assertEqual(2, INTEGRATE.STAGE_AB95_BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS.count("String::FromUTF8("))
+        for current in (
+            INTEGRATE.BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+            INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS,
+        ):
+            self.assertNotIn("FromUTF8", current)
+            self.assertIn("String::FromUtf8(base::as_byte_span(", current)
+        legacy_contents = self.STYLE_SHEET_CONTENTS_SOURCE.replace(
+            INTEGRATE.BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR,
+            INTEGRATE.STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+            1,
+        )
+        patched = self.patch_source_twice(
+            "style_sheet_contents.cc", legacy_contents, INTEGRATE.patch_blink_style_sheet_contents
+        )
+        self.assertNotIn("FromUTF8", patched)
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK))
+        legacy_engine = self.STYLE_ENGINE_SOURCE.replace(
+            INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_ANCHOR,
+            INTEGRATE.STAGE_AB95_BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS
+            + INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_ANCHOR,
+            1,
+        )
+        patched = self.patch_source_twice(
+            "style_engine.cc", legacy_engine, INTEGRATE.patch_blink_style_engine_style_sheets
+        )
+        self.assertNotIn("FromUTF8", patched)
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS))
+
+    # Slice 4f (protocol 0.52): who scheduled each timer.
+    def test_notes_who_scheduled_a_timer_before_its_record_once(self):
+        source = (
+            '#include "third_party/blink/renderer/core/scheduler/dom_timer.h"\n'
+            "\n"
+            "namespace blink {\n"
+            "namespace {\n"
+            "constexpr int kValue = 1;\n"
+            "}  // namespace\n"
+            "\n"
+            "DOMTimer::DOMTimer(ExecutionContext& context,\n"
+            "                   ScheduledAction* action) {\n"
+            + INTEGRATE.BLINK_TIMER_SCHEDULED_HOOK
+            + "}\n"
+            "\n"
+            "}  // namespace blink\n"
+        )
+        patched = self.patch_source_twice(
+            "dom_timer.cc", source, INTEGRATE.patch_blink_dom_timer_origin
+        )
+        for include in INTEGRATE.BLINK_DOM_TIMER_ORIGIN_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_DOM_TIMER_ORIGIN_HELPERS))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_TIMER_ORIGIN_HOOK))
+        # The helpers are in the file's anonymous namespace, and the origin is
+        # noted before the scheduled record that takes it.
+        self.assertLess(
+            patched.index("RecorderTimerOrigin(ExecutionContext& context,"),
+            patched.index("}  // namespace\n"),
+        )
+        self.assertLess(
+            patched.index("NoteBlinkTimerOrigin("),
+            patched.index("RecordBlinkTimerScheduled("),
+        )
+        helpers = INTEGRATE.BLINK_DOM_TIMER_ORIGIN_HELPERS
+        self.assertIn("DOMWrapperWorld::Current(isolate)", helpers)
+        self.assertIn("v8::StackTrace::CurrentStackTrace(", helpers)
+        self.assertIn("kMaximumTimerOriginFrames", helpers)
+        self.assertIn("action->CallbackFunction()", helpers)
+        self.assertIn("origin.string_handler = true;", helpers)
+        # V8 gives a function's position zero-based and a stack frame's
+        # one-based; both are recorded one-based.
+        self.assertIn("line >= 0 ? line + 1 : 0", helpers)
+
+    def test_notes_the_element_of_a_running_script_once(self):
+        source = (
+            '#include "third_party/blink/renderer/core/script/pending_script.h"\n'
+            "\n"
+            "namespace blink {\n"
+            "\n"
+            + INTEGRATE.BLINK_PENDING_SCRIPT_HELPERS_ANCHOR
+            + "    Script* script,\n"
+            "    ScriptElementBase* element,\n"
+            "    bool is_external) {\n"
+            "    context_document->PushCurrentScript(current_script);\n"
+            + INTEGRATE.BLINK_PENDING_SCRIPT_RUN_ANCHOR
+            + "    context_document->PopCurrentScript(current_script);\n"
+            "}\n"
+            "\n"
+            "}  // namespace blink\n"
+        )
+        patched = self.patch_source_twice(
+            "pending_script.cc", source, INTEGRATE.patch_blink_pending_script
+        )
+        for include in INTEGRATE.BLINK_PENDING_SCRIPT_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PENDING_SCRIPT_HELPERS))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_PENDING_SCRIPT_RUN_HOOK))
+        self.assertEqual(1, patched.count("script->RunScript("))
+        # The element is noted just before the run and forgotten just after.
+        self.assertLess(
+            patched.index("RecorderNoteScriptElement(\n        script"),
+            patched.index("script->RunScript("),
+        )
+        self.assertLess(
+            patched.index("script->RunScript("),
+            patched.index("PopBlinkScriptElement("),
+        )
+        helpers = INTEGRATE.BLINK_PENDING_SCRIPT_HELPERS
+        self.assertIn("record->IsSourceTextModule()", helpers)
+        self.assertIn("a11y_recorder::RecordBlinkScriptSource(", helpers)
+        self.assertIn("a11y_recorder::PushBlinkScriptElement(", helpers)
+        # Only an external script's address is recorded.
+        self.assertIn("if (is_external) {", helpers)
+
+    def test_records_the_script_id_of_a_classic_script_once(self):
+        source = (
+            INTEGRATE.BLINK_V8_SCRIPT_RUNNER_OWN_INCLUDE
+            + "\n\n"
+            "    if (V8ScriptRunner::CompileScript(script_state, *classic_script)\n"
+            "            .ToLocal(&script)) {\n"
+            + INTEGRATE.BLINK_V8_SCRIPT_RUNNER_COMPILED_ANCHOR
+            + "      maybe_result = V8ScriptRunner::RunCompiledScript(isolate, script);\n"
+            "    }\n"
+        )
+        patched = self.patch_source_twice(
+            "v8_script_runner.cc", source, INTEGRATE.patch_blink_v8_script_runner
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, patched.count("RecordBlinkClassicScriptCompiled("))
+        # Recorded after the compile and before the run, which may schedule
+        # timers from the script.
+        self.assertLess(
+            patched.index("RecordBlinkClassicScriptCompiled("),
+            patched.index("RunCompiledScript("),
+        )
+
+    def test_records_the_element_of_an_attribute_handler_once(self):
+        source = (
+            INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_OWN_INCLUDE
+            + "\n\n"
+            "  if (!maybe_result.ToLocal(&compiled_function))\n"
+            "    return v8::Null(isolate);\n"
+            "\n"
+            + INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_ANCHOR
+            + "  compiled_function->SetName(V8String(isolate, function_name_));\n"
+        )
+        patched = self.patch_source_twice(
+            "js_event_handler_for_content_attribute.cc",
+            source,
+            INTEGRATE.patch_blink_content_attribute_handler,
+        )
+        for include in INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_INCLUDES:
+            self.assertEqual(1, patched.count(include + "\n"))
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_HOOK))
+        self.assertEqual(1, patched.count("// Step 12."))
+        hook = INTEGRATE.BLINK_CONTENT_ATTRIBUTE_HANDLER_HOOK
+        self.assertIn("compiled_function->ScriptId()", hook)
+        self.assertIn("kScriptSourceKindEventHandlerAttribute", hook)
+        self.assertIn("function_name_.Utf8()", hook)
+        self.assertIn("window ? document->body() : nullptr", hook)
+
+    def test_slice_4f_hooks_call_declared_bridge_functions(self):
+        header = (Path(__file__).parent / "recorder_bridge" / "browser_bridge.h").read_text(
+            encoding="utf-8"
+        )
+        for name in (
+            "NoteBlinkTimerOrigin",
+            "RecordBlinkScriptSource",
+            "PushBlinkScriptElement",
+            "PopBlinkScriptElement",
+            "RecordBlinkClassicScriptCompiled",
+        ):
+            self.assertIn(f"void {name}(", header)
+
+    def test_style_sheet_bridge_calls_match_the_bridge(self):
+        bridge = (Path(__file__).parent / "recorder_bridge" / "browser_bridge.h").read_text(encoding="utf-8")
+        for name in (
+            "RecordBlinkStyleSheetResource",
+            "RecordBlinkStyleSheetText",
+            "AssignStyleSheetNumber",
+            "RecordBlinkStyleSheetsUpdated",
+        ):
+            self.assertIn(name + "(", bridge)
+        signatures = INTEGRATE.parse_bridge_signatures(bridge)
+        INTEGRATE.verify_hook_templates(signatures)
+
+    CLIP_PATH_CLIPPER_SOURCE = (
+        INTEGRATE.BLINK_CLIP_PATH_CLIPPER_OWN_INCLUDE
+        + "\n\nnamespace blink {\n\n"
+        + INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR
+        + INTEGRATE.BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR
+        + "  return std::nullopt;\n}\n\n"
+        + INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_ANCHOR
+        + "  return std::nullopt;\n}\n\n}  // namespace blink\n"
+    )
+
+    def test_upgrades_the_first_paint_worklet_clip_path_helper(self):
+        legacy = INTEGRATE.STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS
+        helpers = INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS
+        # DOMNodeIds::IdForNode takes a Node, not a const Element.
+        self.assertIn("DOMNodeIds::IdForNode(recorder_element)", legacy)
+        self.assertNotIn("DOMNodeIds::IdForNode(recorder_element)", helpers)
+        self.assertIn(
+            "Node* recorder_node = object.GetNode();\n"
+            "    const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_node);",
+            helpers,
+        )
+        source = self.CLIP_PATH_CLIPPER_SOURCE.replace(
+            INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR,
+            legacy + INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR,
+            1,
+        )
+        patched = self.patch_source_twice(
+            "clip_path_clipper.cc", source, INTEGRATE.patch_blink_clip_path_clipper
+        )
+        self.assertNotIn(legacy, patched)
+        self.assertEqual(1, patched.count(helpers))
+
+    def test_imposes_the_paint_worklet_clip_paths_once(self):
+        source = self.patch_source_twice(
+            "clip_path_clipper.cc",
+            self.CLIP_PATH_CLIPPER_SOURCE,
+            INTEGRATE.patch_blink_clip_path_clipper,
+        )
+        for include in INTEGRATE.BLINK_CLIP_PATH_CLIPPER_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CLIP_PATH_BOUNDING_BOX_HOOK))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK))
+        # The helper comes before both uses.
+        self.assertLess(
+            source.index("static std::optional<Path> RecorderPaintWorkletClipPath("),
+            source.index("std::optional<gfx::RectF> ClipPathClipper::LocalClipPathBoundingBox("),
+        )
+        helpers = INTEGRATE.BLINK_CLIP_PATH_CLIPPER_HELPERS
+        # Only while the recreation holds time, from the element's own
+        # attribute, and only for a basic shape the style gives it.
+        self.assertIn("if (!a11y_recorder::RecreationHoldsTime() || object.IsAnonymous() ||", helpers)
+        self.assertIn("recorder_element->IsInUserAgentShadowRoot()", helpers)
+        self.assertIn("!IsA<ShapeClipPathOperation>(*recorder_operation)", helpers)
+        self.assertIn('AtomicString("data-a11y-recorded-paint-worklet")', helpers)
+        # The recorded points are used unchanged at the recorded origin, and
+        # moved, with a console message, elsewhere.
+        self.assertIn("recorder_dx != 0 || recorder_dy != 0", helpers)
+        self.assertIn("if (recorder_moved && report) {", helpers)
+        self.assertIn("/*discard_duplicates=*/true", helpers)
+        # The bounding box is without the paint offset and says nothing; the
+        # path-based clip is at the paint offset.
+        self.assertIn(
+            "object, gfx::Vector2dF(), /*report=*/false)",
+            INTEGRATE.BLINK_CLIP_PATH_BOUNDING_BOX_HOOK,
+        )
+        self.assertIn(
+            "clip_path_owner, clip_offset, /*report=*/true)",
+            INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK,
+        )
+        # The path-based clip hook comes before Blink's own clip.
+        hook = source.index(INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK)
+        self.assertEqual(
+            "  return std::nullopt;\n}",
+            source[
+                hook + len(INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK) : hook
+                + len(INTEGRATE.BLINK_CLIP_PATH_PATH_BASED_HOOK)
+                + len("  return std::nullopt;\n}")
+            ],
+        )
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, signatures)
+        )
+
+    def test_holds_css_animations_and_transitions_once(self):
+        source = self.patch_source_twice(
+            "css_animations.cc",
+            INTEGRATE.BLINK_CSS_ANIMATIONS_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_CSS_ANIMATION_UPDATE_ANCHOR
+            + "  update.Clear();\n}\n\n"
+            + INTEGRATE.BLINK_CSS_TRANSITION_UPDATE_ANCHOR
+            + "  update.Clear();\n}\n\n}  // namespace blink\n",
+            INTEGRATE.patch_blink_css_animations,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CSS_ANIMATION_UPDATE_HOOK))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_CSS_TRANSITION_UPDATE_HOOK))
+        # Each returns before it changes the update.
+        self.assertEqual(2, source.count("if (a11y_recorder::RecreationHoldsTime()) {\n    return;\n  }\n  update.Clear();"))
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(0, signatures["RecreationHoldsTime"])
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, signatures)
+        )
+
+    PAINT_PROPERTY_SOURCE = (
+        INTEGRATE.BLINK_PAINT_PROPERTY_TREE_BUILDER_OWN_INCLUDE
+        + "\n\nnamespace blink {\nnamespace {\n\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_HELPERS_ANCHOR
+        + "  return false;\n}\n\n"
+        + "void FragmentPaintPropertyTreeBuilder::UpdateIndividualTransform() {\n"
+        + "    if (needs) {\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_TRANSFORM_ANCHOR
+        + INTEGRATE.BLINK_PAINT_PROPERTY_NO_TRANSFORM_ANCHOR
+        + "}\n\n"
+        + "static void UpdateFilterEffect(const LayoutObject& object) {\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_FILTER_ANCHOR
+        + "}\n\n"
+        + "void FragmentPaintPropertyTreeBuilder::UpdateFilter() {\n"
+        + "    if (needs) {\n"
+        + "      Update();\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_NO_FILTER_ANCHOR
+        + "}\n\n"
+        + "void FragmentPaintPropertyTreeBuilder::PopulateBackdropFilterIfNeeded() {\n"
+        + INTEGRATE.BLINK_PAINT_PROPERTY_BACKDROP_ANCHOR
+        + "}\n\n}  // namespace\n}  // namespace blink\n"
+    )
+
+    def test_imposes_the_compositor_values_on_the_paint_properties_once(self):
+        source = self.patch_source_twice(
+            "paint_property_tree_builder.cc",
+            self.PAINT_PROPERTY_SOURCE,
+            INTEGRATE.patch_blink_paint_property_tree_builder,
+        )
+        for include in INTEGRATE.BLINK_PAINT_PROPERTY_TREE_BUILDER_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_PAINT_PROPERTY_HELPERS))
+        # The helpers come before their first use.
+        self.assertLess(
+            source.index("static void RecorderImposeFilters("),
+            source.index("static bool NeedsIndividualTransform("),
+        )
+        for hook in (
+            INTEGRATE.BLINK_PAINT_PROPERTY_TRANSFORM_HOOK,
+            INTEGRATE.BLINK_PAINT_PROPERTY_NO_TRANSFORM_HOOK,
+            INTEGRATE.BLINK_PAINT_PROPERTY_FILTER_HOOK,
+            INTEGRATE.BLINK_PAINT_PROPERTY_NO_FILTER_HOOK,
+            INTEGRATE.BLINK_PAINT_PROPERTY_BACKDROP_HOOK,
+        ):
+            self.assertEqual(1, source.count(hook))
+        helpers = INTEGRATE.BLINK_PAINT_PROPERTY_HELPERS
+        # Values are read only while the recreation holds time, from the
+        # element's own attribute, never a user agent shadow copy's.
+        self.assertIn("if (!a11y_recorder::RecreationHoldsTime() || object.IsAnonymous()) {", helpers)
+        self.assertIn("recorder_element->IsInUserAgentShadowRoot()", helpers)
+        self.assertIn('AtomicString("data-a11y-recorded-compositor")', helpers)
+        # A filter is replaced only when its operations match, and what the
+        # record does not hold is kept from Blink's own operation.
+        self.assertIn("recorder_current.size() != recorder_recorded->size()", helpers)
+        self.assertIn("recorder_own.blur_tile_mode()", helpers)
+        self.assertIn("operations.AppendReferenceFilter(recorder_own.image_filter());", helpers)
+        self.assertLess(
+            helpers.index("RecorderReportCompositorNotImposed(\n          object, recorder_property,\n          \"an operation"),
+            helpers.index("operations.ReleaseCcFilterOperations();"),
+        )
+        # The transform's matrix is replaced and its origin kept.
+        transform = INTEGRATE.BLINK_PAINT_PROPERTY_TRANSFORM_HOOK
+        self.assertIn("state.transform_and_origin.matrix = gfx::Transform::RowMajor(", transform)
+        self.assertNotIn("transform_and_origin.origin", transform)
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(1, signatures["RecreationCompositorValuesOf"])
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, signatures)
+        )
+
+    def test_each_paint_image_made_from_an_image_is_recorded_once(self):
+        source = self.patch_source_twice(
+            "bitmap_image.cc",
+            INTEGRATE.BLINK_BITMAP_IMAGE_OWN_INCLUDE
+            + "\n\nPaintImage BitmapImage::PaintImageForCurrentFrameWithInfo() {\n"
+            + INTEGRATE.BLINK_BITMAP_IMAGE_PAINT_IMAGE_ANCHOR
+            + "  new_frame.GetSwSkImage();\n  return new_frame;\n}\n",
+            INTEGRATE.patch_blink_bitmap_image,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_BITMAP_IMAGE_PAINT_IMAGE_HOOK))
+        # The paint image is recorded once it is made, and only when made.
+        self.assertLess(
+            source.index("CreatePaintImage(paint_id"),
+            source.index("a11y_recorder::RecordBlinkImagePaintImage("),
+        )
+        self.assertIn("if (new_frame && a11y_recorder::GetProcessRecorderClient())", source)
+        self.assertIn("recorder_facts.image_id = paint_image_id();", source)
+        self.assertIn("if (id != kNormalCachedFrameId) {", source)
+        self.assertIn("PaintImage::AnimationSyncSequence::kOwn", source)
+        self.assertEqual(1, source.count('A11Y_RECORDER_HOOK_COST("hook:image-paint-image");'))
+        signatures = INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "bitmap_image.cc", source, signatures
+            ),
+        )
+
+    def test_adds_the_item_setters_and_the_recorded_shaping_result_once(self):
+        header = self.patch_source_twice(
+            "fragment_item.h",
+            "class FragmentItem {\n public:\n"
+            + INTEGRATE.BLINK_RECREATION_ITEM_SETTERS_ANCHOR
+            + "};\n",
+            INTEGRATE.patch_blink_fragment_item_header,
+        )
+        self.assertEqual(1, header.count(INTEGRATE.BLINK_RECREATION_ITEM_SETTERS))
+        self.assertLess(
+            header.index(INTEGRATE.BLINK_RECREATION_ITEM_SETTERS_ANCHOR),
+            header.index(INTEGRATE.BLINK_RECREATION_ITEM_SETTERS),
+        )
+        declaration = self.patch_source_twice(
+            "shape_result.h",
+            "class ShapeResult {\n public:\n"
+            + INTEGRATE.BLINK_RECREATION_SHAPE_DECLARATION_ANCHOR
+            + "};\n",
+            INTEGRATE.patch_blink_shape_result_header,
+        )
+        self.assertEqual(
+            1, declaration.count(INTEGRATE.BLINK_RECREATION_SHAPE_DECLARATION)
+        )
+        definition = self.patch_source_twice(
+            "shape_result.cc",
+            "namespace blink {\n"
+            + INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION_ANCHOR
+            + "}\n",
+            INTEGRATE.patch_blink_shape_result,
+        )
+        self.assertEqual(
+            1, definition.count(INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION)
+        )
+        self.assertIn(
+            "run_glyphs[i] = {glyphs[i].glyph, glyphs[i].character_index,",
+            INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION,
+        )
+        self.assertIn(
+            "start_index, num_glyphs, num_characters",
+            INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION,
+        )
+
+    def test_upgrades_the_feasibility_hooks_to_stage_3(self):
+        box = self.patch_source_twice(
+            "box_fragment_builder.cc",
+            self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+                INTEGRATE.LEGACY_FEASIBILITY_FRAGMENT_HELPER
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+            ).replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                INTEGRATE.LEGACY_FEASIBILITY_FRAGMENT_HOOK
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_box_fragment_builder,
+        )
+        self.assertNotIn(INTEGRATE.LEGACY_FEASIBILITY_FRAGMENT_HELPER, box)
+        self.assertNotIn(INTEGRATE.LEGACY_FEASIBILITY_FRAGMENT_HOOK, box)
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER))
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+        items = self.patch_source_twice(
+            "fragment_items_builder.cc",
+            '#include "third_party/blink/renderer/core/layout/inline/'
+            'fragment_items_builder.h"\n'
+            + INTEGRATE.LEGACY_FEASIBILITY_ITEMS_HELPER
+            + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER_ANCHOR
+            + INTEGRATE.LEGACY_FEASIBILITY_ITEMS_HOOK
+            + INTEGRATE.BLINK_RECREATION_ITEMS_ANCHOR
+            + "LayoutUnit offset, bool b) {}\n",
+            INTEGRATE.patch_blink_fragment_items_builder,
+        )
+        self.assertNotIn("RecorderRecordedEntries(", items)
+        self.assertEqual(1, items.count(INTEGRATE.BLINK_RECREATION_ITEMS_HELPER))
+        self.assertEqual(1, items.count(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK))
+        declaration = self.patch_source_twice(
+            "shape_result.h",
+            "class ShapeResult {\n public:\n"
+            + INTEGRATE.LEGACY_FEASIBILITY_SHAPE_DECLARATION
+            + INTEGRATE.BLINK_RECREATION_SHAPE_DECLARATION_ANCHOR
+            + "};\n",
+            INTEGRATE.patch_blink_shape_result_header,
+        )
+        self.assertNotIn("UChar32 code_point;", declaration)
+        self.assertEqual(
+            1, declaration.count(INTEGRATE.BLINK_RECREATION_SHAPE_DECLARATION)
+        )
+        definition = self.patch_source_twice(
+            "shape_result.cc",
+            "namespace blink {\n"
+            + INTEGRATE.LEGACY_FEASIBILITY_SHAPE_DEFINITION
+            + INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION_ANCHOR
+            + "}\n",
+            INTEGRATE.patch_blink_shape_result,
+        )
+        self.assertNotIn("code_point", definition)
+        self.assertEqual(
+            1, definition.count(INTEGRATE.BLINK_RECREATION_SHAPE_DEFINITION)
+        )
+
+    def test_upgrades_the_box_hook_that_did_not_compile(self):
+        self.assertNotEqual(
+            INTEGRATE.INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK,
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK,
+        )
+        self.assertIn(
+            "const auto* recorder_node = node_.GetDOMNode();",
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK,
+        )
+        box = self.patch_source_twice(
+            "box_fragment_builder.cc",
+            self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+            ).replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                INTEGRATE.INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_box_fragment_builder,
+        )
+        self.assertNotIn(
+            "    const Node* recorder_node = node_.GetDOMNode();\n", box
+        )
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+
+    def test_upgrades_the_stage_3_box_hook_to_children_matched_by_node(self):
+        self.assertNotIn(
+            INTEGRATE.STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER,
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER,
+        )
+        self.assertNotIn(
+            INTEGRATE.STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK,
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK,
+        )
+        box = self.patch_source_twice(
+            "box_fragment_builder.cc",
+            self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+                INTEGRATE.STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+            ).replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                INTEGRATE.STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_box_fragment_builder,
+        )
+        self.assertNotIn(
+            "children from its recorded fragment, so its children keep", box
+        )
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER))
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+
+    def test_upgrades_the_node_id_helper_that_did_not_compile(self):
+        self.assertNotEqual(
+            INTEGRATE.INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HELPER,
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER,
+        )
+        self.assertIn(
+            "recorder_text.starts_with(kRecorderPrefix)",
+            INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER,
+        )
+        box = self.patch_source_twice(
+            "box_fragment_builder.cc",
+            self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+                INTEGRATE.INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HELPER
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+            ).replace(
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK
+                + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+            ),
+            INTEGRATE.patch_blink_box_fragment_builder,
+        )
+        self.assertNotIn(".GetString().StartsWith(", box)
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HELPER))
+        self.assertEqual(1, box.count(INTEGRATE.BLINK_RECREATION_FRAGMENT_HOOK))
+
+    def test_refuses_a_feasibility_hook_it_cannot_upgrade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "box_fragment_builder.cc"
+            path.write_text(
+                self.BOX_FRAGMENT_BUILDER_SOURCE.replace(
+                    INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                    '  // edited "data-a11y-recorded-fragment"\n'
+                    + INTEGRATE.BLINK_RECREATION_FRAGMENT_ANCHOR,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "not upgraded to stage 3"):
+                INTEGRATE.patch_blink_box_fragment_builder(path)
+
+    def test_upgrades_the_items_hook_that_did_not_compile(self):
+        self.assertNotEqual(
+            INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK,
+            INTEGRATE.LEGACY_FEASIBILITY_ITEMS_HOOK,
+        )
+        source = (
+            '#include "third_party/blink/renderer/core/layout/inline/'
+            'fragment_items_builder.h"\n'
+            + INTEGRATE.LEGACY_FEASIBILITY_ITEMS_HELPER
+            + INTEGRATE.BLINK_RECREATION_ITEMS_HELPER_ANCHOR
+            + INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK
+            + INTEGRATE.BLINK_RECREATION_ITEMS_ANCHOR
+            + "LayoutUnit offset, bool b) {}\n"
+        )
+        patched = self.patch_source_twice(
+            "fragment_items_builder.cc",
+            source,
+            INTEGRATE.patch_blink_fragment_items_builder,
+        )
+        self.assertNotIn(
+            INTEGRATE.INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, patched
+        )
+        self.assertEqual(1, patched.count(INTEGRATE.BLINK_RECREATION_ITEMS_HOOK))
+
+
+class ScriptSourceIntegrationTests(unittest.TestCase):
+    """Slice 4h (protocol 0.54): the page's script source."""
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def signatures(self):
+        return {
+            **INTEGRATE.parse_bridge_signatures(
+                (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+                .read_text(encoding="utf-8")
+            ),
+            **INTEGRATE.V8_SCRIPT_HOOK_ENTRY_POINTS,
+        }
+
+    def test_v8_gives_each_instantiated_script_to_the_hook_once(self):
+        source = self.patch_twice(
+            "debug.cc",
+            INTEGRATE.V8_DEBUG_OWN_INCLUDE
+            + "\n\nnamespace v8 {\nnamespace internal {\n\n"
+            + INTEGRATE.V8_DEBUG_REPORT_ANCHOR
+            + "  ProcessCompileEvent(true, script);\n}\n\n"
+            + INTEGRATE.V8_DEBUG_AFTER_COMPILE_ANCHOR
+            + "\n"
+            + INTEGRATE.V8_DEBUG_END_ANCHOR,
+            INTEGRATE.patch_v8_debug,
+        )
+        for include in INTEGRATE.V8_DEBUG_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.V8_DEBUG_REPORT))
+        self.assertEqual(1, source.count(INTEGRATE.V8_DEBUG_AFTER_COMPILE_HOOK))
+        # The report is defined before its first use and inside V8's
+        # namespaces; the hook storage follows them.
+        self.assertLess(
+            source.index("void A11yRecorderReportScript("),
+            source.index("A11yRecorderReportScript(isolate_, script, false);"),
+        )
+        self.assertTrue(source.endswith(INTEGRATE.V8_DEBUG_END))
+        report = INTEGRATE.V8_DEBUG_REPORT
+        # Only normal, non-temporary scripts with string source.
+        self.assertIn("script->type() != Script::Type::kNormal", report)
+        self.assertIn("Script::kTemporaryScriptId", report)
+        self.assertIn("if (!IsString(*source)) {", report)
+        self.assertIn("facts.is_module = script->origin_options().IsModule();", report)
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, self.signatures())
+        )
+
+    def test_a_script_that_fails_to_compile_is_given_to_the_hook(self):
+        source = self.patch_twice(
+            "pending-compilation-error-handler.cc",
+            INTEGRATE.V8_COMPILE_ERROR_OWN_INCLUDE
+            + "\n\nnamespace v8 {\nnamespace internal {\n\n"
+            + INTEGRATE.V8_COMPILE_ERROR_DECLARATION_ANCHOR
+            + "    Isolate* isolate, Handle<Script> script) const {\n"
+            + INTEGRATE.V8_COMPILE_ERROR_ANCHOR
+            + "}\n\n}  // namespace internal\n}  // namespace v8\n",
+            INTEGRATE.patch_v8_compile_error,
+        )
+        self.assertEqual(1, source.count(INTEGRATE.V8_COMPILE_ERROR_DECLARATION))
+        self.assertEqual(1, source.count(INTEGRATE.V8_COMPILE_ERROR_HOOK))
+        self.assertIn("A11yRecorderReportScript(isolate, script, true);", source)
+
+    def test_blink_records_main_thread_scripts_outside_devtools_commands(self):
+        source = self.patch_twice(
+            "v8_initializer.cc",
+            INTEGRATE.BLINK_V8_INITIALIZER_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            + INTEGRATE.BLINK_V8_INITIALIZER_HELPERS_ANCHOR
+            + INTEGRATE.BLINK_V8_INITIALIZER_INSTALL_ANCHOR
+            + "}\n\n}  // namespace blink\n",
+            INTEGRATE.patch_blink_v8_initializer,
+        )
+        for include in INTEGRATE.BLINK_V8_INITIALIZER_INCLUDES:
+            self.assertEqual(1, source.count(include + "\n"))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_V8_INITIALIZER_HELPERS))
+        self.assertEqual(1, source.count(INTEGRATE.BLINK_V8_INITIALIZER_INSTALL_HOOK))
+        helpers = INTEGRATE.BLINK_V8_INITIALIZER_HELPERS
+        self.assertIn("a11y_recorder::InDevToolsCommand()", helpers)
+        self.assertIn("!IsMainThread()", helpers)
+        self.assertIn("WorldType::kInspectorIsolated ||", helpers)
+        # Once per script ID, before the text is converted.
+        self.assertLess(
+            helpers.index("a11y_recorder::ClaimScriptParsed(script.script_id)"),
+            helpers.index("RecorderScriptText(isolate, script.source)"),
+        )
+        self.assertIn("v8::String::WriteFlags::kReplaceInvalidUtf8", helpers)
+        self.assertIn('A11Y_RECORDER_HOOK_COST("hook:script-parsed");', helpers)
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, self.signatures())
+        )
+
+    def test_devtools_commands_are_bracketed_on_the_main_thread(self):
+        source = self.patch_twice(
+            "devtools_session.cc",
+            INTEGRATE.BLINK_DEVTOOLS_SESSION_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\nvoid Detach() {\n"
+            + "  agent_->client_->DebuggerTaskStarted();\n"
+            + "  agent_->client_->DebuggerTaskFinished();\n}\n\n"
+            + "void Dispatch() {\n"
+            + INTEGRATE.BLINK_DEVTOOLS_SESSION_START_ANCHOR
+            + "          method)) {\n  } else {\n"
+            + INTEGRATE.BLINK_DEVTOOLS_SESSION_FINISH_ANCHOR
+            + "}\n\n}  // namespace blink\n",
+            INTEGRATE.patch_blink_devtools_session,
+        )
+        self.assertEqual(1, source.count("a11y_recorder::EnterDevToolsCommand();"))
+        self.assertEqual(1, source.count("a11y_recorder::LeaveDevToolsCommand();"))
+        self.assertLess(
+            source.index("EnterDevToolsCommand"), source.index("LeaveDevToolsCommand")
+        )
+        self.assertEqual(
+            [], INTEGRATE.describe_signature_mismatches("patched", source, self.signatures())
+        )
+
+    def test_the_bridge_records_script_parsed_and_script_text(self):
+        bridge = (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc").read_text(
+            encoding="utf-8"
+        )
+        build = (MODULE_PATH.parent / "recorder_bridge" / "BUILD.gn").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"v8_script_hook.h",', build)
+        self.assertIn('constexpr char kScriptChannel[] = "browser.script";', bridge)
+        self.assertIn('SendBlinkEvidence(kScriptChannel, "script-parsed",', bridge)
+        self.assertIn('"script-text", digest,', bridge)
+        self.assertIn("std::move(facts.source), kScriptChannel);", bridge)
+        for field in (
+            "scriptId", "kind", "url", "sourceUrl", "sourceMapUrl", "line", "column",
+            "evalFromScriptId", "compileError", "digest", "size", "textRecorded",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(f'payload.Set("{field}",', bridge)
+
+
+class FrameOwnerIntegrationTests(unittest.TestCase):
+    """Slice 5a (protocol 0.55): which frame each owner element holds."""
+
+    def document_source(self, helper=""):
+        return (
+            '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+            "\n"
+            f"{helper}"
+            "void Document::FinishedParsing() {\n"
+            "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+            "\n"
+            "}\n"
+            "\n"
+            "void Document::NotifyChangeChildren(\n"
+            "    const ContainerNode& container,\n"
+            "    const ContainerNode::ChildrenChange& change) {\n"
+            "}\n"
+        )
+
+    def signatures(self):
+        return INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def test_a_walk_names_its_frame_and_each_owner_s_frame(self):
+        helper = INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER
+        self.assertIn(
+            "recorder_document_frame->GetDevToolsFrameToken().ToString()", helper
+        )
+        self.assertIn(
+            "recorder_document_frame && recorder_document_frame->IsMainFrame()",
+            helper,
+        )
+        # The owner's record follows its node record, before its children
+        # are queued.
+        node = helper.index("a11y_recorder::RecordBlinkDomCheckpointNode(")
+        owner = helper.index("a11y_recorder::RecordBlinkDomCheckpointFrameOwner(")
+        children = helper.index("recorder_pending.push_back(recorder_child);")
+        self.assertLess(node, owner)
+        self.assertLess(owner, children)
+        self.assertIn("recorder_content_frame->IsRemoteFrame()", helper)
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "helper", helper, self.signatures()
+            ),
+        )
+
+    def test_upgrades_a_dom_helper_that_names_no_frame(self):
+        legacy = INTEGRATE.LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER
+        self.assertNotIn("GetDevToolsFrameToken", legacy)
+        # The superseded helper calls the started record with four
+        # arguments, which the bridge no longer declares.
+        self.assertNotEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "legacy", legacy, self.signatures()
+            ),
+        )
+        first = self.patch_twice(
+            "document.cc",
+            self.document_source(legacy),
+            INTEGRATE.patch_blink_document,
+        )
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER))
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", first, self.signatures()
+            ),
+        )
+
+    def test_an_owner_records_each_frame_it_is_given_and_its_loss(self):
+        source = (
+            INTEGRATE.BLINK_FRAME_OWNER_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            "void HTMLFrameOwnerElement::SetContentFrame(Frame& frame) {\n"
+            "  content_frame_ = &frame;\n\n"
+            + INTEGRATE.BLINK_FRAME_OWNER_SET_ANCHOR
+            + "\nvoid HTMLFrameOwnerElement::ClearContentFrame() {\n"
+            "  if (!content_frame_)\n    return;\n\n"
+            + INTEGRATE.BLINK_FRAME_OWNER_CLEAR_ANCHOR
+            + "}\n\n}  // namespace blink\n"
+        )
+        first = self.patch_twice(
+            "html_frame_owner_element.cc", source, INTEGRATE.patch_blink_frame_owner
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_OWNER_SET_HOOK))
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_OWNER_CLEAR_HOOK))
+        # The set record is written once the owner holds the frame; the
+        # cleared record while it still does, so the order is the frame's.
+        set_record = first.index("frame.GetDevToolsFrameToken().ToString()")
+        self.assertLess(first.index("content_frame_ = &frame;"), set_record)
+        clear = first.index("GetDomNodeId(), std::string(), false);")
+        self.assertLess(clear, first.index("  content_frame_ = nullptr;"))
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", first, self.signatures()
+            ),
+        )
+
+    def test_the_bridge_writes_the_frame_records(self):
+        bridge = (
+            MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"dom-checkpoint-frame-owner"', bridge)
+        self.assertIn('"dom-frame-owner-changed"', bridge)
+        self.assertIn('payload.Set("frameToken", base::Value());', bridge)
+        self.assertIn('payload.Set("mainFrame", main_frame);', bridge)
+        self.assertIn('remote ? "remote" : "local"', bridge)
+        # The changed record is not a DOM transition.
+        start = bridge.index("void RecordBlinkDomFrameOwnerChanged(")
+        end = bridge.index("\n}\n", start)
+        self.assertNotIn("CreateDomStateChangeBasePayload", bridge[start:end])

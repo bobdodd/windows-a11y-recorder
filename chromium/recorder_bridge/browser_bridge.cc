@@ -10,12 +10,15 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/containers/span.h"
@@ -31,11 +34,14 @@
 #include "base/win/windows_handle_util.h"
 #include "chromium/recorder_bridge/cookie_text.h"
 #include "chromium/recorder_bridge/evidence_cost.h"
+#include "chromium/recorder_bridge/animation_settings.h"
 #include "chromium/recorder_bridge/full_walks.h"
+#include "chromium/recorder_bridge/recreation_input.h"
 #include "chromium/recorder_bridge/network_text.h"
 #include "chromium/recorder_bridge/recorder_protocol.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
 #include "components/version_info/version_info.h"
+#include "crypto/hash.h"
 
 namespace a11y_recorder {
 namespace {
@@ -221,10 +227,18 @@ struct EvidenceIdentityStorage {
     std::optional<double> requested_delay_milliseconds;
     std::optional<double> effective_delay_milliseconds;
     int nesting_level;
+    // Protocol 0.52: where the callback function is defined.
+    std::optional<ScriptFrameFacts> callback = std::nullopt;
   };
   std::unordered_map<uintptr_t, DispatchState> dispatches;
   std::unordered_map<uintptr_t, InvocationState> active_invocations;
   std::unordered_map<uintptr_t, TimerState> timers;
+  // Protocol 0.52: who scheduled a timer, noted in the call that schedules it
+  // and taken by its timer-scheduled record.
+  std::unordered_map<uintptr_t, TimerOriginFacts> timer_origins;
+  // Protocol 0.52: the script elements whose classic scripts are running, by
+  // the script's identity.
+  std::unordered_map<uintptr_t, ScriptSourceFacts> running_script_elements;
 };
 
 EvidenceIdentityStorage& EvidenceIdentities() {
@@ -832,7 +846,8 @@ EvidenceIdentityStorage::TimerState RegisterTimerIdentity(
     std::string timer_kind,
     std::optional<double> requested_delay_milliseconds,
     std::optional<double> effective_delay_milliseconds,
-    int nesting_level) {
+    int nesting_level,
+    std::optional<ScriptFrameFacts> callback = std::nullopt) {
   EvidenceIdentityStorage& identities = EvidenceIdentities();
   base::AutoLock lock(identities.lock);
   EvidenceIdentityStorage::TimerState state{
@@ -843,6 +858,7 @@ EvidenceIdentityStorage::TimerState RegisterTimerIdentity(
       .requested_delay_milliseconds = requested_delay_milliseconds,
       .effective_delay_milliseconds = effective_delay_milliseconds,
       .nesting_level = nesting_level,
+      .callback = std::move(callback),
   };
   identities.timers.insert_or_assign(timer_identity, state);
   return state;
@@ -1153,6 +1169,70 @@ base::DictValue CreateDispatchPayload(
   return payload;
 }
 
+// Protocol 0.52: takes who scheduled a timer, noted by the call that
+// schedules it.
+std::optional<TimerOriginFacts> TakeTimerOrigin(uintptr_t timer_identity) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  auto found = identities.timer_origins.find(timer_identity);
+  if (found == identities.timer_origins.end()) {
+    return std::nullopt;
+  }
+  TimerOriginFacts origin = std::move(found->second);
+  identities.timer_origins.erase(found);
+  return origin;
+}
+
+// One stack frame of a timer-origin record. Unobserved values are null, as in
+// a script location.
+base::DictValue CreateScriptFrame(ScriptFrameFacts frame) {
+  base::DictValue value;
+  value.Set("scriptId", frame.script_id > 0
+                            ? base::Value(base::NumberToString(frame.script_id))
+                            : base::Value());
+  value.Set("url", frame.url.empty() ? base::Value()
+                                     : base::Value(std::move(frame.url)));
+  value.Set("functionName",
+            frame.function_name.empty()
+                ? base::Value()
+                : base::Value(std::move(frame.function_name)));
+  value.Set("line", frame.line_number > 0 ? base::Value(frame.line_number)
+                                          : base::Value());
+  value.Set("column", frame.column_number > 0
+                          ? base::Value(frame.column_number)
+                          : base::Value());
+  value.Set("isEval", frame.is_eval);
+  return value;
+}
+
+base::DictValue CreateTimerOriginPayload(
+    const RecorderPipeClient& client,
+    const EvidenceIdentityStorage::TimerState& state,
+    TimerOriginFacts origin) {
+  const std::string world_kind =
+      NormalizeExecutionWorldKind(std::move(origin.world_kind));
+  base::DictValue context = CreateContext(client, state.document_node_id);
+  if (!world_kind.empty()) {
+    context.Set("executionWorldId", ExecutionWorldId(origin.world_id));
+  }
+  base::DictValue payload;
+  payload.Set("context", std::move(context));
+  payload.Set("timerId", state.timer_id);
+  payload.Set("world", CreateExecutionWorld(world_kind, origin.world_id,
+                                            std::move(origin.world_name),
+                                            std::move(origin.world_stable_id)));
+  base::ListValue stack;
+  if (origin.stack.size() > kMaximumTimerOriginFrames) {
+    origin.stack.resize(kMaximumTimerOriginFrames);
+  }
+  for (ScriptFrameFacts& frame : origin.stack) {
+    stack.Append(CreateScriptFrame(std::move(frame)));
+  }
+  payload.Set("stack", std::move(stack));
+  payload.Set("handler", origin.string_handler ? "string" : "function");
+  return payload;
+}
+
 base::DictValue CreateTimerPayload(
     const RecorderPipeClient& client,
     const EvidenceIdentityStorage::TimerState& state,
@@ -1179,7 +1259,16 @@ base::DictValue CreateTimerPayload(
   payload.Set("throttled", base::Value());
   payload.Set("pageLifecycleState",
               PageLifecycleStateName(page_lifecycle_state));
-  payload.Set("callbackLocation", base::Value());
+  if (state.callback) {
+    payload.Set("callbackLocation",
+                CreateScriptLocation(state.callback->url,
+                                     state.callback->function_name,
+                                     state.callback->script_id,
+                                     state.callback->line_number,
+                                     state.callback->column_number));
+  } else {
+    payload.Set("callbackLocation", base::Value());
+  }
   if (cancellation_reason) {
     payload.Set("cancellationReason", std::move(*cancellation_reason));
   } else {
@@ -1794,6 +1883,16 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
       (process_type.empty() ? std::string("<empty>") : process_type) +
       " child " + base::NumberToString(child_process_id) + ".");
 
+  // The recreation mode needs no recorder connection, so it is passed to a
+  // renderer before the bootstrap is looked for.
+  if (process_type == kChromiumRendererProcess &&
+      base::CommandLine::ForCurrentProcess()->HasSwitch(kRecreationSwitch) &&
+      !command_line->HasSwitch(kRecreationSwitch)) {
+    command_line->AppendSwitch(kRecreationSwitch);
+    WriteDiagnosticLine("Recorder passed the recreation mode to renderer " +
+                        base::NumberToString(child_process_id) + ".");
+  }
+
   const std::optional<std::string> metadata =
       base::Environment::Create()->GetVar(kChildBootstrapMetadataEnvironment);
   if (!metadata.has_value()) {
@@ -1851,6 +1950,84 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
   WriteDiagnosticLine("Attached recorder bootstrap to " + process_type +
                       " child " + base::NumberToString(child_process_id) + ".");
   return true;
+}
+
+bool IsRecreationMode() {
+  static const bool recreation_mode =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(kRecreationSwitch);
+  return recreation_mode;
+}
+
+namespace {
+// Set once on the main thread, read on the compositor thread.
+std::atomic<bool> g_recreation_browser_page_process{false};
+}  // namespace
+
+bool IsRecreationBrowserPageScheme(std::string_view scheme) {
+  return IsBrowserPageScheme(scheme);
+}
+
+void MarkRecreationBrowserPageProcess() {
+  g_recreation_browser_page_process.store(true, std::memory_order_relaxed);
+}
+
+bool RecreationRefusesCompositorInput() {
+  return IsRecreationMode() &&
+         !g_recreation_browser_page_process.load(std::memory_order_relaxed);
+}
+
+bool RecreationHoldsTime() {
+  return IsRecreationMode() &&
+         !g_recreation_browser_page_process.load(std::memory_order_relaxed);
+}
+
+namespace {
+
+using RecreationImageFrames = HeldImageFrames<base::Lock, base::AutoLock>;
+
+RecreationImageFrames& HeldRecreationImageFrames() {
+  static base::NoDestructor<RecreationImageFrames> frames;
+  return *frames;
+}
+
+}  // namespace
+
+void HoldRecreationImageFrame(int64_t paint_image_id, std::string frame_header) {
+  if (!IsRecreationMode()) {
+    return;
+  }
+  if (const std::optional<size_t> frame_index =
+          ParseRecreationImageFrame(frame_header)) {
+    HeldRecreationImageFrames().Hold(paint_image_id, *frame_index);
+  }
+}
+
+std::optional<size_t> RecreationHeldImageFrame(int64_t paint_image_id) {
+  if (!IsRecreationMode()) {
+    return std::nullopt;
+  }
+  return HeldRecreationImageFrames().Find(paint_image_id);
+}
+
+RecreationCompositorValues RecreationCompositorValuesOf(std::string_view text) {
+  if (!IsRecreationMode()) {
+    return {};
+  }
+  return ParseRecreationCompositorValues(
+      text, [](std::string_view number, double* value) {
+        return base::StringToDouble(number, value);
+      });
+}
+
+RecreationPaintWorkletValues RecreationPaintWorkletValuesOf(
+    std::string_view text) {
+  if (!IsRecreationMode()) {
+    return {};
+  }
+  return ParseRecreationPaintWorkletValues(
+      text, [](std::string_view number, double* value) {
+        return base::StringToDouble(number, value);
+      });
 }
 
 RecorderPipeClient* GetProcessRecorderClient() {
@@ -2349,14 +2526,24 @@ void RecordBlinkTimerScheduled(uintptr_t timer_identity,
     return;
   }
 
+  std::optional<TimerOriginFacts> origin = TakeTimerOrigin(timer_identity);
+  std::optional<ScriptFrameFacts> callback;
+  if (origin && origin->has_callback) {
+    callback = origin->callback;
+  }
   EvidenceIdentityStorage::TimerState state = RegisterTimerIdentity(
       timer_identity, document_node_id, repeating ? "interval" : "timeout",
       requested_delay_milliseconds, effective_delay_milliseconds,
-      nesting_level);
+      nesting_level, std::move(callback));
   base::DictValue payload =
       CreateTimerPayload(*client, state, std::nullopt, std::nullopt,
                          page_lifecycle_state);
   SendBlinkEvidence("browser.timer", "timer-scheduled", std::move(payload));
+  if (origin) {
+    SendBlinkEvidence(
+        "browser.timer", "timer-origin",
+        CreateTimerOriginPayload(*client, state, std::move(*origin)));
+  }
 }
 
 void RecordBlinkTimerFired(uintptr_t timer_identity,
@@ -2523,7 +2710,9 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
 uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string document_token,
                                  std::string reason,
-                                 int maximum_nodes) {
+                                 int maximum_nodes,
+                                 std::string frame_token,
+                                 bool main_frame) {
   static const int recorder_span_slot = CostSpanSlot("span:dom-checkpoint");
   BeginCostSpan(recorder_span_slot);
   A11Y_RECORDER_COST("BeginBlinkDomCheckpoint");
@@ -2544,9 +2733,65 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
   payload.Set("reason", std::move(reason));
   payload.Set("walkReason", std::move(walk_reason));
   payload.Set("maximumNodes", maximum_nodes);
+  if (frame_token.empty()) {
+    payload.Set("frameToken", base::Value());
+    payload.Set("mainFrame", base::Value());
+  } else {
+    payload.Set("frameToken", std::move(frame_token));
+    payload.Set("mainFrame", main_frame);
+  }
   SendBlinkEvidence("browser.dom", "dom-checkpoint-started",
                     std::move(payload));
   return checkpoint_sequence;
+}
+
+void RecordBlinkDomCheckpointFrameOwner(uint64_t checkpoint_sequence,
+                                        int document_node_id,
+                                        std::string document_token,
+                                        int owner_node_id,
+                                        std::string frame_token,
+                                        bool remote) {
+  A11Y_RECORDER_COST("RecordBlinkDomCheckpointFrameOwner");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || owner_node_id <= 0 || frame_token.empty()) {
+    return;
+  }
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("ownerNodeId", owner_node_id);
+  payload.Set("frameToken", std::move(frame_token));
+  payload.Set("frameLocation", remote ? "remote" : "local");
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-frame-owner",
+                    std::move(payload));
+}
+
+void RecordBlinkDomFrameOwnerChanged(int document_node_id,
+                                     std::string document_token,
+                                     int owner_node_id,
+                                     std::string frame_token,
+                                     bool remote) {
+  A11Y_RECORDER_COST("RecordBlinkDomFrameOwnerChanged");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      owner_node_id <= 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateContext(*client, document_node_id,
+                            std::move(document_token)));
+  payload.Set("ownerNodeId", owner_node_id);
+  if (frame_token.empty()) {
+    payload.Set("frameToken", base::Value());
+    payload.Set("frameLocation", base::Value());
+  } else {
+    payload.Set("frameToken", std::move(frame_token));
+    payload.Set("frameLocation", remote ? "remote" : "local");
+  }
+  SendBlinkEvidence("browser.dom", "dom-frame-owner-changed",
+                    std::move(payload));
 }
 
 void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,
@@ -3989,6 +4234,346 @@ void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
                     std::move(payload));
 }
 
+namespace {
+
+base::DictValue PagePopupRectValue(const PagePopupRect& rect) {
+  base::DictValue value;
+  value.Set("x", rect.x);
+  value.Set("y", rect.y);
+  value.Set("width", rect.width);
+  value.Set("height", rect.height);
+  return value;
+}
+
+bool IsValidPagePopupRect(const PagePopupRect& rect) {
+  return rect.width >= 0 && rect.height >= 0;
+}
+
+}  // namespace
+
+void RecordBlinkPagePopupOpened(int document_node_id,
+                                std::string document_token,
+                                std::string kind,
+                                int owner_document_node_id,
+                                std::string owner_document_token,
+                                std::string owner_frame_token,
+                                int owner_node_id,
+                                PagePopupRect owner_visible_bounds_in_local_root,
+                                PagePopupRect owner_local_root_rect_in_screen,
+                                PagePopupRect anchor_rect_in_screen,
+                                PagePopupRect initial_window_rect,
+                                double zoom_factor) {
+  A11Y_RECORDER_COST("RecordBlinkPagePopupOpened");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      !IsOneOf(kind, {"select-list", "date-time", "color", "other"}) ||
+      owner_document_node_id <= 0 || owner_document_token.empty() ||
+      owner_frame_token.empty() || owner_node_id <= 0 ||
+      !IsValidPagePopupRect(owner_visible_bounds_in_local_root) ||
+      !IsValidPagePopupRect(owner_local_root_rect_in_screen) ||
+      !IsValidPagePopupRect(anchor_rect_in_screen) ||
+      !IsValidPagePopupRect(initial_window_rect) ||
+      !std::isfinite(zoom_factor) || zoom_factor <= 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("kind", std::move(kind));
+  payload.Set("ownerDocumentId", DocumentId(owner_document_node_id));
+  payload.Set("ownerDocumentToken", std::move(owner_document_token));
+  payload.Set("ownerFrameToken", std::move(owner_frame_token));
+  payload.Set("ownerNodeId", owner_node_id);
+  payload.Set("ownerVisibleBoundsInLocalRoot",
+              PagePopupRectValue(owner_visible_bounds_in_local_root));
+  payload.Set("ownerLocalRootRectInScreen",
+              PagePopupRectValue(owner_local_root_rect_in_screen));
+  payload.Set("anchorRectInScreen", PagePopupRectValue(anchor_rect_in_screen));
+  payload.Set("initialWindowRect", PagePopupRectValue(initial_window_rect));
+  payload.Set("zoomFactor", zoom_factor);
+  SendBlinkEvidence("browser.interaction", "page-popup-opened",
+                    std::move(payload));
+}
+
+void RecordBlinkPagePopupWindowRect(int document_node_id,
+                                    std::string document_token,
+                                    bool deferred,
+                                    PagePopupRect window_rect) {
+  A11Y_RECORDER_COST("RecordBlinkPagePopupWindowRect");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      !IsValidPagePopupRect(window_rect)) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("deferred", deferred);
+  payload.Set("windowRect", PagePopupRectValue(window_rect));
+  SendBlinkEvidence("browser.interaction", "page-popup-window-rect",
+                    std::move(payload));
+}
+
+namespace {
+
+bool IsValidPopupWidgetSink(const PopupWidgetSink& sink) {
+  return sink.client_id != 0 || sink.sink_id != 0;
+}
+
+std::string PopupWidgetSinkId(const PopupWidgetSink& sink) {
+  return base::NumberToString(sink.client_id) + ":" +
+         base::NumberToString(sink.sink_id);
+}
+
+base::Value OptionalScreenRect(bool present, const PagePopupRect& rect) {
+  return present ? base::Value(PagePopupRectValue(rect)) : base::Value();
+}
+
+}  // namespace
+
+void RecordBrowserPopupWidgetCreated(int page_frame_tree_node_id,
+                                     int frame_tree_node_id,
+                                     int64_t document_navigation_id,
+                                     std::string document_token,
+                                     int renderer_process_id,
+                                     std::string opener_frame_token,
+                                     PopupWidgetSink sink) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetCreated");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || page_frame_tree_node_id < 0 || frame_tree_node_id < 0 ||
+      opener_frame_token.empty() || !IsValidPopupWidgetSink(sink)) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateNavigationContext(*client, page_frame_tree_node_id,
+                                      frame_tree_node_id,
+                                      document_navigation_id,
+                                      std::move(document_token)));
+  payload.Set("rendererProcessId", renderer_process_id > 0
+                                       ? base::Value(renderer_process_id)
+                                       : base::Value());
+  payload.Set("openerFrameToken", std::move(opener_frame_token));
+  payload.Set("frameSinkId", PopupWidgetSinkId(sink));
+  SendBlinkEvidence("browser.interaction", "popup-widget-created",
+                    std::move(payload));
+}
+
+// The Windows animation settings now, read with SystemParametersInfo, each
+// null when the call fails (protocol 0.47).
+namespace {
+base::DictValue WindowsAnimationSettingsValue() {
+  base::DictValue settings;
+  ReadWindowsAnimationSettings(
+      [](WindowsAnimationSetting setting) -> std::optional<bool> {
+        UINT action = 0;
+        switch (setting) {
+          case WindowsAnimationSetting::kClientAreaAnimation:
+            action = SPI_GETCLIENTAREAANIMATION;
+            break;
+          case WindowsAnimationSetting::kUiEffects:
+            action = SPI_GETUIEFFECTS;
+            break;
+          case WindowsAnimationSetting::kMenuAnimation:
+            action = SPI_GETMENUANIMATION;
+            break;
+          case WindowsAnimationSetting::kMenuFade:
+            action = SPI_GETMENUFADE;
+            break;
+          case WindowsAnimationSetting::kComboBoxAnimation:
+            action = SPI_GETCOMBOBOXANIMATION;
+            break;
+        }
+        BOOL value = FALSE;
+        if (!::SystemParametersInfoW(action, 0, &value, 0)) {
+          return std::nullopt;
+        }
+        return value != FALSE;
+      },
+      [&settings](std::string_view name, std::optional<bool> value) {
+        settings.Set(name, value.has_value() ? base::Value(*value)
+                                             : base::Value());
+      });
+  return settings;
+}
+}  // namespace
+
+void RecordBrowserPopupWidgetShown(PopupWidgetShown shown) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetShown");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  const bool is_shown = shown.outcome == "shown";
+  if (!client || !IsValidPopupWidgetSink(shown.sink) ||
+      !IsOneOf(shown.outcome, {"shown", "window-not-active", "not-visible",
+                               "permission-exclusion"}) ||
+      is_shown != shown.has_view_bounds ||
+      (shown.has_constrained && !shown.has_transformed) ||
+      !IsValidPagePopupRect(shown.received_rect) ||
+      !IsValidPagePopupRect(shown.received_anchor_rect) ||
+      (shown.has_transformed &&
+       (!IsValidPagePopupRect(shown.transformed_rect) ||
+        !IsValidPagePopupRect(shown.transformed_anchor_rect))) ||
+      (shown.has_constrained && !IsValidPagePopupRect(shown.constrained_rect)) ||
+      (shown.has_view_bounds && !IsValidPagePopupRect(shown.view_bounds))) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("frameSinkId", PopupWidgetSinkId(shown.sink));
+  payload.Set("outcome", std::move(shown.outcome));
+  payload.Set("receivedRect", PagePopupRectValue(shown.received_rect));
+  payload.Set("receivedAnchorRect",
+              PagePopupRectValue(shown.received_anchor_rect));
+  payload.Set("transformedRect",
+              OptionalScreenRect(shown.has_transformed, shown.transformed_rect));
+  payload.Set("transformedAnchorRect",
+              OptionalScreenRect(shown.has_transformed,
+                                 shown.transformed_anchor_rect));
+  payload.Set("constrainedRect", OptionalScreenRect(shown.has_constrained,
+                                                    shown.constrained_rect));
+  payload.Set("viewBounds",
+              OptionalScreenRect(shown.has_view_bounds, shown.view_bounds));
+  payload.Set("windowsAnimationSettings", WindowsAnimationSettingsValue());
+  SendBlinkEvidence("browser.interaction", "popup-widget-shown",
+                    std::move(payload));
+}
+
+void RecordBrowserPopupWidgetBoundsRequested(PopupWidgetSink sink,
+                                             PagePopupRect requested_rect,
+                                             bool has_set_rect,
+                                             PagePopupRect set_rect) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetBoundsRequested");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !IsValidPopupWidgetSink(sink) ||
+      !IsValidPagePopupRect(requested_rect) ||
+      (has_set_rect && !IsValidPagePopupRect(set_rect))) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("frameSinkId", PopupWidgetSinkId(sink));
+  payload.Set("requestedRect", PagePopupRectValue(requested_rect));
+  payload.Set("setRect", OptionalScreenRect(has_set_rect, set_rect));
+  SendBlinkEvidence("browser.interaction", "popup-widget-bounds-requested",
+                    std::move(payload));
+}
+
+void RecordBrowserPopupWidgetScreenRects(PopupWidgetSink sink,
+                                         PagePopupRect view_rect,
+                                         PagePopupRect window_rect,
+                                         uintptr_t native_window,
+                                         double device_scale_factor) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetScreenRects");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !IsValidPopupWidgetSink(sink) ||
+      !IsValidPagePopupRect(view_rect) || !IsValidPagePopupRect(window_rect) ||
+      !std::isfinite(device_scale_factor) || device_scale_factor <= 0) {
+    return;
+  }
+  // The window rectangle and the client area in screen pixels, as Windows
+  // holds them now. Either is absent when Windows does not answer.
+  PagePopupRect native_window_rect;
+  PagePopupRect native_client_rect;
+  bool has_native_rects = false;
+  if (native_window != 0) {
+    const HWND hwnd = reinterpret_cast<HWND>(native_window);
+    RECT window = {};
+    RECT client_area = {};
+    POINT client_origin = {0, 0};
+    if (::GetWindowRect(hwnd, &window) &&
+        ::GetClientRect(hwnd, &client_area) &&
+        ::ClientToScreen(hwnd, &client_origin)) {
+      has_native_rects = true;
+      native_window_rect = {window.left, window.top,
+                            window.right - window.left,
+                            window.bottom - window.top};
+      native_client_rect = {client_origin.x, client_origin.y,
+                            client_area.right - client_area.left,
+                            client_area.bottom - client_area.top};
+    }
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("frameSinkId", PopupWidgetSinkId(sink));
+  payload.Set("viewRect", PagePopupRectValue(view_rect));
+  payload.Set("windowRect", PagePopupRectValue(window_rect));
+  payload.Set("nativeWindowRect",
+              OptionalScreenRect(has_native_rects, native_window_rect));
+  payload.Set("nativeClientRect",
+              OptionalScreenRect(has_native_rects, native_client_rect));
+  payload.Set("deviceScaleFactor", device_scale_factor);
+  SendBlinkEvidence("browser.interaction", "popup-widget-screen-rects",
+                    std::move(payload));
+}
+
+void RecordBrowserPopupWidgetHidden(PopupWidgetSink sink,
+                                    std::string cause,
+                                    uintptr_t native_window) {
+  A11Y_RECORDER_COST("RecordBrowserPopupWidgetHidden");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !IsValidPopupWidgetSink(sink) ||
+      !IsOneOf(cause, {"hidden", "destroyed"})) {
+    return;
+  }
+  // Whether Windows still shows the popup's window now, or absent when
+  // there is no window or Windows does not know it.
+  base::Value native_visible;
+  if (native_window != 0) {
+    const HWND hwnd = reinterpret_cast<HWND>(native_window);
+    if (::IsWindow(hwnd)) {
+      native_visible = base::Value(::IsWindowVisible(hwnd) != FALSE);
+    }
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("frameSinkId", PopupWidgetSinkId(sink));
+  payload.Set("cause", std::move(cause));
+  payload.Set("nativeWindowVisible", std::move(native_visible));
+  SendBlinkEvidence("browser.interaction", "popup-widget-hidden",
+                    std::move(payload));
+}
+
+void RecordBlinkPagePopupClosed(int document_node_id,
+                                std::string document_token,
+                                std::string closed_by) {
+  A11Y_RECORDER_COST("RecordBlinkPagePopupClosed");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      !IsOneOf(closed_by, {"renderer", "browser"})) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("closedBy", std::move(closed_by));
+  SendBlinkEvidence("browser.interaction", "page-popup-closed",
+                    std::move(payload));
+}
+
+void RecordBlinkOptionSelectednessChanged(int document_node_id,
+                                          std::string document_token,
+                                          int node_id,
+                                          int select_node_id,
+                                          bool selected,
+                                          CookieCallOrigin origin) {
+  A11Y_RECORDER_COST("RecordBlinkOptionSelectednessChanged");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || select_node_id < 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateCookieRendererContext(*client, document_node_id,
+                                          std::move(document_token), origin));
+  payload.Set("nodeId", node_id);
+  payload.Set("selectNodeId",
+              select_node_id > 0 ? base::Value(select_node_id) : base::Value());
+  payload.Set("selected", selected);
+  SetCookieCallOrigin(payload, std::move(origin));
+  SendBlinkEvidence("browser.interaction", "option-selectedness-changed",
+                    std::move(payload));
+}
+
 
 namespace {
 
@@ -4130,6 +4715,239 @@ uint64_t BeginBlinkLayoutCheckpoint(
 
 namespace {
 
+// A variation axis tag, four characters packed big-endian as SkFourByteTag.
+// A tag that is not four printable ASCII characters, which OpenType does not
+// allow, is stated as its number in decimal.
+std::string FontAxisTag(uint32_t axis) {
+  std::string tag(4, ' ');
+  for (int index = 0; index < 4; ++index) {
+    const uint32_t character = (axis >> (24 - 8 * index)) & 0xff;
+    if (character < 0x20 || character > 0x7e) {
+      return base::NumberToString(axis);
+    }
+    tag[index] = static_cast<char>(character);
+  }
+  return tag;
+}
+
+base::DictValue BoxFragmentValue(LayoutBoxFragment& fragment);
+
+// One fragment item (protocol 0.39). Every member is stated, null where it
+// does not apply, and a run's glyphs are base64.
+base::DictValue FragmentItemValue(LayoutFragmentItem& item) {
+  base::DictValue value;
+  value.Set("type", std::move(item.type));
+  value.Set("x", item.x);
+  value.Set("y", item.y);
+  value.Set("width", item.width);
+  value.Set("height", item.height);
+  value.Set("descendantsCount", item.descendants_count >= 0
+                                    ? base::Value(item.descendants_count)
+                                    : base::Value());
+  value.Set("nodeId",
+            item.node_id > 0 ? base::Value(item.node_id) : base::Value());
+  if (item.range_present) {
+    value.Set("start", base::saturated_cast<int>(item.start));
+    value.Set("end", base::saturated_cast<int>(item.end));
+  } else {
+    value.Set("start", base::Value());
+    value.Set("end", base::Value());
+  }
+  if (item.text) {
+    value.Set("firstLineStyle", item.first_line_style);
+    value.Set("direction", item.rtl ? "rtl" : "ltr");
+    value.Set("hiddenForPaint", item.hidden_for_paint);
+    base::ListValue runs;
+    for (LayoutGlyphRun& run : item.glyph_runs) {
+      base::DictValue run_value;
+      base::DictValue font;
+      font.Set("family", std::move(run.family));
+      font.Set("postScriptName", std::move(run.post_script_name));
+      font.Set("size", run.size);
+      font.Set("syntheticBold", run.synthetic_bold);
+      font.Set("syntheticItalic", run.synthetic_italic);
+      run_value.Set("font", std::move(font));
+      if (run.font_file_present) {
+        base::DictValue font_file;
+        font_file.Set("digest", std::move(run.font_file_digest));
+        font_file.Set("index", run.font_file_index);
+        base::ListValue variations;
+        for (const LayoutFontVariation& variation : run.font_variations) {
+          base::DictValue axis;
+          axis.Set("axis", FontAxisTag(variation.axis));
+          axis.Set("value", static_cast<double>(variation.value));
+          variations.Append(std::move(axis));
+        }
+        font_file.Set("variations", std::move(variations));
+        run_value.Set("fontFile", std::move(font_file));
+      } else {
+        run_value.Set("fontFile", base::Value());
+      }
+      run_value.Set("horizontal", run.horizontal);
+      run_value.Set("rotation", run.rotation);
+      run_value.Set("glyphs", base::Base64Encode(PackGlyphs(run.glyphs)));
+      runs.Append(std::move(run_value));
+    }
+    value.Set("glyphRuns", std::move(runs));
+  } else {
+    value.Set("firstLineStyle", base::Value());
+    value.Set("direction", base::Value());
+    value.Set("hiddenForPaint", base::Value());
+    value.Set("glyphRuns", base::Value());
+  }
+  value.Set("generatedText", item.generated_text_present
+                                 ? base::Value(std::move(item.generated_text))
+                                 : base::Value());
+  return value;
+}
+
+// A child link of a box fragment (protocol 0.38).
+base::DictValue FragmentChildValue(LayoutFragmentChild& child) {
+  base::DictValue value;
+  value.Set("kind", std::move(child.kind));
+  value.Set("x", child.x);
+  value.Set("y", child.y);
+  if (child.node_id > 0) {
+    value.Set("nodeId", child.node_id);
+    value.Set("fragmentIndex", child.fragment_index >= 0
+                                   ? base::Value(child.fragment_index)
+                                   : base::Value());
+  } else {
+    value.Set("nodeId", base::Value());
+    value.Set("fragmentIndex", base::Value());
+  }
+  if (!child.fragment.empty()) {
+    value.Set("fragment", BoxFragmentValue(child.fragment.front()));
+  } else {
+    value.Set("fragment", base::Value());
+  }
+  return value;
+}
+
+// One physical fragment of a box, in Blink's layout units (protocol 0.38).
+base::DictValue BoxFragmentValue(LayoutBoxFragment& fragment) {
+  base::DictValue value;
+  value.Set("width", fragment.width);
+  value.Set("height", fragment.height);
+  if (fragment.break_token_present) {
+    base::DictValue token;
+    token.Set("consumedBlockSize", fragment.consumed_block_size);
+    token.Set("breakBefore", fragment.break_before);
+    token.Set("sequenceNumber",
+              fragment.break_before
+                  ? base::Value()
+                  : base::Value(base::saturated_cast<int>(
+                        fragment.sequence_number)));
+    token.Set("atBlockEnd", fragment.at_block_end);
+    value.Set("breakToken", std::move(token));
+  } else {
+    value.Set("breakToken", base::Value());
+  }
+  if (fragment.scrollable_overflow_present) {
+    base::DictValue overflow;
+    overflow.Set("x", fragment.scrollable_overflow.x);
+    overflow.Set("y", fragment.scrollable_overflow.y);
+    overflow.Set("width", fragment.scrollable_overflow.width);
+    overflow.Set("height", fragment.scrollable_overflow.height);
+    value.Set("scrollableOverflow", std::move(overflow));
+  } else {
+    value.Set("scrollableOverflow", base::Value());
+  }
+  base::ListValue children;
+  for (LayoutFragmentChild& child : fragment.children) {
+    children.Append(FragmentChildValue(child));
+  }
+  value.Set("children", std::move(children));
+  if (fragment.text_present) {
+    value.Set("textContent", std::move(fragment.text_content));
+    value.Set("firstLineText",
+              fragment.first_line_text_present
+                  ? base::Value(std::move(fragment.first_line_text))
+                  : base::Value());
+  } else {
+    value.Set("textContent", base::Value());
+    value.Set("firstLineText", base::Value());
+  }
+  if (fragment.items_present) {
+    base::ListValue items;
+    for (LayoutFragmentItem& item : fragment.items) {
+      items.Append(FragmentItemValue(item));
+    }
+    value.Set("items", std::move(items));
+  } else {
+    value.Set("items", base::Value());
+  }
+  return value;
+}
+
+// The box fragments of a node, or null when its layout object is not a box
+// (protocol 0.38).
+base::Value BoxFragmentsValue(LayoutBoxFragments& fragments) {
+  if (!fragments.present) {
+    return base::Value();
+  }
+  base::DictValue value;
+  value.Set("effectiveZoom", fragments.effective_zoom);
+  base::ListValue list;
+  for (LayoutBoxFragment& fragment : fragments.fragments) {
+    list.Append(BoxFragmentValue(fragment));
+  }
+  value.Set("fragments", std::move(list));
+  if (fragments.natural_size_present) {
+    base::DictValue natural;
+    natural.Set("width", fragments.natural_width);
+    natural.Set("height", fragments.natural_height);
+    natural.Set("hasWidth", fragments.natural_has_width);
+    natural.Set("hasHeight", fragments.natural_has_height);
+    natural.Set("aspectRatioWidth", fragments.natural_aspect_ratio_width);
+    natural.Set("aspectRatioHeight", fragments.natural_aspect_ratio_height);
+    value.Set("naturalSize", std::move(natural));
+  } else {
+    value.Set("naturalSize", base::Value());
+  }
+  if (fragments.text_present && !fragments.text_unchanged) {
+    value.Set("textContent", std::move(fragments.text_content));
+    value.Set("firstLineText",
+              fragments.first_line_text_present
+                  ? base::Value(std::move(fragments.first_line_text))
+                  : base::Value());
+  } else {
+    value.Set("textContent", base::Value());
+    value.Set("firstLineText", base::Value());
+  }
+  value.Set("textContentUnchanged", fragments.text_unchanged);
+  return base::Value(std::move(value));
+}
+
+// Estimates a fragment's serialized size: its fixed members and, for each
+// child, its members and any nested fragment.
+size_t EstimateBoxFragmentBytes(const LayoutBoxFragment& fragment) {
+  constexpr size_t kFragmentBytes = 240;
+  constexpr size_t kChildBytes = 110;
+  // An item's members, and a run's font and members, with their names.
+  constexpr size_t kItemBytes = 260;
+  constexpr size_t kRunBytes = 140;
+  size_t bytes = kFragmentBytes + fragment.text_content.size() +
+                 fragment.first_line_text.size();
+  for (const LayoutFragmentItem& item : fragment.items) {
+    bytes += kItemBytes + item.generated_text.size();
+    for (const LayoutGlyphRun& run : item.glyph_runs) {
+      // The font file's digest, index, and variation axes, with their names.
+      bytes += 120 + run.font_file_digest.size() +
+               run.font_variations.size() * 40;
+      bytes += kRunBytes + run.family.size() + run.post_script_name.size() +
+               (run.glyphs.size() * kPackedGlyphBytes + 2) / 3 * 4;
+    }
+  }
+  for (const LayoutFragmentChild& child : fragment.children) {
+    bytes += kChildBytes;
+    for (const LayoutBoxFragment& nested : child.fragment) {
+      bytes += EstimateBoxFragmentBytes(nested);
+    }
+  }
+  return bytes;
+}
+
 // Sets the fields a checkpoint record and a change record of a node share:
 // its identity, type, and name, its pseudo-element and shadow fields, whether
 // it has a layout object and is display locked, and its computed style.
@@ -4173,9 +4991,19 @@ void SetLayoutNodeFields(base::DictValue& payload, LayoutCheckpointNode& node) {
                                     : base::Value());
     }
     payload.Set("computedStyle", std::move(style));
+    base::DictValue custom_properties;
+    for (LayoutCheckpointStyleValue& entry : node.custom_properties) {
+      custom_properties.Set(entry.property_name,
+                            entry.value_present
+                                ? base::Value(std::move(entry.value))
+                                : base::Value());
+    }
+    payload.Set("customProperties", std::move(custom_properties));
   } else {
     payload.Set("computedStyle", base::Value());
+    payload.Set("customProperties", base::Value());
   }
+  payload.Set("boxFragments", BoxFragmentsValue(node.box_fragments));
 }
 
 // Builds a layout checkpoint node record from the values the renderer copied
@@ -4232,6 +5060,18 @@ size_t EstimateLayoutCheckpointNodeBytes(const LayoutCheckpointNode& node,
                  node.shadow_root_mode.size();
   for (const LayoutCheckpointStyleValue& entry : node.computed_style) {
     bytes += kStyleEntryBytes + entry.property_name.size() + entry.value.size();
+  }
+  for (const LayoutCheckpointStyleValue& entry : node.custom_properties) {
+    bytes += kStyleEntryBytes + entry.property_name.size() + entry.value.size();
+  }
+  if (node.box_fragments.present) {
+    // The zoom and the natural size, with their member names.
+    constexpr size_t kBoxFragmentsBytes = 200;
+    bytes += kBoxFragmentsBytes + node.box_fragments.text_content.size() +
+             node.box_fragments.first_line_text.size();
+    for (const LayoutBoxFragment& fragment : node.box_fragments.fragments) {
+      bytes += EstimateBoxFragmentBytes(fragment);
+    }
   }
   return bytes;
 }
@@ -4392,6 +5232,10 @@ struct LayoutChangeStorage {
     LayoutChangeFilter filter;
     uint64_t checkpoint_sequence_seen = 0;
     uint64_t last_use = 0;
+    // The count of lost browser.layout records when the document's style
+    // values were last trusted. A record lost since may have held a style
+    // change, so the next record of each node holds its whole style again.
+    uint64_t losses_seen = 0;
   };
   std::unordered_map<int, Document> documents;
 };
@@ -4422,7 +5266,11 @@ base::DictValue CreateLayoutChangesBasePayload(const RecorderPipeClient& client,
   return payload;
 }
 
-bool IsValidLayoutNode(const LayoutCheckpointNode& node) {
+// A checkpoint records a text node only when it has a layout object. A
+// change set also records a text node whose layout object was destroyed
+// (protocol 0.41), with none.
+bool IsValidLayoutNode(const LayoutCheckpointNode& node,
+                       bool text_without_layout_object = false) {
   if (node.node_id <= 0 || node.node_name.empty() ||
       (node.node_type != 1 && node.node_type != 3)) {
     return false;
@@ -4433,7 +5281,8 @@ bool IsValidLayoutNode(const LayoutCheckpointNode& node) {
     return false;
   }
   if (node.node_type == 3 &&
-      (!node.layout_object_present || node.computed_style_present)) {
+      ((!node.layout_object_present && !text_without_layout_object) ||
+       node.computed_style_present)) {
     return false;
   }
   if (node.computed_style_present) {
@@ -4447,7 +5296,8 @@ bool IsValidLayoutNode(const LayoutCheckpointNode& node) {
 }
 
 bool IsValidLayoutChangedNode(const LayoutChangedNode& changed) {
-  if (!IsValidLayoutNode(changed.node) || changed.reasons == 0 ||
+  if (!IsValidLayoutNode(changed.node, /*text_without_layout_object=*/true) ||
+      changed.reasons == 0 ||
       (changed.reasons & ~(kLayoutChangeStyle | kLayoutChangeLayout |
                            kLayoutChangePaintProperties)) != 0) {
     return false;
@@ -4530,7 +5380,22 @@ struct LayoutChangedNodeEvidence : PendingEvidence {
         *client, change_set_sequence, document_node_id,
         std::move(document_token));
     payload.Set("reasons", LayoutChangeReasonList(changed.reasons));
+    const bool style_present = changed.node.computed_style_present;
     SetLayoutNodeFields(payload, changed.node);
+    // Protocol 0.37: after a node's first record, its computed style and
+    // custom properties hold only the values that changed.
+    payload.Set("computedStyleComplete",
+                style_present ? base::Value(changed.computed_style_complete)
+                              : base::Value());
+    if (style_present && !changed.computed_style_complete) {
+      base::ListValue removed;
+      for (std::string& name : changed.removed_custom_properties) {
+        removed.Append(std::move(name));
+      }
+      payload.Set("removedCustomProperties", std::move(removed));
+    } else {
+      payload.Set("removedCustomProperties", base::Value());
+    }
     if (changed.geometry_present) {
       base::DictValue geometry;
       geometry.Set("transformNodeId",
@@ -4625,6 +5490,11 @@ uint64_t RecordBlinkLayoutChanges(
     LayoutChangeStorage::Document& document =
         storage.documents[document_node_id];
     document.last_use = ++storage.use_clock;
+    const uint64_t losses = LayoutEvidenceLosses().load();
+    if (losses != document.losses_seen) {
+      document.filter.ForgetStyles();
+      document.losses_seen = losses;
+    }
     if (checkpoint_sequence != document.checkpoint_sequence_seen) {
       named_checkpoint_sequence = checkpoint_sequence;
       document.checkpoint_sequence_seen = checkpoint_sequence;
@@ -4644,6 +5514,8 @@ uint64_t RecordBlinkLayoutChanges(
       }
       if (document.filter.NodeChanged(node.node.node_id,
                                       HashLayoutChangedNode(node))) {
+        document.filter.ReduceToStyleChanges(nodes[index]);
+        document.filter.ReduceToTextChanges(nodes[index]);
         changed_nodes.push_back(index);
       } else {
         ++unchanged_node_count;
@@ -4670,6 +5542,10 @@ uint64_t RecordBlinkLayoutChanges(
               named_checkpoint_sequence == 0
                   ? base::Value()
                   : base::Value(LayoutCheckpointId(named_checkpoint_sequence)));
+  started.Set("checkpointUpdate",
+              IsCheckpointUpdateChangeSet(
+                  update == LayoutCheckpointStorage::Update::kWalked,
+                  named_checkpoint_sequence));
   started.Set("viewTransformNodeId",
               LayoutTransformNodeId(frame.view_transform_node_id));
   base::DictValue offset;
@@ -4738,6 +5614,12 @@ uint64_t RecordBlinkLayoutChanges(
                     ? base::Value()
                     : base::Value(LayoutTransformNodeId(
                           scroll.scroll_translation_node_id)));
+    // Protocol 0.49: the scroller's compositor element ID, as the decimal
+    // text the compositor records name element IDs with.
+    payload.Set("scrollElementId",
+                scroll.scroll_element_id == 0
+                    ? base::Value()
+                    : base::Value(base::NumberToString(scroll.scroll_element_id)));
     SendBlinkEvidence("browser.layout", "layout-scroll-offset-changed",
                       std::move(payload));
   }
@@ -4792,7 +5674,8 @@ base::Value OptionalMicroseconds(int64_t microseconds) {
 }
 
 bool IsValidPresentationWidget(const PresentationWidgetIdentity& widget) {
-  return !widget.present || !widget.local_root_frame_token.empty();
+  return widget.present ? !widget.local_root_frame_token.empty()
+                        : !widget.page_popup;
 }
 
 base::DictValue CreatePresentationBasePayload(
@@ -4806,11 +5689,16 @@ base::DictValue CreatePresentationBasePayload(
                                        std::move(document_token)));
   payload.Set("requestId", PresentationRequestId(request_sequence));
   if (widget.present) {
+    payload.Set("widgetKind", widget.page_popup ? "page-popup" : "frame");
     payload.Set("frameSinkId",
-                base::NumberToString(widget.frame_sink_client_id) + ":" +
-                    base::NumberToString(widget.frame_sink_id));
+                widget.page_popup
+                    ? base::Value()
+                    : base::Value(
+                          base::NumberToString(widget.frame_sink_client_id) +
+                          ":" + base::NumberToString(widget.frame_sink_id)));
     payload.Set("localRootFrameToken", widget.local_root_frame_token);
   } else {
+    payload.Set("widgetKind", base::Value());
     payload.Set("frameSinkId", base::Value());
     payload.Set("localRootFrameToken", base::Value());
   }
@@ -5006,6 +5894,509 @@ void RecordBlinkPresentationFeedback(uint64_t request_sequence,
 
 namespace {
 
+// The compositor's state the bridge keeps between frames, per compositor:
+// the widget its presentation requests name, the values last recorded, and
+// the recorded frames whose presentation has not been reported.
+struct CompositorRecordState {
+  PresentationWidgetIdentity widget;
+  std::map<std::pair<uint64_t, std::string>, CompositorDrawnValue> recorded;
+  std::set<uint32_t> awaiting_presentation;
+};
+
+base::Lock& CompositorRecordLock() {
+  static base::NoDestructor<base::Lock> lock;
+  return *lock;
+}
+
+std::map<int, CompositorRecordState>& CompositorRecordStates() {
+  static base::NoDestructor<std::map<int, CompositorRecordState>> states;
+  return *states;
+}
+
+bool SameCompositorValue(const CompositorDrawnValue& left,
+                         const CompositorDrawnValue& right) {
+  if (left.present != right.present || left.numbers != right.numbers ||
+      left.filters.size() != right.filters.size()) {
+    return false;
+  }
+  for (size_t index = 0; index < left.filters.size(); ++index) {
+    if (left.filters[index].type != right.filters[index].type ||
+        left.filters[index].numbers != right.filters[index].numbers) {
+      return false;
+    }
+  }
+  return true;
+}
+
+base::ListValue CompositorNumbers(const std::vector<double>& numbers) {
+  base::ListValue list;
+  for (const double number : numbers) {
+    list.Append(number);
+  }
+  return list;
+}
+
+base::Value CompositorValueJson(const CompositorDrawnValue& value) {
+  if (!value.present) {
+    return base::Value();
+  }
+  if (value.property == "opacity" && value.numbers.size() == 1) {
+    return base::Value(value.numbers[0]);
+  }
+  if (value.property == "image-frame" && value.numbers.size() == 1) {
+    return base::Value(static_cast<int>(value.numbers[0]));
+  }
+  if (value.property == "scroll-offset" &&
+      (value.numbers.size() == 2 || value.numbers.size() == 4)) {
+    base::DictValue offset;
+    offset.Set("x", value.numbers[0]);
+    offset.Set("y", value.numbers[1]);
+    if (value.numbers.size() == 4) {
+      // Protocol 0.50: whether the compositor scrolls the node, and the
+      // reasons Chromium gives for repainting it on the main thread
+      // instead (cc::MainThreadRepaintReason), one bit each in its order.
+      offset.Set("isComposited", value.numbers[2] != 0);
+      const auto bits = static_cast<unsigned>(value.numbers[3]);
+      base::ListValue reasons;
+      static constexpr std::array<const char*, 4> kReasonNames = {
+          "has-background-attachment-fixed-objects",
+          "not-opaque-for-text-and-lcd-text",
+          "prefer-non-composited-scrolling",
+          "background-needs-repaint-on-scroll",
+      };
+      for (size_t bit = 0; bit < kReasonNames.size(); ++bit) {
+        if (bits & (1u << bit)) {
+          reasons.Append(kReasonNames[bit]);
+        }
+      }
+      offset.Set("mainThreadRepaintReasons", std::move(reasons));
+    }
+    return base::Value(std::move(offset));
+  }
+  if (value.property == "background-color-progress" ||
+      value.property == "clip-path-progress") {
+    base::DictValue progress;
+    progress.Set("progress", value.numbers.size() == 1
+                                 ? base::Value(value.numbers[0])
+                                 : base::Value());
+    return base::Value(std::move(progress));
+  }
+  if (value.property == "filter" || value.property == "backdrop-filter") {
+    base::ListValue operations;
+    for (const CompositorFilterOperation& operation : value.filters) {
+      base::DictValue entry;
+      entry.Set("type", operation.type);
+      entry.Set("numbers", CompositorNumbers(operation.numbers));
+      operations.Append(std::move(entry));
+    }
+    return base::Value(std::move(operations));
+  }
+  return base::Value(CompositorNumbers(value.numbers));
+}
+
+base::Value CompositorWidgetJson(const PresentationWidgetIdentity& widget) {
+  if (!widget.present) {
+    return base::Value();
+  }
+  base::DictValue entry;
+  entry.Set("widgetKind", widget.page_popup ? "page-popup" : "frame");
+  entry.Set("frameSinkId",
+            widget.page_popup
+                ? base::Value()
+                : base::Value(
+                      base::NumberToString(widget.frame_sink_client_id) + ":" +
+                      base::NumberToString(widget.frame_sink_id)));
+  entry.Set("localRootFrameToken", widget.local_root_frame_token);
+  return base::Value(std::move(entry));
+}
+
+bool IsCompositorProperty(const std::string& property) {
+  return IsOneOf(property,
+                 {"transform", "opacity", "filter", "backdrop-filter",
+                  "scroll-offset", "background-color-progress",
+                  "clip-path-progress", "image-frame"});
+}
+
+}  // namespace
+
+void RegisterCompositorWidget(int layer_tree_host_id,
+                              PresentationWidgetIdentity widget) {
+  if (!GetProcessRecorderClient() || layer_tree_host_id <= 0 ||
+      !widget.present || !IsValidPresentationWidget(widget)) {
+    return;
+  }
+  base::AutoLock lock(CompositorRecordLock());
+  CompositorRecordStates()[layer_tree_host_id].widget = std::move(widget);
+}
+
+void RecordCompositorAnimationStarted(
+    int document_node_id,
+    std::string document_token,
+    int node_id,
+    int compositor_animation_id,
+    std::vector<CompositorKeyframeModelFacts> keyframe_models) {
+  A11Y_RECORDER_COST("RecordCompositorAnimationStarted");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      node_id <= 0 || keyframe_models.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("nodeId", node_id);
+  payload.Set("compositorAnimationId",
+              compositor_animation_id > 0 ? base::Value(compositor_animation_id)
+                                          : base::Value());
+  base::ListValue models;
+  for (CompositorKeyframeModelFacts& model : keyframe_models) {
+    base::DictValue entry;
+    entry.Set("keyframeModelId", model.keyframe_model_id);
+    entry.Set("targetProperty", std::move(model.target_property));
+    entry.Set("elementId", base::NumberToString(model.element_id));
+    entry.Set("elementIdNamespace", std::move(model.element_id_namespace));
+    models.Append(std::move(entry));
+  }
+  payload.Set("keyframeModels", std::move(models));
+  SendBlinkEvidence("browser.compositor", "compositor-animation-started",
+                    std::move(payload));
+}
+
+void RecordCompositorAnimationEnded(int document_node_id,
+                                    std::string document_token,
+                                    int node_id,
+                                    int compositor_animation_id,
+                                    std::vector<int> keyframe_model_ids) {
+  A11Y_RECORDER_COST("RecordCompositorAnimationEnded");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || keyframe_model_ids.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("nodeId", node_id > 0 ? base::Value(node_id) : base::Value());
+  payload.Set("compositorAnimationId",
+              compositor_animation_id > 0 ? base::Value(compositor_animation_id)
+                                          : base::Value());
+  base::ListValue ids;
+  for (const int id : keyframe_model_ids) {
+    ids.Append(id);
+  }
+  payload.Set("keyframeModelIds", std::move(ids));
+  SendBlinkEvidence("browser.compositor", "compositor-animation-ended",
+                    std::move(payload));
+}
+
+// Protocol 0.53 (slice 4g): the last recorded description of each
+// animation of this renderer, by sequence number, so that an animation is
+// recorded again only when something other than its current time,
+// progress, and current iteration changed.
+namespace {
+
+struct AnimationRecordStorage {
+  base::Lock lock;
+  std::unordered_map<unsigned, AnimationFacts> last;
+};
+
+AnimationRecordStorage& GetAnimationRecordStorage() {
+  static base::NoDestructor<AnimationRecordStorage> storage;
+  return *storage;
+}
+
+bool SameAnimationDescription(const AnimationFacts& a,
+                              const AnimationFacts& b) {
+  return a.document_node_id == b.document_node_id &&
+         a.document_token == b.document_token && a.kind == b.kind &&
+         a.name == b.name && a.id == b.id &&
+         a.target_node_id == b.target_node_id &&
+         a.pseudo_element == b.pseudo_element &&
+         a.play_state == b.play_state && a.pending == b.pending &&
+         a.playback_rate == b.playback_rate &&
+         a.start_time_milliseconds == b.start_time_milliseconds &&
+         a.timeline_kind == b.timeline_kind &&
+         a.timeline_zero_microseconds == b.timeline_zero_microseconds &&
+         a.timeline_playback_rate == b.timeline_playback_rate &&
+         a.timeline_source_node_id == b.timeline_source_node_id &&
+         a.timeline_subject_node_id == b.timeline_subject_node_id &&
+         a.timeline_axis == b.timeline_axis &&
+         a.has_effect == b.has_effect &&
+         a.delay_milliseconds == b.delay_milliseconds &&
+         a.end_delay_milliseconds == b.end_delay_milliseconds &&
+         a.iteration_start == b.iteration_start &&
+         a.iterations == b.iterations &&
+         a.duration_milliseconds == b.duration_milliseconds &&
+         a.direction == b.direction && a.fill == b.fill &&
+         a.easing == b.easing &&
+         a.compositor_animation_id == b.compositor_animation_id;
+}
+
+base::Value FiniteOrNull(std::optional<double> value) {
+  return value && std::isfinite(*value) ? base::Value(*value) : base::Value();
+}
+
+base::Value NodeIdOrNull(int node_id) {
+  return node_id > 0 ? base::Value(node_id) : base::Value();
+}
+
+base::Value TextOrNull(const std::string& text) {
+  return text.empty() ? base::Value() : base::Value(text);
+}
+
+}  // namespace
+
+void RecordAnimationUpdated(AnimationFacts facts) {
+  A11Y_RECORDER_COST("RecordAnimationUpdated");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.document_node_id <= 0 ||
+      facts.document_token.empty() || facts.sequence_number == 0) {
+    return;
+  }
+  {
+    AnimationRecordStorage& storage = GetAnimationRecordStorage();
+    base::AutoLock locked(storage.lock);
+    auto found = storage.last.find(facts.sequence_number);
+    if (found != storage.last.end() &&
+        SameAnimationDescription(found->second, facts)) {
+      return;
+    }
+    storage.last[facts.sequence_number] = facts;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, facts.document_node_id,
+                                       facts.document_token));
+  payload.Set("sequenceNumber", base::NumberToString(facts.sequence_number));
+  payload.Set("kind", facts.kind);
+  payload.Set("name", TextOrNull(facts.name));
+  payload.Set("id", TextOrNull(facts.id));
+  payload.Set("targetNodeId", NodeIdOrNull(facts.target_node_id));
+  payload.Set("pseudoElement", TextOrNull(facts.pseudo_element));
+  payload.Set("playState", facts.play_state);
+  payload.Set("pending", facts.pending);
+  payload.Set("playbackRate", FiniteOrNull(facts.playback_rate));
+  payload.Set("startTimeMilliseconds",
+              FiniteOrNull(facts.start_time_milliseconds));
+  payload.Set("currentTimeMilliseconds",
+              FiniteOrNull(facts.current_time_milliseconds));
+  base::DictValue timeline;
+  timeline.Set("kind", facts.timeline_kind);
+  timeline.Set("zeroTicks",
+               facts.timeline_kind == "document"
+                   ? PresentationCounterTicks(facts.timeline_zero_microseconds,
+                                              facts.high_resolution_ticks)
+                   : base::Value());
+  timeline.Set("zeroTimeTicksMicroseconds",
+               facts.timeline_kind == "document"
+                   ? OptionalMicroseconds(facts.timeline_zero_microseconds)
+                   : base::Value());
+  timeline.Set("playbackRate", FiniteOrNull(facts.timeline_playback_rate));
+  timeline.Set("sourceNodeId", NodeIdOrNull(facts.timeline_source_node_id));
+  timeline.Set("subjectNodeId", NodeIdOrNull(facts.timeline_subject_node_id));
+  timeline.Set("axis", TextOrNull(facts.timeline_axis));
+  payload.Set("timeline", std::move(timeline));
+  if (facts.has_effect) {
+    base::DictValue effect;
+    effect.Set("delayMilliseconds", FiniteOrNull(facts.delay_milliseconds));
+    effect.Set("endDelayMilliseconds",
+               FiniteOrNull(facts.end_delay_milliseconds));
+    effect.Set("iterationStart", FiniteOrNull(facts.iteration_start));
+    effect.Set("iterations", FiniteOrNull(facts.iterations));
+    effect.Set("durationMilliseconds",
+               FiniteOrNull(facts.duration_milliseconds));
+    effect.Set("direction", facts.direction);
+    effect.Set("fill", facts.fill);
+    effect.Set("easing", facts.easing);
+    effect.Set("progress", FiniteOrNull(facts.progress));
+    effect.Set("currentIteration", FiniteOrNull(facts.current_iteration));
+    payload.Set("effect", std::move(effect));
+  } else {
+    payload.Set("effect", base::Value());
+  }
+  payload.Set("compositorAnimationId",
+              NodeIdOrNull(facts.compositor_animation_id));
+  SendBlinkEvidence("browser.animation", "animation-updated",
+                    std::move(payload));
+}
+
+void RecordAnimationRemoved(unsigned sequence_number) {
+  A11Y_RECORDER_COST("RecordAnimationRemoved");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || sequence_number == 0) {
+    return;
+  }
+  AnimationFacts last;
+  {
+    AnimationRecordStorage& storage = GetAnimationRecordStorage();
+    base::AutoLock locked(storage.lock);
+    auto found = storage.last.find(sequence_number);
+    if (found == storage.last.end()) {
+      return;
+    }
+    last = std::move(found->second);
+    storage.last.erase(found);
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, last.document_node_id,
+                                       std::move(last.document_token)));
+  payload.Set("sequenceNumber", base::NumberToString(sequence_number));
+  SendBlinkEvidence("browser.animation", "animation-removed",
+                    std::move(payload));
+}
+
+void RecordCompositorFrame(int layer_tree_host_id,
+                           uint32_t frame_token,
+                           int64_t begin_frame_microseconds,
+                           int source_frame_number,
+                           bool high_resolution_ticks,
+                           std::vector<CompositorDrawnValue> values) {
+  A11Y_RECORDER_COST("RecordCompositorFrame");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || layer_tree_host_id <= 0 || frame_token == 0) {
+    return;
+  }
+  base::ListValue changes;
+  PresentationWidgetIdentity widget;
+  {
+    base::AutoLock lock(CompositorRecordLock());
+    CompositorRecordState& state = CompositorRecordStates()[layer_tree_host_id];
+    for (CompositorDrawnValue& value : values) {
+      if (!IsCompositorProperty(value.property)) {
+        continue;
+      }
+      const auto key = std::make_pair(value.element_id, value.property);
+      auto recorded = state.recorded.find(key);
+      if (!value.present) {
+        // An element never recorded, or already recorded as gone, is not a
+        // change.
+        if (recorded == state.recorded.end()) {
+          continue;
+        }
+        state.recorded.erase(recorded);
+      } else if (recorded != state.recorded.end() &&
+                 SameCompositorValue(recorded->second, value)) {
+        continue;
+      }
+      base::DictValue change;
+      // An animated image's frame is the paint image's, which no compositor
+      // element names.
+      change.Set(value.property == "image-frame" ? "paintImageId" : "elementId",
+                 base::NumberToString(value.element_id));
+      change.Set("property", value.property);
+      change.Set("value", CompositorValueJson(value));
+      changes.Append(std::move(change));
+      if (value.present) {
+        state.recorded[key] = std::move(value);
+      }
+    }
+    if (changes.empty()) {
+      return;
+    }
+    // Viz reports each submitted frame once, presented or failed
+    // (CompositorFrameSinkSupport::DidPresentCompositorFrame). A frame whose
+    // report never came, as when its renderer closed, is not awaited for
+    // ever: the oldest is let go past this bound, which no report is so far
+    // behind.
+    constexpr size_t kMaximumAwaitedCompositorFrames = 1024;
+    state.awaiting_presentation.insert(frame_token);
+    if (state.awaiting_presentation.size() > kMaximumAwaitedCompositorFrames) {
+      state.awaiting_presentation.erase(state.awaiting_presentation.begin());
+    }
+    widget = state.widget;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("layerTreeHostId", layer_tree_host_id);
+  payload.Set("widget", CompositorWidgetJson(widget));
+  payload.Set("frameToken", base::NumberToString(frame_token));
+  payload.Set("sourceFrameNumber", source_frame_number);
+  payload.Set("beginFrameTicks",
+              PresentationCounterTicks(begin_frame_microseconds,
+                                       high_resolution_ticks));
+  payload.Set("beginFrameTimeTicksMicroseconds",
+              OptionalMicroseconds(begin_frame_microseconds));
+  payload.Set("highResolutionTicks", high_resolution_ticks);
+  payload.Set("changes", std::move(changes));
+  SendBlinkEvidence("browser.compositor", "compositor-frame",
+                    std::move(payload));
+}
+
+void RecordCompositorFramePresented(int layer_tree_host_id,
+                                    uint32_t frame_token,
+                                    int64_t presented_microseconds,
+                                    bool failed,
+                                    bool high_resolution_ticks) {
+  A11Y_RECORDER_COST("RecordCompositorFramePresented");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || layer_tree_host_id <= 0 || frame_token == 0) {
+    return;
+  }
+  PresentationWidgetIdentity widget;
+  {
+    base::AutoLock lock(CompositorRecordLock());
+    auto state = CompositorRecordStates().find(layer_tree_host_id);
+    if (state == CompositorRecordStates().end() ||
+        !state->second.awaiting_presentation.erase(frame_token)) {
+      return;
+    }
+    widget = state->second.widget;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("layerTreeHostId", layer_tree_host_id);
+  payload.Set("widget", CompositorWidgetJson(widget));
+  payload.Set("frameToken", base::NumberToString(frame_token));
+  payload.Set("failed", failed);
+  payload.Set("presentedTicks",
+              failed ? base::Value()
+                     : PresentationCounterTicks(presented_microseconds,
+                                                high_resolution_ticks));
+  payload.Set("presentedTimeTicksMicroseconds",
+              failed ? base::Value()
+                     : OptionalMicroseconds(presented_microseconds));
+  payload.Set("highResolutionTicks", high_resolution_ticks);
+  SendBlinkEvidence("browser.compositor", "compositor-frame-presented",
+                    std::move(payload));
+}
+
+void RecordPaintWorkletPainted(PaintWorkletPaintedFacts facts) {
+  A11Y_RECORDER_COST("RecordPaintWorkletPainted");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.element_id == 0 ||
+      (facts.property != "background-color" &&
+       facts.property != "clip-path")) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("elementId", base::NumberToString(facts.element_id));
+  payload.Set("property", facts.property);
+  payload.Set("progress", facts.progress ? base::Value(*facts.progress)
+                                         : base::Value());
+  base::DictValue value;
+  if (facts.property == "background-color") {
+    value.Set("color", CompositorNumbers(facts.color));
+  } else {
+    value.Set("fillType", std::move(facts.fill_type));
+    base::ListValue verbs;
+    for (std::string& verb : facts.verbs) {
+      verbs.Append(std::move(verb));
+    }
+    value.Set("verbs", std::move(verbs));
+    value.Set("points", CompositorNumbers(facts.points));
+    value.Set("conicWeights", CompositorNumbers(facts.conic_weights));
+    base::DictValue translation;
+    translation.Set("x", facts.translate_x);
+    translation.Set("y", facts.translate_y);
+    value.Set("translation", std::move(translation));
+    value.Set("drawnAsRoundedRect", facts.drawn_as_rounded_rect);
+  }
+  payload.Set("value", std::move(value));
+  SendBlinkEvidence("browser.compositor", "paint-worklet-painted",
+                    std::move(payload));
+}
+
+namespace {
+
 std::string InteractionCheckpointId(uint64_t checkpoint_sequence) {
   return "interaction-checkpoint-" + base::NumberToString(checkpoint_sequence);
 }
@@ -5052,7 +6443,8 @@ uint64_t BeginBlinkInteractionCheckpoint(int document_node_id,
   base::Value source_checkpoint_id;
   base::Value source_change_set_id;
   if (source_channel == "browser.dom" &&
-      IsOneOf(reason, {"finished-parsing", "post-mutation"}) &&
+      IsOneOf(reason,
+              {"started-parsing", "finished-parsing", "post-mutation"}) &&
       !change_set_source) {
     if (source_sequence != 0) {
       source_checkpoint_id = base::Value(DomCheckpointId(source_sequence));
@@ -6045,6 +7437,657 @@ void RecordBlinkWebTransportClosed(NetworkScope scope,
                                : base::Value(CreateMessageText(reason)));
   SendBlinkEvidence("browser.network", "web-transport-closed",
                     std::move(payload));
+}
+
+// Page resources (protocol 0.40).
+FontFaceFacts::FontFaceFacts() = default;
+FontFaceFacts::FontFaceFacts(FontFaceFacts&&) = default;
+FontFaceFacts& FontFaceFacts::operator=(FontFaceFacts&&) = default;
+FontFaceFacts::~FontFaceFacts() = default;
+
+ImageResourceFacts::ImageResourceFacts() = default;
+ImageResourceFacts::ImageResourceFacts(ImageResourceFacts&&) = default;
+ImageResourceFacts& ImageResourceFacts::operator=(ImageResourceFacts&&) =
+    default;
+ImageResourceFacts::~ImageResourceFacts() = default;
+StyleSheetResourceFacts::StyleSheetResourceFacts() = default;
+StyleSheetResourceFacts::StyleSheetResourceFacts(StyleSheetResourceFacts&&) =
+    default;
+StyleSheetResourceFacts& StyleSheetResourceFacts::operator=(
+    StyleSheetResourceFacts&&) = default;
+StyleSheetResourceFacts::~StyleSheetResourceFacts() = default;
+StyleSheetFacts::StyleSheetFacts() = default;
+StyleSheetFacts::StyleSheetFacts(const StyleSheetFacts&) = default;
+StyleSheetFacts::StyleSheetFacts(StyleSheetFacts&&) = default;
+StyleSheetFacts& StyleSheetFacts::operator=(const StyleSheetFacts&) = default;
+StyleSheetFacts& StyleSheetFacts::operator=(StyleSheetFacts&&) = default;
+StyleSheetFacts::~StyleSheetFacts() = default;
+StyleSheetScopeFacts::StyleSheetScopeFacts() = default;
+StyleSheetScopeFacts::StyleSheetScopeFacts(StyleSheetScopeFacts&&) = default;
+StyleSheetScopeFacts& StyleSheetScopeFacts::operator=(StyleSheetScopeFacts&&) =
+    default;
+StyleSheetScopeFacts::~StyleSheetScopeFacts() = default;
+
+namespace {
+
+constexpr char kResourcesChannel[] = "browser.resources";
+
+// What the renderer has recorded of its resources: the digest of each font
+// file and image whose bytes were queued, and the font file of each typeface.
+struct RecordedFontFile {
+  std::string digest;
+  int collection_index = 0;
+};
+
+struct ResourceStorage {
+  base::Lock lock;
+  std::unordered_map<uint32_t, RecordedFontFile> typefaces;
+  // Protocol 0.48: the paint image IDs already recorded in the renderer.
+  std::unordered_set<int64_t> paint_image_ids;
+  std::unordered_map<std::string, bool> font_file_digests;
+  std::unordered_map<std::string, bool> image_digests;
+  // Protocol 0.51: the style sheet text digests already recorded.
+  std::unordered_map<std::string, bool> style_sheet_digests;
+  // Protocol 0.54 (slice 4h): the digests of the script sources recorded,
+  // and the script IDs of the main thread recorded.
+  std::unordered_map<std::string, bool> script_digests;
+  std::unordered_set<int> script_ids;
+  uint64_t next_face_number = 0;
+  uint64_t next_style_sheet_number = 0;
+};
+
+ResourceStorage& Resources() {
+  static base::NoDestructor<ResourceStorage> storage;
+  return *storage;
+}
+
+std::string Sha256Hex(const std::string& bytes) {
+  return base::HexEncodeLower(crypto::hash::Sha256(std::string_view(bytes)));
+}
+
+// The bytes of a font file or an image, base64 encoded on the writer thread so
+// the observing thread only copies them.
+struct ResourceBytesEvidence : PendingEvidence {
+  raw_ptr<const RecorderPipeClient> client = nullptr;
+  std::string digest;
+  std::string data;
+
+  base::DictValue TakePayload() override {
+    base::DictValue payload;
+    payload.Set("context", CreateContext(*client, 0));
+    payload.Set("digest", std::move(digest));
+    payload.Set("size", base::NumberToString(data.size()));
+    payload.Set("bytes", base::Base64Encode(data));
+    return payload;
+  }
+};
+
+// Queues the bytes of a digest the renderer has not met. Returns true when the
+// record was queued or had been already, so the digest counts as recorded only
+// when its bytes are on their way.
+bool QueueResourceBytes(RecorderPipeClient* client,
+                        std::unordered_map<std::string, bool>& recorded,
+                        const char* event_type,
+                        const std::string& digest,
+                        std::string bytes,
+                        const char* channel = kResourcesChannel) {
+  if (recorded.contains(digest)) {
+    return true;
+  }
+  auto evidence = std::make_unique<ResourceBytesEvidence>();
+  evidence->channel = channel;
+  evidence->event_type = event_type;
+  // The context and members with their names, and the base64 of the bytes.
+  evidence->bytes = 400 + digest.size() + (bytes.size() + 2) / 3 * 4;
+  evidence->client = client;
+  evidence->digest = digest;
+  evidence->data = std::move(bytes);
+  ReportOmittedEvidence(client, channel);
+  std::string error;
+  if (!client->QueueEvidence(std::move(evidence), &error)) {
+    HoldOmittedEvidence(channel, 1);
+    WriteDiagnosticLine("Blink evidence write failed: " + error);
+    return false;
+  }
+  recorded.emplace(digest, true);
+  return true;
+}
+
+base::DictValue CreateFontFacePayload(const RecorderPipeClient& client,
+                                      int document_node_id,
+                                      std::string document_token,
+                                      uint64_t face_number) {
+  base::DictValue payload;
+  payload.Set("context",
+              CreateContext(client, document_node_id, std::move(document_token)));
+  payload.Set("faceNumber", base::NumberToString(face_number));
+  return payload;
+}
+
+}  // namespace
+
+bool LookUpFontFile(uint32_t typeface_id,
+                    std::string* digest,
+                    int* collection_index) {
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  auto found = storage.typefaces.find(typeface_id);
+  if (found == storage.typefaces.end()) {
+    return false;
+  }
+  *digest = found->second.digest;
+  *collection_index = found->second.collection_index;
+  return true;
+}
+
+std::string RecordFontFile(uint32_t typeface_id,
+                           int collection_index,
+                           bool readable,
+                           std::string bytes) {
+  A11Y_RECORDER_COST("RecordFontFile");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client && !IsRecreationMode()) {
+    return std::string();
+  }
+  std::string digest = readable ? Sha256Hex(bytes) : std::string();
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  if (!client) {
+    // The recreation mode (sub-step 3) records nothing: it keeps the digest
+    // of each typeface, so that a glyph run's recorded font file can be
+    // compared with the font Blink chose, and each file is read once.
+    storage.typefaces[typeface_id] = {digest, collection_index};
+    return digest;
+  }
+  if (readable &&
+      !QueueResourceBytes(client, storage.font_file_digests, "font-file",
+                          digest, std::move(bytes))) {
+    // The typeface is left unmet, so its file is read again the next time a
+    // glyph run uses it.
+    return digest;
+  }
+  storage.typefaces[typeface_id] = {digest, collection_index};
+  return digest;
+}
+
+uint64_t AssignFontFaceNumber() {
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  return ++storage.next_face_number;
+}
+
+void RecordBlinkFontFaceAdded(int document_node_id,
+                              std::string document_token,
+                              uint64_t face_number) {
+  A11Y_RECORDER_COST("RecordBlinkFontFaceAdded");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      face_number == 0) {
+    return;
+  }
+  SendBlinkEvidence(kResourcesChannel, "font-face-added",
+                    CreateFontFacePayload(*client, document_node_id,
+                                          std::move(document_token),
+                                          face_number));
+}
+
+void RecordBlinkFontFaceLoaded(int document_node_id,
+                               std::string document_token,
+                               uint64_t face_number,
+                               FontFaceFacts face) {
+  A11Y_RECORDER_COST("RecordBlinkFontFaceLoaded");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      face_number == 0) {
+    return;
+  }
+  base::DictValue payload = CreateFontFacePayload(
+      *client, document_node_id, std::move(document_token), face_number);
+  payload.Set("family", std::move(face.family));
+  base::DictValue descriptors;
+  descriptors.Set("style", std::move(face.style));
+  descriptors.Set("weight", std::move(face.weight));
+  descriptors.Set("stretch", std::move(face.stretch));
+  descriptors.Set("unicodeRange", std::move(face.unicode_range));
+  descriptors.Set("variant", std::move(face.variant));
+  descriptors.Set("featureSettings", std::move(face.feature_settings));
+  descriptors.Set("display", std::move(face.display));
+  descriptors.Set("ascentOverride", std::move(face.ascent_override));
+  descriptors.Set("descentOverride", std::move(face.descent_override));
+  descriptors.Set("lineGapOverride", std::move(face.line_gap_override));
+  descriptors.Set("sizeAdjust", std::move(face.size_adjust));
+  payload.Set("descriptors", std::move(descriptors));
+  if (face.source_kind.empty()) {
+    payload.Set("source", base::Value());
+  } else {
+    base::DictValue source;
+    source.Set("kind", std::move(face.source_kind));
+    if (face.source_url.empty()) {
+      source.Set("url", base::Value());
+    } else {
+      source.Set("url", std::move(face.source_url));
+    }
+    payload.Set("source", std::move(source));
+  }
+  if (face.font_file_digest.empty()) {
+    payload.Set("fontFile", base::Value());
+  } else {
+    base::DictValue font_file;
+    font_file.Set("digest", std::move(face.font_file_digest));
+    font_file.Set("index", face.font_file_index);
+    payload.Set("fontFile", std::move(font_file));
+  }
+  SendBlinkEvidence(kResourcesChannel, "font-face-loaded", std::move(payload));
+}
+
+void RecordBlinkFontFaceRemoved(int document_node_id,
+                                std::string document_token,
+                                uint64_t face_number) {
+  A11Y_RECORDER_COST("RecordBlinkFontFaceRemoved");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      face_number == 0) {
+    return;
+  }
+  SendBlinkEvidence(kResourcesChannel, "font-face-removed",
+                    CreateFontFacePayload(*client, document_node_id,
+                                          std::move(document_token),
+                                          face_number));
+}
+
+void RecordBlinkImageResource(ImageResourceFacts image) {
+  A11Y_RECORDER_COST("RecordBlinkImageResource");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || image.url.empty()) {
+    return;
+  }
+  const size_t size = image.bytes.size();
+  const std::string digest = Sha256Hex(image.bytes);
+  bool recorded = false;
+  {
+    ResourceStorage& storage = Resources();
+    base::AutoLock lock(storage.lock);
+    recorded = QueueResourceBytes(client, storage.image_digests, "image-data",
+                                  digest, std::move(image.bytes));
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("url", std::move(image.url));
+  if (image.response_url.empty()) {
+    payload.Set("responseUrl", base::Value());
+  } else {
+    payload.Set("responseUrl", std::move(image.response_url));
+  }
+  payload.Set("status", image.status);
+  payload.Set("mimeType", std::move(image.mime_type));
+  payload.Set("size", base::NumberToString(size));
+  payload.Set("digest", digest);
+  payload.Set("dataRecorded", recorded);
+  payload.Set("imageId", image.image_id && *image.image_id >= 0
+                             ? base::Value(base::NumberToString(*image.image_id))
+                             : base::Value());
+  SendBlinkEvidence(kResourcesChannel, "image-resource", std::move(payload));
+}
+
+std::string RecordBlinkStyleSheetResource(StyleSheetResourceFacts sheet) {
+  A11Y_RECORDER_COST("RecordBlinkStyleSheetResource");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || sheet.url.empty()) {
+    return std::string();
+  }
+  const size_t size = sheet.text.size();
+  const std::string digest = Sha256Hex(sheet.text);
+  bool recorded = false;
+  {
+    ResourceStorage& storage = Resources();
+    base::AutoLock lock(storage.lock);
+    recorded = QueueResourceBytes(client, storage.style_sheet_digests,
+                                  "style-sheet-text", digest,
+                                  std::move(sheet.text));
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("url", std::move(sheet.url));
+  if (sheet.response_url.empty()) {
+    payload.Set("responseUrl", base::Value());
+  } else {
+    payload.Set("responseUrl", std::move(sheet.response_url));
+  }
+  payload.Set("status", sheet.status);
+  payload.Set("mimeType", std::move(sheet.mime_type));
+  payload.Set("size", base::NumberToString(size));
+  payload.Set("digest", digest);
+  payload.Set("textRecorded", recorded);
+  SendBlinkEvidence(kResourcesChannel, "style-sheet-resource",
+                    std::move(payload));
+  return recorded ? digest : std::string();
+}
+
+std::string RecordBlinkStyleSheetText(std::string text) {
+  A11Y_RECORDER_COST("RecordBlinkStyleSheetText");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return std::string();
+  }
+  const std::string digest = Sha256Hex(text);
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  return QueueResourceBytes(client, storage.style_sheet_digests,
+                            "style-sheet-text", digest, std::move(text))
+             ? digest
+             : std::string();
+}
+
+uint64_t AssignStyleSheetNumber() {
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  return ++storage.next_style_sheet_number;
+}
+
+namespace {
+
+base::DictValue StyleSheetFactsValue(const StyleSheetFacts& sheet) {
+  base::DictValue value;
+  value.Set("sheet", base::NumberToString(sheet.sheet_number));
+  if (!sheet.full) {
+    return value;
+  }
+  value.Set("kind", sheet.kind);
+  value.Set("ownerNodeId", sheet.owner_node_id > 0
+                               ? base::Value(sheet.owner_node_id)
+                               : base::Value());
+  if (sheet.parent_sheet_number > 0) {
+    value.Set("parentSheet", base::NumberToString(sheet.parent_sheet_number));
+    value.Set("ruleIndex", sheet.rule_index);
+  } else {
+    value.Set("parentSheet", base::Value());
+    value.Set("ruleIndex", base::Value());
+  }
+  value.Set("href", sheet.href.empty() ? base::Value() : base::Value(sheet.href));
+  value.Set("media", sheet.media);
+  value.Set("title", sheet.title);
+  value.Set("disabled", sheet.disabled);
+  value.Set("active", sheet.active);
+  value.Set("textSource", sheet.text_source);
+  value.Set("textDigest", sheet.text_digest.empty()
+                              ? base::Value()
+                              : base::Value(sheet.text_digest));
+  return value;
+}
+
+}  // namespace
+
+void RecordBlinkStyleSheetsUpdated(int document_node_id,
+                                   std::string document_token,
+                                   std::vector<StyleSheetScopeFacts> scopes) {
+  A11Y_RECORDER_COST("RecordBlinkStyleSheetsUpdated");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || scopes.empty()) {
+    return;
+  }
+  base::ListValue scope_values;
+  for (const StyleSheetScopeFacts& scope : scopes) {
+    base::DictValue scope_value;
+    scope_value.Set("scopeNodeId", scope.scope_node_id);
+    base::ListValue sheets;
+    for (const StyleSheetFacts& sheet : scope.sheets) {
+      sheets.Append(StyleSheetFactsValue(sheet));
+    }
+    base::ListValue adopted;
+    for (const StyleSheetFacts& sheet : scope.adopted) {
+      adopted.Append(StyleSheetFactsValue(sheet));
+    }
+    scope_value.Set("sheets", std::move(sheets));
+    scope_value.Set("adopted", std::move(adopted));
+    scope_values.Append(std::move(scope_value));
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, document_node_id,
+                                       std::move(document_token)));
+  payload.Set("scopes", std::move(scope_values));
+  SendBlinkEvidence(kResourcesChannel, "style-sheets-updated",
+                    std::move(payload));
+}
+
+void RecordBlinkImagePaintImage(ImagePaintImageFacts facts) {
+  A11Y_RECORDER_COST("RecordBlinkImagePaintImage");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.image_id < 0 || facts.paint_image_id < 0) {
+    return;
+  }
+  {
+    ResourceStorage& storage = Resources();
+    base::AutoLock lock(storage.lock);
+    if (!storage.paint_image_ids.insert(facts.paint_image_id).second) {
+      return;
+    }
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("imageId", base::NumberToString(facts.image_id));
+  payload.Set("paintImageId", base::NumberToString(facts.paint_image_id));
+  payload.Set("sequence", facts.own_sequence ? "own" : "shared");
+  payload.Set("nodeId", facts.node_id && *facts.node_id > 0
+                            ? base::Value(*facts.node_id)
+                            : base::Value());
+  payload.Set("syncTargetPaintImageId",
+              facts.sync_target_paint_image_id &&
+                      *facts.sync_target_paint_image_id >= 0
+                  ? base::Value(base::NumberToString(
+                        *facts.sync_target_paint_image_id))
+                  : base::Value());
+  SendBlinkEvidence(kResourcesChannel, "image-paint-image", std::move(payload));
+}
+
+int RegisterHookCostKind(const char* name) {
+  return RegisterCostKind(name);
+}
+
+int64_t StartHookCost(int slot) {
+  if (slot < 0 || !GetProcessRecorderClient()) {
+    return -1;
+  }
+  return CostNowNanoseconds();
+}
+
+void StopHookCost(int slot, int64_t started) {
+  if (slot < 0 || started < 0) {
+    return;
+  }
+  RecordCost(slot, CostNowNanoseconds() - started);
+}
+
+
+ScriptFrameFacts::ScriptFrameFacts() = default;
+ScriptFrameFacts::ScriptFrameFacts(const ScriptFrameFacts&) = default;
+ScriptFrameFacts::ScriptFrameFacts(ScriptFrameFacts&&) = default;
+ScriptFrameFacts& ScriptFrameFacts::operator=(const ScriptFrameFacts&) =
+    default;
+ScriptFrameFacts& ScriptFrameFacts::operator=(ScriptFrameFacts&&) = default;
+ScriptFrameFacts::~ScriptFrameFacts() = default;
+TimerOriginFacts::TimerOriginFacts() = default;
+TimerOriginFacts::TimerOriginFacts(TimerOriginFacts&&) = default;
+TimerOriginFacts& TimerOriginFacts::operator=(TimerOriginFacts&&) = default;
+TimerOriginFacts::~TimerOriginFacts() = default;
+ScriptSourceFacts::ScriptSourceFacts() = default;
+ScriptSourceFacts::ScriptSourceFacts(const ScriptSourceFacts&) = default;
+ScriptSourceFacts::ScriptSourceFacts(ScriptSourceFacts&&) = default;
+ScriptSourceFacts& ScriptSourceFacts::operator=(const ScriptSourceFacts&) =
+    default;
+ScriptSourceFacts& ScriptSourceFacts::operator=(ScriptSourceFacts&&) = default;
+ScriptSourceFacts::~ScriptSourceFacts() = default;
+
+void NoteBlinkTimerOrigin(uintptr_t timer_identity, TimerOriginFacts facts) {
+  A11Y_RECORDER_COST("NoteBlinkTimerOrigin");
+  if (!GetProcessRecorderClient() || timer_identity == 0) {
+    return;
+  }
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  identities.timer_origins.insert_or_assign(timer_identity, std::move(facts));
+}
+
+void RecordBlinkScriptSource(ScriptSourceFacts facts) {
+  A11Y_RECORDER_COST("RecordBlinkScriptSource");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.document_node_id <= 0 || facts.script_id <= 0 ||
+      (facts.kind != kScriptSourceKindClassic &&
+       facts.kind != kScriptSourceKindModule &&
+       facts.kind != kScriptSourceKindEventHandlerAttribute)) {
+    return;
+  }
+  const bool attribute = facts.kind == kScriptSourceKindEventHandlerAttribute;
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, facts.document_node_id,
+                                       std::move(facts.document_token)));
+  payload.Set("scriptId", base::NumberToString(facts.script_id));
+  payload.Set("kind", facts.kind);
+  payload.Set("elementNodeId", facts.element_node_id > 0
+                                   ? base::Value(facts.element_node_id)
+                                   : base::Value());
+  payload.Set("attributeName",
+              attribute && !facts.attribute_name.empty()
+                  ? base::Value(std::move(facts.attribute_name))
+                  : base::Value());
+  payload.Set("url", facts.url.empty() ? base::Value()
+                                       : base::Value(std::move(facts.url)));
+  payload.Set("line", facts.line_number > 0 ? base::Value(facts.line_number)
+                                            : base::Value());
+  payload.Set("column", facts.column_number > 0
+                            ? base::Value(facts.column_number)
+                            : base::Value());
+  SendBlinkEvidence("browser.timer", "script-compiled", std::move(payload));
+}
+
+void PushBlinkScriptElement(uintptr_t script_identity,
+                            ScriptSourceFacts facts) {
+  if (!GetProcessRecorderClient() || script_identity == 0) {
+    return;
+  }
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  identities.running_script_elements.insert_or_assign(script_identity,
+                                                      std::move(facts));
+}
+
+void PopBlinkScriptElement(uintptr_t script_identity) {
+  EvidenceIdentityStorage& identities = EvidenceIdentities();
+  base::AutoLock lock(identities.lock);
+  identities.running_script_elements.erase(script_identity);
+}
+
+void RecordBlinkClassicScriptCompiled(uintptr_t script_identity,
+                                      int script_id) {
+  A11Y_RECORDER_COST("RecordBlinkClassicScriptCompiled");
+  if (!GetProcessRecorderClient() || script_identity == 0 || script_id <= 0) {
+    return;
+  }
+  ScriptSourceFacts facts;
+  {
+    EvidenceIdentityStorage& identities = EvidenceIdentities();
+    base::AutoLock lock(identities.lock);
+    auto found = identities.running_script_elements.find(script_identity);
+    if (found == identities.running_script_elements.end()) {
+      return;
+    }
+    facts = found->second;
+  }
+  facts.script_id = script_id;
+  RecordBlinkScriptSource(std::move(facts));
+}
+
+ScriptParsedFacts::ScriptParsedFacts() = default;
+ScriptParsedFacts::ScriptParsedFacts(ScriptParsedFacts&&) = default;
+ScriptParsedFacts& ScriptParsedFacts::operator=(ScriptParsedFacts&&) = default;
+ScriptParsedFacts::~ScriptParsedFacts() = default;
+
+namespace {
+
+constexpr char kScriptChannel[] = "browser.script";
+
+std::atomic<int>& DevToolsCommandDepth() {
+  static std::atomic<int> depth{0};
+  return depth;
+}
+
+base::Value TextOrNullValue(std::string text) {
+  return text.empty() ? base::Value() : base::Value(std::move(text));
+}
+
+}  // namespace
+
+bool ClaimScriptParsed(int script_id) {
+  if (script_id <= 0) {
+    return false;
+  }
+  ResourceStorage& storage = Resources();
+  base::AutoLock lock(storage.lock);
+  return storage.script_ids.insert(script_id).second;
+}
+
+void RecordScriptParsed(ScriptParsedFacts facts) {
+  A11Y_RECORDER_COST("RecordScriptParsed");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || facts.document_node_id <= 0 || facts.script_id <= 0 ||
+      (facts.kind != kScriptParsedKindClassic &&
+       facts.kind != kScriptParsedKindModule &&
+       facts.kind != kScriptParsedKindEval &&
+       facts.kind != kScriptParsedKindFunction)) {
+    return;
+  }
+  const size_t size = facts.source.size();
+  const std::string digest = Sha256Hex(facts.source);
+  bool recorded = false;
+  {
+    ResourceStorage& storage = Resources();
+    base::AutoLock lock(storage.lock);
+    recorded = QueueResourceBytes(client, storage.script_digests,
+                                  "script-text", digest,
+                                  std::move(facts.source), kScriptChannel);
+  }
+  const std::string world_kind =
+      NormalizeExecutionWorldKind(std::move(facts.world_kind));
+  base::DictValue context = CreateContext(*client, facts.document_node_id,
+                                          std::move(facts.document_token));
+  if (!world_kind.empty()) {
+    context.Set("executionWorldId", ExecutionWorldId(facts.world_id));
+  }
+  base::DictValue payload;
+  payload.Set("context", std::move(context));
+  payload.Set("world", CreateExecutionWorld(world_kind, facts.world_id,
+                                            std::move(facts.world_name),
+                                            std::move(facts.world_stable_id)));
+  payload.Set("scriptId", base::NumberToString(facts.script_id));
+  payload.Set("kind", facts.kind);
+  payload.Set("url", TextOrNullValue(std::move(facts.url)));
+  payload.Set("sourceUrl", TextOrNullValue(std::move(facts.source_url)));
+  payload.Set("sourceMapUrl", TextOrNullValue(std::move(facts.source_map_url)));
+  payload.Set("line", facts.line_number > 0 ? base::Value(facts.line_number)
+                                            : base::Value());
+  payload.Set("column", facts.column_number > 0
+                            ? base::Value(facts.column_number)
+                            : base::Value());
+  payload.Set("evalFromScriptId",
+              facts.eval_from_script_id > 0
+                  ? base::Value(base::NumberToString(facts.eval_from_script_id))
+                  : base::Value());
+  payload.Set("compileError", facts.compile_error);
+  payload.Set("digest", digest);
+  payload.Set("size", base::NumberToString(size));
+  payload.Set("textRecorded", recorded);
+  SendBlinkEvidence(kScriptChannel, "script-parsed", std::move(payload));
+}
+
+void EnterDevToolsCommand() {
+  DevToolsCommandDepth().fetch_add(1, std::memory_order_relaxed);
+}
+
+void LeaveDevToolsCommand() {
+  DevToolsCommandDepth().fetch_sub(1, std::memory_order_relaxed);
+}
+
+bool InDevToolsCommand() {
+  return DevToolsCommandDepth().load(std::memory_order_relaxed) > 0;
 }
 
 }  // namespace a11y_recorder

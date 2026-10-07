@@ -50,12 +50,16 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
     private int _lastRejection = -1;
     private int _lastOmission = -1;
     private ushort _writerChannel;
+    private readonly RecordingFileStateRecorder? _state;
+    private readonly Dictionary<string, ushort> _stateChannels = new(StringComparer.Ordinal);
+    private readonly List<BufferedEvent> _stateEvents = [];
 
     public RecordingFileBatchTarget(
         string path,
         IReadOnlyDictionary<string, string> recording,
         RecordingFileWriterOptions? options = null,
-        WriterTimings? timings = null)
+        WriterTimings? timings = null,
+        bool recordState = true)
     {
         ArgumentNullException.ThrowIfNull(recording);
         var frequency = recording.TryGetValue("clockFrequency", out var text) &&
@@ -66,7 +70,14 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
         _file = new RecordingFileWriter(path, options);
         _timings = timings;
         _file.AddMetadata("recording", recording);
+        if (recordState)
+        {
+            _state = new RecordingFileStateRecorder(AddStateMessage, timings);
+        }
     }
+
+    /// <summary>What the state thread did, once the file is finished; null before, or when it made no snapshots.</summary>
+    public RecordingFileStateSummary? StateSummary { get; private set; }
 
     public string Path => _file.Path;
 
@@ -96,9 +107,14 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
         }
     }
 
-    /// <summary>The stream a recorder channel is written in.</summary>
+    /// <summary>
+    /// The stream a recorder channel is written in. The channels a
+    /// document's state is rebuilt from are written in a stream of their own,
+    /// so rebuilding it does not decompress the other browser records.
+    /// </summary>
     public static string StreamOf(string channel) =>
-        channel.StartsWith("browser.", StringComparison.Ordinal) ? "browser"
+        BrowserStateBuilder.IsStateChannel(channel) ? "browser-state"
+        : channel.StartsWith("browser.", StringComparison.Ordinal) ? "browser"
         : channel.StartsWith("graphics.", StringComparison.Ordinal) ||
           channel.StartsWith("audio.", StringComparison.Ordinal) ? "media"
         : "desktop";
@@ -162,6 +178,22 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
                     record.MonotonicNanoseconds,
                     _encoded.WrittenSpan);
                 _index.Add(buffered.EventKey, record);
+                if (_state is not null && BrowserStateBuilder.IsStateChannel(record.Channel))
+                {
+                    _stateEvents.Add(buffered);
+                }
+            }
+
+            if (_state is not null && _stateEvents.Count > 0)
+            {
+                if (_state.Pass(_stateEvents) is { } stopped)
+                {
+                    AddStateMessageLocked(
+                        RecordingFileStateRecorder.IndexTopic,
+                        Math.Max(0, _stateEvents[^1].Event.MonotonicNanoseconds),
+                        RecordingFileStateRecorder.StoppedRecord(_stateEvents[^1].Event.MonotonicNanoseconds, stopped));
+                }
+                _stateEvents.Clear();
             }
 
             _timings?.Since("file.add", adding, batch.Events.Count);
@@ -193,6 +225,16 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
     /// </summary>
     public void Finish()
     {
+        if (_state is not null && StateSummary is null)
+        {
+            // The state thread adds its last snapshots under the gate, so it
+            // is completed before the gate is taken.
+            var completing = Stopwatch.GetTimestamp();
+            StateSummary = _state.Complete();
+            _timings?.Since("complete.state", completing, StateSummary.Snapshots);
+            _timings?.AddNote("state", JsonSerializer.Serialize(StateSummary));
+        }
+
         lock (_gate)
         {
             var finishing = Stopwatch.GetTimestamp();
@@ -211,7 +253,42 @@ public sealed class RecordingFileBatchTarget : IEventBatchTarget, IPeriodicBatch
         }
     }
 
-    public void Dispose() => _file.Dispose();
+    public void Dispose()
+    {
+        _state?.Abandon();
+        _file.Dispose();
+    }
+
+    /// <summary>
+    /// True for a topic whose messages are recorder events, and false for the
+    /// writer's records and the state thread's snapshots and index records.
+    /// </summary>
+    public static bool IsEventTopic(string topic) =>
+        topic is not (WriterTopic or RecordingFileStateRecorder.SnapshotTopic or RecordingFileStateRecorder.IndexTopic);
+
+    private void AddStateMessage(string topic, long time, byte[] data)
+    {
+        lock (_gate)
+        {
+            AddStateMessageLocked(topic, time, data);
+        }
+    }
+
+    private void AddStateMessageLocked(string topic, long time, byte[] data)
+    {
+        if (!_stateChannels.TryGetValue(topic, out var channel))
+        {
+            channel = _file.AddChannel(
+                topic == RecordingFileStateRecorder.SnapshotTopic
+                    ? RecordingFileStateRecorder.SnapshotStream
+                    : RecordingFileStateRecorder.IndexStream,
+                topic,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["derived"] = "true" });
+            _stateChannels.Add(topic, channel);
+        }
+
+        _file.AddMessage(channel, 0, Math.Max(0, time), data);
+    }
 
     private void WritePending()
     {

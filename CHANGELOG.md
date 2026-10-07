@@ -1,6 +1,79 @@
 # Changelog
 
-## Unreleased
+This project uses semantic version numbers for product releases. Protocol and
+archive schema versions are compatibility contracts and advance independently
+from the product version.
+
+## 1.0.0 - 2026-10-07
+
+The first complete version of the Windows Accessibility Session Recorder. It
+records a Windows accessibility test session as synchronized evidence, plays
+it back, and opens any captured frame of a browser page as a frozen,
+inspectable recreation of the whole page in the instrumented Chromium, with
+DevTools and an evidence panel.
+
+This is a source release. It does not include packaged application or
+Chromium binaries. The changes to Chromium are in `chromium/`:
+`integrate.py` installs the recorder bridge in `chromium/recorder_bridge/`
+and its hooks into a Chromium checkout, and `chromium/setup-windows.ps1`
+prepares the Windows build tools and checkout. The browser
+evidence protocol is version 0.55.
+
+### Included
+
+- Recording of desktop frames, raw keyboard and mouse input, foreground
+  windows, microphone and system audio, and Windows UI Automation events,
+  the last through the native UI Automation client; see
+  [UI Automation native client](docs/architecture/uia-native-client.md).
+- An instrumented Chromium that records listeners, dispatch, timers and
+  their origins, scheduling, navigation, DOM, style, layout, interaction
+  state, accessibility, cookies, network, compositor values, animations,
+  page popups, style sheets, and script source, recorded as Blink changes
+  them rather than as repeated full walks; see
+  [change-driven recording](docs/architecture/change-driven-recording.md).
+- Each recording's events stored in an MCAP recording file of its own,
+  with an app-owned PostgreSQL catalog of projects, recordings, and file
+  chunks; see [session database](docs/architecture/session-database.md).
+- An accessible WPF recorder and synchronized player.
+- Page recreation: the recorded state of each document at any captured
+  frame, rendered from its recorded styles, box fragments, line items, and
+  glyphs, with its recorded fonts, images, style sheets, compositor values,
+  animated image frames, paint worklet output, scroll offsets, open select
+  lists, and the documents of its `iframe`, `frame`, and `frameset`
+  elements, held at the frame and read-only; see
+  [page recreation](docs/architecture/page-recreation.md).
+- An evidence panel in DevTools that lists, for the document chosen, its
+  timers and who scheduled them, listeners, style sheets, running
+  animations, script source in a read-only viewer, frames, and notes, and
+  selects recorded nodes in the Elements panel, through shadow roots and
+  into frames.
+
+### Validation
+
+- The page recreation slices were system tested on the target Windows
+  machine, with the results recorded in
+  [page recreation](docs/architecture/page-recreation.md); slice 5, the
+  documents of frames, passed on 2026-10-07.
+- The repository's Windows CI workflow builds the solution and runs the
+  managed tests, with the PostgreSQL server binaries the session store
+  tests need, and the Chromium integration script's tests.
+
+### Known limitations
+
+- The work found after slice 5 is listed in
+  [outstanding work](docs/architecture/recreation-outstanding-work.md):
+  among it, the background check of a recreation against the recording is
+  not built, some kinds of frames are not built, and several SVG cases are
+  not covered.
+- The system test of a recording of about an hour, with the app's memory
+  bounded and a frame's documents read in under 1 s, waits for further
+  work; see "Revision after the hour recording" in
+  [page recreation](docs/architecture/page-recreation.md).
+- Recording text by content hash is agreed and deferred.
+- No validation record with NVDA, JAWS, or Narrator is in
+  `docs/validation`.
+
+### Changes recorded during development
 
 - Restore instrumented Chromium capture to the WPF application as a
   proof-of-concept. The recorder can select a Chromium executable and starting
@@ -12,13 +85,7 @@
   whether the configured browser is launched, not whether its fields can be
   edited.
 
-This project uses semantic version numbers for product releases. Protocol and
-archive schema versions are compatibility contracts and advance independently
-from the product version.
-
-## Unreleased
-
-### Added
+#### Added
 
 - Start the PostgreSQL session store, on the `postgres-session-store` branch
   and not yet used by the app. `Recorder.Database` starts and owns a
@@ -301,7 +368,7 @@ from the product version.
   writing finishes. The file describes the recorder, not the recording, and is
   not stored in the database.
 
-### Changed
+#### Changed
 
 - Check the references between a recording's stored rows once, when the
   recording is completed, on the `postgres-session-store` branch. Migration
@@ -572,7 +639,7 @@ from the product version.
   response shape other than a single target fails where it happens instead of
   activating a target that does not exist.
 
-### Fixed
+#### Fixed
 
 - Hide browser events from the playback timeline when the Browser filter is
   cleared. The timeline treated every channel without its own lane colour as
@@ -619,7 +686,7 @@ from the product version.
   audio collector already read the clock at emission time and now uses the
   shared rule.
 
-### Added
+#### Added
 
 - Recorded the JavaScript world each listener callback belongs to, as protocol
   0.21. Each `browser.listener` record carries a `world` with the world kind,
@@ -727,7 +794,7 @@ from the product version.
   read from the native and managed sources, so the check also fails if the two
   sides of that contract ever disagree.
 
-### Changed
+#### Changed
 
 - Upgraded a listener hook in an existing Chromium checkout by rewriting the
   region the hook introduced instead of matching a remembered copy of its text.
@@ -738,7 +805,7 @@ from the product version.
   that opens on an upstream Chromium function signature, is refused rather than
   replaced.
 
-### Fixed
+#### Fixed
 
 - Made a failed browser bridge report itself. A recorder-launched browser whose
   bridge could not initialize returned `content::RESULT_CODE_NORMAL_EXIT`, so the
@@ -787,7 +854,7 @@ from the product version.
   document identity, which keeps the process-mismatch and ambiguity checks
   without depending on a timing artifact.
 
-### Changed
+#### Changed
 
 - Reversed the join between an attribute or character-data transition and the
   DOM checkpoint around it, as protocol 0.16. A transition now carries its own
@@ -802,7 +869,7 @@ from the product version.
   The archive validator rejects a half-stated coverage range, and the reference
   verifier reports how many recorded transitions no checkpoint covered.
 
-### Added
+#### Added
 
 - Added protocol 0.15 bounded attribute and character-data evidence. Renderer
   DOM checkpoints now emit the attribute state of every element they record,
@@ -918,7 +985,7 @@ from the product version.
 - A deterministic listener and dispatch fixture plus an archive evidence
   verifier for Windows validation.
 
-### Fixed
+#### Fixed
 
 - Fixed deterministic Blink validation aborting when a native tool wrote
   progress output to stderr. Python's unittest runner reports progress and its
@@ -958,7 +1025,7 @@ from the product version.
   failure. Integration also fails when a superseded hook template is declared
   but never wired into an in-place upgrade.
 
-### Changed
+#### Changed
 
 - Validated recorder bridge signature verification end to end on the reference
   Windows platform at revision `b7fd67b`. Integration reported no disagreement

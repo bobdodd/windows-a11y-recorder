@@ -409,7 +409,9 @@ internal static class EvidenceCatalog
         Text("checkpointId"),
         Name("reason"),
         Name("walkReason", N),
-        Int("maximumNodes"));
+        Int("maximumNodes"),
+        Text("frameToken", O),
+        Bool("mainFrame", O));
 
     public static readonly EvidenceTable DomCheckpointNodes = Evidence(
         "browser_dom_checkpoint_nodes",
@@ -480,6 +482,23 @@ internal static class EvidenceCatalog
         Text("coveredTransitionLastId", N),
         Int("shadowRootCount"),
         Int("slotCount"));
+
+    // Protocol 0.55 (page recreation slice 5a), created by
+    // 0018_dom_frame_owners.sql.
+    public static readonly EvidenceTable DomCheckpointFrameOwners = Evidence(
+        "browser_dom_checkpoint_frame_owners",
+        new IdentityField("context", R, BrowserContexts),
+        Text("checkpointId"),
+        BigInt("ownerNodeId"),
+        Text("frameToken"),
+        Name("frameLocation"));
+
+    public static readonly EvidenceTable DomFrameOwnerChanges = Evidence(
+        "browser_dom_frame_owner_changes",
+        new IdentityField("context", R, BrowserContexts),
+        BigInt("ownerNodeId"),
+        Text("frameToken", N),
+        Name("frameLocation", N));
 
     public static readonly EvidenceTable DomAttributeChanges = Evidence(
         "browser_dom_attribute_changes",
@@ -690,6 +709,7 @@ internal static class EvidenceCatalog
         "browser_presentation_requests",
         new IdentityField("context", R, BrowserContexts),
         Text("requestId"),
+        Name("widgetKind", N),
         Text("frameSinkId", N),
         Text("localRootFrameToken", N),
         Text("layoutCheckpointId", N),
@@ -705,7 +725,8 @@ internal static class EvidenceCatalog
         "browser_presentations_not_swapped",
         new IdentityField("context", R, BrowserContexts),
         Text("requestId"),
-        Text("frameSinkId"),
+        Name("widgetKind", N),
+        Text("frameSinkId", N),
         Text("localRootFrameToken"),
         Name("reason"),
         Name("action"),
@@ -718,7 +739,8 @@ internal static class EvidenceCatalog
         "browser_presentation_swaps",
         new IdentityField("context", R, BrowserContexts),
         Text("requestId"),
-        Text("frameSinkId"),
+        Name("widgetKind", N),
+        Text("frameSinkId", N),
         Text("localRootFrameToken"),
         Text("frameToken"),
         Int("notSwappedCount"));
@@ -727,7 +749,8 @@ internal static class EvidenceCatalog
         "browser_presentation_feedback",
         new IdentityField("context", R, BrowserContexts),
         Text("requestId"),
-        Text("frameSinkId"),
+        Name("widgetKind", N),
+        Text("frameSinkId", N),
         Text("localRootFrameToken"),
         Text("frameToken"),
         Text("presentedTicks", N),
@@ -1158,7 +1181,8 @@ internal static class EvidenceCatalog
             WebSocketMessagesReceived, WebSocketCloseRequests, WebSocketErrors, WebSocketClosures,
             EventSourceMessages, WebTransportCreations, WebTransportEstablishments,
             WebTransportCloseRequests, WebTransportClosures
-        ])
+        ]),
+        (18, "dom_frame_owners", [DomCheckpointFrameOwners, DomFrameOwnerChanges])
     ];
 
     /// <summary>
@@ -1196,6 +1220,8 @@ internal static class EvidenceCatalog
             [("browser.dom", "dom-checkpoint-shadow-root")] = DomCheckpointShadowRoots,
             [("browser.dom", "dom-checkpoint-slot-assignment")] = DomCheckpointSlotAssignments,
             [("browser.dom", "dom-checkpoint-completed")] = DomCheckpointCompletions,
+            [("browser.dom", "dom-checkpoint-frame-owner")] = DomCheckpointFrameOwners,
+            [("browser.dom", "dom-frame-owner-changed")] = DomFrameOwnerChanges,
             [("browser.dom", "dom-attribute-changed")] = DomAttributeChanges,
             [("browser.dom", "dom-character-data-changed")] = DomCharacterDataChanges,
             [("browser.interaction", "focus-changed")] = FocusChanges,
@@ -1275,7 +1301,9 @@ internal static class EvidenceCatalog
                      "audio.microphone", "audio.system", "browser.lifecycle", "browser.accessibility",
                      "browser.listener", "browser.dispatch", "browser.timer", "browser.scheduler",
                      "browser.navigation", "browser.dom", "browser.cookie", "browser.interaction",
-                     "browser.layout", "browser.presentation", "browser.network"
+                     "browser.layout", "browser.presentation", "browser.network",
+                     "browser.resources", "browser.compositor", "browser.animation",
+                     "browser.script"
                  })
         {
             map[(channel, "collector-omission")] = CollectorOmissions;

@@ -3,6 +3,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $SessionPath,
 
+    # The session's events, one JSON event per line, as written from its
+    # recording file by tests\RecordingEventExport.
+    [Parameter(Mandatory = $true)]
+    [string] $EventsPath,
+
     # The URL the run script served the app session fixture page from.
     [Parameter(Mandatory = $true)]
     [string] $FixtureUri,
@@ -66,9 +71,9 @@ function Test-InsideRect {
         $Y -ge $Rect.y -and $Y -lt ($Rect.y + $Rect.height)
 }
 
-$eventPath = Join-Path $SessionPath "events.ndjson"
+$eventPath = $EventsPath
 if (-not (Test-Path -LiteralPath $eventPath -PathType Leaf)) {
-    throw "The session does not contain events.ndjson: $SessionPath"
+    throw "The session's events were not found: $EventsPath"
 }
 $steps = ConvertFrom-Json $StepsJson
 $marker = [long] $steps.InputMarker
@@ -784,6 +789,21 @@ $uiaPropertySources = @(
         Sort-Object Name |
         ForEach-Object { "$($_.Name)=$($_.Count)" }
 )
+# Structure changes, and how many arrived without a runtime ID, recorded as
+# null or as an empty list. The managed UI Automation client ended the
+# recorder on such an event; the native client delivers it.
+$uiaStructureChanges = @(
+    $records |
+        Where-Object {
+            $_.channel -eq "accessibility.uia.events" -and
+            $_.eventType -eq "structure-changed"
+        }
+)
+$uiaStructureChangesWithoutRuntimeId = @(
+    $uiaStructureChanges | Where-Object {
+        $null -eq $_.payload.runtimeId -or @($_.payload.runtimeId).Count -eq 0
+    }
+)
 $uiaDropEpisodes = @(
     $records |
         Where-Object {
@@ -851,6 +871,8 @@ if ($null -ne $loadProcessId) {
     UiaLoadSourceReceived = $uiaLoadReceived
     UiaLoadSourceReceivedPeakPerSecond = $uiaLoadReceivedPeak
     UiaPropertySources = ($uiaPropertySources -join "; ")
+    UiaStructureChanges = $uiaStructureChanges.Count
+    UiaStructureChangesWithoutRuntimeId = $uiaStructureChangesWithoutRuntimeId.Count
     UiaDropEpisodes = $uiaDropEpisodes.Count
     UiaDroppedByType = ($uiaDroppedByType -join "; ")
     OmissionKinds = ($omissions -join "; ")

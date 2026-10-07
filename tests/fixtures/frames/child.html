@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Frame</title>
+  <style>body { font: 14px/1.4 system-ui, sans-serif; margin: 8px; background: #eef4f8; }</style>
+</head>
+<body>
+  <h1 id="name">Frame</h1>
+  <p id="where"></p>
+  <script>
+    // Names the frame from its address, so each frame's own document differs.
+    const name = new URLSearchParams(location.search).get('name') || 'unnamed';
+    document.getElementById('name').textContent = 'Frame: ' + name;
+    document.getElementById('where').textContent = location.host;
+    document.title = 'Frame ' + name;
+  </script>
+  <noscript><p>This frame runs no script.</p></noscript>
+</body>
+</html>

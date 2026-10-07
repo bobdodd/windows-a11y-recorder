@@ -1194,6 +1194,60 @@ BLINK_DOM_CHECKPOINT_HELPER = BLINK_DOM_CHECKPOINT_HELPER.replace(
 """,
     1,
 )
+# Protocol 0.55 (slice 5a). A walk names the DevTools frame token of the
+# document's frame, and whether it is a main frame, in its started record, and
+# follows the node record of each frame owner element that holds a frame with
+# that frame's token. See docs/architecture/page-recreation.md, "Slice 5".
+LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER = BLINK_DOM_CHECKPOINT_HELPER
+BLINK_DOM_CHECKPOINT_HELPER = BLINK_DOM_CHECKPOINT_HELPER.replace(
+    """\
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_reason, kRecorderMaximumDomCheckpointNodes);
+""",
+    """\
+  LocalFrame* recorder_document_frame = recorder_document.GetFrame();
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_reason, kRecorderMaximumDomCheckpointNodes,
+          recorder_document_frame
+              ? recorder_document_frame->GetDevToolsFrameToken().ToString()
+              : std::string(),
+          recorder_document_frame && recorder_document_frame->IsMainFrame());
+""",
+    1,
+).replace(
+    """\
+        recorder_node.nodeName().Utf8().c_str());
+    ++recorder_node_count;
+""",
+    """\
+        recorder_node.nodeName().Utf8().c_str());
+    ++recorder_node_count;
+    // A frame owner element that holds a frame is followed by that frame's
+    // DevTools frame token, which the frame's own renderer also records.
+    if (auto* recorder_frame_owner =
+            DynamicTo<HTMLFrameOwnerElement>(recorder_node)) {
+      if (Frame* recorder_content_frame =
+              recorder_frame_owner->ContentFrame()) {
+        a11y_recorder::RecordBlinkDomCheckpointFrameOwner(
+            recorder_checkpoint_sequence, recorder_document_node_id,
+            recorder_document_token, recorder_node.GetDomNodeId(),
+            recorder_content_frame->GetDevToolsFrameToken().ToString(),
+            recorder_content_frame->IsRemoteFrame());
+      }
+    }
+""",
+    1,
+)
+if LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER.count(
+    "a11y_recorder::RecordBlinkDomCheckpointFrameOwner"
+) or BLINK_DOM_CHECKPOINT_HELPER.count(
+    "a11y_recorder::RecordBlinkDomCheckpointFrameOwner"
+) != 1 or BLINK_DOM_CHECKPOINT_HELPER.count("GetDevToolsFrameToken()") != 2:
+    raise RuntimeError("the protocol 0.55 DOM checkpoint helper did not apply")
 # Protocol 0.34. The structural changes of a connected DOM tree, recorded in
 # the order Blink makes them. The helper is defined in document.cc beside the
 # checkpoint, since the document's mutation hook is its main caller, and is
@@ -1481,6 +1535,35 @@ void RecorderRecordDomSlotAssignments(
 }
 
 """
+# Protocol 0.42 records a document's structural changes while it parses too,
+# from the walk made when its parser is created; before, they were recorded
+# only from its finished-parsing checkpoint.
+LEGACY_PARSING_EXCLUDED_BLINK_DOM_CHANGE_HELPER = BLINK_DOM_CHANGE_HELPER
+BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED = """\
+// Whether the structural changes of a document are recorded: from the time
+// its finished-parsing checkpoint is recorded, while it is active and the
+// recorder is connected. The checkpoint is the state the changes apply to.
+bool RecorderRecordsDomChanges(const Document& recorder_document) {
+  return a11y_recorder::IsRecorderActive() && !recorder_document.Parsing() &&
+         recorder_document.IsActive();
+}
+"""
+BLINK_DOM_CHANGE_HELPER_PARSING_INCLUDED = """\
+// Whether the structural changes of a document are recorded: while it is
+// active and the recorder is connected, including while it parses (protocol
+// 0.42). The walk made when its parser is created, and each later walk, is
+// the state the changes apply to.
+bool RecorderRecordsDomChanges(const Document& recorder_document) {
+  return a11y_recorder::IsRecorderActive() && recorder_document.IsActive();
+}
+"""
+if BLINK_DOM_CHANGE_HELPER.count(BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED) != 1:
+    raise RuntimeError("the DOM change condition was not found once")
+BLINK_DOM_CHANGE_HELPER = BLINK_DOM_CHANGE_HELPER.replace(
+    BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED,
+    BLINK_DOM_CHANGE_HELPER_PARSING_INCLUDED,
+    1,
+)
 BLINK_DOCUMENT_DOM_CHANGE_DECLARATION = BLINK_DOM_CHANGE_DECLARATION.replace(
     "    const HeapVector<Member<HTMLSlotElement>>& recorder_slots);\n",
     "    const HeapVector<Member<HTMLSlotElement>>& recorder_slots);\n"
@@ -1910,10 +1993,19 @@ void RecorderRecordDomCheckpoint(Document& recorder_document,
 BLINK_DOM_CHECKPOINT_HOOK = """\
   RecorderRecordDomCheckpoint(*this, "finished-parsing");
 """
-BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+LEGACY_FINISHED_ONLY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
     for (const auto& recorder_document : recorder_mutated_documents) {
       if (!recorder_document->HasFinishedParsing() ||
           !recorder_document->IsActive())
+        continue;
+      RecorderRecordDomCheckpoint(*recorder_document, "post-mutation");
+    }
+"""
+# Protocol 0.42: a mutation delivery is requested while the document parses
+# too, as its changes are then recorded.
+BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK = """\
+    for (const auto& recorder_document : recorder_mutated_documents) {
+      if (!recorder_document->IsActive())
         continue;
       RecorderRecordDomCheckpoint(*recorder_document, "post-mutation");
     }
@@ -2449,6 +2541,39 @@ BLINK_CHARACTER_DATA_MUTATION_HOOK = (
         1,
     )
 )
+# Protocol 0.42 records a parser change to a connected node while the
+# document parses too, as its structural changes are then recorded.
+LEGACY_PARSE_TIME_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK = (
+    BLINK_CHARACTER_DATA_MUTATION_HOOK
+)
+BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED = """\
+  // Parser-driven text updates are excluded while the document is parsed and
+  // for a node that is not connected. The text a document was parsed with is
+  // reported by the finished-parsing checkpoint, recording every parse-time
+  // chunk would queue a checkpoint per chunk during load, and a fragment the
+  // parser builds is recorded when it is inserted.
+  if (source != kUpdateFromParser ||
+      (isConnected() && !GetDocument().Parsing())) {
+"""
+BLINK_CHARACTER_DATA_PARSE_TIME_INCLUDED = """\
+  // Parser-driven text updates are excluded only for a node that is not
+  // connected: a fragment the parser builds is recorded when it is inserted.
+  // From protocol 0.42 a parser update while the document parses is recorded,
+  // as the parser's insertions are.
+  if (source != kUpdateFromParser || isConnected()) {
+"""
+if (
+    BLINK_CHARACTER_DATA_MUTATION_HOOK.count(
+        BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED
+    )
+    != 1
+):
+    raise RuntimeError("the character data condition was not found once")
+BLINK_CHARACTER_DATA_MUTATION_HOOK = BLINK_CHARACTER_DATA_MUTATION_HOOK.replace(
+    BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED,
+    BLINK_CHARACTER_DATA_PARSE_TIME_INCLUDED,
+    1,
+)
 
 
 BLINK_MUTATION_OBSERVER_METHOD = """\
@@ -2459,9 +2584,49 @@ void MutationObserver::EnqueueRecorderDomCheckpoint(Document& document) {
 }
 
 """
-BLINK_DOCUMENT_MUTATION_HOOK = """\
+LEGACY_FINISHED_ONLY_BLINK_DOCUMENT_MUTATION_HOOK = """\
   if (HasFinishedParsing())
     MutationObserver::EnqueueRecorderDomCheckpoint(*this);
+"""
+# Protocol 0.42: a change while the document parses queues a mutation
+# delivery too.
+BLINK_DOCUMENT_MUTATION_HOOK = """\
+  MutationObserver::EnqueueRecorderDomCheckpoint(*this);
+"""
+# Protocol 0.42: the document's DOM is walked when its parser is created, so
+# that the parser's changes, now recorded, apply to it. Document::ImplicitOpen
+# creates the parser for a navigation (OpenForNavigation) and for
+# document.open().
+BLINK_DOCUMENT_STARTED_PARSING_ANCHOR = """\
+  DocumentParserTiming::From(*this).MarkParserStart();
+  SetParsingState(kParsing);
+"""
+STAGE_045_BLINK_DOCUMENT_STARTED_PARSING_HOOK = """\
+  // Windows A11y Recorder (protocol 0.42): the DOM when the parser is
+  // created, the state the parser's changes apply to.
+  if (IsActive())
+    RecorderRecordDomCheckpoint(*this, "started-parsing");
+"""
+BLINK_DOCUMENT_STARTED_PARSING_HOOK = """\
+  // Windows A11y Recorder (protocol 0.42): the DOM when the parser is
+  // created, the state the parser's changes apply to.
+  if (IsActive())
+    RecorderRecordDomCheckpoint(*this, "started-parsing");
+  // Windows A11y Recorder: a browser page's process takes input in the
+  // recreation mode ("Input refused only in the recreation"); noted here,
+  // before the page can be drawn or take input.
+  if (a11y_recorder::IsRecreationMode() &&
+      a11y_recorder::IsRecreationBrowserPageScheme(
+          String(Url().Protocol()).Utf8())) {
+    a11y_recorder::MarkRecreationBrowserPageProcess();
+  }
+"""
+BLINK_DOCUMENT_STARTED_PARSING_DECLARATION = """\
+// Windows A11y Recorder: defined further down this file; records a DOM
+// checkpoint (protocol 0.42 adds the walk when parsing starts).
+void RecorderRecordDomCheckpoint(Document& recorder_document,
+                                 const char* recorder_reason);
+
 """
 BLINK_EVENT_LISTENER_INCLUDE = (
     '#include "third_party/blink/renderer/core/dom/events/event_listener.h"'
@@ -3562,6 +3727,9 @@ def split_argument_list(
     return None, len(text)
 
 
+V8_SCRIPT_HOOK_ENTRY_POINTS = {"SetV8ScriptHook": 1, "GetV8ScriptHook": 0}
+
+
 def parse_bridge_signatures(header_text: str) -> dict[str, int]:
     """Maps each exported bridge entry point to its declared parameter count."""
     text = strip_cxx_comments(header_text)
@@ -3662,6 +3830,10 @@ def verify_hook_templates(signatures: dict[str, int]) -> None:
     build failure at the patched call site rather than an integration failure.
     This check moves that failure forward to integration time.
     """
+    # Protocol 0.54 (slice 4h): the V8 script hook's setter and getter are
+    # declared in v8_script_hook.h and defined in V8, not exported by the
+    # bridge component.
+    signatures = {**signatures, **V8_SCRIPT_HOOK_ENTRY_POINTS}
     problems: list[str] = []
     for name, template in current_hook_templates().items():
         problems.extend(
@@ -3692,6 +3864,10 @@ def verify_integrated_sources(signatures: dict[str, int]) -> None:
     by an earlier protocol revision can read as already integrated. This check
     inspects what the checkout actually contains after patching.
     """
+    # Protocol 0.54 (slice 4h): the V8 script hook's setter and getter are
+    # declared in v8_script_hook.h and defined in V8, not exported by the
+    # bridge component.
+    signatures = {**signatures, **V8_SCRIPT_HOOK_ENTRY_POINTS}
     problems: list[str] = []
     for path in integrated_paths():
         text = read_source(path)
@@ -4409,6 +4585,15 @@ def patch_blink_character_data(path: Path) -> None:
             BLINK_CHARACTER_DATA_MUTATION_HOOK,
             path,
         )
+    # A checkout patched before protocol 0.42 excludes parser updates while
+    # the document parses.
+    if BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED in text:
+        text = replace_once(
+            text,
+            BLINK_CHARACTER_DATA_PARSE_TIME_EXCLUDED,
+            BLINK_CHARACTER_DATA_PARSE_TIME_INCLUDED,
+            path,
+        )
     # A checkout patched before protocol 0.34 excludes every parser update.
     if LEGACY_PARSER_EXCLUDED_BLINK_CHARACTER_DATA_MUTATION_HOOK in text:
         text = replace_once(
@@ -5029,6 +5214,15 @@ def patch_blink_document(path: Path) -> None:
             BLINK_DOM_CHECKPOINT_HELPER,
             path,
         )
+    # A tree patched for protocols 0.35 to 0.54 holds a DOM helper that names
+    # no frame (slice 5a).
+    if LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER in text:
+        text = replace_once(
+            text,
+            LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER,
+            BLINK_DOM_CHECKPOINT_HELPER,
+            path,
+        )
     text = insert_before_once(
         text,
         "void Document::FinishedParsing() {\n",
@@ -5049,6 +5243,27 @@ def patch_blink_document(path: Path) -> None:
             text,
             anchor,
             anchor + BLINK_DOM_CHECKPOINT_HOOK + "\n",
+            path,
+        )
+    # A checkout patched before protocol 0.42 queues a delivery only once the
+    # document has finished parsing, and records no change while it parses.
+    legacy_mutation_hook = (
+        BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+        + LEGACY_FINISHED_ONLY_BLINK_DOCUMENT_MUTATION_HOOK
+    )
+    if legacy_mutation_hook in text:
+        text = replace_once(
+            text,
+            legacy_mutation_hook,
+            BLINK_DOCUMENT_NOTIFY_CHANGE_CHILDREN_ANCHOR
+            + BLINK_DOCUMENT_MUTATION_HOOK,
+            path,
+        )
+    if BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED in text:
+        text = replace_once(
+            text,
+            BLINK_DOM_CHANGE_HELPER_PARSING_EXCLUDED,
+            BLINK_DOM_CHANGE_HELPER_PARSING_INCLUDED,
             path,
         )
     if "EnqueueRecorderDomCheckpoint(*this)" not in text:
@@ -5091,6 +5306,41 @@ def patch_blink_document(path: Path) -> None:
     write_patched(path, text)
 
 
+def patch_blink_document_started_parsing(path: Path) -> None:
+    """Protocol 0.42: walks the DOM when Document::ImplicitOpen creates the
+    parser. See docs/architecture/page-recreation.md, "Slice 4c"."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        "DocumentParser* Document::ImplicitOpen(\n",
+        BLINK_DOCUMENT_STARTED_PARSING_DECLARATION,
+        BLINK_DOCUMENT_STARTED_PARSING_DECLARATION,
+        path,
+    )
+    # The current hook extends the one before it, so it is upgraded only
+    # when the current one is absent.
+    if BLINK_DOCUMENT_STARTED_PARSING_HOOK not in text:
+        text = upgrade_legacy_hooks(
+            text,
+            (
+                (
+                    STAGE_045_BLINK_DOCUMENT_STARTED_PARSING_HOOK,
+                    BLINK_DOCUMENT_STARTED_PARSING_HOOK,
+                ),
+            ),
+            path,
+        )
+    if BLINK_DOCUMENT_STARTED_PARSING_HOOK not in text:
+        text = replace_once(
+            text,
+            BLINK_DOCUMENT_STARTED_PARSING_ANCHOR,
+            BLINK_DOCUMENT_STARTED_PARSING_ANCHOR
+            + BLINK_DOCUMENT_STARTED_PARSING_HOOK,
+            path,
+        )
+    write_patched(path, text)
+
+
 def patch_blink_mutation_observer_header(path: Path) -> None:
     text = read_source(path)
     if "EnqueueRecorderDomCheckpoint" not in text:
@@ -5129,6 +5379,14 @@ def patch_blink_mutation_observer(path: Path) -> None:
             path,
         )
     text = ensure_checkpoint_attribute_includes(text, path)
+    # A checkout patched before protocol 0.42 skips a document that parses.
+    if LEGACY_FINISHED_ONLY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK in text:
+        text = replace_once(
+            text,
+            LEGACY_FINISHED_ONLY_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+            BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK,
+            path,
+        )
     if ORIGINAL_BLINK_POST_MUTATION_DOM_CHECKPOINT_DELIVERY_HOOK in text:
         text = replace_once(
             text,
@@ -6570,6 +6828,2506 @@ def insert_before_once(
     return replace_once(text, anchor, f"{block}{anchor}", path)
 
 
+# Recreation mode, feasibility step 1a: recorded styles. See
+# docs/architecture/page-recreation.md, "The feasibility step".
+BLINK_STYLE_RESOLVER_INCLUDE = (
+    '#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"'
+)
+BLINK_RECREATION_STYLE_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/css/css_property_value_set.h"',
+    '#include "third_party/blink/renderer/core/css/parser/css_parser.h"',
+)
+BLINK_RECREATION_STYLE_ANCHOR = (
+    "\n}\n\nconst ComputedStyle& StyleResolver::StyleForViewport() {\n"
+)
+BLINK_RECREATION_STYLE_MARKER = "recorder_recorded_style"
+STAGE_1A_BLINK_RECREATION_STYLE_HOOK = """
+  // Windows A11y Recorder recreation mode: an element's recorded computed
+  // style is added as its last author declarations, important and attached
+  // to the element, so it wins over every style sheet rule, the element's
+  // own style attribute, and animations. In feasibility step 1a the recorded
+  // style is read from the element's data-a11y-recorded-style attribute.
+  if (a11y_recorder::IsRecreationMode() && element.IsStyledElement() &&
+      !state.IsForPseudoElement()) {
+    const AtomicString& recorder_recorded_style =
+        element.getAttribute(AtomicString("data-a11y-recorded-style"));
+    if (!recorder_recorded_style.IsNull()) {
+      const ImmutableCSSPropertyValueSet* recorder_parsed =
+          CSSParser::ParseInlineStyleDeclaration(recorder_recorded_style,
+                                                 &element);
+      auto* recorder_imposed =
+          MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+      for (unsigned recorder_index = 0;
+           recorder_index < recorder_parsed->PropertyCount();
+           ++recorder_index) {
+        const CSSPropertyValue& recorder_property =
+            recorder_parsed->PropertyAt(recorder_index);
+        recorder_imposed->SetProperty(recorder_property.Name(),
+                                      recorder_property.Value(),
+                                      /*important=*/true);
+      }
+      collector.BeginAddingAuthorRulesForTreeScope(element.GetTreeScope());
+      collector.AddElementStyleProperties(recorder_imposed,
+                                          CascadeOrigin::kAuthor,
+                                          /*is_cacheable=*/false,
+                                          /*is_inline_style=*/true);
+    }
+  }"""
+STAGE_9915_BLINK_RECREATION_STYLE_HOOK = """
+  // Windows A11y Recorder recreation mode: an element's recorded computed
+  // style is added as its last author declarations, important and attached
+  // to the element, so it wins over every style sheet rule, the element's
+  // own style attribute, and animations. The recorded style is read from the
+  // element's data-a11y-recorded-style attribute. An element recorded without
+  // a layout object at the frame then takes the display the recreation
+  // inferred for it, none or contents, from its
+  // data-a11y-recorded-no-layout-object attribute; it is set after the
+  // recorded style, so that it replaces any recorded display. A copy of the
+  // element in a user agent shadow tree, as an svg use element makes, does
+  // not take it: the copy's own layout object was not the one recorded.
+  if (a11y_recorder::IsRecreationMode() && element.IsStyledElement() &&
+      !state.IsForPseudoElement()) {
+    const AtomicString& recorder_recorded_style =
+        element.getAttribute(AtomicString("data-a11y-recorded-style"));
+    const AtomicString& recorder_no_layout_object = element.getAttribute(
+        AtomicString("data-a11y-recorded-no-layout-object"));
+    const char* recorder_inferred_display =
+        element.IsInUserAgentShadowRoot()         ? nullptr
+        : recorder_no_layout_object == "none"     ? "display: none"
+        : recorder_no_layout_object == "contents" ? "display: contents"
+                                                  : nullptr;
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display) {
+      auto* recorder_imposed =
+          MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+      auto recorder_impose = [&](const String& recorder_text) {
+        const ImmutableCSSPropertyValueSet* recorder_parsed =
+            CSSParser::ParseInlineStyleDeclaration(recorder_text, &element);
+        for (unsigned recorder_index = 0;
+             recorder_index < recorder_parsed->PropertyCount();
+             ++recorder_index) {
+          const CSSPropertyValue& recorder_property =
+              recorder_parsed->PropertyAt(recorder_index);
+          recorder_imposed->SetProperty(recorder_property.Name(),
+                                        recorder_property.Value(),
+                                        /*important=*/true);
+        }
+      };
+      if (!recorder_recorded_style.IsNull()) {
+        recorder_impose(recorder_recorded_style);
+      }
+      if (recorder_inferred_display) {
+        recorder_impose(recorder_inferred_display);
+      }
+      collector.BeginAddingAuthorRulesForTreeScope(element.GetTreeScope());
+      collector.AddElementStyleProperties(recorder_imposed,
+                                          CascadeOrigin::kAuthor,
+                                          /*is_cacheable=*/false,
+                                          /*is_inline_style=*/true);
+    }
+  }"""
+# The 2b-i hook as first delivered (1e0bdfd), which named String::FromUTF8.
+STAGE_1E0B_BLINK_RECREATION_STYLE_HOOK = """
+  // Windows A11y Recorder recreation mode: an element's recorded computed
+  // style is added as its last author declarations, important and attached
+  // to the element, so it wins over every style sheet rule, the element's
+  // own style attribute, and animations. The recorded style is read from the
+  // element's data-a11y-recorded-style attribute. An element recorded without
+  // a layout object at the frame then takes the display the recreation
+  // inferred for it, none or contents, from its
+  // data-a11y-recorded-no-layout-object attribute; it is set after the
+  // recorded style, so that it replaces any recorded display. The opacity
+  // the compositor drew at the frame, from the element's
+  // data-a11y-recorded-compositor attribute ("Sub-step 2b-i design:
+  // compositor values imposed"), is set after both, as recorded. A copy of
+  // the element in a user agent shadow tree, as an svg use element makes,
+  // takes none of these: the copy's own layout object was not the one
+  // recorded.
+  if (a11y_recorder::IsRecreationMode() && element.IsStyledElement() &&
+      !state.IsForPseudoElement()) {
+    const AtomicString& recorder_recorded_style =
+        element.getAttribute(AtomicString("data-a11y-recorded-style"));
+    const AtomicString& recorder_no_layout_object = element.getAttribute(
+        AtomicString("data-a11y-recorded-no-layout-object"));
+    const char* recorder_inferred_display =
+        element.IsInUserAgentShadowRoot()         ? nullptr
+        : recorder_no_layout_object == "none"     ? "display: none"
+        : recorder_no_layout_object == "contents" ? "display: contents"
+                                                  : nullptr;
+    const AtomicString& recorder_recorded_compositor = element.getAttribute(
+        AtomicString("data-a11y-recorded-compositor"));
+    std::optional<std::string> recorder_compositor_opacity;
+    if (!recorder_recorded_compositor.IsNull() &&
+        !element.IsInUserAgentShadowRoot()) {
+      recorder_compositor_opacity =
+          a11y_recorder::RecreationCompositorValuesOf(
+              recorder_recorded_compositor.Utf8())
+              .opacity_text;
+    }
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display ||
+        recorder_compositor_opacity) {
+      auto* recorder_imposed =
+          MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+      auto recorder_impose = [&](const String& recorder_text) {
+        const ImmutableCSSPropertyValueSet* recorder_parsed =
+            CSSParser::ParseInlineStyleDeclaration(recorder_text, &element);
+        for (unsigned recorder_index = 0;
+             recorder_index < recorder_parsed->PropertyCount();
+             ++recorder_index) {
+          const CSSPropertyValue& recorder_property =
+              recorder_parsed->PropertyAt(recorder_index);
+          recorder_imposed->SetProperty(recorder_property.Name(),
+                                        recorder_property.Value(),
+                                        /*important=*/true);
+        }
+      };
+      if (!recorder_recorded_style.IsNull()) {
+        recorder_impose(recorder_recorded_style);
+      }
+      if (recorder_inferred_display) {
+        recorder_impose(recorder_inferred_display);
+      }
+      if (recorder_compositor_opacity) {
+        recorder_impose("opacity: " +
+                        String::FromUTF8(*recorder_compositor_opacity));
+      }
+      collector.BeginAddingAuthorRulesForTreeScope(element.GetTreeScope());
+      collector.AddElementStyleProperties(recorder_imposed,
+                                          CascadeOrigin::kAuthor,
+                                          /*is_cacheable=*/false,
+                                          /*is_inline_style=*/true);
+    }
+  }"""
+# The 2b-i hook as delivered through e4c6, before sub-step 2c: no paint
+# worklet color.
+STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK = """
+  // Windows A11y Recorder recreation mode: an element's recorded computed
+  // style is added as its last author declarations, important and attached
+  // to the element, so it wins over every style sheet rule, the element's
+  // own style attribute, and animations. The recorded style is read from the
+  // element's data-a11y-recorded-style attribute. An element recorded without
+  // a layout object at the frame then takes the display the recreation
+  // inferred for it, none or contents, from its
+  // data-a11y-recorded-no-layout-object attribute; it is set after the
+  // recorded style, so that it replaces any recorded display. The opacity
+  // the compositor drew at the frame, from the element's
+  // data-a11y-recorded-compositor attribute ("Sub-step 2b-i design:
+  // compositor values imposed"), is set after both, as recorded. A copy of
+  // the element in a user agent shadow tree, as an svg use element makes,
+  // takes none of these: the copy's own layout object was not the one
+  // recorded.
+  if (a11y_recorder::IsRecreationMode() && element.IsStyledElement() &&
+      !state.IsForPseudoElement()) {
+    const AtomicString& recorder_recorded_style =
+        element.getAttribute(AtomicString("data-a11y-recorded-style"));
+    const AtomicString& recorder_no_layout_object = element.getAttribute(
+        AtomicString("data-a11y-recorded-no-layout-object"));
+    const char* recorder_inferred_display =
+        element.IsInUserAgentShadowRoot()         ? nullptr
+        : recorder_no_layout_object == "none"     ? "display: none"
+        : recorder_no_layout_object == "contents" ? "display: contents"
+                                                  : nullptr;
+    const AtomicString& recorder_recorded_compositor = element.getAttribute(
+        AtomicString("data-a11y-recorded-compositor"));
+    std::optional<std::string> recorder_compositor_opacity;
+    if (!recorder_recorded_compositor.IsNull() &&
+        !element.IsInUserAgentShadowRoot()) {
+      recorder_compositor_opacity =
+          a11y_recorder::RecreationCompositorValuesOf(
+              recorder_recorded_compositor.Utf8())
+              .opacity_text;
+    }
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display ||
+        recorder_compositor_opacity) {
+      auto* recorder_imposed =
+          MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+      auto recorder_impose = [&](const String& recorder_text) {
+        const ImmutableCSSPropertyValueSet* recorder_parsed =
+            CSSParser::ParseInlineStyleDeclaration(recorder_text, &element);
+        for (unsigned recorder_index = 0;
+             recorder_index < recorder_parsed->PropertyCount();
+             ++recorder_index) {
+          const CSSPropertyValue& recorder_property =
+              recorder_parsed->PropertyAt(recorder_index);
+          recorder_imposed->SetProperty(recorder_property.Name(),
+                                        recorder_property.Value(),
+                                        /*important=*/true);
+        }
+      };
+      if (!recorder_recorded_style.IsNull()) {
+        recorder_impose(recorder_recorded_style);
+      }
+      if (recorder_inferred_display) {
+        recorder_impose(recorder_inferred_display);
+      }
+      if (recorder_compositor_opacity) {
+        recorder_impose(String::FromUtf8(
+            ("opacity: " + *recorder_compositor_opacity).c_str()));
+      }
+      collector.BeginAddingAuthorRulesForTreeScope(element.GetTreeScope());
+      collector.AddElementStyleProperties(recorder_imposed,
+                                          CascadeOrigin::kAuthor,
+                                          /*is_cacheable=*/false,
+                                          /*is_inline_style=*/true);
+    }
+  }"""
+
+
+# Sub-step 2c: the background color a native paint worklet painted is set
+# last. See docs/architecture/page-recreation.md, "Sub-step 2c design: paint
+# worklet colors and clip paths imposed".
+BLINK_RECREATION_STYLE_HOOK = (
+    STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK.replace(
+        '''  // compositor values imposed"), is set after both, as recorded. A copy of
+  // the element in a user agent shadow tree, as an svg use element makes,
+  // takes none of these: the copy's own layout object was not the one
+  // recorded.
+''',
+        '''  // compositor values imposed"), is set after both, as recorded. The
+  // background color a native paint worklet painted at the frame, from the
+  // element's data-a11y-recorded-paint-worklet attribute ("Sub-step 2c
+  // design: paint worklet colors and clip paths imposed"), is set last, as
+  // an sRGB color of the recorded floats. A copy of the element in a user
+  // agent shadow tree, as an svg use element makes, takes none of these: the
+  // copy's own layout object was not the one recorded.
+''',
+        1,
+    )
+    .replace(
+        '''              .opacity_text;
+    }
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display ||
+        recorder_compositor_opacity) {
+''',
+        '''              .opacity_text;
+    }
+    const AtomicString& recorder_recorded_paint_worklet = element.getAttribute(
+        AtomicString("data-a11y-recorded-paint-worklet"));
+    std::optional<std::array<std::string, 4>> recorder_worklet_color;
+    if (!recorder_recorded_paint_worklet.IsNull() &&
+        !element.IsInUserAgentShadowRoot()) {
+      recorder_worklet_color =
+          a11y_recorder::RecreationPaintWorkletValuesOf(
+              recorder_recorded_paint_worklet.Utf8())
+              .background_color_text;
+    }
+    if (!recorder_recorded_style.IsNull() || recorder_inferred_display ||
+        recorder_compositor_opacity || recorder_worklet_color) {
+''',
+        1,
+    )
+    .replace(
+        '''            ("opacity: " + *recorder_compositor_opacity).c_str()));
+      }
+''',
+        '''            ("opacity: " + *recorder_compositor_opacity).c_str()));
+      }
+      if (recorder_worklet_color) {
+        const std::array<std::string, 4>& recorder_color =
+            *recorder_worklet_color;
+        recorder_impose(String::FromUtf8(
+            ("background-color: color(srgb " + recorder_color[0] + " " +
+             recorder_color[1] + " " + recorder_color[2] + " / " +
+             recorder_color[3] + ")")
+                .c_str()));
+      }
+''',
+        1,
+    )
+)
+
+
+def patch_blink_style_resolver(path: Path) -> None:
+    """Adds the recreation mode's recorded styles to rule matching."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_STYLE_RESOLVER_INCLUDE, BLINK_RECREATION_STYLE_INCLUDES, path
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (STAGE_1A_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
+            (STAGE_9915_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
+            (STAGE_1E0B_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
+            (STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK, BLINK_RECREATION_STYLE_HOOK),
+        ),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_STYLE_ANCHOR,
+        BLINK_RECREATION_STYLE_HOOK,
+        BLINK_RECREATION_STYLE_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Recreation mode, 1a addition: the recorded declarations as a source of their
+# own in DevTools' style inspection. See docs/architecture/page-recreation.md,
+# "1a addition: recorded styles in DevTools".
+BLINK_INSPECTOR_CSS_AGENT_INCLUDE = (
+    '#include "third_party/blink/renderer/core/inspector/'
+    'inspector_css_agent.h"'
+)
+BLINK_RECREATION_INSPECTOR_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/css/css_property_value_set.h"',
+    '#include "third_party/blink/renderer/core/css/parser/css_parser.h"',
+    '#include "third_party/blink/renderer/core/dom/shadow_root.h"',
+    '#include "third_party/blink/renderer/core/inspector/'
+    'inspector_style_sheet.h"',
+)
+BLINK_RECREATION_INSPECTOR_HELPER_ANCHOR = (
+    "\nprotocol::Response InspectorCSSAgent::getMatchedStylesForNode(\n"
+)
+BLINK_RECREATION_INSPECTOR_HELPER_MARKER = "RecorderRecordedStyleMatch("
+BLINK_RECREATION_INSPECTOR_HELPER = """
+// Windows A11y Recorder recreation mode: an element's recorded declarations,
+// as style resolution imposes them, reported to DevTools as a matched rule
+// named "Recorded style". It has no style sheet, so DevTools offers no
+// editing of it, and it is reported after every other rule, so DevTools shows
+// it first. Returns null outside the recreation mode and for an element with
+// no recorded declarations.
+static std::unique_ptr<protocol::CSS::RuleMatch> RecorderRecordedStyleMatch(
+    Element* element) {
+  if (!a11y_recorder::IsRecreationMode() || !element ||
+      !element->IsStyledElement()) {
+    return nullptr;
+  }
+  const AtomicString& recorder_recorded_text =
+      element->getAttribute(AtomicString("data-a11y-recorded-style"));
+  if (recorder_recorded_text.IsNull()) {
+    return nullptr;
+  }
+  const ImmutableCSSPropertyValueSet* recorder_parsed =
+      CSSParser::ParseInlineStyleDeclaration(recorder_recorded_text, element);
+  auto* recorder_declarations =
+      MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+  for (unsigned recorder_index = 0;
+       recorder_index < recorder_parsed->PropertyCount(); ++recorder_index) {
+    const CSSPropertyValue& recorder_property =
+        recorder_parsed->PropertyAt(recorder_index);
+    recorder_declarations->SetProperty(recorder_property.Name(),
+                                       recorder_property.Value(),
+                                       /*important=*/true);
+  }
+  if (!recorder_declarations->PropertyCount()) {
+    return nullptr;
+  }
+  InspectorStyle* recorder_style = MakeGarbageCollected<InspectorStyle>(
+      recorder_declarations->EnsureCSSStyleDeclaration(
+          element->GetExecutionContext()),
+      nullptr, nullptr);
+  auto recorder_selectors =
+      std::make_unique<protocol::Array<protocol::CSS::Value>>();
+  recorder_selectors->emplace_back(
+      protocol::CSS::Value::create().setText("Recorded style").build());
+  auto recorder_matching = std::make_unique<protocol::Array<int>>();
+  recorder_matching->push_back(0);
+  return protocol::CSS::RuleMatch::create()
+      .setRule(protocol::CSS::CSSRule::create()
+                   .setSelectorList(
+                       protocol::CSS::SelectorList::create()
+                           .setSelectors(std::move(recorder_selectors))
+                           .setText("Recorded style")
+                           .build())
+                   .setOrigin(protocol::CSS::StyleSheetOriginEnum::Regular)
+                   .setStyle(recorder_style->BuildObjectForStyle())
+                   .build())
+      .setMatchingSelectors(std::move(recorder_matching))
+      .build();
+}
+"""
+BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER_MARKER = "RecorderNoLayoutObjectMatch(\n"
+BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER = """
+// Windows A11y Recorder recreation mode: the display the recreation inferred
+// for an element recorded without a layout object at the frame, as style
+// resolution imposes it, reported to DevTools as a matched rule named "No
+// layout object recorded", so that it is not shown as a recorded value. It is
+// reported after the recorded style, so DevTools shows it first. Returns null
+// outside the recreation mode and for any other element.
+static std::unique_ptr<protocol::CSS::RuleMatch> RecorderNoLayoutObjectMatch(
+    Element* element) {
+  if (!a11y_recorder::IsRecreationMode() || !element ||
+      !element->IsStyledElement() || element->IsInUserAgentShadowRoot()) {
+    return nullptr;
+  }
+  const AtomicString& recorder_value = element->getAttribute(
+      AtomicString("data-a11y-recorded-no-layout-object"));
+  const char* recorder_text =
+      recorder_value == "none"       ? "display: none"
+      : recorder_value == "contents" ? "display: contents"
+                                     : nullptr;
+  if (!recorder_text) {
+    return nullptr;
+  }
+  const ImmutableCSSPropertyValueSet* recorder_parsed =
+      CSSParser::ParseInlineStyleDeclaration(recorder_text, element);
+  auto* recorder_declarations =
+      MakeGarbageCollected<MutableCSSPropertyValueSet>(kHTMLStandardMode);
+  for (unsigned recorder_index = 0;
+       recorder_index < recorder_parsed->PropertyCount(); ++recorder_index) {
+    const CSSPropertyValue& recorder_property =
+        recorder_parsed->PropertyAt(recorder_index);
+    recorder_declarations->SetProperty(recorder_property.Name(),
+                                       recorder_property.Value(),
+                                       /*important=*/true);
+  }
+  if (!recorder_declarations->PropertyCount()) {
+    return nullptr;
+  }
+  InspectorStyle* recorder_style = MakeGarbageCollected<InspectorStyle>(
+      recorder_declarations->EnsureCSSStyleDeclaration(
+          element->GetExecutionContext()),
+      nullptr, nullptr);
+  auto recorder_selectors =
+      std::make_unique<protocol::Array<protocol::CSS::Value>>();
+  recorder_selectors->emplace_back(protocol::CSS::Value::create()
+                                       .setText("No layout object recorded")
+                                       .build());
+  auto recorder_matching = std::make_unique<protocol::Array<int>>();
+  recorder_matching->push_back(0);
+  return protocol::CSS::RuleMatch::create()
+      .setRule(protocol::CSS::CSSRule::create()
+                   .setSelectorList(
+                       protocol::CSS::SelectorList::create()
+                           .setSelectors(std::move(recorder_selectors))
+                           .setText("No layout object recorded")
+                           .build())
+                   .setOrigin(protocol::CSS::StyleSheetOriginEnum::Regular)
+                   .setStyle(recorder_style->BuildObjectForStyle())
+                   .build())
+      .setMatchingSelectors(std::move(recorder_matching))
+      .build();
+}
+"""
+BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_MARKER = (
+    "RecorderNoLayoutObjectMatch(element)"
+)
+BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_HOOK = """\
+  // Windows A11y Recorder recreation mode: the display inferred for an
+  // element recorded without a layout object.
+  if (element_pseudo_id == kPseudoIdNone) {
+    if (std::unique_ptr<protocol::CSS::RuleMatch> recorder_inferred =
+            RecorderNoLayoutObjectMatch(element)) {
+      (*matched_css_rules)->emplace_back(std::move(recorder_inferred));
+    }
+  }
+
+"""
+BLINK_RECREATION_INSPECTOR_MATCHED_ANCHOR = (
+    "  // Inherited styles.\n  *inherited_entries =\n"
+)
+BLINK_RECREATION_INSPECTOR_MATCHED_MARKER = (
+    "RecorderRecordedStyleMatch(element)"
+)
+BLINK_RECREATION_INSPECTOR_MATCHED_HOOK = """\
+  // Windows A11y Recorder recreation mode: the element's recorded style.
+  if (element_pseudo_id == kPseudoIdNone) {
+    if (std::unique_ptr<protocol::CSS::RuleMatch> recorder_match =
+            RecorderRecordedStyleMatch(element)) {
+      (*matched_css_rules)->emplace_back(std::move(recorder_match));
+    }
+  }
+
+"""
+BLINK_RECREATION_INSPECTOR_INHERITED_ANCHOR = (
+    "    (*inherited_entries)->emplace_back(std::move(entry));\n"
+)
+BLINK_RECREATION_INSPECTOR_INHERITED_MARKER = (
+    "RecorderRecordedStyleMatch(match->element)"
+)
+BLINK_RECREATION_INSPECTOR_INHERITED_HOOK = """\
+    // Windows A11y Recorder recreation mode: the ancestor's recorded style.
+    if (std::unique_ptr<protocol::CSS::RuleMatch> recorder_match =
+            RecorderRecordedStyleMatch(match->element)) {
+      entry->getMatchedCSSRules()->emplace_back(std::move(recorder_match));
+    }
+"""
+
+
+def patch_blink_inspector_css_agent(path: Path) -> None:
+    """Reports the recreation mode's recorded styles to DevTools."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_INSPECTOR_CSS_AGENT_INCLUDE,
+        BLINK_RECREATION_INSPECTOR_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_HELPER_ANCHOR,
+        BLINK_RECREATION_INSPECTOR_HELPER,
+        BLINK_RECREATION_INSPECTOR_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_MATCHED_ANCHOR,
+        BLINK_RECREATION_INSPECTOR_MATCHED_HOOK,
+        BLINK_RECREATION_INSPECTOR_MATCHED_MARKER,
+        path,
+    )
+    # Inserted after the recorded style's helper and rule, nearer their
+    # anchors, so the inferred display is reported after the recorded style.
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_HELPER_ANCHOR,
+        BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER,
+        BLINK_RECREATION_NO_LAYOUT_OBJECT_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_MATCHED_ANCHOR,
+        BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_HOOK,
+        BLINK_RECREATION_NO_LAYOUT_OBJECT_MATCHED_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_INSPECTOR_INHERITED_ANCHOR,
+        BLINK_RECREATION_INSPECTOR_INHERITED_HOOK,
+        BLINK_RECREATION_INSPECTOR_INHERITED_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Recreation mode, feasibility step 1b: recorded box fragments. See
+# docs/architecture/page-recreation.md, "1b, recorded box fragments".
+BLINK_BOX_FRAGMENT_BUILDER_INCLUDE = (
+    '#include "third_party/blink/renderer/core/layout/box_fragment_builder.h"'
+)
+LEGACY_FEASIBILITY_FRAGMENT_INCLUDES = (
+    "#include <cmath>",
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/layout/geometry/'
+    'physical_rect.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_to_number.h"',
+)
+BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR = (
+    "\nconst LayoutResult* BoxFragmentBuilder::ToBoxFragment(\n"
+    "    WritingMode block_or_line_writing_mode) {\n"
+)
+LEGACY_FEASIBILITY_FRAGMENT_HELPER_MARKER = "RecorderRecordedFragment("
+LEGACY_FEASIBILITY_FRAGMENT_HELPER = """
+namespace {
+
+// Windows A11y Recorder recreation mode: the recorded box fragment of a node,
+// its border-box offset in its parent fragment and its border-box size, in
+// layout units. In feasibility step 1b it is read from the element's
+// data-a11y-recorded-fragment attribute, "x y width height" in CSS pixels.
+// Returns nothing for a node without one or with a malformed one.
+std::optional<PhysicalRect> RecorderRecordedFragment(const Node* node) {
+  const auto* element = DynamicTo<Element>(node);
+  if (!element) {
+    return std::nullopt;
+  }
+  const AtomicString& recorder_text =
+      element->getAttribute(AtomicString("data-a11y-recorded-fragment"));
+  if (recorder_text.IsNull()) {
+    return std::nullopt;
+  }
+  const Vector<String> recorder_parts =
+      recorder_text.GetString().SplitSkippingEmpty(' ');
+  if (recorder_parts.size() != 4u) {
+    return std::nullopt;
+  }
+  const LayoutObject* recorder_layout_object = element->GetLayoutObject();
+  const double recorder_zoom =
+      recorder_layout_object
+          ? recorder_layout_object->StyleRef().EffectiveZoom()
+          : 1.0;
+  Vector<LayoutUnit> recorder_values;
+  for (const String& recorder_part : recorder_parts) {
+    const std::optional<double> recorder_value =
+        recorder_part.Is8Bit() ? CharactersToDouble(recorder_part.Span8())
+                               : CharactersToDouble(recorder_part.Span16());
+    if (!recorder_value || !std::isfinite(*recorder_value)) {
+      return std::nullopt;
+    }
+    recorder_values.push_back(
+        LayoutUnit::FromDoubleRound(*recorder_value * recorder_zoom));
+  }
+  if (recorder_values[2] < LayoutUnit() || recorder_values[3] < LayoutUnit()) {
+    return std::nullopt;
+  }
+  return PhysicalRect(recorder_values[0], recorder_values[1],
+                      recorder_values[2], recorder_values[3]);
+}
+
+}  // namespace
+"""
+BLINK_RECREATION_FRAGMENT_ANCHOR = (
+    "  Finalize();\n\n"
+    "  if (box_type_ == PhysicalFragment::kNormalBox && node_ &&\n"
+)
+LEGACY_FEASIBILITY_FRAGMENT_MARKER = "recorder_own_fragment"
+LEGACY_FEASIBILITY_FRAGMENT_HOOK = """\
+  // Windows A11y Recorder recreation mode: the box's recorded size and its
+  // children's recorded offsets replace those its layout algorithm produced.
+  // Only a fragment that is the whole of its box takes a recorded fragment,
+  // and only in a horizontal, left to right writing mode, in which the
+  // builder's logical offsets equal the recorded physical ones.
+  if (a11y_recorder::IsRecreationMode() && node_ &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    if (!GetConstraintSpace().HasBlockFragmentation() &&
+        !IsFragmentainerBoxType() && !PreviousBreakToken()) {
+      if (const std::optional<PhysicalRect> recorder_own_fragment =
+              RecorderRecordedFragment(node_.GetDOMNode())) {
+        size_.inline_size = recorder_own_fragment->Width();
+        size_.block_size = recorder_own_fragment->Height();
+      }
+    }
+    for (wtf_size_t recorder_index = 0; recorder_index < children_.size();
+         ++recorder_index) {
+      const auto* recorder_child = DynamicTo<PhysicalBoxFragment>(
+          children_[recorder_index].fragment.Get());
+      if (!recorder_child || !recorder_child->IsCSSBox() ||
+          !recorder_child->IsOnlyForNode()) {
+        continue;
+      }
+      if (const std::optional<PhysicalRect> recorder_child_fragment =
+              RecorderRecordedFragment(recorder_child->GetNode())) {
+        SetChildOffset(recorder_index,
+                       LogicalOffset(recorder_child_fragment->X(),
+                                     recorder_child_fragment->Y()));
+      }
+    }
+  }
+
+"""
+
+
+def patch_blink_box_fragment_builder(path: Path) -> None:
+    """Imposes the recreation mode's recorded box fragments."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_BOX_FRAGMENT_BUILDER_INCLUDE,
+        BLINK_RECREATION_FRAGMENT_INCLUDES,
+        path,
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (LEGACY_FEASIBILITY_FRAGMENT_HELPER, BLINK_RECREATION_FRAGMENT_HELPER),
+            (
+                STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER,
+                BLINK_RECREATION_FRAGMENT_HELPER,
+            ),
+            (
+                INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HELPER,
+                BLINK_RECREATION_FRAGMENT_HELPER,
+            ),
+            (LEGACY_FEASIBILITY_FRAGMENT_HOOK, BLINK_RECREATION_FRAGMENT_HOOK),
+            (
+                INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK,
+                BLINK_RECREATION_FRAGMENT_HOOK,
+            ),
+            (
+                STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK,
+                BLINK_RECREATION_FRAGMENT_HOOK,
+            ),
+        ),
+        path,
+    )
+    require_no_feasibility_text(
+        text,
+        (
+            '"data-a11y-recorded-fragment"',
+            "    const Node* recorder_node = node_.GetDOMNode();\n",
+            "children from its recorded fragment, so its children keep",
+            ".GetString().StartsWith(kRecorderPrefix)",
+        ),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_FRAGMENT_HELPER_ANCHOR,
+        BLINK_RECREATION_FRAGMENT_HELPER,
+        BLINK_RECREATION_FRAGMENT_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_FRAGMENT_ANCHOR,
+        BLINK_RECREATION_FRAGMENT_HOOK,
+        BLINK_RECREATION_FRAGMENT_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Recreation mode, feasibility step 1c: recorded lines and glyph runs. See
+# docs/architecture/page-recreation.md, "1c, recorded lines and glyph runs".
+BLINK_RECREATION_ITEM_SETTERS_ANCHOR = (
+    "  void SetOffset(const PhysicalOffset& offset) { rect_.offset = offset; }\n"
+)
+BLINK_RECREATION_ITEM_SETTERS_MARKER = "RecorderSetRect("
+BLINK_RECREATION_ITEM_SETTERS = """\
+  // Windows A11y Recorder recreation mode: set the recorded rectangle of an
+  // item, and the shaping result built from a text item's recorded glyphs.
+  void RecorderSetRect(const PhysicalRect& rect) { rect_ = rect; }
+  void RecorderSetTextShapeResult(const ShapeResultView* shape_result) {
+    DCHECK_EQ(Type(), kText);
+    text_.shape_result = shape_result;
+  }
+"""
+BLINK_RECREATION_SHAPE_DECLARATION_ANCHOR = (
+    "  static const ShapeResult* CreateForStretchyMathOperator(const Font*,\n"
+)
+LEGACY_FEASIBILITY_SHAPE_DECLARATION_MARKER = "CreateFromRecordedGlyphs("
+LEGACY_FEASIBILITY_SHAPE_DECLARATION = """\
+  // Windows A11y Recorder recreation mode: a left to right shaping result of
+  // one glyph for each character from `start_index`, drawn with the primary
+  // font of `font`. Each glyph is the font's glyph for a code point, and its
+  // advance is in layout pixels. Returns null for no glyphs or too many.
+  struct RecorderGlyph {
+    UChar32 code_point;
+    float advance;
+  };
+  static const ShapeResult* CreateFromRecordedGlyphs(
+      const Font* font,
+      unsigned start_index,
+      base::span<const RecorderGlyph> glyphs);
+"""
+BLINK_RECREATION_SHAPE_DEFINITION_ANCHOR = (
+    "\nconst ShapeResult* ShapeResult::CreateForStretchyMathOperator(\n"
+    "    const Font* font,\n"
+    "    TextDirection direction,\n"
+    "    Glyph glyph_variant,\n"
+)
+LEGACY_FEASIBILITY_SHAPE_DEFINITION_MARKER = (
+    "const ShapeResult* ShapeResult::CreateFromRecordedGlyphs("
+)
+LEGACY_FEASIBILITY_SHAPE_DEFINITION = """
+// Windows A11y Recorder recreation mode. After the pattern of
+// CreateForSpaces.
+const ShapeResult* ShapeResult::CreateFromRecordedGlyphs(
+    const Font* font,
+    unsigned start_index,
+    base::span<const RecorderGlyph> glyphs) {
+  const SimpleFontData* font_data = font ? font->PrimaryFont() : nullptr;
+  if (!font_data || glyphs.empty() ||
+      glyphs.size() > HarfBuzzRunGlyphData::kMaxGlyphs) {
+    return nullptr;
+  }
+  const unsigned length = static_cast<unsigned>(glyphs.size());
+  ShapeResult* result =
+      MakeGarbageCollected<ShapeResult>(start_index, length, TextDirection::kLtr);
+  result->has_vertical_offsets_ =
+      font_data->PlatformData().IsVerticalAnyUpright();
+  ShapeResultRun* run = MakeGarbageCollected<ShapeResultRun>(
+      font_data, HB_DIRECTION_LTR, CanvasRotationInVertical::kRegular,
+      HB_SCRIPT_COMMON, start_index, length, length);
+  auto& run_glyphs = run->glyph_data_.MutableGlyphs();
+  float width = 0;
+  for (unsigned i = 0; i < length; ++i) {
+    const TextRunLayoutUnit advance =
+        TextRunLayoutUnit::FromFloatRound(glyphs[i].advance);
+    run_glyphs[i] = {font_data->GlyphForCharacter(glyphs[i].code_point), i,
+                     SafeToBreak::kSafe, advance};
+    width += advance.ToFloat();
+  }
+  result->width_ = run->width_ = width;
+  result->runs_.push_back(run);
+  return result;
+}
+"""
+BLINK_FRAGMENT_ITEMS_BUILDER_INCLUDE = (
+    '#include "third_party/blink/renderer/core/layout/inline/'
+    'fragment_items_builder.h"'
+)
+LEGACY_FEASIBILITY_ITEMS_INCLUDES = (
+    "#include <cmath>",
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/platform/fonts/shaping/'
+    'shape_result.h"',
+    '#include "third_party/blink/renderer/platform/fonts/shaping/'
+    'shape_result_view.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_to_number.h"',
+)
+BLINK_RECREATION_ITEMS_HELPER_ANCHOR = (
+    "\nvoid FragmentItemsBuilder::ConvertToPhysical("
+    "const PhysicalSize& outer_size) {\n"
+)
+LEGACY_FEASIBILITY_ITEMS_HELPER_MARKER = "RecorderRecordedEntries("
+LEGACY_FEASIBILITY_ITEMS_HELPER = """
+namespace {
+
+// Windows A11y Recorder recreation mode, feasibility step 1c: the recorded
+// fragment items of a block, read from attributes of its element. Each
+// attribute holds entries separated by semicolons, of fields separated by
+// spaces.
+Vector<Vector<String>> RecorderRecordedEntries(const Element& element,
+                                               const char* name) {
+  Vector<Vector<String>> entries;
+  const AtomicString& recorder_text = element.getAttribute(AtomicString(name));
+  if (recorder_text.IsNull()) {
+    return entries;
+  }
+  for (const String& recorder_entry :
+       recorder_text.GetString().SplitSkippingEmpty(';')) {
+    Vector<String> recorder_fields = recorder_entry.SplitSkippingEmpty(' ');
+    if (!recorder_fields.empty()) {
+      entries.push_back(std::move(recorder_fields));
+    }
+  }
+  return entries;
+}
+
+std::optional<double> RecorderNumber(const String& field) {
+  const std::optional<double> value = field.Is8Bit()
+                                          ? CharactersToDouble(field.Span8())
+                                          : CharactersToDouble(field.Span16());
+  if (!value || !std::isfinite(*value)) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+bool RecorderMatchesRange(const Vector<String>& fields,
+                          const TextOffsetRange& range) {
+  if (fields.size() < 2u) {
+    return false;
+  }
+  const std::optional<double> start = RecorderNumber(fields[0]);
+  const std::optional<double> end = RecorderNumber(fields[1]);
+  return start && end && *start == range.start && *end == range.end;
+}
+
+// The rectangle "x y width height" in CSS pixels in the four fields from
+// `first`, the last fields of the entry, in layout units.
+std::optional<PhysicalRect> RecorderRect(const Vector<String>& fields,
+                                         wtf_size_t first,
+                                         double zoom) {
+  if (fields.size() != first + 4) {
+    return std::nullopt;
+  }
+  Vector<LayoutUnit> values;
+  for (wtf_size_t index = first; index < fields.size(); ++index) {
+    const std::optional<double> value = RecorderNumber(fields[index]);
+    if (!value) {
+      return std::nullopt;
+    }
+    values.push_back(LayoutUnit::FromDoubleRound(*value * zoom));
+  }
+  if (values[2] < LayoutUnit() || values[3] < LayoutUnit()) {
+    return std::nullopt;
+  }
+  return PhysicalRect(values[0], values[1], values[2], values[3]);
+}
+
+// A code point written "U+0058".
+std::optional<UChar32> RecorderCodePoint(const String& field) {
+  if (field.length() < 3 || field.length() > 8 || field[0] != 'U' ||
+      field[1] != '+') {
+    return std::nullopt;
+  }
+  UChar32 value = 0;
+  for (wtf_size_t index = 2; index < field.length(); ++index) {
+    const UChar character = field[index];
+    int digit = -1;
+    if (character >= '0' && character <= '9') {
+      digit = character - '0';
+    } else if (character >= 'A' && character <= 'F') {
+      digit = character - 'A' + 10;
+    } else if (character >= 'a' && character <= 'f') {
+      digit = character - 'a' + 10;
+    }
+    if (digit < 0) {
+      return std::nullopt;
+    }
+    value = value * 16 + digit;
+  }
+  if (value > 0x10FFFF) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+}  // namespace
+"""
+BLINK_RECREATION_ITEMS_ANCHOR = (
+    "  is_converted_to_physical_ = true;\n}\n\n"
+    "void FragmentItemsBuilder::MoveChildrenInDirection("
+)
+LEGACY_FEASIBILITY_ITEMS_MARKER = "recorder_line_index"
+LEGACY_FEASIBILITY_ITEMS_HOOK = """\
+  // Windows A11y Recorder recreation mode: the block's recorded line, text,
+  // and inline box rectangles, and its recorded glyphs, replace those of its
+  // layout, in a horizontal, left to right writing mode. Lines are matched by
+  // index, text by its range of the block's text, and inline boxes by their
+  // element.
+  if (a11y_recorder::IsRecreationMode() &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    if (const auto* recorder_element = DynamicTo<Element>(node_.GetDOMNode())) {
+      const double recorder_zoom = node_.Style().EffectiveZoom();
+      const Vector<Vector<String>> recorder_lines = RecorderRecordedEntries(
+          *recorder_element, "data-a11y-recorded-lines");
+      const Vector<Vector<String>> recorder_texts = RecorderRecordedEntries(
+          *recorder_element, "data-a11y-recorded-text");
+      const Vector<Vector<String>> recorder_glyphs = RecorderRecordedEntries(
+          *recorder_element, "data-a11y-recorded-glyphs");
+      wtf_size_t recorder_line_index = 0;
+      for (ItemWithOffset& recorder_entry : items_) {
+        FragmentItem& recorder_item = recorder_entry.item;
+        if (recorder_item.Type() == FragmentItem::kLine) {
+          if (recorder_line_index < recorder_lines.size()) {
+            if (const std::optional<PhysicalRect> recorder_rect = RecorderRect(
+                    recorder_lines[recorder_line_index], 0, recorder_zoom)) {
+              recorder_item.RecorderSetRect(*recorder_rect);
+            }
+          }
+          ++recorder_line_index;
+        } else if (recorder_item.Type() == FragmentItem::kText) {
+          const TextOffsetRange recorder_range = recorder_item.TextOffset();
+          for (const Vector<String>& recorder_text : recorder_texts) {
+            if (!RecorderMatchesRange(recorder_text, recorder_range)) {
+              continue;
+            }
+            if (const std::optional<PhysicalRect> recorder_rect =
+                    RecorderRect(recorder_text, 2, recorder_zoom)) {
+              recorder_item.RecorderSetRect(*recorder_rect);
+            }
+          }
+          const wtf_size_t recorder_length = recorder_range.Length();
+          for (const Vector<String>& recorder_glyph_entry : recorder_glyphs) {
+            if (!RecorderMatchesRange(recorder_glyph_entry, recorder_range) ||
+                recorder_glyph_entry.size() != 2 + 2 * recorder_length) {
+              continue;
+            }
+            Vector<ShapeResult::RecorderGlyph> recorder_run;
+            for (wtf_size_t recorder_index = 0;
+                 recorder_index < recorder_length; ++recorder_index) {
+              const std::optional<UChar32> recorder_code_point =
+                  RecorderCodePoint(
+                      recorder_glyph_entry[2 + 2 * recorder_index]);
+              const std::optional<double> recorder_advance = RecorderNumber(
+                  recorder_glyph_entry[3 + 2 * recorder_index]);
+              if (!recorder_code_point || !recorder_advance) {
+                break;
+              }
+              recorder_run.push_back(ShapeResult::RecorderGlyph{
+                  *recorder_code_point,
+                  static_cast<float>(*recorder_advance * recorder_zoom)});
+            }
+            if (recorder_run.size() != recorder_length) {
+              continue;
+            }
+            if (const ShapeResult* recorder_shaped =
+                    ShapeResult::CreateFromRecordedGlyphs(
+                        &recorder_item.ScaledFont(), recorder_range.start,
+                        recorder_run)) {
+              recorder_item.RecorderSetTextShapeResult(
+                  ShapeResultView::Create(recorder_shaped));
+            }
+          }
+        } else if (recorder_item.Type() == FragmentItem::kBox) {
+          if (const auto* recorder_box_element =
+                  DynamicTo<Element>(recorder_item.GetNode())) {
+            const Vector<Vector<String>> recorder_box =
+                RecorderRecordedEntries(*recorder_box_element,
+                                        "data-a11y-recorded-fragment");
+            if (recorder_box.size() == 1u) {
+              if (const std::optional<PhysicalRect> recorder_rect =
+                      RecorderRect(recorder_box[0], 0, recorder_zoom)) {
+                recorder_item.RecorderSetRect(*recorder_rect);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+"""
+
+# The hook as written by revision f23a582, which did not compile: WTF's
+# Vector::push_back cannot take a braced initializer list. A checkout that
+# holds it is upgraded to the current hook.
+INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK = LEGACY_FEASIBILITY_ITEMS_HOOK.replace(
+    """              recorder_run.push_back(ShapeResult::RecorderGlyph{
+                  *recorder_code_point,
+                  static_cast<float>(*recorder_advance * recorder_zoom)});""",
+    """              recorder_run.push_back(
+                  {*recorder_code_point,
+                   static_cast<float>(*recorder_advance * recorder_zoom)});""",
+)
+
+
+# Recreation mode, stage 3: the recorded values as recorded. The builder
+# writes each element's recorded box fragments, the boxFragments object of its
+# latest layout record, as JSON in its data-a11y-recorded-layout attribute,
+# and the hooks read them in place of the feasibility steps' attributes. See
+# docs/architecture/page-recreation.md, "Stage 3: a recorded frame rendered
+# from recorded values". A checkout patched with a feasibility step's helper
+# or hook is upgraded to the stage 3 one.
+BLINK_RECREATION_LAYOUT_HELPERS = """\
+// Windows A11y Recorder recreation mode: the recorded box fragments of a
+// node, the boxFragments object of its latest recorded layout record, read
+// from its element's data-a11y-recorded-layout attribute. Returns null for a
+// node without one, or with one that is not a JSON object.
+std::unique_ptr<JSONObject> RecorderRecordedLayout(const Node* node) {
+  const auto* recorder_element = DynamicTo<Element>(node);
+  if (!recorder_element) {
+    return nullptr;
+  }
+  const AtomicString& recorder_text = recorder_element->getAttribute(
+      AtomicString("data-a11y-recorded-layout"));
+  if (recorder_text.IsNull()) {
+    return nullptr;
+  }
+  return JSONObject::From(ParseJSON(recorder_text.GetString()));
+}
+
+// Windows A11y Recorder recreation mode: says in the console of the node's
+// document that the node's recorded layout was not imposed, and why, naming
+// the node so that DevTools can reveal it. A message repeated by a later
+// layout is not shown again.
+void RecorderReportNotImposed(const Node* node, const char* reason) {
+  if (!node) {
+    return;
+  }
+  Node* recorder_node = const_cast<Node*>(node);
+  const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_node);
+  StringBuilder recorder_text;
+  recorder_text.Append("Recorded layout not imposed on ");
+  recorder_text.Append(node->nodeName());
+  if (const auto* recorder_element = DynamicTo<Element>(node);
+      recorder_element && recorder_element->HasID()) {
+    recorder_text.Append('#');
+    recorder_text.Append(recorder_element->GetIdAttribute());
+  }
+  recorder_text.Append(" (node ");
+  recorder_text.AppendNumber(recorder_id);
+  recorder_text.Append("): ");
+  recorder_text.Append(reason);
+  recorder_text.Append('.');
+  auto* recorder_message = MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kRendering,
+      mojom::blink::ConsoleMessageLevel::kWarning,
+      recorder_text.ToString());
+  Document& recorder_document = recorder_node->GetDocument();
+  if (LocalFrame* recorder_frame = recorder_document.GetFrame()) {
+    recorder_message->SetNodes(recorder_frame, {recorder_id});
+  }
+  recorder_document.AddConsoleMessage(recorder_message,
+                                      /*discard_duplicates=*/true);
+}
+"""
+BLINK_RECREATION_LAYOUT_INCLUDES = (
+    '#include "third_party/blink/public/mojom/devtools/'
+    'console_message.mojom-blink.h"',
+    '#include "third_party/blink/renderer/core/dom/document.h"',
+    '#include "third_party/blink/renderer/core/dom/dom_node_ids.h"',
+    '#include "third_party/blink/renderer/core/frame/local_frame.h"',
+    '#include "third_party/blink/renderer/core/inspector/console_message.h"',
+    '#include "third_party/blink/renderer/platform/json/json_parser.h"',
+    '#include "third_party/blink/renderer/platform/json/json_values.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_builder.h"',
+)
+BLINK_RECREATION_FRAGMENT_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    *BLINK_RECREATION_LAYOUT_INCLUDES,
+    '#include "third_party/blink/renderer/platform/wtf/hash_map.h"',
+    '#include "third_party/blink/renderer/platform/wtf/vector.h"',
+)
+BLINK_RECREATION_FRAGMENT_HELPER_MARKER = "RecorderRecordedLayout("
+STAGE_3_BLINK_RECREATION_FRAGMENT_HELPER = f"""
+namespace {{
+
+{BLINK_RECREATION_LAYOUT_HELPERS}
+}}  // namespace
+"""
+BLINK_RECREATION_NODE_ID_HELPER = """\
+// Windows A11y Recorder recreation mode (slice 4a): the recorded node of an
+// element, which the builder writes first in its data-a11y-recorded-layout
+// attribute, as {"node":<id>, ...}. Read from the start of the attribute,
+// without parsing the rest. Returns 0 for a node without one.
+int RecorderRecordedNodeId(const Node* node) {
+  const auto* recorder_element = DynamicTo<Element>(node);
+  if (!recorder_element) {
+    return 0;
+  }
+  const AtomicString& recorder_text = recorder_element->getAttribute(
+      AtomicString("data-a11y-recorded-layout"));
+  constexpr char kRecorderPrefix[] = "{\\"node\\":";
+  constexpr wtf_size_t kRecorderPrefixLength = sizeof(kRecorderPrefix) - 1;
+  if (recorder_text.IsNull() || !recorder_text.starts_with(kRecorderPrefix)) {
+    return 0;
+  }
+  int recorder_id = 0;
+  for (wtf_size_t recorder_index = kRecorderPrefixLength;
+       recorder_index < recorder_text.length(); ++recorder_index) {
+    const UChar recorder_character = recorder_text[recorder_index];
+    if (recorder_character < '0' || recorder_character > '9' ||
+        recorder_id > 214748363) {
+      break;
+    }
+    recorder_id = recorder_id * 10 + (recorder_character - '0');
+  }
+  return recorder_id;
+}
+"""
+BLINK_RECREATION_FRAGMENT_HELPER = f"""
+namespace {{
+
+{BLINK_RECREATION_LAYOUT_HELPERS}
+{BLINK_RECREATION_NODE_ID_HELPER}}}  // namespace
+"""
+# The slice 4a helper as written by revision dcdb84c, which did not compile:
+# Blink's String names the method starts_with. A checkout that holds it is
+# upgraded to the current helper.
+INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HELPER = BLINK_RECREATION_FRAGMENT_HELPER.replace(
+    "  if (recorder_text.IsNull() || !recorder_text.starts_with(kRecorderPrefix)) {\n",
+    "  if (recorder_text.IsNull() ||\n"
+    "      !recorder_text.GetString().StartsWith(kRecorderPrefix)) {\n",
+)
+BLINK_RECREATION_FRAGMENT_MARKER = "recorder_recorded_fragment"
+STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK = """\
+  // Windows A11y Recorder recreation mode: the box's recorded border-box
+  // size, and its children's recorded offsets, replace those its layout
+  // algorithm produced, in a horizontal, left to right writing mode, in which
+  // the builder's logical offsets equal the recorded physical ones. Only a
+  // box laid out in one fragment and recorded in one takes them, and its
+  // children take the offsets of the recorded child links at their indexes
+  // only when it holds as many children as the recorded fragment links.
+  if (a11y_recorder::IsRecreationMode() && node_ &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    // BoxFragmentBuilder::Node() hides the Node class here.
+    const auto* recorder_node = node_.GetDOMNode();
+    if (std::unique_ptr<JSONObject> recorder_layout =
+            RecorderRecordedLayout(recorder_node)) {
+      const JSONArray* recorder_fragments =
+          recorder_layout->GetArray("fragments");
+      const JSONObject* recorder_recorded_fragment =
+          recorder_fragments && recorder_fragments->size() == 1u
+              ? JSONObject::Cast(recorder_fragments->at(0))
+              : nullptr;
+      double recorder_width = 0;
+      double recorder_height = 0;
+      if (GetConstraintSpace().HasBlockFragmentation() ||
+          IsFragmentainerBoxType() || PreviousBreakToken()) {
+        RecorderReportNotImposed(recorder_node,
+                                 "the box is laid out in more than one "
+                                 "fragment");
+      } else if (!recorder_recorded_fragment ||
+                 !recorder_recorded_fragment->GetDouble("width",
+                                                        &recorder_width) ||
+                 !recorder_recorded_fragment->GetDouble("height",
+                                                        &recorder_height)) {
+        RecorderReportNotImposed(recorder_node,
+                                 "the box was not recorded in one fragment");
+      } else {
+        size_.inline_size = LayoutUnit::FromDoubleRound(recorder_width);
+        size_.block_size = LayoutUnit::FromDoubleRound(recorder_height);
+        const JSONArray* recorder_links =
+            recorder_recorded_fragment->GetArray("children");
+        const wtf_size_t recorder_recorded_count =
+            recorder_links ? recorder_links->size() : 0u;
+        if (recorder_recorded_count != children_.size()) {
+          RecorderReportNotImposed(recorder_node,
+                                   "the box holds a different number of "
+                                   "children from its recorded fragment, so "
+                                   "its children keep their offsets");
+        } else {
+          for (wtf_size_t recorder_index = 0;
+               recorder_index < recorder_recorded_count; ++recorder_index) {
+            const JSONObject* recorder_link =
+                JSONObject::Cast(recorder_links->at(recorder_index));
+            double recorder_x = 0;
+            double recorder_y = 0;
+            if (recorder_link && recorder_link->GetDouble("x", &recorder_x) &&
+                recorder_link->GetDouble("y", &recorder_y)) {
+              SetChildOffset(recorder_index,
+                             LogicalOffset(
+                                 LayoutUnit::FromDoubleRound(recorder_x),
+                                 LayoutUnit::FromDoubleRound(recorder_y)));
+            }
+          }
+        }
+      }
+    }
+  }
+
+"""
+BLINK_RECREATION_FRAGMENT_HOOK = """\
+  // Windows A11y Recorder recreation mode (slice 4a): the box's recorded
+  // border-box size, and its children's recorded offsets, replace those its
+  // layout algorithm produced, in a horizontal, left to right writing mode,
+  // in which the builder's logical offsets equal the recorded physical ones.
+  // Only a box laid out in one fragment and recorded in one takes them. Each
+  // child takes the offset of the recorded child link that is the same
+  // child: a box with an element, the link of kind "box" for its recorded
+  // node; a line box or an anonymous box, the recorded link of its kind in
+  // the same order, when the box holds as many of that kind as recorded. A
+  // child that matches no link keeps its offset, and is reported.
+  if (a11y_recorder::IsRecreationMode() && node_ &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    // BoxFragmentBuilder::Node() hides the Node class here.
+    const auto* recorder_node = node_.GetDOMNode();
+    if (std::unique_ptr<JSONObject> recorder_layout =
+            RecorderRecordedLayout(recorder_node)) {
+      const JSONArray* recorder_fragments =
+          recorder_layout->GetArray("fragments");
+      const JSONObject* recorder_recorded_fragment =
+          recorder_fragments && recorder_fragments->size() == 1u
+              ? JSONObject::Cast(recorder_fragments->at(0))
+              : nullptr;
+      double recorder_width = 0;
+      double recorder_height = 0;
+      if (GetConstraintSpace().HasBlockFragmentation() ||
+          IsFragmentainerBoxType() || PreviousBreakToken()) {
+        RecorderReportNotImposed(recorder_node,
+                                 "the box is laid out in more than one "
+                                 "fragment");
+      } else if (!recorder_recorded_fragment ||
+                 !recorder_recorded_fragment->GetDouble("width",
+                                                        &recorder_width) ||
+                 !recorder_recorded_fragment->GetDouble("height",
+                                                        &recorder_height)) {
+        RecorderReportNotImposed(recorder_node,
+                                 "the box was not recorded in one fragment");
+      } else {
+        size_.inline_size = LayoutUnit::FromDoubleRound(recorder_width);
+        size_.block_size = LayoutUnit::FromDoubleRound(recorder_height);
+        const JSONArray* recorder_links =
+            recorder_recorded_fragment->GetArray("children");
+        const wtf_size_t recorder_link_count =
+            recorder_links ? recorder_links->size() : 0u;
+        // The recorded links by kind: boxes by their node, and lines and
+        // anonymous boxes in order. A node with more than one link, which a
+        // box in one fragment cannot have, matches none.
+        HashMap<int, wtf_size_t> recorder_box_links;
+        Vector<wtf_size_t> recorder_line_links;
+        Vector<wtf_size_t> recorder_anonymous_links;
+        for (wtf_size_t recorder_index = 0;
+             recorder_index < recorder_link_count; ++recorder_index) {
+          const JSONObject* recorder_link =
+              JSONObject::Cast(recorder_links->at(recorder_index));
+          String recorder_kind;
+          if (!recorder_link ||
+              !recorder_link->GetString("kind", &recorder_kind)) {
+            continue;
+          }
+          int recorder_link_node = 0;
+          if (recorder_kind == "box" &&
+              recorder_link->GetInteger("nodeId", &recorder_link_node) &&
+              recorder_link_node > 0) {
+            auto recorder_added =
+                recorder_box_links.insert(recorder_link_node, recorder_index);
+            if (!recorder_added.is_new_entry) {
+              recorder_added.stored_value->value = kNotFound;
+            }
+          } else if (recorder_kind == "line") {
+            recorder_line_links.push_back(recorder_index);
+          } else if (recorder_kind == "anonymous") {
+            recorder_anonymous_links.push_back(recorder_index);
+          }
+        }
+        wtf_size_t recorder_lines = 0;
+        wtf_size_t recorder_anonymous = 0;
+        for (const LogicalFragmentLink& recorder_child : children_) {
+          if (recorder_child->IsLineBox()) {
+            ++recorder_lines;
+          } else if (!recorder_child->GetNode()) {
+            ++recorder_anonymous;
+          }
+        }
+        const bool recorder_lines_match =
+            recorder_lines == recorder_line_links.size();
+        const bool recorder_anonymous_match =
+            recorder_anonymous == recorder_anonymous_links.size();
+        if (!recorder_lines_match) {
+          RecorderReportNotImposed(recorder_node,
+                                   "the box holds a different number of "
+                                   "line boxes from its recorded fragment, so "
+                                   "its line boxes keep their offsets");
+        }
+        if (!recorder_anonymous_match) {
+          RecorderReportNotImposed(recorder_node,
+                                   "the box holds a different number of "
+                                   "anonymous boxes from its recorded "
+                                   "fragment, so its anonymous boxes keep "
+                                   "their offsets");
+        }
+        wtf_size_t recorder_line = 0;
+        wtf_size_t recorder_anonymous_index = 0;
+        for (wtf_size_t recorder_index = 0; recorder_index < children_.size();
+             ++recorder_index) {
+          const PhysicalFragment& recorder_child =
+              *children_[recorder_index].fragment;
+          wtf_size_t recorder_link_index = kNotFound;
+          if (recorder_child.IsLineBox()) {
+            if (recorder_lines_match) {
+              recorder_link_index = recorder_line_links[recorder_line];
+            }
+            ++recorder_line;
+          } else if (const auto* recorder_child_node =
+                         recorder_child.GetNode()) {
+            const int recorder_child_id =
+                RecorderRecordedNodeId(recorder_child_node);
+            auto recorder_found = recorder_child_id > 0
+                                      ? recorder_box_links.find(
+                                            recorder_child_id)
+                                      : recorder_box_links.end();
+            if (recorder_found != recorder_box_links.end()) {
+              recorder_link_index = recorder_found->value;
+            }
+            if (recorder_link_index == kNotFound) {
+              RecorderReportNotImposed(
+                  recorder_child_node,
+                  recorder_child_id > 0
+                      ? "its parent's recorded fragment has no child link "
+                        "for its recorded node, so it keeps its offset"
+                      : "it has no recorded node, as for a pseudo-element "
+                        "or an element without a layout record, so it "
+                        "keeps its offset");
+            }
+          } else {
+            if (recorder_anonymous_match) {
+              recorder_link_index =
+                  recorder_anonymous_links[recorder_anonymous_index];
+            }
+            ++recorder_anonymous_index;
+          }
+          if (recorder_link_index == kNotFound) {
+            continue;
+          }
+          const JSONObject* recorder_link =
+              JSONObject::Cast(recorder_links->at(recorder_link_index));
+          double recorder_x = 0;
+          double recorder_y = 0;
+          if (recorder_link && recorder_link->GetDouble("x", &recorder_x) &&
+              recorder_link->GetDouble("y", &recorder_y)) {
+            SetChildOffset(recorder_index,
+                           LogicalOffset(
+                               LayoutUnit::FromDoubleRound(recorder_x),
+                               LayoutUnit::FromDoubleRound(recorder_y)));
+          }
+        }
+      }
+    }
+  }
+
+"""
+
+BLINK_RECREATION_SHAPE_DECLARATION_MARKER = (
+    "unsigned num_characters,\n      base::span<const RecorderGlyph> glyphs);"
+)
+BLINK_RECREATION_SHAPE_DECLARATION = """\
+  // Windows A11y Recorder recreation mode: a left to right shaping result of
+  // `num_characters` characters from `start_index`, drawn with the primary
+  // font of `font` from recorded glyphs. Each glyph names the character it
+  // starts from, relative to `start_index`, and its advance in layout
+  // pixels. Returns null for no glyphs, too many, or glyphs out of order.
+  struct RecorderGlyph {
+    Glyph glyph;
+    unsigned character_index;
+    float advance;
+  };
+  static const ShapeResult* CreateFromRecordedGlyphs(
+      const Font* font,
+      unsigned start_index,
+      unsigned num_characters,
+      base::span<const RecorderGlyph> glyphs);
+"""
+BLINK_RECREATION_SHAPE_DEFINITION_MARKER = (
+    "run_glyphs[i] = {glyphs[i].glyph, glyphs[i].character_index,"
+)
+BLINK_RECREATION_SHAPE_DEFINITION = """
+// Windows A11y Recorder recreation mode. After the pattern of
+// CreateForSpaces.
+const ShapeResult* ShapeResult::CreateFromRecordedGlyphs(
+    const Font* font,
+    unsigned start_index,
+    unsigned num_characters,
+    base::span<const RecorderGlyph> glyphs) {
+  const SimpleFontData* font_data = font ? font->PrimaryFont() : nullptr;
+  if (!font_data || !num_characters || glyphs.empty() ||
+      glyphs.size() > HarfBuzzRunGlyphData::kMaxGlyphs) {
+    return nullptr;
+  }
+  unsigned previous_index = 0;
+  for (const RecorderGlyph& glyph : glyphs) {
+    if (glyph.character_index >= num_characters ||
+        glyph.character_index < previous_index) {
+      return nullptr;
+    }
+    previous_index = glyph.character_index;
+  }
+  const unsigned num_glyphs = static_cast<unsigned>(glyphs.size());
+  ShapeResult* result = MakeGarbageCollected<ShapeResult>(
+      start_index, num_characters, TextDirection::kLtr);
+  result->has_vertical_offsets_ =
+      font_data->PlatformData().IsVerticalAnyUpright();
+  ShapeResultRun* run = MakeGarbageCollected<ShapeResultRun>(
+      font_data, HB_DIRECTION_LTR, CanvasRotationInVertical::kRegular,
+      HB_SCRIPT_COMMON, start_index, num_glyphs, num_characters);
+  auto& run_glyphs = run->glyph_data_.MutableGlyphs();
+  float width = 0;
+  for (unsigned i = 0; i < num_glyphs; ++i) {
+    const TextRunLayoutUnit advance =
+        TextRunLayoutUnit::FromFloatRound(glyphs[i].advance);
+    run_glyphs[i] = {glyphs[i].glyph, glyphs[i].character_index,
+                     SafeToBreak::kSafe, advance};
+    width += advance.ToFloat();
+  }
+  result->width_ = run->width_ = width;
+  result->runs_.push_back(run);
+  return result;
+}
+"""
+
+BLINK_RECREATION_ITEMS_INCLUDES = (
+    "#include <cmath>",
+    BLINK_BRIDGE_INCLUDE,
+    '#include "base/containers/span.h"',
+    '#include "base/numerics/byte_conversions.h"',
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/layout/layout_box.h"',
+    *BLINK_RECREATION_LAYOUT_INCLUDES,
+    '#include "third_party/blink/renderer/platform/fonts/font_platform_data.h"',
+    '#include "third_party/blink/renderer/platform/fonts/shaping/'
+    'shape_result.h"',
+    '#include "third_party/blink/renderer/platform/fonts/shaping/'
+    'shape_result_view.h"',
+    '#include "third_party/blink/renderer/platform/fonts/simple_font_data.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/base64.h"',
+    '#include "third_party/skia/include/core/SkString.h"',
+    '#include "third_party/skia/include/core/SkTypeface.h"',
+)
+BLINK_RECREATION_ITEMS_HELPER_MARKER = "RecorderRecordedItemsFragment("
+BLINK_RECREATION_ITEMS_HELPER = f"""
+namespace {{
+
+{BLINK_RECREATION_LAYOUT_HELPERS}
+// Windows A11y Recorder recreation mode: the recorded fragment that holds a
+// block's items, and the recorded text they index. For a block with an
+// element, it is the element's only recorded fragment; for an anonymous
+// block, the fragment held by the first anonymous child link of its parent's
+// only recorded fragment whose text is the block's text. `layout` holds the
+// parsed record the result points into, and `node` is set to the node a
+// report names: the element, or the anonymous block's parent.
+const JSONObject* RecorderRecordedItemsFragment(
+    const LayoutBox* box,
+    const String& text_content,
+    std::unique_ptr<JSONObject>& layout,
+    String& recorded_text,
+    const Node*& node) {{
+  node = nullptr;
+  if (!box) {{
+    return nullptr;
+  }}
+  const bool recorder_anonymous = !box->GetNode();
+  const LayoutObject* recorder_parent = box->Parent();
+  node = recorder_anonymous
+             ? (recorder_parent ? recorder_parent->GetNode() : nullptr)
+             : box->GetNode();
+  layout = RecorderRecordedLayout(node);
+  if (!layout) {{
+    return nullptr;
+  }}
+  const JSONArray* recorder_fragments = layout->GetArray("fragments");
+  if (!recorder_fragments || recorder_fragments->size() != 1u) {{
+    return nullptr;
+  }}
+  const JSONObject* recorder_fragment =
+      JSONObject::Cast(recorder_fragments->at(0));
+  if (!recorder_fragment) {{
+    return nullptr;
+  }}
+  if (!recorder_anonymous) {{
+    if (!layout->GetString("textContent", &recorded_text)) {{
+      recorded_text = String();
+    }}
+    return recorder_fragment;
+  }}
+  const JSONArray* recorder_links = recorder_fragment->GetArray("children");
+  if (!recorder_links) {{
+    return nullptr;
+  }}
+  for (wtf_size_t recorder_index = 0; recorder_index < recorder_links->size();
+       ++recorder_index) {{
+    const JSONObject* recorder_link =
+        JSONObject::Cast(recorder_links->at(recorder_index));
+    String recorder_kind;
+    if (!recorder_link || !recorder_link->GetString("kind", &recorder_kind) ||
+        recorder_kind != "anonymous") {{
+      continue;
+    }}
+    const JSONObject* recorder_nested =
+        recorder_link->GetJSONObject("fragment");
+    String recorder_text;
+    if (recorder_nested &&
+        recorder_nested->GetString("textContent", &recorder_text) &&
+        recorder_text == text_content) {{
+      recorded_text = recorder_text;
+      return recorder_nested;
+    }}
+  }}
+  return nullptr;
+}}
+
+// The recorded type name of an item, as protocol 0.39 writes it.
+const char* RecorderItemType(const FragmentItem& item) {{
+  switch (item.Type()) {{
+    case FragmentItem::kText:
+      return "text";
+    case FragmentItem::kGeneratedText:
+      return "generated-text";
+    case FragmentItem::kLine:
+      return "line";
+    case FragmentItem::kBox:
+      return "box";
+    default:
+      return "invalid";
+  }}
+}}
+
+// The shaping result of a text item drawn from its recorded glyphs, when the
+// item was recorded with one horizontal, unrotated glyph run whose font has
+// the PostScript name and size of the primary font Blink chose for the item.
+// A glyph's advance is the distance to the next glyph's recorded position,
+// and the last glyph's is the rest of the recorded item width. Returns null
+// otherwise.
+const ShapeResult* RecorderShapeFromRecordedGlyphs(const FragmentItem& item,
+                                                   const JSONObject& recorded,
+                                                   double width) {{
+  const JSONArray* recorder_runs = recorded.GetArray("glyphRuns");
+  if (!recorder_runs || recorder_runs->size() != 1u) {{
+    return nullptr;
+  }}
+  const JSONObject* recorder_run = JSONObject::Cast(recorder_runs->at(0));
+  const JSONObject* recorder_font =
+      recorder_run ? recorder_run->GetJSONObject("font") : nullptr;
+  String recorder_name;
+  double recorder_size = 0;
+  bool recorder_horizontal = false;
+  int recorder_rotation = -1;
+  String recorder_packed;
+  if (!recorder_font ||
+      !recorder_font->GetString("postScriptName", &recorder_name) ||
+      !recorder_font->GetDouble("size", &recorder_size) ||
+      !recorder_run->GetBoolean("horizontal", &recorder_horizontal) ||
+      !recorder_horizontal ||
+      !recorder_run->GetInteger("rotation", &recorder_rotation) ||
+      recorder_rotation != 0 ||
+      !recorder_run->GetString("glyphs", &recorder_packed)) {{
+    return nullptr;
+  }}
+  const SimpleFontData* recorder_font_data = item.ScaledFont().PrimaryFont();
+  if (!recorder_font_data) {{
+    return nullptr;
+  }}
+  const FontPlatformData& recorder_platform =
+      recorder_font_data->PlatformData();
+  const SkTypeface* recorder_typeface = recorder_platform.Typeface();
+  SkString recorder_typeface_name;
+  if (!recorder_typeface ||
+      !recorder_typeface->getPostScriptName(&recorder_typeface_name) ||
+      String::FromUtf8(recorder_typeface_name.c_str()) != recorder_name ||
+      std::abs(recorder_platform.size() - recorder_size) > 0.001) {{
+    return nullptr;
+  }}
+  Vector<uint8_t> recorder_bytes;
+  constexpr size_t kRecorderPackedGlyphBytes = 18u;
+  if (!Base64Decode(recorder_packed, recorder_bytes) ||
+      recorder_bytes.empty() ||
+      recorder_bytes.size() % kRecorderPackedGlyphBytes) {{
+    return nullptr;
+  }}
+  const TextOffsetRange recorder_range = item.TextOffset();
+  const base::span<const uint8_t> recorder_all(recorder_bytes);
+  const wtf_size_t recorder_count = static_cast<wtf_size_t>(
+      recorder_bytes.size() / kRecorderPackedGlyphBytes);
+  Vector<ShapeResult::RecorderGlyph> recorder_glyphs;
+  Vector<float> recorder_positions;
+  recorder_glyphs.reserve(recorder_count);
+  recorder_positions.reserve(recorder_count);
+  for (wtf_size_t recorder_index = 0; recorder_index < recorder_count;
+       ++recorder_index) {{
+    const base::span<const uint8_t> recorder_glyph = recorder_all.subspan(
+        recorder_index * kRecorderPackedGlyphBytes, kRecorderPackedGlyphBytes);
+    const uint32_t recorder_character =
+        base::U32FromLittleEndian(recorder_glyph.subspan<2, 4>());
+    if (recorder_character < recorder_range.start ||
+        recorder_character >= recorder_range.end) {{
+      return nullptr;
+    }}
+    ShapeResult::RecorderGlyph recorder_value;
+    recorder_value.glyph =
+        base::U16FromLittleEndian(recorder_glyph.subspan<0, 2>());
+    recorder_value.character_index =
+        recorder_character - recorder_range.start;
+    recorder_value.advance = 0;
+    recorder_glyphs.push_back(recorder_value);
+    recorder_positions.push_back(
+        base::FloatFromLittleEndian(recorder_glyph.subspan<6, 4>()));
+  }}
+  for (wtf_size_t recorder_index = 0; recorder_index < recorder_count;
+       ++recorder_index) {{
+    const double recorder_next = recorder_index + 1 < recorder_count
+                                     ? recorder_positions[recorder_index + 1]
+                                     : width;
+    recorder_glyphs[recorder_index].advance = static_cast<float>(
+        recorder_next - recorder_positions[recorder_index]);
+  }}
+  return ShapeResult::CreateFromRecordedGlyphs(
+      &item.ScaledFont(), recorder_range.start, recorder_range.Length(),
+      recorder_glyphs);
+}}
+
+}}  // namespace
+"""
+# Sub-step 3: a glyph run's recorded glyphs are used when the font Blink chose
+# for the text has the recorded font file's digest and collection index, and
+# the recorded size, in place of the PostScript name the stage 3 helper
+# compared. The recreation mode's bridge keeps each typeface's digest, so each
+# file is read once in a renderer. A checkout patched with the stage 3 helper
+# is upgraded to this one.
+PRE_FONT_FILE_BLINK_RECREATION_ITEMS_HELPER = BLINK_RECREATION_ITEMS_HELPER
+_PRE_FONT_FILE_SHAPE_COMMENT = """\
+// The shaping result of a text item drawn from its recorded glyphs, when the
+// item was recorded with one horizontal, unrotated glyph run whose font has
+// the PostScript name and size of the primary font Blink chose for the item.
+"""
+_FONT_FILE_SHAPE_COMMENT = """\
+// The digest and collection index of a typeface's font file, read once in a
+// renderer through Skia's openStream and digested by the bridge, which keeps
+// the digest by the typeface's unique identifier. Returns false when Skia
+// gives no readable file for the typeface.
+bool RecorderRecreationFontFile(const SkTypeface& recorder_typeface,
+                                std::string* recorder_digest,
+                                int* recorder_index) {
+  if (!a11y_recorder::LookUpFontFile(recorder_typeface.uniqueID(),
+                                     recorder_digest, recorder_index)) {
+    *recorder_index = 0;
+    std::unique_ptr<SkStreamAsset> recorder_stream =
+        recorder_typeface.openStream(recorder_index);
+    std::string recorder_bytes;
+    bool recorder_readable = false;
+    if (recorder_stream) {
+      recorder_bytes.resize(recorder_stream->getLength());
+      recorder_readable =
+          recorder_stream->read(recorder_bytes.data(), recorder_bytes.size()) ==
+          recorder_bytes.size();
+    }
+    if (!recorder_readable) {
+      recorder_bytes.clear();
+    }
+    *recorder_digest = a11y_recorder::RecordFontFile(
+        recorder_typeface.uniqueID(), *recorder_index, recorder_readable,
+        std::move(recorder_bytes));
+  }
+  return !recorder_digest->empty();
+}
+
+// The shaping result of a text item drawn from its recorded glyphs, when the
+// item was recorded with one horizontal, unrotated glyph run whose font file
+// has the digest and collection index of the primary font Blink chose for the
+// item, at the recorded size (sub-step 3).
+"""
+_PRE_FONT_FILE_SHAPE_CHECK = """\
+  const JSONObject* recorder_run = JSONObject::Cast(recorder_runs->at(0));
+  const JSONObject* recorder_font =
+      recorder_run ? recorder_run->GetJSONObject("font") : nullptr;
+  String recorder_name;
+  double recorder_size = 0;
+  bool recorder_horizontal = false;
+  int recorder_rotation = -1;
+  String recorder_packed;
+  if (!recorder_font ||
+      !recorder_font->GetString("postScriptName", &recorder_name) ||
+      !recorder_font->GetDouble("size", &recorder_size) ||
+"""
+_FONT_FILE_SHAPE_CHECK = """\
+  const JSONObject* recorder_run = JSONObject::Cast(recorder_runs->at(0));
+  const JSONObject* recorder_font =
+      recorder_run ? recorder_run->GetJSONObject("font") : nullptr;
+  const JSONObject* recorder_file =
+      recorder_run ? recorder_run->GetJSONObject("fontFile") : nullptr;
+  String recorder_digest;
+  int recorder_file_index = -1;
+  double recorder_size = 0;
+  bool recorder_horizontal = false;
+  int recorder_rotation = -1;
+  String recorder_packed;
+  if (!recorder_font || !recorder_file ||
+      !recorder_file->GetString("digest", &recorder_digest) ||
+      !recorder_file->GetInteger("index", &recorder_file_index) ||
+      !recorder_font->GetDouble("size", &recorder_size) ||
+"""
+_PRE_FONT_FILE_TYPEFACE_CHECK = """\
+  const SkTypeface* recorder_typeface = recorder_platform.Typeface();
+  SkString recorder_typeface_name;
+  if (!recorder_typeface ||
+      !recorder_typeface->getPostScriptName(&recorder_typeface_name) ||
+      String::FromUtf8(recorder_typeface_name.c_str()) != recorder_name ||
+      std::abs(recorder_platform.size() - recorder_size) > 0.001) {
+    return nullptr;
+  }
+"""
+_FONT_FILE_TYPEFACE_CHECK = """\
+  const SkTypeface* recorder_typeface = recorder_platform.Typeface();
+  std::string recorder_chosen_digest;
+  int recorder_chosen_index = 0;
+  if (!recorder_typeface ||
+      std::abs(recorder_platform.size() - recorder_size) > 0.001 ||
+      !RecorderRecreationFontFile(*recorder_typeface, &recorder_chosen_digest,
+                                  &recorder_chosen_index) ||
+      String::FromUtf8(recorder_chosen_digest) != recorder_digest ||
+      recorder_chosen_index != recorder_file_index) {
+    return nullptr;
+  }
+"""
+for _old in (
+    _PRE_FONT_FILE_SHAPE_COMMENT,
+    _PRE_FONT_FILE_SHAPE_CHECK,
+    _PRE_FONT_FILE_TYPEFACE_CHECK,
+):
+    if BLINK_RECREATION_ITEMS_HELPER.count(_old) != 1:
+        raise RuntimeError("a stage 3 glyph run check was not found once")
+BLINK_RECREATION_ITEMS_HELPER = (
+    BLINK_RECREATION_ITEMS_HELPER.replace(
+        _PRE_FONT_FILE_SHAPE_COMMENT, _FONT_FILE_SHAPE_COMMENT, 1
+    )
+    .replace(_PRE_FONT_FILE_SHAPE_CHECK, _FONT_FILE_SHAPE_CHECK, 1)
+    .replace(_PRE_FONT_FILE_TYPEFACE_CHECK, _FONT_FILE_TYPEFACE_CHECK, 1)
+)
+BLINK_RECREATION_ITEMS_INCLUDES = (
+    *BLINK_RECREATION_ITEMS_INCLUDES,
+    "#include <memory>",
+    "#include <string>",
+    '#include "third_party/skia/include/core/SkStream.h"',
+)
+BLINK_RECREATION_ITEMS_MARKER = "recorder_recorded_items"
+BLINK_RECREATION_ITEMS_HOOK = """\
+  // Windows A11y Recorder recreation mode: the block's recorded fragment
+  // items replace those of its layout, in a horizontal, left to right writing
+  // mode. Each item takes the rectangle of the recorded item at its index,
+  // when the block's items have the recorded types, in the recorded order,
+  // with the recorded text ranges, and its text is the recorded text; a text
+  // item recorded with one glyph run in the font Blink chose for it is drawn
+  // from the recorded glyphs. A block that does not match keeps its own
+  // items, and the console says so.
+  if (a11y_recorder::IsRecreationMode() &&
+      GetWritingDirection().IsHorizontalLtr()) {
+    std::unique_ptr<JSONObject> recorder_layout;
+    String recorder_text;
+    const Node* recorder_node = nullptr;
+    const JSONObject* recorder_fragment = RecorderRecordedItemsFragment(
+        node_.GetLayoutBox(), text_content_, recorder_layout, recorder_text,
+        recorder_node);
+    const JSONArray* recorder_recorded_items =
+        recorder_fragment ? recorder_fragment->GetArray("items") : nullptr;
+    if (!recorder_recorded_items) {
+      if (recorder_layout) {
+        RecorderReportNotImposed(recorder_node,
+                                 "no recorded items were found for a block "
+                                 "it lays out");
+      }
+    } else {
+      bool recorder_matches =
+          recorder_recorded_items->size() == items_.size() &&
+          recorder_text == text_content_;
+      for (wtf_size_t recorder_index = 0;
+           recorder_matches && recorder_index < items_.size();
+           ++recorder_index) {
+        const FragmentItem& recorder_item = items_[recorder_index].item;
+        const JSONObject* recorder_recorded =
+            JSONObject::Cast(recorder_recorded_items->at(recorder_index));
+        String recorder_type;
+        recorder_matches =
+            recorder_recorded &&
+            recorder_recorded->GetString("type", &recorder_type) &&
+            recorder_type == RecorderItemType(recorder_item);
+        if (recorder_matches && recorder_item.Type() == FragmentItem::kText) {
+          int recorder_start = 0;
+          int recorder_end = 0;
+          recorder_matches =
+              recorder_recorded->GetInteger("start", &recorder_start) &&
+              recorder_recorded->GetInteger("end", &recorder_end) &&
+              recorder_start >= 0 && recorder_end >= 0 &&
+              static_cast<wtf_size_t>(recorder_start) ==
+                  recorder_item.StartOffset() &&
+              static_cast<wtf_size_t>(recorder_end) ==
+                  recorder_item.EndOffset();
+        }
+      }
+      if (!recorder_matches) {
+        RecorderReportNotImposed(recorder_node,
+                                 "a block it lays out has items or text that "
+                                 "differ from those recorded, so the block "
+                                 "keeps its own items");
+      } else {
+        wtf_size_t recorder_reshaped = 0;
+        for (wtf_size_t recorder_index = 0; recorder_index < items_.size();
+             ++recorder_index) {
+          FragmentItem& recorder_item = items_[recorder_index].item;
+          const JSONObject* recorder_recorded =
+              JSONObject::Cast(recorder_recorded_items->at(recorder_index));
+          double recorder_x = 0;
+          double recorder_y = 0;
+          double recorder_width = 0;
+          double recorder_height = 0;
+          if (!recorder_recorded->GetDouble("x", &recorder_x) ||
+              !recorder_recorded->GetDouble("y", &recorder_y) ||
+              !recorder_recorded->GetDouble("width", &recorder_width) ||
+              !recorder_recorded->GetDouble("height", &recorder_height)) {
+            continue;
+          }
+          recorder_item.RecorderSetRect(
+              PhysicalRect(LayoutUnit::FromDoubleRound(recorder_x),
+                           LayoutUnit::FromDoubleRound(recorder_y),
+                           LayoutUnit::FromDoubleRound(recorder_width),
+                           LayoutUnit::FromDoubleRound(recorder_height)));
+          if (recorder_item.Type() != FragmentItem::kText) {
+            continue;
+          }
+          if (const ShapeResult* recorder_shaped =
+                  RecorderShapeFromRecordedGlyphs(
+                      recorder_item, *recorder_recorded, recorder_width)) {
+            recorder_item.RecorderSetTextShapeResult(
+                ShapeResultView::Create(recorder_shaped));
+          } else {
+            ++recorder_reshaped;
+          }
+        }
+        if (recorder_reshaped) {
+          RecorderReportNotImposed(recorder_node,
+                                   "some text it lays out keeps Blink's "
+                                   "shaping, being recorded in another font "
+                                   "or in more than one glyph run");
+        }
+      }
+    }
+  }
+
+"""
+
+
+# The stage 3 box hook as written by revision 44736a8, which did not compile:
+# in a BoxFragmentBuilder member, the Node class is hidden by its Node()
+# method. A checkout that holds it is upgraded to the current hook.
+INTERMEDIATE_BLINK_RECREATION_FRAGMENT_HOOK = STAGE_3_BLINK_RECREATION_FRAGMENT_HOOK.replace(
+    "    // BoxFragmentBuilder::Node() hides the Node class here.\n"
+    "    const auto* recorder_node = node_.GetDOMNode();\n",
+    "    const Node* recorder_node = node_.GetDOMNode();\n",
+)
+
+def require_no_feasibility_text(
+    text: str, fragments: tuple[str, ...], path: Path
+) -> None:
+    """Fails when a feasibility step's text is left after its upgrade."""
+    for fragment in fragments:
+        if fragment in text:
+            raise RuntimeError(
+                f"{path}: a feasibility step's recreation hook was not "
+                f"upgraded to stage 3: {fragment!r} remains"
+            )
+
+
+# Page resources (protocol 0.40). A font file is read from the typeface Blink
+# draws with, through Skia's openStream, and digested by the bridge, which
+# keeps the digest by the typeface's unique identifier, so each file is read
+# once in a renderer. Both the glyph reader and the font face hook use it.
+BLINK_RECORDER_FONT_FILE_READER = """\
+
+// The font file of a typeface (protocol 0.40): the digest of the bytes Skia's
+// openStream gives, and the index of the typeface in a font collection. The
+// bridge records the bytes the first time the renderer meets the digest.
+// Returns false when Skia gives no readable file for the typeface.
+bool RecorderFontFile(const SkTypeface& recorder_typeface,
+                      std::string* recorder_digest,
+                      int* recorder_index) {
+  if (!a11y_recorder::LookUpFontFile(recorder_typeface.uniqueID(),
+                                     recorder_digest, recorder_index)) {
+    *recorder_index = 0;
+    std::unique_ptr<SkStreamAsset> recorder_stream =
+        recorder_typeface.openStream(recorder_index);
+    std::string recorder_bytes;
+    bool recorder_readable = false;
+    if (recorder_stream) {
+      recorder_bytes.resize(recorder_stream->getLength());
+      recorder_readable =
+          recorder_stream->read(recorder_bytes.data(), recorder_bytes.size()) ==
+          recorder_bytes.size();
+    }
+    if (!recorder_readable) {
+      recorder_bytes.clear();
+    }
+    *recorder_digest = a11y_recorder::RecordFontFile(
+        recorder_typeface.uniqueID(), *recorder_index, recorder_readable,
+        std::move(recorder_bytes));
+  }
+  return !recorder_digest->empty();
+}
+"""
+
+# Page resources (protocol 0.40): font faces and images. See
+# docs/architecture/page-recreation.md, "Slice 4a". A FontFace records when it
+# joins and leaves its document's set of faces, which FontFaceCache keeps, and
+# when it loads, with its descriptors and the font file of its source. An
+# image resource records its encoded bytes before Blink clears them.
+BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_ANCHOR = """\
+  size_t DataSize() const { return data_size_; }
+"""
+BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR = """\
+
+  // Windows A11y Recorder (protocol 0.40): the typeface the font file was
+  // decoded to, from which the recorder reads the file Blink draws with.
+  const SkTypeface* RecorderBaseTypeface() const {
+    return base_typeface_.get();
+  }
+"""
+BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_MARKER = "RecorderBaseTypeface()"
+
+BLINK_FONT_FACE_PUBLIC_ANCHOR = """\
+  CSSFontFace* CssFontFace() { return css_font_face_.Get(); }
+"""
+BLINK_FONT_FACE_PUBLIC = """\
+  // Windows A11y Recorder (protocol 0.40): records that this face joined or
+  // left its document's set of faces.
+  void RecorderNoteAdded();
+  void RecorderNoteRemoved();
+"""
+BLINK_FONT_FACE_PRIVATE_ANCHOR = """\
+  Member<CSSFontFace> css_font_face_;
+"""
+BLINK_FONT_FACE_PRIVATE = """\
+  // Windows A11y Recorder (protocol 0.40): the face's number in the
+  // renderer's records, assigned when it is first recorded, and the record of
+  // its loading.
+  uint64_t recorder_face_number_ = 0;
+  void RecorderNoteLoaded();
+"""
+BLINK_FONT_FACE_MARKER = "void RecorderNoteAdded();"
+
+BLINK_FONT_FACE_INCLUDES = (
+    "#include <memory>",
+    "#include <string>",
+    '#include "base/strings/string_util.h"',
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/css/css_font_face_source.h"',
+    '#include "third_party/blink/renderer/platform/fonts/font_custom_platform_data.h"',
+    '#include "third_party/skia/include/core/SkStream.h"',
+    '#include "third_party/skia/include/core/SkTypeface.h"',
+)
+BLINK_FONT_FACE_DEFINITIONS_ANCHOR = """\
+void FontFace::SetLoadStatus(LoadStatusType status) {
+"""
+BLINK_FONT_FACE_DEFINITIONS_MARKER = "void FontFace::RecorderNoteAdded() {"
+BLINK_FONT_FACE_DEFINITIONS = (
+    """\
+namespace {
+"""
+    + BLINK_RECORDER_FONT_FILE_READER
+    + """\
+
+// The document of a face's execution context, when that is a window. A face
+// of a worker has none, and is not recorded.
+Document* RecorderFontFaceDocument(ExecutionContext* recorder_context) {
+  auto* recorder_window = DynamicTo<LocalDOMWindow>(recorder_context);
+  return recorder_window ? recorder_window->document() : nullptr;
+}
+
+}  // namespace
+
+void FontFace::RecorderNoteAdded() {
+  if (!a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  Document* recorder_document = RecorderFontFaceDocument(GetExecutionContext());
+  if (!recorder_document) {
+    return;
+  }
+  if (!recorder_face_number_) {
+    recorder_face_number_ = a11y_recorder::AssignFontFaceNumber();
+  }
+  a11y_recorder::RecordBlinkFontFaceAdded(
+      recorder_document->GetDomNodeId(), recorder_document->Token().ToString(),
+      recorder_face_number_);
+}
+
+void FontFace::RecorderNoteRemoved() {
+  if (!recorder_face_number_ || !a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  Document* recorder_document = RecorderFontFaceDocument(GetExecutionContext());
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkFontFaceRemoved(
+      recorder_document->GetDomNodeId(), recorder_document->Token().ToString(),
+      recorder_face_number_);
+}
+
+// A loaded face's family and descriptors as its getters serialize them, the
+// source it loaded from, and the font file of that source when Blink holds
+// one, which a local() source does not.
+void FontFace::RecorderNoteLoaded() {
+  if (!a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  Document* recorder_document = RecorderFontFaceDocument(GetExecutionContext());
+  if (!recorder_document) {
+    return;
+  }
+  if (!recorder_face_number_) {
+    recorder_face_number_ = a11y_recorder::AssignFontFaceNumber();
+  }
+  a11y_recorder::FontFaceFacts recorder_face;
+  recorder_face.family = family().Utf8();
+  recorder_face.style = style().Utf8();
+  recorder_face.weight = weight().Utf8();
+  recorder_face.stretch = stretch().Utf8();
+  recorder_face.unicode_range = unicodeRange().Utf8();
+  recorder_face.variant = variant().Utf8();
+  recorder_face.feature_settings = featureSettings().Utf8();
+  recorder_face.display = display().Utf8();
+  recorder_face.ascent_override = ascentOverride().Utf8();
+  recorder_face.descent_override = descentOverride().Utf8();
+  recorder_face.line_gap_override = lineGapOverride().Utf8();
+  recorder_face.size_adjust = sizeAdjust().Utf8();
+  const CSSFontFaceSource* recorder_source =
+      css_font_face_ ? css_font_face_->FrontSource() : nullptr;
+  if (recorder_source) {
+    const String recorder_url = recorder_source->GetURL();
+    const FontCustomPlatformData* recorder_data =
+        recorder_source->GetCustomPlaftormData();
+    if (!recorder_url.IsNull()) {
+      std::string recorder_url_text = recorder_url.Utf8();
+      if (base::StartsWith(recorder_url_text, "data:",
+                           base::CompareCase::INSENSITIVE_ASCII)) {
+        // A data URL's file is the font file the face records.
+        recorder_face.source_kind = "data-url";
+      } else {
+        recorder_face.source_kind = "url";
+        recorder_face.source_url = std::move(recorder_url_text);
+      }
+    } else if (recorder_data) {
+      recorder_face.source_kind = "binary";
+    } else {
+      recorder_face.source_kind = "local";
+    }
+    if (recorder_data && recorder_data->RecorderBaseTypeface()) {
+      std::string recorder_digest;
+      int recorder_index = 0;
+      if (RecorderFontFile(*recorder_data->RecorderBaseTypeface(),
+                           &recorder_digest, &recorder_index)) {
+        recorder_face.font_file_digest = std::move(recorder_digest);
+        recorder_face.font_file_index = recorder_index;
+      }
+    }
+  }
+  a11y_recorder::RecordBlinkFontFaceLoaded(
+      recorder_document->GetDomNodeId(), recorder_document->Token().ToString(),
+      recorder_face_number_, std::move(recorder_face));
+}
+
+"""
+)
+BLINK_FONT_FACE_LOADED_ANCHOR = """\
+  if (!GetExecutionContext()) {
+    return;
+  }
+
+  if (status_ == kLoaded || status_ == kError) {
+"""
+BLINK_FONT_FACE_LOADED_HOOK = """\
+  if (!GetExecutionContext()) {
+    return;
+  }
+
+  // Windows A11y Recorder (protocol 0.40).
+  if (status_ == kLoaded) {
+    RecorderNoteLoaded();
+  }
+
+  if (status_ == kLoaded || status_ == kError) {
+"""
+
+BLINK_FONT_FACE_CACHE_ADD_ANCHOR = """\
+  segmented_faces_.AddFontFace(font_face, css_connected);
+"""
+BLINK_FONT_FACE_CACHE_ADD_HOOK = """\
+  segmented_faces_.AddFontFace(font_face, css_connected);
+  // Windows A11y Recorder (protocol 0.40).
+  font_face->RecorderNoteAdded();
+"""
+BLINK_FONT_FACE_CACHE_REMOVE_ANCHOR = """\
+  if (!segmented_faces_.RemoveFontFace(font_face)) {
+    return false;
+  }
+"""
+BLINK_FONT_FACE_CACHE_REMOVE_HOOK = """\
+  if (!segmented_faces_.RemoveFontFace(font_face)) {
+    return false;
+  }
+  // Windows A11y Recorder (protocol 0.40).
+  font_face->RecorderNoteRemoved();
+"""
+BLINK_FONT_FACE_CACHE_CLEAR_ANCHOR = """\
+  segmented_faces_.Clear();
+  font_selection_query_cache_.Clear();
+"""
+BLINK_FONT_FACE_CACHE_CLEAR_HOOK = """\
+  // Windows A11y Recorder (protocol 0.40): the faces of style sheets leave
+  // the set. A face added by script leaves it too, unrecorded, since the
+  // cache keeps no list of those faces apart from the families.
+  for (FontFace* recorder_face : css_connected_font_faces_) {
+    recorder_face->RecorderNoteRemoved();
+  }
+  segmented_faces_.Clear();
+  font_selection_query_cache_.Clear();
+"""
+
+BLINK_IMAGE_RESOURCE_ANCHOR = """\
+  } else {
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+"""
+BLINK_IMAGE_RESOURCE_HOOK_0_40 = """\
+  } else {
+    // Windows A11y Recorder (protocol 0.40): the encoded bytes, before they
+    // are cleared, with the URL requested and the response. A data URL's
+    // bytes are its URL, which the DOM already holds.
+    if (Data() && a11y_recorder::IsRecorderActive() &&
+        !Url().ProtocolIsData()) {
+      a11y_recorder::ImageResourceFacts recorder_image;
+      recorder_image.url = Url().GetString().Utf8();
+      recorder_image.response_url =
+          GetResponse().ResponseUrl().GetString().Utf8();
+      recorder_image.status = GetResponse().HttpStatusCode();
+      recorder_image.mime_type = GetResponse().MimeType().Utf8();
+      recorder_image.bytes.reserve(Data()->size());
+      for (const base::span<const char>& recorder_segment : *Data()) {
+        recorder_image.bytes.append(recorder_segment.begin(),
+                                    recorder_segment.end());
+      }
+      a11y_recorder::RecordBlinkImageResource(std::move(recorder_image));
+    }
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+"""
+# Protocol 0.48 part 1c: the record is made once the bytes were given to the
+# image, with the image's own ID, and the copy of the bytes is timed.
+BLINK_IMAGE_RESOURCE_HOOK_1C = """\
+  } else {
+    // Windows A11y Recorder (protocol 0.40): the encoded bytes, before they
+    // are cleared, with the URL requested and the response. A data URL's
+    // bytes are its URL, which the DOM already holds. Protocol 0.48: with
+    // the ID of the Blink image they were given to.
+    std::optional<a11y_recorder::ImageResourceFacts> recorder_image;
+    if (Data() && a11y_recorder::IsRecorderActive() &&
+        !Url().ProtocolIsData()) {
+      A11Y_RECORDER_HOOK_COST("hook:image-resource");
+      recorder_image.emplace();
+      recorder_image->url = Url().GetString().Utf8();
+      recorder_image->response_url =
+          GetResponse().ResponseUrl().GetString().Utf8();
+      recorder_image->status = GetResponse().HttpStatusCode();
+      recorder_image->mime_type = GetResponse().MimeType().Utf8();
+      recorder_image->bytes.reserve(Data()->size());
+      for (const base::span<const char>& recorder_segment : *Data()) {
+        recorder_image->bytes.append(recorder_segment.begin(),
+                                     recorder_segment.end());
+      }
+    }
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+    if (recorder_image) {
+      if (GetContent()->HasImage()) {
+        recorder_image->image_id = GetContent()->GetImage()->paint_image_id();
+      }
+      a11y_recorder::RecordBlinkImageResource(std::move(*recorder_image));
+    }
+"""
+BLINK_IMAGE_RESOURCE_HOOK = """\
+  } else {
+    // Windows A11y Recorder (protocol 0.40): the encoded bytes, before they
+    // are cleared, with the URL requested and the response. A data URL's
+    // bytes are its URL, which the DOM already holds. Protocol 0.48: with
+    // the ID of the Blink image they were given to.
+    std::optional<a11y_recorder::ImageResourceFacts> recorder_image;
+    if (Data() && a11y_recorder::IsRecorderActive() &&
+        !Url().ProtocolIsData()) {
+      A11Y_RECORDER_HOOK_COST("hook:image-resource");
+      recorder_image.emplace();
+      recorder_image->url = Url().GetString().Utf8();
+      recorder_image->response_url =
+          GetResponse().ResponseUrl().GetString().Utf8();
+      recorder_image->status = GetResponse().HttpStatusCode();
+      recorder_image->mime_type = GetResponse().MimeType().Utf8();
+      recorder_image->bytes.reserve(Data()->size());
+      for (const base::span<const char>& recorder_segment : *Data()) {
+        recorder_image->bytes.append(recorder_segment.begin(),
+                                     recorder_segment.end());
+      }
+    }
+    UpdateImage(Data(), ImageResourceContent::kUpdateImage, true);
+    if (recorder_image) {
+      if (GetContent()->HasImage()) {
+        recorder_image->image_id = GetContent()->GetImage()->paint_image_id();
+      }
+      a11y_recorder::RecordBlinkImageResource(std::move(*recorder_image));
+    }
+    // Windows A11y Recorder recreation mode ("Sub-step 2a design: animated
+    // images held"): the frame the recorder's answer names for the image,
+    // held by the paint image ID its shared sequence uses.
+    if (a11y_recorder::IsRecreationMode() && GetContent()->HasImage()) {
+      a11y_recorder::HoldRecreationImageFrame(
+          GetContent()->GetImage()->paint_image_id(),
+          GetResponse()
+              .HttpHeaderField(AtomicString("X-A11y-Recorder-Image-Frame"))
+              .Utf8());
+    }
+"""
+
+
+def patch_blink_font_custom_platform_data_header(path: Path) -> None:
+    """Gives the recorder the typeface a web font was decoded to."""
+    text = read_source(path)
+    if BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_MARKER not in text:
+        text = replace_once(
+            text,
+            BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_ANCHOR,
+            BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR_ANCHOR
+            + BLINK_FONT_CUSTOM_PLATFORM_DATA_ACCESSOR,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_blink_font_face_header(path: Path) -> None:
+    """Declares the FontFace members that record a face."""
+    text = read_source(path)
+    if BLINK_FONT_FACE_MARKER not in text:
+        text = replace_once(
+            text,
+            BLINK_FONT_FACE_PUBLIC_ANCHOR,
+            BLINK_FONT_FACE_PUBLIC_ANCHOR + BLINK_FONT_FACE_PUBLIC,
+            path,
+        )
+        text = replace_once(
+            text,
+            BLINK_FONT_FACE_PRIVATE_ANCHOR,
+            BLINK_FONT_FACE_PRIVATE_ANCHOR + BLINK_FONT_FACE_PRIVATE,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_blink_font_face(path: Path) -> None:
+    """Defines the FontFace recording members and the loaded hook."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/css/font_face.h"',
+        BLINK_FONT_FACE_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_FONT_FACE_DEFINITIONS_ANCHOR,
+        BLINK_FONT_FACE_DEFINITIONS,
+        BLINK_FONT_FACE_DEFINITIONS_MARKER,
+        path,
+    )
+    if BLINK_FONT_FACE_LOADED_HOOK not in text:
+        text = replace_once(
+            text, BLINK_FONT_FACE_LOADED_ANCHOR, BLINK_FONT_FACE_LOADED_HOOK, path
+        )
+    write_patched(path, text)
+
+
+def patch_blink_font_face_cache(path: Path) -> None:
+    """Records faces joining and leaving a document's set of faces."""
+    text = read_source(path)
+    for anchor, hook in (
+        (BLINK_FONT_FACE_CACHE_ADD_ANCHOR, BLINK_FONT_FACE_CACHE_ADD_HOOK),
+        (BLINK_FONT_FACE_CACHE_REMOVE_ANCHOR, BLINK_FONT_FACE_CACHE_REMOVE_HOOK),
+        (BLINK_FONT_FACE_CACHE_CLEAR_ANCHOR, BLINK_FONT_FACE_CACHE_CLEAR_HOOK),
+    ):
+        if hook not in text:
+            text = replace_once(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+def patch_blink_image_resource(path: Path) -> None:
+    """Records an image resource's encoded bytes before Blink clears them."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "third_party/blink/renderer/core/loader/resource/image_resource.h"',
+        (BLINK_BRIDGE_INCLUDE,),
+        path,
+    )
+    # A tree patched for protocol 0.40, or for part 1c, holds an earlier hook;
+    # it is replaced in place. The 1c hook begins the current one, so a tree
+    # that holds the current hook is left alone.
+    for legacy_hook in (BLINK_IMAGE_RESOURCE_HOOK_0_40, BLINK_IMAGE_RESOURCE_HOOK_1C):
+        if BLINK_IMAGE_RESOURCE_HOOK not in text:
+            text = upgrade_legacy_hooks(
+                text, ((legacy_hook, BLINK_IMAGE_RESOURCE_HOOK),), path
+            )
+    if BLINK_IMAGE_RESOURCE_HOOK not in text:
+        text = replace_once(
+            text, BLINK_IMAGE_RESOURCE_ANCHOR, BLINK_IMAGE_RESOURCE_HOOK, path
+        )
+    write_patched(path, text)
+
+
+BLINK_BITMAP_IMAGE_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/platform/graphics/bitmap_image.h"'
+)
+BLINK_BITMAP_IMAGE_PAINT_IMAGE_ANCHOR = """\
+  PaintImage new_frame =
+      CreatePaintImage(paint_id, sync_animation_target_id, sync_sequence,
+                       reset_animation_sequence_id, expected_repetition_count);
+"""
+BLINK_BITMAP_IMAGE_PAINT_IMAGE_HOOK = BLINK_BITMAP_IMAGE_PAINT_IMAGE_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the paint image made, with the
+  // image it was made from, its animation sequence, the element it was made
+  // for, and the paint image it is synchronised to.
+  if (new_frame && a11y_recorder::GetProcessRecorderClient()) {
+    A11Y_RECORDER_HOOK_COST("hook:image-paint-image");
+    a11y_recorder::ImagePaintImageFacts recorder_facts;
+    recorder_facts.image_id = paint_image_id();
+    recorder_facts.paint_image_id = paint_id;
+    recorder_facts.own_sequence =
+        sync_sequence == PaintImage::AnimationSyncSequence::kOwn;
+    if (id != kNormalCachedFrameId) {
+      recorder_facts.node_id = static_cast<int>(id);
+    }
+    if (sync_animation_target_id != PaintImage::kInvalidId) {
+      recorder_facts.sync_target_paint_image_id = sync_animation_target_id;
+    }
+    a11y_recorder::RecordBlinkImagePaintImage(std::move(recorder_facts));
+  }
+"""
+
+
+def patch_blink_bitmap_image(path: Path) -> None:
+    """Protocol 0.48 part 1c: records each paint image Blink makes from an
+    image, so that an animated image's drawn frame names its image."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_BITMAP_IMAGE_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_BITMAP_IMAGE_PAINT_IMAGE_ANCHOR,
+        BLINK_BITMAP_IMAGE_PAINT_IMAGE_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_fragment_item_header(path: Path) -> None:
+    """Adds the recreation mode's setters to FragmentItem."""
+    text = read_source(path)
+    if BLINK_RECREATION_ITEM_SETTERS_MARKER not in text:
+        text = replace_once(
+            text,
+            BLINK_RECREATION_ITEM_SETTERS_ANCHOR,
+            BLINK_RECREATION_ITEM_SETTERS_ANCHOR + BLINK_RECREATION_ITEM_SETTERS,
+            path,
+        )
+    write_patched(path, text)
+
+
+def patch_blink_shape_result_header(path: Path) -> None:
+    """Declares the recreation mode's shaping result from recorded glyphs."""
+    text = read_source(path)
+    text = upgrade_legacy_hooks(
+        text,
+        ((LEGACY_FEASIBILITY_SHAPE_DECLARATION, BLINK_RECREATION_SHAPE_DECLARATION),),
+        path,
+    )
+    require_no_feasibility_text(text, ("UChar32 code_point;",), path)
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_SHAPE_DECLARATION_ANCHOR,
+        BLINK_RECREATION_SHAPE_DECLARATION,
+        BLINK_RECREATION_SHAPE_DECLARATION_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_shape_result(path: Path) -> None:
+    """Defines the recreation mode's shaping result from recorded glyphs."""
+    text = read_source(path)
+    text = upgrade_legacy_hooks(
+        text,
+        ((LEGACY_FEASIBILITY_SHAPE_DEFINITION, BLINK_RECREATION_SHAPE_DEFINITION),),
+        path,
+    )
+    require_no_feasibility_text(text, ("GlyphForCharacter(glyphs[i].code_point)",), path)
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_SHAPE_DEFINITION_ANCHOR,
+        BLINK_RECREATION_SHAPE_DEFINITION,
+        BLINK_RECREATION_SHAPE_DEFINITION_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_fragment_items_builder(path: Path) -> None:
+    """Imposes the recreation mode's recorded fragment items and glyphs."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_FRAGMENT_ITEMS_BUILDER_INCLUDE,
+        BLINK_RECREATION_ITEMS_INCLUDES,
+        path,
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                PRE_FONT_FILE_BLINK_RECREATION_ITEMS_HELPER,
+                BLINK_RECREATION_ITEMS_HELPER,
+            ),
+            (LEGACY_FEASIBILITY_ITEMS_HELPER, BLINK_RECREATION_ITEMS_HELPER),
+            (INTERMEDIATE_BLINK_RECREATION_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK),
+            (LEGACY_FEASIBILITY_ITEMS_HOOK, BLINK_RECREATION_ITEMS_HOOK),
+        ),
+        path,
+    )
+    require_no_feasibility_text(
+        text,
+        ('"data-a11y-recorded-lines"', "RecorderRecordedEntries("),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_ITEMS_HELPER_ANCHOR,
+        BLINK_RECREATION_ITEMS_HELPER,
+        BLINK_RECREATION_ITEMS_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_RECREATION_ITEMS_ANCHOR,
+        BLINK_RECREATION_ITEMS_HOOK,
+        BLINK_RECREATION_ITEMS_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
 def patch_blink_cookie_jar(path: Path) -> None:
     text = read_source(path)
     text = add_includes_after(
@@ -7236,6 +9994,860 @@ def patch_blink_element_active_descendant(path: Path) -> None:
     )
 
 
+# Page popups and option selectedness (protocol 0.43). A select drawn as a
+# menu list opens its list in a page popup with its own page, document, and
+# widget. The popup's opening, owner, window rectangles, and closing are
+# recorded from WebPagePopupImpl, and its rendering updates request their
+# presentation from the popup's widget. Every change of an option's
+# selectedness, which sets no attribute, is recorded from
+# HTMLOptionElement::SetSelectedState. See docs/architecture/page-recreation.md,
+# "Slice 4d".
+BLINK_PAGE_POPUP_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/exported/web_page_popup_impl.h"'
+)
+BLINK_PAGE_POPUP_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    "#include <string>",
+    '#include "third_party/blink/renderer/core/html/forms/html_input_element.h"',
+    '#include "third_party/blink/renderer/core/html/forms/'
+    'html_select_element.h"',
+)
+BLINK_PAGE_POPUP_HELPER_ANCHOR = (
+    "class PagePopupChromeClient final : public EmptyChromeClient {\n"
+)
+BLINK_PAGE_POPUP_HELPER_MARKER = "Document* RecorderPagePopupDocument("
+BLINK_PAGE_POPUP_HELPER = """\
+namespace {
+
+// The document of a page popup's page, or null once the page is destroyed.
+Document* RecorderPagePopupDocument(Page* recorder_page) {
+  if (!recorder_page) {
+    return nullptr;
+  }
+  auto* recorder_frame = DynamicTo<LocalFrame>(recorder_page->MainFrame());
+  return recorder_frame ? recorder_frame->GetDocument() : nullptr;
+}
+
+a11y_recorder::PagePopupRect RecorderPagePopupRect(const gfx::Rect& rect) {
+  a11y_recorder::PagePopupRect recorder_rect;
+  recorder_rect.x = rect.x();
+  recorder_rect.y = rect.y();
+  recorder_rect.width = rect.width();
+  recorder_rect.height = rect.height();
+  return recorder_rect;
+}
+
+// The kind of popup, from the element that opened it.
+const char* RecorderPagePopupKind(Element& recorder_owner) {
+  if (IsA<HTMLSelectElement>(recorder_owner)) {
+    return "select-list";
+  }
+  if (auto* recorder_input = DynamicTo<HTMLInputElement>(recorder_owner)) {
+    // HTMLInputElement overrides the type name privately, so it is read
+    // through the text control base, as the text control records read it.
+    const String recorder_type =
+        static_cast<const TextControlElement&>(*recorder_input)
+            .FormControlTypeAsString();
+    if (recorder_type == "color") {
+      return "color";
+    }
+    if (recorder_type == "date" || recorder_type == "datetime-local" ||
+        recorder_type == "month" || recorder_type == "time" ||
+        recorder_type == "week") {
+      return "date-time";
+    }
+  }
+  return "other";
+}
+
+void RecorderRecordPagePopupOpened(Page* recorder_page,
+                                   Element& recorder_owner,
+                                   const gfx::Rect& recorder_owner_window,
+                                   const gfx::Rect& recorder_anchor,
+                                   const gfx::Rect& recorder_initial_rect,
+                                   float recorder_zoom_factor) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  Document& recorder_owner_document = recorder_owner.GetDocument();
+  LocalFrame* recorder_owner_frame = recorder_owner_document.GetFrame();
+  if (!recorder_owner_frame) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupOpened(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(),
+      RecorderPagePopupKind(recorder_owner),
+      static_cast<int>(recorder_owner_document.GetDomNodeId()),
+      recorder_owner_document.Token().ToString(),
+      recorder_owner_frame->GetLocalFrameToken().ToString(),
+      static_cast<int>(recorder_owner.GetDomNodeId()),
+      RecorderPagePopupRect(recorder_owner.VisibleBoundsInLocalRoot()),
+      RecorderPagePopupRect(recorder_owner_window),
+      RecorderPagePopupRect(recorder_anchor),
+      RecorderPagePopupRect(recorder_initial_rect), recorder_zoom_factor);
+}
+
+void RecorderRecordPagePopupWindowRect(Page* recorder_page,
+                                       bool recorder_deferred,
+                                       const gfx::Rect& recorder_window_rect) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupWindowRect(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(), recorder_deferred,
+      RecorderPagePopupRect(recorder_window_rect));
+}
+
+void RecorderRecordPagePopupClosed(Page* recorder_page,
+                                   const char* recorder_closed_by) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupClosed(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(), recorder_closed_by);
+}
+
+}  // namespace
+
+"""
+BLINK_PAGE_POPUP_CLIENT_ANCHOR = """\
+  bool IsPopup() override { return true; }
+"""
+BLINK_PAGE_POPUP_CLIENT_HOOK = """\
+  bool IsPopup() override { return true; }
+
+  // Recorder evidence: requests a rendering update's presentation from this
+  // popup's widget. A popup that is closing, or whose widget is gone, is
+  // recorded as having no widget.
+  void RecorderRequestPresentation(LocalFrame& recorder_frame,
+                                   uint64_t recorder_checkpoint_sequence,
+                                   int recorder_document_node_id,
+                                   const std::string& recorder_document_token) {
+    WebPagePopupImpl* recorder_popup = popup_;
+    const bool recorder_has_widget = recorder_popup &&
+                                     !recorder_popup->closing_ &&
+                                     recorder_popup->widget_base_;
+    RecorderRequestWidgetPresentation(
+        recorder_has_widget ? recorder_popup->widget_base_.get() : nullptr,
+        recorder_has_widget, true, 0, 0,
+        recorder_has_widget
+            ? recorder_frame.LocalFrameRoot().GetLocalFrameToken().ToString()
+            : std::string(),
+        true, false, recorder_checkpoint_sequence, recorder_document_node_id,
+        recorder_document_token);
+  }
+"""
+BLINK_PAGE_POPUP_REQUEST_ANCHOR = "void WebPagePopupImpl::DidShowPopup() {\n"
+BLINK_PAGE_POPUP_REQUEST_MARKER = "bool RecorderRequestPagePopupPresentation("
+BLINK_PAGE_POPUP_REQUEST = """\
+bool RecorderRequestPagePopupPresentation(
+    LocalFrame& recorder_frame,
+    uint64_t recorder_checkpoint_sequence,
+    int recorder_document_node_id,
+    const std::string& recorder_document_token) {
+  Page* recorder_page = recorder_frame.GetPage();
+  // PagePopupChromeClient is the only chrome client in core that is a popup.
+  if (!recorder_page || !recorder_page->GetChromeClient().IsPopup()) {
+    return false;
+  }
+  static_cast<PagePopupChromeClient&>(recorder_page->GetChromeClient())
+      .RecorderRequestPresentation(recorder_frame,
+                                   recorder_checkpoint_sequence,
+                                   recorder_document_node_id,
+                                   recorder_document_token);
+  return true;
+}
+
+"""
+BLINK_PAGE_POPUP_OPENED_ANCHOR = """\
+  popup_owner_client_rect_ =
+      popup_client_->OwnerElement().GetBoundingClientRect();
+"""
+BLINK_PAGE_POPUP_OPENED_HOOK = """\
+  popup_owner_client_rect_ =
+      popup_client_->OwnerElement().GetBoundingClientRect();
+  RecorderRecordPagePopupOpened(page_.Get(), popup_client_->OwnerElement(),
+                                OwnerWindowRectInScreen(),
+                                GetAnchorRectInScreen(), initial_rect_,
+                                popup_client_->ZoomFactor());
+"""
+BLINK_PAGE_POPUP_WINDOW_RECT_ANCHOR = """\
+  if (!should_defer_setting_window_rect_) {
+"""
+BLINK_PAGE_POPUP_WINDOW_RECT_HOOK = """\
+  RecorderRecordPagePopupWindowRect(page_.Get(),
+                                    should_defer_setting_window_rect_,
+                                    window_rect);
+  if (!should_defer_setting_window_rect_) {
+"""
+BLINK_PAGE_POPUP_CLOSE_ANCHOR = """\
+  const bool running_inside_close = closing_;
+"""
+BLINK_PAGE_POPUP_CLOSE_HOOK = """\
+  const bool running_inside_close = closing_;
+  RecorderRecordPagePopupClosed(page_.Get(),
+                                running_inside_close ? "browser" : "renderer");
+"""
+BLINK_PAGE_POPUP_BROWSER_CLOSE_ANCHOR = """\
+        controller->ClearPagePopupClient();
+      }
+      DestroyPage();
+"""
+BLINK_PAGE_POPUP_BROWSER_CLOSE_HOOK = """\
+        controller->ClearPagePopupClient();
+      }
+      RecorderRecordPagePopupClosed(page_.Get(), "browser");
+      DestroyPage();
+"""
+BLINK_PAGE_POPUP_HOOKS = (
+    (BLINK_PAGE_POPUP_CLIENT_ANCHOR, BLINK_PAGE_POPUP_CLIENT_HOOK),
+    (BLINK_PAGE_POPUP_OPENED_ANCHOR, BLINK_PAGE_POPUP_OPENED_HOOK),
+    (BLINK_PAGE_POPUP_WINDOW_RECT_ANCHOR, BLINK_PAGE_POPUP_WINDOW_RECT_HOOK),
+    (BLINK_PAGE_POPUP_CLOSE_ANCHOR, BLINK_PAGE_POPUP_CLOSE_HOOK),
+    (
+        BLINK_PAGE_POPUP_BROWSER_CLOSE_ANCHOR,
+        BLINK_PAGE_POPUP_BROWSER_CLOSE_HOOK,
+    ),
+)
+
+
+# Protocol 0.43 recorded the owner without its frame token, a requested
+# window rectangle with its source, and a "placed" rectangle from
+# WebPagePopupImpl::SetScreenRects, which Chromium does not call on the
+# browser's path; 0.44 records the owner frame's token, drops the source, and
+# removes the placed hook, since the browser's popup widget records hold
+# where the window was put.
+LEGACY_043_PAGE_POPUP_OPENED_FN = """  Document& recorder_owner_document = recorder_owner.GetDocument();
+  a11y_recorder::RecordBlinkPagePopupOpened(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(),
+      RecorderPagePopupKind(recorder_owner),
+      static_cast<int>(recorder_owner_document.GetDomNodeId()),
+      recorder_owner_document.Token().ToString(),
+      static_cast<int>(recorder_owner.GetDomNodeId()),
+"""
+STAGE_044_PAGE_POPUP_OPENED_FN = """  Document& recorder_owner_document = recorder_owner.GetDocument();
+  LocalFrame* recorder_owner_frame = recorder_owner_document.GetFrame();
+  if (!recorder_owner_frame) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupOpened(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(),
+      RecorderPagePopupKind(recorder_owner),
+      static_cast<int>(recorder_owner_document.GetDomNodeId()),
+      recorder_owner_document.Token().ToString(),
+      recorder_owner_frame->GetLocalFrameToken().ToString(),
+      static_cast<int>(recorder_owner.GetDomNodeId()),
+"""
+LEGACY_043_PAGE_POPUP_WINDOW_RECT_FN = """void RecorderRecordPagePopupWindowRect(Page* recorder_page,
+                                       const char* recorder_source,
+                                       bool recorder_deferred,
+                                       const gfx::Rect& recorder_window_rect,
+                                       const gfx::Rect* recorder_widget_rect) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupWindowRect(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(), recorder_source,
+      recorder_deferred, RecorderPagePopupRect(recorder_window_rect),
+      recorder_widget_rect != nullptr,
+      recorder_widget_rect ? RecorderPagePopupRect(*recorder_widget_rect)
+                           : a11y_recorder::PagePopupRect{});
+}
+"""
+STAGE_044_PAGE_POPUP_WINDOW_RECT_FN = """void RecorderRecordPagePopupWindowRect(Page* recorder_page,
+                                       bool recorder_deferred,
+                                       const gfx::Rect& recorder_window_rect) {
+  Document* recorder_document = RecorderPagePopupDocument(recorder_page);
+  if (!recorder_document) {
+    return;
+  }
+  a11y_recorder::RecordBlinkPagePopupWindowRect(
+      static_cast<int>(recorder_document->GetDomNodeId()),
+      recorder_document->Token().ToString(), recorder_deferred,
+      RecorderPagePopupRect(recorder_window_rect));
+}
+"""
+LEGACY_043_PAGE_POPUP_WINDOW_RECT_HOOK = """\
+  RecorderRecordPagePopupWindowRect(page_.Get(), "requested",
+                                    should_defer_setting_window_rect_,
+                                    window_rect, nullptr);
+  if (!should_defer_setting_window_rect_) {
+"""
+LEGACY_043_PAGE_POPUP_SCREEN_RECTS_HOOK = """\
+  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
+  RecorderRecordPagePopupWindowRect(page_.Get(), "placed", false,
+                                    window_screen_rect, &widget_screen_rect);
+"""
+LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL = """\
+  widget_base_->SetScreenRects(widget_screen_rect, window_screen_rect);
+"""
+
+STAGE_2A3939B_PAGE_POPUP_TYPE_READ = (
+    "    const String recorder_type = "
+    "recorder_input->FormControlTypeAsString();\n"
+)
+STAGE_2A3939B_PAGE_POPUP_TYPE_FIX = """    // HTMLInputElement overrides the type name privately, so it is read
+    // through the text control base, as the text control records read it.
+    const String recorder_type =
+        static_cast<const TextControlElement&>(*recorder_input)
+            .FormControlTypeAsString();
+"""
+
+
+def patch_blink_page_popup(path: Path) -> None:
+    """Adds the page popup records and the popup presentation request."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_PAGE_POPUP_OWN_INCLUDE, BLINK_PAGE_POPUP_INCLUDES, path
+    )
+    # The first 0.43 package, 2a3939b, read the type name through
+    # HTMLInputElement, where it is private; that helper line is replaced.
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_2A3939B_PAGE_POPUP_TYPE_READ,
+                STAGE_2A3939B_PAGE_POPUP_TYPE_FIX,
+            ),
+            (LEGACY_043_PAGE_POPUP_OPENED_FN, STAGE_044_PAGE_POPUP_OPENED_FN),
+            (
+                LEGACY_043_PAGE_POPUP_WINDOW_RECT_FN,
+                STAGE_044_PAGE_POPUP_WINDOW_RECT_FN,
+            ),
+            (
+                LEGACY_043_PAGE_POPUP_WINDOW_RECT_HOOK,
+                BLINK_PAGE_POPUP_WINDOW_RECT_HOOK,
+            ),
+            (
+                LEGACY_043_PAGE_POPUP_SCREEN_RECTS_HOOK,
+                LEGACY_043_PAGE_POPUP_SCREEN_RECTS_ORIGINAL,
+            ),
+        ),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PAGE_POPUP_HELPER_ANCHOR,
+        BLINK_PAGE_POPUP_HELPER,
+        BLINK_PAGE_POPUP_HELPER_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PAGE_POPUP_REQUEST_ANCHOR,
+        BLINK_PAGE_POPUP_REQUEST,
+        BLINK_PAGE_POPUP_REQUEST_MARKER,
+        path,
+    )
+    for anchor, hook in BLINK_PAGE_POPUP_HOOKS:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+# Slice 4d sub-step 1b (protocol 0.44): the browser's records of a renderer's
+# popup widget. RenderFrameHostImpl::CreateNewPopupWidget records the widget
+# and its frame sink with the opener frame's token, which the renderer's
+# page-popup-opened record also names. WebContentsImpl::ShowCreatedWidget
+# records the rectangles it receives, transforms and constrains, and whether
+# it showed the popup or why it refused. RenderWidgetHostImpl records each
+# bounds request from the renderer and the screen rectangles sent to a popup
+# widget, with the native window's rectangles in pixels. See
+# docs/architecture/page-recreation.md, "Sub-step 1b".
+CONTENT_POPUP_WIDGET_CREATED_ANCHOR = """\
+  // The renderer-owned widget was created before sending the IPC received here.
+  widget->RendererWidgetCreated(/*for_frame_widget=*/false);
+"""
+CONTENT_POPUP_WIDGET_CREATED_HOOK = """\
+  // The renderer-owned widget was created before sending the IPC received here.
+  widget->RendererWidgetCreated(/*for_frame_widget=*/false);
+  {
+    const base::Process& recorder_process = GetProcess()->GetProcess();
+    a11y_recorder::PopupWidgetSink recorder_sink;
+    recorder_sink.client_id = widget->GetFrameSinkId().client_id();
+    recorder_sink.sink_id = widget->GetFrameSinkId().sink_id();
+    a11y_recorder::RecordBrowserPopupWidgetCreated(
+        GetMainFrame()->GetFrameTreeNodeId().GetUnsafeValue(),
+        GetFrameTreeNodeId().GetUnsafeValue(), GetNavigationId(),
+        GetDocumentToken().ToString(),
+        recorder_process.IsValid() ? static_cast<int>(recorder_process.Pid())
+                                   : 0,
+        GetFrameToken().ToString(), recorder_sink);
+  }
+"""
+
+
+def patch_content_popup_widget_created(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "content/browser/renderer_host/render_frame_host_impl.h"',
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_POPUP_WIDGET_CREATED_ANCHOR,
+        CONTENT_POPUP_WIDGET_CREATED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+CONTENT_POPUP_WIDGET_SHOWN_HELPER_ANCHOR = (
+    "void WebContentsImpl::ShowCreatedWidget(ChildProcessId process_id,\n"
+)
+CONTENT_POPUP_WIDGET_SHOWN_HELPER_MARKER = "void RecorderRecordPopupWidgetShown("
+CONTENT_POPUP_WIDGET_SHOWN_HELPER = """\
+namespace {
+
+a11y_recorder::PagePopupRect RecorderPopupWidgetShownRect(
+    const gfx::Rect& rect) {
+  a11y_recorder::PagePopupRect recorder_rect;
+  recorder_rect.x = rect.x();
+  recorder_rect.y = rect.y();
+  recorder_rect.width = rect.width();
+  recorder_rect.height = rect.height();
+  return recorder_rect;
+}
+
+// Records ShowCreatedWidget's handling of a popup widget. A rectangle not yet
+// computed when the popup is refused is passed as null; the view's bounds are
+// passed only when the popup is shown.
+void RecorderRecordPopupWidgetShown(RenderWidgetHostImpl* recorder_host,
+                                    const char* recorder_outcome,
+                                    const gfx::Rect& recorder_received,
+                                    const gfx::Rect& recorder_received_anchor,
+                                    const gfx::Rect* recorder_transformed,
+                                    const gfx::Rect* recorder_transformed_anchor,
+                                    const gfx::Rect* recorder_constrained,
+                                    const gfx::Rect* recorder_view_bounds) {
+  if (!recorder_host) {
+    return;
+  }
+  a11y_recorder::PopupWidgetShown recorder_shown;
+  recorder_shown.sink.client_id = recorder_host->GetFrameSinkId().client_id();
+  recorder_shown.sink.sink_id = recorder_host->GetFrameSinkId().sink_id();
+  recorder_shown.outcome = recorder_outcome;
+  recorder_shown.received_rect = RecorderPopupWidgetShownRect(recorder_received);
+  recorder_shown.received_anchor_rect =
+      RecorderPopupWidgetShownRect(recorder_received_anchor);
+  if (recorder_transformed && recorder_transformed_anchor) {
+    recorder_shown.has_transformed = true;
+    recorder_shown.transformed_rect =
+        RecorderPopupWidgetShownRect(*recorder_transformed);
+    recorder_shown.transformed_anchor_rect =
+        RecorderPopupWidgetShownRect(*recorder_transformed_anchor);
+  }
+  if (recorder_constrained) {
+    recorder_shown.has_constrained = true;
+    recorder_shown.constrained_rect =
+        RecorderPopupWidgetShownRect(*recorder_constrained);
+  }
+  if (recorder_view_bounds) {
+    recorder_shown.has_view_bounds = true;
+    recorder_shown.view_bounds =
+        RecorderPopupWidgetShownRect(*recorder_view_bounds);
+  }
+  a11y_recorder::RecordBrowserPopupWidgetShown(std::move(recorder_shown));
+}
+
+}  // namespace
+
+"""
+CONTENT_POPUP_WIDGET_INACTIVE_ANCHOR = """\
+    // it: https://issues.chromium.org/issues/365089001
+    widget_host_view->host()->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_INACTIVE_HOOK = """\
+    // it: https://issues.chromium.org/issues/365089001
+    RecorderRecordPopupWidgetShown(widget_host_view->host(),
+                                   "window-not-active", initial_rect,
+                                   initial_anchor_rect, nullptr, nullptr,
+                                   nullptr, nullptr);
+    widget_host_view->host()->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_CONSTRAIN_ANCHOR = """\
+  transformed_rect = ConstrainPopupBounds(transformed_rect);
+"""
+CONTENT_POPUP_WIDGET_CONSTRAIN_HOOK = """\
+  const gfx::Rect recorder_transformed_rect = transformed_rect;
+  transformed_rect = ConstrainPopupBounds(transformed_rect);
+"""
+CONTENT_POPUP_WIDGET_NOT_VISIBLE_ANCHOR = """\
+  if (GetVisibility() != Visibility::VISIBLE) {
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_NOT_VISIBLE_HOOK = """\
+  if (GetVisibility() != Visibility::VISIBLE) {
+    RecorderRecordPopupWidgetShown(render_widget_host_impl, "not-visible",
+                                   initial_rect, initial_anchor_rect,
+                                   &recorder_transformed_rect,
+                                   &transformed_anchor_rect, &transformed_rect,
+                                   nullptr);
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_EXCLUSION_ANCHOR = """\
+      permission_exclusion_area_bounds->Intersects(transformed_rect)) {
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_EXCLUSION_HOOK = """\
+      permission_exclusion_area_bounds->Intersects(transformed_rect)) {
+    RecorderRecordPopupWidgetShown(render_widget_host_impl,
+                                   "permission-exclusion", initial_rect,
+                                   initial_anchor_rect,
+                                   &recorder_transformed_rect,
+                                   &transformed_anchor_rect, &transformed_rect,
+                                   nullptr);
+    render_widget_host_impl->ShutdownAndDestroyWidget(true);
+"""
+CONTENT_POPUP_WIDGET_INIT_ANCHOR = """\
+  widget_host_view->InitAsPopup(view, transformed_rect,
+                                transformed_anchor_rect);
+"""
+CONTENT_POPUP_WIDGET_INIT_HOOK = """\
+  widget_host_view->InitAsPopup(view, transformed_rect,
+                                transformed_anchor_rect);
+  {
+    const gfx::Rect recorder_view_bounds = widget_host_view->GetViewBounds();
+    RecorderRecordPopupWidgetShown(render_widget_host_impl, "shown",
+                                   initial_rect, initial_anchor_rect,
+                                   &recorder_transformed_rect,
+                                   &transformed_anchor_rect, &transformed_rect,
+                                   &recorder_view_bounds);
+  }
+"""
+CONTENT_POPUP_WIDGET_SHOWN_HOOKS = (
+    (CONTENT_POPUP_WIDGET_INACTIVE_ANCHOR, CONTENT_POPUP_WIDGET_INACTIVE_HOOK),
+    (CONTENT_POPUP_WIDGET_CONSTRAIN_ANCHOR, CONTENT_POPUP_WIDGET_CONSTRAIN_HOOK),
+    (
+        CONTENT_POPUP_WIDGET_NOT_VISIBLE_ANCHOR,
+        CONTENT_POPUP_WIDGET_NOT_VISIBLE_HOOK,
+    ),
+    (CONTENT_POPUP_WIDGET_EXCLUSION_ANCHOR, CONTENT_POPUP_WIDGET_EXCLUSION_HOOK),
+    (CONTENT_POPUP_WIDGET_INIT_ANCHOR, CONTENT_POPUP_WIDGET_INIT_HOOK),
+)
+
+
+def patch_content_popup_widget_shown(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        '#include "content/browser/web_contents/web_contents_impl.h"',
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_POPUP_WIDGET_SHOWN_HELPER_ANCHOR,
+        CONTENT_POPUP_WIDGET_SHOWN_HELPER,
+        CONTENT_POPUP_WIDGET_SHOWN_HELPER_MARKER,
+        path,
+    )
+    for anchor, hook in CONTENT_POPUP_WIDGET_SHOWN_HOOKS:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+CONTENT_WIDGET_HOST_OWN_INCLUDE = (
+    '#include "content/browser/renderer_host/render_widget_host_impl.h"'
+)
+CONTENT_WIDGET_HOST_HELPER_ANCHOR = "void RenderWidgetHostImpl::SendScreenRects() {\n"
+CONTENT_WIDGET_HOST_HELPER_MARKER = "void RecorderRecordPopupWidgetScreenRects("
+CONTENT_WIDGET_HOST_HELPER = """\
+namespace {
+
+a11y_recorder::PagePopupRect RecorderPopupWidgetRect(const gfx::Rect& rect) {
+  a11y_recorder::PagePopupRect recorder_rect;
+  recorder_rect.x = rect.x();
+  recorder_rect.y = rect.y();
+  recorder_rect.width = rect.width();
+  recorder_rect.height = rect.height();
+  return recorder_rect;
+}
+
+a11y_recorder::PopupWidgetSink RecorderPopupWidgetSink(
+    const viz::FrameSinkId& recorder_frame_sink_id) {
+  a11y_recorder::PopupWidgetSink recorder_sink;
+  recorder_sink.client_id = recorder_frame_sink_id.client_id();
+  recorder_sink.sink_id = recorder_frame_sink_id.sink_id();
+  return recorder_sink;
+}
+
+// Records the screen rectangles sent to a popup widget.
+void RecorderRecordPopupWidgetScreenRects(
+    RenderWidgetHostViewBase* recorder_view,
+    const viz::FrameSinkId& recorder_frame_sink_id,
+    const gfx::Rect& recorder_view_rect,
+    const gfx::Rect& recorder_window_rect) {
+  if (!recorder_view ||
+      recorder_view->GetWidgetType() != WidgetType::kPopup) {
+    return;
+  }
+  // The popup's native window, read by the bridge, is its window tree host's
+  // HWND on Windows.
+  uintptr_t recorder_native_window = 0;
+#if BUILDFLAG(IS_WIN)
+  gfx::NativeView recorder_native_view = recorder_view->GetNativeView();
+  if (recorder_native_view && recorder_native_view->GetHost()) {
+    recorder_native_window = reinterpret_cast<uintptr_t>(
+        recorder_native_view->GetHost()->GetAcceleratedWidget());
+  }
+#endif
+  a11y_recorder::RecordBrowserPopupWidgetScreenRects(
+      RecorderPopupWidgetSink(recorder_frame_sink_id),
+      RecorderPopupWidgetRect(recorder_view_rect),
+      RecorderPopupWidgetRect(recorder_window_rect), recorder_native_window,
+      recorder_view->GetDeviceScaleFactor());
+}
+
+}  // namespace
+
+"""
+CONTENT_WIDGET_HOST_SCREEN_RECTS_ANCHOR = """\
+  blink_widget_->UpdateScreenRects(
+      last_view_screen_rect_, last_window_screen_rect_,
+      base::BindOnce(&RenderWidgetHostImpl::OnUpdateScreenRectsAck,
+                     weak_factory_.GetWeakPtr()));
+  waiting_for_screen_rects_ack_ = true;
+"""
+CONTENT_WIDGET_HOST_SCREEN_RECTS_HOOK = """\
+  blink_widget_->UpdateScreenRects(
+      last_view_screen_rect_, last_window_screen_rect_,
+      base::BindOnce(&RenderWidgetHostImpl::OnUpdateScreenRectsAck,
+                     weak_factory_.GetWeakPtr()));
+  waiting_for_screen_rects_ack_ = true;
+  RecorderRecordPopupWidgetScreenRects(view_.get(), GetFrameSinkId(),
+                                       last_view_screen_rect_,
+                                       last_window_screen_rect_);
+"""
+CONTENT_WIDGET_HOST_POPUP_BOUNDS_ANCHOR = """\
+  if (view_ && !waiting_for_screen_rects_ack_) {
+    gfx::Rect constrained_bounds =
+        delegate_ ? delegate_->ConstrainPopupBounds(bounds) : bounds;
+    view_->SetBounds(
+        ClampPopupBoundsToDisplay(constrained_bounds, view_.get()));
+  }
+  std::move(callback).Run();
+"""
+CONTENT_WIDGET_HOST_POPUP_BOUNDS_HOOK = """\
+  bool recorder_has_set_rect = false;
+  gfx::Rect recorder_set_rect;
+  if (view_ && !waiting_for_screen_rects_ack_) {
+    gfx::Rect constrained_bounds =
+        delegate_ ? delegate_->ConstrainPopupBounds(bounds) : bounds;
+    recorder_set_rect =
+        ClampPopupBoundsToDisplay(constrained_bounds, view_.get());
+    recorder_has_set_rect = true;
+    view_->SetBounds(recorder_set_rect);
+  }
+  a11y_recorder::RecordBrowserPopupWidgetBoundsRequested(
+      RecorderPopupWidgetSink(GetFrameSinkId()),
+      RecorderPopupWidgetRect(bounds), recorder_has_set_rect,
+      RecorderPopupWidgetRect(recorder_set_rect));
+  std::move(callback).Run();
+"""
+CONTENT_WIDGET_HOST_HOOKS = (
+    (
+        CONTENT_WIDGET_HOST_SCREEN_RECTS_ANCHOR,
+        CONTENT_WIDGET_HOST_SCREEN_RECTS_HOOK,
+    ),
+    (
+        CONTENT_WIDGET_HOST_POPUP_BOUNDS_ANCHOR,
+        CONTENT_WIDGET_HOST_POPUP_BOUNDS_HOOK,
+    ),
+)
+
+
+def patch_content_render_widget_host(path: Path) -> None:
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CONTENT_WIDGET_HOST_OWN_INCLUDE,
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_WIDGET_HOST_HELPER_ANCHOR,
+        CONTENT_WIDGET_HOST_HELPER,
+        CONTENT_WIDGET_HOST_HELPER_MARKER,
+        path,
+    )
+    for anchor, hook in CONTENT_WIDGET_HOST_HOOKS:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+# Protocol 0.45 (docs/architecture/page-recreation.md, "Popup on screen"):
+# the popup widget's view records when it hides its window, so that a
+# captured frame is matched to the popup's window leaving the screen rather
+# than to the renderer's close. RenderWidgetHostViewAura::Hide hides the
+# window of a popup that is hidden; CleanUpHostObservers hides it before the
+# view is destroyed, which is the path a closed popup takes. Each records
+# only a window that was shown, so a second clean-up records nothing.
+CONTENT_WIDGET_VIEW_OWN_INCLUDE = (
+    '#include "content/browser/renderer_host/render_widget_host_view_aura.h"'
+)
+CONTENT_WIDGET_VIEW_HELPER_ANCHOR = "void RenderWidgetHostViewAura::Hide() {\n"
+CONTENT_WIDGET_VIEW_HELPER_MARKER = "void RecorderRecordPopupWidgetHidden("
+CONTENT_WIDGET_VIEW_HELPER = """\
+namespace {
+
+// The popup's native window: its window tree host's HWND on Windows.
+uintptr_t RecorderPopupNativeWindow(aura::Window* recorder_window) {
+#if BUILDFLAG(IS_WIN)
+  if (recorder_window && recorder_window->GetHost()) {
+    return reinterpret_cast<uintptr_t>(
+        recorder_window->GetHost()->GetAcceleratedWidget());
+  }
+#endif
+  return 0;
+}
+
+// Records a popup widget's view hiding its window.
+void RecorderRecordPopupWidgetHidden(
+    const viz::FrameSinkId& recorder_frame_sink_id,
+    uintptr_t recorder_native_window,
+    const char* recorder_cause) {
+  a11y_recorder::PopupWidgetSink recorder_sink;
+  recorder_sink.client_id = recorder_frame_sink_id.client_id();
+  recorder_sink.sink_id = recorder_frame_sink_id.sink_id();
+  a11y_recorder::RecordBrowserPopupWidgetHidden(
+      recorder_sink, recorder_cause, recorder_native_window);
+}
+
+}  // namespace
+
+"""
+CONTENT_WIDGET_VIEW_HIDE_ANCHOR = """\
+void RenderWidgetHostViewAura::Hide() {
+  window_->Hide();
+"""
+CONTENT_WIDGET_VIEW_HIDE_HOOK = """\
+void RenderWidgetHostViewAura::Hide() {
+  const bool recorder_popup_was_shown =
+      widget_type_ == WidgetType::kPopup && window_->TargetVisibility();
+  window_->Hide();
+  if (recorder_popup_was_shown) {
+    RecorderRecordPopupWidgetHidden(GetFrameSinkId(),
+                                    RecorderPopupNativeWindow(window_),
+                                    "hidden");
+  }
+"""
+CONTENT_WIDGET_VIEW_CLEAN_UP_ANCHOR = """\
+  if (window_) {
+    aura::client::SetFocusChangeObserver(window_, nullptr);
+    window_->Hide();
+"""
+CONTENT_WIDGET_VIEW_CLEAN_UP_HOOK = """\
+  if (window_) {
+    aura::client::SetFocusChangeObserver(window_, nullptr);
+    const bool recorder_popup_was_shown =
+        widget_type_ == WidgetType::kPopup && window_->TargetVisibility();
+    window_->Hide();
+    if (recorder_popup_was_shown) {
+      RecorderRecordPopupWidgetHidden(GetFrameSinkId(),
+                                      RecorderPopupNativeWindow(window_),
+                                      "destroyed");
+    }
+"""
+CONTENT_WIDGET_VIEW_HOOKS = (
+    (CONTENT_WIDGET_VIEW_HIDE_ANCHOR, CONTENT_WIDGET_VIEW_HIDE_HOOK),
+    (CONTENT_WIDGET_VIEW_CLEAN_UP_ANCHOR, CONTENT_WIDGET_VIEW_CLEAN_UP_HOOK),
+)
+
+
+def patch_content_render_widget_host_view(path: Path) -> None:
+    """Records a popup widget's view hiding its window."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CONTENT_WIDGET_VIEW_OWN_INCLUDE,
+        (CONTENT_NAVIGATION_INCLUDE,),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_WIDGET_VIEW_HELPER_ANCHOR,
+        CONTENT_WIDGET_VIEW_HELPER,
+        CONTENT_WIDGET_VIEW_HELPER_MARKER,
+        path,
+    )
+    for anchor, hook in CONTENT_WIDGET_VIEW_HOOKS:
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+BLINK_OPTION_SELECTEDNESS_HELPER = """\
+namespace {
+
+// Records a change of an option's selectedness. Selectedness sets no
+// attribute, so no DOM record reports it; the highlighted item of an open
+// select list is its popup listbox's selected option.
+void RecorderRecordOptionSelectedness(HTMLOptionElement& option,
+                                      bool selected) {
+  Document& document = option.GetDocument();
+  const int document_node_id = static_cast<int>(document.GetDomNodeId());
+  if (document_node_id <= 0) {
+    return;
+  }
+  HTMLSelectElement* select = option.OwnerSelectElement();
+  a11y_recorder::RecordBlinkOptionSelectednessChanged(
+      document_node_id, document.Token().ToString(),
+      static_cast<int>(option.GetDomNodeId()),
+      select ? static_cast<int>(select->GetDomNodeId()) : 0, selected,
+      RecorderCookieCallOrigin(document.GetExecutionContext()));
+}
+
+}  // namespace
+
+"""
+BLINK_OPTION_SELECTEDNESS_HELPER_MARKER = "void RecorderRecordOptionSelectedness("
+BLINK_OPTION_SELECTEDNESS_HELPER_ANCHOR = (
+    "void HTMLOptionElement::SetSelectedState(bool selected,\n"
+)
+BLINK_OPTION_SELECTEDNESS_ANCHOR = """\
+  is_selected_ = selected;
+  PseudoStateChanged(CSSSelector::kPseudoChecked);
+"""
+BLINK_OPTION_SELECTEDNESS_HOOK = """\
+  is_selected_ = selected;
+  PseudoStateChanged(CSSSelector::kPseudoChecked);
+  RecorderRecordOptionSelectedness(*this, selected);
+"""
+
+
+def patch_blink_option_element(path: Path) -> None:
+    patch_blink_interaction_source(
+        path,
+        '#include "third_party/blink/renderer/core/html/forms/'
+        'html_option_element.h"',
+        (
+            (
+                BLINK_OPTION_SELECTEDNESS_HELPER_ANCHOR,
+                BLINK_COOKIE_ORIGIN_HELPER,
+                BLINK_COOKIE_ORIGIN_HELPER_MARKER,
+            ),
+            (
+                BLINK_OPTION_SELECTEDNESS_HELPER_ANCHOR,
+                BLINK_OPTION_SELECTEDNESS_HELPER,
+                BLINK_OPTION_SELECTEDNESS_HELPER_MARKER,
+            ),
+        ),
+        ((BLINK_OPTION_SELECTEDNESS_ANCHOR, BLINK_OPTION_SELECTEDNESS_HOOK),),
+    )
+
+
 # The computed-style properties a layout checkpoint records, in the order the
 # checkpoint lists them. The list and its rationale are documented in
 # docs/architecture/layout-and-style-checkpoint-evidence-model.md, and the
@@ -7544,6 +11156,10 @@ BLINK_LAYOUT_CHECKPOINT_INCLUDES = (
     "#include <vector>",
     '#include "base/no_destructor.h"',
     '#include "third_party/blink/renderer/platform/heap/persistent.h"',
+    '#include "third_party/blink/renderer/core/css/'
+    'computed_style_css_value_mapping.h"',
+    '#include "third_party/blink/renderer/core/css/'
+    'css_computed_style_declaration.h"',
     '#include "third_party/blink/renderer/core/css/css_value.h"',
     '#include "third_party/blink/renderer/core/css/properties/css_property.h"',
     '#include "third_party/blink/renderer/core/css/style_engine.h"',
@@ -7683,13 +11299,19 @@ void RecorderReadGeneratedText(
 
 // Asks the local-root widget of a frame to report what happens to the
 // compositor frame that carries a layout checkpoint's rendering update. A
-// frame with no widget is recorded as such, so every completed layout
-// checkpoint has exactly one presentation request.
+// frame in a page popup asks the popup's widget. A frame with no widget is
+// recorded as such, so every completed layout checkpoint has exactly one
+// presentation request.
 void RecorderRequestLayoutPresentation(
     LocalFrame& recorder_frame,
     uint64_t recorder_checkpoint_sequence,
     int recorder_document_node_id,
     const std::string& recorder_document_token) {
+  if (RecorderRequestPagePopupPresentation(
+          recorder_frame, recorder_checkpoint_sequence,
+          recorder_document_node_id, recorder_document_token)) {
+    return;
+  }
   WebLocalFrameImpl* recorder_local_root =
       WebLocalFrameImpl::FromFrame(recorder_frame.LocalFrameRoot());
   WebFrameWidgetImpl* recorder_widget =
@@ -8104,6 +11726,195 @@ BLINK_LAYOUT_CHECKPOINT_HELPER = (
         BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
     )
 )
+
+# Protocol 0.37 reads every property getComputedStyle() lists, and the
+# custom properties, in place of the fixed list above. A checkout patched
+# before holds the earlier helper, which is kept to test its upgrade.
+LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER = BLINK_LAYOUT_CHECKPOINT_HELPER
+BLINK_LAYOUT_CHECKPOINT_COMPUTABLE_STYLE_EDITS = (
+    (
+        """\
+// The computed-style properties recorded for each element, in recorded order.
+@@RECORDER_LAYOUT_STYLE_PROPERTY_ARRAY@@
+const std::vector<std::string>& RecorderLayoutStylePropertyNames() {
+  static const base::NoDestructor<std::vector<std::string>> names([] {
+    std::vector<std::string> result;
+    for (CSSPropertyID id : kRecorderLayoutStyleProperties) {
+      result.push_back(CSSProperty::Get(id).GetPropertyNameString().Utf8());
+""",
+        """\
+// The computed-style properties recorded for each element and pseudo-element:
+// every property getComputedStyle() lists for the document, in its order
+// (protocol 0.37). Blink keeps one list for the process, built for the first
+// document that asks, as getComputedStyle() builds it.
+const Vector<const CSSProperty*>& RecorderLayoutStyleProperties(
+    const Document& recorder_document) {
+  return CSSComputedStyleDeclaration::ComputableProperties(
+      recorder_document.GetExecutionContext());
+}
+
+// The names of those properties, read once, since the list is kept for the
+// process.
+const std::vector<std::string>& RecorderLayoutStylePropertyNames(
+    const Document& recorder_document) {
+  static const base::NoDestructor<std::vector<std::string>> names(
+      [&recorder_document] {
+        std::vector<std::string> result;
+        for (const CSSProperty* recorder_property :
+             RecorderLayoutStyleProperties(recorder_document)) {
+          result.push_back(
+              recorder_property->GetPropertyNameString().Utf8());
+        }
+        return result;
+      }());
+  return *names;
+}
+
+// Appends the custom properties of a computed style, by name in code-unit
+// order, each with the value getComputedStyle() reports for it (protocol
+// 0.37). A name whose value Blink does not report is not recorded, as
+// getComputedStyle() does not list it.
+void RecorderReadCustomProperties(
+    const Document& recorder_document,
+    const ComputedStyle& recorder_style,
+    std::vector<a11y_recorder::LayoutCheckpointStyleValue>& recorder_values) {
+  // GetVariables reads each of the style's custom properties as
+  // getComputedStyle() does, and leaves out a name with no value.
+  const HeapHashMap<AtomicString, Member<const CSSValue>> recorder_variables =
+      ComputedStyleCSSValueMapping::GetVariables(
+          recorder_style, recorder_document.GetPropertyRegistry(),
+          CSSValuePhase::kResolvedValue);
+  Vector<AtomicString> recorder_names;
+  for (const auto& recorder_variable : recorder_variables) {
+    recorder_names.push_back(recorder_variable.key);
+  }
+  std::sort(recorder_names.begin(), recorder_names.end(),
+            [](const AtomicString& recorder_a, const AtomicString& recorder_b) {
+              return CodeUnitCompareLessThan(recorder_a, recorder_b);
+            });
+  for (const AtomicString& recorder_name : recorder_names) {
+    const CSSValue* recorder_value = recorder_variables.at(recorder_name);
+    if (!recorder_value) {
+      continue;
+""",
+    ),
+    (
+        """\
+    return result;
+  }());
+  return *names;
+""",
+        """\
+    a11y_recorder::LayoutCheckpointStyleValue recorder_entry;
+    recorder_entry.property_name = recorder_name.Utf8();
+    recorder_entry.value_present = true;
+    recorder_entry.value = recorder_value->CssText().Utf8();
+    recorder_values.push_back(std::move(recorder_entry));
+  }
+""",
+    ),
+    (
+        """\
+          RecorderLayoutStylePropertyNames(),
+""",
+        """\
+          RecorderLayoutStylePropertyNames(*recorder_document),
+""",
+    ),
+    (
+        """\
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+""",
+        """\
+  if (recorder_checkpoint_sequence == 0) {
+    return;
+  }
+  const Vector<const CSSProperty*>& recorder_style_properties =
+      RecorderLayoutStyleProperties(*recorder_document);
+""",
+    ),
+    (
+        """\
+      RecorderLayoutStylePropertyNames();
+""",
+        """\
+      RecorderLayoutStylePropertyNames(*recorder_document);
+""",
+    ),
+    (
+        """\
+                std::size(kRecorderLayoutStyleProperties)) {
+""",
+        """\
+                recorder_style_properties.size()) {
+""",
+    ),
+    (
+        """\
+        recorder_reading.values.resize(
+            static_cast<wtf_size_t>(std::size(kRecorderLayoutStyleProperties)));
+""",
+        """\
+        recorder_reading.values.resize(recorder_style_properties.size());
+""",
+    ),
+    (
+        """\
+        recorder_reading.layout_dependent.resize(
+            static_cast<wtf_size_t>(std::size(kRecorderLayoutStyleProperties)));
+""",
+        """\
+        recorder_reading.layout_dependent.resize(
+            recorder_style_properties.size());
+""",
+    ),
+    (
+        """\
+      recorder_record.computed_style.reserve(
+          std::size(kRecorderLayoutStyleProperties));
+""",
+        """\
+      recorder_record.computed_style.reserve(recorder_style_properties.size());
+""",
+    ),
+    (
+        """\
+      for (CSSPropertyID recorder_property_id :
+           kRecorderLayoutStyleProperties) {
+        const CSSProperty& recorder_property =
+            CSSProperty::Get(recorder_property_id);
+""",
+        """\
+      for (const CSSProperty* recorder_property_entry :
+           recorder_style_properties) {
+        const CSSProperty& recorder_property = *recorder_property_entry;
+""",
+    ),
+    (
+        """\
+        ++recorder_index;
+      }
+""",
+        """\
+        ++recorder_index;
+      }
+      RecorderReadCustomProperties(*recorder_document, *recorder_style,
+                                   recorder_record.custom_properties);
+""",
+    ),
+)
+for _legacy, _current in BLINK_LAYOUT_CHECKPOINT_COMPUTABLE_STYLE_EDITS:
+    _legacy = _legacy.replace(
+        "@@RECORDER_LAYOUT_STYLE_PROPERTY_ARRAY@@\n",
+        BLINK_LAYOUT_STYLE_PROPERTY_ARRAY,
+    )
+    if BLINK_LAYOUT_CHECKPOINT_HELPER.count(_legacy) != 1:
+        raise RuntimeError("a layout checkpoint helper block was not found")
+    BLINK_LAYOUT_CHECKPOINT_HELPER = BLINK_LAYOUT_CHECKPOINT_HELPER.replace(
+        _legacy, _current, 1
+    )
 BLINK_LAYOUT_STYLE_PROPERTY_ARRAY_PATTERN = re.compile(
     r"constexpr CSSPropertyID kRecorderLayoutStyleProperties\[\] = \{\n"
     r"(?:    CSSPropertyID::k[A-Za-z]+,\n)+"
@@ -8211,16 +12022,8 @@ def patch_blink_local_frame_view(path: Path) -> None:
         text = upgrade_legacy_hooks(
             text, BLINK_LAYOUT_CHECKPOINT_LEGACY_STYLE_LOOPS, path
         )
-    # A tree patched by an earlier revision holds an older property list.
-    # Replace that list in place, since the helper is inserted only once.
-    if BLINK_LAYOUT_CHECKPOINT_HELPER_MARKER in text:
-        arrays = BLINK_LAYOUT_STYLE_PROPERTY_ARRAY_PATTERN.findall(text)
-        if len(arrays) != 1:
-            raise RuntimeError(
-                f"{path}: expected one layout style property array, "
-                f"found {len(arrays)}"
-            )
-        text = text.replace(arrays[0], BLINK_LAYOUT_STYLE_PROPERTY_ARRAY)
+    # A tree patched before protocol 0.37 holds a fixed property list in the
+    # helper region, which replace_layout_checkpoint_helper rewrites whole.
     text = replace_layout_checkpoint_helper(text, path)
     text = insert_before_once(
         text,
@@ -8954,14 +12757,417 @@ BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
     BLINK_LAYOUT_CHANGES_QUAD_RECT_GEOMETRY,
     1,
 )
+# Protocol 0.37 reads every property getComputedStyle() lists, and the
+# custom properties, in place of the fixed list.
+BLINK_LAYOUT_CHANGES_FIXED_LIST_STYLE = """\
+    const std::vector<std::string>& recorder_property_names =
+        RecorderLayoutStylePropertyNames();
+    recorder_record.computed_style_present = true;
+    recorder_record.computed_style.reserve(
+        std::size(kRecorderLayoutStyleProperties));
+    size_t recorder_index = 0;
+    for (CSSPropertyID recorder_property_id : kRecorderLayoutStyleProperties) {
+      const CSSValue* recorder_value =
+          CSSProperty::Get(recorder_property_id)
+              .CSSValueFromComputedStyle(*recorder_style,
+"""
+BLINK_LAYOUT_CHANGES_COMPUTABLE_STYLE = """\
+    const Vector<const CSSProperty*>& recorder_style_properties =
+        RecorderLayoutStyleProperties(recorder_document);
+    const std::vector<std::string>& recorder_property_names =
+        RecorderLayoutStylePropertyNames(recorder_document);
+    recorder_record.computed_style_present = true;
+    recorder_record.computed_style.reserve(recorder_style_properties.size());
+    RecorderReadCustomProperties(recorder_document, *recorder_style,
+                                 recorder_record.custom_properties);
+    size_t recorder_index = 0;
+    for (const CSSProperty* recorder_property : recorder_style_properties) {
+      const CSSValue* recorder_value =
+          recorder_property->CSSValueFromComputedStyle(*recorder_style,
+"""
+LEGACY_FIXED_LIST_BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION
+if BLINK_LAYOUT_CHANGES_FIXED_LIST_STYLE not in BLINK_LAYOUT_CHANGES_DEFINITION:
+    raise RuntimeError("the layout change style block was not found")
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_FIXED_LIST_STYLE,
+    BLINK_LAYOUT_CHANGES_COMPUTABLE_STYLE,
+    1,
+)
+# Protocol 0.38 records each layout box's physical fragments in its node
+# record, in the checkpoint and the change set alike. See
+# docs/architecture/page-recreation.md, "2b design".
+BLINK_LAYOUT_BOX_FRAGMENTS_READER = """\
+
+// The glyph runs of one text item as ForEachGlyph reports its glyphs: a new
+// run starts at each change of font, orientation, or rotation (protocol
+// 0.39). It lives on the stack for one ForEachGlyph call, so it may hold the
+// garbage-collected font of the current run by a raw pointer.
+struct RecorderGlyphReading {
+  STACK_ALLOCATED();
+
+ public:
+  std::vector<a11y_recorder::LayoutGlyphRun>* runs = nullptr;
+  const SimpleFontData* font = nullptr;
+  bool horizontal = true;
+  int rotation = 0;
+};
+
+// A run's font file and its typeface's variation position (protocol 0.40).
+void RecorderReadRunFontFile(const SkTypeface& recorder_typeface,
+                             a11y_recorder::LayoutGlyphRun& recorder_run) {
+  std::string recorder_digest;
+  int recorder_index = 0;
+  if (!RecorderFontFile(recorder_typeface, &recorder_digest,
+                        &recorder_index)) {
+    return;
+  }
+  recorder_run.font_file_present = true;
+  recorder_run.font_file_digest = std::move(recorder_digest);
+  recorder_run.font_file_index = recorder_index;
+  const int recorder_axes = recorder_typeface.getVariationDesignPosition({});
+  if (recorder_axes <= 0) {
+    return;
+  }
+  std::vector<SkFontArguments::VariationPosition::Coordinate>
+      recorder_coordinates(static_cast<size_t>(recorder_axes));
+  if (recorder_typeface.getVariationDesignPosition(recorder_coordinates) !=
+      recorder_axes) {
+    return;
+  }
+  for (const auto& recorder_coordinate : recorder_coordinates) {
+    recorder_run.font_variations.push_back(
+        {recorder_coordinate.axis, recorder_coordinate.value});
+  }
+}
+
+void RecorderReadGlyph(void* recorder_context,
+                       unsigned recorder_character_index,
+                       Glyph recorder_glyph,
+                       gfx::Vector2dF recorder_offset,
+                       float recorder_total_advance,
+                       bool recorder_horizontal,
+                       CanvasRotationInVertical recorder_rotation,
+                       const SimpleFontData* recorder_font) {
+  auto& recorder_reading =
+      *static_cast<RecorderGlyphReading*>(recorder_context);
+  const int recorder_rotation_value = static_cast<int>(recorder_rotation);
+  if (recorder_reading.runs->empty() ||
+      recorder_font != recorder_reading.font ||
+      recorder_horizontal != recorder_reading.horizontal ||
+      recorder_rotation_value != recorder_reading.rotation) {
+    recorder_reading.font = recorder_font;
+    recorder_reading.horizontal = recorder_horizontal;
+    recorder_reading.rotation = recorder_rotation_value;
+    a11y_recorder::LayoutGlyphRun& recorder_run =
+        recorder_reading.runs->emplace_back();
+    recorder_run.horizontal = recorder_horizontal;
+    recorder_run.rotation = recorder_rotation_value;
+    if (recorder_font) {
+      const FontPlatformData& recorder_platform =
+          recorder_font->PlatformData();
+      recorder_run.family =
+          recorder_platform.FontFamilyName().Utf8(
+              Utf8ConversionMode::kStrictReplacingErrors);
+      if (const SkTypeface* recorder_typeface =
+              recorder_platform.Typeface()) {
+        SkString recorder_name;
+        if (recorder_typeface->getPostScriptName(&recorder_name)) {
+          recorder_run.post_script_name = recorder_name.c_str();
+        }
+        RecorderReadRunFontFile(*recorder_typeface, recorder_run);
+      }
+      recorder_run.size = recorder_platform.size();
+      recorder_run.synthetic_bold = recorder_platform.SyntheticBold();
+      recorder_run.synthetic_italic = recorder_platform.SyntheticItalic();
+    }
+  }
+  recorder_reading.runs->back().glyphs.push_back(
+      {recorder_glyph, recorder_character_index, recorder_total_advance,
+       recorder_offset.x(), recorder_offset.y()});
+}
+
+// Reads the items of a fragment that holds lines, in Blink's pre-order
+// (protocol 0.39).
+void RecorderReadFragmentItems(const FragmentItems& recorder_items,
+                               a11y_recorder::LayoutBoxFragment& recorder_out) {
+  recorder_out.items_present = true;
+  recorder_out.text_present = true;
+  recorder_out.text_content = recorder_items.NormalText().Utf8(
+      Utf8ConversionMode::kStrictReplacingErrors);
+  if (!recorder_items.FirstLineText().IsNull()) {
+    recorder_out.first_line_text_present = true;
+    recorder_out.first_line_text = recorder_items.FirstLineText().Utf8(
+        Utf8ConversionMode::kStrictReplacingErrors);
+  }
+  recorder_out.items.reserve(recorder_items.Size());
+  for (const FragmentItem& recorder_item : recorder_items.Items()) {
+    a11y_recorder::LayoutFragmentItem& recorder_record =
+        recorder_out.items.emplace_back();
+    switch (recorder_item.Type()) {
+      case FragmentItem::kText:
+        recorder_record.type = "text";
+        break;
+      case FragmentItem::kGeneratedText:
+        recorder_record.type = "generated-text";
+        break;
+      case FragmentItem::kLine:
+        recorder_record.type = "line";
+        break;
+      case FragmentItem::kBox:
+        recorder_record.type = "box";
+        break;
+      default:
+        recorder_record.type = "invalid";
+        break;
+    }
+    const PhysicalRect& recorder_rect = recorder_item.RectInContainerFragment();
+    recorder_record.x = recorder_rect.offset.left.ToDouble();
+    recorder_record.y = recorder_rect.offset.top.ToDouble();
+    recorder_record.width = recorder_rect.size.width.ToDouble();
+    recorder_record.height = recorder_rect.size.height.ToDouble();
+    if (recorder_item.IsContainer()) {
+      recorder_record.descendants_count =
+          base::saturated_cast<int>(recorder_item.DescendantsCount());
+    }
+    if (const LayoutObject* recorder_object =
+            recorder_item.GetLayoutObject()) {
+      if (Node* recorder_node = recorder_object->GetNode()) {
+        recorder_record.node_id = recorder_node->GetDomNodeId();
+      }
+    }
+    if (!recorder_item.IsText()) {
+      continue;
+    }
+    recorder_record.text = true;
+    if (recorder_item.Type() == FragmentItem::kText) {
+      recorder_record.range_present = true;
+      recorder_record.start = recorder_item.StartOffset();
+      recorder_record.end = recorder_item.EndOffset();
+    } else {
+      recorder_record.generated_text_present = true;
+      recorder_record.generated_text =
+          recorder_item.GeneratedText().ToString().Utf8(
+              Utf8ConversionMode::kStrictReplacingErrors);
+    }
+    recorder_record.first_line_style = recorder_item.UsesFirstLineStyle();
+    recorder_record.rtl =
+        recorder_item.ResolvedDirection() == TextDirection::kRtl;
+    recorder_record.hidden_for_paint = recorder_item.IsHiddenForPaint();
+    if (const ShapeResultView* recorder_shape =
+            recorder_item.TextShapeResult()) {
+      RecorderGlyphReading recorder_reading;
+      recorder_reading.runs = &recorder_record.glyph_runs;
+      recorder_shape->ForEachGlyph(0, RecorderReadGlyph, &recorder_reading);
+    }
+  }
+}
+
+// Reads one physical fragment of a box: its border-box size, its break
+// position, its scrollable overflow, and each child link with its offset. A
+// child with no node of its own, an anonymous box or a column or page, holds
+// its fragment, nested (protocol 0.38). Lengths are Blink's layout units.
+void RecorderReadBoxFragment(const PhysicalBoxFragment& recorder_fragment,
+                             a11y_recorder::LayoutBoxFragment& recorder_out) {
+  recorder_out.width = recorder_fragment.Size().width.ToDouble();
+  recorder_out.height = recorder_fragment.Size().height.ToDouble();
+  if (const BlockBreakToken* recorder_token =
+          recorder_fragment.GetBreakToken()) {
+    recorder_out.break_token_present = true;
+    recorder_out.consumed_block_size =
+        recorder_token->ConsumedBlockSize().ToDouble();
+    recorder_out.break_before = recorder_token->IsBreakBefore();
+    if (!recorder_token->IsBreakBefore()) {
+      recorder_out.sequence_number = recorder_token->SequenceNumber();
+    }
+    recorder_out.at_block_end = recorder_token->IsAtBlockEnd();
+  }
+  if (recorder_fragment.HasScrollableOverflow()) {
+    const PhysicalRect recorder_overflow =
+        recorder_fragment.ScrollableOverflow();
+    recorder_out.scrollable_overflow_present = true;
+    recorder_out.scrollable_overflow = a11y_recorder::LayoutLocalRect{
+        recorder_overflow.offset.left.ToDouble(),
+        recorder_overflow.offset.top.ToDouble(),
+        recorder_overflow.size.width.ToDouble(),
+        recorder_overflow.size.height.ToDouble()};
+  }
+  for (const PhysicalFragmentLink& recorder_link :
+       recorder_fragment.PostLayoutChildren()) {
+    const PhysicalFragment& recorder_child = *recorder_link.fragment;
+    a11y_recorder::LayoutFragmentChild recorder_child_out;
+    recorder_child_out.x = recorder_link.Offset().left.ToDouble();
+    recorder_child_out.y = recorder_link.Offset().top.ToDouble();
+    const Node* recorder_child_node = recorder_child.GetNode();
+    bool recorder_nested = false;
+    if (recorder_child.IsLineBox()) {
+      recorder_child_out.kind = "line";
+    } else if (recorder_child.IsFragmentainerBox()) {
+      recorder_child_out.kind =
+          recorder_child.IsColumnBox() ? "column" : "page";
+      recorder_nested = true;
+    } else if (recorder_child_node) {
+      recorder_child_out.kind = "box";
+      recorder_child_out.node_id =
+          const_cast<Node*>(recorder_child_node)->GetDomNodeId();
+      if (const auto* recorder_child_box =
+              DynamicTo<LayoutBox>(recorder_child.GetLayoutObject())) {
+        int recorder_index = 0;
+        for (const PhysicalBoxFragment& recorder_sibling :
+             recorder_child_box->PhysicalFragments()) {
+          if (&recorder_sibling == &recorder_child) {
+            recorder_child_out.fragment_index = recorder_index;
+            break;
+          }
+          ++recorder_index;
+        }
+      }
+    } else {
+      recorder_child_out.kind = "anonymous";
+      recorder_nested = recorder_child.IsBox();
+    }
+    if (recorder_nested) {
+      recorder_child_out.fragment.emplace_back();
+      RecorderReadBoxFragment(To<PhysicalBoxFragment>(recorder_child),
+                              recorder_child_out.fragment.back());
+    }
+    recorder_out.children.push_back(std::move(recorder_child_out));
+  }
+  if (const FragmentItems* recorder_items = recorder_fragment.Items()) {
+    RecorderReadFragmentItems(*recorder_items, recorder_out);
+  }
+}
+
+// Reads every physical fragment of a node's layout box, its effective zoom,
+// and a replaced element's natural dimensions (protocol 0.38). A node whose
+// layout object is not a box has none.
+void RecorderReadBoxFragments(
+    const LayoutObject* recorder_layout_object,
+    a11y_recorder::LayoutCheckpointNode& recorder_record) {
+  const auto* recorder_box = DynamicTo<LayoutBox>(recorder_layout_object);
+  if (!recorder_box) {
+    return;
+  }
+  a11y_recorder::LayoutBoxFragments& recorder_fragments =
+      recorder_record.box_fragments;
+  recorder_fragments.present = true;
+  recorder_fragments.effective_zoom = recorder_box->StyleRef().EffectiveZoom();
+  for (const PhysicalBoxFragment& recorder_fragment :
+       recorder_box->PhysicalFragments()) {
+    recorder_fragments.fragments.emplace_back();
+    RecorderReadBoxFragment(recorder_fragment,
+                            recorder_fragments.fragments.back());
+    // The block's text content, which every fragment's items share, is
+    // recorded once for the node, from its first fragment that holds lines
+    // (protocol 0.39); fragments held by child links keep their own.
+    a11y_recorder::LayoutBoxFragment& recorder_read =
+        recorder_fragments.fragments.back();
+    if (recorder_read.text_present && !recorder_fragments.text_present) {
+      recorder_fragments.text_present = true;
+      recorder_fragments.text_content = std::move(recorder_read.text_content);
+      recorder_fragments.first_line_text_present =
+          recorder_read.first_line_text_present;
+      recorder_fragments.first_line_text =
+          std::move(recorder_read.first_line_text);
+    }
+    recorder_read.text_present = false;
+    recorder_read.text_content.clear();
+    recorder_read.first_line_text_present = false;
+    recorder_read.first_line_text.clear();
+  }
+  if (const auto* recorder_replaced =
+          DynamicTo<LayoutReplaced>(recorder_layout_object)) {
+    const PhysicalNaturalSizingInfo recorder_natural =
+        recorder_replaced->ComputeNaturalSizingInfo();
+    recorder_fragments.natural_size_present = true;
+    recorder_fragments.natural_width = recorder_natural.size.width.ToDouble();
+    recorder_fragments.natural_height =
+        recorder_natural.size.height.ToDouble();
+    recorder_fragments.natural_has_width = recorder_natural.has_width;
+    recorder_fragments.natural_has_height = recorder_natural.has_height;
+    recorder_fragments.natural_aspect_ratio_width =
+        recorder_natural.aspect_ratio.width.ToDouble();
+    recorder_fragments.natural_aspect_ratio_height =
+        recorder_natural.aspect_ratio.height.ToDouble();
+  }
+}
+"""
+BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR = """\
+
+const char* RecorderShadowRootModeName(ShadowRootMode recorder_mode) {
+"""
+BLINK_LAYOUT_CHECKPOINT_BOX_FRAGMENTS_ANCHOR = """\
+          RecorderShadowRootModeName(recorder_containing_root->GetMode());
+    }
+    recorder_cost.node_fields_nanoseconds +=
+"""
+BLINK_LAYOUT_BOX_FRAGMENTS_READER = (
+    BLINK_RECORDER_FONT_FILE_READER + BLINK_LAYOUT_BOX_FRAGMENTS_READER
+)
+for _anchor in (
+    BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR,
+    BLINK_LAYOUT_CHECKPOINT_BOX_FRAGMENTS_ANCHOR,
+):
+    if BLINK_LAYOUT_CHECKPOINT_HELPER.count(_anchor) != 1:
+        raise RuntimeError("a box fragment anchor was not found once")
+BLINK_LAYOUT_CHECKPOINT_HELPER = BLINK_LAYOUT_CHECKPOINT_HELPER.replace(
+    BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR,
+    BLINK_LAYOUT_BOX_FRAGMENTS_READER + BLINK_LAYOUT_BOX_FRAGMENTS_READER_ANCHOR,
+    1,
+).replace(
+    BLINK_LAYOUT_CHECKPOINT_BOX_FRAGMENTS_ANCHOR,
+    """\
+          RecorderShadowRootModeName(recorder_containing_root->GetMode());
+    }
+    RecorderReadBoxFragments(recorder_layout_object, recorder_record);
+    recorder_cost.node_fields_nanoseconds +=
+""",
+    1,
+)
+BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END = """\
+        RecorderShadowRootModeName(recorder_containing_root->GetMode());
+  }
+  return recorder_changed;
+}
+"""
+LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION = (
+    BLINK_LAYOUT_CHANGES_DEFINITION
+)
+if BLINK_LAYOUT_CHANGES_DEFINITION.count(BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END) != 1:
+    raise RuntimeError("the layout change node reader's end was not found once")
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_UNFRAGMENTED_END,
+    """\
+        RecorderShadowRootModeName(recorder_containing_root->GetMode());
+  }
+  RecorderReadBoxFragments(recorder_layout_object, recorder_record);
+  return recorder_changed;
+}
+""",
+    1,
+)
 BLINK_LAYOUT_CHANGES_INCLUDES = (
     "#include <array>",
     '#include "base/numerics/safe_conversions.h"',
     '#include "third_party/blink/renderer/core/layout/inline/fragment_item.h"',
     '#include "third_party/blink/renderer/core/layout/inline/fragment_items.h"',
+    '#include "third_party/blink/renderer/core/layout/block_break_token.h"',
     '#include "third_party/blink/renderer/core/layout/layout_box.h"',
+    '#include "third_party/blink/renderer/core/layout/layout_replaced.h"',
     '#include "third_party/blink/renderer/core/layout/layout_view.h"',
+    '#include "third_party/blink/renderer/core/layout/natural_sizing_info.h"',
     '#include "third_party/blink/renderer/core/layout/physical_box_fragment.h"',
+    '#include "third_party/blink/renderer/core/layout/'
+    'physical_fragment_link.h"',
+    '#include "third_party/blink/renderer/platform/fonts/'
+    'canvas_rotation_in_vertical.h"',
+    '#include "third_party/blink/renderer/platform/fonts/font_platform_data.h"',
+    '#include "third_party/blink/renderer/platform/fonts/glyph.h"',
+    '#include "third_party/blink/renderer/platform/fonts/shaping/'
+    'shape_result_view.h"',
+    '#include "third_party/blink/renderer/platform/fonts/simple_font_data.h"',
+    '#include "third_party/skia/include/core/SkString.h"',
+    '#include "third_party/skia/include/core/SkTypeface.h"',
+    '#include "third_party/skia/include/core/SkStream.h"',
     '#include "third_party/blink/renderer/core/paint/fragment_data.h"',
     '#include "third_party/blink/renderer/core/paint/object_paint_properties.h"',
     '#include "third_party/blink/renderer/core/paint/'
@@ -9033,7 +13239,71 @@ BLINK_LAYOUT_CHANGES_EARLIER_ROTATED_QUADS = """\
             Vector<gfx::QuadF> recorder_quads;
             recorder_layout_object->AbsoluteQuads(recorder_quads);
 """
+# Protocol 0.41: a noted text node without a layout object is recorded, with
+# no layout object, so that a change set states that a text node's layout
+# object was destroyed; the checkpoint still leaves such a node out, as its
+# absence from a full walk states it. Before, a change set left it out too,
+# and the text node's last record, which stated a layout object, stood.
+BLINK_LAYOUT_CHANGES_TEXT_SKIP = """\
+    // A removed node is recorded by slice 4, and a text node without a layout
+    // object is not recorded, as in the checkpoint.
+    if (!recorder_node.isConnected() ||
+        (recorder_node.IsTextNode() && !recorder_node.GetLayoutObject())) {
+      continue;
+    }
+"""
+BLINK_LAYOUT_CHANGES_TEXT_RECORDED = """\
+    // A removed node is recorded by slice 4. A text node without a layout
+    // object is recorded (protocol 0.41): it was noted when its layout object
+    // was destroyed, and its record states that it has none.
+    if (!recorder_node.isConnected()) {
+      continue;
+    }
+"""
+if BLINK_LAYOUT_CHANGES_DEFINITION.count(BLINK_LAYOUT_CHANGES_TEXT_SKIP) != 1:
+    raise RuntimeError("the layout change set's text node skip was not found once")
+LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION = (
+    BLINK_LAYOUT_CHANGES_DEFINITION
+)
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_TEXT_SKIP, BLINK_LAYOUT_CHANGES_TEXT_RECORDED, 1
+)
+# Protocol 0.49 (slice 4b sub-step 2b-ii) records each scroller's compositor
+# element ID with its scroll offset, so that the compositor's drawn offset of
+# it can be joined to its node.
+BLINK_LAYOUT_CHANGES_SCROLL_PUSH = """\
+            *recorder_translation, recorder_document_node_id);
+      }
+    }
+    recorder_scroll_offsets.push_back(std::move(recorder_scroll));
+"""
+BLINK_LAYOUT_CHANGES_SCROLL_ELEMENT_ID = """\
+            *recorder_translation, recorder_document_node_id);
+      }
+    }
+    // Protocol 0.49: the compositor element ID of the scroller, which the
+    // compositor's drawn scroll offset of it is recorded under.
+    recorder_scroll.scroll_element_id =
+        recorder_area->GetScrollElementId().GetInternalValue();
+    recorder_scroll_offsets.push_back(std::move(recorder_scroll));
+"""
+if BLINK_LAYOUT_CHANGES_DEFINITION.count(BLINK_LAYOUT_CHANGES_SCROLL_PUSH) != 1:
+    raise RuntimeError("the layout change set's scroll offset push was not found once")
+LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION = (
+    BLINK_LAYOUT_CHANGES_DEFINITION
+)
+BLINK_LAYOUT_CHANGES_DEFINITION = BLINK_LAYOUT_CHANGES_DEFINITION.replace(
+    BLINK_LAYOUT_CHANGES_SCROLL_PUSH, BLINK_LAYOUT_CHANGES_SCROLL_ELEMENT_ID, 1
+)
 BLINK_LAYOUT_CHANGES_LEGACY_DEFINITIONS = (
+    # Before protocol 0.49 recorded a scroller's compositor element ID.
+    LEGACY_UNIDENTIFIED_SCROLL_BLINK_LAYOUT_CHANGES_DEFINITION,
+    # Before protocol 0.41 recorded a text node without a layout object.
+    LEGACY_TEXT_SKIPPING_BLINK_LAYOUT_CHANGES_DEFINITION,
+    # Before protocol 0.38 recorded box fragments.
+    LEGACY_UNFRAGMENTED_BLINK_LAYOUT_CHANGES_DEFINITION,
+    # Before protocol 0.37 read every computable property.
+    LEGACY_FIXED_LIST_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.36 recorded the bounds of each quad.
     LEGACY_SINGLE_RECT_BLINK_LAYOUT_CHANGES_DEFINITION,
     # Before protocol 0.35 requested presentation from change sets.
@@ -9154,6 +13424,22 @@ BLINK_TEXT_LAYOUT_CHANGE_HOOKS = (
         "      RecorderNoteLayoutChange(this, 1);\n",
     ),
 )
+# A node whose layout object is destroyed is noted, so that its change record
+# states it has none. Without it, a text node under an element that became
+# display: none kept its last record, which stated a layout object.
+BLINK_NODE_LAYOUT_CHANGE_HOOKS = (
+    (
+        "  if (GetLayoutObject()) {\n"
+        "    GetLayoutObject()->DestroyAndCleanupAnonymousWrappers(performing_reattach);\n"
+        "  }\n"
+        "  SetLayoutObject(nullptr);\n",
+        "  if (GetLayoutObject()) {\n"
+        "    RecorderNoteLayoutChange(this, 1);\n"
+        "    GetLayoutObject()->DestroyAndCleanupAnonymousWrappers(performing_reattach);\n"
+        "  }\n"
+        "  SetLayoutObject(nullptr);\n",
+    ),
+)
 BLINK_LAYOUT_OBJECT_LAYOUT_CHANGE_HOOKS = (
     (
         "    element->SetComputedStyle(&style);\n",
@@ -9235,6 +13521,7 @@ BLINK_PRESENTATION_WIDGET_INCLUDES = (
     "#include <atomic>",
     "#include <string>",
     '#include "base/memory/ref_counted.h"',
+    '#include "base/memory/weak_ptr.h"',
     '#include "cc/trees/swap_promise.h"',
     '#include "components/viz/common/frame_timing_details.h"',
     '#include "components/viz/common/quads/compositor_frame_metadata.h"',
@@ -9244,6 +13531,234 @@ BLINK_PRESENTATION_WIDGET_ANCHOR = """\
 void WebFrameWidgetImpl::WaitForDebuggerWhenShown() {
 """
 BLINK_PRESENTATION_WIDGET_BLOCK = """\
+// Recorder evidence: the facts every record of one presentation request
+// repeats. The swap promise and the presentation callback share them across
+// the main and compositor threads, so they never change once made.
+class RecorderPresentationRequestFacts
+    : public base::RefCountedThreadSafe<RecorderPresentationRequestFacts> {
+ public:
+  RecorderPresentationRequestFacts(
+      uint64_t request_sequence,
+      int document_node_id,
+      std::string document_token,
+      a11y_recorder::PresentationWidgetIdentity widget,
+      bool high_resolution_ticks)
+      : request_sequence(request_sequence),
+        document_node_id(document_node_id),
+        document_token(std::move(document_token)),
+        widget(std::move(widget)),
+        high_resolution_ticks(high_resolution_ticks) {}
+
+  const uint64_t request_sequence;
+  const int document_node_id;
+  const std::string document_token;
+  const a11y_recorder::PresentationWidgetIdentity widget;
+  const bool high_resolution_ticks;
+
+ private:
+  friend class base::RefCountedThreadSafe<RecorderPresentationRequestFacts>;
+  ~RecorderPresentationRequestFacts() = default;
+};
+
+static int64_t RecorderTimeTicksMicroseconds(base::TimeTicks recorder_time) {
+  return recorder_time.is_null()
+             ? 0
+             : (recorder_time - base::TimeTicks()).InMicroseconds();
+}
+
+static const char* RecorderDidNotSwapReasonName(
+    cc::SwapPromise::DidNotSwapReason recorder_reason) {
+  switch (recorder_reason) {
+    case cc::SwapPromise::SWAP_FAILS:
+      return "swap-fails";
+    case cc::SwapPromise::COMMIT_FAILS:
+      return "commit-fails";
+    case cc::SwapPromise::COMMIT_NO_UPDATE:
+      return "commit-no-update";
+    case cc::SwapPromise::ACTIVATION_FAILS:
+      return "activation-fails";
+  }
+  return "unknown";
+}
+
+// Follows the compositor frame that carries one layout checkpoint's rendering
+// update. The promise breaks on the reasons ReportTimeSwapPromise treats as
+// failures, a swap that fails or a commit with no update, and otherwise stays
+// active for a later frame. DidNotSwap may run on either thread, so the count
+// of calls is atomic.
+class RecorderPresentationSwapPromise : public cc::SwapPromise {
+ public:
+  RecorderPresentationSwapPromise(
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      base::WeakPtr<WidgetBase> widget_base)
+      : facts_(std::move(facts)),
+        task_runner_(std::move(task_runner)),
+        widget_base_(std::move(widget_base)) {}
+
+  RecorderPresentationSwapPromise(const RecorderPresentationSwapPromise&) =
+      delete;
+  RecorderPresentationSwapPromise& operator=(
+      const RecorderPresentationSwapPromise&) = delete;
+
+  ~RecorderPresentationSwapPromise() override = default;
+
+  void DidActivate() override {}
+
+  void WillSwap(viz::CompositorFrameMetadata* metadata) override {
+    frame_token_ = metadata->frame_token;
+  }
+
+  void DidSwap() override {
+    const int recorder_not_swapped_count = not_swapped_count_.load();
+    a11y_recorder::RecordBlinkPresentationSwapped(
+        facts_->request_sequence, facts_->document_node_id,
+        facts_->document_token, facts_->widget, frame_token_,
+        recorder_not_swapped_count);
+    PostCrossThreadTask(
+        *task_runner_, FROM_HERE,
+        CrossThreadBindOnce(&AddFeedbackCallback, widget_base_, facts_,
+                            frame_token_, recorder_not_swapped_count));
+  }
+
+  DidNotSwapAction DidNotSwap(DidNotSwapReason reason,
+                              base::TimeTicks timestamp) override {
+    const bool recorder_kept_active =
+        reason != DidNotSwapReason::SWAP_FAILS &&
+        reason != DidNotSwapReason::COMMIT_NO_UPDATE;
+    const int recorder_index = not_swapped_count_.fetch_add(1);
+    a11y_recorder::RecordBlinkPresentationNotSwapped(
+        facts_->request_sequence, facts_->document_node_id,
+        facts_->document_token, facts_->widget,
+        RecorderDidNotSwapReasonName(reason), recorder_kept_active,
+        recorder_index, RecorderTimeTicksMicroseconds(timestamp),
+        facts_->high_resolution_ticks);
+    return recorder_kept_active ? DidNotSwapAction::KEEP_ACTIVE
+                                : DidNotSwapAction::BREAK_PROMISE;
+  }
+
+  int64_t GetTraceId() const override { return 0; }
+
+ private:
+  // Runs on the main thread, where the widget's weak pointer is bound. A
+  // widget that was closed before the task ran registers nothing, so the
+  // request ends without feedback. The widget is reached through its
+  // WidgetBase because a page popup's widget is not garbage collected.
+  static void AddFeedbackCallback(
+      base::WeakPtr<WidgetBase> widget_base,
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      uint32_t frame_token,
+      int not_swapped_count) {
+    if (!widget_base) {
+      return;
+    }
+    widget_base->AddPresentationCallback(
+        frame_token, blink::BindOnce(&RecordFeedback, std::move(facts),
+                                     frame_token, not_swapped_count));
+  }
+
+  static void RecordFeedback(
+      scoped_refptr<RecorderPresentationRequestFacts> facts,
+      uint32_t frame_token,
+      int not_swapped_count,
+      const viz::FrameTimingDetails& details) {
+    a11y_recorder::PresentationFeedbackTiming recorder_timing;
+    recorder_timing.presented_microseconds = RecorderTimeTicksMicroseconds(
+        details.presentation_feedback.timestamp);
+    recorder_timing.interval_microseconds =
+        details.presentation_feedback.interval.InMicroseconds();
+    recorder_timing.flags = details.presentation_feedback.flags;
+    recorder_timing.received_compositor_frame_microseconds =
+        RecorderTimeTicksMicroseconds(
+            details.received_compositor_frame_timestamp);
+    recorder_timing.draw_start_microseconds =
+        RecorderTimeTicksMicroseconds(details.draw_start_timestamp);
+    recorder_timing.swap_start_microseconds =
+        RecorderTimeTicksMicroseconds(details.swap_timings.swap_start);
+    recorder_timing.swap_end_microseconds =
+        RecorderTimeTicksMicroseconds(details.swap_timings.swap_end);
+    a11y_recorder::RecordBlinkPresentationFeedback(
+        facts->request_sequence, facts->document_node_id,
+        facts->document_token, facts->widget, frame_token, recorder_timing,
+        not_swapped_count, facts->high_resolution_ticks);
+  }
+
+  const scoped_refptr<RecorderPresentationRequestFacts> facts_;
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  // Copied on the compositor thread and dereferenced only on the main thread.
+  const base::WeakPtr<WidgetBase> widget_base_;
+  uint32_t frame_token_ = 0;
+  std::atomic<int> not_swapped_count_{0};
+};
+
+void RecorderRequestWidgetPresentation(WidgetBase* widget_base,
+                                       bool has_widget,
+                                       bool page_popup,
+                                       uint32_t frame_sink_client_id,
+                                       uint32_t frame_sink_id,
+                                       std::string local_root_frame_token,
+                                       bool view_composites,
+                                       bool is_main_frame_widget,
+                                       uint64_t layout_checkpoint_sequence,
+                                       int document_node_id,
+                                       std::string document_token) {
+  const bool recorder_high_resolution = base::TimeTicks::IsHighResolution();
+  if (!has_widget) {
+    a11y_recorder::BeginBlinkPresentationRequest(
+        document_node_id, std::move(document_token),
+        layout_checkpoint_sequence,
+        a11y_recorder::PresentationWidgetIdentity{}, "no-widget", -1, false,
+        recorder_high_resolution);
+    return;
+  }
+  a11y_recorder::PresentationWidgetIdentity recorder_widget;
+  recorder_widget.present = true;
+  recorder_widget.page_popup = page_popup;
+  recorder_widget.frame_sink_client_id = frame_sink_client_id;
+  recorder_widget.frame_sink_id = frame_sink_id;
+  recorder_widget.local_root_frame_token = std::move(local_root_frame_token);
+  cc::LayerTreeHost* recorder_host =
+      widget_base ? widget_base->LayerTreeHost() : nullptr;
+  const bool recorder_composites = view_composites && recorder_host;
+  const uint64_t recorder_request_sequence =
+      a11y_recorder::BeginBlinkPresentationRequest(
+          document_node_id, document_token, layout_checkpoint_sequence,
+          recorder_widget, recorder_composites ? "" : "not-compositing",
+          recorder_composites ? recorder_host->SourceFrameNumber() : -1,
+          is_main_frame_widget, recorder_high_resolution);
+  if (recorder_request_sequence == 0) {
+    return;
+  }
+  recorder_host->QueueSwapPromise(
+      std::make_unique<RecorderPresentationSwapPromise>(
+          base::MakeRefCounted<RecorderPresentationRequestFacts>(
+              recorder_request_sequence, document_node_id,
+              std::move(document_token), std::move(recorder_widget),
+              recorder_high_resolution),
+          recorder_host->GetTaskRunnerProvider()->MainThreadTaskRunner(),
+          widget_base->GetWeakPtr()));
+}
+
+void WebFrameWidgetImpl::RecorderRequestPresentationEvidence(
+    uint64_t layout_checkpoint_sequence,
+    int document_node_id,
+    std::string document_token) {
+  WebLocalFrameImpl* recorder_local_root = LocalRootImpl();
+  const bool recorder_has_root =
+      recorder_local_root && recorder_local_root->GetFrame();
+  RecorderRequestWidgetPresentation(
+      widget_base_.get(), recorder_has_root, false,
+      frame_sink_id_.client_id(), frame_sink_id_.sink_id(),
+      recorder_has_root
+          ? recorder_local_root->GetFrame()->GetLocalFrameToken().ToString()
+          : std::string(),
+      recorder_has_root && View()->does_composite(), ForMainFrame(),
+      layout_checkpoint_sequence,
+      document_node_id, std::move(document_token));
+}
+
+"""
+STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK = """\
 // Recorder evidence: the facts every record of one presentation request
 // repeats. The swap promise and the presentation callback share them across
 // the main and compositor threads, so they never change once made.
@@ -9447,12 +13962,55 @@ void WebFrameWidgetImpl::RecorderRequestPresentationEvidence(
 """
 
 
+BLINK_PRESENTATION_FREE_DECLARATION_ANCHOR = (
+    "\nclass CORE_EXPORT WebFrameWidgetImpl\n"
+)
+BLINK_PRESENTATION_FREE_DECLARATION = """
+// Recorder evidence: records a presentation request for the compositor frame
+// that carries a layout checkpoint's or change set's rendering update, and
+// queues a swap promise that follows that frame when the widget composites. A
+// frame widget's request names its frame sink; a page popup's widget is not
+// told its frame sink, so its request names only its frame. Defined in
+// web_frame_widget_impl.cc.
+CORE_EXPORT void RecorderRequestWidgetPresentation(
+    WidgetBase* widget_base,
+    bool has_widget,
+    bool page_popup,
+    uint32_t frame_sink_client_id,
+    uint32_t frame_sink_id,
+    std::string local_root_frame_token,
+    bool view_composites,
+    bool is_main_frame_widget,
+    uint64_t layout_checkpoint_sequence,
+    int document_node_id,
+    std::string document_token);
+
+// Recorder evidence: when the frame is in a page popup, such as the list of an
+// open select, requests the presentation from the popup's widget and returns
+// true; otherwise returns false. Defined in web_page_popup_impl.cc.
+CORE_EXPORT bool RecorderRequestPagePopupPresentation(
+    LocalFrame& frame,
+    uint64_t layout_checkpoint_sequence,
+    int document_node_id,
+    const std::string& document_token);
+"""
+
+
 def patch_blink_web_frame_widget_header(path: Path) -> None:
     """Declares the presentation request and befriends its swap promise."""
     text = read_source(path)
     text = add_includes_after(
         text, '#include "base/time/time.h"', ("#include <string>",), path
     )
+    # Protocol 0.43: the widget-level request a page popup shares.
+    if BLINK_PRESENTATION_FREE_DECLARATION not in text:
+        text = replace_once(
+            text,
+            BLINK_PRESENTATION_FREE_DECLARATION_ANCHOR,
+            BLINK_PRESENTATION_FREE_DECLARATION
+            + BLINK_PRESENTATION_FREE_DECLARATION_ANCHOR,
+            path,
+        )
     if BLINK_PRESENTATION_WIDGET_HEADER_DECLARATION not in text:
         text = replace_once(
             text,
@@ -9472,6 +14030,276 @@ def patch_blink_web_frame_widget_header(path: Path) -> None:
     write_patched(path, text)
 
 
+# Recreation input (docs/architecture/page-recreation.md, "Input refused"):
+# under the recreation switch the page takes no input but the right-click
+# that opens the context menu with Inspect, and the events DevTools' overlay
+# takes for its element picker. On the compositor thread, every event that
+# is not a mouse event is dropped, before any scroll, pinch, or touch is
+# handled, and mouse events go to the main thread unhandled, so no
+# scrollbar is dragged there. On the main thread, after the DevTools
+# overlay has had the event, the right button's context menu event is shown
+# and every other event is suppressed.
+BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/platform/widget/input/'
+    'input_handler_proxy.h"'
+)
+BLINK_INPUT_HANDLER_PROXY_ANCHOR = """\
+  const WebInputEvent& event = event_with_callback->event();
+  if (event.IsGestureScroll() &&
+"""
+STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+  const WebInputEvent& event = event_with_callback->event();
+  // Windows A11y Recorder: a recreation takes no input on this thread. A
+  // mouse event goes to the main thread, which shows the context menu for
+  // the right button and suppresses the rest; every other event is dropped.
+  if (a11y_recorder::IsRecreationMode()) {
+    return WebInputEvent::IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE
+                                                            : DROP_EVENT;
+  }
+  if (event.IsGestureScroll() &&
+"""
+STAGE_0172_BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+  const WebInputEvent& event = event_with_callback->event();
+  // Windows A11y Recorder: a recreation takes no input on this thread. A
+  // mouse event goes to the main thread, which shows the context menu for
+  // the right button and suppresses the rest; every other event is dropped.
+  // A process showing a browser page (DevTools, the evidence panel, the
+  // browser's own pages) takes input as in any Chromium.
+  if (a11y_recorder::RecreationRefusesCompositorInput()) {
+    return WebInputEvent::IsMouseEventType(event.GetType()) ? DID_NOT_HANDLE
+                                                            : DROP_EVENT;
+  }
+  if (event.IsGestureScroll() &&
+"""
+STAGE_6A83_BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+  const WebInputEvent& event = event_with_callback->event();
+  // Windows A11y Recorder: a recreation takes no input on this thread but
+  // its scrollbars'. A mouse event is seen by cc's scrollbar controller, as
+  // in any Chromium, and then goes to the main thread, which shows the
+  // context menu for the right button and suppresses the rest; the scroll
+  // gestures cc makes for a scrollbar are handled; every other event, the
+  // wheel, keys, touch, and other gestures, is dropped. A process showing a
+  // browser page (DevTools, the evidence panel, the browser's own pages)
+  // takes input as in any Chromium.
+  if (a11y_recorder::RecreationRefusesCompositorInput() &&
+      !WebInputEvent::IsMouseEventType(event.GetType()) &&
+      !(event.IsGestureScroll() &&
+        static_cast<const WebGestureEvent&>(event).SourceDevice() ==
+            WebGestureDevice::kScrollbar)) {
+    return DROP_EVENT;
+  }
+  if (event.IsGestureScroll() &&
+"""
+BLINK_INPUT_HANDLER_PROXY_HOOK = """\
+  const WebInputEvent& event = event_with_callback->event();
+  // Windows A11y Recorder: a recreation takes no input on this thread but
+  // its scrollbars' and the wheel's scrolling. A mouse event is seen by cc's
+  // scrollbar controller, as in any Chromium, and then goes to the main
+  // thread, which shows the context menu for the right button and
+  // suppresses the rest. A wheel event is dropped, so the page sees none,
+  // and the browser, given no consumer, sends its scroll gestures, of the
+  // touchpad device. Those, and the scroll gestures cc makes for a
+  // scrollbar, are handled; every other event, keys, touch, pinches, and
+  // other gestures, is dropped. A process showing a browser page (DevTools,
+  // the evidence panel, the browser's own pages) takes input as in any
+  // Chromium.
+  if (a11y_recorder::RecreationRefusesCompositorInput() &&
+      !WebInputEvent::IsMouseEventType(event.GetType()) &&
+      !(event.IsGestureScroll() &&
+        (static_cast<const WebGestureEvent&>(event).SourceDevice() ==
+             WebGestureDevice::kScrollbar ||
+         static_cast<const WebGestureEvent&>(event).SourceDevice() ==
+             WebGestureDevice::kTouchpad))) {
+    return DROP_EVENT;
+  }
+  if (event.IsGestureScroll() &&
+"""
+BLINK_PLATFORM_BUILD_TARGET = 'component("platform") {'
+BLINK_PLATFORM_DEP = '    "//chromium/recorder_bridge",'
+BLINK_WIDGET_INPUT_ANCHOR = """\
+  base::AutoReset<const WebInputEvent*> current_event_change(
+      &CurrentInputEvent::current_input_event_, &input_event);
+  UIEventWithKeyState::ClearNewTabModifierSetFromIsolatedWorld();
+"""
+STAGE_045_BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+
+  // Windows A11y Recorder: a recreation is a snapshot in time and takes no
+  // input but the right-click that opens the context menu with Inspect. The
+  // DevTools overlay, for its element picker, has had the event above. The
+  // menu is shown on the button event the page's setting names, as
+  // HandleMouseDown and HandleMouseUp show it. The page receives only the
+  // contextmenu event, which no page script runs to see.
+  if (a11y_recorder::IsRecreationMode()) {
+    if (WebInputEvent::IsMouseEventType(input_event.GetType())) {
+      const auto& recorder_mouse = static_cast<const WebMouseEvent&>(input_event);
+      const WebInputEvent::Type recorder_menu_type =
+          GetPage()->GetSettings().GetShowContextMenuOnMouseUp()
+              ? WebInputEvent::Type::kMouseUp
+              : WebInputEvent::Type::kMouseDown;
+      if (recorder_mouse.button == WebMouseEvent::Button::kRight &&
+          input_event.GetType() == recorder_menu_type) {
+        MouseContextMenu(recorder_mouse);
+        return WebInputEventResult::kHandledSystem;
+      }
+    }
+    return WebInputEventResult::kHandledSuppressed;
+  }
+"""
+
+STAGE_0172_BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+
+  // Windows A11y Recorder: a recreation is a snapshot in time and takes no
+  // input but the right-click that opens the context menu with Inspect. The
+  // DevTools overlay, for its element picker, has had the event above. The
+  // menu is shown on the button event the page's setting names, as
+  // HandleMouseDown and HandleMouseUp show it. The page receives only the
+  // contextmenu event, which no page script runs to see. A browser page
+  // (DevTools, the evidence panel, the browser's own pages) takes input as
+  // in any Chromium.
+  if (a11y_recorder::IsRecreationMode() &&
+      !(LocalRootImpl()->GetFrame() &&
+        LocalRootImpl()->GetFrame()->GetDocument() &&
+        a11y_recorder::IsRecreationBrowserPageScheme(
+            String(LocalRootImpl()->GetFrame()->GetDocument()->Url().Protocol())
+                .Utf8()))) {
+    if (WebInputEvent::IsMouseEventType(input_event.GetType())) {
+      const auto& recorder_mouse = static_cast<const WebMouseEvent&>(input_event);
+      const WebInputEvent::Type recorder_menu_type =
+          GetPage()->GetSettings().GetShowContextMenuOnMouseUp()
+              ? WebInputEvent::Type::kMouseUp
+              : WebInputEvent::Type::kMouseDown;
+      if (recorder_mouse.button == WebMouseEvent::Button::kRight &&
+          input_event.GetType() == recorder_menu_type) {
+        MouseContextMenu(recorder_mouse);
+        return WebInputEventResult::kHandledSystem;
+      }
+    }
+    return WebInputEventResult::kHandledSuppressed;
+  }
+"""
+
+
+STAGE_6A83_BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+
+  // Windows A11y Recorder: a recreation is a snapshot in time and takes no
+  // input but the right-click that opens the context menu with Inspect. The
+  // DevTools overlay, for its element picker, has had the event above. The
+  // menu is shown on the button event the page's setting names, as
+  // HandleMouseDown and HandleMouseUp show it. The page receives only the
+  // contextmenu event, which no page script runs to see. A scroll gesture
+  // cc made for a scrollbar, which cc leaves to this thread when the scroll
+  // must be made here, is handled as in any Chromium, so the scrollbars
+  // work. A browser page
+  // (DevTools, the evidence panel, the browser's own pages) takes input as
+  // in any Chromium.
+  if (a11y_recorder::IsRecreationMode() &&
+      !(input_event.IsGestureScroll() &&
+        static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==
+            WebGestureDevice::kScrollbar) &&
+      !(LocalRootImpl()->GetFrame() &&
+        LocalRootImpl()->GetFrame()->GetDocument() &&
+        a11y_recorder::IsRecreationBrowserPageScheme(
+            String(LocalRootImpl()->GetFrame()->GetDocument()->Url().Protocol())
+                .Utf8()))) {
+    if (WebInputEvent::IsMouseEventType(input_event.GetType())) {
+      const auto& recorder_mouse = static_cast<const WebMouseEvent&>(input_event);
+      const WebInputEvent::Type recorder_menu_type =
+          GetPage()->GetSettings().GetShowContextMenuOnMouseUp()
+              ? WebInputEvent::Type::kMouseUp
+              : WebInputEvent::Type::kMouseDown;
+      if (recorder_mouse.button == WebMouseEvent::Button::kRight &&
+          input_event.GetType() == recorder_menu_type) {
+        MouseContextMenu(recorder_mouse);
+        return WebInputEventResult::kHandledSystem;
+      }
+    }
+    return WebInputEventResult::kHandledSuppressed;
+  }
+"""
+
+
+BLINK_WIDGET_INPUT_HOOK = BLINK_WIDGET_INPUT_ANCHOR + """\
+
+  // Windows A11y Recorder: a recreation is a snapshot in time and takes no
+  // input but the right-click that opens the context menu with Inspect. The
+  // DevTools overlay, for its element picker, has had the event above. The
+  // menu is shown on the button event the page's setting names, as
+  // HandleMouseDown and HandleMouseUp show it. The page receives only the
+  // contextmenu event, which no page script runs to see. A scroll gesture
+  // of a scrollbar or of the wheel (the touchpad device), which cc leaves
+  // to this thread when the scroll must be made here, is handled as in any
+  // Chromium, so the scrollbars and the wheel scroll. A browser page
+  // (DevTools, the evidence panel, the browser's own pages) takes input as
+  // in any Chromium.
+  if (a11y_recorder::IsRecreationMode() &&
+      !(input_event.IsGestureScroll() &&
+        (static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==
+             WebGestureDevice::kScrollbar ||
+         static_cast<const WebGestureEvent&>(input_event).SourceDevice() ==
+             WebGestureDevice::kTouchpad)) &&
+      !(LocalRootImpl()->GetFrame() &&
+        LocalRootImpl()->GetFrame()->GetDocument() &&
+        a11y_recorder::IsRecreationBrowserPageScheme(
+            String(LocalRootImpl()->GetFrame()->GetDocument()->Url().Protocol())
+                .Utf8()))) {
+    if (WebInputEvent::IsMouseEventType(input_event.GetType())) {
+      const auto& recorder_mouse = static_cast<const WebMouseEvent&>(input_event);
+      const WebInputEvent::Type recorder_menu_type =
+          GetPage()->GetSettings().GetShowContextMenuOnMouseUp()
+              ? WebInputEvent::Type::kMouseUp
+              : WebInputEvent::Type::kMouseDown;
+      if (recorder_mouse.button == WebMouseEvent::Button::kRight &&
+          input_event.GetType() == recorder_menu_type) {
+        MouseContextMenu(recorder_mouse);
+        return WebInputEventResult::kHandledSystem;
+      }
+    }
+    return WebInputEventResult::kHandledSuppressed;
+  }
+"""
+
+
+def patch_blink_input_handler_proxy(path: Path) -> None:
+    """Drops a recreation's input on the compositor thread."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_INPUT_HANDLER_PROXY_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (STAGE_045_BLINK_INPUT_HANDLER_PROXY_HOOK, BLINK_INPUT_HANDLER_PROXY_HOOK),
+            (STAGE_0172_BLINK_INPUT_HANDLER_PROXY_HOOK, BLINK_INPUT_HANDLER_PROXY_HOOK),
+            (STAGE_6A83_BLINK_INPUT_HANDLER_PROXY_HOOK, BLINK_INPUT_HANDLER_PROXY_HOOK),
+        ),
+        path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_INPUT_HANDLER_PROXY_ANCHOR, BLINK_INPUT_HANDLER_PROXY_HOOK, path
+    )
+    write_patched(path, text)
+
+
+def patch_blink_platform_build(path: Path) -> None:
+    """Lets the Blink platform component include the recorder bridge."""
+    text = read_source(path)
+    target_index = text.find(BLINK_PLATFORM_BUILD_TARGET)
+    if target_index < 0:
+        raise RuntimeError(f"{path}: Blink platform target not found")
+    target_end = text.find("\n}", target_index)
+    deps = text.find("  deps = [\n", target_index)
+    if deps < 0 or (target_end >= 0 and deps > target_end):
+        raise RuntimeError(f"{path}: Blink platform deps list not found")
+    list_end = text.find("\n  ]", deps)
+    if BLINK_PLATFORM_DEP in text[deps:list_end]:
+        return
+    opening = "  deps = [\n"
+    text = text[:deps] + text[deps:].replace(
+        opening, opening + f"{BLINK_PLATFORM_DEP}\n", 1
+    )
+    write_patched(path, text)
+
+
 def patch_blink_web_frame_widget(path: Path) -> None:
     """Adds the presentation swap promise and the request that queues it."""
     text = read_source(path)
@@ -9482,12 +14310,48 @@ def patch_blink_web_frame_widget(path: Path) -> None:
         BLINK_PRESENTATION_WIDGET_INCLUDES,
         path,
     )
+    # A tree patched before protocol 0.43 holds the swap promise that reaches
+    # its widget as a WebFrameWidgetImpl; it is replaced whole.
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_042_BLINK_PRESENTATION_WIDGET_BLOCK,
+                BLINK_PRESENTATION_WIDGET_BLOCK,
+            ),
+        ),
+        path,
+    )
+    if (
+        BLINK_PRESENTATION_WIDGET_MARKER in text
+        and BLINK_PRESENTATION_WIDGET_BLOCK not in text
+        and blink_registered_presentation_widget_block() not in text
+    ):
+        raise RuntimeError(
+            f"{path}: the presentation swap promise is not recognised"
+        )
     text = insert_before_once(
         text,
         BLINK_PRESENTATION_WIDGET_ANCHOR,
         BLINK_PRESENTATION_WIDGET_BLOCK,
         BLINK_PRESENTATION_WIDGET_MARKER,
         path,
+    )
+    for recorder_anchor in BLINK_COMPOSITOR_WIDGET_HOOKS:
+        text = apply_cookie_hook(
+            text, recorder_anchor, blink_compositor_widget_hook(recorder_anchor), path
+        )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (STAGE_045_BLINK_WIDGET_INPUT_HOOK, BLINK_WIDGET_INPUT_HOOK),
+            (STAGE_0172_BLINK_WIDGET_INPUT_HOOK, BLINK_WIDGET_INPUT_HOOK),
+            (STAGE_6A83_BLINK_WIDGET_INPUT_HOOK, BLINK_WIDGET_INPUT_HOOK),
+        ),
+        path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_WIDGET_INPUT_ANCHOR, BLINK_WIDGET_INPUT_HOOK, path
     )
     write_patched(path, text)
 
@@ -11384,6 +16248,3334 @@ def patch_network_service_build(path: Path) -> None:
     write_patched(path, text)
 
 
+# Protocol 0.48 (slice 4b, "The frame's moment, held", sub-step 1): the
+# compositor's drawn values. See docs/architecture/page-recreation.md.
+CC_LAYER_TREE_HOST_IMPL_OWN_INCLUDE = '#include "cc/trees/layer_tree_host_impl.h"'
+CC_BUILD_DEP = '    "//chromium/recorder_bridge",'
+CC_BUILD_TARGET = 'cc_component("cc") {'
+
+CC_COMPOSITOR_FRAME_HELPERS_ANCHOR = (
+    "std::optional<SubmitInfo> LayerTreeHostImpl::DrawLayers(FrameData* frame) {\n"
+)
+# The helpers as protocol 0.48 part 1a inserted them, replaced in place.
+CC_COMPOSITOR_FRAME_HELPERS_1A = """\
+// Windows A11y Recorder (protocol 0.48): the elements each compositor has
+// animated, by property, and the drawn values of the active tree read for
+// them at each submitted frame. Used on the compositor thread alone.
+namespace {
+
+enum RecorderAnimatedProperty {
+  kRecorderAnimatedTransform = 0,
+  kRecorderAnimatedOpacity = 1,
+  kRecorderAnimatedFilter = 2,
+  kRecorderAnimatedBackdropFilter = 3,
+};
+
+std::map<int, std::set<std::pair<ElementId::InternalValue, int>>>&
+RecorderAnimatedElements() {
+  static base::NoDestructor<
+      std::map<int, std::set<std::pair<ElementId::InternalValue, int>>>>
+      elements;
+  return *elements;
+}
+
+void RecorderTrackAnimatedElement(int host_id,
+                                  ElementId element_id,
+                                  int property) {
+  if (!a11y_recorder::GetProcessRecorderClient() || !element_id) {
+    return;
+  }
+  RecorderAnimatedElements()[host_id].insert(
+      {element_id.GetInternalValue(), property});
+}
+
+const char* RecorderFilterTypeName(FilterOperation::FilterType type) {
+  switch (type) {
+    case FilterOperation::GRAYSCALE:
+      return "grayscale";
+    case FilterOperation::SEPIA:
+      return "sepia";
+    case FilterOperation::SATURATE:
+      return "saturate";
+    case FilterOperation::HUE_ROTATE:
+      return "hue-rotate";
+    case FilterOperation::INVERT:
+      return "invert";
+    case FilterOperation::BRIGHTNESS:
+      return "brightness";
+    case FilterOperation::CONTRAST:
+      return "contrast";
+    case FilterOperation::OPACITY:
+      return "opacity";
+    case FilterOperation::BLUR:
+      return "blur";
+    case FilterOperation::DROP_SHADOW:
+      return "drop-shadow";
+    case FilterOperation::COLOR_MATRIX:
+      return "color-matrix";
+    case FilterOperation::ZOOM:
+      return "zoom";
+    case FilterOperation::REFERENCE:
+      return "reference";
+    case FilterOperation::SATURATING_BRIGHTNESS:
+      return "saturating-brightness";
+    case FilterOperation::ALPHA_THRESHOLD:
+      return "alpha-threshold";
+    case FilterOperation::OFFSET:
+      return "offset";
+  }
+  return "unknown";
+}
+
+// Each operation's numbers, as cc holds them: an amount; a drop shadow's
+// standard deviation, offset x and y, and color as four floats; a color
+// matrix's 20 entries; a zoom's amount and inset; an offset's x and y; an
+// alpha threshold's rectangles as x, y, width, and height. A reference
+// filter, an SVG filter, has no numbers here.
+std::vector<a11y_recorder::CompositorFilterOperation> RecorderFilters(
+    const FilterOperations& filters) {
+  std::vector<a11y_recorder::CompositorFilterOperation> operations;
+  for (size_t index = 0; index < filters.size(); ++index) {
+    const FilterOperation& filter = filters.at(index);
+    a11y_recorder::CompositorFilterOperation operation;
+    operation.type = RecorderFilterTypeName(filter.type());
+    switch (filter.type()) {
+      case FilterOperation::DROP_SHADOW: {
+        const SkColor4f color = filter.drop_shadow_color();
+        operation.numbers = {filter.amount(),
+                             static_cast<double>(filter.offset().x()),
+                             static_cast<double>(filter.offset().y()),
+                             color.fR,
+                             color.fG,
+                             color.fB,
+                             color.fA};
+        break;
+      }
+      case FilterOperation::COLOR_MATRIX:
+        for (const float entry : filter.matrix()) {
+          operation.numbers.push_back(entry);
+        }
+        break;
+      case FilterOperation::ZOOM:
+        operation.numbers = {filter.amount(),
+                             static_cast<double>(filter.zoom_inset())};
+        break;
+      case FilterOperation::OFFSET:
+        operation.numbers = {static_cast<double>(filter.offset().x()),
+                             static_cast<double>(filter.offset().y())};
+        break;
+      case FilterOperation::ALPHA_THRESHOLD:
+        for (const gfx::Rect& rect : filter.shape()) {
+          operation.numbers.push_back(rect.x());
+          operation.numbers.push_back(rect.y());
+          operation.numbers.push_back(rect.width());
+          operation.numbers.push_back(rect.height());
+        }
+        break;
+      case FilterOperation::REFERENCE:
+        break;
+      default:
+        operation.numbers = {filter.amount()};
+        break;
+    }
+    operations.push_back(std::move(operation));
+  }
+  return operations;
+}
+
+void RecorderRecordCompositorFrame(int host_id,
+                                   const LayerTreeImpl* tree,
+                                   const viz::BeginFrameArgs& args,
+                                   uint32_t frame_token) {
+  if (!a11y_recorder::GetProcessRecorderClient() || !tree) {
+    return;
+  }
+  const PropertyTrees* trees = tree->property_trees();
+  std::vector<a11y_recorder::CompositorDrawnValue> values;
+  auto animated = RecorderAnimatedElements().find(host_id);
+  if (animated != RecorderAnimatedElements().end()) {
+    for (const auto& [internal_id, property] : animated->second) {
+      const ElementId element_id(internal_id);
+      a11y_recorder::CompositorDrawnValue value;
+      value.element_id = internal_id;
+      if (property == kRecorderAnimatedTransform) {
+        value.property = "transform";
+        const TransformNode* node =
+            trees->transform_tree().FindNodeFromElementId(element_id);
+        value.present = node != nullptr;
+        if (node) {
+          for (unsigned row = 0; row < 4; ++row) {
+            for (unsigned column = 0; column < 4; ++column) {
+              value.numbers.push_back(node->local.rc(row, column));
+            }
+          }
+        }
+      } else {
+        value.property = property == kRecorderAnimatedOpacity ? "opacity"
+                         : property == kRecorderAnimatedFilter
+                             ? "filter"
+                             : "backdrop-filter";
+        const EffectNode* node =
+            trees->effect_tree().FindNodeFromElementId(element_id);
+        value.present = node != nullptr;
+        if (node && property == kRecorderAnimatedOpacity) {
+          value.numbers = {node->opacity};
+        } else if (node && property == kRecorderAnimatedFilter) {
+          value.filters = RecorderFilters(node->filters);
+        } else if (node) {
+          value.filters = RecorderFilters(node->backdrop_filters);
+        }
+      }
+      values.push_back(std::move(value));
+    }
+  }
+  // Every scroll node's offset as drawn, so a scroll the compositor made
+  // itself is recorded; the bridge writes only the offsets that changed.
+  const ScrollTree& scroll_tree = trees->scroll_tree();
+  for (const ScrollNode& node : scroll_tree.nodes()) {
+    if (!node.element_id) {
+      continue;
+    }
+    const gfx::PointF offset = scroll_tree.current_scroll_offset(node.element_id);
+    a11y_recorder::CompositorDrawnValue value;
+    value.element_id = node.element_id.GetInternalValue();
+    value.property = "scroll-offset";
+    value.numbers = {offset.x(), offset.y()};
+    values.push_back(std::move(value));
+  }
+  a11y_recorder::RecordCompositorFrame(
+      host_id, frame_token,
+      args.frame_time.is_null()
+          ? 0
+          : (args.frame_time - base::TimeTicks()).InMicroseconds(),
+      tree->source_frame_number(), base::TimeTicks::IsHighResolution(),
+      std::move(values));
+}
+
+}  // namespace
+
+"""
+
+# Part 1b: the compositor progress each native paint worklet's drawn record
+# was painted with. As part 1b inserted them; part 1c times the results hook
+# (CC_PAINT_WORKLET_HELPERS, below).
+CC_PAINT_WORKLET_HELPERS_1B = """\
+// Windows A11y Recorder (protocol 0.48): the compositor progress each paint
+// worklet result was painted with, by its record's buffer, for each
+// compositor. Noted as the results reach the pending tree
+// (ClientLayerTreeHostImpl::OnPaintWorkletResultsReady), and read for the
+// active tree's records at each submitted frame. Used on the compositor
+// thread alone.
+namespace {
+
+struct RecorderPaintWorkletResult {
+  explicit RecorderPaintWorkletResult(const PaintWorkletJob& job)
+      : record(job.output()), values(job.GetAnimatedPropertyValues()) {}
+  // Holds the buffer, so that its address names no other record while the
+  // result is noted.
+  PaintRecord record;
+  PaintWorkletJob::AnimatedPropertyValues values;
+};
+
+using RecorderPaintWorkletResultMap =
+    std::map<const PaintOpBuffer*, RecorderPaintWorkletResult>;
+
+std::map<int, RecorderPaintWorkletResultMap>& RecorderPaintWorkletResults() {
+  static base::NoDestructor<std::map<int, RecorderPaintWorkletResultMap>>
+      results;
+  return *results;
+}
+
+// The paint worklet properties of each compositor's last recorded frame.
+std::map<int, std::set<std::pair<ElementId::InternalValue, int>>>&
+RecorderPaintWorkletKeys() {
+  static base::NoDestructor<
+      std::map<int, std::set<std::pair<ElementId::InternalValue, int>>>>
+      keys;
+  return *keys;
+}
+
+const char* RecorderPaintWorkletProgressName(int native_property_type) {
+  switch (static_cast<PaintWorkletInput::NativePropertyType>(
+      native_property_type)) {
+    case PaintWorkletInput::NativePropertyType::kBackgroundColor:
+      return "background-color-progress";
+    case PaintWorkletInput::NativePropertyType::kClipPath:
+      return "clip-path-progress";
+    case PaintWorkletInput::NativePropertyType::kInvalid:
+      return nullptr;
+  }
+  return nullptr;
+}
+
+// Adds, for each native paint worklet property of the active tree's
+// records, the compositor progress its record was painted with, and, for
+// each one no longer drawn, its absence. Results no longer held by the
+// active or the pending tree are let go.
+void RecorderReadPaintWorkletProgress(
+    int host_id,
+    const LayerTreeImpl* active_tree,
+    const LayerTreeImpl* pending_tree,
+    std::vector<a11y_recorder::CompositorDrawnValue>* values) {
+  RecorderPaintWorkletResultMap& noted = RecorderPaintWorkletResults()[host_id];
+  std::set<std::pair<ElementId::InternalValue, int>>& recorded =
+      RecorderPaintWorkletKeys()[host_id];
+  std::set<const PaintOpBuffer*> in_use;
+  std::set<std::pair<ElementId::InternalValue, int>> drawn;
+  for (const LayerTreeImpl* tree : {active_tree, pending_tree}) {
+    if (!tree) {
+      continue;
+    }
+    for (const PictureLayerImpl* layer :
+         tree->picture_layers_with_paint_worklets()) {
+      for (const auto& [input, entry] : layer->GetPaintWorkletRecordMap()) {
+        if (!entry.second) {
+          continue;
+        }
+        const PaintOpBuffer* buffer = &entry.second->buffer();
+        in_use.insert(buffer);
+        if (tree != active_tree) {
+          continue;
+        }
+        const auto result = noted.find(buffer);
+        if (result == noted.end()) {
+          continue;
+        }
+        for (const PaintWorkletInput::PropertyKey& key :
+             input->GetPropertyKeys()) {
+          if (!key.native_property_type || !key.element_id) {
+            continue;
+          }
+          const int type = static_cast<int>(*key.native_property_type);
+          const char* name = RecorderPaintWorkletProgressName(type);
+          const auto drawn_key =
+              std::make_pair(key.element_id.GetInternalValue(), type);
+          if (!name || !drawn.insert(drawn_key).second) {
+            continue;
+          }
+          a11y_recorder::CompositorDrawnValue value;
+          value.element_id = drawn_key.first;
+          value.property = name;
+          const auto progress = result->second.values.find(key);
+          if (progress != result->second.values.end() &&
+              progress->second.float_value) {
+            value.numbers = {*progress->second.float_value};
+          }
+          values->push_back(std::move(value));
+        }
+      }
+    }
+  }
+  for (const auto& [element_id, type] : recorded) {
+    if (drawn.contains({element_id, type})) {
+      continue;
+    }
+    a11y_recorder::CompositorDrawnValue value;
+    value.element_id = element_id;
+    value.property = RecorderPaintWorkletProgressName(type);
+    value.present = false;
+    values->push_back(std::move(value));
+  }
+  recorded = std::move(drawn);
+  std::erase_if(noted, [&in_use](const auto& entry) {
+    return !in_use.contains(entry.first);
+  });
+}
+
+}  // namespace
+
+void RecorderNotePaintWorkletResults(int host_id,
+                                     const PaintWorkletJobMap& results);
+
+void RecorderNotePaintWorkletResults(int host_id,
+                                     const PaintWorkletJobMap& results) {
+  if (!a11y_recorder::GetProcessRecorderClient()) {
+    return;
+  }
+  RecorderPaintWorkletResultMap& noted = RecorderPaintWorkletResults()[host_id];
+  for (const auto& entry : results) {
+    for (const PaintWorkletJob& job : entry.second->data) {
+      RecorderPaintWorkletResult result(job);
+      const PaintOpBuffer* buffer = &result.record.buffer();
+      noted.insert_or_assign(buffer, std::move(result));
+    }
+  }
+}
+
+"""
+
+CC_PAINT_WORKLET_RESULTS_START = """\
+  if (!a11y_recorder::GetProcessRecorderClient()) {
+    return;
+  }
+  RecorderPaintWorkletResultMap& noted = RecorderPaintWorkletResults()[host_id];
+  for (const auto& entry : results) {
+"""
+CC_PAINT_WORKLET_HELPERS = CC_PAINT_WORKLET_HELPERS_1B.replace(
+    CC_PAINT_WORKLET_RESULTS_START,
+    CC_PAINT_WORKLET_RESULTS_START.replace(
+        "  }\n  RecorderPaintWorkletResultMap",
+        '  }\n  A11Y_RECORDER_HOOK_COST("hook:paint-worklet-results");\n'
+        "  RecorderPaintWorkletResultMap",
+    ),
+)
+
+# Part 1c: the frame each animated paint image is drawn at on the active
+# tree, as the image animation controller holds it.
+CC_IMAGE_FRAME_HELPERS = """\
+// Windows A11y Recorder (protocol 0.48): the paint images whose frame each
+// compositor's last recorded frame named. Used on the compositor thread
+// alone.
+namespace {
+
+std::map<int, std::set<PaintImage::Id>>& RecorderImageFrameIds() {
+  static base::NoDestructor<std::map<int, std::set<PaintImage::Id>>> ids;
+  return *ids;
+}
+
+// Adds, for each paint image the image animation controller holds, the frame
+// the active tree draws, and, for each one no longer held, its absence.
+void RecorderReadImageFrames(
+    int host_id,
+    const ImageAnimationController* images,
+    std::vector<a11y_recorder::CompositorDrawnValue>* values) {
+  std::set<PaintImage::Id>& recorded = RecorderImageFrameIds()[host_id];
+  std::set<PaintImage::Id> held;
+  if (images) {
+    for (const auto& [paint_image_id, frame_index] :
+         images->RecorderActiveFrameIndexes()) {
+      if (paint_image_id < 0 || !held.insert(paint_image_id).second) {
+        continue;
+      }
+      a11y_recorder::CompositorDrawnValue value;
+      value.element_id = static_cast<uint64_t>(paint_image_id);
+      value.property = "image-frame";
+      value.numbers = {static_cast<double>(frame_index)};
+      values->push_back(std::move(value));
+    }
+  }
+  for (const PaintImage::Id paint_image_id : recorded) {
+    if (held.contains(paint_image_id)) {
+      continue;
+    }
+    a11y_recorder::CompositorDrawnValue value;
+    value.element_id = static_cast<uint64_t>(paint_image_id);
+    value.property = "image-frame";
+    value.present = false;
+    values->push_back(std::move(value));
+  }
+  recorded = std::move(held);
+}
+
+}  // namespace
+
+"""
+
+CC_FRAME_SIGNATURE_1A = """\
+void RecorderRecordCompositorFrame(int host_id,
+                                   const LayerTreeImpl* tree,
+                                   const viz::BeginFrameArgs& args,
+                                   uint32_t frame_token) {
+"""
+CC_FRAME_SIGNATURE_1B = """\
+void RecorderRecordCompositorFrame(int host_id,
+                                   const LayerTreeImpl* tree,
+                                   const LayerTreeImpl* pending_tree,
+                                   const viz::BeginFrameArgs& args,
+                                   uint32_t frame_token) {
+"""
+CC_FRAME_SIGNATURE = """\
+void RecorderRecordCompositorFrame(int host_id,
+                                   const LayerTreeImpl* tree,
+                                   const LayerTreeImpl* pending_tree,
+                                   const ImageAnimationController* images,
+                                   const viz::BeginFrameArgs& args,
+                                   uint32_t frame_token) {
+"""
+CC_FRAME_CLIENT_CHECK = """\
+  if (!a11y_recorder::GetProcessRecorderClient() || !tree) {
+    return;
+  }
+"""
+CC_FRAME_SCROLL_COMMENT = """\
+  // Every scroll node's offset as drawn, so a scroll the compositor made
+"""
+# The helpers as part 1b inserted them, replaced in place.
+CC_COMPOSITOR_FRAME_HELPERS_1B = CC_PAINT_WORKLET_HELPERS_1B + (
+    CC_COMPOSITOR_FRAME_HELPERS_1A.replace(
+        CC_FRAME_SIGNATURE_1A, CC_FRAME_SIGNATURE_1B
+    ).replace(
+        CC_FRAME_SCROLL_COMMENT,
+        "  RecorderReadPaintWorkletProgress(host_id, tree, pending_tree, &values);\n"
+        + CC_FRAME_SCROLL_COMMENT,
+    )
+)
+CC_COMPOSITOR_FRAME_HELPERS = (
+    CC_PAINT_WORKLET_HELPERS
+    + CC_IMAGE_FRAME_HELPERS
+    + CC_COMPOSITOR_FRAME_HELPERS_1A.replace(
+        CC_FRAME_SIGNATURE_1A, CC_FRAME_SIGNATURE
+    )
+    .replace(
+        CC_FRAME_CLIENT_CHECK,
+        CC_FRAME_CLIENT_CHECK
+        + '  A11Y_RECORDER_HOOK_COST("hook:compositor-frame");\n',
+    )
+    .replace(
+        CC_FRAME_SCROLL_COMMENT,
+        "  RecorderReadPaintWorkletProgress(host_id, tree, pending_tree, &values);\n"
+        "  RecorderReadImageFrames(host_id, images, &values);\n"
+        + CC_FRAME_SCROLL_COMMENT,
+    )
+)
+# Protocol 0.50 (slice 4b sub-step 2b-iii): with each scroll node's offset,
+# whether the compositor scrolls it (cc::ScrollNode::is_composited) and the
+# reasons Chromium gives for repainting it on the main thread instead, as
+# a bitmask of the four cc::MainThreadRepaintReason values in their order.
+CC_FRAME_SCROLL_NUMBERS = """\
+    value.numbers = {offset.x(), offset.y()};
+"""
+CC_FRAME_SCROLL_COMPOSITED_NUMBERS = """\
+    // Protocol 0.50: whether the compositor scrolls the node, and the
+    // reasons it is repainted on the main thread instead, one bit each.
+    const MainThreadRepaintReasons& recorder_reasons =
+        node.main_thread_repaint_reasons;
+    const double recorder_reason_bits =
+        (recorder_reasons.Has(
+             MainThreadRepaintReason::kHasBackgroundAttachmentFixedObjects)
+             ? 1
+             : 0) +
+        (recorder_reasons.Has(MainThreadRepaintReason::kNotOpaqueForTextAndLCDText)
+             ? 2
+             : 0) +
+        (recorder_reasons.Has(
+             MainThreadRepaintReason::kPreferNonCompositedScrolling)
+             ? 4
+             : 0) +
+        (recorder_reasons.Has(
+             MainThreadRepaintReason::kBackgroundNeedsRepaintOnScroll)
+             ? 8
+             : 0);
+    value.numbers = {offset.x(), offset.y(), node.is_composited ? 1.0 : 0.0,
+                     recorder_reason_bits};
+"""
+if CC_COMPOSITOR_FRAME_HELPERS.count(CC_FRAME_SCROLL_NUMBERS) != 1:
+    raise RuntimeError("the compositor frame's scroll offset numbers were not found once")
+# The helpers as protocol 0.48 and 0.49 inserted them, replaced in place.
+CC_COMPOSITOR_FRAME_HELPERS_0_49 = CC_COMPOSITOR_FRAME_HELPERS
+CC_COMPOSITOR_FRAME_HELPERS = CC_COMPOSITOR_FRAME_HELPERS.replace(
+    CC_FRAME_SCROLL_NUMBERS, CC_FRAME_SCROLL_COMPOSITED_NUMBERS, 1
+)
+
+CC_DRAW_LAYERS_ANCHOR = """\
+  const auto frame_token = compositor_frame.metadata.frame_token;
+  frame->frame_token = frame_token;
+"""
+CC_DRAW_LAYERS_HOOK_1A = CC_DRAW_LAYERS_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the active tree's values as drawn
+  // in the frame about to be submitted, for a page's compositor.
+  if (!settings_.is_layer_tree_for_ui) {
+    RecorderRecordCompositorFrame(id_, active_tree(), CurrentBeginFrameArgs(),
+                                  frame_token);
+  }
+"""
+CC_DRAW_LAYERS_HOOK_1B = CC_DRAW_LAYERS_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the active tree's values as drawn
+  // in the frame about to be submitted, for a page's compositor.
+  if (!settings_.is_layer_tree_for_ui) {
+    RecorderRecordCompositorFrame(id_, active_tree(), pending_tree(),
+                                  CurrentBeginFrameArgs(), frame_token);
+  }
+"""
+CC_DRAW_LAYERS_HOOK = CC_DRAW_LAYERS_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the active tree's values as drawn
+  // in the frame about to be submitted, for a page's compositor, with each
+  // animated image's frame.
+  if (!settings_.is_layer_tree_for_ui) {
+    RecorderRecordCompositorFrame(id_, active_tree(), pending_tree(),
+                                  image_animation_controller_.get(),
+                                  CurrentBeginFrameArgs(), frame_token);
+  }
+"""
+
+CC_PRESENTED_ANCHOR = """\
+void LayerTreeHostImpl::DidPresentCompositorFrame(
+    uint32_t frame_token,
+    const viz::FrameTimingDetails& details) {
+"""
+CC_PRESENTED_HOOK = CC_PRESENTED_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the presentation of a recorded
+  // compositor frame.
+  if (!settings_.is_layer_tree_for_ui) {
+    const base::TimeTicks recorder_presented =
+        details.presentation_feedback.timestamp;
+    a11y_recorder::RecordCompositorFramePresented(
+        id_, frame_token,
+        recorder_presented.is_null()
+            ? 0
+            : (recorder_presented - base::TimeTicks()).InMicroseconds(),
+        details.presentation_feedback.failed(),
+        base::TimeTicks::IsHighResolution());
+  }
+"""
+
+# Each mutation callback, for either list, names the element animated.
+CC_MUTATED_HOOKS = (
+    (
+        """\
+void LayerTreeHostImpl::SetElementFilterMutated(
+    ElementId element_id,
+    ElementListType list_type,
+    const FilterOperations& filters) {
+""",
+        "kRecorderAnimatedFilter",
+    ),
+    (
+        """\
+void LayerTreeHostImpl::SetElementBackdropFilterMutated(
+    ElementId element_id,
+    ElementListType list_type,
+    const FilterOperations& backdrop_filters) {
+""",
+        "kRecorderAnimatedBackdropFilter",
+    ),
+    (
+        """\
+void LayerTreeHostImpl::SetElementOpacityMutated(ElementId element_id,
+                                                 ElementListType list_type,
+                                                 float opacity) {
+""",
+        "kRecorderAnimatedOpacity",
+    ),
+    (
+        """\
+void LayerTreeHostImpl::SetElementTransformMutated(
+    ElementId element_id,
+    ElementListType list_type,
+    const gfx::Transform& transform) {
+""",
+        "kRecorderAnimatedTransform",
+    ),
+)
+
+
+def cc_mutated_hook(anchor: str, property_name: str) -> str:
+    return anchor + (
+        "  // Windows A11y Recorder (protocol 0.48): an animated element.\n"
+        f"  RecorderTrackAnimatedElement(id_, element_id, {property_name});\n"
+    )
+
+
+def patch_cc_layer_tree_host_impl(path: Path) -> None:
+    """Protocol 0.48: records the compositor's drawn values at each submitted
+    frame and their presentation. See docs/architecture/page-recreation.md,
+    "Slice 4b"."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CC_LAYER_TREE_HOST_IMPL_OWN_INCLUDE,
+        (
+            BLINK_BRIDGE_INCLUDE,
+            '#include "cc/layers/picture_layer_impl.h"',
+            '#include "cc/paint/filter_operations.h"',
+        ),
+        path,
+    )
+    if "#include <set>\n" not in text:
+        text = replace_once(text, "#include <map>\n", "#include <map>\n#include <set>\n", path)
+    # A tree patched by part 1a or 1b holds its helpers and draw hook; they
+    # are replaced in place.
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (CC_COMPOSITOR_FRAME_HELPERS_1A, CC_COMPOSITOR_FRAME_HELPERS),
+            (CC_COMPOSITOR_FRAME_HELPERS_1B, CC_COMPOSITOR_FRAME_HELPERS),
+            (CC_COMPOSITOR_FRAME_HELPERS_0_49, CC_COMPOSITOR_FRAME_HELPERS),
+            (CC_DRAW_LAYERS_HOOK_1A, CC_DRAW_LAYERS_HOOK),
+            (CC_DRAW_LAYERS_HOOK_1B, CC_DRAW_LAYERS_HOOK),
+        ),
+        path,
+    )
+    if CC_COMPOSITOR_FRAME_HELPERS not in text:
+        text = insert_before_once(
+            text,
+            CC_COMPOSITOR_FRAME_HELPERS_ANCHOR,
+            CC_COMPOSITOR_FRAME_HELPERS,
+            CC_COMPOSITOR_FRAME_HELPERS,
+            path,
+        )
+    text = apply_cookie_hook(text, CC_DRAW_LAYERS_ANCHOR, CC_DRAW_LAYERS_HOOK, path)
+    text = apply_cookie_hook(text, CC_PRESENTED_ANCHOR, CC_PRESENTED_HOOK, path)
+    for anchor, property_name in CC_MUTATED_HOOKS:
+        text = apply_cookie_hook(
+            text, anchor, cc_mutated_hook(anchor, property_name), path
+        )
+    write_patched(path, text)
+
+
+CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR = (
+    "  scoped_refptr<AnimatedImageFrameIndexMap> GatherFrameIndexes() const;\n"
+)
+CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR = """\
+
+  // Windows A11y Recorder (protocol 0.48): each held paint image's frame on
+  // the active tree, the frame drawn, as GatherFrameIndexes gives the pending
+  // tree's.
+  std::vector<std::pair<PaintImage::Id, size_t>> RecorderActiveFrameIndexes()
+      const {
+    std::vector<std::pair<PaintImage::Id, size_t>> indexes;
+    indexes.reserve(animation_state_map_.size());
+    for (const auto& [paint_image_id, state] : animation_state_map_) {
+      indexes.emplace_back(paint_image_id, state.active_index());
+    }
+    return indexes;
+  }
+"""
+
+
+CC_IMAGE_ANIMATION_STATE_ANCHOR = (
+    "    size_t active_index() const { return active_index_; }\n"
+)
+CC_IMAGE_ANIMATION_STATE_HOLD = """\
+
+    // Windows A11y Recorder recreation mode ("Sub-step 2a design: animated
+    // images held"): the image is held at the frame on both trees, or at its
+    // first frame when the index is not one of its frames.
+    void RecorderHoldFrame(size_t index) {
+      if (index >= frames_.size()) {
+        index = PaintImage::kDefaultFrameIndex;
+      }
+      current_state_.pending_index = index;
+      active_index_ = index;
+    }
+"""
+
+
+def patch_cc_image_animation_controller(path: Path) -> None:
+    """Protocol 0.48 part 1c: lets the recorder read the frame each animated
+    paint image is drawn at. Sub-step 2a: lets the recreation hold an image
+    at a frame."""
+    text = read_source(path)
+    text = apply_cookie_hook(
+        text,
+        CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR,
+        CC_IMAGE_ANIMATION_CONTROLLER_ANCHOR + CC_IMAGE_ANIMATION_CONTROLLER_ACCESSOR,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CC_IMAGE_ANIMATION_STATE_ANCHOR,
+        CC_IMAGE_ANIMATION_STATE_ANCHOR + CC_IMAGE_ANIMATION_STATE_HOLD,
+        path,
+    )
+    write_patched(path, text)
+
+
+CC_IMAGE_ANIMATION_CONTROLLER_OWN_INCLUDE = (
+    '#include "cc/trees/image_animation_controller.h"'
+)
+CC_IMAGE_ANIMATION_UPDATE_ANCHOR = """\
+  AnimationState& animation_state = animation_state_map_[data.paint_image_id];
+  animation_state.UpdateMetadata(data, animation_state_map_);
+"""
+CC_IMAGE_ANIMATION_UPDATE_HOOK = CC_IMAGE_ANIMATION_UPDATE_ANCHOR + """\
+  // Windows A11y Recorder recreation mode ("Sub-step 2a design: animated
+  // images held"): the image is held at the frame the recorder's answer
+  // named, or at its first frame.
+  if (a11y_recorder::IsRecreationMode()) {
+    animation_state.RecorderHoldFrame(
+        a11y_recorder::RecreationHeldImageFrame(data.paint_image_id)
+            .value_or(PaintImage::kDefaultFrameIndex));
+  }
+"""
+CC_IMAGE_ANIMATION_SHOULD_ANIMATE_ANCHOR = """\
+bool ImageAnimationController::AnimationState::ShouldAnimate() const {
+"""
+CC_IMAGE_ANIMATION_SHOULD_ANIMATE_HOOK = CC_IMAGE_ANIMATION_SHOULD_ANIMATE_ANCHOR + """\
+  // Windows A11y Recorder recreation mode: a recreation is a snapshot in
+  // time, so no image is advanced, and no frame is asked for to advance one.
+  if (a11y_recorder::IsRecreationMode()) {
+    return false;
+  }
+"""
+
+
+def patch_cc_image_animation_controller_source(path: Path) -> None:
+    """Sub-step 2a: in the recreation mode, each animated image is held at
+    its recorded frame and never advanced."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, CC_IMAGE_ANIMATION_CONTROLLER_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text, CC_IMAGE_ANIMATION_UPDATE_ANCHOR, CC_IMAGE_ANIMATION_UPDATE_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text,
+        CC_IMAGE_ANIMATION_SHOULD_ANIMATE_ANCHOR,
+        CC_IMAGE_ANIMATION_SHOULD_ANIMATE_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_cc_build(path: Path) -> None:
+    """Lets the cc component include the recorder bridge."""
+    text = read_source(path)
+    target_index = text.find(CC_BUILD_TARGET)
+    if target_index < 0:
+        raise RuntimeError(f"{path}: cc component target not found")
+    target_end = text.find("\n}", target_index)
+    deps = text.find("  deps = [\n", target_index)
+    if deps < 0 or (target_end >= 0 and deps > target_end):
+        raise RuntimeError(f"{path}: cc component deps list not found")
+    list_end = text.find("\n  ]", deps)
+    if CC_BUILD_DEP in text[deps:list_end]:
+        return
+    opening = "  deps = [\n"
+    text = text[:deps] + text[deps:].replace(
+        opening, opening + f"{CC_BUILD_DEP}\n", 1
+    )
+    write_patched(path, text)
+
+
+BLINK_COMPOSITOR_ANIMATIONS_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/animation/compositor_animations.h"'
+)
+BLINK_COMPOSITOR_ANIMATION_HELPERS_ANCHOR = (
+    "void CompositorAnimations::StartAnimationOnCompositor(\n"
+)
+BLINK_COMPOSITOR_ANIMATION_HELPERS = """\
+// Windows A11y Recorder (protocol 0.48): names for the compositor animation
+// records.
+namespace {
+
+std::string RecorderTargetPropertyName(int target_property) {
+  switch (target_property) {
+    case cc::TargetProperty::TRANSFORM:
+      return "transform";
+    case cc::TargetProperty::SCALE:
+      return "scale";
+    case cc::TargetProperty::ROTATE:
+      return "rotate";
+    case cc::TargetProperty::TRANSLATE:
+      return "translate";
+    case cc::TargetProperty::OPACITY:
+      return "opacity";
+    case cc::TargetProperty::FILTER:
+      return "filter";
+    case cc::TargetProperty::SCROLL_OFFSET:
+      return "scroll-offset";
+    case cc::TargetProperty::BACKGROUND_COLOR:
+      return "background-color";
+    case cc::TargetProperty::BOUNDS:
+      return "bounds";
+    case cc::TargetProperty::CSS_CUSTOM_PROPERTY:
+      return "css-custom-property";
+    case cc::TargetProperty::NATIVE_PROPERTY:
+      return "native-property";
+    case cc::TargetProperty::BACKDROP_FILTER:
+      return "backdrop-filter";
+    default:
+      return "other";
+  }
+}
+
+std::string RecorderElementIdNamespaceName(CompositorElementId element_id) {
+  if (!element_id) {
+    return "none";
+  }
+  switch (NamespaceFromCompositorElementId(element_id)) {
+    case CompositorElementIdNamespace::kPrimaryEffect:
+      return "primary-effect";
+    case CompositorElementIdNamespace::kPrimaryTransform:
+      return "primary-transform";
+    case CompositorElementIdNamespace::kEffectFilter:
+      return "effect-filter";
+    case CompositorElementIdNamespace::kScaleTransform:
+      return "scale-transform";
+    case CompositorElementIdNamespace::kRotateTransform:
+      return "rotate-transform";
+    case CompositorElementIdNamespace::kTranslateTransform:
+      return "translate-transform";
+    case CompositorElementIdNamespace::kScroll:
+      return "scroll";
+    case CompositorElementIdNamespace::kPrimary:
+      return "primary";
+    default:
+      return "other";
+  }
+}
+
+}  // namespace
+
+"""
+BLINK_COMPOSITOR_ANIMATION_STARTED_ANCHOR = """\
+  for (auto& keyframe_model : keyframe_models) {
+    int id = keyframe_model->id();
+    compositor_animation.AddKeyframeModel(std::move(keyframe_model));
+    started_keyframe_model_ids.push_back(id);
+  }
+"""
+BLINK_COMPOSITOR_ANIMATION_STARTED_HOOK = """\
+  // Windows A11y Recorder (protocol 0.48): an animation started on the
+  // compositor, its keyframe models, and the elements they animate.
+  {
+    std::vector<a11y_recorder::CompositorKeyframeModelFacts> recorder_models;
+    for (const auto& keyframe_model : keyframe_models) {
+      a11y_recorder::CompositorKeyframeModelFacts recorder_model;
+      recorder_model.keyframe_model_id = keyframe_model->id();
+      recorder_model.target_property =
+          RecorderTargetPropertyName(keyframe_model->TargetProperty());
+      recorder_model.element_id =
+          keyframe_model->element_id().GetInternalValue();
+      recorder_model.element_id_namespace =
+          RecorderElementIdNamespaceName(keyframe_model->element_id());
+      recorder_models.push_back(std::move(recorder_model));
+    }
+    Element& recorder_element = const_cast<Element&>(element);
+    a11y_recorder::RecordCompositorAnimationStarted(
+        recorder_element.GetDocument().GetDomNodeId(),
+        recorder_element.GetDocument().Token().ToString(),
+        recorder_element.GetDomNodeId(), compositor_animation.CcAnimationId(),
+        std::move(recorder_models));
+  }
+""" + BLINK_COMPOSITOR_ANIMATION_STARTED_ANCHOR
+
+BLINK_KEYFRAME_EFFECT_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/animation/keyframe_effect.h"'
+)
+BLINK_COMPOSITOR_ANIMATION_ENDED_ANCHOR = """\
+  DCHECK(Model());
+  if (compositor_animation) {
+    for (const auto& compositor_keyframe_model_id :
+         compositor_keyframe_model_ids_) {
+"""
+BLINK_COMPOSITOR_ANIMATION_ENDED_HOOK = """\
+  // Windows A11y Recorder (protocol 0.48): the animation's keyframe models
+  // leave the compositor, cancelled or finished.
+  {
+    std::vector<int> recorder_ids(compositor_keyframe_model_ids_.begin(),
+                                  compositor_keyframe_model_ids_.end());
+    Document& recorder_document = effect_target_->GetDocument();
+    a11y_recorder::RecordCompositorAnimationEnded(
+        recorder_document.GetDomNodeId(), recorder_document.Token().ToString(),
+        effect_target_->GetDomNodeId(),
+        compositor_animation ? compositor_animation->CcAnimationId() : 0,
+        std::move(recorder_ids));
+  }
+""" + BLINK_COMPOSITOR_ANIMATION_ENDED_ANCHOR
+
+
+def patch_blink_compositor_animations(path: Path) -> None:
+    """Protocol 0.48: records an animation started on the compositor."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_COMPOSITOR_ANIMATIONS_OWN_INCLUDE,
+        (BLINK_BRIDGE_INCLUDE, '#include "cc/trees/target_property.h"'),
+        path,
+    )
+    if BLINK_COMPOSITOR_ANIMATION_HELPERS not in text:
+        text = insert_before_once(
+            text,
+            BLINK_COMPOSITOR_ANIMATION_HELPERS_ANCHOR,
+            BLINK_COMPOSITOR_ANIMATION_HELPERS,
+            BLINK_COMPOSITOR_ANIMATION_HELPERS,
+            path,
+        )
+    text = apply_cookie_hook(
+        text,
+        BLINK_COMPOSITOR_ANIMATION_STARTED_ANCHOR,
+        BLINK_COMPOSITOR_ANIMATION_STARTED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Slice 4g (protocol 0.53): each Blink animation, from the probe DevTools'
+# Animations panel is fed from. The bridge records an animation again only
+# when something other than its current time and progress changed.
+BLINK_ANIMATION_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/animation/animation.h"'
+)
+BLINK_ANIMATION_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/animation/scroll_snapshot_timeline.h"',
+    '#include "third_party/blink/renderer/core/animation/view_timeline.h"',
+)
+BLINK_ANIMATION_UPDATED_ANCHOR = """\
+  probe::AnimationUpdated(document_, this);
+"""
+BLINK_ANIMATION_UPDATED_HOOK = BLINK_ANIMATION_UPDATED_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.53): the animation, its play state,
+  // times, timeline, and effect timing, as DevTools' Animations panel
+  // describes it.
+  if (document_ && a11y_recorder::IsRecorderActive()) {
+    A11Y_RECORDER_HOOK_COST("hook:animation-updated");
+    a11y_recorder::AnimationFacts recorder_facts;
+    recorder_facts.document_node_id = document_->GetDomNodeId();
+    recorder_facts.document_token = document_->Token().ToString();
+    recorder_facts.sequence_number = sequence_number_;
+    recorder_facts.kind = IsA<CSSTransition>(*this)  ? "css-transition"
+                          : IsA<CSSAnimation>(*this) ? "css-animation"
+                                                     : "web-animation";
+    recorder_facts.id = id().Utf8();
+    if (!id().empty()) {
+      recorder_facts.name = id().Utf8();
+    } else if (auto* recorder_css_animation = DynamicTo<CSSAnimation>(this)) {
+      recorder_facts.name = recorder_css_animation->animationName().Utf8();
+    } else if (auto* recorder_transition = DynamicTo<CSSTransition>(this)) {
+      recorder_facts.name = recorder_transition->transitionProperty().Utf8();
+    }
+    recorder_facts.play_state =
+        V8AnimationPlayState(CalculateAnimationPlayState()).AsCStr();
+    recorder_facts.pending = PendingInternal();
+    recorder_facts.playback_rate = playbackRate();
+    if (std::optional<AnimationTimeDelta> recorder_start = StartTimeInternal()) {
+      recorder_facts.start_time_milliseconds = recorder_start->InMillisecondsF();
+    }
+    if (std::optional<AnimationTimeDelta> recorder_current =
+            CurrentTimeInternal()) {
+      recorder_facts.current_time_milliseconds =
+          recorder_current->InMillisecondsF();
+    }
+    AnimationTimeline* recorder_timeline = TimelineInternal();
+    if (!recorder_timeline) {
+      recorder_facts.timeline_kind = "none";
+    } else if (auto* recorder_document_timeline =
+                   DynamicTo<DocumentTimeline>(recorder_timeline)) {
+      recorder_facts.timeline_kind = "document";
+      recorder_facts.timeline_zero_microseconds =
+          recorder_document_timeline->CalculateZeroTime()
+              .since_origin()
+              .InMicroseconds();
+      recorder_facts.high_resolution_ticks =
+          base::TimeTicks::IsHighResolution();
+      recorder_facts.timeline_playback_rate =
+          recorder_document_timeline->PlaybackRate();
+    } else if (auto* recorder_scroll_timeline =
+                   DynamicTo<ScrollSnapshotTimeline>(recorder_timeline)) {
+      auto* recorder_view_timeline =
+          DynamicTo<ViewTimeline>(recorder_scroll_timeline);
+      recorder_facts.timeline_kind = recorder_view_timeline ? "view" : "scroll";
+      if (Node* recorder_source = recorder_scroll_timeline->ResolvedSource()) {
+        recorder_facts.timeline_source_node_id = recorder_source->GetDomNodeId();
+      }
+      if (std::optional<PhysicalDirection> recorder_direction =
+              recorder_scroll_timeline->GetResolvedScrollDirection()) {
+        recorder_facts.timeline_axis =
+            ScrollSnapshotTimeline::ToPhysicalAxis(*recorder_direction) ==
+                    PhysicalAxis::kHorizontal
+                ? "horizontal"
+                : "vertical";
+      }
+      if (recorder_view_timeline && recorder_view_timeline->subject()) {
+        recorder_facts.timeline_subject_node_id =
+            recorder_view_timeline->subject()->GetDomNodeId();
+      }
+    } else {
+      recorder_facts.timeline_kind = "other";
+    }
+    if (auto* recorder_effect = DynamicTo<KeyframeEffect>(effect())) {
+      const Timing& recorder_specified = recorder_effect->SpecifiedTiming();
+      const Timing::NormalizedTiming& recorder_normalized =
+          recorder_effect->NormalizedTiming();
+      recorder_facts.has_effect = true;
+      if (Element* recorder_target = recorder_effect->target()) {
+        recorder_facts.target_node_id = recorder_target->GetDomNodeId();
+      }
+      recorder_facts.pseudo_element = recorder_effect->pseudoElement().Utf8();
+      recorder_facts.delay_milliseconds =
+          recorder_normalized.start_delay.InMillisecondsF();
+      recorder_facts.end_delay_milliseconds =
+          recorder_normalized.end_delay.InMillisecondsF();
+      recorder_facts.iteration_start = recorder_specified.iteration_start;
+      if (std::isfinite(recorder_specified.iteration_count)) {
+        recorder_facts.iterations = recorder_specified.iteration_count;
+      }
+      recorder_facts.duration_milliseconds =
+          recorder_normalized.iteration_duration.InMillisecondsF();
+      recorder_facts.direction =
+          V8PlaybackDirection(
+              Timing::PlaybackDirectionEnum(recorder_specified.direction))
+              .AsCStr();
+      recorder_facts.fill =
+          V8FillMode(Timing::FillModeEnum(recorder_specified.fill_mode))
+              .AsCStr();
+      recorder_facts.easing =
+          recorder_specified.timing_function->ToString().Utf8();
+      // Read only when the timing is up to date: an outdated animation would
+      // be updated by the read, which the recorder must not cause.
+      if (!Outdated()) {
+        recorder_facts.progress = recorder_effect->Progress();
+        recorder_facts.current_iteration = recorder_effect->CurrentIteration();
+      }
+    }
+    if (GetCompositorAnimation() && HasActiveAnimationsOnCompositor()) {
+      recorder_facts.compositor_animation_id =
+          GetCompositorAnimation()->CcAnimationId();
+    }
+    a11y_recorder::RecordAnimationUpdated(std::move(recorder_facts));
+  }
+"""
+BLINK_ANIMATION_DISPOSE_ANCHOR = """\
+void Animation::Dispose() {
+"""
+BLINK_ANIMATION_DISPOSE_HOOK = BLINK_ANIMATION_DISPOSE_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.53): the animation is released.
+  if (a11y_recorder::IsRecorderActive()) {
+    a11y_recorder::RecordAnimationRemoved(sequence_number_);
+  }
+"""
+BLINK_ANIMATION_CONTEXT_DESTROYED_ANCHOR = """\
+void Animation::ContextDestroyed() {
+"""
+BLINK_ANIMATION_CONTEXT_DESTROYED_HOOK = (
+    BLINK_ANIMATION_CONTEXT_DESTROYED_ANCHOR
+    + """\
+  // Windows A11y Recorder (protocol 0.53): the animation's document is gone.
+  if (a11y_recorder::IsRecorderActive()) {
+    a11y_recorder::RecordAnimationRemoved(sequence_number_);
+  }
+"""
+)
+
+
+def patch_blink_animation(path: Path) -> None:
+    """Protocol 0.53: records each Blink animation and its removal."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_ANIMATION_OWN_INCLUDE, BLINK_ANIMATION_INCLUDES, path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_ANIMATION_UPDATED_ANCHOR, BLINK_ANIMATION_UPDATED_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_ANIMATION_DISPOSE_ANCHOR, BLINK_ANIMATION_DISPOSE_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_ANIMATION_CONTEXT_DESTROYED_ANCHOR,
+        BLINK_ANIMATION_CONTEXT_DESTROYED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_keyframe_effect(path: Path) -> None:
+    """Protocol 0.48: records an animation's keyframe models leaving the
+    compositor."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_KEYFRAME_EFFECT_OWN_INCLUDE,
+        (BLINK_BRIDGE_INCLUDE,),
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_COMPOSITOR_ANIMATION_ENDED_ANCHOR,
+        BLINK_COMPOSITOR_ANIMATION_ENDED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Part 1b: the paint worklet results noted as they reach the pending tree,
+# so that each frame names the compositor progress its records were painted
+# with, and what the native paint worklets painted.
+CC_CLIENT_OWN_INCLUDE = '#include "cc/trees/client_layer_tree_host_impl.h"'
+CC_CLIENT_DECLARATION_ANCHOR = """\
+void ClientLayerTreeHostImpl::OnPaintWorkletResultsReady(
+    PaintWorkletJobMap results) {
+"""
+CC_CLIENT_DECLARATION = """\
+// Windows A11y Recorder (protocol 0.48), in layer_tree_host_impl.cc.
+void RecorderNotePaintWorkletResults(int host_id,
+                                     const PaintWorkletJobMap& results);
+
+"""
+CC_CLIENT_RESULTS_ANCHOR = """\
+  for (const auto& entry : results) {
+    for (const PaintWorkletJob& job : entry.second->data) {
+      LayerImpl* layer_impl =
+          pending_tree_->FindPendingTreeLayerById(job.layer_id());
+"""
+CC_CLIENT_RESULTS_HOOK = """\
+  // Windows A11y Recorder (protocol 0.48): the compositor progress each
+  // result was painted with, for a page's compositor.
+  if (!settings_.is_layer_tree_for_ui) {
+    RecorderNotePaintWorkletResults(id(), results);
+  }
+""" + CC_CLIENT_RESULTS_ANCHOR
+
+
+def patch_cc_client_layer_tree_host_impl(path: Path) -> None:
+    """Protocol 0.48: notes each paint worklet result as it reaches the
+    pending tree."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        CC_CLIENT_DECLARATION_ANCHOR,
+        CC_CLIENT_DECLARATION,
+        CC_CLIENT_DECLARATION,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, CC_CLIENT_RESULTS_ANCHOR, CC_CLIENT_RESULTS_HOOK, path
+    )
+    write_patched(path, text)
+
+
+BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/modules/csspaint/nativepaint/'
+    'background_color_paint_definition.h"'
+)
+BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR = """\
+  Color color = Sample(compositor_input, animated_property_values);
+  SkColor4f sk_color = color.toSkColor4f();
+"""
+# The two paint worklet hooks as part 1b inserted them; part 1c times them.
+BLINK_PAINT_WORKLET_PAINTED_START = (
+    "  if (a11y_recorder::GetProcessRecorderClient()) {\n"
+    "    a11y_recorder::PaintWorkletPaintedFacts recorder_facts;\n"
+)
+BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B = BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the color painted, with the
+  // compositor progress it was painted from.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    a11y_recorder::PaintWorkletPaintedFacts recorder_facts;
+    recorder_facts.property = "background-color";
+    const auto& recorder_keys = compositor_input->GetPropertyKeys();
+    if (!recorder_keys.empty()) {
+      recorder_facts.element_id =
+          recorder_keys.front().element_id.GetInternalValue();
+    }
+    if (!animated_property_values.empty() &&
+        animated_property_values.begin()->second.float_value) {
+      recorder_facts.progress =
+          *animated_property_values.begin()->second.float_value;
+    }
+    recorder_facts.color = {sk_color.fR, sk_color.fG, sk_color.fB,
+                            sk_color.fA};
+    a11y_recorder::RecordPaintWorkletPainted(std::move(recorder_facts));
+  }
+"""
+BLINK_BACKGROUND_COLOR_PAINTED_HOOK = BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B.replace(
+    BLINK_PAINT_WORKLET_PAINTED_START,
+    BLINK_PAINT_WORKLET_PAINTED_START.replace(
+        "{\n", '{\n    A11Y_RECORDER_HOOK_COST("hook:background-color-painted");\n', 1
+    ),
+)
+
+BLINK_CLIP_PATH_PAINT_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/modules/csspaint/nativepaint/'
+    'clip_path_paint_definition.h"'
+)
+BLINK_CLIP_PATH_TRANSLATION_ANCHOR = """\
+  void ApplyTranslation(cc::PaintCanvas* canvas) const {
+    canvas->translate(dx_, dy_);
+  }
+"""
+BLINK_CLIP_PATH_TRANSLATION_HOOK = BLINK_CLIP_PATH_TRANSLATION_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.48): the translation applied.
+  SkScalar RecorderTranslateX() const { return dx_; }
+  SkScalar RecorderTranslateY() const { return dy_; }
+"""
+BLINK_CLIP_PATH_PAINTED_ANCHOR = """\
+  cc::InspectablePaintRecorder paint_recorder;
+  const gfx::Size clip_area_size(
+"""
+BLINK_CLIP_PATH_PAINTED_HOOK_1B = """\
+  // Windows A11y Recorder (protocol 0.48): the path painted, with the
+  // compositor progress it was painted from.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    a11y_recorder::PaintWorkletPaintedFacts recorder_facts;
+    recorder_facts.property = "clip-path";
+    const auto& recorder_keys = compositor_input->GetPropertyKeys();
+    if (!recorder_keys.empty()) {
+      recorder_facts.element_id =
+          recorder_keys.front().element_id.GetInternalValue();
+    }
+    if (!animated_property_values.empty() &&
+        animated_property_values.begin()->second.float_value) {
+      recorder_facts.progress =
+          *animated_property_values.begin()->second.float_value;
+    }
+    switch (cur_path.getFillType()) {
+      case SkPathFillType::kWinding:
+        recorder_facts.fill_type = "winding";
+        break;
+      case SkPathFillType::kEvenOdd:
+        recorder_facts.fill_type = "even-odd";
+        break;
+      case SkPathFillType::kInverseWinding:
+        recorder_facts.fill_type = "inverse-winding";
+        break;
+      case SkPathFillType::kInverseEvenOdd:
+        recorder_facts.fill_type = "inverse-even-odd";
+        break;
+    }
+    for (const SkPathVerb verb : cur_path.verbs()) {
+      switch (verb) {
+        case SkPathVerb::kMove:
+          recorder_facts.verbs.push_back("move");
+          break;
+        case SkPathVerb::kLine:
+          recorder_facts.verbs.push_back("line");
+          break;
+        case SkPathVerb::kQuad:
+          recorder_facts.verbs.push_back("quad");
+          break;
+        case SkPathVerb::kConic:
+          recorder_facts.verbs.push_back("conic");
+          break;
+        case SkPathVerb::kCubic:
+          recorder_facts.verbs.push_back("cubic");
+          break;
+        case SkPathVerb::kClose:
+          recorder_facts.verbs.push_back("close");
+          break;
+      }
+    }
+    for (const SkPoint& point : cur_path.points()) {
+      recorder_facts.points.push_back(point.fX);
+      recorder_facts.points.push_back(point.fY);
+    }
+    for (const float weight : cur_path.conicWeights()) {
+      recorder_facts.conic_weights.push_back(weight);
+    }
+    recorder_facts.translate_x = input->RecorderTranslateX();
+    recorder_facts.translate_y = input->RecorderTranslateY();
+    recorder_facts.drawn_as_rounded_rect =
+        ReduceToRRectIfPossible(cur_path).has_value();
+    a11y_recorder::RecordPaintWorkletPainted(std::move(recorder_facts));
+  }
+
+""" + BLINK_CLIP_PATH_PAINTED_ANCHOR
+BLINK_CLIP_PATH_PAINTED_HOOK = BLINK_CLIP_PATH_PAINTED_HOOK_1B.replace(
+    BLINK_PAINT_WORKLET_PAINTED_START,
+    BLINK_PAINT_WORKLET_PAINTED_START.replace(
+        "{\n", '{\n    A11Y_RECORDER_HOOK_COST("hook:clip-path-painted");\n', 1
+    ),
+)
+
+BLINK_CSSPAINT_BUILD_ANCHOR = """\
+  public_deps = [ "//third_party/blink/renderer/modules/canvas" ]
+}
+"""
+
+
+def patch_blink_native_paint_definitions(csspaint: Path) -> None:
+    """Protocol 0.48: records what the native paint worklets painted."""
+    nativepaint = csspaint / "nativepaint"
+    path = nativepaint / "background_color_paint_definition.cc"
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_BACKGROUND_COLOR_PAINT_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    # A tree patched by part 1b holds the hook untimed; it is replaced in
+    # place.
+    text = upgrade_legacy_hooks(
+        text,
+        ((BLINK_BACKGROUND_COLOR_PAINTED_HOOK_1B, BLINK_BACKGROUND_COLOR_PAINTED_HOOK),),
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_BACKGROUND_COLOR_PAINTED_ANCHOR,
+        BLINK_BACKGROUND_COLOR_PAINTED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+    path = nativepaint / "clip_path_paint_definition.cc"
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_CLIP_PATH_PAINT_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_CLIP_PATH_TRANSLATION_ANCHOR,
+        BLINK_CLIP_PATH_TRANSLATION_HOOK,
+        path,
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        ((BLINK_CLIP_PATH_PAINTED_HOOK_1B, BLINK_CLIP_PATH_PAINTED_HOOK),),
+        path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_CLIP_PATH_PAINTED_ANCHOR, BLINK_CLIP_PATH_PAINTED_HOOK, path
+    )
+    write_patched(path, text)
+    patch_blink_module_build(
+        csspaint / "BUILD.gn",
+        BLINK_CSSPAINT_BUILD_ANCHOR,
+        BLINK_CSSPAINT_BUILD_ANCHOR[: -len("}\n")] + BLINK_MODULE_BRIDGE_DEPS,
+    )
+
+
+# The widget a compositor draws for, named where every presentation request
+# is made (RecorderRequestWidgetPresentation, for a frame widget and a page
+# popup alike).
+BLINK_COMPOSITOR_WIDGET_HOOKS = (
+    "  const bool recorder_composites = view_composites && recorder_host;\n",
+)
+
+
+def blink_compositor_widget_hook(anchor: str) -> str:
+    return anchor + (
+        "  // Windows A11y Recorder (protocol 0.48): the widget this compositor's\n"
+        "  // frames are drawn for.\n"
+        "  if (recorder_composites) {\n"
+        "    a11y_recorder::RegisterCompositorWidget(recorder_host->GetId(),\n"
+        "                                            recorder_widget);\n"
+        "  }\n"
+    )
+
+
+
+def blink_registered_presentation_widget_block() -> str:
+    """The presentation block once protocol 0.48 names each compositor's
+    widget in it."""
+    block = BLINK_PRESENTATION_WIDGET_BLOCK
+    for anchor in BLINK_COMPOSITOR_WIDGET_HOOKS:
+        if block.count(anchor) != 1:
+            raise RuntimeError("compositor widget anchor not in the presentation block")
+        block = block.replace(anchor, blink_compositor_widget_hook(anchor))
+    return block
+
+
+# Slice 4b sub-step 2b-i ("Sub-step 2b-i design: compositor values imposed"
+# in docs/architecture/page-recreation.md): the recreation holds time, and
+# imposes the compositor's recorded transforms, filters, and backdrop
+# filters on Blink's paint property tree. The recorded opacity is imposed
+# through the style, in BLINK_RECREATION_STYLE_HOOK.
+BLINK_CSS_ANIMATIONS_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/animation/css/css_animations.h"'
+)
+BLINK_CSS_ANIMATION_UPDATE_ANCHOR = """\
+void CSSAnimations::CalculateAnimationUpdate(
+    CSSAnimationUpdate& update,
+    Element& animating_element,
+    Element& element,
+    const ComputedStyleBuilder& style_builder,
+    const ComputedStyle* parent_style,
+    StyleResolver* resolver,
+    bool can_trigger_animations) {
+"""
+BLINK_CSS_ANIMATION_UPDATE_HOOK = BLINK_CSS_ANIMATION_UPDATE_ANCHOR + """\
+  // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): the
+  // recreation is a snapshot in time, so no CSS animation is started,
+  // updated, or cancelled in it.
+  if (a11y_recorder::RecreationHoldsTime()) {
+    return;
+  }
+"""
+BLINK_CSS_TRANSITION_UPDATE_ANCHOR = """\
+void CSSAnimations::CalculateTransitionUpdate(
+    CSSAnimationUpdate& update,
+    Element& animating_element,
+    const ComputedStyleBuilder& style_builder,
+    const ComputedStyle* old_style,
+    const StyleRecalcContext& style_recalc_context,
+    bool can_trigger_animations) {
+"""
+BLINK_CSS_TRANSITION_UPDATE_HOOK = BLINK_CSS_TRANSITION_UPDATE_ANCHOR + """\
+  // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): the
+  // recreation is a snapshot in time, so no CSS transition is started,
+  // updated, or cancelled in it.
+  if (a11y_recorder::RecreationHoldsTime()) {
+    return;
+  }
+"""
+
+
+def patch_blink_css_animations(path: Path) -> None:
+    """Sub-step 2b-i: no CSS animation or transition runs in a recreation."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_CSS_ANIMATIONS_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_CSS_ANIMATION_UPDATE_ANCHOR, BLINK_CSS_ANIMATION_UPDATE_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_CSS_TRANSITION_UPDATE_ANCHOR,
+        BLINK_CSS_TRANSITION_UPDATE_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+BLINK_PAINT_PROPERTY_TREE_BUILDER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/paint/'
+    'paint_property_tree_builder.h"'
+)
+BLINK_PAINT_PROPERTY_TREE_BUILDER_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/public/mojom/devtools/'
+    'console_message.mojom-blink.h"',
+    '#include "third_party/blink/renderer/core/dom/document.h"',
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/inspector/console_message.h"',
+    '#include "third_party/blink/renderer/platform/graphics/color.h"',
+    '#include "third_party/blink/renderer/platform/graphics/'
+    'compositor_filter_operations.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_builder.h"',
+)
+BLINK_PAINT_PROPERTY_HELPERS_ANCHOR = """\
+static bool NeedsIndividualTransform(
+    const LayoutObject& object,
+    CompositingReasons relevant_compositing_reasons,
+    bool (*style_test)(const ComputedStyle&)) {
+"""
+BLINK_PAINT_PROPERTY_HELPERS = """\
+// Windows A11y Recorder recreation mode ("Sub-step 2b-i design: compositor
+// values imposed"): the compositor values recorded at the frame for the
+// object's element, from its data-a11y-recorded-compositor attribute, or
+// none. A copy of the element in a user agent shadow tree takes none, as
+// with the recorded style.
+static a11y_recorder::RecreationCompositorValues RecorderCompositorValues(
+    const LayoutObject& object) {
+  if (!a11y_recorder::RecreationHoldsTime() || object.IsAnonymous()) {
+    return {};
+  }
+  const auto* recorder_element = DynamicTo<Element>(object.GetNode());
+  if (!recorder_element || recorder_element->IsInUserAgentShadowRoot()) {
+    return {};
+  }
+  const AtomicString& recorder_text = recorder_element->getAttribute(
+      AtomicString("data-a11y-recorded-compositor"));
+  if (recorder_text.IsNull()) {
+    return {};
+  }
+  return a11y_recorder::RecreationCompositorValuesOf(recorder_text.Utf8());
+}
+
+// Says in the console of the element's document that a recorded compositor
+// value was not imposed, and why, naming the element so that DevTools can
+// reveal it. A message repeated by a later update is not shown again.
+static void RecorderReportCompositorNotImposed(const LayoutObject& object,
+                                               const char* property,
+                                               const char* reason) {
+  Node* recorder_node = object.GetNode();
+  if (!recorder_node) {
+    return;
+  }
+  const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_node);
+  StringBuilder recorder_text;
+  recorder_text.Append("Recorded compositor ");
+  recorder_text.Append(property);
+  recorder_text.Append(" not imposed on ");
+  recorder_text.Append(recorder_node->nodeName());
+  if (const auto* recorder_element = DynamicTo<Element>(recorder_node);
+      recorder_element && recorder_element->HasID()) {
+    recorder_text.Append('#');
+    recorder_text.Append(recorder_element->GetIdAttribute());
+  }
+  recorder_text.Append(" (node ");
+  recorder_text.AppendNumber(recorder_id);
+  recorder_text.Append("): ");
+  recorder_text.Append(reason);
+  recorder_text.Append('.');
+  auto* recorder_message = MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kRendering,
+      mojom::blink::ConsoleMessageLevel::kWarning, recorder_text.ToString());
+  Document& recorder_document = recorder_node->GetDocument();
+  if (LocalFrame* recorder_frame = recorder_document.GetFrame()) {
+    recorder_message->SetNodes(recorder_frame, {recorder_id});
+  }
+  recorder_document.AddConsoleMessage(recorder_message,
+                                      /*discard_duplicates=*/true);
+}
+
+// The name the compositor-frame record gives a filter operation's type.
+static const char* RecorderFilterTypeName(cc::FilterOperation::FilterType type) {
+  switch (type) {
+    case cc::FilterOperation::GRAYSCALE:
+      return "grayscale";
+    case cc::FilterOperation::SEPIA:
+      return "sepia";
+    case cc::FilterOperation::SATURATE:
+      return "saturate";
+    case cc::FilterOperation::HUE_ROTATE:
+      return "hue-rotate";
+    case cc::FilterOperation::INVERT:
+      return "invert";
+    case cc::FilterOperation::BRIGHTNESS:
+      return "brightness";
+    case cc::FilterOperation::CONTRAST:
+      return "contrast";
+    case cc::FilterOperation::OPACITY:
+      return "opacity";
+    case cc::FilterOperation::BLUR:
+      return "blur";
+    case cc::FilterOperation::DROP_SHADOW:
+      return "drop-shadow";
+    case cc::FilterOperation::COLOR_MATRIX:
+      return "color-matrix";
+    case cc::FilterOperation::ZOOM:
+      return "zoom";
+    case cc::FilterOperation::REFERENCE:
+      return "reference";
+    case cc::FilterOperation::SATURATING_BRIGHTNESS:
+      return "saturating-brightness";
+    case cc::FilterOperation::ALPHA_THRESHOLD:
+      return "alpha-threshold";
+    case cc::FilterOperation::OFFSET:
+      return "offset";
+  }
+  return "unknown";
+}
+
+// How many numbers the record holds for an operation of the type Blink can
+// make again, or -1 for a type Blink makes no operation of.
+static int RecorderFilterNumberCount(cc::FilterOperation::FilterType type) {
+  switch (type) {
+    case cc::FilterOperation::DROP_SHADOW:
+      return 7;
+    case cc::FilterOperation::COLOR_MATRIX:
+      return 20;
+    case cc::FilterOperation::ZOOM:
+      return 2;
+    case cc::FilterOperation::REFERENCE:
+      return 0;
+    case cc::FilterOperation::ALPHA_THRESHOLD:
+    case cc::FilterOperation::OFFSET:
+      return -1;
+    default:
+      return 1;
+  }
+}
+
+// Replaces the numbers of the operations Blink made from the recorded style
+// with the recorded ones, when the recorded operations are of the same types
+// in the same order; otherwise leaves them and says so in the console. What
+// the record does not hold, such as a blur's tile mode or a reference
+// filter's image filter, is kept from Blink's own operation.
+static void RecorderImposeFilters(const LayoutObject& object,
+                                  bool backdrop,
+                                  CompositorFilterOperations& operations) {
+  const a11y_recorder::RecreationCompositorValues recorder_values =
+      RecorderCompositorValues(object);
+  const auto& recorder_recorded =
+      backdrop ? recorder_values.backdrop_filter : recorder_values.filter;
+  if (!recorder_recorded) {
+    return;
+  }
+  const char* recorder_property = backdrop ? "backdrop filter" : "filter";
+  const cc::FilterOperations& recorder_current =
+      operations.AsCcFilterOperations();
+  if (recorder_current.size() != recorder_recorded->size()) {
+    RecorderReportCompositorNotImposed(
+        object, recorder_property,
+        "the recorded style's filter has a different number of operations");
+    return;
+  }
+  for (size_t recorder_index = 0; recorder_index < recorder_current.size();
+       ++recorder_index) {
+    const cc::FilterOperation::FilterType recorder_type =
+        recorder_current.at(recorder_index).type();
+    const auto& recorder_operation = (*recorder_recorded)[recorder_index];
+    if (recorder_operation.type != RecorderFilterTypeName(recorder_type)) {
+      RecorderReportCompositorNotImposed(
+          object, recorder_property,
+          "the recorded style's filter has operations of other types");
+      return;
+    }
+    if (RecorderFilterNumberCount(recorder_type) < 0 ||
+        static_cast<int>(recorder_operation.numbers.size()) !=
+            RecorderFilterNumberCount(recorder_type)) {
+      RecorderReportCompositorNotImposed(
+          object, recorder_property,
+          "an operation is of a type or form Blink does not make");
+      return;
+    }
+  }
+  const cc::FilterOperations recorder_blink =
+      operations.ReleaseCcFilterOperations();
+  operations.Clear();
+  for (size_t recorder_index = 0; recorder_index < recorder_blink.size();
+       ++recorder_index) {
+    const cc::FilterOperation& recorder_own = recorder_blink.at(recorder_index);
+    const std::vector<double>& recorder_numbers =
+        (*recorder_recorded)[recorder_index].numbers;
+    switch (recorder_own.type()) {
+      case cc::FilterOperation::GRAYSCALE:
+        operations.AppendGrayscaleFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::SEPIA:
+        operations.AppendSepiaFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::SATURATE:
+        operations.AppendSaturateFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::HUE_ROTATE:
+        operations.AppendHueRotateFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::INVERT:
+        operations.AppendInvertFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::BRIGHTNESS:
+        operations.AppendBrightnessFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::CONTRAST:
+        operations.AppendContrastFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::OPACITY:
+        operations.AppendOpacityFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::SATURATING_BRIGHTNESS:
+        operations.AppendSaturatingBrightnessFilter(static_cast<float>(recorder_numbers[0]));
+        break;
+      case cc::FilterOperation::BLUR:
+        operations.AppendBlurFilter(static_cast<float>(recorder_numbers[0]),
+                                    recorder_own.blur_tile_mode());
+        break;
+      case cc::FilterOperation::DROP_SHADOW:
+        operations.AppendDropShadowFilter(
+            gfx::Vector2d(static_cast<int>(recorder_numbers[1]),
+                          static_cast<int>(recorder_numbers[2])),
+            static_cast<float>(recorder_numbers[0]),
+            Color::FromSkColor4f(SkColor4f{
+                static_cast<float>(recorder_numbers[3]),
+                static_cast<float>(recorder_numbers[4]),
+                static_cast<float>(recorder_numbers[5]),
+                static_cast<float>(recorder_numbers[6])}));
+        break;
+      case cc::FilterOperation::COLOR_MATRIX: {
+        cc::FilterOperation::Matrix recorder_matrix;
+        for (size_t recorder_entry = 0; recorder_entry < 20; ++recorder_entry) {
+          recorder_matrix[recorder_entry] =
+              static_cast<float>(recorder_numbers[recorder_entry]);
+        }
+        operations.AppendColorMatrixFilter(recorder_matrix);
+        break;
+      }
+      case cc::FilterOperation::ZOOM:
+        operations.AppendZoomFilter(static_cast<float>(recorder_numbers[0]),
+                                    static_cast<int>(recorder_numbers[1]));
+        break;
+      case cc::FilterOperation::REFERENCE:
+        operations.AppendReferenceFilter(recorder_own.image_filter());
+        break;
+      case cc::FilterOperation::ALPHA_THRESHOLD:
+      case cc::FilterOperation::OFFSET:
+        break;
+    }
+  }
+}
+
+// The namespace name of an element ID namespace whose transform the
+// compositor animates, or null.
+static const char* RecorderTransformNamespace(
+    CompositorElementIdNamespace compositor_namespace) {
+  switch (compositor_namespace) {
+    case CompositorElementIdNamespace::kTranslateTransform:
+      return "translate-transform";
+    case CompositorElementIdNamespace::kRotateTransform:
+      return "rotate-transform";
+    case CompositorElementIdNamespace::kScaleTransform:
+      return "scale-transform";
+    case CompositorElementIdNamespace::kPrimaryTransform:
+      return "primary-transform";
+    default:
+      return nullptr;
+  }
+}
+
+"""
+BLINK_PAINT_PROPERTY_TRANSFORM_ANCHOR = """\
+        state.transform_and_origin =
+            TransformAndOriginState(box, reference_box, compute_matrix);
+"""
+BLINK_PAINT_PROPERTY_TRANSFORM_HOOK = BLINK_PAINT_PROPERTY_TRANSFORM_ANCHOR + """\
+        // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"):
+        // the matrix the compositor drew for this namespace at the frame
+        // replaces the one computed from the recorded style; the origin is
+        // kept, as the compositor's animations do not change it.
+        if (const char* recorder_namespace =
+                RecorderTransformNamespace(compositor_namespace)) {
+          const a11y_recorder::RecreationCompositorValues recorder_values =
+              RecorderCompositorValues(object_);
+          if (const auto recorder_found =
+                  recorder_values.transforms.find(recorder_namespace);
+              recorder_found != recorder_values.transforms.end()) {
+            const auto& recorder_m = recorder_found->second;
+            state.transform_and_origin.matrix = gfx::Transform::RowMajor(
+                recorder_m[0], recorder_m[1], recorder_m[2], recorder_m[3],
+                recorder_m[4], recorder_m[5], recorder_m[6], recorder_m[7],
+                recorder_m[8], recorder_m[9], recorder_m[10], recorder_m[11],
+                recorder_m[12], recorder_m[13], recorder_m[14],
+                recorder_m[15]);
+          }
+        }
+"""
+BLINK_PAINT_PROPERTY_NO_TRANSFORM_ANCHOR = """\
+    } else {
+      OnClearTransform((properties_->*clearer)());
+    }
+"""
+BLINK_PAINT_PROPERTY_NO_TRANSFORM_HOOK = """\
+    } else {
+      OnClearTransform((properties_->*clearer)());
+      // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): a
+      // recorded transform of a namespace the element has no node of is
+      // not imposed.
+      if (const char* recorder_namespace =
+              RecorderTransformNamespace(compositor_namespace);
+          recorder_namespace && RecorderCompositorValues(object_)
+                                    .transforms.count(recorder_namespace)) {
+        RecorderReportCompositorNotImposed(
+            object_, recorder_namespace,
+            "the recorded style gives the element no transform of this kind");
+      }
+    }
+"""
+BLINK_PAINT_PROPERTY_FILTER_ANCHOR = """\
+    layer->UpdateCompositorFilterOperationsForFilter(filter_info.operations);
+"""
+BLINK_PAINT_PROPERTY_FILTER_HOOK = BLINK_PAINT_PROPERTY_FILTER_ANCHOR + """\
+    // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): the
+    // filter the compositor drew at the frame.
+    RecorderImposeFilters(object, /*backdrop=*/false, filter_info.operations);
+"""
+BLINK_PAINT_PROPERTY_NO_FILTER_ANCHOR = """\
+    } else {
+      OnClearEffect(properties_->ClearFilter());
+      OnClearClip(properties_->ClearPixelMovingFilterClipExpander());
+    }
+"""
+BLINK_PAINT_PROPERTY_NO_FILTER_HOOK = """\
+    } else {
+      OnClearEffect(properties_->ClearFilter());
+      OnClearClip(properties_->ClearPixelMovingFilterClipExpander());
+      // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): a
+      // recorded filter of an element with no filter node is not imposed.
+      if (RecorderCompositorValues(object_).filter) {
+        RecorderReportCompositorNotImposed(
+            object_, "filter", "the recorded style gives the element no filter");
+      }
+    }
+"""
+BLINK_PAINT_PROPERTY_BACKDROP_ANCHOR = """\
+      layer->UpdateCompositorFilterOperationsForBackdropFilter(operations,
+                                                               bounds);
+"""
+BLINK_PAINT_PROPERTY_BACKDROP_HOOK = BLINK_PAINT_PROPERTY_BACKDROP_ANCHOR + """\
+      // Windows A11y Recorder recreation mode ("Sub-step 2b-i design"): the
+      // backdrop filter the compositor drew at the frame.
+      RecorderImposeFilters(object_, /*backdrop=*/true, operations);
+"""
+
+
+def patch_blink_paint_property_tree_builder(path: Path) -> None:
+    """Sub-step 2b-i: the recorded compositor transforms, filters, and
+    backdrop filters are imposed on the recreation's paint property tree."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_PAINT_PROPERTY_TREE_BUILDER_OWN_INCLUDE,
+        BLINK_PAINT_PROPERTY_TREE_BUILDER_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PAINT_PROPERTY_HELPERS_ANCHOR,
+        BLINK_PAINT_PROPERTY_HELPERS,
+        "RecorderCompositorValues(\n    const LayoutObject& object) {",
+        path,
+    )
+    for anchor, hook in (
+        (BLINK_PAINT_PROPERTY_TRANSFORM_ANCHOR, BLINK_PAINT_PROPERTY_TRANSFORM_HOOK),
+        (
+            BLINK_PAINT_PROPERTY_NO_TRANSFORM_ANCHOR,
+            BLINK_PAINT_PROPERTY_NO_TRANSFORM_HOOK,
+        ),
+        (BLINK_PAINT_PROPERTY_FILTER_ANCHOR, BLINK_PAINT_PROPERTY_FILTER_HOOK),
+        (BLINK_PAINT_PROPERTY_NO_FILTER_ANCHOR, BLINK_PAINT_PROPERTY_NO_FILTER_HOOK),
+        (BLINK_PAINT_PROPERTY_BACKDROP_ANCHOR, BLINK_PAINT_PROPERTY_BACKDROP_HOOK),
+    ):
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+# Recreation mode, slice 4b sub-step 2c: the clip path a native paint worklet
+# painted at the frame is imposed on the element's clip path. See
+# docs/architecture/page-recreation.md, "Sub-step 2c design: paint worklet
+# colors and clip paths imposed".
+BLINK_CLIP_PATH_CLIPPER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/paint/clip_path_clipper.h"'
+)
+BLINK_CLIP_PATH_CLIPPER_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/public/mojom/devtools/'
+    'console_message.mojom-blink.h"',
+    '#include "third_party/blink/renderer/core/dom/document.h"',
+    '#include "third_party/blink/renderer/core/dom/dom_node_ids.h"',
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/inspector/console_message.h"',
+    '#include "third_party/blink/renderer/platform/wtf/text/'
+    'string_builder.h"',
+    '#include "third_party/skia/include/core/SkPathBuilder.h"',
+)
+BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR = """\
+std::optional<gfx::RectF> ClipPathClipper::LocalClipPathBoundingBox(
+    const LayoutObject& object) {
+"""
+BLINK_CLIP_PATH_CLIPPER_HELPERS_MARKER = "RecorderPaintWorkletClipPath("
+# The helper as first delivered (5616770), which passed a const Element to
+# DOMNodeIds::IdForNode, which takes a Node.
+STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS = """\
+// Windows A11y Recorder recreation mode ("Sub-step 2c design: paint worklet
+// colors and clip paths imposed"): the clip path a native paint worklet
+// painted at the frame for the object's element, from its
+// data-a11y-recorded-paint-worklet attribute, or none. The recorded path
+// holds the recorded paint offset, the origin of the element's border box in
+// its transform space, which the attribute also holds; the path is given
+// with clip_offset in its place. When clip_offset is the recorded origin, the
+// recorded points are used unchanged; otherwise they are moved by the
+// difference and, when report is set, the element's console says so. Only an
+// element whose style has a basic shape clip path takes one, as only it has
+// a path-based clip for the recorded path to replace; an SVG child, an
+// anonymous object, or a copy in a user agent shadow tree takes none.
+static std::optional<Path> RecorderPaintWorkletClipPath(
+    const LayoutObject& object,
+    const gfx::Vector2dF& clip_offset,
+    bool report) {
+  if (!a11y_recorder::RecreationHoldsTime() || object.IsAnonymous() ||
+      object.IsSVGChild()) {
+    return std::nullopt;
+  }
+  const auto* recorder_element = DynamicTo<Element>(object.GetNode());
+  if (!recorder_element || recorder_element->IsInUserAgentShadowRoot()) {
+    return std::nullopt;
+  }
+  const ClipPathOperation* recorder_operation = object.StyleRef().ClipPath();
+  if (!recorder_operation ||
+      !IsA<ShapeClipPathOperation>(*recorder_operation)) {
+    return std::nullopt;
+  }
+  const AtomicString& recorder_text = recorder_element->getAttribute(
+      AtomicString("data-a11y-recorded-paint-worklet"));
+  if (recorder_text.IsNull()) {
+    return std::nullopt;
+  }
+  const a11y_recorder::RecreationPaintWorkletValues recorder_values =
+      a11y_recorder::RecreationPaintWorkletValuesOf(recorder_text.Utf8());
+  if (!recorder_values.clip_path) {
+    return std::nullopt;
+  }
+  const a11y_recorder::RecreationClipPath& recorder_path =
+      *recorder_values.clip_path;
+  const double recorder_dx = clip_offset.x() - recorder_path.origin_x;
+  const double recorder_dy = clip_offset.y() - recorder_path.origin_y;
+  const bool recorder_moved = recorder_dx != 0 || recorder_dy != 0;
+  // The recorded points are floats; each is read back as the same float.
+  auto recorder_point = [&](const std::vector<double>& recorder_points,
+                            size_t recorder_index) {
+    return recorder_moved
+               ? SkPoint::Make(
+                     static_cast<float>(recorder_points[2 * recorder_index] +
+                                        recorder_dx),
+                     static_cast<float>(
+                         recorder_points[2 * recorder_index + 1] +
+                         recorder_dy))
+               : SkPoint::Make(
+                     static_cast<float>(recorder_points[2 * recorder_index]),
+                     static_cast<float>(
+                         recorder_points[2 * recorder_index + 1]));
+  };
+  SkPathBuilder recorder_builder;
+  recorder_builder.setFillType(
+      recorder_path.fill_type == "even-odd" ? SkPathFillType::kEvenOdd
+      : recorder_path.fill_type == "inverse-winding"
+          ? SkPathFillType::kInverseWinding
+      : recorder_path.fill_type == "inverse-even-odd"
+          ? SkPathFillType::kInverseEvenOdd
+          : SkPathFillType::kWinding);
+  for (const a11y_recorder::RecreationPathSegment& recorder_segment :
+       recorder_path.segments) {
+    const std::vector<double>& recorder_points = recorder_segment.points;
+    switch (recorder_segment.verb) {
+      case a11y_recorder::RecreationPathVerb::kMove:
+        recorder_builder.moveTo(recorder_point(recorder_points, 0));
+        break;
+      case a11y_recorder::RecreationPathVerb::kLine:
+        recorder_builder.lineTo(recorder_point(recorder_points, 0));
+        break;
+      case a11y_recorder::RecreationPathVerb::kQuad:
+        recorder_builder.quadTo(recorder_point(recorder_points, 0),
+                                recorder_point(recorder_points, 1));
+        break;
+      case a11y_recorder::RecreationPathVerb::kConic:
+        recorder_builder.conicTo(recorder_point(recorder_points, 0),
+                                 recorder_point(recorder_points, 1),
+                                 static_cast<float>(recorder_segment.weight));
+        break;
+      case a11y_recorder::RecreationPathVerb::kCubic:
+        recorder_builder.cubicTo(recorder_point(recorder_points, 0),
+                                 recorder_point(recorder_points, 1),
+                                 recorder_point(recorder_points, 2));
+        break;
+      case a11y_recorder::RecreationPathVerb::kClose:
+        recorder_builder.close();
+        break;
+    }
+  }
+  if (recorder_moved && report) {
+    const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_element);
+    StringBuilder recorder_message_text;
+    recorder_message_text.Append(
+        "Recorded paint worklet clip path moved on ");
+    recorder_message_text.Append(recorder_element->nodeName());
+    if (recorder_element->HasID()) {
+      recorder_message_text.Append('#');
+      recorder_message_text.Append(recorder_element->GetIdAttribute());
+    }
+    recorder_message_text.Append(" (node ");
+    recorder_message_text.AppendNumber(recorder_id);
+    recorder_message_text.Append(
+        "): its paint offset in the recreation is not the recorded origin of "
+        "its border box, so the recorded path is moved by (");
+    recorder_message_text.AppendNumber(recorder_dx);
+    recorder_message_text.Append(", ");
+    recorder_message_text.AppendNumber(recorder_dy);
+    recorder_message_text.Append(").");
+    auto* recorder_message = MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kRendering,
+        mojom::blink::ConsoleMessageLevel::kWarning,
+        recorder_message_text.ToString());
+    Document& recorder_document = recorder_element->GetDocument();
+    if (LocalFrame* recorder_frame = recorder_document.GetFrame()) {
+      recorder_message->SetNodes(recorder_frame, {recorder_id});
+    }
+    recorder_document.AddConsoleMessage(recorder_message,
+                                        /*discard_duplicates=*/true);
+  }
+  return Path(recorder_builder.detach());
+}
+
+"""
+BLINK_CLIP_PATH_CLIPPER_HELPERS = STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS.replace(
+    """  if (recorder_moved && report) {
+    const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_element);
+""",
+    """  if (recorder_moved && report) {
+    Node* recorder_node = object.GetNode();
+    const DOMNodeId recorder_id = DOMNodeIds::IdForNode(recorder_node);
+""",
+    1,
+)
+BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR = """\
+  if (object.IsText() || !object.StyleRef().HasClipPath() ||
+      (!object.IsSVGChild() && !object.HasLayer())) {
+    return std::nullopt;
+  }
+"""
+BLINK_CLIP_PATH_BOUNDING_BOX_HOOK = BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR + """\
+  // Windows A11y Recorder recreation mode (sub-step 2c): the bounds of the
+  // recorded paint worklet clip path, without the paint offset.
+  if (std::optional<Path> recorder_path = RecorderPaintWorkletClipPath(
+          object, gfx::Vector2dF(), /*report=*/false)) {
+    gfx::RectF recorder_bounds = recorder_path->BoundingRect();
+    recorder_bounds.Intersect(gfx::RectF(InfiniteIntRect()));
+    return recorder_bounds;
+  }
+"""
+BLINK_CLIP_PATH_PATH_BASED_ANCHOR = """\
+std::optional<Path> ClipPathClipper::PathBasedClip(
+    const LayoutObject& clip_path_owner,
+    const gfx::Vector2dF& clip_offset) {
+"""
+BLINK_CLIP_PATH_PATH_BASED_HOOK = BLINK_CLIP_PATH_PATH_BASED_ANCHOR + """\
+  // Windows A11y Recorder recreation mode (sub-step 2c): the recorded paint
+  // worklet clip path, at the paint offset.
+  if (std::optional<Path> recorder_path = RecorderPaintWorkletClipPath(
+          clip_path_owner, clip_offset, /*report=*/true)) {
+    return recorder_path;
+  }
+"""
+
+
+def patch_blink_clip_path_clipper(path: Path) -> None:
+    """Sub-step 2c: the recorded paint worklet clip paths are imposed."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_CLIP_PATH_CLIPPER_OWN_INCLUDE,
+        BLINK_CLIP_PATH_CLIPPER_INCLUDES,
+        path,
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS,
+                BLINK_CLIP_PATH_CLIPPER_HELPERS,
+            ),
+        ),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_CLIP_PATH_CLIPPER_HELPERS_ANCHOR,
+        BLINK_CLIP_PATH_CLIPPER_HELPERS,
+        BLINK_CLIP_PATH_CLIPPER_HELPERS_MARKER + "\n    const LayoutObject& object,",
+        path,
+    )
+    for anchor, hook in (
+        (BLINK_CLIP_PATH_BOUNDING_BOX_ANCHOR, BLINK_CLIP_PATH_BOUNDING_BOX_HOOK),
+        (BLINK_CLIP_PATH_PATH_BASED_ANCHOR, BLINK_CLIP_PATH_PATH_BASED_HOOK),
+    ):
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+# Slice 4e (protocol 0.51): the page's style sheets as they arrive. The text a
+# link or @import sheet arrived with is recorded when Blink parses it, and
+# each update of a document's active style sheets records the sheets of the
+# tree scopes it touched, with the CSSOM text of each sheet script changed.
+# See docs/architecture/page-recreation.md, "Slice 4e".
+BLINK_CSS_STYLE_SHEET_HEADER_ANCHOR = """\
+  void Trace(Visitor*) const override;
+
+ private:
+  friend class QuietMutationScope;
+"""
+BLINK_CSS_STYLE_SHEET_HEADER_MARKER = "uint64_t recorder_sheet_number_ = 0;"
+BLINK_CSS_STYLE_SHEET_HEADER = """\
+  // Windows A11y Recorder (protocol 0.51, slice 4e): the sheet's number in
+  // the renderer's records, assigned when it is first recorded; whether its
+  // rules changed since its CSSOM text was last recorded; the digest of that
+  // text; and the state last recorded, so an unchanged sheet is recorded by
+  // its number only.
+  uint64_t recorder_sheet_number_ = 0;
+  bool recorder_cssom_changed_ = false;
+  String recorder_cssom_digest_;
+  String recorder_last_facts_;
+  // The sheet's CSSOM text as DevTools builds it: each rule's cssText on a
+  // line of its own.
+  String RecorderCSSOMText();
+
+"""
+
+BLINK_CSS_STYLE_SHEET_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/css/css_style_sheet.h"'
+)
+BLINK_CSS_STYLE_SHEET_DID_MUTATE_ANCHOR = """\
+void CSSStyleSheet::DidMutate(Mutation mutation) {
+"""
+BLINK_CSS_STYLE_SHEET_DID_MUTATE_HOOK = """\
+void CSSStyleSheet::DidMutate(Mutation mutation) {
+  // Windows A11y Recorder (protocol 0.51): a change to the rules or contents
+  // is recorded as the sheet's CSSOM text at the next active sheet update.
+  if (mutation != Mutation::kSheet) {
+    recorder_cssom_changed_ = true;
+  }
+"""
+BLINK_CSS_STYLE_SHEET_SET_TEXT_ANCHOR = """\
+void CSSStyleSheet::SetText(const String& text, CSSImportRules import_rules) {
+"""
+BLINK_CSS_STYLE_SHEET_SET_TEXT_HOOK = """\
+void CSSStyleSheet::SetText(const String& text, CSSImportRules import_rules) {
+  // Windows A11y Recorder (protocol 0.51): replace() and replaceSync().
+  recorder_cssom_changed_ = true;
+"""
+BLINK_CSS_STYLE_SHEET_CAN_ACCESS_ANCHOR = """\
+bool CSSStyleSheet::CanAccessRules() const {
+  return enable_rule_access_for_inspector_ || contents_->IsOriginClean();
+}
+"""
+BLINK_CSS_STYLE_SHEET_CAN_ACCESS_HOOK = """\
+bool CSSStyleSheet::CanAccessRules() const {
+  // Windows A11y Recorder recreation mode (slice 4e): the builder gives a
+  // sheet from another origin its recorded CSSOM text. The page's own
+  // scripts do not run in a recreation.
+  if (a11y_recorder::IsRecreationMode()) {
+    return true;
+  }
+  return enable_rule_access_for_inspector_ || contents_->IsOriginClean();
+}
+"""
+BLINK_CSS_STYLE_SHEET_DEFINITIONS_ANCHOR = """\
+void CSSStyleSheet::Trace(Visitor* visitor) const {
+"""
+BLINK_CSS_STYLE_SHEET_DEFINITIONS_MARKER = "String CSSStyleSheet::RecorderCSSOMText() {"
+BLINK_CSS_STYLE_SHEET_DEFINITIONS = """\
+// Windows A11y Recorder (protocol 0.51): as
+// InspectorStyleSheet::CollectStyleSheetRules builds it.
+String CSSStyleSheet::RecorderCSSOMText() {
+  StringBuilder recorder_builder;
+  for (unsigned i = 0; i < length(); ++i) {
+    recorder_builder.Append(ItemInternal(i)->cssText());
+    recorder_builder.Append('\\n');
+  }
+  return recorder_builder.ToString();
+}
+
+"""
+
+BLINK_STYLE_SHEET_CONTENTS_HEADER_ANCHOR = """\
+  void Trace(Visitor*) const;
+
+ private:
+  StyleSheetContents& operator=(const StyleSheetContents&) = delete;
+"""
+BLINK_STYLE_SHEET_CONTENTS_HEADER_MARKER = "String recorder_arrived_digest_;"
+BLINK_STYLE_SHEET_CONTENTS_HEADER = """\
+  // Windows A11y Recorder (protocol 0.51, slice 4e): the digest of the text
+  // this sheet's resource arrived with, or empty when it was not recorded.
+  String recorder_arrived_digest_;
+
+"""
+BLINK_STYLE_SHEET_CONTENTS_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/css/style_sheet_contents.h"'
+)
+BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR = """\
+  String sheet_text =
+      cached_style_sheet->SheetText(parser_context_, mime_type_check);
+"""
+# The parse hook as first delivered (ab95625) named String::FromUTF8 and
+# passed it a std::string; blink::String has FromUtf8 of a byte span. That
+# hook is STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK, below.
+BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK = BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR + """\
+  // Windows A11y Recorder (protocol 0.51, slice 4e): the text this sheet
+  // arrived with, by its address, recorded once for each digest.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    A11Y_RECORDER_HOOK_COST("hook:style-sheet-resource");
+    a11y_recorder::StyleSheetResourceFacts recorder_sheet;
+    recorder_sheet.url = cached_style_sheet->Url().GetString().Utf8();
+    recorder_sheet.response_url = response.ResponseUrl().GetString().Utf8();
+    recorder_sheet.status = response.HttpStatusCode();
+    recorder_sheet.mime_type = response.MimeType().Utf8();
+    recorder_sheet.text = sheet_text.Utf8();
+    const std::string recorder_digest =
+        a11y_recorder::RecordBlinkStyleSheetResource(std::move(recorder_sheet));
+    recorder_arrived_digest_ =
+        String::FromUtf8(base::as_byte_span(recorder_digest));
+  }
+"""
+
+STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK = BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK.replace(
+    """    const std::string recorder_digest =
+        a11y_recorder::RecordBlinkStyleSheetResource(std::move(recorder_sheet));
+    recorder_arrived_digest_ =
+        String::FromUtf8(base::as_byte_span(recorder_digest));
+""",
+    """    recorder_arrived_digest_ = String::FromUTF8(
+        a11y_recorder::RecordBlinkStyleSheetResource(std::move(recorder_sheet)));
+""",
+    1,
+)
+
+BLINK_STYLE_ENGINE_STYLE_SHEETS_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/bindings/core/v8/v8_observable_array_css_style_sheet.h"',
+    '#include "third_party/blink/renderer/core/css/css_import_rule.h"',
+    '#include "third_party/blink/renderer/core/css/media_list.h"',
+    '#include "third_party/blink/renderer/core/html/html_link_element.h"',
+    '#include "third_party/blink/renderer/core/html/html_style_element.h"',
+    '#include "third_party/blink/renderer/core/svg/svg_style_element.h"',
+    '#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"',
+    "#include <string>",
+    "#include <vector>",
+    '#include "base/strings/string_number_conversions.h"',
+)
+BLINK_STYLE_ENGINE_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/css/style_engine.h"'
+)
+BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_ANCHOR = """\
+void StyleEngine::UpdateActiveStyleSheets() {
+"""
+BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_MARKER = (
+    "void RecorderAppendStyleSheet("
+)
+BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS = """\
+namespace {
+
+// Windows A11y Recorder (protocol 0.51, slice 4e): a sheet's facts at an
+// update of the active style sheets, in full only when they differ from
+// those last recorded for it. A sheet that script changed, and a constructed
+// sheet, is recorded by its CSSOM text, serialized only when its rules
+// changed since it was last serialized.
+a11y_recorder::StyleSheetFacts RecorderStyleSheetFacts(
+    CSSStyleSheet& sheet,
+    bool active,
+    CSSStyleSheet* parent,
+    int rule_index) {
+  a11y_recorder::StyleSheetFacts facts;
+  if (!sheet.recorder_sheet_number_) {
+    sheet.recorder_sheet_number_ = a11y_recorder::AssignStyleSheetNumber();
+  }
+  facts.sheet_number = sheet.recorder_sheet_number_;
+  Node* owner = sheet.ownerNode();
+  if (parent) {
+    facts.kind = "import";
+    if (!parent->recorder_sheet_number_) {
+      parent->recorder_sheet_number_ = a11y_recorder::AssignStyleSheetNumber();
+    }
+    facts.parent_sheet_number = parent->recorder_sheet_number_;
+    facts.rule_index = rule_index;
+  } else if (sheet.IsConstructed()) {
+    facts.kind = "constructed";
+  } else if (IsA<HTMLLinkElement>(owner)) {
+    facts.kind = "link";
+  } else if (IsA<HTMLStyleElement>(owner) || IsA<SVGStyleElement>(owner)) {
+    facts.kind = "style";
+  } else if (IsA<ProcessingInstruction>(owner)) {
+    facts.kind = "processing-instruction";
+  } else {
+    facts.kind = "other";
+  }
+  facts.owner_node_id = owner ? static_cast<int>(owner->GetDomNodeId()) : 0;
+  facts.href = sheet.href().Utf8();
+  facts.media =
+      sheet.MediaQueries() ? sheet.MediaQueries()->MediaText().Utf8() : "";
+  facts.title = sheet.title().Utf8();
+  facts.disabled = sheet.disabled();
+  facts.active = active;
+  StyleSheetContents* contents = sheet.Contents();
+  if (sheet.IsConstructed() || (contents && contents->IsMutable())) {
+    if (sheet.recorder_cssom_changed_ || sheet.recorder_cssom_digest_.empty()) {
+      const std::string recorder_digest =
+          a11y_recorder::RecordBlinkStyleSheetText(
+              sheet.RecorderCSSOMText().Utf8());
+      sheet.recorder_cssom_digest_ =
+          String::FromUtf8(base::as_byte_span(recorder_digest));
+      sheet.recorder_cssom_changed_ = false;
+    }
+    // A text whose record could not be queued is named by no digest.
+    facts.text_digest = sheet.recorder_cssom_digest_.Utf8();
+    facts.text_source = facts.text_digest.empty() ? "none" : "cssom";
+  } else if (facts.kind == "style") {
+    facts.text_source = "element";
+  } else if (contents && !contents->recorder_arrived_digest_.empty()) {
+    facts.text_source = "arrived";
+    facts.text_digest = contents->recorder_arrived_digest_.Utf8();
+  } else {
+    facts.text_source = "none";
+  }
+  const std::string state =
+      facts.kind + "\\n" + base::NumberToString(facts.owner_node_id) + "\\n" +
+      base::NumberToString(facts.parent_sheet_number) + "\\n" +
+      base::NumberToString(facts.rule_index) + "\\n" + facts.href + "\\n" +
+      facts.media + "\\n" + facts.title + "\\n" +
+      (facts.disabled ? "1" : "0") + (facts.active ? "1" : "0") + "\\n" +
+      facts.text_source + "\\n" + facts.text_digest;
+  const String recorder_state = String::FromUtf8(base::as_byte_span(state));
+  facts.full = recorder_state != sheet.recorder_last_facts_;
+  sheet.recorder_last_facts_ = recorder_state;
+  return facts;
+}
+
+// A sheet, then each sheet it imports, depth first. Import rules precede
+// every rule but @charset and @layer statements, so the walk stops once the
+// sheet's import rules are all met.
+void RecorderAppendStyleSheet(
+    CSSStyleSheet& sheet,
+    bool active,
+    CSSStyleSheet* parent,
+    int rule_index,
+    int depth,
+    std::vector<a11y_recorder::StyleSheetFacts>& out) {
+  out.push_back(RecorderStyleSheetFacts(sheet, active, parent, rule_index));
+  StyleSheetContents* contents = sheet.Contents();
+  if (!contents || depth >= 16) {
+    return;
+  }
+  const wtf_size_t imports = contents->ImportRules().size();
+  wtf_size_t met = 0;
+  for (unsigned i = 0; i < sheet.length() && met < imports; ++i) {
+    auto* import_rule = DynamicTo<CSSImportRule>(sheet.ItemInternal(i));
+    if (!import_rule) {
+      continue;
+    }
+    ++met;
+    if (CSSStyleSheet* imported = import_rule->styleSheet()) {
+      RecorderAppendStyleSheet(*imported, active, &sheet, static_cast<int>(i),
+                               depth + 1, out);
+    }
+  }
+}
+
+// A tree scope's sheets in document.styleSheets order, then its adopted
+// sheets.
+a11y_recorder::StyleSheetScopeFacts RecorderStyleSheetScope(
+    TreeScope& tree_scope,
+    StyleSheetCollection& collection) {
+  a11y_recorder::StyleSheetScopeFacts scope;
+  scope.scope_node_id = static_cast<int>(tree_scope.RootNode().GetDomNodeId());
+  HeapHashSet<Member<CSSStyleSheet>> active;
+  for (const auto& entry : collection.ActiveStyleSheets()) {
+    active.insert(entry.first);
+  }
+  collection.UpdateStyleSheetList();
+  for (StyleSheet* listed : collection.StyleSheetsForStyleSheetList()) {
+    if (auto* sheet = DynamicTo<CSSStyleSheet>(listed)) {
+      RecorderAppendStyleSheet(*sheet, active.Contains(sheet), nullptr, -1, 0,
+                               scope.sheets);
+    }
+  }
+  if (tree_scope.HasAdoptedStyleSheets()) {
+    for (CSSStyleSheet* sheet : *tree_scope.AdoptedStyleSheets()) {
+      if (sheet) {
+        RecorderAppendStyleSheet(*sheet, active.Contains(sheet), nullptr, -1,
+                                 0, scope.adopted);
+      }
+    }
+  }
+  return scope;
+}
+
+}  // namespace
+
+"""
+# The helpers as first delivered (ab95625), which named String::FromUTF8.
+STAGE_AB95_BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS = BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS.replace(
+    """      const std::string recorder_digest =
+          a11y_recorder::RecordBlinkStyleSheetText(
+              sheet.RecorderCSSOMText().Utf8());
+      sheet.recorder_cssom_digest_ =
+          String::FromUtf8(base::as_byte_span(recorder_digest));
+""",
+    """      sheet.recorder_cssom_digest_ = String::FromUTF8(
+          a11y_recorder::RecordBlinkStyleSheetText(
+              sheet.RecorderCSSOMText().Utf8()));
+""",
+    1,
+).replace(
+    "  const String recorder_state = String::FromUtf8(base::as_byte_span(state));\n",
+    "  const String recorder_state = String::FromUTF8(state);\n",
+    1,
+)
+BLINK_STYLE_ENGINE_STYLE_SHEETS_ANCHOR = """\
+  probe::ActiveStyleSheetsUpdated(document_);
+
+  dirty_tree_scopes_.clear();
+"""
+BLINK_STYLE_ENGINE_STYLE_SHEETS_HOOK = """\
+  // Windows A11y Recorder (protocol 0.51, slice 4e): the sheets of each tree
+  // scope this update touched.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    A11Y_RECORDER_HOOK_COST("hook:style-sheets-updated");
+    std::vector<a11y_recorder::StyleSheetScopeFacts> recorder_scopes;
+    if (ShouldUpdateDocumentStyleSheetCollection()) {
+      recorder_scopes.push_back(RecorderStyleSheetScope(
+          *document_, GetDocumentStyleSheetCollection()));
+    }
+    if (ShouldUpdateShadowTreeStyleSheetCollection()) {
+      for (TreeScope* tree_scope : dirty_tree_scopes_) {
+        if (!tree_scope || !tree_scope->RootNode().isConnected()) {
+          continue;
+        }
+        if (StyleSheetCollection* recorder_collection =
+                StyleSheetCollectionFor(*tree_scope)) {
+          recorder_scopes.push_back(
+              RecorderStyleSheetScope(*tree_scope, *recorder_collection));
+        }
+      }
+    }
+    a11y_recorder::RecordBlinkStyleSheetsUpdated(
+        document_->GetDomNodeId(), document_->Token().ToString(),
+        std::move(recorder_scopes));
+  }
+""" + BLINK_STYLE_ENGINE_STYLE_SHEETS_ANCHOR
+
+
+def patch_blink_css_style_sheet_header(path: Path) -> None:
+    """Slice 4e: the CSSStyleSheet members that record a sheet."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        BLINK_CSS_STYLE_SHEET_HEADER_ANCHOR,
+        BLINK_CSS_STYLE_SHEET_HEADER,
+        BLINK_CSS_STYLE_SHEET_HEADER_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_css_style_sheet(path: Path) -> None:
+    """Slice 4e: a changed sheet is marked, and its CSSOM text is built."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_CSS_STYLE_SHEET_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    for anchor, hook in (
+        (BLINK_CSS_STYLE_SHEET_DID_MUTATE_ANCHOR, BLINK_CSS_STYLE_SHEET_DID_MUTATE_HOOK),
+        (BLINK_CSS_STYLE_SHEET_SET_TEXT_ANCHOR, BLINK_CSS_STYLE_SHEET_SET_TEXT_HOOK),
+        (BLINK_CSS_STYLE_SHEET_CAN_ACCESS_ANCHOR, BLINK_CSS_STYLE_SHEET_CAN_ACCESS_HOOK),
+    ):
+        text = apply_cookie_hook(text, anchor, hook, path)
+    text = insert_before_once(
+        text,
+        BLINK_CSS_STYLE_SHEET_DEFINITIONS_ANCHOR,
+        BLINK_CSS_STYLE_SHEET_DEFINITIONS,
+        BLINK_CSS_STYLE_SHEET_DEFINITIONS_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_style_sheet_contents_header(path: Path) -> None:
+    """Slice 4e: the digest of the text a sheet arrived with."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        BLINK_STYLE_SHEET_CONTENTS_HEADER_ANCHOR,
+        BLINK_STYLE_SHEET_CONTENTS_HEADER,
+        BLINK_STYLE_SHEET_CONTENTS_HEADER_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_style_sheet_contents(path: Path) -> None:
+    """Slice 4e: the text a link or @import sheet arrived with is recorded."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_STYLE_SHEET_CONTENTS_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_AB95_BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+                BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+            ),
+        ),
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_STYLE_SHEET_CONTENTS_PARSE_ANCHOR,
+        BLINK_STYLE_SHEET_CONTENTS_PARSE_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_style_engine_style_sheets(path: Path) -> None:
+    """Slice 4e: each update of the active style sheets is recorded."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_STYLE_ENGINE_OWN_INCLUDE,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_INCLUDES,
+        path,
+    )
+    text = upgrade_legacy_hooks(
+        text,
+        (
+            (
+                STAGE_AB95_BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS,
+                BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS,
+            ),
+        ),
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_ANCHOR,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_HELPERS_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_ANCHOR,
+        BLINK_STYLE_ENGINE_STYLE_SHEETS_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Slice 4f (protocol 0.52): who scheduled each timer. See
+# docs/architecture/page-recreation.md, "Slice 4f: who scheduled each timer".
+BLINK_DOM_TIMER_ORIGIN_INCLUDES = (
+    '#include "third_party/blink/renderer/platform/bindings/'
+    'callback_function_base.h"',
+    BLINK_DOM_WRAPPER_WORLD_INCLUDE,
+    BLINK_WTF_INCLUDE,
+    '#include "v8/include/v8-debug.h"',
+    '#include "v8/include/v8-function.h"',
+    '#include "v8/include/v8-isolate.h"',
+    '#include "v8/include/v8-local-handle.h"',
+    '#include "v8/include/v8-primitive.h"',
+    '#include "v8/include/v8-script.h"',
+)
+BLINK_DOM_TIMER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/scheduler/dom_timer.h"'
+)
+BLINK_DOM_TIMER_ORIGIN_HELPERS_ANCHOR = "}  // namespace\n"
+BLINK_DOM_TIMER_ORIGIN_HELPERS_MARKER = (
+    "a11y_recorder::TimerOriginFacts RecorderTimerOrigin("
+)
+BLINK_DOM_TIMER_ORIGIN_HELPERS = """\
+// Windows A11y Recorder (protocol 0.52, slice 4f): who scheduled a timer.
+// The recorder's name for a world type. The inspector's isolated worlds are
+// tested before isolated worlds generally, because Blink classifies both as
+// isolated.
+const char* RecorderTimerWorldKind(const DOMWrapperWorld& world) {
+  if (world.IsMainWorld()) {
+    return a11y_recorder::kExecutionWorldKindMain;
+  }
+  if (world.GetWorldType() == DOMWrapperWorld::WorldType::kInspectorIsolated) {
+    return a11y_recorder::kExecutionWorldKindInspectorIsolated;
+  }
+  if (world.IsIsolatedWorld()) {
+    return a11y_recorder::kExecutionWorldKindIsolated;
+  }
+  if (world.IsWorkerOrWorkletWorld()) {
+    return a11y_recorder::kExecutionWorldKindWorkerOrWorklet;
+  }
+  if (world.IsShadowRealmWorld()) {
+    return a11y_recorder::kExecutionWorldKindShadowRealm;
+  }
+  return a11y_recorder::kExecutionWorldKindOther;
+}
+
+// A V8 string as UTF-8, or empty for a value that is not a string.
+std::string RecorderTimerText(v8::Isolate* isolate,
+                              v8::Local<v8::Value> value) {
+  if (value.IsEmpty() || !value->IsString()) {
+    return std::string();
+  }
+  v8::String::Utf8Value text(isolate, value);
+  return *text ? std::string(*text, text.length()) : std::string();
+}
+
+// Reads the world and the script stack of the setTimeout or setInterval call
+// that is running, and where the timer's callback function is defined.
+a11y_recorder::TimerOriginFacts RecorderTimerOrigin(ExecutionContext& context,
+                                                    ScheduledAction* action) {
+  a11y_recorder::TimerOriginFacts origin;
+  v8::Isolate* isolate = context.GetIsolate();
+  if (!isolate) {
+    return origin;
+  }
+  v8::HandleScope handles(isolate);
+  if (isolate->InContext()) {
+    const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
+    origin.world_kind = RecorderTimerWorldKind(world);
+    origin.world_id = world.GetWorldId();
+    // Blink keeps isolated world names and stable identifiers in main-thread
+    // maps.
+    if (!world.IsMainWorld() && IsMainThread()) {
+      origin.world_name = world.NonMainWorldHumanReadableName().Utf8();
+      origin.world_stable_id = world.NonMainWorldStableId().Utf8();
+    }
+    v8::Local<v8::StackTrace> stack = v8::StackTrace::CurrentStackTrace(
+        isolate, static_cast<int>(a11y_recorder::kMaximumTimerOriginFrames),
+        v8::StackTrace::kDetailed);
+    const int frame_count = stack.IsEmpty() ? 0 : stack->GetFrameCount();
+    for (int index = 0; index < frame_count; ++index) {
+      v8::Local<v8::StackFrame> frame = stack->GetFrame(isolate, index);
+      if (frame.IsEmpty()) {
+        continue;
+      }
+      a11y_recorder::ScriptFrameFacts facts;
+      facts.script_id = frame->GetScriptId();
+      facts.url = RecorderTimerText(isolate, frame->GetScriptNameOrSourceURL());
+      facts.function_name = RecorderTimerText(isolate, frame->GetFunctionName());
+      facts.line_number = frame->GetLineNumber();
+      facts.column_number = frame->GetColumn();
+      facts.is_eval = frame->IsEval();
+      origin.stack.push_back(std::move(facts));
+    }
+  }
+  CallbackFunctionBase* callback =
+      action ? action->CallbackFunction() : nullptr;
+  if (!callback) {
+    origin.string_handler = true;
+    return origin;
+  }
+  v8::Local<v8::Object> callback_object = callback->CallbackObject();
+  if (callback_object.IsEmpty() || !callback_object->IsFunction()) {
+    return origin;
+  }
+  v8::Local<v8::Function> function = callback_object.As<v8::Function>();
+  origin.has_callback = true;
+  origin.callback.script_id = function->ScriptId();
+  // V8 reports a function's line and column zero-based, and a negative value
+  // for a function with no script position, such as a bound function.
+  const int line = function->GetScriptLineNumber();
+  const int column = function->GetScriptColumnNumber();
+  origin.callback.line_number = line >= 0 ? line + 1 : 0;
+  origin.callback.column_number = column >= 0 ? column + 1 : 0;
+  origin.callback.url =
+      RecorderTimerText(isolate, function->GetScriptOrigin().ResourceName());
+  origin.callback.function_name =
+      RecorderTimerText(isolate, function->GetDebugName());
+  return origin;
+}
+
+"""
+BLINK_TIMER_ORIGIN_HOOK = """\
+  // Windows A11y Recorder (protocol 0.52, slice 4f): who scheduled the timer,
+  // read while the call that scheduled it is running.
+  if (a11y_recorder::GetProcessRecorderClient() &&
+      IsA<LocalDOMWindow>(context)) {
+    A11Y_RECORDER_HOOK_COST("hook:timer-origin");
+    a11y_recorder::NoteBlinkTimerOrigin(reinterpret_cast<uintptr_t>(this),
+                                        RecorderTimerOrigin(context, action));
+  }
+"""
+BLINK_TIMER_ORIGIN_MARKER = "RecorderTimerOrigin(context, action)"
+
+# A script element's script: the element is noted around the run, a module's
+# script ID is read from its record, and a classic script's from its compile.
+BLINK_PENDING_SCRIPT_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/script/pending_script.h"'
+)
+BLINK_PENDING_SCRIPT_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/core/script/module_script.h"',
+    '#include "v8/include/v8-local-handle.h"',
+    '#include "v8/include/v8-script.h"',
+)
+BLINK_PENDING_SCRIPT_HELPERS_ANCHOR = """\
+// <specdef href="https://html.spec.whatwg.org/C/#execute-the-script-block">
+void PendingScript::ExecuteScriptBlockInternal(
+"""
+BLINK_PENDING_SCRIPT_HELPERS_MARKER = "bool RecorderNoteScriptElement("
+BLINK_PENDING_SCRIPT_HELPERS = """\
+namespace {
+
+// Windows A11y Recorder (protocol 0.52, slice 4f): the element whose script is
+// about to run. A module's script ID is in its record, so it is recorded here;
+// a classic script is compiled inside its run, so its element is noted and
+// the compile records it. Returns true when the element was noted.
+bool RecorderNoteScriptElement(Script* script,
+                               ScriptElementBase* element,
+                               bool is_external,
+                               Document& context_document) {
+  if (!script || !element || !a11y_recorder::GetProcessRecorderClient()) {
+    return false;
+  }
+  A11Y_RECORDER_HOOK_COST("hook:script-element");
+  a11y_recorder::ScriptSourceFacts facts;
+  facts.document_node_id = static_cast<int>(context_document.GetDomNodeId());
+  facts.document_token = context_document.Token().ToString();
+  facts.element_node_id = static_cast<int>(element->GetDOMNodeId());
+  if (is_external) {
+    facts.url = script->SourceUrl().GetString().Utf8();
+  }
+  facts.line_number = script->StartPosition().line_.OneBasedInt();
+  facts.column_number = script->StartPosition().column_.OneBasedInt();
+  if (script->GetScriptType() == mojom::blink::ScriptType::kModule) {
+    facts.kind = a11y_recorder::kScriptSourceKindModule;
+    auto* module_script = static_cast<ModuleScript*>(script);
+    ExecutionContext* execution_context =
+        context_document.GetExecutionContext();
+    if (!execution_context || module_script->HasEmptyRecord()) {
+      return false;
+    }
+    v8::Isolate* isolate = execution_context->GetIsolate();
+    v8::HandleScope handles(isolate);
+    v8::Local<v8::Module> record = module_script->V8Module();
+    if (!record.IsEmpty() && record->IsSourceTextModule()) {
+      facts.script_id = record->ScriptId();
+      a11y_recorder::RecordBlinkScriptSource(std::move(facts));
+    }
+    return false;
+  }
+  facts.kind = a11y_recorder::kScriptSourceKindClassic;
+  a11y_recorder::PushBlinkScriptElement(reinterpret_cast<uintptr_t>(script),
+                                        std::move(facts));
+  return true;
+}
+
+}  // namespace
+
+"""
+BLINK_PENDING_SCRIPT_RUN_ANCHOR = """\
+    script->RunScript(context_document->domWindow());
+"""
+BLINK_PENDING_SCRIPT_RUN_HOOK = """\
+    // Windows A11y Recorder (protocol 0.52, slice 4f): the element whose
+    // script runs, for the script ID its compile gives.
+    const bool recorder_script_noted = RecorderNoteScriptElement(
+        script, element, is_external, *context_document);
+    script->RunScript(context_document->domWindow());
+    if (recorder_script_noted) {
+      a11y_recorder::PopBlinkScriptElement(
+          reinterpret_cast<uintptr_t>(script));
+    }
+"""
+
+BLINK_V8_SCRIPT_RUNNER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"'
+)
+BLINK_V8_SCRIPT_RUNNER_COMPILED_ANCHOR = """\
+      DEVTOOLS_TIMELINE_TRACE_EVENT_WITH_CATEGORIES(
+          TRACE_DISABLED_BY_DEFAULT("devtools.target-rundown"),
+          "ScriptCompiled", inspector_target_rundown_event::Data,
+          execution_context, isolate, script_state, script->ScriptId());
+"""
+BLINK_V8_SCRIPT_RUNNER_COMPILED_HOOK = BLINK_V8_SCRIPT_RUNNER_COMPILED_ANCHOR + """\
+      // Windows A11y Recorder (protocol 0.52, slice 4f): the script ID of a
+      // script element's classic script, recorded when the element was noted.
+      a11y_recorder::RecordBlinkClassicScriptCompiled(
+          reinterpret_cast<uintptr_t>(classic_script), script->ScriptId());
+"""
+
+BLINK_CONTENT_ATTRIBUTE_HANDLER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/bindings/core/v8/'
+    'js_event_handler_for_content_attribute.h"'
+)
+BLINK_CONTENT_ATTRIBUTE_HANDLER_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    BLINK_DOCUMENT_INCLUDE,
+    '#include "third_party/blink/renderer/core/dom/element.h"',
+    '#include "third_party/blink/renderer/core/html/html_element.h"',
+)
+BLINK_CONTENT_ATTRIBUTE_HANDLER_ANCHOR = """\
+  // Step 12. Set eventHandler's value to the result of creating a Web IDL
+"""
+BLINK_CONTENT_ATTRIBUTE_HANDLER_HOOK = """\
+  // Windows A11y Recorder (protocol 0.52, slice 4f): the element and attribute
+  // an on... handler was compiled from, by its script ID.
+  if (a11y_recorder::GetProcessRecorderClient()) {
+    A11Y_RECORDER_HOOK_COST("hook:script-compiled-attribute");
+    a11y_recorder::ScriptSourceFacts recorder_source;
+    recorder_source.document_node_id =
+        static_cast<int>(document->GetDomNodeId());
+    recorder_source.document_token = document->Token().ToString();
+    recorder_source.script_id = compiled_function->ScriptId();
+    recorder_source.kind =
+        a11y_recorder::kScriptSourceKindEventHandlerAttribute;
+    // A window handler set by a body or frameset attribute is recorded with
+    // the document's body element, which holds the attribute.
+    Element* recorder_owner =
+        element ? element : (window ? document->body() : nullptr);
+    recorder_source.element_node_id =
+        recorder_owner ? static_cast<int>(recorder_owner->GetDomNodeId()) : 0;
+    recorder_source.attribute_name = function_name_.Utf8();
+    recorder_source.url = source_url_.Utf8();
+    recorder_source.line_number = position_.line_.OneBasedInt();
+    recorder_source.column_number = position_.column_.OneBasedInt();
+    a11y_recorder::RecordBlinkScriptSource(std::move(recorder_source));
+  }
+
+""" + BLINK_CONTENT_ATTRIBUTE_HANDLER_ANCHOR
+
+
+def patch_blink_dom_timer_origin(path: Path) -> None:
+    """Slice 4f: who scheduled a timer, noted before its scheduled record."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_DOM_TIMER_OWN_INCLUDE, BLINK_DOM_TIMER_ORIGIN_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        BLINK_DOM_TIMER_ORIGIN_HELPERS_ANCHOR,
+        BLINK_DOM_TIMER_ORIGIN_HELPERS,
+        BLINK_DOM_TIMER_ORIGIN_HELPERS_MARKER,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        BLINK_TIMER_SCHEDULED_HOOK,
+        BLINK_TIMER_ORIGIN_HOOK,
+        BLINK_TIMER_ORIGIN_MARKER,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_pending_script(path: Path) -> None:
+    """Slice 4f: the element of each script element's script."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_PENDING_SCRIPT_OWN_INCLUDE, BLINK_PENDING_SCRIPT_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        BLINK_PENDING_SCRIPT_HELPERS_ANCHOR,
+        BLINK_PENDING_SCRIPT_HELPERS,
+        BLINK_PENDING_SCRIPT_HELPERS_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, BLINK_PENDING_SCRIPT_RUN_ANCHOR, BLINK_PENDING_SCRIPT_RUN_HOOK, path
+    )
+    write_patched(path, text)
+
+
+def patch_blink_v8_script_runner(path: Path) -> None:
+    """Slice 4f: the script ID of a script element's classic script."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_V8_SCRIPT_RUNNER_OWN_INCLUDE, (BLINK_BRIDGE_INCLUDE,), path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_V8_SCRIPT_RUNNER_COMPILED_ANCHOR,
+        BLINK_V8_SCRIPT_RUNNER_COMPILED_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_content_attribute_handler(path: Path) -> None:
+    """Slice 4f: the element and attribute of each compiled on... handler."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        BLINK_CONTENT_ATTRIBUTE_HANDLER_OWN_INCLUDE,
+        BLINK_CONTENT_ATTRIBUTE_HANDLER_INCLUDES,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_CONTENT_ATTRIBUTE_HANDLER_ANCHOR,
+        BLINK_CONTENT_ATTRIBUTE_HANDLER_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Slice 4h (protocol 0.54): the page's script source. V8 reports each script
+# it instantiates, or fails to compile, to a hook Blink sets for the main
+# thread; the hook records the script and its source text. See
+# docs/architecture/page-recreation.md, "Slice 4h: the page's script source".
+V8_SCRIPT_HOOK_INCLUDE = '#include "chromium/recorder_bridge/v8_script_hook.h"'
+
+V8_DEBUG_OWN_INCLUDE = '#include "src/debug/debug.h"'
+V8_DEBUG_INCLUDES = (
+    "#include <atomic>",
+    V8_SCRIPT_HOOK_INCLUDE,
+    '#include "src/objects/script-inl.h"',
+    '#include "src/objects/shared-function-info-inl.h"',
+)
+V8_DEBUG_REPORT_ANCHOR = "void Debug::OnCompileError(DirectHandle<Script> script) {\n"
+V8_DEBUG_REPORT_MARKER = "void A11yRecorderReportScript("
+V8_DEBUG_REPORT = """\
+// Windows A11y Recorder (protocol 0.54, slice 4h): a normal script, when it
+// is instantiated or fails to compile, is given to the hook Blink sets,
+// before the debugger's own checks, which skip every script while no
+// debugger is attached. Temporary, native, extension, inspector, and
+// WebAssembly scripts are not given.
+void A11yRecorderReportScript(Isolate* isolate, DirectHandle<Script> script,
+                              bool compile_error) {
+  ::a11y_recorder::V8ScriptHook hook = ::a11y_recorder::GetV8ScriptHook();
+  if (!hook || script->id() == Script::kTemporaryScriptId ||
+      script->type() != Script::Type::kNormal) {
+    return;
+  }
+  HandleScope scope(isolate);
+  DirectHandle<PrimitiveHeapObject> source(script->source(), isolate);
+  if (!IsString(*source)) {
+    return;
+  }
+  ::a11y_recorder::V8ScriptFacts facts;
+  facts.script_id = script->id();
+  facts.source = v8::Utils::ToLocal(Cast<String>(source));
+  DirectHandle<Object> name(script->name(), isolate);
+  if (IsString(*name)) {
+    facts.name = v8::Utils::ToLocal(Cast<String>(name));
+  }
+  DirectHandle<PrimitiveHeapObject> source_url(script->source_url(), isolate);
+  if (IsString(*source_url)) {
+    facts.source_url = v8::Utils::ToLocal(Cast<String>(source_url));
+  }
+  DirectHandle<Object> source_mapping_url(script->source_mapping_url(),
+                                          isolate);
+  if (IsString(*source_mapping_url)) {
+    facts.source_mapping_url =
+        v8::Utils::ToLocal(Cast<String>(source_mapping_url));
+  }
+  facts.line_offset = script->line_offset();
+  facts.column_offset = script->column_offset();
+  facts.is_module = script->origin_options().IsModule();
+  facts.compilation_kind = static_cast<int>(script->compilation_kind());
+  if (script->has_eval_from_shared()) {
+    Tagged<HeapObject> from = script->eval_from_shared()->script();
+    if (IsScript(from)) {
+      facts.eval_from_script_id = Cast<Script>(from)->id();
+    }
+  }
+  facts.compile_error = compile_error;
+  hook(reinterpret_cast<v8::Isolate*>(isolate), facts);
+}
+
+"""
+V8_DEBUG_AFTER_COMPILE_ANCHOR = """\
+void Debug::OnAfterCompile(DirectHandle<Script> script) {
+  ProcessCompileEvent(false, script);
+}
+"""
+V8_DEBUG_AFTER_COMPILE_HOOK = """\
+void Debug::OnAfterCompile(DirectHandle<Script> script) {
+  // Windows A11y Recorder (protocol 0.54, slice 4h).
+  A11yRecorderReportScript(isolate_, script, false);
+  ProcessCompileEvent(false, script);
+}
+"""
+V8_DEBUG_END_ANCHOR = "}  // namespace internal\n}  // namespace v8\n"
+V8_DEBUG_END_MARKER = "void SetV8ScriptHook(V8ScriptHook hook) {"
+V8_DEBUG_END = """\
+}  // namespace internal
+}  // namespace v8
+
+// Windows A11y Recorder (protocol 0.54, slice 4h): the hook V8 gives each
+// script to. Declared in chromium/recorder_bridge/v8_script_hook.h.
+namespace a11y_recorder {
+namespace {
+std::atomic<V8ScriptHook> g_v8_script_hook{nullptr};
+}  // namespace
+
+void SetV8ScriptHook(V8ScriptHook hook) {
+  g_v8_script_hook.store(hook, std::memory_order_release);
+}
+
+V8ScriptHook GetV8ScriptHook() {
+  return g_v8_script_hook.load(std::memory_order_acquire);
+}
+}  // namespace a11y_recorder
+"""
+
+V8_COMPILE_ERROR_OWN_INCLUDE = (
+    '#include "src/parsing/pending-compilation-error-handler.h"'
+)
+V8_COMPILE_ERROR_DECLARATION_ANCHOR = (
+    "void PendingCompilationErrorHandler::ThrowPendingError(\n"
+)
+V8_COMPILE_ERROR_DECLARATION_MARKER = "// Windows A11y Recorder (protocol 0.54, slice 4h): defined in"
+V8_COMPILE_ERROR_DECLARATION = """\
+// Windows A11y Recorder (protocol 0.54, slice 4h): defined in
+// src/debug/debug.cc.
+void A11yRecorderReportScript(Isolate* isolate, DirectHandle<Script> script,
+                              bool compile_error);
+
+"""
+V8_COMPILE_ERROR_ANCHOR = """\
+  isolate->debug()->OnCompileError(script);
+
+  Factory* factory = isolate->factory();
+"""
+V8_COMPILE_ERROR_HOOK = """\
+  // Windows A11y Recorder (protocol 0.54, slice 4h): a script that failed
+  // to compile.
+  A11yRecorderReportScript(isolate, script, true);
+  isolate->debug()->OnCompileError(script);
+
+  Factory* factory = isolate->factory();
+"""
+
+BLINK_V8_INITIALIZER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/bindings/core/v8/v8_initializer.h"'
+)
+BLINK_V8_INITIALIZER_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    V8_SCRIPT_HOOK_INCLUDE,
+    BLINK_DOCUMENT_INCLUDE,
+)
+BLINK_V8_INITIALIZER_HELPERS_ANCHOR = (
+    "void V8Initializer::InitializeV8Common(v8::Isolate* isolate) {\n"
+)
+BLINK_V8_INITIALIZER_HELPERS_MARKER = "void RecorderV8ScriptCompiled("
+BLINK_V8_INITIALIZER_HELPERS = """\
+namespace {
+
+// Windows A11y Recorder (protocol 0.54, slice 4h): the recorder's name for a
+// world type, as the timer records give it.
+const char* RecorderScriptWorldKind(const DOMWrapperWorld& world) {
+  if (world.IsMainWorld()) {
+    return a11y_recorder::kExecutionWorldKindMain;
+  }
+  if (world.GetWorldType() == DOMWrapperWorld::WorldType::kInspectorIsolated) {
+    return a11y_recorder::kExecutionWorldKindInspectorIsolated;
+  }
+  if (world.IsIsolatedWorld()) {
+    return a11y_recorder::kExecutionWorldKindIsolated;
+  }
+  if (world.IsWorkerOrWorkletWorld()) {
+    return a11y_recorder::kExecutionWorldKindWorkerOrWorklet;
+  }
+  if (world.IsShadowRealmWorld()) {
+    return a11y_recorder::kExecutionWorldKindShadowRealm;
+  }
+  return a11y_recorder::kExecutionWorldKindOther;
+}
+
+// A V8 string as UTF-8, with unpaired surrogates replaced, or empty for an
+// empty handle. Read with V8's own API, so the string is not changed.
+std::string RecorderScriptText(v8::Isolate* isolate,
+                               v8::Local<v8::String> text) {
+  if (text.IsEmpty()) {
+    return std::string();
+  }
+  const size_t length = text->Utf8LengthV2(isolate);
+  std::string utf8(length, '\\0');
+  if (length > 0) {
+    text->WriteUtf8V2(isolate, utf8.data(), length,
+                      v8::String::WriteFlags::kReplaceInvalidUtf8);
+  }
+  return utf8;
+}
+
+// The recorder's kind of a V8 script.
+const char* RecorderScriptKind(const a11y_recorder::V8ScriptFacts& script) {
+  if (script.is_module) {
+    return a11y_recorder::kScriptParsedKindModule;
+  }
+  switch (script.compilation_kind) {
+    case a11y_recorder::kV8CompilationKindDirectEval:
+    case a11y_recorder::kV8CompilationKindIndirectEval:
+      return a11y_recorder::kScriptParsedKindEval;
+    case a11y_recorder::kV8CompilationKindFunctionConstructor:
+    case a11y_recorder::kV8CompilationKindWrapped:
+      return a11y_recorder::kScriptParsedKindFunction;
+    default:
+      return a11y_recorder::kScriptParsedKindClassic;
+  }
+}
+
+// Records a script of a document of the main thread, once per script ID.
+// A script compiled while a DevTools protocol command runs, such as an
+// expression typed in the Console, or in DevTools' own isolated world, is
+// not the page's and is not recorded.
+void RecorderV8ScriptCompiled(v8::Isolate* isolate,
+                              const a11y_recorder::V8ScriptFacts& script) {
+  if (!IsMainThread() || !a11y_recorder::IsRecorderActive() ||
+      a11y_recorder::InDevToolsCommand() || script.script_id <= 0 ||
+      !isolate->InContext()) {
+    return;
+  }
+  A11Y_RECORDER_HOOK_COST("hook:script-parsed");
+  v8::HandleScope handles(isolate);
+  LocalDOMWindow* window = ToLocalDOMWindow(isolate->GetCurrentContext());
+  Document* document = window ? window->document() : nullptr;
+  if (!document) {
+    return;
+  }
+  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
+  if (world.GetWorldType() == DOMWrapperWorld::WorldType::kInspectorIsolated ||
+      !a11y_recorder::ClaimScriptParsed(script.script_id)) {
+    return;
+  }
+  a11y_recorder::ScriptParsedFacts facts;
+  facts.document_node_id = static_cast<int>(document->GetDomNodeId());
+  facts.document_token = document->Token().ToString();
+  facts.world_kind = RecorderScriptWorldKind(world);
+  facts.world_id = world.GetWorldId();
+  // Blink keeps isolated world names and stable identifiers in main-thread
+  // maps; this is the main thread.
+  if (!world.IsMainWorld() && IsMainThread()) {
+    facts.world_name = world.NonMainWorldHumanReadableName().Utf8();
+    facts.world_stable_id = world.NonMainWorldStableId().Utf8();
+  }
+  facts.script_id = script.script_id;
+  facts.kind = RecorderScriptKind(script);
+  facts.source = RecorderScriptText(isolate, script.source);
+  facts.url = RecorderScriptText(isolate, script.name);
+  facts.source_url = RecorderScriptText(isolate, script.source_url);
+  facts.source_map_url = RecorderScriptText(isolate, script.source_mapping_url);
+  facts.line_number = script.line_offset + 1;
+  facts.column_number = script.column_offset + 1;
+  facts.eval_from_script_id = script.eval_from_script_id;
+  facts.compile_error = script.compile_error;
+  a11y_recorder::RecordScriptParsed(std::move(facts));
+}
+
+}  // namespace
+
+"""
+BLINK_V8_INITIALIZER_INSTALL_ANCHOR = (
+    "  isolate->SetUseCounterCallback(&UseCounterCallback);\n"
+)
+BLINK_V8_INITIALIZER_INSTALL_HOOK = """\
+  isolate->SetUseCounterCallback(&UseCounterCallback);
+  // Windows A11y Recorder (protocol 0.54, slice 4h): the main thread's
+  // scripts, as V8 instantiates them.
+  if (IsMainThread()) {
+    a11y_recorder::SetV8ScriptHook(&RecorderV8ScriptCompiled);
+  }
+"""
+
+BLINK_DEVTOOLS_SESSION_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/inspector/devtools_session.h"'
+)
+BLINK_DEVTOOLS_SESSION_INCLUDES = (
+    BLINK_BRIDGE_INCLUDE,
+    '#include "third_party/blink/renderer/platform/wtf/threading.h"',
+)
+BLINK_DEVTOOLS_SESSION_START_ANCHOR = """\
+  agent_->client_->DebuggerTaskStarted();
+  if (v8_inspector::V8InspectorSession::canDispatchMethod(
+"""
+BLINK_DEVTOOLS_SESSION_START_HOOK = """\
+  agent_->client_->DebuggerTaskStarted();
+  // Windows A11y Recorder (protocol 0.54, slice 4h): a script compiled while
+  // a DevTools command runs on the main thread is DevTools', not the page's.
+  const bool recorder_devtools_command = IsMainThread();
+  if (recorder_devtools_command) {
+    a11y_recorder::EnterDevToolsCommand();
+  }
+  if (v8_inspector::V8InspectorSession::canDispatchMethod(
+"""
+BLINK_DEVTOOLS_SESSION_FINISH_ANCHOR = """\
+    inspector_backend_dispatcher_->Dispatch(dispatchable);
+  }
+  agent_->client_->DebuggerTaskFinished();
+"""
+BLINK_DEVTOOLS_SESSION_FINISH_HOOK = """\
+    inspector_backend_dispatcher_->Dispatch(dispatchable);
+  }
+  if (recorder_devtools_command) {
+    a11y_recorder::LeaveDevToolsCommand();
+  }
+  agent_->client_->DebuggerTaskFinished();
+"""
+
+
+def patch_v8_debug(path: Path) -> None:
+    """Slice 4h: V8 gives each instantiated script to the recorder's hook."""
+    text = read_source(path)
+    text = add_includes_after(text, V8_DEBUG_OWN_INCLUDE, V8_DEBUG_INCLUDES, path)
+    text = insert_before_once(
+        text, V8_DEBUG_REPORT_ANCHOR, V8_DEBUG_REPORT, V8_DEBUG_REPORT_MARKER, path
+    )
+    text = apply_cookie_hook(
+        text, V8_DEBUG_AFTER_COMPILE_ANCHOR, V8_DEBUG_AFTER_COMPILE_HOOK, path
+    )
+    if V8_DEBUG_END_MARKER not in text:
+        if not text.endswith(V8_DEBUG_END_ANCHOR):
+            raise RuntimeError(f"{path}: expected the file to end with its namespaces")
+        text = text[: -len(V8_DEBUG_END_ANCHOR)] + V8_DEBUG_END
+    write_patched(path, text)
+
+
+def patch_v8_compile_error(path: Path) -> None:
+    """Slice 4h: a script that failed to compile is given to the hook."""
+    text = read_source(path)
+    text = insert_before_once(
+        text,
+        V8_COMPILE_ERROR_DECLARATION_ANCHOR,
+        V8_COMPILE_ERROR_DECLARATION,
+        V8_COMPILE_ERROR_DECLARATION_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, V8_COMPILE_ERROR_ANCHOR, V8_COMPILE_ERROR_HOOK, path
+    )
+    write_patched(path, text)
+
+
+def patch_blink_v8_initializer(path: Path) -> None:
+    """Slice 4h: Blink sets the V8 script hook for the main thread."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_V8_INITIALIZER_OWN_INCLUDE, BLINK_V8_INITIALIZER_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        BLINK_V8_INITIALIZER_HELPERS_ANCHOR,
+        BLINK_V8_INITIALIZER_HELPERS,
+        BLINK_V8_INITIALIZER_HELPERS_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_V8_INITIALIZER_INSTALL_ANCHOR,
+        BLINK_V8_INITIALIZER_INSTALL_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_blink_devtools_session(path: Path) -> None:
+    """Slice 4h: DevTools commands on the main thread are bracketed."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_DEVTOOLS_SESSION_OWN_INCLUDE, BLINK_DEVTOOLS_SESSION_INCLUDES, path
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_DEVTOOLS_SESSION_START_ANCHOR,
+        BLINK_DEVTOOLS_SESSION_START_HOOK,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        BLINK_DEVTOOLS_SESSION_FINISH_ANCHOR,
+        BLINK_DEVTOOLS_SESSION_FINISH_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Protocol 0.55 (slice 5a): a frame owner element records each frame it is
+# given and its loss, with the frame's DevTools frame token, which names the
+# frame in every renderer. See docs/architecture/page-recreation.md, "Slice 5".
+BLINK_FRAME_OWNER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/html/html_frame_owner_element.h"'
+)
+BLINK_FRAME_OWNER_INCLUDES = (BLINK_BRIDGE_INCLUDE,)
+BLINK_FRAME_OWNER_SET_ANCHOR = """\
+  SetNeedsStyleRecalc(kLocalStyleChange, StyleChangeReasonForTracing::Create(
+                                             style_change_reason::kFrame));
+
+  for (ContainerNode* node = this; node; node = node->ParentOrShadowHostNode())
+    node->IncrementConnectedSubframeCount();
+}
+"""
+BLINK_FRAME_OWNER_SET_HOOK = """\
+  SetNeedsStyleRecalc(kLocalStyleChange, StyleChangeReasonForTracing::Create(
+                                             style_change_reason::kFrame));
+
+  for (ContainerNode* node = this; node; node = node->ParentOrShadowHostNode())
+    node->IncrementConnectedSubframeCount();
+
+  // Windows A11y Recorder (protocol 0.55, slice 5a): the owner's new frame,
+  // named by its DevTools frame token.
+  a11y_recorder::RecordBlinkDomFrameOwnerChanged(
+      GetDocument().GetDomNodeId(), GetDocument().Token().ToString(),
+      GetDomNodeId(), frame.GetDevToolsFrameToken().ToString(),
+      frame.IsRemoteFrame());
+}
+"""
+BLINK_FRAME_OWNER_CLEAR_ANCHOR = """\
+  RendererResourceCoordinator::Get()->OnBeforeContentFrameDetached(
+      *content_frame_, *this);
+
+  content_frame_ = nullptr;
+"""
+BLINK_FRAME_OWNER_CLEAR_HOOK = """\
+  RendererResourceCoordinator::Get()->OnBeforeContentFrameDetached(
+      *content_frame_, *this);
+
+  // Windows A11y Recorder (protocol 0.55, slice 5a): the owner holds no frame.
+  a11y_recorder::RecordBlinkDomFrameOwnerChanged(
+      GetDocument().GetDomNodeId(), GetDocument().Token().ToString(),
+      GetDomNodeId(), std::string(), false);
+
+  content_frame_ = nullptr;
+"""
+
+
+def patch_blink_frame_owner(path: Path) -> None:
+    """Slice 5a: a frame owner element records its frame and its loss."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_FRAME_OWNER_OWN_INCLUDE, BLINK_FRAME_OWNER_INCLUDES, path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_FRAME_OWNER_SET_ANCHOR, BLINK_FRAME_OWNER_SET_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_FRAME_OWNER_CLEAR_ANCHOR, BLINK_FRAME_OWNER_CLEAR_HOOK, path
+    )
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -11494,6 +19686,15 @@ def main() -> int:
         / "dom"
         / "document.cc"
     )
+    patch_blink_document_started_parsing(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "dom"
+        / "document.cc"
+    )
     patch_blink_document_cookie(
         source
         / "third_party"
@@ -11511,6 +19712,8 @@ def main() -> int:
     patch_blink_input_element(forms / "html_input_element.cc")
     patch_blink_text_field_input_type(forms / "text_field_input_type.cc")
     patch_blink_text_area_element(forms / "html_text_area_element.cc")
+    patch_blink_option_element(forms / "html_option_element.cc")
+    patch_blink_page_popup(blink_core / "exported" / "web_page_popup_impl.cc")
     patch_blink_local_frame_view(blink_core / "frame" / "local_frame_view.cc")
     for recorder_path, recorder_declaration, recorder_hooks in (
         (
@@ -11522,6 +19725,11 @@ def main() -> int:
             blink_core / "dom" / "text.cc",
             BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
             BLINK_TEXT_LAYOUT_CHANGE_HOOKS,
+        ),
+        (
+            blink_core / "dom" / "node.cc",
+            BLINK_LAYOUT_CHANGE_NOTE_DECLARATION,
+            BLINK_NODE_LAYOUT_CHANGE_HOOKS,
         ),
         (
             blink_core / "css" / "style_engine.cc",
@@ -11552,12 +19760,37 @@ def main() -> int:
         patch_blink_layout_change_notes(
             recorder_path, recorder_declaration, recorder_hooks
         )
+    patch_blink_style_engine_style_sheets(blink_core / "css" / "style_engine.cc")
     patch_blink_web_frame_widget_header(
         blink_core / "frame" / "web_frame_widget_impl.h"
     )
     patch_blink_web_frame_widget(
         blink_core / "frame" / "web_frame_widget_impl.cc"
     )
+    blink_platform = source / "third_party" / "blink" / "renderer" / "platform"
+    patch_blink_input_handler_proxy(
+        blink_platform / "widget" / "input" / "input_handler_proxy.cc"
+    )
+    patch_blink_platform_build(blink_platform / "BUILD.gn")
+    patch_blink_compositor_animations(
+        blink_core / "animation" / "compositor_animations.cc"
+    )
+    patch_blink_keyframe_effect(blink_core / "animation" / "keyframe_effect.cc")
+    patch_blink_animation(blink_core / "animation" / "animation.cc")
+    patch_cc_layer_tree_host_impl(source / "cc" / "trees" / "layer_tree_host_impl.cc")
+    patch_cc_image_animation_controller(
+        source / "cc" / "trees" / "image_animation_controller.h"
+    )
+    patch_cc_image_animation_controller_source(
+        source / "cc" / "trees" / "image_animation_controller.cc"
+    )
+    patch_cc_client_layer_tree_host_impl(
+        source / "cc" / "trees" / "client_layer_tree_host_impl.cc"
+    )
+    patch_blink_native_paint_definitions(
+        source / "third_party" / "blink" / "renderer" / "modules" / "csspaint"
+    )
+    patch_cc_build(source / "cc" / "BUILD.gn")
     patch_blink_cookie_jar(
         source
         / "third_party"
@@ -11567,6 +19800,96 @@ def main() -> int:
         / "loader"
         / "cookie_jar.cc"
     )
+    patch_blink_style_resolver(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "css"
+        / "resolver"
+        / "style_resolver.cc"
+    )
+    patch_blink_css_animations(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "animation"
+        / "css"
+        / "css_animations.cc"
+    )
+    patch_blink_paint_property_tree_builder(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "paint"
+        / "paint_property_tree_builder.cc"
+    )
+    patch_blink_clip_path_clipper(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "paint"
+        / "clip_path_clipper.cc"
+    )
+    patch_blink_inspector_css_agent(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "inspector"
+        / "inspector_css_agent.cc"
+    )
+    patch_blink_box_fragment_builder(
+        source
+        / "third_party"
+        / "blink"
+        / "renderer"
+        / "core"
+        / "layout"
+        / "box_fragment_builder.cc"
+    )
+    blink_renderer = source / "third_party" / "blink" / "renderer"
+    patch_blink_font_custom_platform_data_header(
+        blink_renderer / "platform" / "fonts" / "font_custom_platform_data.h"
+    )
+    patch_blink_font_face_header(blink_renderer / "core" / "css" / "font_face.h")
+    patch_blink_font_face(blink_renderer / "core" / "css" / "font_face.cc")
+    patch_blink_font_face_cache(
+        blink_renderer / "core" / "css" / "font_face_cache.cc"
+    )
+    patch_blink_image_resource(
+        blink_renderer / "core" / "loader" / "resource" / "image_resource.cc"
+    )
+    blink_css = blink_renderer / "core" / "css"
+    patch_blink_css_style_sheet_header(blink_css / "css_style_sheet.h")
+    patch_blink_css_style_sheet(blink_css / "css_style_sheet.cc")
+    patch_blink_style_sheet_contents_header(blink_css / "style_sheet_contents.h")
+    patch_blink_style_sheet_contents(blink_css / "style_sheet_contents.cc")
+    patch_blink_bitmap_image(
+        blink_renderer / "platform" / "graphics" / "bitmap_image.cc"
+    )
+    blink_inline = (
+        source / "third_party" / "blink" / "renderer" / "core" / "layout"
+        / "inline"
+    )
+    patch_blink_fragment_item_header(blink_inline / "fragment_item.h")
+    patch_blink_fragment_items_builder(
+        blink_inline / "fragment_items_builder.cc"
+    )
+    blink_shaping = (
+        source / "third_party" / "blink" / "renderer" / "platform" / "fonts"
+        / "shaping"
+    )
+    patch_blink_shape_result_header(blink_shaping / "shape_result.h")
+    patch_blink_shape_result(blink_shaping / "shape_result.cc")
     cookie_store = (
         source / "third_party" / "blink" / "renderer" / "modules"
         / "cookie_store"
@@ -11576,6 +19899,19 @@ def main() -> int:
     renderer_host = source / "content" / "browser" / "renderer_host"
     patch_content_frame_cookie_access(
         renderer_host / "render_frame_host_impl.cc"
+    )
+    patch_content_popup_widget_created(
+        renderer_host / "render_frame_host_impl.cc"
+    )
+    patch_content_render_widget_host(
+        renderer_host / "render_widget_host_impl.cc"
+    )
+    patch_content_render_widget_host_view(
+        renderer_host / "render_widget_host_view_aura.cc"
+    )
+    patch_content_popup_widget_shown(
+        source / "content" / "browser" / "web_contents"
+        / "web_contents_impl.cc"
     )
     patch_content_navigation_cookie_access(
         renderer_host / "navigation_request.cc"
@@ -11625,6 +19961,25 @@ def main() -> int:
         / "core"
         / "scheduler"
         / "dom_timer.cc"
+    )
+    blink_source = source / "third_party" / "blink" / "renderer"
+    patch_blink_dom_timer_origin(blink_source / "core" / "scheduler" / "dom_timer.cc")
+    patch_blink_pending_script(blink_source / "core" / "script" / "pending_script.cc")
+    blink_bindings_v8 = blink_source / "bindings" / "core" / "v8"
+    patch_blink_v8_script_runner(blink_bindings_v8 / "v8_script_runner.cc")
+    patch_blink_content_attribute_handler(
+        blink_bindings_v8 / "js_event_handler_for_content_attribute.cc"
+    )
+    patch_blink_v8_initializer(blink_bindings_v8 / "v8_initializer.cc")
+    patch_blink_devtools_session(
+        blink_source / "core" / "inspector" / "devtools_session.cc"
+    )
+    patch_blink_frame_owner(
+        blink_source / "core" / "html" / "html_frame_owner_element.cc"
+    )
+    patch_v8_debug(source / "v8" / "src" / "debug" / "debug.cc")
+    patch_v8_compile_error(
+        source / "v8" / "src" / "parsing" / "pending-compilation-error-handler.cc"
     )
     patch_blink_animation_frame_callbacks(
         source

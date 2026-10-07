@@ -132,6 +132,12 @@
                          IsEnabled="{Binding IsChecked, ElementName=FullWalkCheckBox}"
                          AutomationProperties.Name="Full walk interval in updates"
                          AutomationProperties.HelpText="A whole number from 1. Each page is walked in full at every Nth mutation delivery and every Nth rendering update." />
+                <Button x:Name="OpenFixedRecreationButton"
+                        Margin="0,12,0,0"
+                        HorizontalAlignment="Left"
+                        Content="Open recreation with _fixed content"
+                        AutomationProperties.HelpText="Opens a fixed test page in the instrumented Chromium with DevTools and the evidence panel. The page is written in code and is not evidence from a recording."
+                        Click="OpenFixedRecreationButton_Click" />
               </StackPanel>
             </GroupBox>
 
@@ -336,6 +342,7 @@
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
           <Button x:Name="PreviousFrameButton"
                   Grid.Column="0"
@@ -372,6 +379,13 @@
                      FontFamily="Consolas"
                      Text="00:00:00.000 / 00:00:00.000"
                      AutomationProperties.LiveSetting="Off" />
+          <Button x:Name="InspectPageButton"
+                  Grid.Column="5"
+                  Margin="12,0,0,0"
+                  Content="Inspect pa_ge at this frame"
+                  IsEnabled="False"
+                  AutomationProperties.HelpText="Recreates a recorded page as it was at the frame shown, in the instrumented Chromium with DevTools and the evidence panel. No page script runs."
+                  Click="InspectPageButton_Click" />
         </Grid>
 
         <Grid Grid.Row="1" Margin="0,10,0,0">

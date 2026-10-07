@@ -53,6 +53,9 @@ public sealed class LayoutChangeCheck
     public int NodesCompared { get; private set; }
     public int NodesMatched { get; private set; }
     public int RectsCompared { get; private set; }
+
+    /// <summary>The checkpoint nodes whose box fragments were compared (protocol 0.38).</summary>
+    public int BoxFragmentsCompared { get; private set; }
     public double LargestRectDifference { get; private set; }
     public int ChangeSets { get; private set; }
     public int ChangedNodeRecords { get; private set; }
@@ -161,6 +164,7 @@ public sealed class LayoutChangeCheck
         report.AppendLine(
             $"checkpoint nodes under a display lock, without a change record, layout object, or style, not compared: {NodesLockedWithoutRecord}");
         report.AppendLine($"rectangles compared: {RectsCompared}");
+        report.AppendLine($"checkpoint nodes whose box fragments were compared, null ones included: {BoxFragmentsCompared}");
         report.AppendLine($"largest rectangle edge difference: {LargestRectDifference:G6} CSS px");
         foreach (var (kind, count) in _differences.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {
@@ -249,6 +253,47 @@ public sealed class LayoutChangeCheck
         {
             Note("computed-style", $"{where} {property}");
             matched = false;
+        }
+        // Protocol 0.37: the custom properties, and whether the rebuilt style
+        // is whole. A checkpoint of an earlier version states neither.
+        if (node.TryGetProperty("customProperties", out var observedCustom))
+        {
+            var custom = StyleDifference(
+                observedCustom,
+                changed.TryGetProperty("customProperties", out var changedCustom)
+                    ? changedCustom
+                    : default);
+            if (custom is not null)
+            {
+                Note("custom-properties", $"{where} {custom}");
+                matched = false;
+            }
+        }
+        if (changed.TryGetProperty("computedStyleComplete", out var complete) &&
+            complete.ValueKind == JsonValueKind.False)
+        {
+            Note("computed-style-incomplete", where);
+            matched = false;
+        }
+        // Protocol 0.38: the box fragments, exactly, since the checkpoint and
+        // the change record read the same fragments. A checkpoint of an
+        // earlier version states none.
+        // Protocol 0.39: text left out as unchanged that the state could not
+        // put back, its node's earlier text never having been recorded.
+        if (LayoutDocumentChangeState.TextContentUnchanged(changed))
+        {
+            Note("text-content-incomplete", where);
+            matched = false;
+        }
+        else if (node.TryGetProperty("boxFragments", out var observedFragments))
+        {
+            BoxFragmentsCompared++;
+            if (!changed.TryGetProperty("boxFragments", out var changedFragments) ||
+                !JsonElement.DeepEquals(observedFragments, changedFragments))
+            {
+                Note("box-fragments", where);
+                matched = false;
+            }
         }
         if (node.GetProperty("boundingClientRect") is { ValueKind: JsonValueKind.Object } observed)
         {

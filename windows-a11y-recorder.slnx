@@ -6,6 +6,7 @@
     <Project Path="src/Recorder.Coordinator/Recorder.Coordinator.csproj" />
     <Project Path="src/Recorder.WindowsCapture/Recorder.WindowsCapture.csproj" />
     <Project Path="src/Recorder.Contracts/Recorder.Contracts.csproj" />
+    <Project Path="src/Recorder.Recreation/Recorder.Recreation.csproj" />
     <Project Path="src/Recorder.Session/Recorder.Session.csproj" />
     <Project Path="src/Recorder.Database/Recorder.Database.csproj" />
     <Project Path="src/Recorder.Collectors.Input/Recorder.Collectors.Input.csproj" />
@@ -17,5 +18,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/Recorder.Tests/Recorder.Tests.csproj" />
     <Project Path="tests/UiaLoadSource/UiaLoadSource.csproj" />
+    <Project Path="tests/RecordingEventExport/RecordingEventExport.csproj" />
   </Folder>
 </Solution>

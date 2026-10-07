@@ -11,6 +11,8 @@ using Microsoft.Win32;
 using Npgsql;
 using Recorder.Coordinator;
 using Recorder.Database;
+using Recorder.Database.RecordingFiles;
+using Recorder.Recreation;
 using Recorder.Session;
 using Recorder.WindowsCapture;
 
@@ -32,7 +34,11 @@ public partial class MainWindow : Window
         "browser.layout",
         "browser.presentation",
         "browser.network",
-        "browser.accessibility"
+        "browser.resources",
+        "browser.accessibility",
+        "browser.compositor",
+        "browser.animation",
+        "browser.script"
     ];
     private static readonly HashSet<string> FilteredChannels =
     [
@@ -58,10 +64,12 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _announcedHealthReasons =
         new(StringComparer.Ordinal);
     private SessionCoordinator? _coordinator;
+    private RecreationSession? _recreation;
     private SessionDatabase? _database;
     private string? _databaseStartError;
     private SessionAudioPlayer? _audioPlayer;
     private SessionPlaybackArchive? _playbackArchive;
+    private RecordingFileDocuments? _recordedDocuments;
     private HashSet<string> _visibleTimelineChannels = new(StringComparer.Ordinal);
     private long _visibleTimelineEventCount;
 
@@ -668,6 +676,7 @@ public partial class MainWindow : Window
             CloseAudio();
             CloseRecordingFile();
             _playbackArchive = archive;
+            _recordedDocuments = opened.Documents;
             _playbackPositionNanoseconds = 0;
             _displayedFrameIndex = -1;
             TimelineControl.SetSession(
@@ -741,6 +750,7 @@ public partial class MainWindow : Window
     // another recording is opened.
     private void CloseRecordingFile()
     {
+        _recordedDocuments = null;
         (_playbackArchive?.Timeline as IDisposable)?.Dispose();
     }
 
@@ -1137,6 +1147,7 @@ public partial class MainWindow : Window
         PreviousFrameButton.IsEnabled = enabled;
         NextFrameButton.IsEnabled = enabled;
         PlaybackSlider.IsEnabled = enabled;
+        InspectPageButton.IsEnabled = enabled && _recordedDocuments is not null;
         var timelineEnabled = _playbackArchive is not null &&
             _playbackArchive.DurationNanoseconds > 0;
         TimelineZoomSlider.IsEnabled = timelineEnabled;
@@ -1539,6 +1550,7 @@ public partial class MainWindow : Window
         }
 
         await DisposeCoordinatorAsync();
+        await CloseRecreationAsync();
         if (_database is not null)
         {
             var busy = _busy.Begin("Stopping the database.");
@@ -1561,6 +1573,180 @@ public partial class MainWindow : Window
 
         _allowClose = true;
         Application.Current.Shutdown();
+    }
+
+    // Slice 3a: opens the fixed test page. A recreation already open is
+    // closed first, so at most one is open.
+    private async void OpenFixedRecreationButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenFixedRecreationButton.IsEnabled = false;
+        var busy = _busy.Begin("Opening the recreation.");
+        try
+        {
+            await CloseRecreationAsync();
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Windows A11y Recorder",
+                "recreations",
+                Guid.NewGuid().ToString("N"));
+            _recreation = await RecreationSession.OpenAsync(
+                ChromiumPathTextBox.Text.Trim(),
+                directory,
+                FixedRecreation.Create(),
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"The recreation could not be opened. {exception.Message}",
+                "Recreation",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            busy.Dispose();
+            OpenFixedRecreationButton.IsEnabled = true;
+        }
+    }
+
+    // Slice 3b: recreates a recorded page as it was at the frame shown. The
+    // auditor chooses the page from the top-level documents at the frame. A
+    // recreation already open is closed first, so at most one is open.
+    private async void InspectPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_playbackArchive is null || _recordedDocuments is not { } documents || _displayedFrameIndex < 0)
+        {
+            MessageBox.Show(
+                this,
+                "No frame is shown, or this recording was not read from its recording file.",
+                "Inspect page at this frame",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+        var frame = _playbackArchive.Frames[_displayedFrameIndex].MonotonicNanoseconds;
+        var chromium = ChromiumPathTextBox.Text.Trim();
+        InspectPageButton.IsEnabled = false;
+        PausePlayback();
+        try
+        {
+            IReadOnlyList<RecordedDocumentChoice> choices;
+            using (_busy.Begin("Finding the pages at this frame."))
+            {
+                choices = await Task.Run(() => documents.At(frame));
+            }
+            if (choices.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    "No top-level page was recorded at or before this frame.",
+                    "Inspect page at this frame",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+            var dialog = new RecordedDocumentDialog(this, FormatTime(frame), choices, FormatTime);
+            if (dialog.ShowDialog() != true || dialog.Chosen is not { } chosen)
+            {
+                return;
+            }
+            using (_busy.Begin("Opening the recreation."))
+            {
+                var timings = new List<RecreationTiming>();
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                await CloseRecreationAsync();
+                timings.Add(new RecreationTiming("Closing the previous recreation", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                var content = await Task.Run(() =>
+                {
+                    clock.Restart();
+                    var found = documents.Document(chosen.Key, frame)
+                        ?? throw new InvalidDataException("The page's state at this frame could not be read from the recording.");
+                    timings.Add(new RecreationTiming("Reading the page's state at the frame from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                    clock.Restart();
+                    if (found.State!.Dom is null)
+                    {
+                        throw new InvalidDataException("No DOM walk of this page was recorded at or before this frame, so it cannot be recreated here. A page can be drawn before its first DOM walk; a later frame may have one.");
+                    }
+                    var basis = found.Basis is { Basis: "presented", PresentedTime: { } presented }
+                        ? $"the state after the page's last rendering update drawn at or before the frame, drawn at {FormatTime(presented)}"
+                        : "no rendering update of the page was drawn at or before the frame, so this is its state at the frame's composition time";
+                    // Slice 4d sub-step 2: the page popups the page owned
+                    // open at the frame, each at its own popup widget's
+                    // last presented rendering update.
+                    var popups = documents.Popups(chosen.Key, frame)
+                        .Select(item => new RecordedPopup(
+                            item.Popup,
+                            item.State?.State,
+                            item.State?.Basis is { Basis: "presented", PresentedTime: { } popupPresented }
+                                ? $"its state is the one after its last rendering update drawn at or before the frame, drawn at {FormatTime(popupPresented)}"
+                                : "no rendering update of it was drawn at or before the frame, so its state is the one at the frame's composition time"))
+                        .ToArray();
+                    timings.Add(new RecreationTiming("Reading the page's popups at the frame from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                    clock.Restart();
+                    // Slice 4b sub-step 2a: the frame each animated image
+                    // is held at, chosen at the frame's composition.
+                    var resources = documents.Resources(chosen.Key, found.Basis.CutTime, compositionNanoseconds: documents.CompositionTime(frame));
+                    var resourcesMilliseconds = Math.Round(clock.Elapsed.TotalMilliseconds, 1);
+                    var framesMilliseconds = resources.ImageFramesMilliseconds ?? 0;
+                    timings.Add(new RecreationTiming("Reading the page's fonts and images from the recording", Math.Round(resourcesMilliseconds - framesMilliseconds, 1)));
+                    if (resources.ImageFramesMilliseconds is { } imageFrames)
+                    {
+                        timings.Add(new RecreationTiming("Choosing the frame of each animated image and the compositor values from the recording's compositor records", imageFrames));
+                    }
+                    clock.Restart();
+                    RecordedFrame[] frames = [];
+                    try
+                    {
+                        // Slice 5b: the page's frames, each with the document
+                        // it showed at the frame, its state, and its fonts
+                        // and images.
+                        frames = RecordedFrames.Read(documents, documents.Frames(chosen.Key, found.State, frame), frame, FormatTime);
+                        timings.Add(new RecreationTiming("Reading the page's frames, their states, and their fonts and images from the recording", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                        clock.Restart();
+                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames);
+                        timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
+                        return written;
+                    }
+                    catch
+                    {
+                        resources.Dispose();
+                        RecordedFrame.DisposeAll(frames);
+                        throw;
+                    }
+                });
+                var directory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Windows A11y Recorder",
+                    "recreations",
+                    Guid.NewGuid().ToString("N"));
+                _recreation = await RecreationSession.OpenAsync(chromium, directory, content, CancellationToken.None, earlierTimings: timings);
+            }
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"The page could not be recreated. {exception.Message}",
+                "Inspect page at this frame",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            InspectPageButton.IsEnabled = _playbackArchive is not null && _recordedDocuments is not null;
+        }
+    }
+
+    private async Task CloseRecreationAsync()
+    {
+        if (_recreation is not null)
+        {
+            var recreation = _recreation;
+            _recreation = null;
+            await recreation.DisposeAsync();
+        }
     }
 
     private async Task DisposeCoordinatorAsync()

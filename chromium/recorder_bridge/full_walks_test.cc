@@ -53,6 +53,24 @@ void TestAChangeBeforeAnyWalkIsWalkedFirst() {
          "an unknown request is not walked");
 }
 
+void TestTheStartOfParsingIsAlwaysWalked() {
+  // Protocol 0.42: the walk when parsing starts is the document's first, and
+  // a later one, as after document.open(), names its own reason.
+  a11y_recorder::FullWalkSchedule schedule(0);
+  Expect(schedule.DomWalkReason(3, "started-parsing", 0) == "first",
+         "the start of parsing is the first walk");
+  Expect(schedule.DomWalkReason(3, "post-mutation", 0).empty(),
+         "a mutation delivery while parsing is not walked");
+  Expect(schedule.DomWalkReason(3, "finished-parsing", 0) ==
+             "finished-parsing",
+         "finished parsing is still walked");
+  Expect(schedule.DomWalkReason(3, "started-parsing", 0) ==
+             "started-parsing",
+         "a later start of parsing is walked as one");
+  Expect(schedule.DomWalkReason(3, "started-parsing", 2) == "after-loss",
+         "and names a loss before it");
+}
+
 void TestALossWalksEachDocumentAgainOnce() {
   a11y_recorder::FullWalkSchedule schedule(0);
   schedule.DomWalkReason(1, "finished-parsing", 0);
@@ -125,13 +143,26 @@ void TestTheChangeSetSourceIsDistinct() {
 
 }  // namespace
 
+void TestOnlyTheChangeSetOfACheckpointsOwnUpdateIsMarked() {
+  Expect(a11y_recorder::IsCheckpointUpdateChangeSet(true, 12),
+         "the change set reading the checkpoint's update is marked");
+  Expect(!a11y_recorder::IsCheckpointUpdateChangeSet(false, 12),
+         "a later change set that names the checkpoint is not marked");
+  Expect(!a11y_recorder::IsCheckpointUpdateChangeSet(true, 0),
+         "a change set naming no checkpoint is not marked");
+  Expect(!a11y_recorder::IsCheckpointUpdateChangeSet(false, 0),
+         "a change set of an update that was not walked is not marked");
+}
+
 int main() {
   TestWithoutChecksOnlyTheFirstRequestsAreWalked();
   TestAChangeBeforeAnyWalkIsWalkedFirst();
+  TestTheStartOfParsingIsAlwaysWalked();
   TestALossWalksEachDocumentAgainOnce();
   TestChecksWalkEveryNthRequest();
   TestAForgottenDocumentIsWalkedAgain();
   TestTheChangeSetSourceIsDistinct();
+  TestOnlyTheChangeSetOfACheckpointsOwnUpdateIsMarked();
   if (failures == 0) {
     std::printf("full walk tests passed\n");
   }

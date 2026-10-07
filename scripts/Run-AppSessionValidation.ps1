@@ -593,6 +593,8 @@ $appProject = Join-Path $repository "src\Recorder.App\Recorder.App.csproj"
 $appOutput = Join-Path $repository "artifacts\app-session-validation\app"
 $loadProject = Join-Path $repository "tests\UiaLoadSource\UiaLoadSource.csproj"
 $loadOutput = Join-Path $repository "artifacts\app-session-validation\uia-load"
+$exportProject = Join-Path $repository "tests\RecordingEventExport\RecordingEventExport.csproj"
+$exportOutput = Join-Path $repository "artifacts\app-session-validation\export"
 $verifier = Join-Path $PSScriptRoot "Verify-AppSessionEvidence.ps1"
 $dotnet = $DotnetPath
 $chromiumPath = [IO.Path]::GetFullPath($ChromiumPath)
@@ -603,7 +605,7 @@ $outputRoot = [IO.Path]::GetFullPath($OutputRoot)
 $inputMarker = 0x41313159
 $typedText = "a11y"
 
-foreach ($requiredPath in @($chromiumPath, $dotnet, $solution, $appProject, $loadProject)) {
+foreach ($requiredPath in @($chromiumPath, $dotnet, $solution, $appProject, $loadProject, $exportProject)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "Required path not found: $requiredPath"
     }
@@ -626,6 +628,15 @@ Invoke-Checked "Building the UI Automation load source" {
 $loadExecutable = Join-Path $loadOutput "UiaLoadSource.exe"
 if (-not (Test-Path -LiteralPath $loadExecutable -PathType Leaf)) {
     throw "The load source build did not produce $loadExecutable."
+}
+Invoke-Checked "Building the recording event export" {
+    & $dotnet build $exportProject --configuration Release --output $exportOutput
+}
+# Run through dotnet, which finds its own runtime, as the app's host does
+# only with DOTNET_ROOT set (see the app's start below).
+$exportAssembly = Join-Path $exportOutput "RecordingEventExport.dll"
+if (-not (Test-Path -LiteralPath $exportAssembly -PathType Leaf)) {
+    throw "The export build did not produce $exportAssembly."
 }
 $loadSummaryPath = Join-Path $outputRoot "uia-load-source.json"
 Remove-Item -LiteralPath $loadSummaryPath -Force -ErrorAction SilentlyContinue
@@ -714,7 +725,17 @@ try {
 
     $stopButton = Find-ById $window "StopButton"
     $statusText = Find-ById $window "StatusTextBlock"
-    Invoke-Element (Find-ById $window "StartButton")
+    # The window opens before the recorder's database has started, and Start
+    # is enabled only once it has. A start that applies a new migration or
+    # marks recordings interrupted can take longer than the settings above.
+    # If the database cannot start, Start stays disabled and the status
+    # says why.
+    $startButton = Find-ById $window "StartButton"
+    Wait-Until -TimeoutSeconds 180 -Condition { $startButton.Current.IsEnabled } -Failure (
+        "The recorder did not become ready to record. The app reported: " +
+        $statusText.Current.Name
+    )
+    Invoke-Element $startButton
     Wait-Until -TimeoutSeconds 60 -Condition { $stopButton.Current.IsEnabled } -Failure (
         "The recording did not start. The app reported: " +
         $statusText.Current.Name
@@ -836,19 +857,29 @@ try {
             $statusText.Current.Name -like "Recording stopped*"
     } -Failure "The recording did not stop. The app reported: $($statusText.Current.Name)"
     $stopStatus = $statusText.Current.Name
-    if ($stopStatus -ne "Recording completed and session files verified.") {
+    # Each event is checked as it is written, and an event that fails its
+    # checks or is not written fails the recording. A problem storing the
+    # recording in the database follows the status as " Database: ...".
+    if ($stopStatus -ne "Recording completed and stored.") {
         throw "The app reported: $stopStatus"
     }
 
-    # The app loads the finished session into playback on its own.
+    # The app loads the finished session into playback on its own. The
+    # status names the loaded session only until playback moves to its start
+    # and states the nearest event, so the load is known from the navigation
+    # summary, which leaves its initial text only when a recording loads or
+    # fails to.
     $playbackText = Find-ById $window "PlaybackStatusTextBlock"
-    $sessionId = Split-Path -Leaf $sessionPath
+    $correlationText = Find-ById $window "BrowserCorrelationTextBox"
+    $initialCorrelation = "Open a recording with browser evidence to inspect navigation correlation."
     Wait-Until -TimeoutSeconds 120 -Condition {
-        $playbackText.Current.Name -like "$sessionId |*" -or
-            $playbackText.Current.Name -eq "Recording load failed."
+        $playbackText.Current.Name -eq "Recording load failed." -or (
+            $playbackText.Current.Name -ne "Loading recording..." -and
+            (Get-TextValue $correlationText) -ne $initialCorrelation)
     } -Failure "The app did not load the recording. It reported: $($playbackText.Current.Name)"
     $playbackStatus = $playbackText.Current.Name
-    if ($playbackStatus -eq "Recording load failed.") {
+    if ($playbackStatus -eq "Recording load failed." -or
+        (Get-TextValue $correlationText) -eq "The recording could not be opened.") {
         throw "The app could not load the recording it made."
     }
     $navigationList = Find-ById $window "BrowserNavigationListBox"
@@ -904,18 +935,43 @@ if (-not $session -or $session.FullName -ne [IO.Path]::GetFullPath($sessionPath)
     throw "The session the app reported, $sessionPath, is not the new session folder."
 }
 
-$validationPath = Join-Path $session.FullName "diagnostics\archive-validation.json"
-if (-not (Test-Path -LiteralPath $validationPath -PathType Leaf)) {
-    throw "The session does not contain an archive-validation report."
+# The events are in the recording file. They are written out in the form of
+# the retired events.ndjson, beside the session, not in it, as the steps are.
+$manifest = Get-Content -LiteralPath (Join-Path $session.FullName "manifest.json") -Raw |
+    ConvertFrom-Json
+$eventsPath = Join-Path $outputRoot "$($session.Name).events.ndjson"
+$exportOutputLines = @(& $dotnet $exportAssembly (Join-Path $session.FullName "recording.mcap") $eventsPath)
+if ($LASTEXITCODE -ne 0) {
+    throw "The recording file's events could not be read: $($exportOutputLines -join ' ')"
 }
-$validation = Get-Content -LiteralPath $validationPath -Raw | ConvertFrom-Json
-if (-not $validation.isValid) {
-    $errors = @(
-        $validation.issues |
-            Where-Object { $_.severity -eq "Error" } |
-            ForEach-Object { "$($_.code) at $($_.path)" }
+$exportedLine = @($exportOutputLines | Where-Object { $_ -like "EVENTS_EXPORTED=*" })
+if ($exportedLine.Count -ne 1) {
+    throw "The recording event export did not report its count."
+}
+$eventsExported = [long] ($exportedLine[0] -replace "^EVENTS_EXPORTED=", "")
+if ($eventsExported -ne [long] $manifest.acceptedEventCount) {
+    throw (
+        "The recording file holds $eventsExported events; the manifest " +
+        "reports $($manifest.acceptedEventCount) accepted."
     )
-    throw "Archive validation failed: $($errors -join '; ')"
+}
+
+# Every file the manifest lists is in the session folder with its size and
+# SHA-256 digest.
+$artifactsChecked = 0
+foreach ($artifact in @($manifest.artifacts)) {
+    $artifactPath = Join-Path $session.FullName $artifact.path
+    if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {
+        throw "The manifest lists $($artifact.path), which is not in the session."
+    }
+    if ((Get-Item -LiteralPath $artifactPath).Length -ne [long] $artifact.sizeBytes) {
+        throw "$($artifact.path) is not the size the manifest lists."
+    }
+    $digest = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($digest -ne $artifact.sha256) {
+        throw "$($artifact.path) does not have the digest the manifest lists."
+    }
+    $artifactsChecked++
 }
 
 $steps = [pscustomobject]@{
@@ -932,19 +988,17 @@ $steps = [pscustomobject]@{
 Set-Content -LiteralPath (Join-Path $outputRoot "$($session.Name).steps.json") `
     -Value $steps -Encoding UTF8
 
-& $verifier -SessionPath $session.FullName -FixtureUri $fixtureUri -StepsJson $steps
+& $verifier -SessionPath $session.FullName -EventsPath $eventsPath -FixtureUri $fixtureUri -StepsJson $steps
 
 # Browser evidence the recorder lost fails the run, as in the Blink
 # validation. Omissions from other collectors are reported with their counts.
-$manifest = Get-Content -LiteralPath (Join-Path $session.FullName "manifest.json") -Raw |
-    ConvertFrom-Json
 $sinkRefusedEvents = [int] $manifest.droppedEventCount
 $lossReasons = @("browser-evidence-write-failed", "browser-evidence-sink-refused")
 $browserLost = 0
 $otherOmissions = @()
 foreach ($omissionLine in @(
         Select-String `
-            -LiteralPath (Join-Path $session.FullName "events.ndjson") `
+            -LiteralPath $eventsPath `
             -Pattern "collector-omission" `
             -SimpleMatch
     )) {
@@ -1000,9 +1054,9 @@ Write-Host "APP_PLAYBACK_STATUS=$playbackStatus"
 Write-Host "APP_PLAYBACK_NAVIGATIONS=$playbackNavigations"
 Write-Host "DISPLAYS=$displays"
 Write-Host "SYSTEM_DPI=$systemDpi"
-Write-Host "ARCHIVE_VALID=$($validation.isValid)"
-Write-Host "EVENTS_VALIDATED=$($validation.eventsValidated)"
-Write-Host "ARTIFACTS_VALIDATED=$($validation.artifactsValidated)"
+Write-Host "EVENTS_PATH=$eventsPath"
+Write-Host "EVENTS_EXPORTED=$eventsExported"
+Write-Host "ARTIFACTS_CHECKED=$artifactsChecked"
 Write-Host "SINK_REFUSED_EVENTS=$sinkRefusedEvents"
 Write-Host "BROWSER_OMITTED_RECORDS=$browserLost"
 Write-Host "OTHER_OMISSIONS=$($otherOmissions -join '; ')"

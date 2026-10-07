@@ -82,6 +82,12 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.TimerFired or
                 BrowserEvidenceEventTypes.TimerCancelled) =>
                 payload.Deserialize<BrowserTimerPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Timer,
+                BrowserEvidenceEventTypes.TimerOrigin) =>
+                payload.Deserialize<BrowserTimerOriginPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Timer,
+                BrowserEvidenceEventTypes.ScriptCompiled) =>
+                payload.Deserialize<BrowserScriptCompiledPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Scheduler,
                 BrowserEvidenceEventTypes.WakeUpDeferred) =>
                 payload.Deserialize<BrowserSchedulerPayload>(JsonOptions) as object,
@@ -92,6 +98,12 @@ internal static class BrowserProtocol
             (BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCheckpointStarted) =>
                 payload.Deserialize<BrowserDomCheckpointStartedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointFrameOwner) =>
+                payload.Deserialize<BrowserDomCheckpointFrameOwnerPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomFrameOwnerChanged) =>
+                payload.Deserialize<BrowserDomFrameOwnerChangedPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCheckpointNode) =>
                 payload.Deserialize<BrowserDomCheckpointNodePayload>(JsonOptions) as object,
@@ -191,6 +203,42 @@ internal static class BrowserProtocol
                 payload.Deserialize<BrowserActiveDescendantReferenceSetPayload>(
                     JsonOptions) as object,
             (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PagePopupOpened) =>
+                payload.Deserialize<BrowserPagePopupOpenedPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PagePopupWindowRect) =>
+                payload.Deserialize<BrowserPagePopupWindowRectPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PagePopupClosed) =>
+                payload.Deserialize<BrowserPagePopupClosedPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetCreated) =>
+                payload.Deserialize<BrowserPopupWidgetCreatedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetShown) =>
+                payload.Deserialize<BrowserPopupWidgetShownPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetBoundsRequested) =>
+                payload.Deserialize<BrowserPopupWidgetBoundsRequestedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetScreenRects) =>
+                payload.Deserialize<BrowserPopupWidgetScreenRectsPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.PopupWidgetHidden) =>
+                payload.Deserialize<BrowserPopupWidgetHiddenPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
+                BrowserEvidenceEventTypes.OptionSelectednessChanged) =>
+                payload.Deserialize<BrowserOptionSelectednessChangedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceEventTypes.InteractionCheckpointStarted) =>
                 payload.Deserialize<BrowserInteractionCheckpointStartedPayload>(
                     JsonOptions) as object,
@@ -217,6 +265,38 @@ internal static class BrowserProtocol
             (BrowserEvidenceChannels.Presentation,
                 BrowserEvidenceEventTypes.PresentationFeedback) =>
                 payload.Deserialize<BrowserPresentationFeedbackPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Script,
+                BrowserEvidenceEventTypes.ScriptParsed) =>
+                payload.Deserialize<BrowserScriptParsedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Script,
+                BrowserEvidenceEventTypes.ScriptText) =>
+                payload.Deserialize<BrowserResourceBytesPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Animation,
+                BrowserEvidenceEventTypes.AnimationUpdated) =>
+                payload.Deserialize<BrowserAnimationUpdatedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Animation,
+                BrowserEvidenceEventTypes.AnimationRemoved) =>
+                payload.Deserialize<BrowserAnimationRemovedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Compositor,
+                BrowserEvidenceEventTypes.CompositorAnimationStarted) =>
+                payload.Deserialize<BrowserCompositorAnimationStartedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Compositor,
+                BrowserEvidenceEventTypes.CompositorAnimationEnded) =>
+                payload.Deserialize<BrowserCompositorAnimationEndedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Compositor,
+                BrowserEvidenceEventTypes.CompositorFrame) =>
+                payload.Deserialize<BrowserCompositorFramePayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Compositor,
+                BrowserEvidenceEventTypes.CompositorFramePresented) =>
+                payload.Deserialize<BrowserCompositorFramePresentedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Compositor,
+                BrowserEvidenceEventTypes.PaintWorkletPainted) =>
+                payload.Deserialize<BrowserPaintWorkletPaintedPayload>(
                     JsonOptions) as object,
             (BrowserEvidenceChannels.Layout,
                 BrowserEvidenceEventTypes.LayoutCheckpointStarted) =>
@@ -334,6 +414,37 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.NetworkWebTransportClosed) =>
                 payload.Deserialize<BrowserNetworkWebTransportClosedPayload>(
                     JsonOptions) as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.FontFile or
+                BrowserEvidenceEventTypes.ImageData or
+                BrowserEvidenceEventTypes.StyleSheetText) =>
+                payload.Deserialize<BrowserResourceBytesPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.FontFaceAdded or
+                BrowserEvidenceEventTypes.FontFaceRemoved) =>
+                payload.Deserialize<BrowserFontFacePayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.FontFaceLoaded) =>
+                payload.Deserialize<BrowserFontFaceLoadedPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.ImageResource) =>
+                payload.Deserialize<BrowserImageResourcePayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.ImagePaintImage) =>
+                payload.Deserialize<BrowserImagePaintImagePayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.StyleSheetResource) =>
+                payload.Deserialize<BrowserStyleSheetResourcePayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Resources,
+                BrowserEvidenceEventTypes.StyleSheetsUpdated) =>
+                payload.Deserialize<BrowserStyleSheetsUpdatedPayload>(JsonOptions)
+                    as object,
             (BrowserEvidenceChannels.Lifecycle or
                 BrowserEvidenceChannels.Listener or
                 BrowserEvidenceChannels.Dispatch or
@@ -346,7 +457,11 @@ internal static class BrowserProtocol
                 BrowserEvidenceChannels.Interaction or
                 BrowserEvidenceChannels.Layout or
                 BrowserEvidenceChannels.Presentation or
-                BrowserEvidenceChannels.Network,
+                BrowserEvidenceChannels.Network or
+                BrowserEvidenceChannels.Resources or
+                BrowserEvidenceChannels.Compositor or
+                BrowserEvidenceChannels.Animation or
+                BrowserEvidenceChannels.Script,
                 BrowserEvidenceEventTypes.Omission) =>
                 payload.Deserialize<BrowserOmissionPayload>(JsonOptions)
                     as object,

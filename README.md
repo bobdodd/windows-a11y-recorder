@@ -6,11 +6,13 @@ The project is intended to produce one standalone application that works with NV
 
 ## Status
 
-The first development baseline is
+The current release is
+[`v1.0.0`](https://github.com/bobdodd/windows-a11y-recorder/releases/tag/v1.0.0),
+the first complete version of the recorder, with page recreation at any
+captured frame. It is a source release; the changes to Chromium are in
+`chromium/`. See the [changelog](CHANGELOG.md) for its scope and known
+limitations. The first development baseline was
 [`v0.1.0`](https://github.com/bobdodd/windows-a11y-recorder/releases/tag/v0.1.0).
-It is a source release for research and continued development, not an
-end-user production release. See the [changelog](CHANGELOG.md) for the
-baseline scope and known limitations.
 
 The repository contains a working technical prototype. The managed solution
 currently implements:
@@ -348,6 +350,143 @@ rectangle is derived correctly under a later rotation or skew. In one
 recording on the target Windows machine, every compared node equalled its
 full walk, including text of two lines under a rotation. See
 [change-driven recording](docs/architecture/change-driven-recording.md).
+
+Protocol 0.37 records every computed-style property `getComputedStyle()`
+lists, in place of a fixed list of 283, and each element's custom
+properties. After a node's first record, a layout change record holds only
+the style values that changed. Its cost in one recording on the target
+Windows machine is in "2a results" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.38 records each layout box's physical fragments in its node
+records: the border-box size of each fragment, its break position, its
+scrollable overflow, its child links with their offsets, and a replaced
+element's natural size, in Blink's layout units. Its cost and check on the
+target Windows machine are in "2b results". See "2b as built" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.39 adds, for each fragment that holds lines, its fragment items
+in Blink's order, the block's text as laid out, and each text item's glyph
+runs: the font by name, and each glyph's identifier, character index,
+position, and offset, packed in base64. A block's text after its first
+record is left out when it is unchanged. Its cost and check on the target
+Windows machine are in "2c results". See "2c as built" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.40 records the page's resources on `browser.resources`: the font
+file of each typeface a glyph run uses, each web font face as it joins,
+loads, and leaves its document, and the encoded bytes of each image
+resource, each file or image once for each SHA-256 digest in a renderer.
+See "Sub-step 2 as built" under "Slice 4a" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.41 records, in a layout change set, a text node whose layout
+object was destroyed, stating that it has none; a checkpoint still leaves
+such a node out. See "Sub-step 3 on the target machine" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.42 walks a document's DOM when its parser is created and records
+the parser's changes while it parses, so a page drawn before it finished
+parsing can be recreated. See "Slice 4c" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.43 records page popups, such as the list of an open select: their
+opening, owner, window rectangles, and closing, and each change of an
+option's selectedness. A popup's rendering updates request their
+presentation from the popup's own widget. See "Slice 4d" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.44 records, from the browser process, each popup widget a frame
+asks for: its frame sink, the rectangles the browser received, transformed,
+constrained, and set, whether it showed the popup or why it refused, and the
+screen rectangles it sent, with the native window's rectangle and client area
+in screen pixels. A page popup names its owner frame's token, which joins it
+to its widget. See "Sub-step 1b" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.45 records, from the browser process, each popup widget's window
+being hidden, with its frame sink, so that a recreated frame shows a popup
+from its first presented rendering update until its window left the screen.
+See "Popup on screen" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.46 marks the layout change set of a walked rendering update
+(`checkpointUpdate`), so the state of a frame presented by that update
+includes the update's own layout and styles. See "Layout of a walked
+rendering update" in [page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.55 records the frames of each document: a DOM walk names the
+DevTools frame token of its document's frame and whether it is a main frame,
+and the frame each frame owner element (`iframe`, `frame`, `object`,
+`embed`, `fencedframe`) holds, and each change of an owner's frame is
+recorded as it happens. The token names a frame in every renderer, so an
+owner is joined to its frame's documents in the same process or in
+another. See "Slice 5" in [page recreation](docs/architecture/page-recreation.md).
+
+The recreation builds the frames of a recorded page (slice 5b): each
+frame's document at the frame is served at its recorded address with a
+page of its own, or built in place in its `about:blank` or `srcdoc`
+document, or not built, with the reason in the evidence panel. Each
+frame's requests are held in its own DevTools session, a cross-site frame's
+included, and answered from its own document's resources.
+
+Protocol 0.54 records the source of each script V8 instantiates, or fails
+to compile, in a document's main thread, on a new channel, `browser.script`:
+a `script-parsed` record for each script, with its kind, world, URL, start
+position, and the digest of its source, and a `script-text` record with the
+source, once per digest, so that the evidence panel lists the document's
+scripts at the frame and shows the text of each. Scripts compiled while a
+DevTools command runs, such as Console expressions, are not recorded. See
+"Slice 4h" in [page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.53 records each Blink animation, a CSS animation, a CSS
+transition, or a Web Animation, on a new channel, `browser.animation`: its
+kind, name, target, play state, start and current times, timeline, and
+effect timing, when it starts and each time any of them other than its
+current time changes, and its removal, so that the evidence panel lists the
+animations running at the frame with their progress. See "Slice 4g" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.52 records who scheduled each window timer: the world and script
+stack of the setTimeout or setInterval call, where the callback is defined,
+and, for each script element's script and each on... attribute's handler,
+the element it came from, so that the evidence panel names the owner of each
+pending timer and the element whose script scheduled it. See "Slice 4f" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.51 records the page's style sheets as they arrive and as they
+change: the text each linked or imported sheet arrived with, the CSSOM text
+of a sheet script changed or constructed, and each tree scope's sheets and
+adopted sheets at each update, so that page recreation serves and rebuilds
+them for DevTools. See "Slice 4e" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.50 adds, to each compositor scroll offset, whether the
+compositor scrolls the node and the reasons Chromium gives for repainting it
+on the main thread, so that page recreation imposes the compositor's offset
+only where the compositor drew it. See "Sub-step 2b-iii" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.49 adds each scroller's compositor element ID to its scroll
+offset record, so that page recreation can scroll it to the offset the
+compositor drew. See "Sub-step 2b-ii" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.48 adds the `browser.compositor` channel: each animation
+started on and removed from the compositor, and, for each compositor frame
+a page's compositor submits in which a drawn transform, opacity, filter,
+backdrop filter, scroll offset, native paint worklet progress, or
+animated image frame changed, the changed values as drawn, then the
+frame's presentation; what each native paint worklet painted; and, on the
+`browser.resources` channel, each paint image made from an image. See "Slice 4b" in
+[page recreation](docs/architecture/page-recreation.md).
+
+Protocol 0.47 records the Windows animation settings with each popup
+window as it is shown, and the evidence panel states, for each popup drawn
+at a frame, how long before the frame its window was shown, those
+settings, and that the window's opacity at the capture is not recorded.
+See "Window fade of a popup" in
+[page recreation](docs/architecture/page-recreation.md).
 
 Each captured monitor image is the newest frame that reached the Windows
 Graphics Capture pool before the poll. The recorder releases older arrivals

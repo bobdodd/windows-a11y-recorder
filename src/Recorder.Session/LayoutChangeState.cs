@@ -88,7 +88,9 @@ public sealed class LayoutChangeState
 public sealed class LayoutDocumentChangeState
 {
     private readonly Dictionary<string, TransformNode> _transforms = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, JsonElement> _transformRecords = new(StringComparer.Ordinal);
     private readonly Dictionary<long, JsonElement> _nodes = [];
+    private readonly Dictionary<long, JsonElement> _scrollOffsets = [];
 
     private sealed record TransformNode(string? ParentId, double[] Matrix, bool Flattens);
 
@@ -99,13 +101,90 @@ public sealed class LayoutDocumentChangeState
 
     public double ViewPaintOffsetY { get; private set; }
 
+    /// <summary>The layout zoom factor named by the latest change set, or null before one.</summary>
+    public double? LayoutZoomFactor { get; private set; }
+
+    /// <summary>The start record of the latest change set, or null before one.</summary>
+    public JsonElement? LastStarted { get; private set; }
+
+    /// <summary>True between a change set's start record and its completion.</summary>
+    public bool IsOpen { get; private set; }
+
+    /// <summary>The last record of each transform node, by transform node identity.</summary>
+    public IReadOnlyDictionary<string, JsonElement> TransformRecords => _transformRecords;
+
+    /// <summary>The last scroll offset record of each scrolling node, by node identity.</summary>
+    public IReadOnlyDictionary<long, JsonElement> ScrollOffsets => _scrollOffsets;
+
     /// <summary>The last change record of each node, by node identity.</summary>
     public IReadOnlyDictionary<long, JsonElement> Nodes => _nodes;
 
     public int TransformNodeCount => _transforms.Count;
 
+    /// <summary>
+    /// Applies one browser.layout change record of this document: a change
+    /// set's start, transform node, node, and scroll offset records, and its
+    /// completion. Other records are ignored.
+    /// </summary>
+    public void Apply(string eventType, JsonElement payload)
+    {
+        switch (eventType)
+        {
+            case "layout-changes-started":
+                ApplyStarted(payload);
+                break;
+            case "layout-transform-node":
+                ApplyTransformNode(payload);
+                break;
+            case "layout-node-changed":
+                ApplyNode(payload);
+                break;
+            case "layout-scroll-offset-changed":
+                _scrollOffsets[payload.GetProperty("nodeId").GetInt64()] = payload.Clone();
+                break;
+            case "layout-changes-completed":
+                IsOpen = false;
+                break;
+        }
+    }
+
+    // Restores the state a snapshot holds: the latest change set's start,
+    // and the last record of each transform node, node, and scroll offset.
+    internal void Load(
+        JsonElement? started,
+        IEnumerable<JsonElement> transforms,
+        IEnumerable<JsonElement> nodes,
+        IEnumerable<JsonElement> scrollOffsets)
+    {
+        if (started is { } start)
+        {
+            ApplyStarted(start);
+            IsOpen = false;
+        }
+        foreach (var transform in transforms)
+        {
+            ApplyTransformNode(transform);
+        }
+        // A snapshot holds each node's merged record, which is stored as it
+        // is: one whose style is not whole is not a record of changes.
+        foreach (var node in nodes)
+        {
+            _nodes[node.GetProperty("nodeId").GetInt64()] = node.Clone();
+        }
+        foreach (var scroll in scrollOffsets)
+        {
+            _scrollOffsets[scroll.GetProperty("nodeId").GetInt64()] = scroll.Clone();
+        }
+    }
+
     internal void ApplyStarted(JsonElement payload)
     {
+        LastStarted = payload.Clone();
+        IsOpen = true;
+        LayoutZoomFactor = payload.TryGetProperty("layoutZoomFactor", out var zoom) &&
+            zoom.ValueKind == JsonValueKind.Number
+                ? zoom.GetDouble()
+                : null;
         ViewTransformNodeId = payload.GetProperty("viewTransformNodeId").GetString();
         var offset = payload.GetProperty("viewPaintOffset");
         ViewPaintOffsetX = offset.GetProperty("x").GetDouble();
@@ -123,10 +202,190 @@ public sealed class LayoutDocumentChangeState
             parent.ValueKind == JsonValueKind.String ? parent.GetString() : null,
             matrix,
             payload.GetProperty("flattensInheritedTransform").GetBoolean());
+        _transformRecords[id] = payload.Clone();
     }
 
-    internal void ApplyNode(JsonElement payload) =>
-        _nodes[payload.GetProperty("nodeId").GetInt64()] = payload.Clone();
+    // From protocol 0.37 a node record after the node's first holds only the
+    // style values that changed. The state keeps each node's whole style: a
+    // record of changes is merged into the node's last record, and the
+    // merged record states that it is complete only when that last record
+    // was. A merged record is then what a snapshot holds.
+    //
+    // From protocol 0.39 a record whose text content equals the node's last
+    // record states it unchanged and leaves it out; the state puts the last
+    // record's text back, and the record stays marked unchanged when the last
+    // record had none to give.
+    internal void ApplyNode(JsonElement payload)
+    {
+        var nodeId = payload.GetProperty("nodeId").GetInt64();
+        JsonElement? last = _nodes.TryGetValue(nodeId, out var found) ? found : null;
+        var record = payload.TryGetProperty("computedStyleComplete", out var complete) &&
+            complete.ValueKind == JsonValueKind.False
+                ? MergeStyleChanges(last, payload)
+                : payload.Clone();
+        _nodes[nodeId] = TextContentUnchanged(record)
+            ? MergeTextContent(last, record)
+            : record;
+    }
+
+    internal static bool TextContentUnchanged(JsonElement record) =>
+        record.TryGetProperty("boxFragments", out var fragments) &&
+        fragments.ValueKind == JsonValueKind.Object &&
+        fragments.TryGetProperty("textContentUnchanged", out var unchanged) &&
+        unchanged.ValueKind == JsonValueKind.True;
+
+    internal static JsonElement MergeTextContent(JsonElement? last, JsonElement record)
+    {
+        if (last is not { } previous ||
+            !previous.TryGetProperty("boxFragments", out var lastFragments) ||
+            lastFragments.ValueKind != JsonValueKind.Object ||
+            TextContentUnchanged(previous) ||
+            !lastFragments.TryGetProperty("textContent", out var text) ||
+            text.ValueKind != JsonValueKind.String)
+        {
+            return record;
+        }
+        var firstLine = lastFragments.TryGetProperty("firstLineText", out var line)
+            ? line
+            : default;
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in record.EnumerateObject())
+            {
+                if (property.Name != "boxFragments")
+                {
+                    property.WriteTo(writer);
+                    continue;
+                }
+                writer.WriteStartObject(property.Name);
+                foreach (var member in property.Value.EnumerateObject())
+                {
+                    switch (member.Name)
+                    {
+                        case "textContent":
+                            writer.WritePropertyName(member.Name);
+                            text.WriteTo(writer);
+                            break;
+                        case "firstLineText":
+                            writer.WritePropertyName(member.Name);
+                            if (firstLine.ValueKind == JsonValueKind.Undefined)
+                            {
+                                writer.WriteNullValue();
+                            }
+                            else
+                            {
+                                firstLine.WriteTo(writer);
+                            }
+                            break;
+                        case "textContentUnchanged":
+                            writer.WriteBoolean(member.Name, false);
+                            break;
+                        default:
+                            member.WriteTo(writer);
+                            break;
+                    }
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndObject();
+        }
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    internal static JsonElement MergeStyleChanges(JsonElement? last, JsonElement changes)
+    {
+        var lastStyle = last is { } record &&
+            record.TryGetProperty("computedStyle", out var style) &&
+            style.ValueKind == JsonValueKind.Object
+                ? style
+                : (JsonElement?)null;
+        var lastCustom = last is { } customRecord &&
+            customRecord.TryGetProperty("customProperties", out var custom) &&
+            custom.ValueKind == JsonValueKind.Object
+                ? custom
+                : (JsonElement?)null;
+        // The merged style is whole only when the last record's was: a node
+        // whose first record was lost, or whose last record had no style,
+        // keeps the changed values alone and says so.
+        var baseComplete = lastStyle is not null &&
+            (!last!.Value.TryGetProperty("computedStyleComplete", out var lastComplete) ||
+                lastComplete.ValueKind != JsonValueKind.False);
+        var removed = changes.TryGetProperty("removedCustomProperties", out var names) &&
+            names.ValueKind == JsonValueKind.Array
+                ? names.EnumerateArray().Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in changes.EnumerateObject())
+            {
+                switch (property.Name)
+                {
+                    case "computedStyle":
+                        writer.WritePropertyName(property.Name);
+                        WriteMerged(writer, lastStyle, property.Value, removed: null);
+                        break;
+                    case "customProperties":
+                        writer.WritePropertyName(property.Name);
+                        WriteMerged(writer, lastCustom, property.Value, removed);
+                        break;
+                    case "computedStyleComplete":
+                        writer.WriteBoolean(property.Name, baseComplete);
+                        break;
+                    case "removedCustomProperties":
+                        writer.WriteNull(property.Name);
+                        break;
+                    default:
+                        property.WriteTo(writer);
+                        break;
+                }
+            }
+            writer.WriteEndObject();
+        }
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    // Writes the last values with each changed value in its place, in the
+    // last record's order, then the values the last record did not hold.
+    private static void WriteMerged(
+        Utf8JsonWriter writer,
+        JsonElement? last,
+        JsonElement changed,
+        HashSet<string>? removed)
+    {
+        var changes = changed.ValueKind == JsonValueKind.Object
+            ? changed.EnumerateObject().ToDictionary(item => item.Name, item => item.Value, StringComparer.Ordinal)
+            : new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var written = new HashSet<string>(StringComparer.Ordinal);
+        writer.WriteStartObject();
+        if (last is { } values)
+        {
+            foreach (var property in values.EnumerateObject())
+            {
+                if (removed is not null && removed.Contains(property.Name))
+                {
+                    continue;
+                }
+                writer.WritePropertyName(property.Name);
+                (changes.TryGetValue(property.Name, out var value) ? value : property.Value).WriteTo(writer);
+                written.Add(property.Name);
+            }
+        }
+        foreach (var (name, value) in changes)
+        {
+            if (written.Add(name))
+            {
+                writer.WritePropertyName(name);
+                value.WriteTo(writer);
+            }
+        }
+        writer.WriteEndObject();
+    }
 
     /// <summary>
     /// Derives the client rectangle of a node from its last change record:

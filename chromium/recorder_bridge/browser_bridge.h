@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <limits>
+#include <optional>
 
 #include <string>
 #include <string_view>
@@ -13,6 +14,9 @@
 #include "chromium/recorder_bridge/full_walks.h"
 #include "chromium/recorder_bridge/layout_changes.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
+#include "chromium/recorder_bridge/recreation_compositor_values.h"
+#include "chromium/recorder_bridge/recreation_paint_worklet_values.h"
+#include "chromium/recorder_bridge/recreation_image_frames.h"
 
 namespace base {
 class CommandLine;
@@ -46,6 +50,66 @@ bool AppendRecorderBootstrapToChildProcess(base::CommandLine* command_line,
                                            base::LaunchOptions* launch_options,
                                            int child_process_id,
                                            std::string* error);
+
+// Returns whether this process runs in the recreation mode: the browser was
+// started with --a11y-recorder-recreation, which it passes to its renderers.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool IsRecreationMode();
+
+// "Input refused only in the recreation": true for a browser page's URL
+// scheme (devtools, chrome, chrome-untrusted, chrome-extension), whose page
+// takes input in the recreation mode as in any Chromium.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool IsRecreationBrowserPageScheme(std::string_view scheme);
+
+// Marks, on the main thread, that this renderer process shows a browser
+// page: called when such a page's parser is created, before it can be drawn
+// or take input. Chromium keeps browser pages out of web content's
+// processes, so the whole process is then a browser page's.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void MarkRecreationBrowserPageProcess();
+
+// True, on any thread, when this process runs in the recreation mode and
+// shows no browser page, so that the compositor thread refuses its input.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool RecreationRefusesCompositorInput();
+
+// True, on any thread, when this process runs in the recreation mode and
+// shows no browser page, so that its page is held at the recorded moment:
+// no CSS animation or transition is run, and the recorded compositor values
+// are imposed ("Sub-step 2b-i design: compositor values imposed"). A browser
+// page, such as DevTools, runs its own animations as usual.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool RecreationHoldsTime();
+
+// "Sub-step 2a design: animated images held": in the recreation mode, Blink's
+// main thread gives the value of the X-A11y-Recorder-Image-Frame header of
+// the recorder's answer for an image, and its paint image is held at that
+// frame index; cc reads it, on the compositor thread, for each animated
+// image it is given. An empty or malformed value holds nothing. Does nothing
+// outside the recreation mode.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void HoldRecreationImageFrame(int64_t paint_image_id, std::string frame_header);
+
+// The frame index a paint image is held at in the recreation mode, or none.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::optional<size_t> RecreationHeldImageFrame(int64_t paint_image_id);
+
+// "Sub-step 2b-i design: compositor values imposed": in the recreation mode,
+// the compositor values of an element's data-a11y-recorded-compositor
+// attribute, which Blink imposes on its paint properties and style. Text not
+// of the attribute's form gives none. Gives none outside the recreation mode.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+RecreationCompositorValues RecreationCompositorValuesOf(std::string_view text);
+
+// "Sub-step 2c design: paint worklet colors and clip paths imposed": in the
+// recreation mode, the native paint worklet values of an element's
+// data-a11y-recorded-paint-worklet attribute, which Blink imposes on its
+// style and clip path. Text not of the attribute's form gives none. Gives
+// none outside the recreation mode.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+RecreationPaintWorkletValues RecreationPaintWorkletValuesOf(
+    std::string_view text);
 
 // Appends a non-secret startup diagnostic when the opt-in bridge log
 // environment variable is present. This works before Chromium logging starts.
@@ -411,11 +475,41 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
 // only when the document has no walk yet, when a DOM record was lost since its
 // last walk, or at the recording's check interval. The caller still records
 // the interaction snapshot of a mutation delivery that was not walked.
+//
+// Protocol 0.55 (slice 5a): the started record also names the DevTools frame
+// token of the document's frame, and whether that frame is a main frame. An
+// empty token means the document has no frame; both are then written as null.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string document_token,
                                  std::string reason,
-                                 int maximum_nodes);
+                                 int maximum_nodes,
+                                 std::string frame_token,
+                                 bool main_frame);
+
+// Protocol 0.55 (slice 5a): records, after the node record of a frame owner
+// element (iframe, frame, object, embed, or fencedframe) in the same
+// checkpoint, the DevTools frame token of the frame it holds, and whether that
+// frame is remote in this renderer. An owner that holds no frame is not
+// recorded.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomCheckpointFrameOwner(uint64_t checkpoint_sequence,
+                                        int document_node_id,
+                                        std::string document_token,
+                                        int owner_node_id,
+                                        std::string frame_token,
+                                        bool remote);
+
+// Protocol 0.55 (slice 5a): records that a frame owner element was given a
+// frame, from HTMLFrameOwnerElement::SetContentFrame, or lost it, from
+// ClearContentFrame, in which case the frame token is empty and written as
+// null. The record is not a DOM transition: it takes no transition ID.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomFrameOwnerChanged(int document_node_id,
+                                     std::string document_token,
+                                     int owner_node_id,
+                                     std::string frame_token,
+                                     bool remote);
 
 // Records one node in preorder. The data of a character data node is recorded
 // after it by RecordBlinkDomCheckpointNodeCharacterData.
@@ -1065,6 +1159,139 @@ void RecordBlinkActiveDescendantReferenceSet(int document_node_id,
                                              int referenced_node_id,
                                              CookieCallOrigin origin);
 
+// A rectangle in screen DIPs, or in a frame's local root, as Blink's
+// gfx::Rect holds it.
+struct PagePopupRect {
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+};
+
+// Records a page popup, such as the list of an open select, once its
+// document is installed. The document named is the popup's own; the owner is
+// the element that opened it, in the owner document, whose frame's token is
+// the owner frame token (protocol 0.44). The kind is
+// "select-list", "date-time", "color", or "other". The rectangles are those
+// WebPagePopupImpl computes: the owner's visible bounds in its local root, the
+// owner's local root view and the anchor in screen DIPs, and the popup's first
+// window rectangle.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPagePopupOpened(int document_node_id,
+                                std::string document_token,
+                                std::string kind,
+                                int owner_document_node_id,
+                                std::string owner_document_token,
+                                std::string owner_frame_token,
+                                int owner_node_id,
+                                PagePopupRect owner_visible_bounds_in_local_root,
+                                PagePopupRect owner_local_root_rect_in_screen,
+                                PagePopupRect anchor_rect_in_screen,
+                                PagePopupRect initial_window_rect,
+                                double zoom_factor);
+
+// Records a window rectangle a page popup asked for, after the emulation is
+// reversed, deferred when it was asked for before the popup was shown. Where
+// the browser put the window is recorded by the browser's popup widget
+// records (protocol 0.44).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPagePopupWindowRect(int document_node_id,
+                                    std::string document_token,
+                                    bool deferred,
+                                    PagePopupRect window_rect);
+
+// Records a page popup closing, by "renderer" or "browser".
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkPagePopupClosed(int document_node_id,
+                                std::string document_token,
+                                std::string closed_by);
+
+// The browser's records of a renderer's popup widget (protocol 0.44). A popup
+// widget is named by its frame sink, which the browser makes from the routing
+// ID it allocates and the renderer never receives.
+struct PopupWidgetSink {
+  uint32_t client_id = 0;
+  uint32_t sink_id = 0;
+};
+
+// Records a popup widget made for a frame's request, after
+// RenderFrameHostImpl::CreateNewPopupWidget makes it. The context names the
+// opener frame's document; the opener frame token is the renderer's local
+// frame token of the frame that asked.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetCreated(int page_frame_tree_node_id,
+                                     int frame_tree_node_id,
+                                     int64_t document_navigation_id,
+                                     std::string document_token,
+                                     int renderer_process_id,
+                                     std::string opener_frame_token,
+                                     PopupWidgetSink sink);
+
+// Records WebContentsImpl::ShowCreatedWidget for a popup widget: the
+// rectangle and anchor as received, the rectangle after the transform for
+// nested web contents and after ConstrainPopupBounds, and the outcome,
+// "shown" with the view's bounds after InitAsPopup, or the reason the popup
+// was refused: "window-not-active", "not-visible", or
+// "permission-exclusion". A rectangle not reached before a refusal is
+// absent.
+struct PopupWidgetShown {
+  PopupWidgetSink sink;
+  std::string outcome;
+  PagePopupRect received_rect;
+  PagePopupRect received_anchor_rect;
+  bool has_transformed = false;
+  PagePopupRect transformed_rect;
+  PagePopupRect transformed_anchor_rect;
+  bool has_constrained = false;
+  PagePopupRect constrained_rect;
+  bool has_view_bounds = false;
+  PagePopupRect view_bounds;
+};
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetShown(PopupWidgetShown shown);
+
+// Records RenderWidgetHostImpl::SetPopupBounds: the rectangle the renderer
+// asked for, and the rectangle set on the view after ConstrainPopupBounds and
+// the display clamp, or none when the request was ignored.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetBoundsRequested(PopupWidgetSink sink,
+                                             PagePopupRect requested_rect,
+                                             bool has_set_rect,
+                                             PagePopupRect set_rect);
+
+// Records the screen rectangles RenderWidgetHostImpl::SendScreenRects sends to
+// a popup widget: the view and window bounds in screen DIPs and the view's
+// device scale factor. The native window is the popup's HWND, or zero for
+// none; the bridge reads its window rectangle and client area in screen
+// pixels from Windows when the record is made.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetScreenRects(PopupWidgetSink sink,
+                                         PagePopupRect view_rect,
+                                         PagePopupRect window_rect,
+                                         uintptr_t native_window,
+                                         double device_scale_factor);
+
+// Records a popup widget's view hiding its window (protocol 0.45):
+// RenderWidgetHostViewAura::Hide, cause "hidden", or the view's clean-up
+// before it is destroyed, cause "destroyed", each just after the view's
+// window was hidden and only when it had been shown. The native window is
+// the popup's HWND, or zero for none; the bridge asks Windows whether it is
+// still visible when the record is made.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPopupWidgetHidden(PopupWidgetSink sink,
+                                    std::string cause,
+                                    uintptr_t native_window);
+
+// Records a change of an option's selectedness, which sets no attribute. The
+// select node is zero for an option with no owner select.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkOptionSelectednessChanged(int document_node_id,
+                                          std::string document_token,
+                                          int node_id,
+                                          int select_node_id,
+                                          bool selected,
+                                          CookieCallOrigin origin);
+
 // The document-level interaction state read for one interaction checkpoint.
 // Node identifiers are Blink DOM node ids, and zero means no node. The focus
 // type is Blink's record of how focus last moved in the document, named as in
@@ -1262,9 +1489,11 @@ uint64_t RecordBlinkLayoutChanges(
 // The local-root widget a presentation request was queued on. The frame sink
 // is the viz::FrameSinkId whose compositor frames the frame tokens number, and
 // the frame token is the LocalFrameToken of the widget's local root. A request
-// made without a widget carries no identity.
+// made without a widget carries no identity. A page popup's widget is not
+// told its frame sink, so its identity names only its frame.
 struct PresentationWidgetIdentity {
   bool present = false;
+  bool page_popup = false;
   uint32_t frame_sink_client_id = 0;
   uint32_t frame_sink_id = 0;
   std::string local_root_frame_token;
@@ -1337,6 +1566,185 @@ void RecordBlinkPresentationFeedback(uint64_t request_sequence,
                                      PresentationFeedbackTiming timing,
                                      int not_swapped_count,
                                      bool high_resolution_ticks);
+
+// Protocol 0.48 (slice 4b, "The frame's moment, held"): the compositor's
+// drawn values, on the browser.compositor channel. A compositor is named by
+// its cc::LayerTreeHost ID, which its LayerTreeHostImpl shares, and by the
+// widget its Blink presentation requests name.
+
+// One cc::FilterOperation as the compositor holds it: its type, and its
+// numbers in the order "What is recorded" in the bridge README gives.
+struct CompositorFilterOperation {
+  std::string type;
+  std::vector<double> numbers;
+};
+
+// One property of one element of the active tree as drawn. The property is
+// "transform" (numbers: the 16 matrix entries, row by row), "opacity" (one
+// number), "filter" or "backdrop-filter" (the operations), or
+// "scroll-offset" (x and y, and from protocol 0.50 1 or 0 for whether the
+// compositor scrolls the node and a bitmask of its main thread repaint
+// reasons), or "background-color-progress" or
+// "clip-path-progress" (the compositor's progress a native paint worklet's
+// drawn record was painted with, one number, or none when it was painted
+// with no compositor progress), or "image-frame" (protocol 0.48 part 1c:
+// the frame index of an animated paint image on the active tree, one number,
+// with element_id holding the PaintImage::Id). An element whose node or paint
+// worklet, or an image the image animation controller no longer holds, is
+// given with present false.
+struct CompositorDrawnValue {
+  uint64_t element_id = 0;
+  std::string property;
+  bool present = true;
+  std::vector<double> numbers;
+  std::vector<CompositorFilterOperation> filters;
+};
+
+// One cc::KeyframeModel of an animation started on the compositor: its ID,
+// its cc::TargetProperty, and the compositor element it animates, with the
+// element ID's Blink namespace.
+struct CompositorKeyframeModelFacts {
+  int keyframe_model_id = 0;
+  std::string target_property;
+  uint64_t element_id = 0;
+  std::string element_id_namespace;
+};
+
+// Names, on the main thread, the widget whose compositor has this ID, so
+// that its compositor frames name the widget its presentation records name.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RegisterCompositorWidget(int layer_tree_host_id,
+                              PresentationWidgetIdentity widget);
+
+// Records, on Blink's main thread, an animation started on the compositor
+// (CompositorAnimations::StartAnimationOnCompositor).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordCompositorAnimationStarted(
+    int document_node_id,
+    std::string document_token,
+    int node_id,
+    int compositor_animation_id,
+    std::vector<CompositorKeyframeModelFacts> keyframe_models);
+
+// Records, on Blink's main thread, that an animation's keyframe models were
+// removed from the compositor (KeyframeEffect::CancelAnimationOnCompositor),
+// which is how both a cancelled and a finished animation leave it.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordCompositorAnimationEnded(int document_node_id,
+                                    std::string document_token,
+                                    int node_id,
+                                    int compositor_animation_id,
+                                    std::vector<int> keyframe_model_ids);
+
+// One Blink animation as Animation::NotifyProbe sees it (protocol 0.53,
+// slice 4g): a CSS animation, a CSS transition, or a Web Animation, with its
+// target, play state, times on its timeline, and its effect's timing, as
+// DevTools' Animations panel describes it. Times are milliseconds; an
+// unresolved time is absent. The timeline's zero time is TimeTicks
+// microseconds, for a document timeline only.
+struct AnimationFacts {
+  int document_node_id = 0;
+  std::string document_token;
+  unsigned sequence_number = 0;
+  // "css-animation", "css-transition", or "web-animation".
+  std::string kind;
+  // The animation's id, else its animation-name, else the transitioned
+  // property, as DevTools names it; empty when it has none.
+  std::string name;
+  std::string id;
+  int target_node_id = 0;
+  std::string pseudo_element;
+  // The play state, "idle", "running", "paused", or "finished", and whether
+  // a play or pause is pending.
+  std::string play_state;
+  bool pending = false;
+  double playback_rate = 1;
+  std::optional<double> start_time_milliseconds;
+  std::optional<double> current_time_milliseconds;
+  // "document", "scroll", "view", "other", or "none".
+  std::string timeline_kind;
+  int64_t timeline_zero_microseconds = 0;
+  bool high_resolution_ticks = false;
+  double timeline_playback_rate = 1;
+  int timeline_source_node_id = 0;
+  int timeline_subject_node_id = 0;
+  std::string timeline_axis;
+  bool has_effect = false;
+  double delay_milliseconds = 0;
+  double end_delay_milliseconds = 0;
+  double iteration_start = 0;
+  // Absent when infinite.
+  std::optional<double> iterations;
+  double duration_milliseconds = 0;
+  std::string direction;
+  std::string fill;
+  std::string easing;
+  // Blink's computed progress, after the easing, and current iteration, at
+  // the call; absent when not in effect.
+  std::optional<double> progress;
+  std::optional<double> current_iteration;
+  int compositor_animation_id = 0;
+};
+
+// Records, on Blink's main thread, from Animation::NotifyProbe, an
+// animation's first call and each later call in which anything other than
+// its current time, progress, and current iteration changed, as
+// animation-updated on browser.animation (protocol 0.53).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordAnimationUpdated(AnimationFacts facts);
+
+// Records, on Blink's main thread, that an animation recorded before was
+// released (Animation::Dispose) or its document's context was destroyed
+// (Animation::ContextDestroyed), as animation-removed.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordAnimationRemoved(unsigned sequence_number);
+
+// Records, on the compositor thread in LayerTreeHostImpl::DrawLayers, the
+// frame about to be submitted: the values given are those of the active
+// tree as drawn, and only those changed since this compositor's last
+// recorded frame are written. A frame with no change is not recorded. The
+// begin frame time is TimeTicks microseconds.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordCompositorFrame(int layer_tree_host_id,
+                           uint32_t frame_token,
+                           int64_t begin_frame_microseconds,
+                           int source_frame_number,
+                           bool high_resolution_ticks,
+                           std::vector<CompositorDrawnValue> values);
+
+// Records viz's presentation of a recorded compositor frame, from
+// LayerTreeHostImpl::DidPresentCompositorFrame. A frame not recorded is
+// ignored.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordCompositorFramePresented(int layer_tree_host_id,
+                                    uint32_t frame_token,
+                                    int64_t presented_microseconds,
+                                    bool failed,
+                                    bool high_resolution_ticks);
+
+// What a native paint worklet painted, on the worklet's thread
+// (BackgroundColorPaintDefinition::Paint or ClipPathPaintDefinition::Paint):
+// the compositor element and property, the compositor progress it was
+// given, if any, and the value it drew. A background color is its four
+// floats (SkColor4f); a clip path is the path as Skia holds it, its fill
+// type, verbs, points (x, y, ...), and conic weights, with the translation
+// the paint applied and whether it was drawn as a rounded rectangle.
+struct PaintWorkletPaintedFacts {
+  uint64_t element_id = 0;
+  std::string property;
+  std::optional<double> progress;
+  std::vector<double> color;
+  std::string fill_type;
+  std::vector<std::string> verbs;
+  std::vector<double> points;
+  std::vector<double> conic_weights;
+  double translate_x = 0;
+  double translate_y = 0;
+  bool drawn_as_rounded_rect = false;
+};
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordPaintWorkletPainted(PaintWorkletPaintedFacts facts);
 
 // Network metadata. Every record on the browser.network channel carries
 // request and response metadata only: no request body, no response body, no
@@ -1735,6 +2143,396 @@ void RecordBlinkWebTransportClosed(NetworkScope scope,
                                    bool abrupt,
                                    int64_t code,
                                    std::string reason);
+
+// Page resources (protocol 0.40), on browser.resources. A font file or an
+// image is identified by the SHA-256 digest of its bytes, and a renderer
+// records the bytes once for each digest.
+
+// Reports the font file recorded for a Skia typeface, by the typeface's
+// unique identifier, which Skia does not reuse within a process. Returns false
+// when the typeface has not been met; a met typeface whose file could not be
+// read has an empty digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool LookUpFontFile(uint32_t typeface_id,
+                    std::string* digest,
+                    int* collection_index);
+
+// Digests a typeface's font file, records a font-file record the first time
+// the renderer meets the digest, and keeps the digest for the typeface.
+// Returns the digest, or an empty string when the file was not readable. In
+// the recreation mode, it records nothing and keeps the digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::string RecordFontFile(uint32_t typeface_id,
+                           int collection_index,
+                           bool readable,
+                           std::string bytes);
+
+// A number for a FontFace, unique in the renderer, so the face's records
+// refer to the same face.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t AssignFontFaceNumber();
+
+// A FontFace's descriptors as Blink serializes them, and its source.
+struct FontFaceFacts {
+  FontFaceFacts();
+  FontFaceFacts(FontFaceFacts&&);
+  FontFaceFacts& operator=(FontFaceFacts&&);
+  ~FontFaceFacts();
+
+  std::string family;
+  std::string style;
+  std::string weight;
+  std::string stretch;
+  std::string unicode_range;
+  std::string variant;
+  std::string feature_settings;
+  std::string display;
+  std::string ascent_override;
+  std::string descent_override;
+  std::string line_gap_override;
+  std::string size_adjust;
+  // "url", "data-url", "binary", or "local"; empty when the face has no
+  // source.
+  std::string source_kind;
+  // The source's URL, for a url source.
+  std::string source_url;
+  // The digest of the font file the face loaded, or empty when Blink holds
+  // no file for it, as for a local source.
+  std::string font_file_digest;
+  int font_file_index = 0;
+};
+
+// Records that a FontFace joined a document's set of faces.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkFontFaceAdded(int document_node_id,
+                              std::string document_token,
+                              uint64_t face_number);
+
+// Records that a FontFace of a document finished loading.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkFontFaceLoaded(int document_node_id,
+                               std::string document_token,
+                               uint64_t face_number,
+                               FontFaceFacts face);
+
+// Records that a FontFace left a document's set of faces.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkFontFaceRemoved(int document_node_id,
+                                std::string document_token,
+                                uint64_t face_number);
+
+// An image resource that finished loading, with its encoded bytes.
+struct ImageResourceFacts {
+  ImageResourceFacts();
+  ImageResourceFacts(ImageResourceFacts&&);
+  ImageResourceFacts& operator=(ImageResourceFacts&&);
+  ~ImageResourceFacts();
+
+  std::string url;
+  std::string response_url;
+  int status = 0;
+  std::string mime_type;
+  std::string bytes;
+  // Protocol 0.48: the Blink image's own ID (Image::paint_image_id()) once
+  // the bytes were given to it, or none when no image was made.
+  std::optional<int64_t> image_id;
+};
+
+// Records an image-resource record, and an image-data record the first time
+// the renderer meets the bytes' digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkImageResource(ImageResourceFacts image);
+
+// Protocol 0.51 (slice 4e): a style sheet resource Blink parsed
+// (StyleSheetContents::ParseAuthorStyleSheet), with the text it decoded.
+struct StyleSheetResourceFacts {
+  StyleSheetResourceFacts();
+  StyleSheetResourceFacts(StyleSheetResourceFacts&&);
+  StyleSheetResourceFacts& operator=(StyleSheetResourceFacts&&);
+  ~StyleSheetResourceFacts();
+
+  std::string url;
+  std::string response_url;
+  int status = 0;
+  std::string mime_type;
+  // The decoded text, in UTF-8.
+  std::string text;
+};
+
+// Records a style-sheet-resource record, and a style-sheet-text record the
+// first time the renderer meets the text's digest. Returns the digest, which
+// the parsed contents keep. Records nothing when the recorder is not active,
+// and returns an empty digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::string RecordBlinkStyleSheetResource(StyleSheetResourceFacts sheet);
+
+// Protocol 0.51: a style sheet's CSSOM text, as DevTools builds it (each
+// rule's cssText on a line of its own). Records a style-sheet-text record the
+// first time the renderer meets the digest, and returns the digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+std::string RecordBlinkStyleSheetText(std::string text);
+
+// Protocol 0.51: a number for a CSSStyleSheet, unique in the renderer, so the
+// sheet's records refer to the same sheet. Numbers start at 1.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+uint64_t AssignStyleSheetNumber();
+
+// Protocol 0.51: one style sheet of a tree scope at an update of the active
+// style sheets. Only the number is recorded for a sheet whose state is
+// unchanged since the document's last record (full is false).
+struct StyleSheetFacts {
+  StyleSheetFacts();
+  StyleSheetFacts(const StyleSheetFacts&);
+  StyleSheetFacts(StyleSheetFacts&&);
+  StyleSheetFacts& operator=(const StyleSheetFacts&);
+  StyleSheetFacts& operator=(StyleSheetFacts&&);
+  ~StyleSheetFacts();
+
+  uint64_t sheet_number = 0;
+  bool full = false;
+  // "link", "style", "import", "constructed", "processing-instruction", or
+  // "other".
+  std::string kind;
+  // The owner node's DOM node ID, or 0 for none.
+  int owner_node_id = 0;
+  // For an import: the parent sheet's number and the import rule's index.
+  uint64_t parent_sheet_number = 0;
+  int rule_index = -1;
+  // The address, or empty for none.
+  std::string href;
+  std::string media;
+  std::string title;
+  bool disabled = false;
+  bool active = false;
+  // "arrived" (the text the resource arrived with), "element" (the owner
+  // element's text, recorded in the DOM), "cssom" (the CSSOM text), or "none".
+  std::string text_source;
+  // The digest of the text, for "arrived" and "cssom"; empty otherwise.
+  std::string text_digest;
+};
+
+// Protocol 0.51: a tree scope's style sheets at an update: the scope's root
+// node (the document or a shadow root), its sheets in document.styleSheets
+// order with each import after the sheet that imports it, and its adopted
+// sheets in order.
+struct StyleSheetScopeFacts {
+  StyleSheetScopeFacts();
+  StyleSheetScopeFacts(StyleSheetScopeFacts&&);
+  StyleSheetScopeFacts& operator=(StyleSheetScopeFacts&&);
+  ~StyleSheetScopeFacts();
+
+  int scope_node_id = 0;
+  std::vector<StyleSheetFacts> sheets;
+  std::vector<StyleSheetFacts> adopted;
+};
+
+// Protocol 0.51: records a style-sheets-updated record for the tree scopes an
+// update of a document's active style sheets touched
+// (StyleEngine::UpdateActiveStyleSheets).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkStyleSheetsUpdated(int document_node_id,
+                                   std::string document_token,
+                                   std::vector<StyleSheetScopeFacts> scopes);
+
+// Protocol 0.52 (slice 4f): one frame of the script stack at a call, as V8
+// reports it. An unobserved URL or function name is empty, and an unobserved
+// script identifier, line, or column is zero; lines and columns are one-based.
+struct ScriptFrameFacts {
+  ScriptFrameFacts();
+  ScriptFrameFacts(const ScriptFrameFacts&);
+  ScriptFrameFacts(ScriptFrameFacts&&);
+  ScriptFrameFacts& operator=(const ScriptFrameFacts&);
+  ScriptFrameFacts& operator=(ScriptFrameFacts&&);
+  ~ScriptFrameFacts();
+
+  int script_id = 0;
+  std::string url;
+  std::string function_name;
+  int line_number = 0;
+  int column_number = 0;
+  bool is_eval = false;
+};
+
+// The most stack frames a timer-origin record carries, innermost first.
+inline constexpr size_t kMaximumTimerOriginFrames = 16;
+
+// Protocol 0.52: who scheduled a window timer, read in the setTimeout or
+// setInterval call. An empty world kind means no script was running. The
+// callback is the function the timer runs, read from the function itself; a
+// string handler has none.
+struct TimerOriginFacts {
+  TimerOriginFacts();
+  TimerOriginFacts(TimerOriginFacts&&);
+  TimerOriginFacts& operator=(TimerOriginFacts&&);
+  ~TimerOriginFacts();
+
+  std::string world_kind;
+  int world_id = kExecutionWorldIdUnobserved;
+  std::string world_name;
+  std::string world_stable_id;
+  std::vector<ScriptFrameFacts> stack;
+  bool string_handler = false;
+  bool has_callback = false;
+  ScriptFrameFacts callback;
+};
+
+// Notes who scheduled a timer, for the timer-scheduled record the same call
+// makes next (RecordBlinkTimerScheduled), which carries the callback location
+// and is followed by a timer-origin record.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void NoteBlinkTimerOrigin(uintptr_t timer_identity, TimerOriginFacts facts);
+
+inline constexpr char kScriptSourceKindClassic[] = "classic";
+inline constexpr char kScriptSourceKindModule[] = "module";
+inline constexpr char kScriptSourceKindEventHandlerAttribute[] =
+    "event-handler-attribute";
+
+// Protocol 0.52: the markup a V8 script came from: a script element's classic
+// or module script, or an on... attribute's handler. A window handler set by
+// a body or frameset attribute is given the document's body element; a zero
+// element node ID is an element Blink did not give. The URL is empty for an
+// inline script.
+struct ScriptSourceFacts {
+  ScriptSourceFacts();
+  ScriptSourceFacts(const ScriptSourceFacts&);
+  ScriptSourceFacts(ScriptSourceFacts&&);
+  ScriptSourceFacts& operator=(const ScriptSourceFacts&);
+  ScriptSourceFacts& operator=(ScriptSourceFacts&&);
+  ~ScriptSourceFacts();
+
+  int document_node_id = 0;
+  std::string document_token;
+  int script_id = 0;
+  std::string kind;
+  int element_node_id = 0;
+  std::string attribute_name;
+  std::string url;
+  int line_number = 0;
+  int column_number = 0;
+};
+
+// Records a script-compiled record for a script whose V8 script ID is known.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkScriptSource(ScriptSourceFacts facts);
+
+// A classic script is compiled inside its run, so the element running it is
+// noted by the script's identity before the run and forgotten after it, and
+// the compile records the script ID (RecordBlinkClassicScriptCompiled).
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void PushBlinkScriptElement(uintptr_t script_identity, ScriptSourceFacts facts);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void PopBlinkScriptElement(uintptr_t script_identity);
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkClassicScriptCompiled(uintptr_t script_identity,
+                                      int script_id);
+
+inline constexpr char kScriptParsedKindClassic[] = "classic";
+inline constexpr char kScriptParsedKindModule[] = "module";
+inline constexpr char kScriptParsedKindEval[] = "eval";
+// A function made by new Function or wrapped by Blink, such as an attribute
+// handler.
+inline constexpr char kScriptParsedKindFunction[] = "function";
+
+// Protocol 0.54 (slice 4h): a script V8 instantiated, or failed to compile,
+// in a document of the main thread, with its source as UTF-8. Line and column
+// are one-based; an eval-from script ID of zero is none. Empty texts are
+// recorded as null.
+struct ScriptParsedFacts {
+  ScriptParsedFacts();
+  ScriptParsedFacts(ScriptParsedFacts&&);
+  ScriptParsedFacts& operator=(ScriptParsedFacts&&);
+  ~ScriptParsedFacts();
+
+  int document_node_id = 0;
+  std::string document_token;
+  std::string world_kind;
+  int world_id = kExecutionWorldIdUnobserved;
+  std::string world_name;
+  std::string world_stable_id;
+  int script_id = 0;
+  std::string kind;
+  std::string source;
+  std::string url;
+  std::string source_url;
+  std::string source_map_url;
+  int line_number = 0;
+  int column_number = 0;
+  int eval_from_script_id = 0;
+  bool compile_error = false;
+};
+
+// Notes a script ID of the process's main thread, and returns whether it was
+// not noted before, so that a script V8 reports again, as it does each time a
+// cached script or eval code is instantiated again, is recorded once.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool ClaimScriptParsed(int script_id);
+
+// Records script-parsed on browser.script, with a script-text record the
+// first time the process meets the source's digest.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordScriptParsed(ScriptParsedFacts facts);
+
+// Bracket a DevTools protocol command dispatched on the main thread, so that
+// the scripts DevTools compiles, such as a Console expression, are not
+// recorded as the page's.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void EnterDevToolsCommand();
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void LeaveDevToolsCommand();
+
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+bool InDevToolsCommand();
+
+// Protocol 0.48: a paint image Blink made from an image
+// (BitmapImage::PaintImageForCurrentFrameWithInfo): the image's own ID, the
+// paint image's ID, whether its animation sequence is the image's shared one
+// or an element's own, the element it was made for, and the paint image it is
+// synchronised to.
+// IDs are PaintImage::Id values, which start at 0; a negative one, such as
+// PaintImage::kInvalidId, names none.
+struct ImagePaintImageFacts {
+  int64_t image_id = -1;
+  int64_t paint_image_id = -1;
+  bool own_sequence = false;
+  std::optional<int> node_id;
+  std::optional<int64_t> sync_target_paint_image_id;
+};
+
+// Records an image-paint-image record the first time the renderer makes a
+// paint image with the ID.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkImagePaintImage(ImagePaintImageFacts facts);
+
+// Protocol 0.48: times a recorder hook's whole work, before and including its
+// bridge call, as a kind of its own in the bridge's cost lines. A hook writes
+// A11Y_RECORDER_HOOK_COST("hook:name") at the start of its block.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+int RegisterHookCostKind(const char* name);
+// Returns the start in nanoseconds, or -1 when cost is not being reported.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+int64_t StartHookCost(int slot);
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void StopHookCost(int slot, int64_t started);
+
+class HookCost {
+ public:
+  explicit HookCost(int slot) : slot_(slot), started_(StartHookCost(slot)) {}
+  ~HookCost() { StopHookCost(slot_, started_); }
+  HookCost(const HookCost&) = delete;
+  HookCost& operator=(const HookCost&) = delete;
+
+ private:
+  const int slot_;
+  const int64_t started_;
+};
+
+#define A11Y_RECORDER_HOOK_COST(name)                               \
+  static const int recorder_hook_cost_slot =                        \
+      ::a11y_recorder::RegisterHookCostKind(name);                  \
+  const ::a11y_recorder::HookCost recorder_hook_cost(recorder_hook_cost_slot)
 
 }  // namespace a11y_recorder
 

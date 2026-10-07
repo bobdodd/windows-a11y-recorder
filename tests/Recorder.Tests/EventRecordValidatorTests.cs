@@ -2639,6 +2639,208 @@ public sealed class EventRecordValidatorTests
             issue => issue.Code == "browser-selection-text-control-inconsistent");
     }
 
+    [Theory]
+    [InlineData("source", "\"placed\"")]
+    [InlineData("widgetRect", "null")]
+    public void RejectsA043PopupWindowRectProperty(string property, string value)
+    {
+        // Protocol 0.44 records only the requested rectangle.
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupRequestedRect)!;
+        payload[property] = JsonNode.Parse(value);
+
+        var issues = ValidateInteractionRecord("page-popup-window-rect", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void RejectsAPopupOpenedWithoutAnOwnerFrameToken()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupOpened)!;
+        payload["ownerFrameToken"] = " ";
+
+        var issues = ValidateInteractionRecord("page-popup-opened", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-page-popup-owner-frame-token-empty");
+    }
+
+    [Theory]
+    [InlineData("shown", "viewBounds")]
+    [InlineData("not-visible", "constrainedRect")]
+    [InlineData("permission-exclusion", "transformedAnchorRect")]
+    public void RejectsAShownPopupWidgetMissingARectangle(string outcome, string missing)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetShown)!;
+        payload["outcome"] = outcome;
+        if (outcome != "shown")
+        {
+            payload["viewBounds"] = null;
+        }
+        payload[missing] = null;
+
+        var issues = ValidateInteractionRecord("popup-widget-shown", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-shown-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsAPopupWidgetShownWithoutOrWithInvalidAnimationSettings()
+    {
+        var missing = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetShown)!.AsObject();
+        missing.Remove("windowsAnimationSettings");
+        Assert.NotEmpty(ValidateInteractionRecord("popup-widget-shown", missing));
+
+        var invalid = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetShown)!;
+        invalid["windowsAnimationSettings"]!["menuFade"] = "on";
+        Assert.NotEmpty(ValidateInteractionRecord("popup-widget-shown", invalid));
+
+        var unread = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetShown)!;
+        unread["windowsAnimationSettings"]!["menuFade"] = null;
+        Assert.Empty(ValidateInteractionRecord("popup-widget-shown", unread));
+    }
+
+    [Fact]
+    public void RejectsAnInactiveWindowRefusalWithATransformedRectangle()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetRefused)!;
+        payload["transformedRect"] = JsonNode.Parse("""{ "x": 0, "y": 0, "width": 1, "height": 1 }""");
+
+        var issues = ValidateInteractionRecord("popup-widget-shown", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-shown-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("popup-widget-created")]
+    [InlineData("popup-widget-shown")]
+    [InlineData("popup-widget-bounds-requested")]
+    [InlineData("popup-widget-screen-rects")]
+    [InlineData("popup-widget-hidden")]
+    public void RejectsAPopupWidgetRecordFromARenderer(string eventType)
+    {
+        var json = eventType switch
+        {
+            "popup-widget-created" => BrowserInteractionPayloads.PopupWidgetCreated,
+            "popup-widget-shown" => BrowserInteractionPayloads.PopupWidgetShown,
+            "popup-widget-bounds-requested" =>
+                BrowserInteractionPayloads.PopupWidgetBoundsRequested,
+            "popup-widget-hidden" => BrowserInteractionPayloads.PopupWidgetHidden,
+            _ => BrowserInteractionPayloads.PopupWidgetScreenRects
+        };
+        var payload = JsonNode.Parse(json)!;
+        payload["context"]!["processType"] = "renderer";
+
+        var issues = ValidateInteractionRecord(eventType, payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-context-invalid");
+    }
+
+    [Fact]
+    public void RejectsACreatedPopupWidgetWithoutItsOpenerFrame()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetCreated)!;
+        payload["context"]!["frameId"] = null;
+
+        var issues = ValidateInteractionRecord("popup-widget-created", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-context-invalid");
+    }
+
+    [Theory]
+    [InlineData("frameSinkId", "\"4-12\"")]
+    [InlineData("deviceScaleFactor", "0")]
+    public void RejectsMalformedPopupWidgetScreenRects(string property, string value)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetScreenRects)!;
+        payload[property] = JsonNode.Parse(value);
+
+        var issues = ValidateInteractionRecord("popup-widget-screen-rects", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Theory]
+    [InlineData("frameSinkId", "\"4-12\"")]
+    [InlineData("cause", "\"closed\"")]
+    [InlineData("nativeWindowVisible", "1")]
+    public void RejectsAMalformedPopupWidgetHiddenRecord(string property, string value)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetHidden)!;
+        payload[property] = JsonNode.Parse(value);
+
+        var issues = ValidateInteractionRecord("popup-widget-hidden", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void AcceptsAPopupWidgetHiddenRecordWithoutANativeWindow()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetHidden)!;
+        payload["nativeWindowVisible"] = null;
+        payload["cause"] = "hidden";
+
+        Assert.Empty(ValidateInteractionRecord("popup-widget-hidden", payload));
+    }
+
+    [Fact]
+    public void RejectsANativeWindowRectangleWithoutItsClientArea()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PopupWidgetScreenRects)!;
+        payload["nativeClientRect"] = null;
+
+        var issues = ValidateInteractionRecord("popup-widget-screen-rects", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-popup-widget-native-rects-inconsistent");
+    }
+
+    [Theory]
+    [InlineData("width", "-1")]
+    [InlineData("x", "1.5")]
+    [InlineData("depth", "0")]
+    public void RejectsAMalformedPopupRectangle(string property, string value)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupOpened)!;
+        payload["anchorRectInScreen"]![property] = JsonNode.Parse(value);
+
+        var issues = ValidateInteractionRecord("page-popup-opened", payload);
+
+        Assert.Contains(
+            issues,
+            issue => issue.Path.StartsWith("#/payload/anchorRectInScreen/", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("ownerDocumentId", "document-2486", "browser-page-popup-owner-document-invalid")]
+    [InlineData("ownerDocumentToken", " ", "browser-page-popup-owner-token-empty")]
+    [InlineData("kind", "listbox", "payload-property-invalid")]
+    public void RejectsAnInvalidPopupOpening(string property, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupOpened)!;
+        payload[property] = value;
+
+        var issues = ValidateInteractionRecord("page-popup-opened", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void RejectsAPopupZoomFactorThatIsNotPositive()
+    {
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.PagePopupOpened)!;
+        payload["zoomFactor"] = 0;
+
+        var issues = ValidateInteractionRecord("page-popup-opened", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "payload-property-invalid");
+    }
+
     [Fact]
     public void RejectsAReversedTextControlValueSelection()
     {
@@ -2699,6 +2901,19 @@ public sealed class EventRecordValidatorTests
             issue => issue.Code == "browser-interaction-checkpoint-reason-inconsistent");
     }
 
+    [Fact]
+    public void AcceptsAnInteractionCheckpointAfterTheWalkWhenParsingStarted()
+    {
+        // Protocol 0.42.
+        var payload = JsonNode.Parse(BrowserInteractionPayloads.LayoutCheckpointStarted)!;
+        payload["sourceChannel"] = "browser.dom";
+        payload["reason"] = "started-parsing";
+        payload["sourceCheckpointId"] = "dom-checkpoint-3";
+        payload["sourceChangeSetId"] = null;
+
+        Assert.Empty(ValidateInteractionRecord("interaction-checkpoint-started", payload));
+    }
+
     [Theory]
     [InlineData("browser.layout", "rendering-update", null, "layout-changes-7")]
     [InlineData("browser.dom", "post-mutation", null, null)]
@@ -2721,6 +2936,7 @@ public sealed class EventRecordValidatorTests
     [InlineData("browser.layout", "rendering-update", null, null, "browser-interaction-checkpoint-source-inconsistent")]
     [InlineData("browser.layout", "rendering-update", "layout-checkpoint-12", "layout-changes-7", "browser-interaction-checkpoint-source-inconsistent")]
     [InlineData("browser.dom", "finished-parsing", null, null, "browser-interaction-checkpoint-source-inconsistent")]
+    [InlineData("browser.dom", "started-parsing", null, null, "browser-interaction-checkpoint-source-inconsistent")]
     [InlineData("browser.dom", "post-mutation", null, "layout-changes-7", "browser-interaction-checkpoint-source-inconsistent")]
     [InlineData("browser.layout", "rendering-update", null, "layout-checkpoint-7", "browser-interaction-checkpoint-change-set-invalid")]
     public void RejectsAnInteractionCheckpointWithSourcesItsChannelDoesNotName(
@@ -2948,6 +3164,31 @@ public sealed class EventRecordValidatorTests
         Assert.NotEmpty(issues);
     }
 
+    [Theory]
+    [InlineData("\"0\"")]
+    [InlineData("\"-4\"")]
+    [InlineData("68")]
+    [InlineData("\"\"")]
+    public void RejectsAScrollElementIdThatIsNotPositiveDecimalText(string value)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ScrollOffsetChanged)!;
+        payload["scrollElementId"] = JsonNode.Parse(value);
+
+        var issues = ValidateLayoutRecord("layout-scroll-offset-changed", payload);
+
+        Assert.NotEmpty(issues);
+    }
+
+    [Fact]
+    public void AcceptsANullOrAbsentScrollElementId()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ScrollOffsetChanged)!;
+        payload["scrollElementId"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-scroll-offset-changed", payload));
+        payload.AsObject().Remove("scrollElementId");
+        Assert.Empty(ValidateLayoutRecord("layout-scroll-offset-changed", payload));
+    }
+
     [Fact]
     public void RejectsALayoutChangeCompletionWithoutItsScrollOffsetCount()
     {
@@ -3035,6 +3276,27 @@ public sealed class EventRecordValidatorTests
         Assert.Contains(issues, issue => issue.Code == code);
     }
 
+    [Fact]
+    public void RejectsAChangeSetOfACheckpointsUpdateWithoutTheCheckpoint()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!;
+        payload["layoutCheckpointId"] = null;
+
+        var issues = ValidateLayoutRecord("layout-changes-started", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-layout-change-checkpoint-update-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsAChangeSetWithoutTheCheckpointUpdateFlag()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangesStarted)!.AsObject();
+        payload.Remove("checkpointUpdate");
+
+        Assert.NotEmpty(ValidateLayoutRecord("layout-changes-started", payload));
+    }
+
     [Theory]
     [InlineData("[]")]
     [InlineData("[\"style\", \"style\"]")]
@@ -3061,6 +3323,192 @@ public sealed class EventRecordValidatorTests
         var issues = ValidateLayoutRecord("layout-node-changed", payload);
 
         Assert.Contains(issues, issue => issue.Code == "browser-layout-local-rect-inconsistent");
+    }
+
+    [Fact]
+    public void AcceptsStyleChangesAndCustomProperties()
+    {
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-node-changed",
+            JsonNode.Parse(BrowserLayoutPayloads.ChangedElementStyleChanges)!));
+
+        var complete = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementNode)!;
+        complete["computedStyleComplete"] = true;
+        complete["customProperties"] = JsonNode.Parse("""{"--gap":"4px"}""");
+        complete["removedCustomProperties"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", complete));
+
+        var checkpoint = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
+        checkpoint["customProperties"] = JsonNode.Parse("""{"--gap":"4px"}""");
+        Assert.Empty(ValidateLayoutRecord("layout-checkpoint-node", checkpoint));
+    }
+
+    [Theory]
+    [InlineData("removedCustomProperties", "null", "browser-layout-style-changes-incomplete")]
+    [InlineData("customProperties", "null", "browser-layout-style-changes-incomplete")]
+    [InlineData("computedStyleComplete", "true", "browser-layout-style-removals-in-complete-style")]
+    [InlineData("customProperties", """{"gap":"4px"}""", "payload-property-invalid")]
+    [InlineData("removedCustomProperties", """["--gap","--gap"]""", "payload-property-invalid")]
+    [InlineData("computedStyleComplete", "\"no\"", "payload-property-invalid")]
+    public void RejectsInconsistentStyleChanges(string property, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementStyleChanges)!;
+        payload[property] = JsonNode.Parse(value);
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void RejectsStyleCompletenessWithoutAComputedStyle()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedElementStyleChanges)!;
+        payload["computedStyle"] = null;
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-custom-properties-without-style");
+        Assert.Contains(issues, issue => issue.Code == "browser-layout-style-completeness-without-style");
+
+        var checkpoint = JsonNode.Parse(BrowserLayoutPayloads.ElementNode)!;
+        checkpoint["computedStyle"] = null;
+        checkpoint["customProperties"] = JsonNode.Parse("""{"--gap":"4px"}""");
+        Assert.Contains(
+            ValidateLayoutRecord("layout-checkpoint-node", checkpoint),
+            issue => issue.Code == "browser-layout-custom-properties-without-style");
+    }
+
+    [Fact]
+    public void AcceptsBoxFragmentsInBothNodeRecords()
+    {
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-node-changed",
+            JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!));
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-checkpoint-node",
+            JsonNode.Parse(BrowserLayoutPayloads.BoxedElementNode)!));
+
+        var unboxed = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        unboxed["boxFragments"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", unboxed));
+
+        // A break before has no sequence number.
+        var before = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        var token = before["boxFragments"]!["fragments"]![0]!["breakToken"]!;
+        token["breakBefore"] = true;
+        token["sequenceNumber"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", before));
+    }
+
+    [Theory]
+    [InlineData("children/0/nodeId", "null", "browser-layout-fragment-child-node-inconsistent")]
+    [InlineData("children/1/nodeId", "7", "browser-layout-fragment-child-node-inconsistent")]
+    [InlineData("children/3/fragmentIndex", "0", "browser-layout-fragment-child-node-inconsistent")]
+    [InlineData("children/1/fragment", "null", "browser-layout-fragment-child-fragment-inconsistent")]
+    [InlineData("children/0/fragment", """{"width":1,"height":1,"breakToken":null,"scrollableOverflow":null,"children":[]}""", "browser-layout-fragment-child-fragment-inconsistent")]
+    [InlineData("children/0/kind", "\"inline\"", "payload-property-invalid")]
+    [InlineData("children/1/fragment/width", "-1", "payload-property-invalid")]
+    [InlineData("breakToken/sequenceNumber", "null", "browser-layout-break-token-inconsistent")]
+    [InlineData("scrollableOverflow/height", "-1", "payload-property-invalid")]
+    [InlineData("width", "\"80px\"", "payload-property-invalid")]
+    public void RejectsInconsistentBoxFragments(string path, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        var parts = path.Split('/');
+        var target = payload["boxFragments"]!["fragments"]![0]!;
+        for (var index = 0; index < parts.Length - 1; index++)
+        {
+            target = int.TryParse(parts[index], out var item) ? target[item]! : target[parts[index]]!;
+        }
+        target[parts[^1]] = JsonNode.Parse(value);
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void AcceptsItemsTextAndGlyphRuns()
+    {
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-checkpoint-node",
+            JsonNode.Parse(BrowserLayoutPayloads.TextBlockNode)!));
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-node-changed",
+            JsonNode.Parse(BrowserLayoutPayloads.ChangedTextBlockNode)!));
+        Assert.Empty(ValidateLayoutRecord(
+            "layout-node-changed",
+            JsonNode.Parse(BrowserLayoutPayloads.ChangedTextBlockNodeTextUnchanged())!));
+    }
+
+    [Theory]
+    [InlineData("fragments/0/items/0/descendantsCount", "null", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/0/descendantsCount", "6", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/1/descendantsCount", "1", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/1/start", "null", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/4/start", "0", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/4/generatedText", "null", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/1/glyphRuns", "null", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/2/direction", "\"ltr\"", "browser-layout-fragment-item-inconsistent")]
+    [InlineData("fragments/0/items/3/end", "6", "browser-layout-fragment-item-range-outside-text")]
+    [InlineData("fragments/0/items/3/start", "6", "browser-layout-fragment-item-range-outside-text")]
+    [InlineData("fragments/0/children/0/fragment/items/1/end", "2", "browser-layout-fragment-item-range-outside-text")]
+    [InlineData("fragments/0/items/1/glyphRuns/0/glyphs", "\"KwAAAAAAAAAAAAAA\"", "browser-layout-glyphs-invalid")]
+    [InlineData("fragments/0/items/1/glyphRuns/0/glyphs", "\"not base64\"", "browser-layout-glyphs-invalid")]
+    [InlineData("fragments/0/items/1/glyphRuns/0/font/size", "-1", "payload-property-invalid")]
+    [InlineData("fragments/0/items/1/type", "\"atomic\"", "payload-property-invalid")]
+    [InlineData("fragments/0/textContent", "\"Hi\"", "browser-layout-text-content-inconsistent")]
+    [InlineData("fragments/0/children/0/fragment/textContent", "null", "browser-layout-text-content-inconsistent")]
+    [InlineData("textContent", "null", "browser-layout-text-content-inconsistent")]
+    [InlineData("textContentUnchanged", "true", "browser-layout-text-content-inconsistent")]
+    public void RejectsInconsistentItemsAndText(string path, string value, string code)
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedTextBlockNode)!;
+        var parts = path.Split('/');
+        var target = payload["boxFragments"]!;
+        for (var index = 0; index < parts.Length - 1; index++)
+        {
+            target = int.TryParse(parts[index], out var item) ? target[item]! : target[parts[index]]!;
+        }
+        target[parts[^1]] = JsonNode.Parse(value);
+
+        var issues = ValidateLayoutRecord("layout-node-changed", payload);
+
+        Assert.Contains(issues, issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void ABoxWithoutItemsStatesNoText()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        payload["boxFragments"]!["textContent"] = "stray";
+        Assert.Contains(
+            ValidateLayoutRecord("layout-node-changed", payload),
+            issue => issue.Code == "browser-layout-text-content-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsBoxFragmentsWithoutABox()
+    {
+        var text = JsonNode.Parse(BrowserLayoutPayloads.TextNode)!;
+        text["boxFragments"] = JsonNode.Parse(BrowserLayoutPayloads.BoxFragmentsJson);
+        Assert.Contains(
+            ValidateLayoutRecord("layout-checkpoint-node", text),
+            issue => issue.Code == "browser-layout-box-fragments-without-box");
+
+        var unrendered = JsonNode.Parse(BrowserLayoutPayloads.ChangedBoxedElementNode)!;
+        unrendered["layoutObjectPresent"] = false;
+        unrendered["geometry"] = null;
+        Assert.Contains(
+            ValidateLayoutRecord("layout-node-changed", unrendered),
+            issue => issue.Code == "browser-layout-box-fragments-without-box");
+
+        var zoom = JsonNode.Parse(BrowserLayoutPayloads.BoxedElementNode)!;
+        zoom["boxFragments"]!["effectiveZoom"] = 0;
+        Assert.Contains(
+            ValidateLayoutRecord("layout-checkpoint-node", zoom),
+            issue => issue.Code == "payload-property-invalid");
     }
 
     [Fact]
@@ -3160,6 +3608,11 @@ public sealed class EventRecordValidatorTests
     [InlineData("post-mutation", "check", false)]
     [InlineData("finished-parsing", "finished-parsing", false)]
     [InlineData("finished-parsing", "after-loss", false)]
+    [InlineData("started-parsing", "first", false)]
+    [InlineData("started-parsing", "started-parsing", false)]
+    [InlineData("started-parsing", "finished-parsing", true)]
+    [InlineData("finished-parsing", "started-parsing", true)]
+    [InlineData("post-mutation", "started-parsing", true)]
     public void ChecksTheWalkReasonOfADomCheckpoint(string reason, string walkReason, bool rejected)
     {
         var payload = new JsonObject
@@ -3274,6 +3727,25 @@ public sealed class EventRecordValidatorTests
             issue =>
                 issue.Code == "payload-property-invalid" &&
                 issue.Path.EndsWith("/computedStyle", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AcceptsAChangedTextNodeWhoseLayoutObjectWasDestroyed()
+    {
+        // Protocol 0.41: a change set records a text node whose layout object
+        // was destroyed, with none and no geometry; a checkpoint leaves such a
+        // node out.
+        var changed = JsonNode.Parse(BrowserLayoutPayloads.ChangedEmptyTextNode)!;
+        changed["layoutObjectPresent"] = false;
+        changed["geometry"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", changed));
+
+        var checkpoint = JsonNode.Parse(BrowserLayoutPayloads.TextNode)!;
+        checkpoint["layoutObjectPresent"] = false;
+        checkpoint["boundingClientRect"] = null;
+        Assert.Contains(
+            ValidateLayoutRecord("layout-checkpoint-node", checkpoint),
+            issue => issue.Code == "browser-layout-text-node-inconsistent");
     }
 
     [Fact]
@@ -3868,6 +4340,38 @@ public sealed class EventRecordValidatorTests
     }
 
     [Theory]
+    [InlineData("frame", null)]
+    [InlineData("page-popup", "3:2")]
+    [InlineData(null, "3:2")]
+    public void RejectsAWidgetKindThatDisagreesWithItsFrameSink(
+        string? kind,
+        string? frameSinkId)
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.QueuedRequest)!;
+        payload["widgetKind"] = kind;
+        payload["frameSinkId"] = frameSinkId;
+
+        var issues = ValidatePresentationRecord("presentation-requested", payload);
+
+        Assert.Contains(
+            issues, issue => issue.Code == "browser-presentation-widget-inconsistent" ||
+                issue.Code == "browser-presentation-request-inconsistent");
+    }
+
+    [Fact]
+    public void RejectsAPopupFeedbackWithoutAWidgetKind()
+    {
+        var payload = JsonNode.Parse(BrowserPresentationPayloads.PagePopupFeedback)!;
+        payload["widgetKind"] = null;
+
+        var issues = ValidatePresentationRecord("presentation-feedback", payload);
+
+        Assert.Contains(issues, issue => issue.Code == "payload-property-invalid" ||
+            issue.Code == "payload-property-missing" ||
+            issue.Code == "browser-presentation-widget-inconsistent");
+    }
+
+    [Theory]
     [InlineData("frameSinkId", "3-2")]
     [InlineData("frameSinkId", "3:")]
     [InlineData("frameSinkId", "4294967296:2")]
@@ -4396,6 +4900,48 @@ public sealed class EventRecordValidatorTests
         Assert.NotEmpty(issues);
     }
 
+    // A structure change raised without a runtime ID, which the native client
+    // delivers as a null array; see docs/architecture/uia-native-client.md.
+    [Fact]
+    public void AcceptsAUiaStructureChangeWithoutARuntimeId()
+    {
+        var payload = JsonNode.Parse(UiaPropertyChange)!;
+        payload["eventId"] = "AutomationElementIdentifiers.StructureChangedEvent";
+        payload["changeType"] = "ChildrenBulkRemoved";
+        payload["runtimeId"] = null;
+        payload["newValue"] = null;
+
+        var issues = ValidateUiaRecord("structure-changed", payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public void AcceptsAUiaStructureChangeWithARuntimeId()
+    {
+        var payload = JsonNode.Parse(UiaPropertyChange)!;
+        payload["eventId"] = "AutomationElementIdentifiers.StructureChangedEvent";
+        payload["changeType"] = "ChildRemoved";
+        payload["runtimeId"] = new JsonArray(42, 7, 3);
+        payload["newValue"] = null;
+
+        var issues = ValidateUiaRecord("structure-changed", payload);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public void AcceptsAUiaHandlerFaultOmission()
+    {
+        var payload = JsonNode.Parse("""
+            { "reason": "uia-event-handler-failed", "count": 2 }
+            """)!;
+
+        var issues = ValidateUiaRecord("collector-omission", payload);
+
+        Assert.Empty(issues);
+    }
+
     private static IReadOnlyList<EventValidationIssue> ValidateUiaRecord(string eventType, JsonNode payload, long timestamp = 100)
     {
         using var document = JsonDocument.Parse(payload.ToJsonString());
@@ -4419,6 +4965,189 @@ public sealed class EventRecordValidatorTests
             100,
             "graphics.desktop.frames",
             "desktop-frame",
+            document.RootElement.Clone());
+        IReadOnlyList<RecorderEvent> events = ([record]);
+
+        var result = Validate(events);
+        return result.Issues.ToList();
+    }
+
+    [Theory]
+    [InlineData("font-file")]
+    [InlineData("image-data")]
+    [InlineData("font-face-added")]
+    [InlineData("font-face-removed")]
+    [InlineData("font-face-loaded")]
+    [InlineData("image-resource")]
+    [InlineData("image-paint-image")]
+    public void AcceptsResourceRecords(string eventType)
+    {
+        Assert.Empty(ValidateResourceRecord(eventType, ResourcePayload(eventType)));
+    }
+
+    [Fact]
+    public void AcceptsAnImageWithNoImageIdAndASharedPaintImageWithNoNode()
+    {
+        var resource = ResourcePayload("image-resource");
+        resource["imageId"] = null;
+        Assert.Empty(ValidateResourceRecord("image-resource", resource));
+
+        var shared = ResourcePayload("image-paint-image");
+        shared["sequence"] = "shared";
+        shared["paintImageId"] = "0";
+        shared["nodeId"] = null;
+        shared["syncTargetPaintImageId"] = null;
+        Assert.Empty(ValidateResourceRecord("image-paint-image", shared));
+    }
+
+    // Protocol 0.51 (slice 4e).
+    [Fact]
+    public void AcceptsTheStyleSheetRecords()
+    {
+        Assert.Empty(ValidateResourceRecord("style-sheet-text", ResourcePayload("style-sheet-text")));
+        Assert.Empty(ValidateResourceRecord("style-sheet-resource", ResourcePayload("style-sheet-resource")));
+        Assert.Empty(ValidateResourceRecord("style-sheets-updated", ResourcePayload("style-sheets-updated")));
+    }
+
+    [Theory]
+    [InlineData("kind", "\"sheet\"", "payload-property-invalid")]
+    [InlineData("sheet", "\"-1\"", "payload-property-invalid")]
+    [InlineData("textSource", "\"network\"", "payload-property-invalid")]
+    [InlineData("textDigest", "null", "browser-style-sheet-text-digest")]
+    [InlineData("parentSheet", "\"7\"", "browser-style-sheet-import-parent")]
+    [InlineData("media", "null", "payload-property-invalid")]
+    public void RejectsMalformedStyleSheetEntries(string property, string value, string code)
+    {
+        var payload = ResourcePayload("style-sheets-updated");
+        payload["scopes"]![0]!["sheets"]![0]![property] = JsonNode.Parse(value);
+
+        Assert.Contains(
+            ValidateResourceRecord("style-sheets-updated", payload),
+            issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void AnImportNamesItsParentAndRule()
+    {
+        var payload = ResourcePayload("style-sheets-updated");
+        payload["scopes"]![0]!["sheets"]![1]!["ruleIndex"] = null;
+
+        Assert.Contains(
+            ValidateResourceRecord("style-sheets-updated", payload),
+            issue => issue.Code == "browser-style-sheet-import-parent");
+    }
+
+    [Fact]
+    public void ASheetUnchangedSinceItsLastRecordIsItsNumberAlone()
+    {
+        var payload = ResourcePayload("style-sheets-updated");
+        payload["scopes"]![0]!["sheets"]![2]!["media"] = "";
+
+        Assert.Contains(
+            ValidateResourceRecord("style-sheets-updated", payload),
+            issue => issue.Code == "payload-property-unexpected");
+    }
+
+    [Fact]
+    public void APaintImageOfAnElementsOwnSequenceNamesItsNode()
+    {
+        var payload = ResourcePayload("image-paint-image");
+        payload["nodeId"] = null;
+
+        Assert.Contains(
+            ValidateResourceRecord("image-paint-image", payload),
+            issue => issue.Code == "browser-image-paint-image-node-missing");
+    }
+
+    [Theory]
+    [InlineData("font-file", "digest", "\"ABC\"", "payload-property-invalid")]
+    [InlineData("font-file", "size", "\"6\"", "browser-resource-bytes-invalid")]
+    [InlineData("font-file", "bytes", "\"SGVsbG8\"", "browser-resource-bytes-invalid")]
+    [InlineData("font-face-added", "faceNumber", "\"0\"", "payload-property-invalid")]
+    [InlineData("font-face-loaded", "descriptors/weight", "null", "payload-property-invalid")]
+    [InlineData("font-face-loaded", "source/kind", "\"file\"", "payload-property-invalid")]
+    [InlineData("font-face-loaded", "source/url", "null", "browser-font-face-source-url")]
+    [InlineData("font-face-loaded", "fontFile/index", "-1", "payload-property-invalid")]
+    [InlineData("image-resource", "url", "7", "payload-property-invalid")]
+    [InlineData("image-resource", "dataRecorded", "null", "payload-property-invalid")]
+    [InlineData("image-resource", "imageId", "41", "payload-property-invalid")]
+    [InlineData("image-paint-image", "paintImageId", "\"-2\"", "payload-property-invalid")]
+    [InlineData("image-paint-image", "sequence", "\"stopped\"", "payload-property-invalid")]
+    [InlineData("image-paint-image", "nodeId", "0", "payload-property-invalid")]
+    [InlineData("style-sheet-text", "size", "\"6\"", "browser-resource-bytes-invalid")]
+    [InlineData("style-sheet-resource", "textRecorded", "null", "payload-property-invalid")]
+    [InlineData("style-sheet-resource", "digest", "\"ab\"", "payload-property-invalid")]
+    public void RejectsMalformedResourceRecords(
+        string eventType, string path, string value, string code)
+    {
+        var payload = ResourcePayload(eventType);
+        var parts = path.Split('/');
+        var target = payload;
+        for (var index = 0; index < parts.Length - 1; index++)
+        {
+            target = target[parts[index]]!;
+        }
+        target[parts[^1]] = JsonNode.Parse(value);
+
+        Assert.Contains(
+            ValidateResourceRecord(eventType, payload),
+            issue => issue.Code == code);
+    }
+
+    [Fact]
+    public void AFaceRecordNamesItsDocument()
+    {
+        var payload = ResourcePayload("font-face-added");
+        payload["context"]!["documentId"] = null;
+
+        Assert.Contains(
+            ValidateResourceRecord("font-face-added", payload),
+            issue => issue.Code == "browser-dom-context-invalid");
+    }
+
+    [Fact]
+    public void AcceptsAGlyphRunsFontFile()
+    {
+        var payload = JsonNode.Parse(BrowserLayoutPayloads.ChangedTextBlockNode)!;
+        var run = payload["boxFragments"]!["fragments"]![0]!["items"]![1]!["glyphRuns"]![0]!;
+        run["fontFile"] = JsonNode.Parse($$"""
+            {
+              "digest": "{{BrowserResourcePayloads.Digest}}", "index": 0,
+              "variations": [{ "axis": "wght", "value": 400 }]
+            }
+            """);
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", payload));
+
+        run["fontFile"] = null;
+        Assert.Empty(ValidateLayoutRecord("layout-node-changed", payload));
+
+        run["fontFile"] = JsonNode.Parse("""{ "digest": "ab", "index": 0, "variations": [] }""");
+        Assert.Contains(
+            ValidateLayoutRecord("layout-node-changed", payload),
+            issue => issue.Code == "payload-property-invalid");
+    }
+
+    private static JsonNode ResourcePayload(string eventType) =>
+        JsonNode.Parse(eventType switch
+        {
+            "font-file" or "image-data" => BrowserResourcePayloads.FontFile,
+            "font-face-added" or "font-face-removed" => BrowserResourcePayloads.FaceAdded,
+            "font-face-loaded" => BrowserResourcePayloads.FaceLoaded,
+            "image-paint-image" => BrowserResourcePayloads.ImagePaintImage,
+            "style-sheet-text" => BrowserResourcePayloads.FontFile,
+            "style-sheet-resource" => BrowserResourcePayloads.StyleSheetResource,
+            "style-sheets-updated" => BrowserResourcePayloads.StyleSheetsUpdated,
+            _ => BrowserResourcePayloads.ImageResource
+        })!;
+
+    private static IReadOnlyList<EventValidationIssue> ValidateResourceRecord(string eventType, JsonNode payload)
+    {
+        using var document = JsonDocument.Parse(payload.ToJsonString());
+        var record = CreateEvent(
+            0,
+            100,
+            BrowserEvidenceChannels.Resources,
+            eventType,
             document.RootElement.Clone());
         IReadOnlyList<RecorderEvent> events = ([record]);
 

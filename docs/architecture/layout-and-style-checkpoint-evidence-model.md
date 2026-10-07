@@ -79,7 +79,9 @@ within one renderer process.
   pixels to device pixels.
 - `maximumNodes`: 2147483647, the largest value a 32-bit count holds.
 - `styleProperties`: the computed-style properties every element record
-  reports, in recorded order.
+  reports, in recorded order. From protocol 0.37 this is the list Blink
+  reports through `getComputedStyle()` at run time; see "Recorded
+  computed-style properties".
 
 ### Checkpoint node
 
@@ -115,10 +117,20 @@ and the document node are not recorded.
   Blink keeps no computed style for an element whose own `display` is `none`,
   so such an element, including `head` and `script`, is recorded with a null
   style and no layout object.
+- `customProperties`: from protocol 0.37, for an element with a computed
+  style, an object holding each custom property the element has, including
+  the ones it inherits, with its value as `getComputedStyle()` resolves it.
+  Null when `computedStyle` is null.
 - `pseudoElement`, `shadowHostNodeId`, and `shadowRootMode`: from protocol
   0.28, the pseudo-element's originating node, type, and generated text, and
   the host and mode of the shadow tree containing the node. Each is null when
   it does not apply.
+- `boxFragments`: from protocol 0.38, for a node whose layout object is a
+  layout box, its effective zoom, its physical fragments, and a replaced
+  element's natural size, in Blink's layout units; null for any other node.
+  The fields are listed in "2b design" in
+  [page recreation](page-recreation.md). A `layout-node-changed` record
+  holds the same field, always whole.
 
 ### Checkpoint completion
 
@@ -130,10 +142,19 @@ and the document node are not recorded.
 
 ## Recorded computed-style properties
 
-The list holds 283 properties. It is fixed in the integration script, which
-generates the compiled property array from it, recorded in every checkpoint
-start, and checked by the integration tests against this document and the
-verifier. Every listed property is one the reference Chromium reports through
+From protocol 0.37 the list is not fixed: the hook records every property
+`CSSComputedStyleDeclaration::ComputableProperties` returns for the
+document, which is the list `getComputedStyle()` reports, and the custom
+properties of each element. The list read is in each checkpoint start's
+`styleProperties`. Its length depends on the Chromium build and its runtime
+features, and has not yet been observed in a recording.
+
+The rest of this section describes the list recorded before protocol 0.37.
+That list held 283 properties. It was fixed in the integration script,
+which generated the compiled property array from it, recorded in every
+checkpoint start, and checked by the integration tests against this
+document and the verifier. The script keeps it to recognise a checkout
+patched before 0.37, and its tests still check it against this document. Every listed property is one the reference Chromium reports through
 `getComputedStyle()` in a default build. The first 75 were chosen for
 geometry, visibility, and basic text presentation. The remaining 208 cover
 color and forced colors, text decoration, text layout, reading order and

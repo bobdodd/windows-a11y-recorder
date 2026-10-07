@@ -211,7 +211,12 @@ is to be measured on the target machine.
    drawn from.
 3. The bridge compares each record with its cache and records only the ones
    that differ. A style Blink recalculated to the same values is not
-   recorded again.
+   recorded again. From protocol 0.37 a record after a node's first holds
+   only the computed-style values and custom properties that changed since
+   the node's last record; see "2a as built" in
+   [page recreation](page-recreation.md). From protocol 0.38 a node's
+   record also holds its box fragments, whole, and is recorded again when
+   they differ; see "2b as built" there.
 4. DOM insertions and removals are recorded as they happen. A removed node
    leaves the cache.
 5. The first rendering update of a document, and any update after a record
@@ -264,6 +269,24 @@ How the recorder uses MCAP:
   on disk within about a second.
 - The writer's rejections and omissions are messages on the topic
   `recorder.writer` in a fourth stream, `recorder`.
+- Since page recreation slice 2, the DOM, layout, interaction, and
+  presentation channels are in a stream of their own, `browser-state`, and
+  the state thread's snapshots and state index records are in the streams
+  `state` and `state-index`; see
+  [page recreation](page-recreation.md). Files written before are read from
+  the `browser` stream.
+- Migration `0013_recording_files.sql` allowed only the first four streams
+  in `recording_file_chunks`, so from slice 2 the chunk index of every
+  recording file with browser state was refused when the recording was
+  completed, and with it the list of collectors whose events the file
+  holds. The recording and its file were stored; the refusal was reported
+  with the database status ("The recording file's index was not stored:
+  ... violates check constraint recording_file_chunks_stream_check"). It
+  was found on the target machine on 2026-10-06, when the application
+  session validation failed on that status. Nothing in the recorder reads
+  either table yet, and the index can be rebuilt from the file. Migration
+  `0016_recording_file_state_streams.sql` allows the three streams; the
+  chunk index of a recording stored before it is not added.
 
 The design this section proposed before slice 1:
 
@@ -623,7 +646,9 @@ it in the range of transitions it covers.
 
 Change records are made for a document that is active and no longer parsing
 (`!Document::Parsing()`, `core/dom/document.h`, line 1144), while the
-recorder is connected. The finished-parsing checkpoint is recorded when the
+recorder is connected. From protocol 0.42 they are made while it parses
+too, from a walk when its parser is created; see "Slice 4c" in
+[page recreation](page-recreation.md). The finished-parsing checkpoint is recorded when the
 parsing state becomes `kInDOMContentLoaded` (`core/dom/document.cc`, near
 line 8573), before the `DOMContentLoaded` handlers run, so a change made by
 a handler follows the checkpoint and is recorded. `HasFinishedParsing()`,
@@ -767,7 +792,12 @@ scroller still connected is recorded as `layout-scroll-offset-changed`:
 - `scrollOrigin`, the position of offset zero;
 - `effectiveZoom`, the scroller's effective zoom;
 - `scrollTranslationNodeId`, the transform node the offset moves, read in
-  the same change set, or null when the scroller has none.
+  the same change set, or null when the scroller has none;
+- from protocol 0.49, `scrollElementId`, the scroller's compositor element
+  ID (`ScrollableArea::GetScrollElementId`) as decimal text, which the
+  `compositor-frame` records name its drawn scroll offset by, or null when
+  it has none. Page recreation joins the compositor's offset to the node
+  with it (slice 4b sub-step 2b-ii).
 
 A change set is recorded when only an offset was stored, and its completion
 record counts the offsets (`scrollOffsetCount`). The check compares each

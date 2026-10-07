@@ -82,7 +82,7 @@ public sealed class RecordingFileTests : IDisposable
         Assert.Null(reader.Incomplete);
         Assert.Equal(SessionId, reader.Metadata["recording"]["sessionKey"]);
         Assert.True(reader.Chunks.Count > 3);
-        Assert.Equal(["browser", "desktop", "media"], reader.Chunks.Select(chunk => chunk.Stream).Distinct().Order());
+        Assert.Equal(["browser-state", "desktop", "media"], reader.Chunks.Select(chunk => chunk.Stream).Distinct().Order());
 
         var stored = new List<StoredEvent>();
         foreach (var chunk in reader.Chunks)
@@ -147,6 +147,7 @@ public sealed class RecordingFileTests : IDisposable
 
         using var reader = RecordingFileReader.Open(path);
         var stored = reader.ReadAll()
+            .Where(message => RecordingFileBatchTarget.IsEventTopic(message.Channel.Topic))
             .Select(message => RecordingEventCodec.Decode(message.Data.Span))
             .OrderBy(item => item.EventKey)
             .ToArray();
@@ -360,7 +361,12 @@ public sealed class RecordingFileTests : IDisposable
     [Fact]
     public void StreamsFollowTheChannelNames()
     {
-        Assert.Equal("browser", RecordingFileBatchTarget.StreamOf("browser.layout"));
+        Assert.Equal("browser-state", RecordingFileBatchTarget.StreamOf("browser.layout"));
+        Assert.Equal("browser-state", RecordingFileBatchTarget.StreamOf("browser.dom"));
+        Assert.Equal("browser-state", RecordingFileBatchTarget.StreamOf("browser.interaction"));
+        Assert.Equal("browser-state", RecordingFileBatchTarget.StreamOf("browser.presentation"));
+        Assert.Equal("browser", RecordingFileBatchTarget.StreamOf("browser.navigation"));
+        Assert.Equal("browser", RecordingFileBatchTarget.StreamOf("browser.dispatch"));
         Assert.Equal("media", RecordingFileBatchTarget.StreamOf("graphics.desktop.frames"));
         Assert.Equal("media", RecordingFileBatchTarget.StreamOf("audio.microphone"));
         Assert.Equal("desktop", RecordingFileBatchTarget.StreamOf("input.mouse"));

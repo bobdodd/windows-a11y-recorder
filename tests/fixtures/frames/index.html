@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frame evidence fixture</title>
+  <!--
+    The slice 5a frame fixture (protocol 0.55). See
+    docs/architecture/page-recreation.md, "Slice 5: the documents of frames".
+    Serve this folder twice, at http://127.0.0.1:8765/ and at
+    http://localhost:8766/, with ..\animation\Serve-Fixture.ps1 -Folder <this
+    folder> -Port 8765 and -Port 8766. The two hosts are different sites, so
+    the cross-site frames are out of process. Each frame names itself in its
+    heading; the list below says what each owner is expected to hold.
+  -->
+  <style>
+    body { font: 16px/1.4 system-ui, sans-serif; margin: 16px; }
+    iframe { width: 360px; height: 140px; border: 2px solid #345; display: block; margin: 8px 0 16px; }
+    .spacer { height: 2400px; border-left: 4px dashed #999; padding-left: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Frame evidence fixture</h1>
+  <ol>
+    <li>Same-site frame (in process).</li>
+    <li>Cross-site frame (out of process), holding a nested frame back on the first site.</li>
+    <li>Two owners of the same address, each its own frame.</li>
+    <li>A srcdoc frame.</li>
+    <li>An about:blank frame whose document a script writes.</li>
+    <li>A frame a script navigates to another page after 2 seconds.</li>
+    <li>A frame a script navigates to the other site after 3 seconds, so its frame is swapped.</li>
+    <li>A frame removed after 4 seconds.</li>
+    <li>A sandboxed frame without allow-scripts (its own evidence is not recorded in slice 5).</li>
+    <li>A lazy frame far below, loaded only when scrolled to.</li>
+  </ol>
+  <p><a href="frameset.html">The frameset page</a></p>
+
+  <h2>1. Same-site</h2>
+  <iframe id="same" title="Same-site frame" src="child.html?name=same"></iframe>
+
+  <h2>2. Cross-site with a nested frame</h2>
+  <iframe id="cross" title="Cross-site frame" src="http://localhost:8766/cross.html"></iframe>
+
+  <h2>3. Two owners of one address</h2>
+  <iframe id="twin-1" title="First twin" src="child.html?name=twin"></iframe>
+  <iframe id="twin-2" title="Second twin" src="child.html?name=twin"></iframe>
+
+  <h2>4. srcdoc</h2>
+  <iframe id="srcdoc" title="srcdoc frame" srcdoc="<h1>srcdoc frame</h1><p>Written in the owner's attribute.</p>"></iframe>
+
+  <h2>5. Script-written about:blank</h2>
+  <iframe id="blank" title="Script-written frame"></iframe>
+
+  <h2>6. Navigated by script, same site</h2>
+  <iframe id="navigated" title="Navigated frame" src="child.html?name=before"></iframe>
+
+  <h2>7. Navigated by script to the other site</h2>
+  <iframe id="swapped" title="Swapped frame" src="child.html?name=swap-before"></iframe>
+
+  <h2>8. Removed after load</h2>
+  <div id="removed-holder">
+    <iframe id="removed" title="Removed frame" src="child.html?name=removed"></iframe>
+  </div>
+
+  <h2>9. Sandboxed without allow-scripts</h2>
+  <iframe id="sandboxed" title="Sandboxed frame" sandbox="" src="child.html?name=sandboxed"></iframe>
+
+  <h2>10. Lazy, out of view</h2>
+  <div class="spacer">Scroll down to the lazy frame.</div>
+  <iframe id="lazy" title="Lazy frame" loading="lazy" src="child.html?name=lazy"></iframe>
+
+  <script>
+    const blank = document.getElementById('blank').contentDocument;
+    blank.open();
+    blank.write('<!doctype html><title>Written</title><h1>Script-written frame</h1><p>Written by the parent.</p>');
+    blank.close();
+    setTimeout(() => { document.getElementById('navigated').src = 'child.html?name=after'; }, 2000);
+    setTimeout(() => { document.getElementById('swapped').src = 'http://localhost:8766/child.html?name=swap-after'; }, 3000);
+    setTimeout(() => { document.getElementById('removed').remove(); }, 4000);
+  </script>
+</body>
+</html>

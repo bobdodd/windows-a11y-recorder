@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Style sheet evidence fixture</title>
+  <!--
+    The slice 4e style sheet fixture. See docs/architecture/page-recreation.md,
+    "Slice 4e". Each panel states which sheet styles it and how the sheet
+    reached the page. Serve this folder over http with
+    ..\animation\Serve-Fixture.ps1 -Folder <this folder>, so that the
+    recreation is served at the recorded address.
+  -->
+  <link rel="stylesheet" href="site.css">
+  <style id="page-style">
+    :root {
+      color: #1a1a1a;
+      background: #ffffff;
+      font: 16px/1.4 system-ui, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 48rem;
+      padding: 1rem;
+    }
+    .panel {
+      margin: 0 0 1rem;
+      padding: 0.75rem 1rem;
+      border: 1px solid #757575;
+    }
+  </style>
+  <style id="changed-style">
+    .changed {
+      background: #fce4ec;
+    }
+  </style>
+</head>
+<body>
+  <h1>Style sheet evidence fixture</h1>
+  <p id="status" role="status">Waiting for the late sheets.</p>
+
+  <p class="panel linked">Styled by site.css, a linked sheet.</p>
+  <p class="panel imported">Styled by more.css, imported by site.css.</p>
+  <p class="panel changed">Styled by the second style element, whose rules
+    script changes through insertRule and deleteRule at load.</p>
+  <p class="panel constructed">Styled by a constructed sheet the document
+    adopts.</p>
+  <div class="panel" id="host">A shadow root, styled by a constructed sheet
+    it adopts, is attached here.</div>
+  <p class="panel late">Styled by late.css, linked by script 1.5 s after
+    load.</p>
+  <p class="panel later">Styled by a style element and a rule script
+    inserts 3 s after load.</p>
+
+  <script>
+    // A style element's sheet changed through the CSSOM.
+    const changed = document.getElementById("changed-style").sheet;
+    changed.insertRule(".changed { border-left: 0.5rem solid #ad1457; }", changed.cssRules.length);
+    changed.insertRule(".changed::before { content: \"CSSOM rule: \"; font-weight: 700; }", changed.cssRules.length);
+    changed.deleteRule(0);
+    changed.insertRule(".changed { background: #f8bbd0; }", 0);
+
+    // A constructed sheet adopted by the document.
+    const documentSheet = new CSSStyleSheet();
+    documentSheet.replaceSync(".constructed { background: #ede7f6; border-left: 0.5rem solid #4527a0; }");
+    document.adoptedStyleSheets = [documentSheet];
+
+    // A constructed sheet adopted by a shadow root.
+    const root = document.getElementById("host").attachShadow({ mode: "open" });
+    const shadowSheet = new CSSStyleSheet({ media: "screen" });
+    shadowSheet.replaceSync(":host { display: block; } p { margin: 0.5rem 0 0; color: #004d40; font-weight: 700; }");
+    root.adoptedStyleSheets = [shadowSheet];
+    root.innerHTML = "<slot></slot><p>Shadow root text, styled by its adopted sheet.</p>";
+
+    const status = document.getElementById("status");
+    setTimeout(() => {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "late.css";
+      document.head.appendChild(link);
+      status.textContent = "late.css linked; waiting for the later rules.";
+    }, 1500);
+    setTimeout(() => {
+      const style = document.createElement("style");
+      style.textContent = ".later { background: #f1f8e9; }";
+      document.head.appendChild(style);
+      style.sheet.insertRule(".later { border-left: 0.5rem solid #33691e; }", 1);
+      status.textContent = "All sheets are in place.";
+    }, 3000);
+  </script>
+</body>
+</html>

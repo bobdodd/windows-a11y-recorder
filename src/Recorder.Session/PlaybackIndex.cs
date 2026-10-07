@@ -14,7 +14,10 @@ namespace Recorder.Session;
 /// </summary>
 public sealed record PlaybackIndex
 {
-    public const int CurrentVersion = 1;
+    // Version 2 keeps the page popup and popup widget records (protocol
+    // 0.43 and 0.44) whole. Version 3 adds the frame documents (protocol
+    // 0.55, slice 5b).
+    public const int CurrentVersion = 3;
 
     public required int Version { get; init; }
 
@@ -26,8 +29,9 @@ public sealed record PlaybackIndex
     public required PlaybackOccupancy Occupancy { get; init; }
 
     /// <summary>
-    /// The desktop frame, audio stream start, and browser navigation events,
-    /// with the payload properties playback reads.
+    /// The desktop frame, audio stream start, browser navigation, and page
+    /// popup and popup widget events, with the payload properties playback
+    /// reads.
     /// </summary>
     public required IReadOnlyList<PlaybackIndexEvent> Events { get; init; }
 
@@ -44,7 +48,21 @@ public sealed record PlaybackIndex
     public required IReadOnlyList<BrowserPresentedCheckpoint> PresentedCheckpoints { get; init; }
 
     public required IReadOnlyList<CapturedFrameComposition> FrameCompositions { get; init; }
+
+    /// <summary>
+    /// The first DOM walk of each document that named its frame (protocol
+    /// 0.55, slice 5b), so that the documents of a frame are found without
+    /// reading every document's state.
+    /// </summary>
+    public IReadOnlyList<FrameDocumentRecord> FrameDocuments { get; init; } = [];
 }
+
+/// <summary>
+/// The first DOM walk of a document that named its frame (protocol 0.55):
+/// when it started, the document's key, the DevTools token of its frame,
+/// whether that is a main frame, and the renderer process it was recorded in.
+/// </summary>
+public sealed record FrameDocumentRecord(long Time, string DocumentKey, string FrameToken, bool? MainFrame, int? ProcessId);
 
 /// <summary>An event kept whole in a playback index, with the payload properties playback reads.</summary>
 public sealed record PlaybackIndexEvent(
@@ -97,7 +115,13 @@ public sealed class PlaybackIndexBuilder
     private readonly PriorityQueue<(long Time, int Key), long> _pending = new();
     private readonly Dictionary<(long Segment, int Key), int> _segmentCounts = [];
     private readonly List<CapturedFrameComposition> _compositions = [];
+    private readonly Dictionary<string, FrameDocumentRecord> _frameDocuments = new(StringComparer.Ordinal);
     private readonly List<LayoutCompletion> _completions = [];
+    // Protocol 0.46: a change set read for the rendering update its named
+    // checkpoint recorded, by browser instance, process, and change set,
+    // and the completion time of each, by its checkpoint.
+    private readonly Dictionary<(string?, long?, string), string> _checkpointUpdateChangeSets = [];
+    private readonly Dictionary<(string?, long?, string), long> _checkpointUpdateCompletions = [];
     private readonly List<PresentationRequest> _requests = [];
     private readonly List<PresentationFeedback> _feedback = [];
     private readonly List<ClockSynchronization> _synchronizations = [];
@@ -126,6 +150,17 @@ public sealed class PlaybackIndexBuilder
     /// Whether an event starts a segment of the browser counts: a navigation
     /// start with a payload.
     /// </summary>
+    /// <summary>
+    /// True for the records that say which page popups were open and where:
+    /// a popup's opening, window requests, and closing, and the browser's
+    /// popup widget records. They are few, and kept with their whole payloads
+    /// for recreation.
+    /// </summary>
+    public static bool IsPopupRecord(string channel, string eventType) =>
+        channel == "browser.interaction" &&
+        (eventType is "page-popup-opened" or "page-popup-window-rect" or "page-popup-closed" ||
+            eventType.StartsWith("popup-widget-", StringComparison.Ordinal));
+
     public static bool IsNavigationStart(RecorderEvent record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -196,6 +231,13 @@ public sealed class PlaybackIndexBuilder
             return;
         }
 
+        if (IsPopupRecord(channel, record.EventType))
+        {
+            Keep(eventKey, record);
+        }
+
+        AddFrameDocument(channel, record.EventType, time, payload);
+
         CollectPresentation(eventKey, record);
         var context = payload.TryGetProperty("context", out var value) && value.ValueKind == JsonValueKind.Object
             ? value
@@ -248,8 +290,35 @@ public sealed class PlaybackIndexBuilder
                 .ToArray(),
             BrowserCountsExact = _exact,
             PresentedCheckpoints = PresentedCheckpoints(),
-            FrameCompositions = [.. _compositions]
+            FrameCompositions = [.. _compositions],
+            FrameDocuments = [.. _frameDocuments.Values
+                .OrderBy(item => item.Time)
+                .ThenBy(item => item.DocumentKey, StringComparer.Ordinal)]
         };
+    }
+
+    // Slice 5b: the earliest DOM walk of each document that named its frame
+    // token. Events may arrive out of order, so the earliest is kept.
+    private void AddFrameDocument(string channel, string eventType, long time, JsonElement payload)
+    {
+        if (channel != "browser.dom" || eventType != "dom-checkpoint-started" ||
+            !payload.TryGetProperty("frameToken", out var token) || token.ValueKind != JsonValueKind.String ||
+            token.GetString() is not { Length: > 0 } frameToken ||
+            DomTreeRebuilder.DocumentKey(payload) is not { } key)
+        {
+            return;
+        }
+        if (_frameDocuments.TryGetValue(key, out var known) && known.Time <= time)
+        {
+            return;
+        }
+        var context = payload.TryGetProperty("context", out var value) && value.ValueKind == JsonValueKind.Object ? value : default;
+        _frameDocuments[key] = new FrameDocumentRecord(
+            time,
+            key,
+            frameToken,
+            payload.TryGetProperty("mainFrame", out var main) && main.ValueKind is JsonValueKind.True or JsonValueKind.False ? main.GetBoolean() : null,
+            ReadInt32(context, "processId"));
     }
 
     private void Keep(long eventKey, RecorderEvent record) =>
@@ -260,7 +329,9 @@ public sealed class PlaybackIndexBuilder
             record.Channel,
             record.EventType,
             record.MonotonicNanoseconds,
-            PlaybackPayload(record.Payload)));
+            IsPopupRecord(record.Channel, record.EventType) && record.Payload.ValueKind == JsonValueKind.Object
+                ? record.Payload.Clone()
+                : PlaybackPayload(record.Payload)));
 
     private void AddBoundary(long time)
     {
@@ -336,8 +407,28 @@ public sealed class PlaybackIndexBuilder
             // From protocol 0.35 a rendering update that was not walked is
             // presented after its layout change set, which takes the
             // checkpoint's place. The two identities never share a value.
+            case ("browser.layout", "layout-changes-started"):
+                if (ReadBoolean(payload, "checkpointUpdate") == true &&
+                    ReadString(payload, "changeSetId") is { } updateChangeSet &&
+                    ReadString(payload, "layoutCheckpointId") is { } updateCheckpoint)
+                {
+                    _checkpointUpdateChangeSets[(ReadString(context, "browserInstanceId"), ReadInt64(context, "processId"), updateChangeSet)] =
+                        updateCheckpoint;
+                }
+
+                break;
             case ("browser.layout", "layout-checkpoint-completed"):
             case ("browser.layout", "layout-changes-completed"):
+                if (record.EventType == "layout-changes-completed" &&
+                    ReadString(payload, "changeSetId") is { } completedChangeSet &&
+                    _checkpointUpdateChangeSets.TryGetValue(
+                        (ReadString(context, "browserInstanceId"), ReadInt64(context, "processId"), completedChangeSet),
+                        out var ofCheckpoint))
+                {
+                    _checkpointUpdateCompletions[(ReadString(context, "browserInstanceId"), ReadInt64(context, "processId"), ofCheckpoint)] =
+                        record.MonotonicNanoseconds;
+                }
+
                 if (ReadString(context, "documentToken") is { } token &&
                     (record.EventType == "layout-checkpoint-completed"
                         ? ReadString(payload, "checkpointId")
@@ -432,10 +523,18 @@ public sealed class PlaybackIndexBuilder
                     var offset = decimal.Round(
                         (item.PresentedTicks - item.NativeValue) * 1_000_000_000m / frequency,
                         MidpointRounding.AwayFromZero);
+                    // A walked update is presented through its checkpoint,
+                    // and its own change set follows the checkpoint, so the
+                    // update's state is cut after that change set.
+                    var cut = _checkpointUpdateCompletions.TryGetValue(
+                        (completion.BrowserInstanceId, completion.ProcessId, completion.CheckpointId),
+                        out var updateCompleted)
+                        ? updateCompleted
+                        : completion.Time;
                     result.Add(new BrowserPresentedCheckpoint(
                         completion.BrowserInstanceId,
                         completion.DocumentToken,
-                        completion.Time,
+                        cut,
                         item.Time + (long)offset));
                 }
             }

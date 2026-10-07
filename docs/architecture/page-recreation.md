@@ -2,11 +2,24 @@
 
 ## Status
 
-Slice 1 (character data in DOM checkpoints, protocol 0.33) is implemented on
-branch `recording-object-store` and awaits its test on the target Windows
-machine. Slices 2 and 3 are proposed and not implemented. Recording text by
-content hash is agreed and deferred until slice 4 of change-driven recording;
-see "Text by content hash".
+Slice 1 (character data in DOM checkpoints, protocol 0.33) is merged, and
+the character data check passed in the recordings at protocols 0.35 and 0.36
+on the target Windows machine; see "Slice 5 status" in
+[change-driven recording](change-driven-recording.md). Slice 2 (rebuilding
+the recorded state at any captured frame) is implemented on the
+`frame-state` branch as designed in "Slice 2 design", with the differences
+listed in "Slice 2 implementation". Its hour recording on the target
+machine did not meet the design's limits, and the revision in "Revision
+after the hour recording" is implemented and waits for a second hour
+recording. Slices 3 to 5 are designed in "Slice 3 design", proposed
+2026-09-29 and agreed the same day; it revises the decision below. Slice
+3a is implemented on the `recreation` branch and not yet tested on the
+target machine; see "Slice 3a implementation".
+Recording text by content hash is agreed and deferred; see "Text by content
+hash".
+Slice 5 (frames) is complete on the target machine (2026-10-07). The
+outstanding work found after it, for frames and for SVG, is listed in
+[outstanding work](recreation-outstanding-work.md).
 
 ## Purpose
 
@@ -16,7 +29,66 @@ tools auditors already use. The recorder is an evidence logger, not an
 analyzer. A recreation is a view of recorded evidence, and it must not be
 presented as the page itself.
 
+## Requirement: the page exactly as drawn at the frame
+
+Stated by the owner on 2026-10-02:
+
+> When I open a frame in the recording, I expect to see a pixel-perfect
+> rendering of that frame's whole page. If there is animation, I will see
+> the page at that point in the animation. If a select is open and the
+> second item in the select is selected, that is exactly what I will see.
+> It needs to be precise and specific because it impacts visual
+> accessibility testing
+
+This governs every slice below. A recreation shows the whole page, not only
+the part in the viewport, drawn as it was drawn at the frame, with every
+transient state the frame shows. Nothing in the recreation moves on from
+the frame: animations, transitions, animated images, video, and carets
+show the state they had when the frame was drawn, and stay there. A
+difference from the frame is a defect of the recording or the recreation,
+not an accepted limit.
+
+What does not yet meet it (proposed 2026-10-02, to be agreed before work
+on it starts). Each item says what the recording would need; none is yet
+verified against Chromium's source.
+
+- Animated images. Sub-step 3 answers an animated image with its bytes,
+  and it then animates in the recreation from its first frame. The
+  recording does not hold which frame of each animated image was drawn at
+  each frame, and the recreation does not hold an image at a frame.
+- CSS animations and transitions. The recorded computed style is that of
+  the latest layout walk at or before the frame, which is not necessarily
+  the style drawn at the frame while an animation runs. Animations that
+  run on the compositor may not change the style the walk reads at all.
+  The recreation must also not run the recorded page's own animations
+  from the time it opens.
+- An open select. The recording does not hold whether a select's list was
+  open, which item was highlighted, or where the list was drawn. See
+  "Slice 4d" below: on Windows the list is a page popup whose document is
+  recorded, but not joined to its select, placed, or presented.
+- Other transient states: hover (the pointer's position), active and focus
+  rings, the text caret and its blink phase, selection highlight, and
+  scrollbar state. Focus, selection, and scroll offsets are recorded and
+  applied; whether they are drawn as at the frame is not checked.
+- Style sheets, which are not recorded. Pseudo-elements take no recorded
+  style, and rules that depend on state (such as `:hover`) are lost.
+- Iframes, canvas, video, and other media, which are not recorded or not
+  built.
+- Drawing differences between the recording machine and the playback
+  machine, such as font smoothing settings and the graphics device.
+- A page drawn before its first DOM walk. The DOM is recorded from the
+  finished-parsing walk, but the page is drawn while it parses, so a frame
+  before that walk cannot be recreated. Slice 4c proposes recording the
+  DOM from the start of parsing.
+- Checking. The recorded screen frame is the reference for the viewport;
+  nothing compares the recreation with it yet.
+
 ## Decision
+
+This decision is revised by "Slice 3 design": the rebuilt page opens in the
+instrumented Chromium rather than Chrome, with the recorded style sheets and
+resources, and is checked node by node against the recording. The text
+below is kept as the record of the first decision.
 
 The player writes the page rebuilt for the chosen frame as an HTML document
 and opens it in Chrome, in a profile of its own, so that every Chrome
@@ -89,11 +161,8383 @@ Each slice is tested on the target Windows machine before the next.
    Unit tests of the rebuild from generated sequences; integration tests
    comparing the rebuilt state with every full checkpoint of recorded files;
    system test: time to rebuild at the middle and end of a long recording.
-3. App: write the rebuilt page for the current frame and open it in Chrome,
+3. Revised, with slices 4 and 5, in "Slice 3 design". As first proposed:
+   App: write the rebuilt
+   page for the current frame and open it in Chrome,
    with the notice of what the recreation lacks. Unit tests of the document
    writer, including escaping of recorded text and attribute values, and of
    disabled scripts and blocked network access; system test on the target
    machine: open a frame of a recording and inspect it in DevTools.
+
+## Slice 2 design: the recorded state at any captured frame
+
+Proposed and agreed 2026-09-29. The record names, counts, and sizes
+below are from recording 20260929-172645-baa5818d82194001acf0edaa560b335c
+(protocol 0.36, 92.6 s) unless stated.
+
+### What slice 2 adds, and what it does not change
+
+The app gains a reader that returns, for a time in a recording, the recorded
+state of each browser document at that time, and for a captured desktop
+frame, the state that frame shows, with the basis of the match. Nothing
+recorded changes, no browser change is needed, and the protocol stays at
+0.36. The player shows nothing new in this slice; slice 3 writes the state
+as a page. The recording file gains derived records, the snapshots, which
+the reader never needs for a correct answer, only for a fast one.
+
+### One reading of state
+
+The DOM, character data, and layout checks each rebuild a document's state
+from its checkpoints and change records, in three separate classes
+(`DomChangeCheck`, `DomCharacterDataCheck`, and `LayoutChangeState`). Slice 2
+moves the rebuild into one class, `BrowserDocumentState`, which applies
+records in order and exposes the state, and the checks compare that state
+with each full walk. The rebuild the reader returns is then the one the
+checks have compared with every full walk of every recording checked, and a
+fix to either is a fix to both. The checks' reports on the recordings at
+f409513, 70d22d4, and 66030a7 must be unchanged by the move.
+
+### What the state holds
+
+For each document, identified by its renderer process, document token, and
+document identity, as the checks now identify it:
+
+- The DOM tree: each node's parent, children in order, type, name,
+  attributes, character data, shadow root fields, and slot assignment.
+- For each node with a layout record: its computed style values, whether it
+  has a layout object, whether it is display locked, its geometry, and the
+  viewport rectangle derived from the geometry and the transform nodes, in
+  CSS pixels.
+- The transform nodes, the view's transform node, paint offset, and layout
+  zoom factor, and each scroll offset.
+- The interaction state: focus, selection, and each text control's value
+  and selection, from the latest interaction checkpoint and the interaction
+  changes after it.
+- For each part (DOM, layout, interaction), the event key and time of the
+  record that last changed it, so that a value shown later can be traced to
+  its record.
+- Completeness, for each part, as one of:
+  - complete: taken from a full walk and changed by every record since;
+  - parsing: the document has not finished parsing, and the parser's
+    insertions are not recorded, so nodes the parser added since the last
+    walk are missing;
+  - after loss: a record of the channel was lost after the last walk, and
+    the state lacks that change until the next walk;
+  - not walked: no full walk of the document was recorded yet, so the part
+    has no state.
+
+A document's last record time is kept. No record states that a document was
+discarded, so the reader returns every document with a record at or before
+the time, with its last record time, and does not guess which are still
+shown. Choosing the document a frame shows is part of the frame match below.
+
+### Matching a captured frame
+
+A desktop frame has the time the Windows compositor composed it. For each
+document, the frame shows the last rendering update of that document whose
+`presentation-feedback` reports a presentation at or before that
+composition. The state returned is the state after that update's change set
+or checkpoint, and the basis is `presented`. A document with no presented
+update at or before the frame is matched by time, the state at the
+composition time, with the basis `by time`. The DOM and interaction records
+after the presented update and before the composition are applied to the
+DOM and interaction parts only when the basis is `by time`, since a
+presented frame was drawn before them; the reader states which.
+
+The presentation records join to the change set or checkpoint of their
+update through `layoutChangeSetId` or `layoutCheckpointId` (protocol 0.35),
+as the playback index already joins them for presented checkpoints.
+
+### Snapshots
+
+The state at a time can always be rebuilt from a document's first full walk
+and every record after it, but the time taken grows with the recording. In
+the recording above, the DOM, layout, and interaction channels hold 149,182
+records, 366 MB of JSON, in 92.6 s, about 4 MB per second; reading them
+with the MCAP project's Python reader took 1.4 s on the development
+machine, not the target machine. An hour at that rate is about 14 GB.
+
+The app therefore writes snapshots as it records:
+
+1. After the writer accepts a batch, it passes the batch's DOM, layout,
+   interaction, and presentation records to a state thread through a
+   bounded queue. The thread waits on the queue and does no work while it
+   is empty. It applies each record to the state of its document.
+2. When 10 s of recording time have passed since a document's last
+   snapshot and the document has changed since, the state thread writes a
+   snapshot of that document: its whole state, and the event key of the last
+   record applied, and passes it to the writer as a record of its own. A
+   snapshot is also written for each changed document when recording stops.
+3. Snapshots are messages on the topic `recorder.state`, in a stream of
+   their own, `state`, so that reading the browser records never
+   decompresses a snapshot. They are marked as derived records. The playback
+   index lists each snapshot's document, time, event key, and position.
+4. If the queue is full, the state thread stops applying records and writes
+   no snapshot for the rest of the recording, and a `recorder.state` record
+   states when and why. No evidence is lost: the file still holds every
+   record, and the reader rebuilds without the snapshots after that time.
+   The writer never waits for the state thread.
+
+To rebuild a document at time t, the reader takes the document's last
+snapshot at or before t, or its first full walk if it has none, and applies
+the document's records from the snapshot's event key to t. With a snapshot
+every 10 s, that is at most about 10 s of records, about 40 MB of DOM,
+layout, and interaction JSON at the rate above.
+
+The browser records are one stream, and the DOM, layout, and interaction
+records are about 40% of its bytes in the recording above; dispatch records
+alone are 456 MB of the 916 MB. The reader decompresses every browser chunk
+in the range it reads. Slice 2 therefore also writes the DOM, layout,
+interaction, and presentation channels in a stream of their own,
+`browser-state`, so a rebuild decompresses only those. Recordings made
+before this slice are read as before, from the `browser` stream.
+
+A snapshot holds the rebuilt state, so it is checked in the same way as the
+rebuild: the tests rebuild each document at each snapshot's time without
+snapshots and compare.
+
+### The alternative considered
+
+Snapshots could be made after recording stops, or when a recording is
+first opened, by reading the file once. That adds no work while recording,
+but makes stopping or first opening take time proportional to the
+recording, which the app must avoid: at least the time to read the DOM,
+layout, and interaction records, 1.4 s for the 92.6 s above with the Python
+reader on the development machine. It remains the way a recording without
+snapshots, or one whose state thread stopped, is given them later, as a
+background task the player does not wait for.
+
+### To be settled
+
+- Memory. The state thread holds the whole state of every document of the
+  recording that has not been discarded, and nothing records a discard, so
+  it holds every document until its renderer exits. Its memory is to be
+  measured on the target machine, and if it grows without bound, documents
+  with no record for a set time are dropped from the thread, with a final
+  snapshot, and rebuilt by the reader from that snapshot if they change
+  again.
+- The snapshot interval, 10 s, to be set from the measured rebuild time.
+- Whether the time taken to rebuild at a frame has a required limit. The
+  proposed limit is 1 s on the target machine for any frame of a one-hour
+  recording.
+
+### Required tests
+
+- Unit: the document state rebuilt from generated sequences of checkpoints
+  and change records, compared with the state those sequences describe,
+  including a lost record, a document that is parsing, and a document with
+  no walk; each completeness state; the frame match for a presented update,
+  an update presented after the frame, and a document with no presentation;
+  the snapshot writer and reader; the state thread's behaviour when its
+  queue is full, and that the writer never waits for it.
+- Integration: every check's report on each recording file checked in
+  slice 5 is unchanged by the move to one state class; the state rebuilt
+  with snapshots equals the state rebuilt without them, at every snapshot
+  and at times between; a recording written with the `browser-state`
+  stream plays back as it did with one browser stream.
+- System, on the target Windows machine: a recording of at least an hour
+  with snapshots, reporting the state thread's memory and time, the size of
+  the snapshots, the time to stop, and the time to rebuild at frames at the
+  start, middle, and end; and that hover and scrolling are as smooth as in
+  the recording at 66030a7.
+
+## Slice 2 implementation
+
+Implemented 2026-09-29 on the `frame-state` branch. The measurements below
+were made on the development machine with a debug build, not on the target
+machine, and say nothing about the target machine's times.
+
+### Classes
+
+- `DomTreeRebuilder` (in `Recorder.Session`) holds the DOM rebuild that
+  `DomChangeCheck` did: checkpoints, insertion sets, and changes, applied in
+  record order. `DomChangeCheck` now uses it, and compares its tree with
+  every full walk as before.
+- `LayoutDocumentChangeState` gained a public `Apply` for layout records,
+  the layout zoom factor, the transform records as recorded, and the scroll
+  offsets.
+- `BrowserDocumentState` holds one document's DOM, layout, and interaction
+  state, the completeness of each part, and the event key and time of the
+  record that last changed each part. `BrowserStateBuilder` applies DOM,
+  layout, interaction, and presentation records to the documents they
+  name.
+- `BrowserStateSnapshot` writes and reads a document's state as JSON,
+  format version 1. Nodes are in identifier order and recorded payloads are
+  kept as recorded.
+- `RecordingFileStateRecorder` is the state thread. `RecordingFileBrowserState`
+  is the reader, with `At` for a time and `AtFrame` for a captured frame.
+
+### Differences from the design
+
+- `DomCharacterDataCheck` keeps its own per-node data map. Its check is of
+  record order, that each text node's data record follows its node record,
+  which the rebuilt tree does not keep. The character data the state holds
+  is the `DomTreeRebuilder`'s, which `DomChangeCheck` compares with every
+  full walk. The reports of the DOM, layout, and character data checks on
+  the recordings at f409513, 70d22d4, and 66030a7 are unchanged by the
+  move.
+- Completeness has a fifth value, walk cut: a full walk of the part was
+  started and its completion was not recorded, so its nodes are those
+  recorded before the cut.
+- The playback index does not list the snapshots. The playback index is
+  written when recording stops, so a file cut short has none. The state
+  thread instead writes a state index record on the topic
+  `recorder.state-index`, in a stream of its own, `state-index`, at each
+  sweep in which it wrote a snapshot or a document changed. Each lists, for
+  every document (since the revision below, for every document whose entry
+  changed), its last record time, its latest snapshot's event key,
+  time, and position, and the time of its first record not in that
+  snapshot. The reader reads only these records when it opens a file, so a
+  file cut short is read from the snapshots before the cut.
+- One sweep writes the snapshots of several documents at one log time, and
+  they can be split across two chunks of the snapshot stream. In a file cut
+  between those chunks, an index record names a snapshot that is not in the
+  file although another snapshot at its log time is. Found on the target
+  machine on 2026-10-06, where the test of a file cut at six tenths failed
+  with "The snapshot of document token-b doc-9 at event 2520 is not in the
+  file"; on the build machine the same cut fell elsewhere and passed. In a
+  file cut short, the reader therefore looks for each named snapshot by its
+  document and event, and uses the index only up to the first record that
+  names one it does not find. A test cuts the file after each chunk of the
+  snapshot and index streams, and failed before the change.
+- The state thread checks for due snapshots once a second of recording
+  time. A document part way through a checkpoint, insertion set, or change
+  set is not snapshotted until it completes.
+- The queue to the state thread is not bounded by count: it holds up to
+  256 MB of estimated record bytes. Passing a batch never waits. When the
+  limit is passed, the thread stops as designed, and a record on
+  `recorder.state` states when and why.
+- The writer's own omissions, records it could not write, are reported on
+  the reader's result for the whole file, with their times, not for each
+  document, since an omission does not name a document.
+- The presentation records are also in the `browser-state` stream, since
+  the state thread reads them.
+- The frame match reads the presented updates from the playback index's
+  presented checkpoints, by document token, which is the join the design
+  names.
+- A document whose last presented update is long before the frame, such as
+  a document not drawn since, is read from the snapshot before that update,
+  so the time to rebuild grows with the number of such documents. The
+  reader holds the state of such a document at its cut between calls, up
+  to 512 MB, so each is rebuilt once.
+- There is no player change in this slice, as designed.
+
+### Tests
+
+- Unit (`BrowserStateTests`): generated sessions of DOM, layout, and
+  interaction records over several documents, rebuilt with and without
+  snapshots and compared at many times; each completeness value, including
+  a lost record, a parsing document, a document with no walk, and a cut
+  walk; the frame match for a presented update, an update presented after
+  the frame, and a document with no presentation; snapshot writing and
+  reading; the state thread stopping when its queue limit is passed while
+  the writer does not wait; and a file cut short, read from its snapshots
+  before the cut.
+- Integration (`ChecksTheStateOfARecordingFile`, run when
+  `RECORDER_STATE_FILE` names a recording file): writes the file again with
+  the state thread, then compares the state with and without snapshots at
+  times and frames spread over the recording, and in a copy cut short at
+  half. It reports the state thread's summary, the size of each stream, and
+  the time of each rebuild. The DOM, layout, and character data check
+  reports on the recordings at f409513, 70d22d4, and 66030a7 are compared
+  with those made before the move.
+- System, on the target Windows machine: a first, short recording has been
+  checked; see "First recording on the target machine". The recording of
+  at least an hour is not yet made.
+
+### Measurements on the development machine
+
+Recording 20260929-172645-baa5818d82194001acf0edaa560b335c (protocol 0.36,
+92.6 s), written again with the state thread:
+
+- The state thread applied 153,363 records in 0.55 s and wrote 139
+  snapshots in 0.99 s. The snapshots are 93 MB of JSON, 3.0 MB compressed;
+  the file grew from 28.5 MB to 30.4 MB.
+- At 8 times and 8 frames spread over the recording, and in the copy cut
+  short at half, the state rebuilt with snapshots equals the state rebuilt
+  from every record.
+- At the end, with 125 documents, a rebuild from snapshots took 0.23 s and
+  one from every record took 2.1 s. At the other sampled times and frames,
+  a rebuild from snapshots took 0.16 s to 0.69 s, excluding the first,
+  which includes the time to load the code.
+
+These are not the target machine's times, and do not show that a one-hour
+recording meets the proposed 1 s limit; the system test on the target
+machine does.
+
+### First recording on the target machine
+
+Recording 20260929-201652-b1261415cb204312943567e88e1305b2 (70.5 s,
+17.1 MB), made at 37f65ec with the state thread, and checked with a
+Release build:
+
+- The state thread did not stop. The snapshots are 1.56 MB compressed and
+  54 MB uncompressed, about 9% of the file; the state index records are
+  65 KB compressed.
+- At 8 times, 8 frames, and in a copy cut short at half, the state rebuilt
+  with snapshots equals the state rebuilt from every record.
+- A rebuild from snapshots took 50 ms to 394 ms at the sampled times and
+  87 ms to 339 ms at the sampled frames. A rebuild from every record took
+  up to 904 ms. The one rebuild over 1 s, 1,060 ms at 11.8 s, was before
+  the first snapshot and was the first call, which includes loading the
+  code.
+- Hover and scrolling were reported to be as responsive as in the
+  recording at 66030a7, and stopping to take no noticeable time.
+- The report at 37f65ec did not give the state thread's time or its
+  largest queue for a recording made with the state thread, only for a
+  file written again by the check. From the commit after e118748 on, it also reports the
+  state thread's summary and stop record as recorded in the file, and the
+  time taken to stop the state thread from the writer timings beside it.
+  The writer timings of this recording give 24.5 ms to stop the state
+  thread.
+
+A recording of 70.5 s says nothing about the state thread's memory or the
+rebuild time in a recording of an hour.
+
+### Hour recording on the target machine
+
+Recording 20260929-204938-6b2c1ec82ed94783950f60a7939184a7 (60.6 min,
+938 MB), made at 8e2c539 and checked at 693ea98 with a Release build. The
+check at 8e2c539 failed with an out-of-memory error in the check's own
+comparison, which joined the whole state into one string; at 693ea98 it
+compares document by document.
+
+Correct:
+
+- At 9 times, 8 frames, and in a copy cut short at half, the state rebuilt
+  with snapshots equals the state rebuilt from every record.
+- The state thread never stopped. It applied 4,646,791 records in 7.5 s
+  and wrote 7,666 snapshots in 26.4 s of processor time; its largest queue
+  was 30 MB, and stopping it took 131 ms.
+
+Not acceptable:
+
+- The recording has 6,719 documents, and the state thread holds every one
+  of them to the end. After stopping, the app, still open, used 20.1 GB of
+  memory, with 38.2 GB committed and a peak working set of 25.7 GB. The
+  batch target keeps the state thread's documents after `Complete`, which
+  may explain why the memory was still held after stopping; this is not
+  measured. Garbage collection paused the app for 45 s in total. Closing
+  the app did not return control to the shell, and Ctrl+C did not end it;
+  the cause is not known.
+- Each state index record lists every document seen so far, so the index
+  records grow with documents times sweeps: 830 MB uncompressed, 120 MB
+  compressed, and opening the file takes 4.0 s to read them.
+- Snapshots are 6.3 GB uncompressed and 114 MB compressed.
+- A rebuild at a time loads a snapshot of every document with a record
+  before it: 3.6 s at the end, with 6,719 documents, against 48 s from
+  every record.
+- A rebuild at a frame took 2.3 s to 25 s. Documents whose last presented
+  update is long before the frame are each read from the records before
+  their cut, and these are spread over the whole hour, so the reader reads
+  from 5.6 s into the recording.
+
+The proposed limit of 1 s at any frame of a one-hour recording is not met.
+
+### Revision after the hour recording
+
+Proposed and agreed 2026-09-29, after the hour recording above:
+
+1. A document with no record for 30 s of recording time is given a final
+   snapshot, if it changed since its last, and leaves the state thread,
+   which keeps only that snapshot, compressed. A record of the document
+   after that reloads it from the snapshot. A lost-record notice for its
+   process reloads it too, so that it is marked. When recording stops, the
+   state thread releases every document.
+2. A state index record lists only the documents whose entry changed since
+   the previous index record: a new document, a new last record time, a new
+   snapshot, or a new first record after the snapshot. The reader builds
+   each document's history of entries when it opens the file. A file whose
+   index records list every document is read the same way.
+3. The reader returns, for a time or a frame, every document's key and
+   basis without reading its state, and reads the state only of the
+   documents asked for. Choosing the documents a frame shows is left to
+   slice 3.
+4. Required tests: unit tests of a document leaving and returning to the
+   state thread, including a lost-record notice while it is out, and of
+   index records that list only changes; the comparison of the state with
+   and without snapshots, for the documents asked for; system test on the
+   target machine, a recording of about an hour, with the app's memory
+   bounded through the hour and after stopping, the file opened in under
+   1 s, and the documents of a frame read in under 1 s. The system test
+   waits until further work is done.
+
+Implemented 2026-09-29 on the `frame-state` branch:
+
+- `RecordingFileStateRecorder` sends a document away after
+  `IdleInterval`, 30 s of recording time without a record, keeping its
+  snapshot compressed with Zstandard, and reads it back before applying a
+  record of it or a lost-record notice for its process. Its summary adds
+  the departures, returns, the most documents held whole at once, and the
+  most compressed bytes of departed documents held at once. `Complete`
+  releases every document.
+- Index records carry `"listing": "changed"`.
+- `RecordingFileBrowserState.At` and `AtFrame` take the set of document
+  keys to read, or null for every document. A document not asked for is
+  returned with its key and basis and a null state. A document asked for
+  is returned when it has a state at its cut.
+- Unit tests: a document leaving and returning, including for a
+  lost-record notice while it is away, with the state equal with and
+  without snapshots at every 5 s; index records that do not list a
+  document while it is away; documents named without their state, and one
+  document read alone, equal to the same document read with every other.
+  The state check reports the time to name the documents at each sample,
+  and at each frame the time to read the documents presented in the
+  second before the composition, which stand in for the documents the
+  frame shows until slice 3 chooses them.
+
+On the development machine, with a debug build, recording
+20260929-172645-baa5818d82194001acf0edaa560b335c written again: 86
+departures and 2 returns; at most 64 of the 125 documents held whole at
+once; at most 1.2 MB of compressed departed documents; index records
+90 KB against 883 KB before the revision; every sample equal with and
+without snapshots. These are not the target machine's figures, and a
+92.6 s recording says nothing about an hour.
+
+## Slice 3 design: inspecting the whole page at a recorded instant
+
+Proposed and agreed 2026-09-29. This section revises the first
+decision and the third slice as first proposed, and divides the work into
+slices 3 to 5.
+
+### Why the first decision is revised
+
+An auditor who finds an issue at a captured frame needs to explore the
+whole page as it was at that instant to understand the issue: its layout,
+its interactive elements, and its timers, including the parts of the page
+that were not on screen. The captured frame holds only what was on screen,
+and nothing recorded holds pixels of the rest of the page, so the whole page
+has to be rendered again.
+
+Two things follow. First, a rendering is exact only where it is checked,
+so the recreation is compared node by node with the recording, and every
+difference is shown. Second, a recreation built only from the DOM and the
+recorded computed style cannot match, since layout also depends on style
+sheets, fonts, images, the environment, and element states that are not
+recorded now; recording them is slice 4.
+
+An inspector serving recorded values to the DevTools front end over the
+captured frame, proposed earlier the same day, was not chosen: the captured
+frame does not hold the whole page.
+
+Browser extensions and bookmarklets are not a requirement (decided
+2026-09-29). Automated test tools read the recorded state through the
+reader of slice 2, and later through an interface of their own, which is
+not part of these slices.
+
+### Requirements
+
+1. The auditor chooses a captured frame in the player and opens the
+   recreation of the page at that frame.
+2. The recreation is a page in the instrumented Chromium, in a profile of
+   its own, with DevTools open, so every DevTools panel can be used on the
+   whole page.
+3. The recreation is written from the state slice 2 returns at the frame,
+   with the recorded style sheets and resources (from slice 4), at the
+   recorded viewport size, device pixel ratio, zoom, and media features, in
+   the recorded compatibility mode (from slice 4).
+4. The page's own scripts do not run, and event handler attributes are kept
+   in the DOM but do not run. Network access is blocked, so that the current
+   version of a resource is never shown as if it were evidence.
+5. Focus and hover are set to their recorded state through
+   `CSS.forcePseudoState`, which enforces a pseudo state on an element
+   ([CSS domain](https://chromedevtools.github.io/devtools-protocol/tot/CSS/)),
+   and the environment through `Emulation.setDeviceMetricsOverride` and
+   `Emulation.setEmulatedMedia`
+   ([Emulation domain](https://chromedevtools.github.io/devtools-protocol/tot/Emulation/)).
+6. The recreation is written in its final state; the recorded changes are
+   not replayed into it, since a replay would start CSS transitions and
+   animations the page had finished. The page is shown only after it and
+   its resources have loaded.
+7. Precision is checked, not assumed (revised 2026-09-30: the check is a
+   background guard; see "The check is a background guard"). The instrumented Chromium takes a
+   layout checkpoint of the recreation with the code that recorded the
+   page, and every node is compared with the recording: its bounding
+   rectangle exactly, and each of the 283 recorded computed-style
+   properties exactly. Layout checkpoints hold every element and every text
+   node with a layout object, on screen or not, and hold the bounding box
+   only, not line boxes or fragments; see
+   [instrumented Chromium](instrumented-chromium.md). The check is therefore
+   exact at the level of recorded boxes and styles, and states that limit.
+8. A difference is listed, never hidden by forcing the recorded value.
+9. A panel of our own in DevTools, the evidence panel, shows at the frame:
+   the pending script timers with
+   their type, delay, time scheduled, and time remaining; the running CSS
+   animations and transitions with their name or property, start, duration,
+   and progress; the interactive elements with their path (see "Paths
+   through shadow roots"), registered listeners and event types,
+   focusability, and recorded role; and form control values, focus, and
+   selection. Selecting a row selects the node in the Elements panel. The
+   panel reads records; it does not judge whether an element is accessible.
+10. The recreation, DevTools, and the evidence panel can each be moved to
+    any display and maximized there (agreed 2026-09-29).
+11. Every view states that it is a recreation, the frame, the recording
+    time, and the basis of the state (presented or by time).
+12. What the auditor does in the recreation changes the recreation, not the
+    evidence; reloading returns it to the recorded instant.
+13. The recreation is served only on the loopback interface, with a random
+    port and a token of its own in its address, and closes with the player.
+
+### Slices
+
+Each slice is tested on the target Windows machine before the next.
+
+3. App: the user interface, first with fixed content. Step 3a: the player
+   opens a fixed page, built in code, in the instrumented Chromium with
+   DevTools and the evidence panel showing fixed rows, and settles how the
+   evidence panel is added (see "To be settled"). Step 3b: the page is
+   written from the slice 2 state at a chosen frame, with the precision
+   check. Until slice 4, differences are expected and are shown as they
+   are.
+4. Browser, in a new protocol version: style sheets as Blink parsed them
+   and every change script makes to them, including constructed and
+   adopted sheets; font and image bytes, recorded once for each content
+   hash; the environment (viewport, device pixel ratio, zoom, media
+   features, and compatibility mode); hover state; and CSS animations and
+   transitions. App: the recreation uses them.
+5. Iframes and frames: the documents of `iframe`, `frame`, and `frameset`
+   elements in the recreation, the precision check, and the evidence panel
+   (decided 2026-09-29).
+
+The timers, listeners, and accessibility checkpoint in the evidence panel
+are added to the slice 2 state in slice 3b where they are already
+recorded, and in slice 4 for animations and transitions.
+
+### Required tests
+
+- Slice 3a: unit tests of the fixed page writer and the evidence panel's
+  data; a system test on the target machine: open the recreation, use the
+  Elements panel and the evidence panel, move each window to another
+  display and maximize it, and close the player leaving no process running.
+- Slice 3b: unit tests of the document writer, including escaping of
+  recorded text and attribute values, scripts and event handlers that do
+  not run, blocked network access, and paths through shadow roots; unit
+  tests of the precision check on generated differences; integration tests
+  writing recreations from recorded files and checking them; a system test
+  on the target machine at frames of a recording, including the time to
+  open the recreation and the differences found.
+- Slices 4 and 5: stated in their designs.
+
+### Paths through shadow roots
+
+Recommended and accepted 2026-09-29. XPath has no step into a shadow root,
+so a node's path is a list of XPath expressions, one for each tree scope
+from the document to the node. The first is evaluated from the document;
+each later one from the shadow root of the element the previous one
+selects. Each expression uses positional steps only, such as
+`/html[1]/body[1]/div[3]`, since an `id` or other attribute may be
+repeated or changed and a position in the recorded tree is not. An element
+outside the HTML namespace is selected by a local name test, such as
+`*[local-name()='svg'][1]`, and a text node by `text()[n]`. The evidence
+panel shows the list joined by `/#shadow-root(open)` or
+`/#shadow-root(closed)`, as recorded, for example
+`/html[1]/body[1]/my-card[1]/#shadow-root(open)/div[1]/button[2]`, and
+copies either that form or the list itself. A path follows the DOM tree,
+not the tree as slots render it: a slotted node is found under its host's
+light DOM, and its assigned slot is shown with it.
+
+### To be settled
+
+- How the evidence panel is added to DevTools. A DevTools extension panel
+  ([chrome.devtools.panels](https://developer.chrome.com/docs/extensions/reference/api/devtools/panels))
+  needs only an extension of our own loaded in the recreation's profile. A
+  patch to the DevTools front end in the Chromium checkout needs no
+  extension but is rebuilt with the browser. Slice 3a tries the extension
+  first.
+- How the page's scripts are kept from running while the evidence panel
+  and the precision check can still act on the page, for example a content
+  security policy that allows no page script, which slice 3a tests.
+
+## Slice 3a implementation
+
+Implemented 2026-09-29 on the `recreation` branch, which starts from
+`frame-state`.
+
+### Parts
+
+- `Recorder.Recreation`, a new project:
+  - `RecreationContent` and its records: the page, and the evidence the
+    panel shows, including `NodePath`, a path as its list of scopes and the
+    mode of each shadow root crossed, shown as agreed in "Paths through
+    shadow roots".
+  - `FixedRecreation`: the fixed page and evidence written in code. The page
+    has a header and navigation, a form, a custom element with a
+    declarative open shadow root, an SVG image, and 60 paragraphs below the
+    first screen, so the whole page can be explored. It also has a script
+    and an event handler attribute that change the title if they run. The
+    evidence panel states that none of it is evidence.
+  - `RecreationServer`: Kestrel on 127.0.0.1 at a random port, answering
+    only under a random 256-bit token and only to requests whose Host header
+    names that address and port. The page is served with a content security
+    policy that allows no script, so neither the page's scripts nor its
+    event handler attributes run, and allows nothing from another origin.
+  - `RecreationBrowser`: writes the profile and the evidence panel, and
+    opens the page in the instrumented Chromium without the recorder
+    bootstrap, so it records nothing. DevTools opens for the page
+    (`--auto-open-devtools-for-tabs`) in a window of its own, set by the
+    profile's DevTools dock preference, so the page and DevTools can each
+    be moved to any display and maximized there. Closing kills the browser
+    and its child processes and removes the profile.
+  - `RecreationSession`: the server and browser of one recreation.
+  - The evidence panel, an unpacked extension of our own
+    (`EvidencePanel\`), loaded with `--load-extension` and
+    `--disable-extensions-except`. Google removed `--load-extension` from
+    Chrome branded builds only, from Chrome 137
+    ([Chromium extensions group](https://groups.google.com/a/chromium.org/g/chromium-extensions/c/1-g8EFx2BBY/m/8IEC1RCVAQAJ)),
+    and the instrumented build is not branded. The panel reads the evidence
+    from the server and inserts every value as text, never as markup, since
+    recorded values are page content. Selecting a row selects the node in
+    the Elements panel through `chrome.devtools.inspectedWindow.eval` and
+    `inspect()`.
+- The player: "Open recreation with fixed content", in the Instrumented
+  Chromium group, opens the fixed page; a recreation already open is closed
+  first, and closing the player closes it.
+
+### Differences from the design
+
+- The evidence panel is a tab in the DevTools window, so it moves with
+  DevTools rather than in a window of its own.
+- The recreation states that it is a recreation in its window title, which
+  is the page's own, and in the evidence panel, not in the page, since text
+  added to the page would change its layout.
+- Blink's `document.evaluate` does not take a shadow root as its context
+  node: it fails with "The node provided is '#document-fragment', which is
+  not a valid context node type", found on the development machine. The
+  panel's path resolver therefore matches the first step of each scope
+  after the first against the shadow root's children itself, and evaluates
+  the rest of the scope from the node that step selects. Closed shadow
+  roots cannot be reached from page script, so the panel reports that it
+  cannot select a node inside one; slice 3b settles how DevTools selects
+  such a node.
+
+### Tests
+
+- Unit tests: paths through shadow roots and their validation; the fixed
+  page and evidence; the server's token, Host check, methods, and headers,
+  including the content security policy; the evidence panel's files, its
+  address of the evidence, and that it inserts no markup; the browser's
+  arguments, which include no recorder bootstrap or remote debugging
+  switch (slice 3b adds the remote debugging port; see "Leaving the
+  recreation"), and the undocked DevTools preference; and that no recreation is
+  opened, and no profile left, without the browser.
+- Integration test, run when `RECORDER_RECREATION_CHROMIUM` names a Chromium
+  executable: the fixed recreation is opened without a window, a click on
+  the button with the event handler leaves the title unchanged, the page's
+  script has not changed it, and every path in the evidence selects the
+  node it names through the panel's own resolver. On the development
+  machine it passed with a Chromium build of the test framework's own; it
+  has not yet run with the instrumented build.
+- System test on the target machine, still to be run: open the recreation
+  from the player; see the page and DevTools in windows of their own; move
+  each to another display and maximize it; see the Evidence tab and its
+  rows; select rows, including the buttons inside the shadow root, and see
+  each node selected in the Elements panel; see that the title is "Fixed
+  recreation" after clicking Save; scroll to the end of the page; close the
+  player and see that no Chromium process of the recreation remains.
+
+### On the target machine
+
+2026-09-29, at b9c4d8b: the seven recreation tests passed with the
+instrumented build as `RECORDER_RECREATION_CHROMIUM`, including the
+integration test. At aab4934 the integration test's checks had passed, but
+removing its profile failed while Chromium's child processes still held a
+file in it, so the test now retries the removal. The fixed recreation opened
+from the player and was reported to run very well. Of the system test's
+checks: selecting Open and Close, inside the shadow root, from the evidence
+panel selected them in the Elements panel; after the player closed, no
+Chromium process of the recreation remained. Moving the page and DevTools
+to other displays was not tested, since only one display was connected,
+and remains to be tested.
+
+## Slice 3b design: the recorded page at a chosen frame
+
+Proposed and agreed 2026-09-29. Slice 3b replaces the fixed content of
+slice 3a with the page recorded at a frame the auditor chooses, checks the
+recreation against the recording, and fills the evidence panel from the
+recording. What slice 4 records, and the documents of frames (slice 5), are
+not part of it.
+
+### Choosing the frame and the document
+
+- The player gains "Inspect page at this frame" beside the frame controls,
+  enabled when an open recording has browser state.
+- The documents at the frame come from the slice 2 reader with no state
+  loaded, as "Only the documents asked for" allows. The candidates are the
+  documents of primary main frames: the document token of each is matched
+  to a `navigation-completed` record whose `frameType` is
+  `primary-main-frame`, which also gives its URL. Documents of the
+  browser's own interface, such as `chrome://webui-toolbar.top-chrome/`,
+  are primary main frames of their own in the recordings and are listed
+  last, marked as browser interface.
+- The player lists the candidates with their URL and the time each was
+  last presented, the most recently presented first and selected, and
+  opens the one chosen. The choice is the auditor's; the player does not
+  infer which document the frame shows.
+
+### Building the document exactly
+
+The recorded DOM is not written as HTML markup, since the HTML parser does
+not return every tree a script can build: for example, it moves content out
+of tables ("foster parenting",
+[HTML standard, parsing](https://html.spec.whatwg.org/multipage/parsing.html#foster-parent))
+and closes a `p` element when a block starts inside it. Instead:
+
+- The server returns a short document: the recorded document type if the
+  recording has one (its name only, since its identifiers are not
+  recorded), so the rendering mode is standards mode with a document type
+  and quirks mode without; a data block holding the recorded tree as JSON,
+  which is not run; and a builder script.
+- The content security policy allows only the builder, by a nonce new for
+  each recreation: `script-src 'nonce-...'`. The recorded `script` elements
+  are built as elements and do not run, and event handler attributes and
+  `javascript:` URLs do not run, as in slice 3a.
+- The builder runs before the first rendering. It builds the recorded tree
+  with DOM calls: each node with its recorded type, name, attributes, and
+  character data, in recorded order; each shadow root with `attachShadow`
+  and its recorded mode, `delegatesFocus`, `slotAssignment`, `clonable`,
+  `serializable`, and `referenceTarget`; the nodes assigned to each manually
+  assigned slot. It then replaces the served document's element with the
+  built one and removes itself and the data block, so the Elements panel
+  shows only the recorded tree.
+- User agent shadow roots, such as those of `input` elements, are made by
+  the browser, not the builder, and are compared like every other node.
+- Element namespaces are not recorded. An element whose recorded name is in
+  capitals is in the HTML namespace, since an element's name is given in
+  capitals only for an element in the HTML namespace in an HTML document
+  ([DOM standard](https://dom.spec.whatwg.org/#element-html-uppercased-qualified-name));
+  an `svg` or `math` element and its
+  descendants are in the SVG or MathML namespace. This is an inference, and
+  the evidence panel says so; recording the namespace is added to slice 4.
+- A value cut in the recording, marked by the slice 2 reader, cannot be
+  built; the node is built with the part recorded and is listed as a
+  difference with the reason "cut in the recording".
+- After building: the recorded text control values and selections are set,
+  the recorded focus is set with focus emulation, so it holds while
+  DevTools has the keyboard, and the recorded scroll offset of each
+  scrolling node is set.
+
+### The environment
+
+Before the page is opened, over the DevTools protocol connection of the
+recreation browser: the viewport size and device pixel ratio of the latest
+layout checkpoint of the document at or before the frame, through
+`Emulation.setDeviceMetricsOverride`. A layout zoom factor other than 1 is
+listed as a difference, since browser zoom is not set this way. Media
+features are not recorded and take the browser's values; recording them is
+in slice 4. The viewport size is recorded only in layout checkpoints, so a
+window resized after the latest checkpoint is recreated at the older size;
+the check will show it, and recording the viewport size with each change is
+added to slice 4.
+
+### Leaving the recreation
+
+A recreation is a static copy of a recorded page, but its links and forms
+are live elements: a followed link would load the live site in the
+recreation's tab, in place of the recorded page. On the target machine a
+recreation of a recording of https://cnib.ca did so. The recreation must not
+leave the recorded page, and nothing is added to the page to stop it, since
+a listener added by the builder would show in DevTools' Event Listeners
+pane as though recorded.
+
+The recorder holds the recreation browser over its DevTools protocol
+connection instead:
+
+- The browser opens a blank tab and a DevTools protocol port that it
+  chooses on the loopback interface. The recorder connects, attaches to
+  every tab before it runs (`Target.setAutoAttach` with
+  `waitForDebuggerOnStart`), and only then opens the page.
+- In every tab, every document request is paused (`Fetch.enable` for
+  documents at the request stage). A request for the recreation's own
+  address continues; any other is refused as a stopped navigation
+  (`Fetch.failRequest` with `Aborted`), so no error page replaces the
+  recreation. A tab opened by a refused request, such as a link with
+  `target="_blank"`, is closed.
+- Each refused navigation is recorded with its address and time and listed
+  in the evidence panel, which announces it: "Navigation to ... was
+  blocked; the recreation does not leave the recorded page."
+- Form submission is already refused by the page's content security policy
+  (`form-action 'none'`), before any request is made.
+
+The same connection sets the viewport of "The environment" and focus
+emulation (`Emulation.setFocusEmulationEnabled`), so the recorded focus
+holds while DevTools has the keyboard.
+
+### Recording the recreation to check it
+
+The recreation browser is the instrumented Chromium with its recorder
+bootstrap, as when recording, so its bridge emits the same records for the
+recreated page with the same code. The recorder receives them in memory with
+its browser evidence receiver; they are not written to any recording. The
+receiver launches the browser with the arguments of slice 3a added: the
+profile, the evidence panel, DevTools, and a remote debugging port on the
+loopback interface for the protocol connection above.
+
+The records of the recreated document, found by its URL, are applied with
+the slice 2 state builder, so both sides of the check are rebuilt by the
+same code. Records of DevTools and the browser's interface are ignored.
+
+### The check
+
+The check runs once the recreation is settled: the builder has finished,
+the page's load event has fired, and no layout change set has been recorded
+for 1 s after a presentation of the page. The evidence panel shows
+"checking" until then. It compares the recorded state at the frame with the
+recreation's state:
+
+- Nodes are matched by position: both trees are walked in the same order,
+  light DOM children and then each shadow root. Where the trees differ, the
+  difference is listed and the nodes below it are not compared further.
+- DOM: node type, name, attributes, character data, shadow root fields, and
+  slot assignments, exactly.
+- Layout: for each node, whether it has a layout object, whether a display
+  lock prevents its layout, each of the 283 recorded computed-style
+  properties as text, and its geometry: the local rectangle, the local
+  quads, whether its client rectangle is empty, and its client rectangle
+  derived from its transform nodes by the slice 2 code, all exactly. The
+  transform node identities differ between the two, so only the rectangles
+  they give are compared.
+- Scroll offsets of each scrolling node, and the focused node, selection,
+  and text control values, exactly.
+
+The panel shows the result as a summary first, the number of nodes that
+differ for each property, so that one cause, such as a style sheet that was
+not recorded, is seen as one line, and then each difference with its node,
+its recorded value, and its recreated value. The check describes the
+recreation as it was settled; what the auditor changes afterwards is not
+checked again.
+
+Until slice 4, differences are expected wherever the page used style sheets
+from files, web fonts, or images, and wherever script changed a style sheet.
+
+### The check is a background guard
+
+Decided by the owner on 2026-09-30: "This check, if it exists at all, is in
+the background and the most the user gets is a toast warning that the
+rendering is off compared the the recording. In practice it should almost
+NEVER happen or the tool is useless."
+
+A recreation is therefore required to match the recording, and the check is
+a guard against the recorder failing that requirement, not a feature of the
+evidence panel. It changes the design above and the proposal below:
+
+- The check runs in the background. The auditor sees nothing of it unless
+  the recreation differs from the recording, and then only a notification
+  in the player that the recreation differs from the recording.
+- The panel has no fidelity section and lists no differences.
+- The differences are written to the recorder's diagnostics, for fixing the
+  recorder, and are not evidence.
+- Until slice 4 records style sheets, fonts, and images, the recreation
+  cannot match the recording on most pages, and the check would warn on
+  almost every recreation. The check is therefore built after slice 4, and
+  slice 4 is where the requirement is met.
+
+The proposal below is kept as the design of what the check compares and
+when it runs; its parts on the panel are replaced by this section.
+
+### Building the check (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built. Its result is
+shown as "The check is a background guard" states.
+
+The recreation browser. The recorder's own receiver
+(`BrowserEvidenceReceiver`) and launcher (`ChromiumLauncher`) start the
+recreation browser, as they start the browser when recording, so it has the
+bootstrap, its own pipe name and authentication token, the protocol version
+query, and the refusal to start from an elevated process. The launcher gains
+the arguments of slice 3a (the evidence panel, DevTools in its own window, a
+new window) and a remote debugging port of 0, which the browser chooses and
+writes to the profile, as now. The protocol connection of "Leaving the
+recreation" is unchanged. The recreation browser then records; the slice 3a
+statement that it records nothing no longer holds.
+
+The records. The receiver is given an event sink that keeps nothing on disk
+and writes to no recording: each record is applied at once with the slice 2
+state builder, in the order received. The recreated document is the one
+whose `navigation-completed` record has the recreation's address. Records of
+any other document, such as the blank tab, DevTools, and the evidence
+panel's pages, and of the browser's interface, are dropped when received.
+The records of the recreated document are not kept once applied; only its
+state is.
+
+When the check runs. It runs every time a page is opened with "Inspect page
+at this frame", once the recreation is settled. The recreation is settled
+when:
+
+- the recreated document's DOM, layout, and interaction checkpoints of its
+  first walk have completed;
+- the page's load event has fired (`Page.loadEventFired` on the protocol
+  connection); and
+- 1 s has passed with no layout change set of the document, counted from
+  its latest `presentation-feedback` record.
+
+The wait is a timer reset by each record that applies, not a poll. If the
+recreation is not settled within 30 s, the check runs on the state it has,
+and the panel says it was not settled and which condition was not met.
+
+After the check. The bridge goes on sending records while the recreation is
+open, since the pipe stays connected; they are dropped when received. The
+check is not run again when the auditor changes the page.
+
+The comparison. Both sides are slice 2 states, so both are read by the same
+code:
+
+- DOM nodes are matched by position, as the design above states: the
+  document's children, then each node's children, then its shadow root.
+  Where the node type or name of a matched pair differs, or a node has no
+  counterpart, the difference is listed and the nodes below it are not
+  compared.
+- Identities are not compared, since they are new in the recreation: node,
+  document, checkpoint, change set, and transform node identities, the
+  document token, and node indexes. A value that names a node, such as a
+  shadow host, a slot's assigned nodes, the focused node, and a selection's
+  anchor and focus, is compared through the node match.
+- The document's URL is not compared, since the recreation's address is its
+  own; the panel already shows the recorded one.
+- Layout records are matched through the DOM match; a pseudo-element by its
+  originating node and pseudo-element type. Each field of the layout record
+  of the design above is compared as recorded, exactly: layout object,
+  display lock, bounding client rectangle, each computed-style property as
+  text, and the client rectangle derived from the transform nodes.
+- The viewport, device pixel ratio, and layout zoom factor, the scroll
+  offset of each scrolling node, and the interaction state: focused node,
+  selection, and each text control's value and selection.
+
+The result. The panel's Fidelity section reads "checking" until the result
+is ready, then "checked" with the number of nodes compared and differing. It
+lists the summary first, one line for each property with the number of
+nodes that differ, then every difference, grouped by property, each with
+its node's path, the recorded value, and the recreated value. Every
+difference is listed; none is dropped. The panel reads the result from the
+recorder, as it reads the blocked navigations, and announces when it is
+ready. If the check cannot run, for example because the browser's protocol
+version does not match, the section says "not checked" and why.
+
+Required tests:
+
+- Unit tests of the comparison on states built from records: equal states
+  give no difference; each kind of difference above is found and counted
+  once; nodes below a structural difference are not compared; identities
+  and the document URL are not compared; values that name nodes are
+  compared through the match; pseudo-elements are matched by originating
+  node and type.
+- Unit tests of the settling rule, on records given in order, and of the
+  sink: records of other documents are dropped, and records after the check
+  are dropped.
+- Integration test, with the instrumented Chromium, which is available only
+  on the target machine: a generated recreation is opened, settles, and its
+  check reports no DOM difference.
+- System test on the target machine: a page of a recording is inspected,
+  the panel shows "checking", then the summary and the differences.
+
+### The evidence panel from the recording
+
+- The recreation: the frame, recording time, basis, document URL, and
+  document key, and the notice that the page is a recreation.
+- Pending timers: the timers of the document scheduled and neither fired
+  (for a timeout) nor cancelled at the frame, with their kind, requested
+  and effective delay, time scheduled, and time remaining to their next
+  run, counted from their last run for an interval timer.
+- Interactive elements: the nodes with an event listener registered and not
+  removed at the frame, with their event types and options, and the nodes
+  the latest accessibility checkpoint at or before the frame records as
+  focusable, with its role and name and the time of that checkpoint. The
+  panel reads the records; it does not decide what is interactive.
+- Focus, selection, and text control values, from the interaction state.
+- Selecting a node inside a closed shadow root is done by the recorder over
+  its protocol connection, since page script cannot reach it; the method is
+  settled in the first step of the slice.
+
+The slice 2 state and its snapshots gain, for each document, its URL, its
+registered listeners, its pending timers, and its latest accessibility
+checkpoint, and the snapshot version is raised. Recordings made before are
+not supported.
+
+### Added to slice 4
+
+Found while designing slice 3b: element namespaces; the checked state of
+check boxes and radio buttons and the selected options of `select`
+elements, which are properties, not attributes, and are not recorded; and
+the viewport size with each change, not only in layout checkpoints.
+
+Found while building slice 3b (see "Found while building"), and added with
+the owner's agreement on 2026-09-30:
+
+- A DOM walk of each document no later than its first presentation, so
+  that a page can be recreated at any frame that shows it. In the
+  recording of 2026-09-29 a product page was drawn at 65.52 s and first
+  walked at 66.13 s.
+- The contents of `template` elements. The records have no field for them,
+  so the six `template` elements of that recording have no recorded
+  children.
+
+### Required tests
+
+- Unit tests: the tree data written for the builder, including namespaces,
+  shadow root fields, manual slot assignment, and cut values; the choice of
+  candidate documents; pending timers and registered listeners at a frame,
+  including interval timers, cancellation, and removal; the matching of
+  nodes by position and the comparison of each property, on generated
+  states with generated differences; the summary of differences.
+- Integration tests, with `RECORDER_RECREATION_CHROMIUM` set: the builder
+  builds generated trees, including trees the HTML parser cannot return,
+  and the DOM the browser then holds equals the tree given; no page script,
+  handler, or `javascript:` URL runs; and, with a recorded file, a
+  recreation at a frame of it is opened, received, and checked.
+- System test on the target machine: record a short session on a page with
+  forms, a shadow root, and scrolled content; open the recreation at
+  several frames; see the check's summary and differences, the timers, the
+  listeners, and the focus; select nodes, including one inside a closed
+  shadow root; state the time from choosing a frame to the page shown and
+  to the check completed.
+
+## Slice 3 revision: rendering from recorded values (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built.
+
+### The decision
+
+The owner, on 2026-09-30: "I would much prefer the rendering to use the
+exact numbers. I really wanted you to use the libraries inside of chromium
+to render the page, not to use the default existing browser view." Asked
+whether this meant a recreation mode in Blink that imposes the recorded
+styles and geometry, with DevTools working on the page, the owner answered
+"Yes, I think so", and that more is to be recorded from Blink for it.
+
+This reverses requirement 8 of the slice 3 design, "A difference is listed,
+never hidden by forcing the recorded value", which was a proposal of this
+design, not a requirement of the owner. Requirement 7 changes with it: the
+recorded values are no longer checked against a computed rendering; they
+are the rendering. The page is still a page in the instrumented Chromium,
+in its own profile, with DevTools and the evidence panel, the navigation
+held as in "Leaving the recreation", and the viewport emulated.
+
+### What a recreation mode is
+
+Normally Blink works out an element's computed style from the style sheets
+(the cascade), then its boxes from the style (layout), then draws the boxes
+(paint). In the recreation mode of the instrumented Chromium, for each node
+of the recreated document that the recording holds:
+
+- Style: the node's computed style is the recorded one. Blink resolves the
+  element's style as usual and then sets each recorded property to its
+  recorded value, at the end of `StyleResolver::ResolveStyle`
+  (`core/css/resolver/style_resolver.cc`, line 1377 in the checkout on the
+  target machine). DevTools' Computed pane then shows the recorded values,
+  since it reads that style.
+- Layout: the node's boxes are the recorded ones. Where Blink lays out a
+  block, in `BlockNode::Layout` (`core/layout/block_node.cc`, line 406), the
+  recreation mode builds the layout result from the recorded fragments: each
+  box fragment's size and offset, and, for a block holding lines, its
+  fragment items, the line boxes, text runs, and inline boxes
+  (`core/layout/inline/fragment_item.h`, line 124). The layout algorithms are
+  not run for it. DevTools' box model and element outlines then show the
+  recorded geometry, since they read those fragments.
+- Text: each recorded text run is drawn from its recorded glyphs, positions,
+  and font, as a shaping result (`platform/fonts/shaping/shape_result.h`,
+  line 134), not shaped again, when the recorded font is available.
+- Paint: Blink paints from that style and those fragments with its own
+  code, so borders, backgrounds, text, transforms, clips, and scrolling are
+  drawn as Blink draws them.
+- Animations and transitions are not started: the recorded style is the
+  style at the instant, animated values included.
+
+The DOM is built by the recreation mode in the renderer, not by the builder
+script, so that each recreated node is known to be the recorded node it is
+built from. The page then holds no script of the recorder's, and the
+builder script and its data block are removed.
+
+### What is recorded in addition
+
+The layout checkpoints and change sets record, in a new protocol version:
+
+- Every property `getComputedStyle()` lists (Blink's computable properties,
+  `CSSComputedStyleDeclaration::ComputableProperties`,
+  `core/css/css_computed_style_declaration.cc`, line 103), not only the 283
+  of the list, and the custom properties.
+- For each layout box, each of its box fragments: size, offset in its
+  parent fragment, and the fragment's break token position when it is one
+  of several, as in columns.
+- For each block holding lines, its fragment items: each line box, each
+  text run with its range of the node's text, and each inline box, with
+  its rectangle.
+- For each text run, its glyphs as shaped: glyph identifiers, advances and
+  offsets, and the font: family, typeface name, size, and synthetic bold or
+  italic, with a content hash of the font file when slice 4 records font
+  files.
+- For each scrolling box, its scrollable overflow rectangle; the scroll
+  offsets are already recorded.
+- For each replaced element, such as an image, its intrinsic size; its
+  pixels come with slice 4.
+
+These are recorded when they change, as the layout change sets record
+changed nodes now, so an idle page repeats nothing. What this costs to
+record is measured on the target machine before the recording format is
+fixed.
+
+### A read-only snapshot
+
+Replaced on 2026-10-03 by "Input refused (agreed)" under slice 4d:
+the recreation takes no input except the right-click for Inspect.
+
+The owner, on 2026-09-30: "the page is a read-only snapshot, I didn't think
+there was anything to edit except the user typing in a text field or text
+area." This replaces requirement 12 of the slice 3 design. In the recreation
+mode:
+
+- Typing into a text field or text area changes its value; that control's
+  text is laid out by Blink as it changes.
+- Scrolling changes scroll offsets only, and is allowed.
+- Every other change to the DOM or to styles is refused, whether it comes
+  from DevTools' Elements and Styles panes, from script run in the console,
+  or from the page's own controls, such as check boxes, radio buttons,
+  `select` elements, and `details` elements.
+- Reloading returns the page to the recorded instant.
+
+### Limits
+
+- Values that are not recorded are still worked out by Blink: Blink's
+  internal style state that `getComputedStyle()` does not report, and paint
+  details, such as antialiasing, that no record holds.
+- A text run whose recorded font is not available is shaped again with the
+  font Blink chooses, inside its recorded rectangle; the evidence panel
+  lists those runs. Font files are recorded in slice 4; a system font of the
+  machine the recording was made on is available when the recreation is
+  opened on that machine.
+- Images are drawn only once slice 4 records them; until then a replaced
+  element keeps its recorded size and draws nothing.
+- Layout that is not block or inline layout, such as SVG, is laid out from
+  its recorded style as Blink lays it out. Whether table, flex, grid, and
+  multi-column layouts, which Blink lays out as blocks with their own
+  algorithms, can take recorded fragments in the same way is found by the
+  first step below.
+
+### The background guard
+
+The check of "The check is a background guard" remains, after slice 4, as a
+guard against the recreation mode failing: the recreation's own layout
+checkpoint is compared with the recording, and a difference is a fault of
+the recorder.
+
+### Slices
+
+1. A feasibility step on the target machine: in the instrumented Chromium,
+   impose a recorded computed style and a recorded box size and position on
+   the elements of a small fixed page, and a recorded glyph run on its text,
+   and confirm that DevTools' Computed pane and box model show them and that
+   Blink paints them. Table, flex, grid, and multi-column content is
+   included, to find which layouts take recorded fragments.
+2. Recording: the additions above, in a new protocol version, with its cost
+   measured on the target machine.
+3. The recreation mode: the DOM built in the renderer, the recorded styles
+   imposed.
+4. The recorded geometry and glyph runs imposed.
+
+Slice 4 of the plan (style sheets, fonts, images, and the environment)
+follows. Style sheets are then needed not for the styles, which are
+recorded, but so that DevTools' Styles pane shows which rules applied.
+
+### The feasibility step (proposed)
+
+Delivered in three parts, each built and checked on the target machine
+before the next is designed in detail:
+
+- 1a, recorded styles, below.
+- 1b, recorded box fragments: sizes and offsets of blocks, and of table,
+  flex, grid, and multi-column content.
+- 1c, recorded lines and glyph runs.
+
+The step uses the switch the recreation mode keeps,
+`--a11y-recorder-recreation`. The browser passes it to each renderer it
+starts, in the child process hook that passes the recorder bootstrap, and
+does so whether or not a recorder is connected, so the step runs without
+one. Without the switch nothing changes.
+
+In the step only, the recorded values are written in the test page itself,
+in an attribute of each element, since the connection that will carry them
+is not built yet: `data-a11y-recorded-style` holds the recorded computed
+style as CSS declarations. The attribute has effect only under the switch.
+The test page, `chromium/recreation_spike/styles.html`, gives each element
+a style sheet value and a different recorded value, for layout, color,
+font, and visibility properties.
+
+1a, recorded styles. At the end of `StyleResolver::MatchAllRules`
+(`core/css/resolver/style_resolver.cc`, line 1278), under the switch, an
+element's recorded declarations are parsed as CSS and added as the last
+author declarations, marked important and as element-attached, so they win
+over every style sheet rule, the element's own `style` attribute, and
+animations. Blink then builds the computed style from them as from any
+declaration, so inherited and dependent values follow. The step records
+what DevTools' Styles pane shows for them.
+
+Checked on the target machine, with the page opened under the switch and
+without it:
+
+- With the switch, DevTools' Computed pane and `getComputedStyle()` give
+  the recorded value of each property, and Blink paints with them; without
+  it, the style sheet values.
+- Changing the style sheet in DevTools' Styles pane does not change a
+  recorded property.
+
+Tests: unit tests of the integration script's new patch and of the switch
+passed to renderers; the check above as the system test.
+
+Built on the `recreation` branch: the switch in
+`chromium/recorder_bridge/recorder_switches.h`, passed to renderers in
+`AppendRecorderBootstrapToChildProcess` before the bootstrap is looked for;
+`IsRecreationMode()` in the bridge; the hook, written by
+`patch_blink_style_resolver` in `chromium/integrate.py`; and the test page.
+The patch was applied to the checkout's `style_resolver.cc`, copied from the
+target machine, and applied again without change. The unit tests of the
+patch and of the switch check the text of the hook and of the bridge; they
+do not compile it. Whether it compiles and behaves as intended is found by
+the build and the check on the target machine.
+
+On the target machine, with revision 06dcc58, as reported on 2026-09-30:
+
+- The build first stopped at the V8 context snapshot step. The generator,
+  run by hand with its output written elsewhere, exited with 0, and the
+  build was run again; its failure was most likely the output file held
+  open by a running instrumented Chromium, which was not confirmed.
+- With the switch, every recorded property compared as equal in
+  `getComputedStyle()`; without it, every one gave the style sheet value;
+  the two pages looked different accordingly.
+- DevTools' Computed pane showed the recorded `width` of `#box`, 237.5px,
+  and its recorded `background-color`, rgb(0, 90, 160). Expanded,
+  `background-color` listed only the style sheet's rgb(200, 0, 0) from
+  `#box` at styles.html line 19. DevTools names no source for the recorded
+  value, since the recorded declarations are not a rule its style
+  inspection knows.
+- With the switch, after the `#box` rule's width was changed to 300px in
+  the Styles pane, `getComputedStyle()` still gave the recorded 237.5px.
+- The Styles pane for `#box` showed the user agent style sheet's `div`
+  rule, `display: block`, and no block holding the recorded declarations.
+  Of the `#box` rule's declarations, none was shown as overridden until
+  its width was changed to 300px; the width was then shown struck
+  through, and the height and background color were not. Why the edit
+  changed this was not examined.
+
+Not yet reported: the same edit without the switch.
+
+#### 1a addition: recorded styles in DevTools (proposed)
+
+The check found that DevTools shows the recorded values as the computed
+style but names no source for them, and shows the style sheet declarations
+they override as if they were in effect. The addition makes the recorded
+declarations a source of their own in DevTools' style inspection. Blink's
+side of DevTools only is changed; the DevTools front end is not.
+
+Under the switch, `InspectorCSSAgent::getMatchedStylesForNode`
+(`core/inspector/inspector_css_agent.cc`, line 1461) adds, for an element
+with recorded declarations, one more matched rule after all the others:
+
+- Its selector text is `Recorded style`, so the Styles pane shows a block
+  under that name.
+- Its declarations are the recorded ones, each marked important, as
+  imposed in style resolution.
+- It has no style sheet, so DevTools offers no editing of it, as fits a
+  read-only snapshot.
+- Its origin is the author origin, the one Blink gives it in the cascade.
+
+The DevTools front end orders a node's styles by the order Blink gives and
+then by importance
+(`front_end/core/sdk/CSSMatchedStyles.ts`), so it should show the block
+first, its declarations in effect, and each style sheet declaration of a
+recorded property struck through; the Computed pane should list the block
+as the source of each recorded value. The same block is added for each
+ancestor in the inherited entries, so an inherited recorded value is shown
+as inherited from that ancestor. These are expectations from reading the
+front end's source, to be confirmed on the target machine.
+
+In the step the block's declarations are read from the same attribute as in
+style resolution; when the recorded state comes over its connection, both
+read it there.
+
+Not changed by the addition: a style sheet rule can still be edited in the
+Styles pane. An edit has no effect on a recorded property. When every
+computed property is recorded, as the recreation will record them, no edit
+has an effect on the page.
+
+Checked on the target machine, with the test page under the switch:
+
+- For `#box`, the Styles pane shows the `Recorded style` block first, with
+  its width, height and background color, and the `#box` rule's width,
+  height and background color struck through.
+- The block cannot be edited.
+- The Computed pane lists the block as the source of each recorded value.
+- For `#child`, the Styles pane shows the block of `#parent` as inherited,
+  with its color.
+- Without the switch, no block is shown.
+
+Tests: a unit test of the integration script's new patch; the check above
+as the system test.
+
+Built on the `recreation` branch: `patch_blink_inspector_css_agent` in
+`chromium/integrate.py` writes the helper `RecorderRecordedStyleMatch`, its
+call after the element's matched rules, and its call for each ancestor's
+inherited entry. The patch was applied to the checkout's
+`inspector_css_agent.cc`, copied from the target machine, and applied again
+without change; the protocol names it uses were read from the checkout's
+generated `css.h`. As with 1a, the unit test checks the text of the patch,
+not its compilation. DevTools shows each recorded declaration with
+`!important`, as Blink reports an important declaration.
+
+On the target machine, with revision 979b17e, as reported on 2026-09-30,
+the build succeeded and every check above passed: the Styles pane showed
+the `Recorded style` block for `#box` first, with its three recorded
+values, and the `#box` rule's width, height and background color struck
+through; the block could not be edited; the Computed pane listed the block
+as the source of the recorded background color; for `#child`, the Styles
+pane showed the block of `div#parent` as inherited, with its color; and
+without the switch no block was shown.
+
+#### 1b, recorded box fragments (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built.
+
+A box fragment is the rectangle Blink's layout produces for one box: its
+border-box size, and its offset in the fragment that holds it, its parent
+fragment. Paint, hit testing, `getBoundingClientRect()`, and DevTools'
+element highlight and box model are all read from fragments. 1b makes the
+recorded size and offset of a box the ones Blink uses.
+
+Where. Every layout algorithm, for block, flex, grid, table, and
+multi-column layout alike, ends by turning its fragment builder into a box
+fragment, in `BoxFragmentBuilder::ToBoxFragment`
+(`core/layout/box_fragment_builder.cc`, line 673 in the checkout on the
+target machine). Under the switch, at the start of that function, before
+the builder is finalized:
+
+- The box's own size: when its element has a recorded fragment, the
+  builder's inline and block sizes are set to the recorded width and
+  height.
+- Its children's offsets: for each child fragment whose element has a
+  recorded fragment, the child's offset in the builder is set to the
+  recorded offset.
+
+Blink then finalizes the fragment from these values as from its own, so
+overflow and scrolling follow.
+
+This differs from the earlier text of this design, which had the layout
+algorithms not run for a box with recorded fragments. Here the algorithms
+still run and their sizes and offsets are replaced at the one place every
+algorithm passes through. Building a layout result without an algorithm
+would need a new algorithm that lays out children itself and would lose the
+data that tables, flex, and grid add to their fragments, which paint and
+DevTools use. Whether replacing sizes and offsets is enough is what 1b
+finds out.
+
+In 1b only, as in 1a, the recorded values are written in the test page, in
+an attribute of each element: `data-a11y-recorded-fragment="x y width
+height"`, the border-box offset in the parent fragment and the border-box
+size, in CSS pixels. They are multiplied by the element's effective zoom to
+give Blink's layout units.
+
+Not covered by 1b, left to Blink's own layout:
+
+- A box broken into several fragments, as across columns, and any box laid
+  out under block fragmentation: a recorded fragment is one fragment, so
+  only a fragment that is the whole of its box takes it.
+- Line boxes and the boxes inside lines, such as inline blocks: these are
+  1c.
+- A writing mode other than horizontal, left to right. Blink's builder
+  holds logical offsets and the recorded offsets are physical; they are
+  equal only in that writing mode, and 1b does not convert between them.
+- Anonymous boxes, which have no element to carry a recorded fragment; the
+  test page has none between a recorded box and its parent.
+- Data that algorithms add to their fragments beside sizes and offsets,
+  such as a table's column positions and a grid's tracks, which Blink uses
+  to paint collapsed table borders and DevTools uses for its grid overlay.
+
+The test page, `chromium/recreation_spike/boxes.html`, gives each case a
+recorded fragment that differs from what its style sheet produces:
+
+- Block boxes in normal flow, the second recorded above the first.
+- A float and an absolutely positioned box.
+- Flex items and grid items at recorded offsets and sizes.
+- A table's cells, rows, and the table itself.
+- Boxes inside a multi-column container, whose parent fragment is a
+  column; these are checked by eye, since the column has no element.
+
+Checked on the target machine, with the page opened under the switch and
+without it:
+
+- With the switch, for each recorded element except those in columns,
+  `getBoundingClientRect()` gives its parent element's rectangle moved by
+  the recorded offset, with the recorded size; a Console snippet, given
+  with the build, compares them. Without it, Blink's own layout.
+- DevTools' element highlight and box model show the recorded rectangle,
+  and the page is painted there.
+- What DevTools' Layout pane overlays show for the flex and grid
+  containers, and how the table's borders and the columns' content are
+  painted, is reported.
+
+Tests: a unit test of the integration script's new patch; the check above
+as the system test.
+
+Built on the `recreation` branch: `patch_blink_box_fragment_builder` in
+`chromium/integrate.py` writes the helper `RecorderRecordedFragment` and
+the hook at the start of `ToBoxFragment`, and
+`chromium/recreation_spike/boxes.html` is the test page. The patch was
+applied to the checkout's `box_fragment_builder.cc`, copied from the target
+machine, and applied again without change. As with 1a, the unit test checks
+the text of the patch, not its compilation. In an unmodified Chromium in
+the development sandbox, the comparison snippet reported Blink's own layout
+for every compared element, as expected without the switch. The builder's
+scrollable overflow and the data it gathers from children as they are
+added, such as their bounds for anchor queries, are not recomputed from the
+recorded offsets.
+
+On the target machine, with revision 5ea654e, as reported on 2026-09-30,
+everything checked tallied with the recorded values. The cells of the
+table's second row were painted slightly to the right of those of the
+first. This came from the test page, not from Blink: the second row was
+recorded at an offset of 2 pixels in its section, and the first row, which
+has no recorded fragment, was placed by Blink at 0. The page now records
+the second row at 0.
+
+#### 1c, recorded lines and glyph runs (proposed)
+
+Proposed on 2026-09-30, for agreement before it is built.
+
+A block holding text has, beside its box fragment, a list of fragment
+items: for each line, a line item, followed by an item for each text run
+and each inline box on the line. A text item holds its range of the block's
+text, its rectangle, and its shaping result: the glyphs to draw, each with
+its glyph identifier, the character it belongs to, and its advance. Paint,
+hit testing, selection, `Range.getClientRects()`, and DevTools read these.
+1c makes the recorded items and glyphs the ones Blink uses.
+
+Where. Blink lays out the lines with its own line breaking and shaping, as
+it does now, and then converts the items' offsets to physical ones, in
+`FragmentItemsBuilder::ConvertToPhysical`
+(`core/layout/inline/fragment_items_builder.cc`, line 377 in the checkout
+on the target machine). Under the switch, at the end of that function, for
+a block whose element has recorded items, in a horizontal, left to right
+writing mode:
+
+- Each line item takes the rectangle recorded for the line of the same
+  index.
+- Each text item takes the rectangle recorded for its text range, and, when
+  glyphs are recorded for that range, a shaping result built from them,
+  with the item's font.
+- Each inline box item, such as an inline block, whose element has a
+  recorded fragment takes that rectangle.
+
+Rectangles of items are in the block's coordinates, as Blink holds them.
+The patch adds to Blink two setters on `FragmentItem`
+(`core/layout/inline/fragment_item.h`), for an item's rectangle and a text
+item's shaping result, and a function on `ShapeResult`
+(`platform/fonts/shaping/shape_result.h`, line 134) that builds a shaping
+result from given glyphs and advances with a given font, after the pattern
+of its `CreateForSpaces`.
+
+In 1c only, the recorded values are written in attributes of the block's
+element:
+
+- `data-a11y-recorded-lines`: "x y width height" for each line, separated
+  by semicolons.
+- `data-a11y-recorded-text`: "start end x y width height" for each text
+  item, the range being offsets in the block's text.
+- `data-a11y-recorded-glyphs`: "start end" and then, for each character of
+  the range, a glyph and its advance in CSS pixels. A recording holds glyph
+  identifiers of the font; a page cannot know them, so in 1c each glyph is
+  given as a code point, "U+0058", and Blink's glyph for it in the item's
+  font is used.
+
+Not covered by 1c, left to Blink:
+
+- Line breaking. Recorded items are matched to Blink's items by line index
+  and text range, so when Blink breaks the text differently from the
+  recording, the unmatched items keep Blink's values; the check reports
+  whether that happens on the test page. Imposing the recorded breaks is a
+  later step, if needed.
+- Glyph offsets, the shifts of a glyph from its pen position, which are
+  zero in most Latin text, and text drawn with more than one font, as with
+  font fallback: a recorded run is drawn with the item's primary font.
+- Writing modes other than horizontal, left to right, as in 1b.
+- Ink overflow and other values Blink derives from items after this point
+  are worked out from the recorded values; values derived before it, such
+  as the line's baseline, are not.
+
+The test page, `chromium/recreation_spike/lines.html`, has a block of two
+lines separated by a line break, with the second line recorded above the
+first, the first line's text recorded at a different offset, and the second
+line's glyphs recorded as other characters with fixed advances; a paragraph
+holding an inline block with a recorded fragment; and a paragraph with no
+recorded values, which is unchanged.
+
+Checked on the target machine, with the page opened under the switch and
+without it:
+
+- With the switch, for each recorded text item, `Range.getBoundingClientRect()`
+  over its text gives the block's rectangle moved by the recorded offset,
+  with the recorded size; a Console snippet, given with the build, compares
+  them. Without it, Blink's own layout.
+- The lines are painted in the recorded places, and the second line shows
+  the recorded glyphs at their recorded advances.
+- Selecting text on the recorded lines with the mouse highlights the
+  recorded glyph positions.
+
+Tests: unit tests of the integration script's new patches; the check above
+as the system test.
+
+Built on the `recreation` branch: in `chromium/integrate.py`,
+`patch_blink_fragment_item_header` adds the setters,
+`patch_blink_shape_result_header` and `patch_blink_shape_result` add
+`ShapeResult::CreateFromRecordedGlyphs`, and
+`patch_blink_fragment_items_builder` writes the attribute readers and the
+hook at the end of `ConvertToPhysical`; `chromium/recreation_spike/lines.html`
+is the test page. Each patch was applied to its file copied from the
+checkout on the target machine, and applied again without change. As with
+1a and 1b, the unit tests check the text of the patches, not their
+compilation. In an unmodified Chromium in the development sandbox, the
+comparison snippet reported Blink's own layout for every compared item, as
+expected without the switch.
+
+On the target machine, revision f23a582 did not compile: the hook passed a
+braced initializer list to WTF's `Vector::push_back`, which cannot deduce
+its argument type from one. The hook now names the type, and a checkout
+holding the earlier hook is upgraded to it.
+
+On the target machine, with revision acc629a, as reported on 2026-09-30,
+the build succeeded and the checks passed: with the switch, the comparison
+snippet reported every recorded text item and the inline block as equal to
+its recorded rectangle; the lines, the recorded glyphs, and the inline block
+were painted as recorded, and the paragraph without recorded values was
+unchanged; and selecting the recorded second line highlighted its recorded
+glyph positions.
+
+With 1c, the feasibility step is complete: recorded styles, box fragments,
+lines, text items, and glyphs can each be imposed in Blink under the
+switch, and DevTools shows the recorded styles as their source.
+
+### Stage 2: recording for the recreation (agreed; 2a, 2b, and 2c built and measured)
+
+Proposed on 2026-09-30 and agreed by the user the same day, with changed
+style values only and packed glyph arrays. 2a is built and not yet tested
+on the target machine; see "2a as built" below. This is slice 2
+of "Slices" above: the recorded additions, in a new protocol version, with
+their cost measured on the target machine.
+
+#### What is recorded, and when
+
+The additions are recorded in the layout change sets of
+`change-driven-recording.md`, for the nodes those change sets already note,
+and in the full walks of slice 5 there, for every node walked. Nothing is
+noted that is not noted now: a box that receives a new layout result is
+noted with the objects its fragment items name and the objects of its child
+fragments, which covers each record below. As now, a record equal to the
+node's last record is not sent again.
+
+1. Computed style. Every property `getComputedStyle()` lists
+   (`CSSComputedStyleDeclaration::ComputableProperties`,
+   `core/css/css_computed_style_declaration.cc`, line 103), read at run time
+   rather than from the fixed list of 283, and every custom property with
+   its value. The list read is recorded in each change set's start record,
+   so a value is a name and a value, as now. After a node's first record, a
+   record holds only the properties whose values differ from the node's last
+   record, and the custom properties added, changed, or removed; the bridge
+   keeps a hash of each value for this. A node whose document the bridge has
+   stopped tracking, as it does beyond 64 documents, is recorded in full
+   again, so a dropped hash costs a repeated record and never a lost one.
+
+2. Box fragments, in a new record, `layout-box-fragments`, for each noted
+   node with a layout box: each of its physical fragments
+   (`LayoutBox::PhysicalFragments()`, `core/layout/layout_box.h`, line 583),
+   in order, with:
+   - its border-box size;
+   - its child links (`PhysicalBoxFragment::Children()`): for each child,
+     its node, or, for an anonymous box or a column, its kind and its index
+     among the links, the child's fragment index, and its offset;
+   - its scrollable overflow rectangle, when it has one
+     (`PhysicalBoxFragment::ScrollableOverflow()`);
+   - for a replaced element, such as an image, its natural size.
+   Offsets are recorded at the parent, as the recreation imposes them in
+   1b. A box broken across columns has one entry for each fragment, with its
+   break position.
+
+3. Fragment items, in the same record, for each fragment that holds lines
+   (`PhysicalBoxFragment::Items()`): the block's text content as laid out,
+   recorded when it changes, and each item in order, with its type (line,
+   text, generated text, or box), its rectangle in the fragment, and, for a
+   text item, its range of the text content, and for a box item, its node.
+
+4. Glyph runs, for each text item, from its shaping result
+   (`ShapeResultView::ForEachGlyph`, `platform/fonts/shaping/
+   shape_result_view.h`, line 137), which reports each glyph with its font,
+   so text drawn with fallback fonts is recorded as several runs: for each
+   run, its font (family, typeface name, size, and synthetic bold or
+   italic), and for each glyph its identifier, the character it belongs to,
+   its advance, and its offset. Glyphs are written as packed little-endian
+   arrays encoded in base64 (2 bytes for an identifier and for a character
+   index, 4 for an advance and for each offset), not as lists of numbers, so
+   a glyph costs 14 bytes before encoding.
+
+The protocol version becomes 0.37. A recording made before keeps its
+records and has none of these.
+
+#### What the app does with them
+
+The recorder's validator accepts the new records and fields; the browser
+state of slice 2 of the plan keeps, for each node, its latest computed
+style, applying the changed properties of each record to the last, its box
+fragments, and, for a block, its fragment items and glyph runs; and the
+state snapshots, at a new snapshot format version, hold them. The player
+shows nothing new yet; the recreation reads them from stage 3.
+
+#### Sub-steps
+
+Each is built, checked on the target machine, and measured before the next:
+
+- 2a, computed style: every computable property and the custom properties,
+  with changed properties only after a node's first record.
+- 2b, box fragments: sizes, child offsets, scrollable overflow, and natural
+  sizes.
+- 2c, fragment items and glyph runs.
+
+#### Checks and measurement
+
+- At each layout checkpoint the change check of `change-driven-recording.md`
+  already compares the state rebuilt from change records with the
+  checkpoint. It is extended to the additions: the rebuilt computed style,
+  fragments, items, and glyphs of each node equal those of the full walk.
+- For each sub-step, a recording on the target machine of the same pages,
+  made with the earlier package and with the new one, compares the bytes
+  written per channel and per minute, the bytes per change set, and the
+  rendering update time the bridge already reports. What it costs is
+  recorded in this document before the next sub-step.
+
+#### Limits
+
+- Values Blink holds outside fragments and items, such as a table's column
+  positions and a grid's tracks, are not recorded; 1b found that the
+  recreation does not need them for the cases tested.
+- Fonts are recorded by name; font files come with slice 4 of the plan.
+- A transform or opacity animation running on the compositor is not
+  recorded, as now.
+
+#### 2a as built
+
+Protocol 0.37. The differences from the design above are marked.
+
+- The checkpoint helper in `chromium/integrate.py` reads the property list
+  from `CSSComputedStyleDeclaration::ComputableProperties` for the
+  document's execution context, and keeps the names in a static list. The
+  fixed list of 283 is kept in the script
+  (`LEGACY_FIXED_LIST_BLINK_LAYOUT_CHECKPOINT_HELPER`) only to recognise and
+  upgrade a checkout patched before 0.37.
+- Custom properties are read with
+  `ComputedStyleCSSValueMapping::GetVariables` and the document's property
+  registry, which reads each name `ComputedStyle::GetVariableNames` holds
+  as `getComputedStyle()` resolves it, and are recorded by name in
+  code-unit order. (`ComputedStyleCSSValueMapping::Get`, which reads one
+  name, is private in the reference checkout.) The names include the custom
+  properties an element inherits, so an element under a page that defines
+  many of them records each one in its first record.
+- Each checkpoint node and change record states `customProperties`, an
+  object of name and value, or null when `computedStyle` is null.
+- Difference from the design: the property list is recorded in each layout
+  checkpoint's start record (`styleProperties`), as before, and not in each
+  change set's start record. A node's first change record holds every
+  property by name, and every later record names the properties it holds,
+  so the list adds nothing a reader needs, and repeating it would add
+  several kilobytes to every change set.
+- After a node's first record, the bridge (`LayoutChangeFilter::
+  ReduceToStyleChanges` in `chromium/recorder_bridge/layout_changes.h`)
+  keeps a hash of each style value and of each custom property, and a
+  change record holds only the values that differ from the node's last
+  record, with `computedStyleComplete` false and
+  `removedCustomProperties` listing the custom properties the node no
+  longer has. A first record, and a record after a record of the
+  `browser.layout` channel was lost, holds every value, with
+  `computedStyleComplete` true and `removedCustomProperties` null. A node
+  whose document the bridge stopped tracking is recorded in full again.
+  `computedStyleComplete` is null when `computedStyle` is null.
+- The app's validator checks these fields together: a record of changes
+  must state its custom properties and removals, and a complete record
+  must not list removals. The layout change state merges a record of
+  changes into the node's last record, so the state and its snapshots hold
+  each node's whole style; a merged record states that it is complete only
+  when the record it was merged into was. The snapshot format is
+  unchanged, since it holds node records as they are.
+- The layout change check compares the rebuilt custom properties with the
+  checkpoint's, as `custom-properties`, and counts a rebuilt style that was
+  never recorded whole as `computed-style-incomplete`.
+
+The cost of 2a is measured on the target machine before 2b is built. The
+app test `RecordingCostReport` (`tests/Recorder.Tests/RecordingCostReport.cs`),
+run with `RECORDER_COST_FILE` naming a recording file, reports the bytes of
+each channel, over the recording and per minute, before chunk compression,
+and the bytes of each layout record type and of an average change set. The
+rendering update time is read from the bridge's "Recorder evidence cost"
+lines in the recording's Chromium log.
+
+#### 2a results
+
+Two recordings on the target machine on 2026-10-01, with the check setting
+off, of the same pages (the same twelve navigation addresses, on
+`www.cnib.ca` and the pages it embeds): one at revision acc629a (protocol
+0.36), 1.53 minutes, and one at revision d3e1598 (protocol 0.37), 0.86
+minutes. A third recording at d3e1598 held no browser evidence and no
+Chromium log, and is not used. Neither recording dropped an event. The
+bytes are those of the records before chunk compression, from
+`RecordingCostReport`; the times are the sums of the bridge's "Recorder
+evidence cost" lines.
+
+| | acc629a (0.36) | d3e1598 (0.37) |
+| --- | --- | --- |
+| Properties listed per element | 283 | 480 |
+| `browser.layout` bytes | 110,175,252 | 93,899,552 |
+| `layout-node-changed` records, bytes | 14,402, 103,675,974 | 15,591, 80,865,359 |
+| `layout-checkpoint-node` records, bytes per record | 1,114, 4,163 | 1,255, 9,422 |
+| Change sets, bytes per change set | 342, 308,120 | 202, 405,249 |
+| `recorder.state` (snapshots) bytes | 82,519,732 | 99,578,451 |
+| Bridge time in change sets: calls, total, mean, largest | 1,360, 0.307 s, 226 us, 31.1 ms | 530, 1.080 s, 2,038 us, 157.6 ms |
+| Layout checkpoint walks: count, total, largest | 21, 0.076 s, 25.7 ms | 18, 0.290 s, 98.9 ms |
+
+The 0.37 change records split as follows: 3,439 whole records (a node's
+first, 17,424 bytes each, with 480 values and 59.4 custom properties on
+average); 8,963 records of changes only (1,733 bytes each, with 0.7 style
+values and 0.4 custom properties on average); and 3,189 records with no
+style (1,697 bytes each). The checkpoint nodes held 138.8 custom properties
+on average.
+
+The layout change check compared 18 checkpoints and 1,255 nodes of the
+0.37 recording, and every node matched in every field, custom properties
+included; the 0.36 recording's 21 checkpoints and 1,114 nodes also all
+matched. With the check setting off, a checkpoint is a document's first
+walk, so these comparisons do not yet exercise the merging of records of
+changes into later states; a recording with the check setting on does.
+
+What this shows, within these two recordings:
+
+- For the same pages, `browser.layout` held 15 percent fewer bytes,
+  although each element lists 480 properties instead of 283 and its custom
+  properties: a later record of a node holds only what changed.
+- The snapshots grew by 21 percent, since they hold each node's whole
+  style.
+- The bridge's time in change sets rose from a mean of 226 us to 2,038 us
+  per call, and its largest single call from 31.1 ms to 157.6 ms; these
+  calls run on the renderer's main thread at the end of a rendering
+  update. The bridge's lines do not time Blink's reading of the values
+  before the call, so the whole cost to a rendering update is larger than
+  this and is not measured.
+- The recordings differ in length, so per-minute rates are not compared.
+
+The owner, on 2026-10-01, on the main-thread time: "for now, let's carry
+on and come back to the optimization later. There may be more to do, so we
+can deal with it in one session." The time of 2a is to be measured in full
+and reduced after 2b and 2c, together with theirs.
+
+#### 2b design (agreed)
+
+Proposed on 2026-10-01 and agreed by the owner the same day, with both
+changes from the outline. It fills in item 2 of "What is recorded, and
+when" above, with two changes from it, marked.
+
+Where it is recorded. Change from the outline: the fragments are a new
+field of the node records the change sets and checkpoints already write,
+`boxFragments`, not a new `layout-box-fragments` record. In the 2a
+recording a record with almost no fields, `layout-changes-completed`, took
+1,292 bytes, so a record of its own for each box would add about that much
+to every box recorded; and the bridge's comparison with the node's last
+record, which decides whether a record is sent, then covers the fragments
+with no second cache. A node record is sent when its fragments differ from
+its last record, as when its style or geometry differs; the whole
+`boxFragments` is sent each time, not only what changed.
+
+Protocol version. Change from the outline: 2b is protocol 0.38, not 0.37,
+since 0.37 was built and recorded for 2a, and a live connection needs an
+exact version match.
+
+When a node is read. A box that receives a new layout result is already
+noted, with the objects of its child fragments
+(`RecorderNoteLayoutResult`); a new size, child offset, scrollable
+overflow, or natural size comes with a new layout result, so nothing new is
+noted. The checkpoint walk reads every node, as now.
+
+What `boxFragments` holds, for a node whose layout object is a layout box
+(`LayoutObject::IsBox`), and null otherwise (a text node, an inline box
+such as a `span`, which 2c covers through its block's items, and a node
+without a layout object):
+
+- `effectiveZoom`: the box's `ComputedStyle::EffectiveZoom`.
+- `fragments`: each of the box's physical fragments
+  (`LayoutBox::PhysicalFragments`, `core/layout/layout_box.h`, line 583),
+  in order. Each holds:
+  - `width` and `height`: its border-box size (`PhysicalFragment::Size`).
+  - `breakToken`: null for a fragment that ends the box; otherwise the
+    position its next fragment continues from
+    (`PhysicalBoxFragment::GetBreakToken`): `consumedBlockSize`,
+    `sequenceNumber`, and `atBlockEnd`.
+  - `scrollableOverflow`: its scrollable overflow rectangle
+    (`PhysicalBoxFragment::ScrollableOverflow`) when it has one
+    (`HasScrollableOverflow`), and null otherwise.
+  - `children`: each child link (`PhysicalBoxFragment::PostLayoutChildren`,
+    the latest generation of each child), in order, with `x` and `y`, its
+    offset in this fragment (`PhysicalFragmentLink::Offset`), and `kind`:
+    - `box`: a box with a DOM node, an element or pseudo-element, named by
+      `nodeId`, with `fragmentIndex`, which of that node's fragments it
+      is. That node's own record holds its fragment.
+    - `anonymous`: a box Blink generated with no node, such as an
+      anonymous block, and `column` and `page`: a column or page
+      fragment of a multi-column or paged box. These have no record of
+      their own, so the child holds its fragment, `fragment`, in the same
+      form, nested.
+    - `line`: a line box, if a fragment holds one as a child; a block's
+      lines are otherwise its fragment items, which 2c records.
+- `naturalSize`: for a replaced element, such as an image, its natural
+  dimensions (`LayoutReplaced::ComputeNaturalSizingInfo`,
+  `core/layout/natural_sizing_info.h`): `width`, `height`, `hasWidth`,
+  `hasHeight`, `aspectRatioWidth`, and `aspectRatioHeight`; null for
+  other boxes.
+
+Units. Every length is the value Blink holds, a layout unit (1/64 of a
+pixel) written as a number, which is exact; physical, not logical; and
+zoomed, as Blink lays out, so a length in CSS pixels is the value divided by
+`effectiveZoom`. Recording Blink's own values keeps them exact for the
+recreation, which gives them back to Blink.
+
+What the app does. The validator checks the field's shape and that a
+`box` child names a node and the others do not; the contracts gain its
+records; the layout change state keeps it with the node, a record of style
+changes carrying the node's current `boxFragments` as it carries its
+geometry; snapshots hold it, as they hold node records as they are. The
+layout change check compares each checkpoint node's `boxFragments` with the
+rebuilt one, as `box-fragments`, exactly, since both are read from the same
+fragments.
+
+Cost. Measured as for 2a, with a recording of the same pages at 0.37 and
+0.38, and the check setting on in one recording so the comparison covers
+nodes recorded after their first record.
+
+Limits:
+
+- 1b imposes one fragment per box in horizontal, left-to-right writing;
+  the record holds every fragment and its break position, and physical
+  offsets in any writing mode, so the recreation can take more cases
+  later without a new recording.
+- Data layout algorithms keep beside sizes and offsets, such as a grid's
+  tracks, are not recorded, as above.
+- A child link's fragment is read in its latest generation; a fragment
+  Blink holds from an earlier generation is not recorded.
+
+Required tests:
+
+- Unit: the integration script's tests of the new reading in both the
+  checkpoint and the change set; the bridge's serialization of the field
+  and its part in the comparison with the last record; the validator's
+  checks; the layout change state and check with fragments, including a
+  record of style changes; the contract round trip.
+- System, on the target machine: the two recordings above, with the check
+  setting on in the 0.38 one and no `box-fragments` differences.
+
+#### 2b as built
+
+Built on 2026-10-01; not yet compiled or recorded on the target machine.
+
+- Integration script (`chromium/integrate.py`): the layout checkpoint
+  helper gains `RecorderReadBoxFragment` and `RecorderReadBoxFragments`,
+  called in the checkpoint walk after a node's shadow fields, and the
+  change set's node reader calls the same reader at its end. A checkout
+  patched at 0.37 has its change-set definition recognised and replaced;
+  the helper region is rewritten whole, as before. New includes:
+  `block_break_token.h`, `layout_replaced.h`, `natural_sizing_info.h`, and
+  `physical_fragment_link.h`.
+- Bridge (`chromium/recorder_bridge`): `LayoutBoxFragments`,
+  `LayoutBoxFragment`, and `LayoutFragmentChild` in `layout_changes.h`, a
+  field of `LayoutCheckpointNode`, so the checkpoint and the change set
+  share them; the node hash covers every field, so a node whose fragments
+  differ from its last record is recorded again. `SetLayoutNodeFields`
+  writes `boxFragments`, and the size estimate counts it.
+- App: contracts `BrowserLayoutBoxFragments`, `BrowserLayoutBoxFragment`,
+  `BrowserLayoutFragmentChild`, `BrowserLayoutBreakToken`, and
+  `BrowserLayoutNaturalSize`. Validator rules and errors:
+  `browser-layout-box-fragments-without-box`,
+  `browser-layout-fragment-child-node-inconsistent`,
+  `browser-layout-fragment-child-fragment-inconsistent`, and
+  `browser-layout-break-token-inconsistent`. The layout change state needs
+  no change, since a record of style changes is merged by copying every
+  other field, `boxFragments` included. The layout change check compares
+  the field exactly and reports `box-fragments compared`. Snapshots hold
+  node records as they are, so they hold the field without a format
+  change.
+
+Two details added in building, beyond the design:
+
+- `breakToken` also states `breakBefore`, whether the token is a break
+  before the box rather than inside it. Blink states no sequence number
+  for such a token (`BlockBreakToken::SequenceNumber` requires one that is
+  not), so `sequenceNumber` is null exactly then.
+- A `box` child whose fragment is not among its node's fragments has a
+  null `fragmentIndex`.
+
+No database migration, as for 2a: the database tables are not written for
+recordings that have a recording file.
+
+#### 2b results
+
+Recorded by the owner on 2026-10-01 on the target machine with a3c21b4, on
+the same pages as the 2a recording: two recordings at 0.38, one without the
+check setting (20261001-200852) and one with it at every 100 updates
+(20261001-201008). The 0.37 recording of 2a (20261001-185400) is the
+baseline. Bytes are those of the records before chunk compression.
+
+| | 0.37 | 0.38 | 0.38, check on |
+| --- | --- | --- | --- |
+| Minutes recorded | 0.85 | 0.99 | 1.21 |
+| `browser.layout` bytes | 93.9 MB | 101.3 MB | 106.1 MB |
+| Change sets | 202 | 229 | 257 |
+| Bytes per `layout-node-changed` record | 5,187 | 5,343 | 4,885 |
+| Bytes per checkpoint node record | 9,422 | 9,368 | 9,372 |
+| Bridge change-set time, mean | 2,038 µs | 1,767 µs | 1,380 µs |
+| Bridge change-set time, largest | 157.6 ms | 158.4 ms | 157.0 ms |
+| Walk field reading, mean per walk | 56 µs | 83 µs | 85 µs |
+| Walk field reading, largest | 280 µs | 620 µs | 571 µs |
+
+- Size. In the 0.38 recording without the check, the `boxFragments` JSON
+  of change records was 2.83 MB of their 87.8 MB (3.2%), in 9,463 records
+  holding 9,765 fragments and 15,267 child links; in checkpoint records it
+  was 90 KB of 12.1 MB (0.7%), for 348 boxes. The recordings differ in
+  length and in the number of change sets, so the totals are not compared
+  as a rate.
+- Time. The bridge's time per change set did not rise; its differences
+  are within those between recordings of the same build. Blink's reading of
+  the fragments in a change set happens before the bridge is called and is
+  not timed. In a walk it is part of the node-fields phase, whose mean rose
+  from 56 to 83 µs per walk.
+- Layout check. In both 0.38 recordings every compared checkpoint node
+  matched, box fragments included: 1,288 of 1,288 nodes, 706 of them with
+  a change record whose box fragments were compared, and 1,265 of 1,265
+  nodes, 674 compared. The largest rectangle difference was
+  1.3 × 10⁻⁵ CSS px.
+- Limit. Every checkpoint in both recordings was a document's first walk,
+  so the comparison covers each node's first record only, not a record
+  after it, nor a record of style changes merged into an earlier one. The
+  check setting walks a document at every Nth layout checkpoint it
+  requests; the busiest document had 79 change sets, and no check walk was
+  recorded. A recording with a smaller interval is needed to cover later
+  records.
+
+A third 0.38 recording, by the owner on 2026-10-01 with the same build and
+pages and the check setting at every 10 updates (20261001-202215), covers
+later records:
+
+- 35 checkpoints: 20 first walks and 15 check walks, all compared.
+- 19,516 of 19,516 compared checkpoint nodes matched in every field,
+  16,092 of them with a change record whose box fragments were compared
+  (null ones included). The largest rectangle difference was
+  2.5 × 10⁻⁴ CSS px.
+- The change records held 9,934 records of style changes alone
+  (`computedStyleComplete` false), merged into the nodes' earlier records;
+  no compared node's rebuilt style was incomplete and none differed. This
+  is the first recording on the target machine to check the 2a merging.
+
+#### 2c design (agreed)
+
+Proposed on 2026-10-01 and agreed by the owner the same day, with its three
+changes from the outline. It fills in items 3 and 4 of "What is recorded,
+and when" above, with the changes marked.
+
+Where it is recorded. As in 2b, in the node records: each fragment in a
+block's `boxFragments` gains `items`, and the block's `boxFragments` gains
+`textContent`. A block is noted when it receives a new layout result, with
+the objects its items name, so nothing new is noted.
+
+Protocol version. Change from the outline: 0.39, since 0.37 and 0.38 are
+built and recorded.
+
+The text content. `textContent` is the block's text as laid out
+(`FragmentItems::NormalText`, `core/layout/inline/fragment_items.h`, line
+47), which item offsets index, and `firstLineText`, the text for
+`::first-line` when Blink holds one (`FirstLineText`), and null otherwise.
+Both are recorded whole, with no length limit. As the outline says, they
+are recorded when they change: the bridge keeps a hash of each node's last
+text, and a record whose text equals it states `textContent` and
+`firstLineText` null with `textContentUnchanged` true. The app's layout
+change state then keeps the node's earlier text, as it keeps earlier style
+values in 2a, and after a lost record the bridge forgets its hashes, so the
+next record holds the text again.
+
+The items. For each fragment with items (`PhysicalBoxFragment::Items`),
+`items` lists them in Blink's order, a pre-order list in which a line or
+box item is followed by its descendants (`FragmentItem::DescendantsCount`,
+`core/layout/inline/fragment_item.h`, line 280). It is null for a fragment
+without items. Each item holds:
+
+- `type`: `line`, `text`, `generated-text`, or `box`
+  (`FragmentItem::Type`, line 151).
+- `x`, `y`, `width`, `height`: its rectangle in the fragment
+  (`RectInContainerFragment`, line 239), in layout units.
+- `descendantsCount`, for a line or box item.
+- `nodeId`: the node of its layout object, or null for one with no node,
+  such as an anonymous box. For a text item it is the text node, for a box
+  item the inline box or atomic inline.
+- For a text or generated-text item: `start` and `end`, its range of the
+  text content (`TextOffset`); `firstLineStyle`
+  (`UsesFirstLineStyle`); `direction`, `ltr` or `rtl`
+  (`ResolvedDirection`); `hiddenForPaint` (`IsHiddenForPaint`); and its
+  glyph runs.
+- For a generated-text item, such as an ellipsis, a list marker, or a
+  hyphen, which is not part of the text content: `generatedText`, its
+  text (`GeneratedText`).
+
+The glyph runs. For each text item, its shaping result
+(`FragmentItem::TextShapeResult`) is read with
+`ShapeResultView::ForEachGlyph`
+(`platform/fonts/shaping/shape_result_view.h`, line 137), which reports
+each glyph with its font. A run is a sequence of glyphs with the same font,
+orientation, and rotation, so text drawn with fallback fonts gives several
+runs. Each run holds:
+
+- `font`: `family` (`FontPlatformData::FontFamilyName`), `postScriptName`
+  (the typeface's), `size` (`FontPlatformData::size`), `syntheticBold`, and
+  `syntheticItalic`.
+- `horizontal` and `rotation`: the glyphs' orientation and their rotation
+  in vertical text, as the callback reports them.
+- `glyphs`: a packed little-endian array, encoded in base64, of 18 bytes
+  per glyph: the glyph identifier (2 bytes), the character index as Blink
+  reports it, an index into the text content (4 bytes), the glyph's
+  position along the run, the total advance before it (4 bytes, a float),
+  and its offset, x and y (4 bytes each, floats).
+
+Changes from the outline in the glyphs. First, a character index takes 4
+bytes, not 2: it indexes the block's text content, which can be longer than
+65,535 code units, and a limit on it would drop glyphs. Second, the
+callback reports the total advance before each glyph rather than its own
+advance, so that is what is recorded; a glyph's advance is the difference
+from the next glyph's, and the last glyph's is the item's width less its
+position. A glyph costs 18 bytes before encoding, 24 after.
+
+Units. Item rectangles are layout units, physical and zoomed, as in 2b.
+Glyph positions and offsets are the floats Blink reports, in zoomed
+pixels. SVG text items are scaled as Blink holds them and are recorded as
+they are.
+
+What the app does. The validator checks the shapes, that every item's
+range lies within the text content, that each glyphs field decodes to a
+whole number of 18-byte glyphs, and that `textContentUnchanged` comes only
+with null text; the contracts gain the records; the layout change state
+keeps a node's text when a record states it unchanged; snapshots hold the
+merged records as they are. The layout change check compares each
+checkpoint node's `boxFragments`, items and text included, exactly, as for
+2b; a rebuilt node whose text was never recorded whole is noted as
+`text-content-incomplete`.
+
+Cost. Measured as for 2b: one 0.39 recording of the same pages without the
+check setting, against the 2b recording without it, and one with the check
+at every 10 updates.
+
+Limits:
+
+- Fonts are recorded by name, as above; font files come with slice 4 of the
+  plan.
+- Ink overflow, text decorations, and emphasis marks are not recorded;
+  paint computes them from style and the recorded glyphs.
+- A ruby annotation's items are recorded as Blink holds them; the
+  recreation of ruby is not designed.
+
+Required tests:
+
+- Unit: the integration script's tests of the item and glyph reading in
+  the checkpoint and the change set; the bridge's packing of glyphs, its
+  text hashes, and their part in the comparison with the last record; the
+  validator's checks; the layout change state's keeping of unchanged text;
+  the check with items and text; the contract round trip.
+- System, on the target machine: the two recordings above, with no
+  `box-fragments` or `text-content-incomplete` differences in the one with
+  the check.
+
+#### 2c as built
+
+Built on 2026-10-01 at protocol 0.39 and tested on the target machine the
+same day; see "2c results". As designed, with these additions and details:
+
+- Text of an anonymous block. A block's loose text beside its child blocks,
+  as in `<div>text<p>para</p></div>`, is laid out in an anonymous block,
+  which has no node and whose fragment is held by its parent's child link
+  (2b). Its items index its own text, not the node's, so each fragment held
+  by a child link that holds items records `textContent` and
+  `firstLineText` itself, whole and with no unchanged marker. A node's own
+  fragments state both null, their text being the node's in
+  `boxFragments`. The node's text hash covers only the node's own text;
+  the record's hash covers both, so a changed anonymous text still sends
+  the record.
+- Generated text has no range. Blink holds a generated-text item's text
+  apart from the text content (`FragmentItem::GeneratedTextItem`,
+  `core/layout/inline/fragment_item.h`, line 81), so only a text item
+  states `start` and `end`; a generated-text item states them null and
+  states `generatedText`.
+- Conversion. Text and names are converted to UTF-8 with an unpaired
+  surrogate replaced by U+FFFD
+  (`Utf8ConversionMode::kStrictReplacingErrors`), which keeps every UTF-16
+  offset the items state.
+- Where the packing happens. Blink's reading fills plain glyph records,
+  each with its identifier, character index, total advance, and offset,
+  and the bridge packs them as designed when it writes the record. The
+  integration script lets Blink call only the bridge's exported entry
+  points, so the packing stays in the bridge, where its unit test is.
+- The app reads a run's glyphs with `BrowserLayoutGlyphs.Unpack` in the
+  contracts, which refuses a run that is not whole 18-byte glyphs.
+- Validator errors: `browser-layout-fragment-item-inconsistent` (an item
+  without what its type states, or spanning past the list),
+  `browser-layout-fragment-item-range-outside-text`,
+  `browser-layout-glyphs-invalid`, and
+  `browser-layout-text-content-inconsistent` (text stated where it does not
+  belong, missing where items are, or stated with the unchanged marker).
+  A range is checked against the text it indexes when the record holds
+  it, and not when the text is left out as unchanged.
+- The layout change check notes `text-content-incomplete` instead of
+  comparing the box fragments when the rebuilt record still marks its text
+  unchanged.
+- Blink's garbage-collection plugin refuses a raw pointer to a font in an
+  ordinary structure, so the glyph reading, which keeps the current run's
+  font, is marked `STACK_ALLOCATED()`; it lives only for one
+  `ForEachGlyph` call.
+
+#### 2c results
+
+Recorded by the owner on 2026-10-01 on the target machine with ff1a2a2, on
+the same pages as 2b: one recording without the check setting
+(20261002-005805) and one with it at every 10 updates (20261002-005927).
+The 2b recordings without the check (20261001-200852) and with it at every
+10 updates (20261001-202215) are the baselines. Bytes are those of the
+records before chunk compression.
+
+| | 2b | 2c | 2b, check | 2c, check |
+| --- | --- | --- | --- | --- |
+| Minutes recorded | 0.99 | 1.08 | 1.12 | 1.04 |
+| Change sets | 229 | 262 | 288 | 244 |
+| Bytes per change set | 388,515 | 397,691 | | 407,847 |
+| Bytes per `layout-node-changed` record | 5,343 | 5,234 | 5,214 | 5,504 |
+| Bytes per checkpoint node record | 9,368 | 9,730 | 9,658 | 9,938 |
+| Bridge change-set time, mean | 1,767 µs | 1,968 µs | | 2,001 µs |
+| Bridge change-set time, largest | 158.4 ms | 166.5 ms | | 166.6 ms |
+| Walk field reading, mean per walk | 83 µs | 236 µs | | 2,405 µs |
+| Walk field reading, largest | 620 µs | 1,580 µs | | 21.3 ms |
+
+The blank cells are those not computed for the 2b check recording.
+
+- Size. In the 2c recording without the check, the change records held
+  15,827 items in 102.7 MB: their JSON without glyph runs was 3.50 M
+  characters, and their 6,004 glyph runs 4.31 M, of which the base64 of
+  142,344 glyphs was 3.42 M. Text took 38 K characters; 3,157 records left
+  their text out as unchanged. Items and runs together are about 7.6% of
+  the change-record bytes. The bytes per change set rose 2.4% over 2b; the
+  recordings differ in length and in their change sets, so this is not a
+  rate.
+- Time. The bridge's mean time per change set rose from 1,767 to
+  1,968 µs, which includes packing and encoding the glyphs; Blink's reading
+  of items and glyphs in a change set is not timed. In a walk, reading them
+  is part of the node-fields phase. Its mean rose from 83 to 236 µs per
+  walk over first walks, and in the check recording, whose 14 check walks
+  read whole documents, to 2,405 µs, with a largest walk of 21.3 ms. The
+  check walks run only with the check setting.
+- Layout check. Every compared checkpoint node matched in every field,
+  items, glyphs, and text included: 1,412 of 1,412 nodes over 20 first
+  walks without the check, and 18,632 of 18,632 over 20 first and 14 check
+  walks with it, 15,253 of them with box fragments compared (null ones
+  included). There was no `text-content-incomplete` note, and the 2,868
+  records in the check recording that left their text out had it put back
+  from earlier records. The largest rectangle difference was
+  2.5 × 10⁻⁴ CSS px.
+- Limits. The pages are those of 2b only. The glyph runs were checked as
+  equal between the change records and the walks, not against what was
+  painted, which stage 3 does by rendering them.
+
+
+#### Required tests
+
+- Unit tests of the bridge's new records against the record contract, and
+  of the encoding of glyph arrays.
+- Unit tests of the validator and of the browser state for the new records,
+  including a computed style rebuilt from changed properties and a
+  snapshot holding fragments and glyphs.
+- Integration tests of the integration script's new hooks.
+- The extended change check on recordings from the target machine, as the
+  system test.
+
+### Stage 3: a recorded frame rendered from recorded values (agreed; built)
+
+Proposed on 2026-10-01 and agreed by the owner the same day ("yes I do"). The owner, on
+2026-10-01: "I would prefer to experience the rendering of a frame rather
+than worry about optimization. Let's build the tool, at least to the point
+where I can make qualitative judgments on responsiveness." Stage 3 is
+therefore the shortest path from the player to a recorded frame drawn by
+Blink from the recorded values, on the paths built already, with the
+recorded styles, box fragments, items, and glyphs all imposed. It takes
+slices 3 and 4 of "Slices" above together, and leaves building the DOM in
+the renderer for later.
+
+What the owner does. In the player, at a frame, "Inspect page at this
+frame" lists the pages and opens the one chosen, as in slice 3b. The
+recreation browser now starts the instrumented Chromium with
+`--a11y-recorder-recreation`, so the page is drawn from the recorded
+values, with DevTools open on it.
+
+How it is built:
+
+- The DOM is built by the builder script of slice 3b, unchanged, with the
+  recorded text control values, selection, focus, and scroll offsets.
+- The values come from the document's layout change state at the frame
+  (`LayoutDocumentChangeState`), which holds each node's latest record
+  with its style changes and unchanged text merged in, as the change check
+  uses it.
+- They reach Blink as in the feasibility step, in attributes the builder
+  sets on each element before it is inserted, read only under the switch:
+  `data-a11y-recorded-style`, the recorded computed style and custom
+  properties as CSS declarations, read by the 1a hook unchanged; and
+  `data-a11y-recorded-layout`, the node's recorded `boxFragments` JSON as
+  recorded, replacing the attributes of 1b and 1c. Text nodes carry
+  nothing: a text's items are in its block's record.
+- The 1b hook, at the start of `BoxFragmentBuilder::ToBoxFragment`, takes
+  the box's size from its recorded fragment, and each child's offset from
+  the recorded child link at the same index, when the builder holds as
+  many children as the record holds links. The fragment is the record's
+  first for a box that is not fragmented; a fragmented box keeps Blink's
+  sizes, as in 1b.
+- The 1c hook, at the end of `FragmentItemsBuilder::ConvertToPhysical`,
+  takes each item's rectangle from the recorded item at the same index,
+  when Blink's items have the recorded types in the recorded order and the
+  block's text content equals the recorded text; otherwise the block keeps
+  Blink's items.
+- Glyphs: a text item with one recorded run whose font has the PostScript
+  name and size of the item's primary font is drawn from the recorded glyph
+  identifiers and the advances between their recorded positions, with
+  `ShapeResult::CreateFromRecordedGlyphs` changed to take glyph
+  identifiers rather than code points. Any other item keeps Blink's
+  shaping inside its recorded rectangle.
+- Blink then paints from these with its own code.
+
+How responsiveness is shown. The player times each part of opening a
+frame: reading the state at the frame, writing the page, starting or
+reusing the recreation browser, building the DOM, and the first paint
+after it, read from the page's `requestAnimationFrame` after the build.
+The times are listed in the evidence panel's notes and written to the
+app's log, beside the owner's own judgment.
+
+What the owner can judge: the time from choosing the page to seeing it,
+scrolling and DevTools on the recreated page, and how closely the drawing
+matches the frame's screenshot.
+
+Limits of this stage:
+
+- The recorded values are visible as two attributes on each element in
+  DevTools' Elements pane, and attribute selectors see them. Moving them
+  off the DOM is the later step that builds the DOM in the renderer.
+- Images draw nothing, and web fonts are not available, so text in a web
+  font keeps Blink's shaping with a fallback font in its recorded
+  rectangle; fonts and images come with slice 4 of the plan. On the
+  machine the recording was made on, system fonts are those recorded.
+- Glyph offsets are not imposed, and text drawn with several fonts, as
+  with font fallback, keeps Blink's shaping.
+- Only horizontal, left to right writing modes take recorded fragments and
+  items, as in 1b and 1c.
+- A block whose recorded items or text do not match Blink's, and a box
+  whose children do not match its record, keep Blink's layout; how many do
+  is counted by the hooks and listed in the panel, so a mismatch is seen,
+  not hidden.
+- The fidelity guard stays as designed, after slice 4.
+
+Required tests:
+
+- Unit: the attributes the page writer produces from a layout change
+  state, including merged style changes and a node without a record; the
+  recreation browser's switch; the integration script's tests of the
+  changed hooks, including the matching rules and the font test for
+  glyphs; the timing notes.
+- Integration, with `RECORDER_RECREATION_CHROMIUM` set: a generated page
+  with recorded values is opened, and the box sizes, child offsets, and
+  item rectangles read back over the DevTools protocol equal the recorded
+  ones.
+- System, on the target machine: a frame of the cnib recording opened from
+  the player, judged by the owner, with the panel's timings and counts.
+
+#### Stage 3 as built
+
+Built on 2026-10-01, not yet run on the target machine.
+
+- The page writer (`RecordedPage`) gives each element of the tree data a
+  `recordedStyle` and a `recordedLayout`, from the element's record in the
+  document's layout change state, or null without one. The style is each
+  computed style property with a value, then each custom property, written
+  `name: value;`; the layout is the record's `boxFragments` JSON unchanged.
+  The builder sets them as `data-a11y-recorded-style` and
+  `data-a11y-recorded-layout` before the element is inserted.
+- The recreation browser passes `--a11y-recorder-recreation`. It still has
+  no recorder bootstrap, so it records nothing.
+- The 1a style hook is unchanged. The 1b and 1c helpers and hooks, and
+  `ShapeResult::CreateFromRecordedGlyphs`, are replaced; the integration
+  script upgrades a checkout that holds the feasibility versions, and stops
+  with an error if feasibility text is left after the upgrade. The
+  feasibility attributes `data-a11y-recorded-fragment`, `-lines`, `-text`,
+  and `-glyphs` are no longer read, so the spike pages `boxes.html` and
+  `lines.html` no longer show recorded values.
+- Revision 44736a8 did not compile: in a `BoxFragmentBuilder` member the
+  `Node` class is hidden by the builder's `Node()` method. The box hook
+  declares the node with `auto`, and the integration script upgrades the
+  44736a8 hook.
+- The hooks parse the attribute with Blink's JSON parser
+  (`platform/json`) each time they run for a box or block.
+- Box fragments: the box takes the size of its only recorded fragment, and
+  child link `i` gives the offset of builder child `i` when the counts are
+  equal.
+- Items: a block with an element reads its element's record; an anonymous
+  block reads the fragment of the first anonymous child link of its
+  parent's record whose `textContent` equals the block's text. The items
+  are imposed when their count, types in order, text ranges, and the text
+  match.
+- Glyphs: the packed glyphs are decoded with Blink's `Base64Decode`. A
+  glyph's advance is the next glyph's recorded position less its own, and
+  the last glyph's is the recorded item width less its position. Each glyph
+  keeps its recorded character index, so a glyph may stand for more than
+  one character. The PostScript name is compared as Skia reports it for the
+  typeface, and the size within 0.001.
+- A box or block whose recorded values were not imposed is reported by a
+  warning in the document's console, naming the node so that DevTools can
+  reveal it. Repeated messages are not shown again. The panel does not
+  count them; its notes say where they are.
+- Timings: the recorder times closing the previous recreation, reading the
+  state, writing the page, starting the browser to its DevTools port, and
+  attaching to the tab, and serves them as `timings.json`. The builder
+  records, from the page's time origin, when it started, read the tree,
+  built the DOM, finished the first style and layout, which it forces once
+  for the measure, finished, and when a task posted from the next animation
+  frame ran, after that frame's paint. The panel shows both under "Time to
+  open the recreation". The recorder has no log of its own, so the times
+  are not written to one.
+
+- The window (added on 2026-10-01, after the owner found the window too
+  narrow to show the page and its scroll bar): before the viewport is
+  emulated, the recorder reads the window's frame from the blank tab as
+  `outerWidth - innerWidth` and `outerHeight - innerHeight`, and sets the
+  window's size to the recorded viewport plus that frame with
+  `Browser.setWindowBounds`. The viewport is still emulated after, so a
+  window the screen cannot hold keeps the recorded layout. The owner
+  reported on 2026-10-01 that with revision 2fa7988 the window shows the
+  whole page.
+
+Tests at this stage:
+
+- Unit: the window size for a recorded viewport and frame; the tree data's
+  recorded style and layout, after a record of
+  changes is merged, and none for a text node or an element without a
+  record; the notes; the browser's switch; the server's `timings.json`;
+  the integration script's hooks, their upgrade from the feasibility
+  versions, and the refusal of a feasibility hook it cannot upgrade. The
+  integration script's 170 tests and the bridge's C++ test pass; the .NET
+  tests pass except those that need Windows or a database. One snapshot
+  test, `AFileCutShortIsReadFromItsSnapshotsBeforeTheCut`, failed once in
+  the full run and passed when run alone twice; it does not touch the
+  recreation.
+- Integration: `TheRecreationModeImposesTheRecordedBoxFragmentsAndItems`
+  runs when `RECORDER_RECREATION_CHROMIUM` names the instrumented Chromium;
+  it has not been run yet.
+- System: not yet run.
+
+### Slice 4a: fonts, images, and children matched by node (proposed)
+
+Asked for by the owner on 2026-10-01, after the first stage 3 recreation of
+the recording 20261002-005927. Its Console listed 918 boxes and blocks that
+kept Blink's layout: 580 text items in another font, 190 boxes whose number
+of children differed from the recording, 89 blocks whose items differed,
+and 59 blocks with no recorded items. Of about 13,200 glyph runs in that
+recording, 12,741 name the family "." with no PostScript name: the page's
+web fonts, whose names Blink's typefaces do not give. A recreation without
+them falls back to another font, breaks lines elsewhere, and so holds a
+different number of line boxes, which undoes the recorded offsets of every
+child of the box. This step records the fonts and images, uses them in the
+recreation, and matches children to the recording one by one.
+
+#### What is recorded (protocol 0.40)
+
+1. Font files. Each typeface a glyph run uses, web font or installed, is
+   identified by the SHA-256 digest of its font file as Blink holds it: the
+   bytes Skia's `SkTypeface::openStream` returns, which for a web font are
+   the file after Blink's sanitizer, as Blink draws with it, since Blink
+   discards the downloaded bytes once decoded (`FontResource::ClearData`).
+   Each glyph run gains `fontFile`: the digest, the collection index
+   `openStream` returns, and the typeface's variation position, axis tag
+   and value. A renderer records a `font-file` record, the digest and the
+   bytes, the first time it meets a digest. The digest is kept for each
+   typeface, so a file is read and digested once in a renderer.
+2. Font faces. When a `FontFace` of a document finishes loading, from an
+   `@font-face` rule or from script, a `font-face-loaded` record holds the
+   document, a face number unique in the renderer, its family and its
+   descriptors as Blink serializes them (style, weight, stretch,
+   unicode-range, feature settings, display, ascent, descent and line-gap
+   overrides, size adjust), its source's URL when it has one or its local
+   font name, and the digest of the font file of the source it loaded
+   from. A face leaving the document's set of faces, as when its style
+   sheet is removed, records `font-face-removed` with the face number.
+3. Images. When an image resource finishes loading, before Blink clears
+   its encoded bytes (`ImageResource::Finish`), an `image-resource` record
+   holds the URL requested, the response's URL, status, and MIME type, and
+   the digest of the encoded bytes. A renderer records an `image-data`
+   record, the digest and the bytes, the first time it meets a digest. This
+   covers `img`, `picture`, `input type=image`, SVG `image`, video posters,
+   and CSS images, which all load through image resources. Multipart images
+   and images that fail their integrity check are not recorded.
+4. The records go on a new topic, `browser.resources`. A record is as large
+   as what it holds; the protocol's frames already allow 2 GB.
+
+The digest uses the SHA-256 of `//crypto`, which the bridge gains as a
+dependency. Reading, digesting, and copying run on the renderer's main
+thread, once for each file or image in a renderer; what they cost is
+measured on the target machine with the recordings of this step.
+
+#### What the recreation does with them
+
+1. The page is served at its recorded address. The recorder navigates the
+   recreation's tab to the recorded document URL, and answers that
+   document's request itself through `Fetch.fulfillRequest`
+   ([Fetch domain](https://chromedevtools.github.io/devtools-protocol/tot/Fetch/)),
+   with the page it writes now and its content security policy. Every
+   relative URL of the page then resolves as it did when recorded. The
+   builder and the tree data are written into the page, the builder with
+   the policy's nonce, so nothing else is fetched to build it. Reloading
+   asks for the same document, and is answered the same way.
+2. Every other request of the tab is paused at the request stage and
+   answered from the recording or refused, so nothing reaches the network:
+   - an image at a URL the recording holds, loaded at or before the frame,
+     is answered with its last recorded status, MIME type, and bytes;
+   - a font file is answered by its digest, at an address of the recorder's
+     own (`https://a11y-recorder.invalid/<token>/font/<digest>`), which the
+     policy's `connect-src` allows;
+   - anything else, such as a style sheet, which is not recorded until a
+     later step, is refused. DevTools' Network panel lists what was
+     answered and what was refused.
+3. Before it builds the DOM, the builder adds to the document's set of
+   faces each face the document had loaded at the frame and not removed,
+   as a `FontFace` made from the recorded family, descriptors, and the
+   bytes of its font file
+   ([FontFace constructor](https://developer.mozilla.org/en-US/docs/Web/API/FontFace/FontFace)),
+   and waits for them to load. Blink then matches the recorded
+   `font-family` values to the same faces as when recorded, so line
+   breaks, line heights, and baselines come from the recorded fonts, not
+   only the glyphs. The time this takes is a step of "Time to open the
+   recreation".
+4. A glyph run's recorded glyphs are used when the font Blink chose for
+   the text has the recorded font file's digest and size. The recreation
+   digests a typeface once, as the recording does. Installed fonts are
+   matched the same way, so a playback machine with a different version of
+   a font reports the text as in another font, not drawn with wrong glyphs.
+5. Images draw from their recorded bytes, from the first frame of an
+   animated image. Image boxes already take their recorded size.
+
+#### Children matched by node
+
+The box hook gives each child of a box the offset of the recorded child
+link that is the same child, not the link at the same index:
+
+1. A child box with an element takes the offset of the link of kind "box"
+   whose node is that element's recorded node. The builder adds the
+   recorded node to `data-a11y-recorded-layout`, as `node`.
+2. Line boxes take the offsets of the recorded line links in order, when
+   the box holds as many lines as recorded.
+3. Anonymous boxes take the offsets of the recorded anonymous links in
+   order, when the box holds as many as recorded.
+4. A child that matches no link keeps the offset Blink gave it, and is
+   reported once, naming the reason: no recorded link for its node, or a
+   different number of lines or of anonymous boxes. The box's own size is
+   imposed in every case, as now.
+
+So an extra line, or an image showing its alternative text, no longer
+undoes the offsets of the box's other children.
+
+#### Limits
+
+- Style sheets are still not recorded, so a face that the page declared
+  but had not loaded at the frame is not added, and DevTools' Styles pane
+  still shows no rules. Faces load in the recreation from recorded bytes,
+  so a face that was still loading when recorded is shown loaded if its
+  file had been recorded by the frame.
+- A font installed on the recording machine and not the playback machine
+  is not added to the recreation: installed fonts are matched by digest
+  and reported when they differ. Their files are recorded, so adding them
+  is possible later.
+- Images not recorded: multipart images, images that failed their
+  integrity check, and images loaded before recording started in a
+  renderer that kept them in its memory cache. `data:` URLs are not
+  requests, so they draw from the recorded attribute.
+- Media other than images (video, audio) is not recorded.
+- The `font-face-removed` record covers faces removed from a document's
+  set; a face whose family or descriptors script changes after loading is
+  recorded as it was when it loaded.
+
+#### Sub-steps
+
+1. Children matched by node (no new recording needed), and the recreation
+   served at its recorded address, with every request answered or refused.
+2. Protocol 0.40: font files, font faces, and images recorded, with their
+   cost measured on the target machine, as for stage 2.
+3. The recreation uses them: faces added before the build, images answered
+   from the recording, glyphs matched by digest.
+
+Each sub-step is tested on the target Windows machine before the next.
+
+#### Sub-step 1 as built
+
+Agreed by the owner on 2026-10-01.
+
+Children matched by node:
+
+- The builder's `data-a11y-recorded-layout` attribute now starts with the
+  element's recorded node, as `{"node":<id>,` followed by the recorded
+  `boxFragments` members. The box hook reads the node from the start of a
+  child's attribute without parsing the rest.
+- The box hook indexes the recorded child links by kind: links of kind
+  "box" by `nodeId`, and "line" and "anonymous" links in order. A node with
+  more than one link matches none. Each child of the builder then takes the
+  offset of its own link: a box with a node by its recorded node, a line
+  box or an anonymous box by its order among its kind when the counts of
+  that kind are equal.
+- The Console reasons are now: a different number of line boxes, or of
+  anonymous boxes, named on the parent; and, named on the child, no child
+  link for its recorded node, or no recorded node, as for a
+  pseudo-element or an element without a layout record.
+- The integration script upgrades the stage 3 box hook and its helper, and
+  the 44736a8 hook, to these, and refuses a checkout that still holds the
+  stage 3 text.
+- Revision dcdb84c did not compile: Blink's `String` names the method
+  `starts_with`, not `StartsWith`. The helper calls `starts_with` on the
+  attribute, and the integration script upgrades the dcdb84c helper.
+
+The page served at its recorded address:
+
+- `RecreationContent.DocumentUrl` holds the recorded document's URL when
+  it is an absolute http or https URL. The recreation's tab is navigated
+  to it, and every request of every tab is paused at the request stage.
+- The recorded document's address, without its fragment, is answered with
+  `Fetch.fulfillRequest` with the page, its content security policy, and
+  the headers the loopback server sends. An http address is also answered
+  at https, and the browser is started with
+  `--disable-features=HttpsUpgrades`, so that it does not upgrade the
+  navigation first.
+- Another navigation of a tab's main frame, whose frame ID is the tab's
+  target ID, is refused and listed in the evidence panel, as before. Any
+  other request, such as an image, a style sheet, or an iframe's document,
+  is refused with `BlockedByClient` and counted; DevTools' Network panel
+  lists it. Nothing is continued to the network.
+- The builder script is written into the page, inside the script element
+  its nonce allows, and runs on `DOMContentLoaded`, as a deferred script
+  would; the loopback server no longer serves `builder.js`. The page is
+  refused if the builder ever holds `</script` or `<!--`.
+- A recorded address that is not http or https, such as `about:blank`, is
+  served from the loopback server as before, with a note saying that its
+  relative URLs do not resolve as recorded.
+
+Tests at this sub-step:
+
+- Unit: the recorded node at the start of the layout attribute; which
+  addresses are served, and which requests are answered; the page and
+  policy of the answer; the builder written into the page; the box hook's
+  matching, its upgrade from the stage 3 hook, and the check that it names
+  no `Node` type, which `BoxFragmentBuilder::Node()` hides. The
+  integration script's 172 tests pass; the .NET tests pass except the four
+  that need Windows.
+- Integration, run in this environment with a stock headless Chromium:
+  `TheRecordedPageIsServedAtItsRecordedAddress` (the tab shows the
+  recorded address; a relative image address resolves against it and is
+  refused; a link away is refused; reloading builds the page again), and
+  `TheRecreationDoesNotLeaveThePage`,
+  `TheBuilderBuildsTheRecordedTreeExactlyAndRunsNoPageScript`, and
+  `TheFixedRecreationRunsNoPageScriptAndEveryPathSelectsItsNode` still
+  pass. The box hook needs the instrumented Chromium and is checked on the
+  target machine.
+
+#### Sub-step 1 on the target machine
+
+Reported by the owner on 2026-10-02 for recording
+20261002-005927-d604cba519d04477ad353f0b9cf5f287, page
+`https://www.cnib.ca/en/event`, built from revision f23b5d0:
+
+- The address bar showed the recorded address, and DevTools' Network panel
+  listed the page's images as blocked.
+- No improvement in the page's appearance was seen.
+- The Console listed 580 text items in another font or in more than one
+  glyph run, 124 boxes with a different number of line boxes, 89 blocks
+  whose items differed, 62 children with no recorded node, 59 blocks with
+  no recorded items, and 2 boxes with a different number of anonymous
+  boxes.
+
+Measured in the running recreation through its DevTools port:
+
+- All 1623 elements with a layout record had their recorded border box
+  size, and every child box with a recorded node was at its recorded
+  offset from its parent, within 0.5 pixels. The box layout is the
+  recorded one.
+- 357 elements in the body had no recorded style and were drawn, in 56
+  subtrees. Among them are `#header-collapsible`, which holds a second
+  search form and menu, `#block-octheme-search`, a `div.hidden`, and a
+  `div.col-12.col-md-10` in each event listing. The recording holds a
+  layout record for these elements with `layoutObjectPresent` false and no
+  computed style: they were not rendered at the frame. The recreation
+  writes no recorded style for them, so the user agent's style applies and
+  they are drawn over the recorded content.
+
+The remaining differences seen are text in another font, which wraps
+differently, and images, which slice 4a's later sub-steps address.
+
+#### Elements without a layout object
+
+Proposed on 2026-10-02 and agreed by the owner the same day.
+
+- An element whose layout record at the frame has `layoutObjectPresent`
+  false is written with a `data-a11y-recorded-no-layout-object` attribute.
+  Its value is `none` when no element or text below it, in its subtree or
+  its shadow trees, had a layout object at the frame, and `contents` otherwise, as for an element
+  styled `display: contents`. The value is an inference from the recorded
+  layout objects, not a recorded style; the recording holds no computed
+  style for such an element.
+- In the recreation mode, style resolution adds `display` with that value
+  as an important declaration, after the recorded style, so the element
+  takes no box, as at the frame.
+- DevTools' Styles pane lists the declaration as a rule of its own named
+  "No layout object recorded", separate from "Recorded style", so that the
+  inference is not shown as a recorded value.
+- The evidence panel states how many elements were given each value, and
+  why.
+- An element with no layout record at all at the frame is unchanged.
+- This needs a Chromium build, and is tested on the target machine with
+  the same recording.
+
+Required tests: unit tests of the attribute and its value for an element
+with and without a rendered descendant, through a shadow root, and for an
+element with no layout record; integration script tests of the style and
+inspector hooks; a browser integration test that such an element takes no
+box in the instrumented build.
+
+As built:
+
+- `RecordedPage.NoLayoutObjectDisplays` works out the values from each
+  node's latest layout record, without recursion, so a deep tree cannot
+  exhaust the stack. The tree data carries the value as `noLayoutObject`,
+  and the builder writes the attribute before the element is inserted.
+- The style hook replaces the stage 1a hook, which the integration script
+  upgrades. Both the recorded style and the inferred display go into the
+  one set of important declarations, the inferred display last, so it
+  replaces a recorded display.
+- A copy of an element in a user agent shadow tree, as an svg `use`
+  element makes, does not take the inferred display, in style resolution
+  or in DevTools: the copy's layout object was not the one recorded.
+- DevTools' rule is added after the recorded style's, by a helper and a
+  matched rule of its own, and is not reported for ancestors, since
+  `display` is not inherited.
+- Tests: the unit test covers `none`, `contents` through an open and a
+  closed shadow root, an element without a record, and the evidence
+  panel's note. The integration script's 173 tests pass. The .NET tests
+  pass except the four that need Windows. The stage 3 browser test, run
+  with the instrumented build, now also checks that such an element takes
+  no box; it runs on the target machine.
+
+On the target machine, reported by the owner on 2026-10-02 for revision
+55e3125: the instrumented Chromium built and the recreation ran, and fewer
+elements that were not rendered at the frame appeared on the page.
+
+#### Sub-step 2 as built
+
+Asked for by the owner on 2026-10-02: "We should probably move on to fonts
+and images". Protocol 0.40, on the topic `browser.resources`.
+
+Records:
+
+| Record | Holds |
+| --- | --- |
+| `font-file` | the digest, the size, and the bytes in base64 |
+| `font-face-added` | the document and the face number |
+| `font-face-loaded` | the document, the face number, the family, the descriptors, the source, and the face's font file by digest and index |
+| `font-face-removed` | the document and the face number |
+| `image-resource` | the URL requested, the response's URL, status, and MIME type, the size and digest of the bytes, and `dataRecorded` |
+| `image-data` | the digest, the size, and the bytes in base64 |
+
+Each glyph run gains `fontFile`: the digest, the collection index, and the
+variation position as a list of axis tags and values, or null when Skia
+gives no readable file for the typeface. A digest is the SHA-256 of the
+bytes in lowercase hexadecimal, from `crypto::hash::Sha256`.
+
+How it is read:
+
+- Font files are read in Blink with `SkTypeface::openStream`, once for each
+  typeface in a renderer. The bridge keeps each typeface's digest and index
+  by `SkTypeface::uniqueID()`, which Skia does not reuse within a process,
+  and records a `font-file` record the first time the renderer meets a
+  digest. A typeface whose record could not be queued is left unmet, so its
+  file is read again the next time a run uses it.
+- The bytes of a `font-file` or `image-data` record are copied on the main
+  thread and encoded to base64 on the writer thread, through the queue the
+  layout records use.
+- A face's records come from `FontFace`. `FontFace::SetLoadStatus` records
+  `font-face-loaded` when the status becomes loaded. `FontFaceCache`, which
+  holds a document's set of faces, records `font-face-added` in
+  `AddFontFace`, and `font-face-removed` in `RemoveFontFace`, which also
+  serves `ClearCSSConnected`, and in `ClearAll` for the faces of style
+  sheets. The face number is a member patched into `FontFace`, assigned
+  from a counter in the bridge when the face is first recorded.
+- The descriptors are the strings of `FontFace`'s getters. The source is
+  `CSSFontFace::FrontSource()`, the source the face loaded from: `url` with
+  its URL, `data-url`, `binary` from script, or `local`. The face's font
+  file is read from the typeface its `FontCustomPlatformData` decoded,
+  through an accessor patched into that class, since the member is private.
+  A `local` source has no such data, and its `fontFile` is null.
+- Images are recorded in `ImageResource::Finish`, before `ClearData`, when
+  the resource is neither multipart nor failed its integrity check, and its
+  URL is not a `data:` URL.
+
+Differences from the design above:
+
+- `font-face-added` is added. A face that script loads and never adds to
+  `document.fonts` loads without joining the document's set, so the loaded
+  record alone does not say which faces the document had. A face is in the
+  set from its added record to its removed record; the loaded record holds
+  what it is.
+- A `local` source does not record the local font name: Blink keeps it in a
+  private member with no accessor, and the glyph runs that use the face
+  hold the installed font's file by digest.
+- `ClearAll` records the removal of the faces of style sheets only, since
+  the cache keeps no list of the faces script added, apart from their
+  families.
+- `image-resource` states `dataRecorded`, false when the image's bytes
+  could not be queued, so a missing `image-data` record is stated rather
+  than inferred.
+- Records of images and font files name no document: Blink shares image
+  resources between the documents of a renderer through its memory cache,
+  and font files between faces.
+
+Not done in this sub-step: the instrumented Chromium integration test of a
+generated page with a web font and an image, in "Required tests" below.
+What is recorded is checked on the target machine with a recording of the
+page of recording 20261002-005927, with its cost.
+
+Tests: the bridge's change hash covers the font file, index, and variation
+position; the integration script's tests cover the font file reader, the
+face and cache hooks, the image hook, and their call shapes against the
+bridge; the .NET tests cover each record against the record contract and
+the typed contracts, and a glyph run's font file.
+
+#### Sub-step 2 on the target machine
+
+Recording 20261002-162024 at revision 881c098, made by the owner on
+2026-10-02 of the same pages as recording 20261002-005927, with the same
+values entered.
+
+- `browser.resources` holds 602 records, 20,481 KB before chunk
+  compression: 13 `font-file`, 199 `font-face-added`, 46
+  `font-face-loaded`, 199 `font-face-removed`, 89 `image-resource`, and 56
+  `image-data`.
+- Every `font-file` and `image-data` record's bytes decode to its stated
+  size and digest. The 13 font files are 11 distinct files, since each
+  renderer records its own; 4,192 KB in all, each an OpenType file (10 with
+  TrueType outlines, 1 with CFF outlines). The 56 images are 8,609 KB.
+- All 5,291 glyph runs in the recording's layout records carry a
+  `fontFile`, naming 10 digests, each of which has a `font-file` record.
+- All 46 loaded faces have a `url` source and a font file with a
+  `font-file` record. Their families are Stag Sans Web (30), OpenSans (8),
+  Plakkaat (4), PrefsFramework-Icons (3), and Google Sans (1).
+- All 89 images loaded with status 200 and had their bytes recorded: 34
+  JPEG, 32 GIF, 16 PNG, and 7 SVG, from 89 URLs.
+- A document's faces are removed and added again when its style sheets
+  change: in one document, 19 faces were added at 9.05 s, all 19 removed
+  at 22.5 s and 19 new faces added, which loaded within 0.06 s. Every face
+  is removed when its document closes.
+
+Cost, from the bridge's "Recorder evidence cost" lines, which cover only
+part of the recording (95 of the 199 removals): `RecordFontFile`, which
+digests a file and queues its bytes, 16 calls, 5.3 ms in all, the largest
+0.79 ms; `RecordBlinkImageResource` 89 calls, 6.4 ms, the largest 2.8 ms;
+the face records 340 calls, 3.6 ms. Blink's reading of a font file and its
+copy of an image's bytes happen before these calls and are not measured.
+
+#### Sub-step 3 as built
+
+Asked for by the owner on 2026-10-02, after sub-step 2 on the target
+machine.
+
+What the app reads:
+
+- `RecordingFileResources` (`src/Recorder.Database/RecordingFiles/`) reads
+  the `browser.resources` records of the recording file up to the
+  recording time the document's state is read at. It reads only the chunks
+  that hold records of that channel, through each chunk's message index.
+- A face is named by its browser instance, renderer, and face number. It is
+  in the document's set from its `font-face-added` record to its
+  `font-face-removed` record, matched to the document by its state key.
+  Faces are kept in the order they were added. A face in the set is added
+  to the recreation when it has a `font-face-loaded` record at or before
+  the frame, a font file at collection index 0, and a `font-file` record
+  for that digest.
+- An image is the latest `image-resource` record for its URL at or before
+  the frame. It is found by the URL requested or by the response's URL,
+  each without its fragment. A record whose `dataRecorded` is false removes
+  the image for its URL.
+- The bytes of a font file or an image are not decoded until the
+  recreation asks for them. The resources hold a reader of their own on
+  the file, so the recreation can still read bytes after the recording is
+  closed in the player; the recreation's server disposes it. Bytes that do
+  not match their digest are not used.
+- Reading takes a step of its own in "Time to open the recreation":
+  "Reading the page's fonts and images from the recording".
+
+What the recreation does:
+
+- The builder's data gains `fontFaces`. Each entry holds the family, the
+  recorded descriptors, the digest, and the face's address at the
+  recorder: `https://a11y-recorder.invalid/<token>/font/<digest>`, with a
+  token new for each recreation.
+- Before it builds the tree, the builder reads each distinct file once with
+  `fetch`. It then makes each face with
+  `new FontFace(family, bytes, descriptors)` and adds it to
+  `document.fonts`, in the recorded order, and waits for every face to
+  load. A face that fails is listed in the builder's notes and in DevTools'
+  Console. The time is shown in the evidence panel as "The recorded font
+  faces were added and loaded".
+- Requests are answered by resource type:
+  - the page's own address, for a `Document` request, with the page;
+  - an `Image` request, with the image's latest recorded status, MIME
+    type, and bytes;
+  - a `Fetch` or `XHR` request at the font address, for a digest one of
+    the faces names, with the file's bytes and
+    `Access-Control-Allow-Origin: *`. The instrumented Chromium on the
+    target machine reports the builder's `fetch()` as `XHR` in
+    `Fetch.requestPaused`; the stock Chromium of the integration tests
+    reports it as `Fetch`.
+    The page's origin is not the recorder's, so the builder's read is a
+    cross-origin request.
+  - Anything else is refused, as before.
+  An answer is made off the thread that reads the DevTools connection,
+  since it may read the recording file.
+- The recorded page's content security policy allows `connect-src` for the
+  font address only. It allows `img-src` for any http or https address, in
+  addition to `'self'` and `data:`, since the recorder answers or refuses
+  every request of the tab and nothing reaches the network. Without it, the
+  policy would stop an image of another origin before the recorder could
+  answer it.
+- In Blink, a text item takes its recorded glyphs when the font Blink chose
+  for it has the recorded size and the recorded font file's digest and
+  collection index. This replaces the PostScript name comparison of stage 3.
+  The recreation mode's bridge digests each typeface's file once, as the
+  recording does (`RecordFontFile` keeps the digest and records nothing
+  when there is no recorder connection in the recreation mode). The
+  integration script upgrades the stage 3 helper to this one.
+
+Found while building:
+
+- A web font's recorded file is the file Blink decoded: the output of the
+  OpenType Sanitizer, after WOFF2 decompression. The recreation's face is
+  sanitized again when it loads, so its digest matches the recorded one
+  only if sanitizing is idempotent for the file. The 8 web font files of
+  recording 20261002-162024 were run through the sanitizer of the Python
+  package `opentype-sanitizer` 9.2.0 in this environment. All 8 came out
+  byte for byte unchanged, with the same digest. The 3 installed font
+  files, which Blink does not sanitize, changed. That package's sanitizer
+  version is not necessarily Chromium's, so the target machine is the
+  check.
+
+Differences from the design above:
+
+- A face whose font file is not the first of a collection is not added,
+  since a `FontFace` made from bytes takes the first font. A face from a
+  `local()` source is not added, since its local name is not recorded.
+  The evidence panel's notes count both, with the faces that had not
+  loaded at the frame and the images recorded without their bytes.
+- Images and font files are matched across the whole recording, not only
+  within the document, since their records name no document (sub-step 2).
+- An animated image is answered with its recorded bytes and animates in
+  the recreation, from its first frame. This does not meet the
+  requirement: the image must show the frame drawn at the recorded frame.
+  See "Requirement: the page exactly as drawn at the frame".
+
+Tests at this sub-step:
+
+- Unit: the faces and images chosen for a frame, from a recording file
+  (removed faces, another document's faces, faces not loaded, faces added
+  after the frame, an image found by its response's URL, and an image
+  without bytes); bytes that do not match their digest; the answers by
+  resource type and the policy; the faces in the builder's data; the
+  integration script's helper, its digest comparison, and its upgrade from
+  the stage 3 helper.
+- Integration, run in this environment with a stock headless Chromium:
+  `TheRecordedImageAndFontFaceAreUsed`. A page served at its recorded
+  address draws a recorded image, and refuses an image that was not
+  recorded. With `RECORDER_RECREATION_FONT_FILE` naming a font file (here
+  DejaVu Sans), the face is loaded before the tree is built. The glyph
+  comparison needs the instrumented Chromium, and is checked on the target
+  machine.
+
+#### Sub-step 3 on the target machine
+
+Recording 20261002-162024, on the CNIB events page at revision e12b61b,
+reported by the owner 2026-10-02: the images are drawn, and the web fonts
+are not; the headings, in Stag Sans Web, are drawn in a fallback font.
+
+Read in the open recreation through its DevTools port: `document.fonts`
+was empty, and the builder's notes held "not added: Failed to fetch" for
+each of the five faces. Each font request was refused by the recorder
+(`net::ERR_BLOCKED_BY_CLIENT`), and `Fetch.requestPaused` gave its
+resource type as `XHR`, not the `Fetch` the server required. The same
+recording's five faces were read and answered in the development
+environment with the type `Fetch`. Revision after e12b61b answers either
+type at the font address.
+
+With the fonts answered (revision cf9fa2d), the owner reported the page
+as close to the recording when nothing animates and no select is open,
+with one difference: the text "Reset" of a button shown only while the
+preferences panel is open is drawn over the "Show" of the "Show
+Preferences" button.
+
+The button (`button#reset`) has `style="display: none;"` at the frame.
+Read from the recording in the development environment, at each frame of
+the two documents of the page: the button and its `span` have a latest
+layout record stating no layout object (change sets 53 and 120), and its
+text node "Reset" has a latest record stating one (change sets 44 and
+118), from before the button was hidden. The recreation therefore gave
+the button `display: contents`, as an element with no layout object over
+a node that had one ("Elements without a layout object"), and drew its
+text.
+
+The recording is at fault, not the inference: a node's change record is
+written only when the node is noted, and a text node was noted only when
+its layout object's style was set, not when its layout object was
+destroyed. When the button became `display: none`, Blink destroyed the
+text node's layout object in `Node::DetachLayoutTree`
+(`third_party/blink/renderer/core/dom/node.cc`), and nothing noted it.
+From the revision after cf9fa2d, `Node::DetachLayoutTree` notes every
+element and text node whose layout object it destroys, so the next
+change set records it with no layout object. A recording made before it
+keeps the stale record.
+
+That revision (00c20cc) was not enough. In a recording made with it on
+the target machine (20261002-194407), the text node "Reset" still had a
+latest record stating a layout object, at each frame of three documents
+of the site. Noting the node was not the fault: the change set left out
+any noted text node without a layout object, as the checkpoint does, and
+the bridge refused a text node change record without one. A checkpoint
+is a full walk, so a text node it leaves out has no layout object; a
+change set states only what changed, so leaving the node out kept its
+earlier record. Protocol 0.41 records, in a change set, a noted text node
+without a layout object, stating that it has none; the bridge and the
+recorder's validation accept such a record for a change set and still
+refuse it in a checkpoint.
+
+#### Required tests
+
+- Unit tests: the font-file, font-face, and image records against the
+  record contract, including the once-per-digest rule; the resources the
+  app chooses for a frame (last image record for a URL at or before the
+  frame, faces loaded and not removed); the answer chosen for a paused
+  request; the tree data's recorded node; the integration script's new
+  hooks and their upgrade from those of stage 3.
+- Integration tests in the instrumented Chromium: a generated page with a
+  web font and an image is recorded, and its records hold the font file
+  and image bytes with matching digests; the recreation of that page draws
+  its text with the recorded glyphs and the recorded font, and its image
+  from the recorded bytes; a box whose child count differs keeps the
+  recorded offsets of the children that match; no request of the
+  recreation reaches the network.
+- System test on the target machine: a recording of a page with web fonts
+  and images is inspected, and the Console's list of boxes not imposed is
+  compared with that of stage 3.
+
+### Slice 4b: the frame's moment, held (agreed)
+
+Proposed 2026-10-02, after the owner agreed to start the work in
+"Requirement: the page exactly as drawn at the frame" with time held in
+the recreation and the animation state recorded. Revised 2026-10-03, at
+the owner's request, after slice 4d: the protocol is renumbered (0.45 to
+0.47 were taken by slice 4d's defects), popup widgets are included, and the
+two questions it left open are settled from the Chromium source. Agreed
+by the owner on 2026-10-03 ("start on 4b"). Nothing below is built yet.
+
+#### What Chromium does that the recording misses
+
+Read in the Chromium checkout on the target machine.
+
+- An animation running on the compositor is not ticked on Blink's main
+  thread at each frame. `Animation::TimeToEffectChange`
+  (`third_party/blink/renderer/core/animation/animation.cc`) returns zero,
+  which asks for service at the next frame, only for an animation that is
+  not on the compositor (`!HasActiveAnimationsOnCompositor()`). For one on
+  the compositor, it returns the time to its next change of phase. The
+  style the layout walk reads for an element so animated is therefore not
+  the value drawn while the animation runs.
+- The compositor ticks its animations at each begin frame, in
+  `LayerTreeHostImpl::AnimateInternal` (`cc/trees/layer_tree_host_impl.cc`),
+  at the begin frame's time, on the active tree
+  (`AnimateLayers(monotonic_time, /* is_active_tree */ true)`). Each value
+  reaches the trees through `cc::ElementAnimations`
+  (`cc/animation/element_animations.cc`): `OnTransformAnimated`,
+  `OnOpacityAnimated`, `OnFilterAnimated`, `OnBackdropFilterAnimated`, and
+  `OnScrollOffsetAnimated`, each for the active list, the pending list, or
+  both.
+- A scroll the compositor handles itself (a wheel or touch scroll, or a
+  smooth scroll) changes the active tree's scroll offset before the main
+  thread hears of it.
+- A background color or clip path animation run as a native paint
+  worklet is not a property of the trees. Its animation gives only a
+  progress value, kept for the pending tree alone
+  (`ElementAnimations::OnFloatAnimated`, `NATIVE_PROPERTY`: "only
+  dispatched from the pending tree"), and passed to the paint worklet
+  through `LayerTreeHostImpl::OnCustomPropertyMutated`. The drawn color is
+  interpolated from the progress when the worklet paints, in
+  `BackgroundColorPaintDefinition::Paint`
+  (`third_party/blink/renderer/modules/csspaint/nativepaint/background_color_paint_definition.cc`,
+  `Sample`), and the clip path likewise in
+  `clip_path_paint_definition.cc`.
+- An animated image's frame is chosen by the compositor, not by Blink.
+  `cc::ImageAnimationController` (`cc/trees/image_animation_controller.h`)
+  advances each animated image when a sync tree is made
+  (`AnimateForSyncTree`), keeps the frame for that tree's lifetime, makes
+  it the active tree's at `DidActivate`, and gives it by `PaintImage::Id`
+  and tree (`GetFrameIndexForImage`). Blink makes the image's `PaintImage`
+  in `BitmapImage::CreatePaintImage`
+  (`third_party/blink/renderer/platform/graphics/bitmap_image.cc`).
+- The frame drawn is the active tree as it is at
+  `LayerTreeHostImpl::DrawLayers`, after the begin frame's animations and
+  any activation. `DrawLayers` makes the compositor frame
+  (`GenerateCompositorFrame`), takes its frame token, and submits it; a
+  draw with no damage submits nothing. Viz reports the frame's
+  presentation by that token, to `LayerTreeHostImpl::DidPresentCompositorFrame`.
+- A frame the compositor draws for these changes alone has no rendering
+  update on the main thread, so it has no presentation record: the
+  presentation records follow rendering updates (protocol 0.35), and each
+  names the compositor frame token of the frame that carried its update.
+
+So at a captured frame, the recording holds the main thread's state after
+its last presented rendering update, which already includes the values of
+animations Blink ticks on the main thread (subject to the check in
+"Required tests" below), but not the compositor's values drawn after it.
+
+#### Settled from the source
+
+- Where a compositor frame is recorded: at frame submission, in
+  `DrawLayers`, with the token of the frame submitted. Activation is not
+  enough: the begin frame's animations are applied to the active tree
+  after it, and a frame drawn without a new tree has no activation.
+- How a paint worklet animation is recorded: the drawn value where the
+  worklet paints it. `Paint` records the element, the progress it was
+  given, and the value it drew (the color as four floats; the clip path as
+  the path it drew). The compositor frame records the progress of each
+  paint worklet property of the tree it drew, so the drawn value of a
+  frame is the one painted from the same element and progress. Recording
+  the worklet's input and interpolating in the app is not taken: it would
+  repeat Blink's interpolation outside Blink.
+
+#### What is recorded (protocol 0.48)
+
+On a new topic, `browser.compositor`, for each compositor: the tab's
+widget, each page popup's widget (named by its frame sink, as in slice 4d
+sub-step 1b), and later each out of process iframe's.
+
+| Record | Where | Holds |
+| --- | --- | --- |
+| `compositor-animation-started` | Blink, main thread, when an animation starts on the compositor | the document, the target node, the compositor element ID and namespace, the animated properties, and the compositor animation ID |
+| `compositor-animation-ended` | Blink, main thread, when it is cancelled or finishes there | the compositor animation ID |
+| `compositor-frame` | cc, compositor thread, in `DrawLayers`, for each submitted frame in which an animated value, a compositor scroll offset, a paint worklet progress, or an image's frame changed on the active tree since the last recorded frame | the frame sink and frame token, the begin frame's time, and each change: element ID, property, and value |
+| `compositor-frame-presented` | cc, at `DidPresentCompositorFrame`, for a recorded frame | the frame sink, the frame token, and the presentation time, on the clock of the existing presentation records, or the failure flag |
+| `paint-worklet-painted` | Blink, in a native paint definition's `Paint`, on the worklet's thread | the element ID, the property (background color or clip path), the progress given, and the value drawn |
+| `image-paint-image` | Blink, when an image resource's Blink image gets its paint image ID | the image's URL and digest (as `image-resource`) and its `PaintImage::Id`; revised by "Sub-step 1c design" below |
+
+Values are written as the compositor holds them: a transform as its 16
+matrix entries, an opacity as a number, filters as their operations and
+numbers, a scroll offset as x and y, an image's frame as its index, a
+paint worklet's progress as a number, and a painted color as its four
+floats. Nothing is rounded. A frame with no change is not recorded, so a
+page with nothing moving adds no records.
+
+#### Which state a captured frame shows
+
+For each document, the frame shows the main thread's state after the
+last presented rendering update at or before the frame's composition, as
+now, and then the compositor's values of the last `compositor-frame` of
+the same frame sink presented at or before the composition, together with
+every earlier compositor frame's values not yet replaced. A value is
+dropped when its animation ends and a later rendering update was
+presented. A popup takes its own frame sink's compositor frames. The basis
+line in the evidence panel names both the rendering update and the
+compositor frame.
+
+#### What the recreation does
+
+- Nothing moves. In the recreation mode Blink starts no CSS animation or
+  transition: the recorded computed style holds the animation and
+  transition properties, and they are not run. No page script runs, so no
+  Web Animation is made. SVG animation elements are not run either; the
+  recorded style and box fragments hold their effect on style and
+  geometry, and whether they hold all of it (an animated `transform`
+  attribute, for one) is checked in the required tests. The text caret,
+  video, and other transient states are not part of this slice; see the
+  requirement's list.
+- An element with a recorded compositor value at the frame takes it in
+  place of the recorded style value of that property: the transform as a
+  `matrix3d()` of the recorded entries, the opacity, the filter, or the
+  scroll offset. An element with a paint worklet value takes the painted
+  value: the background color as the recorded color, the clip path as the
+  recorded path.
+- An animated image is held at its recorded frame. The recorder answers
+  the image with its bytes and, in a response header of its own, the frame
+  index at the frame. In the recreation mode Blink puts the index in the
+  bridge by the image's paint image ID, and `ImageAnimationController`
+  gives that index for the image and never advances it. An image whose
+  frame was not recorded is held at its first frame, and the Console says
+  so.
+- The evidence panel names, for each imposed value, the compositor frame
+  it came from and its presentation time.
+
+#### Limits
+
+- An animation that is not on the compositor and does not cause a
+  rendering update at each frame would be missed. Whether one exists is
+  checked in the required tests.
+- A frame sink other than the tab's and the popups', such as an out of
+  process iframe's, is recorded the same way but not shown until iframes
+  are recreated.
+- The window fade of a popup is the Windows compositor's, not Chromium's,
+  and stays as "Window fade of a popup" states.
+- `compositor-frame` and `paint-worklet-painted` are written off the main
+  thread; the bridge's send from those threads is checked when building,
+  as the records must not wait on the main thread.
+
+#### To be settled
+
+- The cost on the target machine, measured as for stage 2, on a page with
+  a running composited animation, a background color animation, and an
+  animated image.
+
+#### Sub-steps
+
+1. Record (protocol 0.48), with its cost measured on the target machine.
+2. The recreation holds time: no animation or transition run, compositor
+   and paint worklet values imposed, animated images held at their
+   recorded frame.
+
+Each sub-step is tested on the target machine before the next.
+
+#### Required tests
+
+- Unit tests: each new record against the record contract; the values the
+  app chooses for a frame from a sequence of compositor frames and their
+  presentations, including a popup's frame sink and a paint worklet value
+  joined by element and progress; the image frame header; the integration
+  script's hooks and their call shapes against the bridge.
+- Integration tests in the instrumented Chromium, on a generated page with
+  a composited transform animation, a background color animation, a
+  main-thread animation of a non-composited property (width), a smooth
+  scroll, and an animated image: the main-thread animation causes a
+  recorded rendering update at each frame it changes; the recording holds
+  the compositor values, paint worklet values, scroll offsets, and image
+  frames, joined to their presentations; the recreation at a chosen frame
+  imposes the values recorded for it; and two screenshots of the
+  recreation taken a second apart are identical. The page also has an SVG
+  `animateTransform`, to check that its effect is held.
+- System test on the target machine: a recording of a page with running
+  animations and an animated image is opened at several frames, and each
+  recreation is compared with the captured frame.
+
+#### Animation fixture (built)
+
+Proposed 2026-10-03, at the owner's request, and agreed by the owner the
+same day ("yes please build as written"): existing sites do not hold
+each kind of animation this slice records, so a fixture page in the
+repository does, each kind in its own labelled panel. It serves the
+target machine tests of sub-step 1 (each record present, with the values
+the page states) and later of sub-step 2 (each panel recreated as drawn).
+
+Where: `tests/fixtures/animation/index.html`, with its images beside it,
+opened in the instrumented Chromium from the unpacked package as a file
+URL, as `tests/fixtures/blink-listener-dispatch.html` is. Whether a file
+URL's images are recorded as an https page's are is checked in its first
+run; if not, the fixture is served from a local server instead, which is
+proposed then. (They are; see the first recording below.)
+
+How each panel is made checkable:
+
+- Each panel names its element (an `id`), its property, its keyframes,
+  duration, and timing, in visible text, so the value expected at a time
+  is stated on the page. Running animations use `linear` timing and whole
+  second durations.
+- Each running animation has a twin held still at a stated point
+  (`animation-play-state: paused` with a negative `animation-delay`, so
+  the value is exact, for one at 25 percent of its duration). A held twin
+  shows the recreation's value without timing, and shows whether Blink
+  puts a paused animation on the compositor.
+- Animations start when the page loads and repeat, except where a panel
+  starts one with a button, so a recording can begin at any time; a start
+  button records the start as an input event.
+- The page does not test `prefers-reduced-motion`, so the Windows setting
+  does not stop its animations; the page states this.
+- No script runs except where a panel says so.
+
+Panels:
+
+| Panel | Element and property | Expected records |
+| --- | --- | --- |
+| Skip link | a "Skip to content" link moved in with a `transform` transition on focus (Tab from the top of the page) | `compositor-animation-started` for transform; `compositor-frame` transforms |
+| Rotation | `transform: rotate()`, 0 to 360 degrees, 4 s | transforms |
+| Separate transform properties | `translate`, `rotate`, and `scale` on one element, each animated | three keyframe models with the `translate-transform`, `rotate-transform`, and `scale-transform` namespaces |
+| Fade | `opacity`, 1 to 0.2, 2 s, alternate | opacities |
+| Blur | `filter: blur()`, 0 to 6 px, 3 s, alternate | filters |
+| Frosted glass | `backdrop-filter: blur()`, over a striped background, 3 s, alternate | backdrop filters |
+| Compositor scroll | a scroll container with numbered rows, and a button that calls `scrollTo` with `behavior: "smooth"`; also scrolled with the wheel | scroll offsets |
+| Background color | `background-color`, red to blue, 2 s, alternate | `background-color-progress`; `paint-worklet-painted` colors |
+| Clip path, same shape | `clip-path: inset()` to another `inset()`, 3 s, alternate | `clip-path-progress`; `paint-worklet-painted` paths |
+| Clip path, circle | `clip-path: circle()` radius 20 to 50 percent, 3 s, alternate | as above |
+| Clip path, change of shape | `inset()` to `circle()`, which does not interpolate | as above, the shape changing at half way |
+| Animated images | a GIF, an animated WebP, and an animated PNG, each of numbered frames of distinct colors, 250 ms a frame | (sub-step 1c) image frames |
+| Main thread, text color | `color`, 2 s, alternate, not composited | no compositor record; the main thread's style records |
+| Main thread, layout | `width`, 3 s, alternate, which lays out at each frame | no compositor record; layout records |
+| Web Animations | `element.animate()` of a transform, started by a button (script) | as a CSS animation of transform |
+| Focus ring | a button whose `outline-color` has a transition on `:focus-visible` | main thread style records, focus outline at each frame |
+
+The images are made by a script in the repository (`tests/fixtures/animation/make_images.py`),
+so their frames, colors, and timings are stated by it and can be made
+again; the images are committed with it.
+
+Tests: the fixture is a test asset; it is checked by opening it in the
+instrumented Chromium on the target machine and reading the recording for
+the records the table names. No automated test is added for the page
+itself.
+
+As built, in `tests/fixtures/animation/`: `index.html`, `make_images.py`,
+and the images it made, `frames.gif`, `frames.webp`, and `frames.png`.
+Each image has eight frames of 96 by 96 pixels, each 250 ms, numbered 0
+to 7 by white squares on a solid color, so no font is needed; the page
+lists the colors. Each held twin's rule sets `animation-play-state:
+paused` after its animation shorthand, which would otherwise reset it.
+The clip path change of shape panel lasts 4 s, so its held twin is at
+1 s. Script runs in two panels only: the compositor scroll panel, which
+also makes its 60 rows, and the Web Animations panel.
+
+Checked here, in a headless Chromium of the build environment with the
+images inlined as data URLs (not the instrumented Chromium): every held
+twin's computed value is the one the page states (`rotate(90deg)` as a
+matrix; translate 30px, rotate 45deg, scale 1.125; opacity 0.8;
+`blur(1.5px)`; backdrop `blur(2px)`; `rgb(153, 0, 51)` for the background
+and the text; `inset(15% 8.75%)`; `circle(27.5% at 50% 50%)`;
+`inset(10%)`; width 150px), each `paused`. The first Tab focuses the skip
+link, which ends at `translateY(0)`; the scroll button scrolls the list to
+row 30 (649 px); the Web Animations button starts its animation; the
+focus ring's outline ends at `rgb(0, 80, 200)` on keyboard focus; and the
+three images advance their frames. Not checked here: anything about the
+recording, which needs the target machine, and whether a file URL's
+images are recorded.
+
+#### First recording of the fixture (target machine, 2026-10-04)
+
+Recording `20261004-033545-4c52758971324a5486ac0bfe66ee1d4d`, about 30
+s, made by the owner with the d08a701 build (sub-steps 1a and 1b) and
+the fixture opened as a file URL. The recording holds no Tab, button
+press, or scroll in the fixture, so the skip link, focus ring, compositor
+scroll, and Web Animations panels were not exercised. Read from the
+recording's `browser.compositor`, `browser.resources`, and `browser.dom`
+channels:
+
+- Eight `compositor-animation-started` records, each with an ended
+  record when the page went away, matched to the fixture by the `id`
+  attributes of their nodes: `#rotation` (transform), `#separate` (one
+  animation of three keyframe models, `translate-transform`,
+  `rotate-transform`, and `scale-transform`), `#fade` (opacity),
+  `#frost` (backdrop filter), and `#background`, `#clip-inset`,
+  `#clip-circle`, and `#clip-change` (each `native-property`).
+- Not on the compositor: `#blur`. Its `filter: blur()` moves pixels, and
+  `CompositorAnimations::CheckCanStartEffectOnCompositor`
+  (`compositor_animations.cc`) marks a filter animation that does so
+  `kFilterRelatedPropertyMayMovePixels`, while a backdrop filter's is
+  composited. None of the eleven held twins was started on the
+  compositor. The main thread controls (text color, width) had no
+  compositor record, as expected.
+- 1,466 `compositor-frame` records, 1,465 of them from widget `6:3`, a
+  median of 16.666 ms apart over 26.1 s. Each composited value stayed in
+  its stated range: opacity 0.2 to 1.0, translate 0 to 119.9973 px,
+  scale 1.0 to 1.5, backdrop blur 0 to 7.9996 px, and each native
+  property's progress 0 to 1 (914 values each). The only scroll offsets
+  were five zero offsets.
+- 1,464 `compositor-frame-presented` records; the five that failed are
+  frame tokens 1 to 5, at startup.
+- 3,721 `paint-worklet-painted` records: 930 each for the background and
+  the three clip paths, and one for `#background-held`. Each background
+  color is the sRGB interpolation of its progress (at progress 0.5584 the
+  color is 0.3533, 0, 0.4467, which is 0.8 times 0.4416 and 0.5584). The
+  held twin's single paint, with no progress, is 0.6, 0, 0.2, which is
+  `rgb(153, 0, 51)`, the value the page states. `#clip-change` is a
+  four-line inset path below progress 0.5 and a four-conic circle path
+  above it, changing between progress 0.4959 and 0.5041 each time.
+- The three images were recorded from their file URLs with their bytes
+  (`image-resource` with `dataRecorded` true, and `image-data`), so the
+  fixture does not need a local server.
+
+Not shown by this recording: the recreation's use of these records
+(sub-step 2), the animated image frame index (sub-step 1c), and the
+panels that need input.
+
+#### Second recording of the fixture, with input (target machine, 2026-10-04)
+
+Recording `20261004-034141-b0217e5cafc542c48681ad91880709f2`, about 66
+s, with the same build, in which the owner pressed Tab through the page
+several times, clicked, and scrolled. The recording shows no activation
+of the compositor scroll panel's button (it was focused by Tab, not
+pressed), so the smooth `scrollTo` was not exercised. Read from the
+recording:
+
+- The eight animations of the first recording, and three more:
+  `#skip-link` twice and `#web-animation` once.
+- `#skip-link`: the first Tab from the top of the page focused it at
+  11.39 s (recording times are from the first compositor record) and
+  the next Tab moved focus on at 11.76 s, so its 1 s transition ran for
+  about 0.37 s and was then reversed by a second transition. Its
+  recorded translation went from -46.07 px (-120 percent of its height)
+  to -29.95 px, which is 35 percent of the way, and back.
+- `#web-animation`: started by a click on its button at 47.74 s and
+  cancelled by a second click at 51.02 s. Its translation went from 0 to
+  79.998 px, with its peak 2.0 s after its start, as the page states,
+  and was written as a null value when cancelled.
+- Scroll offsets: 207 for the document's scroller (to 631 and 1604 px as
+  Tab moved focus down the page, and through the wheel scrolls between
+  26 s and 47 s), and 65 for `#scroller`, scrolled with the wheel from 0
+  to 1182.8 px between 32.4 s and 34.1 s.
+- `#focus-ring`: its `outline-color` transition is on the main thread,
+  so it has no compositor record. The layout records hold its style at
+  each update: from `rgba(0, 0, 0, 0)` through `rgba(0, 80, 200, a)`
+  rising in alpha to `rgb(0, 80, 200)` when Tab focused it, about 30 ms
+  apart, and back when focus left it. The interaction checkpoints record
+  `focusVisible` true while it had keyboard focus, and false for
+  `#web-animation-button` after it was clicked. (The `focusVisible` of
+  a `focus-changed` record is what the request stated, so it is null for
+  these focus moves, as documented in instrumented-chromium.md.)
+- 2,873 `compositor-frame-presented` records; 9 failed: frame tokens 1
+  to 6 and a second token 1 at startup, and 1127 and 1480 during the
+  run. Why those two failed is not established.
+- 8,820 `paint-worklet-painted` records, as in the first recording.
+
+#### Third recording of the fixture, smooth scroll (target machine, 2026-10-04)
+
+Recording `20261004-034540-f7cbf2fffaf840c78ad8b5cf61063090`, with the
+same build, in which the owner pressed the compositor scroll panel's
+button five times, at 24.02, 27.68, 29.26, 30.51, and 31.91 s
+(recording times are from the first compositor record); each press
+invoked the panel's click listener and was followed by a `scrollend` on
+`#scroller`. Read from the recording's compositor frames, 146 scroll
+offsets for `#scroller`:
+
+- Four of the five smooth scrolls, at 27.68 s and after, were recorded
+  in 26 offsets each, about 18 ms apart over about 0.41 s, between 0 and
+  649 px. 649 px is the top of row 30, the value `offsetTop` gave in the
+  build environment's check of the page.
+- The first, at 24.02 s, from 400 px (where an earlier wheel scroll had
+  left the list) to 649 px, has three offsets: 402.52 px in the frame of
+  24.076 s, then 648.79 px and 649 px. Between 24.076 s and 24.294 s the
+  renderer drew no frame: the begin frames of frame tokens 1063 and 1064
+  are 233.4 ms apart, and no browser record of any channel was written
+  between 24.08 s and 24.28 s. The recording is consistent with the
+  screen: no frame was drawn then. Why the renderer paused is not
+  established; whether the recorder's own work caused it is one of the
+  questions for the cost measurement of sub-step 1c. Shorter pauses of
+  this kind are in the same recording (100 ms at 23.81 s, 83.4 ms at
+  38.15 s, and others at startup).
+- 2,028 `compositor-frame-presented` records; 11 failed: frame tokens 1
+  to 7 and a second token 1 at startup, and 110, 172, and 806 at 2.94,
+  3.98, and 19.73 s. As in the second recording, why those failed is
+  not established.
+
+#### Sub-step 1 in parts
+
+Sub-step 1 is delivered in three parts, each tested on the target machine
+before the next, as the hooks are in different parts of Chromium:
+
+- 1a: `compositor-animation-started`, `compositor-animation-ended`,
+  `compositor-frame` with transforms, opacities, filters, backdrop
+  filters, and scroll offsets, and `compositor-frame-presented`.
+- 1b: `paint-worklet-painted`, and each paint worklet progress in
+  `compositor-frame`.
+- 1c: `image-paint-image`, and each animated image's frame in
+  `compositor-frame`.
+
+The cost is measured with 1c, on the page "To be settled" names.
+
+#### Sub-step 1a as built
+
+Read in the target machine's checkout before writing the hooks, and the
+patches run against copies of those files: each applies once and a second
+run leaves it unchanged.
+
+- Compositor identity: `LayerTreeHost::CreateLayerTreeHostImpl`
+  (`cc/trees/layer_tree_host.cc`) gives the impl its host's `id_`, which
+  `LayerTreeHost::GetId()` returns, so both threads name a compositor by
+  the same number, unique in its process
+  (`s_layer_tree_host_sequence_number`). Where every presentation request
+  is made, `RecorderRequestWidgetPresentation` calls
+  `RegisterCompositorWidget` with that ID and the widget, and the
+  compositor records carry the widget as the presentation records name it,
+  or null for a frame drawn before its compositor's first request.
+- `compositor-animation-started`: in
+  `CompositorAnimations::StartAnimationOnCompositor`, before the keyframe
+  models are moved to the compositor: the document, the target node, the
+  `cc::Animation` ID (`CcAnimationId`), and each keyframe model's ID,
+  `cc::TargetProperty`, element ID (set in `GetAnimationOnCompositor` from
+  the layout object's unique ID and the property's namespace), and the
+  element ID's namespace (`NamespaceFromCompositorElementId`), which tells
+  a `translate`, `rotate`, `scale`, or `transform` node apart.
+- `compositor-animation-ended`: in
+  `KeyframeEffect::CancelAnimationOnCompositor`, before the keyframe models
+  are removed, with their IDs.
+- `compositor-frame`: in `LayerTreeHostImpl::DrawLayers`, once the
+  compositor frame's token is set and before it is submitted, for a page's
+  compositor (not one with `is_layer_tree_for_ui`). Each of
+  `SetElementTransformMutated`, `SetElementOpacityMutated`,
+  `SetElementFilterMutated`, and `SetElementBackdropFilterMutated`, for
+  either list, adds the element to the compositor's animated set. At each
+  submitted frame the hook reads, from the active tree, the transform
+  node's `local` matrix, the effect node's `opacity`, `filters`, or
+  `backdrop_filters` for each element of the set, and the current scroll
+  offset of every scroll node with an element ID; the bridge writes those
+  that changed since the compositor's last recorded frame. The begin
+  frame's time is `CurrentBeginFrameArgs().frame_time`, and the active
+  tree's `source_frame_number` names the commit drawn.
+- `compositor-frame-presented`: in
+  `LayerTreeHostImpl::DidPresentCompositorFrame`, for a recorded frame
+  only, with the presentation time on the presentation records' clock or
+  the failure. Viz reports each submitted frame once, presented or failed
+  (`CompositorFrameSinkSupport::DidPresentCompositorFrame`, which also
+  reports a rejected frame as failed), so a recorded frame's report is
+  awaited by its token.
+- The records are written on the compositor thread through the bridge's
+  queue (`RecorderPipeClient::QueueEvidence`), which takes a lock and does
+  not wait on the main thread; a push that waits for the writer to free
+  space is measured as `queue.push-waited`.
+- The receiver and the validator take the four records on the new
+  channel (`BrowserCompositor*` contracts in
+  `BrowserEvidenceContracts.cs`; `EventPayloadValidator`), and the channel
+  is added to the recorder's channel lists and its omission records.
+
+Limits of 1a:
+
+- The animated set of a compositor is kept for the compositor's
+  lifetime, and is not emptied when an animation ends, so an element once
+  animated is read at each frame after. Its value is written only when it
+  changes.
+- A value is not a finite number when Chromium holds one that is not;
+  such a record cannot be serialized as JSON (`base::JSONWriter`) and is
+  lost, and is reported to the client's write-failure handler, as any
+  record that cannot be serialized is.
+
+Tests run: Python tests of the hooks, each applied once, in place, and
+upgraded where an earlier hook stood (208 passed); .NET tests of the
+four records against the receiver's contracts and the validator, with
+each value shape (BrowserCompositorRecordTests); the full .NET suite, 1002
+passed, with the four ChromiumLauncherTests that need Windows failing as
+before. Not done here: the
+instrumented Chromium build and the integration and system tests, which
+are for the target machine.
+
+On the target machine (2026-10-03): the instrumented Chromium built, after
+a first attempt stopped at `generate_v8_context_snapshot` because the
+earlier build's running Chromium held `v8_context_snapshot.bin` open.
+The user recorded a page with a CSS animation of text color and a slide-in
+of a skip-to-content link, and reports the animations drawn correctly.
+Read from that recording (20261004-022434): 32
+`compositor-animation-started` and 32 `compositor-animation-ended`
+records, each with one transform keyframe model, on four nodes of one
+document; 249 `compositor-frame` records holding 970 transform values and
+4 scroll offsets, 248 of them from the page's widget, at a median of
+16.667 ms between begin frames; and 249 `compositor-frame-presented`
+records, one for each recorded frame, none failed. The text color
+animation has no compositor record, as color is not animated on the
+compositor. The recreation does not yet impose the recorded compositor
+values (sub-step 2), so what it drew is from the main thread's records,
+and this recording does not test the replay.
+
+#### Sub-step 1b as built
+
+Read in the target machine's checkout before writing the hooks: both
+native paint worklets in use are on by default there
+(`CompositeBGColorAnimation` and `CompositeClipPathAnimation` have
+status "stable" in `runtime_enabled_features.json5`); the box shadow one
+is not.
+
+- How a paint worklet's progress reaches the screen: the compositor's
+  animation gives the progress to `OnCustomPropertyMutated`, which keeps
+  it in `AnimatedPaintWorkletTracker`; at the next impl-side invalidation
+  the records that depend on it are dropped, and
+  `ClientLayerTreeHostImpl::GatherDirtyPaintWorklets` makes a
+  `PaintWorkletJob` for each, holding the progress at that time. The
+  worklet thread paints the jobs, `OnPaintWorkletResultsReady` puts each
+  painted record on its pending tree layer, and the record is drawn once
+  that tree is activated. So the progress drawn in a frame is the one the
+  active tree's record was painted with, not the tracker's latest.
+- `compositor-frame`: in `OnPaintWorkletResultsReady`, before the records
+  are put on the pending tree, each result's progress is noted by its
+  record's `PaintOpBuffer`, which the record keeps as it is copied to the
+  layer and on activation. At each submitted frame, for each record of
+  the active tree's layers with paint worklets, the frame recorder adds
+  `background-color-progress` or `clip-path-progress` for the record's
+  element: `{"progress": p}`, or `{"progress": null}` when the record was
+  painted with no compositor progress, from the main thread's value. A
+  property no longer drawn is written once as null, as in 1a. A noted
+  result neither tree holds is let go.
+- `paint-worklet-painted`: on the worklet's thread, in
+  `BackgroundColorPaintDefinition::Paint` and
+  `ClipPathPaintDefinition::Paint`, once the value is computed and before
+  it is drawn: the element ID and property of the input, the compositor
+  progress given, or null, and the value. A background color is the four
+  floats of the `SkColor4f` drawn. A clip path is the `SkPath` drawn, as
+  Skia holds it (fill type, verbs, points, and conic weights, from which
+  `SkPath::Raw` builds the same path), the translation the paint applies
+  before drawing, and whether it was drawn as a rounded rectangle
+  (`ReduceToRRectIfPossible`). The value is matched to a frame by element,
+  property, and progress: the last painted at or before the frame.
+
+Limits of 1b:
+
+- A paint worklet of the CSS Painting API, with composited custom
+  properties, is not recorded: its painted output is not one of these
+  two, and its properties are named by custom property, not by native
+  type.
+- Two paints of one element and property with the same progress but
+  different keyframes, as when an animation is replaced, are told apart
+  only by order: the last painted at or before the frame is taken.
+- A record already painted before the recorder's client was connected has
+  no noted progress, and its element is not written until it is painted
+  again.
+
+Tests run: Python tests of the hooks against copies of the target
+machine's files, each applied once, in place, with a tree patched by 1a
+upgraded to the same result as a fresh tree (211 passed); .NET tests of
+the paint worklet progress values and the `paint-worklet-painted`
+records against the receiver's contracts and the validator
+(BrowserCompositorRecordTests, 36 passed); the full .NET suite, 1013
+passed, with the four ChromiumLauncherTests that need Windows failing as
+before. Not done here: the
+instrumented Chromium build and the integration and system tests, which
+are for the target machine.
+
+#### Sub-step 1c design (agreed)
+
+Proposed 2026-10-04, after the fixture's recordings, and agreed the same
+day. It covers what the table above calls
+`image-paint-image` and an animated image's frame in `compositor-frame`,
+and the cost measurement "To be settled" names.
+
+Read in the Chromium checkout on the target machine:
+
+- A Blink image has one ID of its own, made when it is made:
+  `Image::paint_image_id()`, set from `PaintImage::GetNextId()` in its
+  constructor (`third_party/blink/renderer/platform/graphics/image.cc`).
+- The paint images drawn from it are made in
+  `BitmapImage::PaintImageForCurrentFrameWithInfo` (`bitmap_image.cc`),
+  which calls `CreatePaintImage` when no paint image is cached for the
+  case. By default the paint image takes the image's own ID (the
+  "shared" sequence). With the CSS `image-animation` property, an element
+  whose image is paused or running on its own gets a new ID of its own
+  (`PaintImage::GetNextId()`, the "own" sequence, cached by the element's
+  `DOMNodeId`), which can name the shared ID it is synchronised to; a
+  stopped image keeps the ID it had or, with none, gets a new one. So one image resource can be drawn
+  under several paint image IDs, and a record made once, when the
+  resource finishes loading, as the table above has it, would miss every
+  ID but the first.
+- In cc, `ImageAnimationController` (`cc/trees/image_animation_controller.h`)
+  keeps each animated paint image's state by `PaintImage::Id`. Its
+  `active_index()` is the frame the active tree draws; its
+  `GetFrameIndexForImage` gives that for `ACTIVE_TREE`.
+  `GatherFrameIndexes` gives the pending tree's frames, not the drawn
+  ones, so it is not used. `LayerTreeHostImpl::GetFrameIndexForImage`
+  gives frame 0 for a paint image that should not animate, which the
+  controller does not hold.
+
+What is recorded (protocol 0.48, additive):
+
+| Record | Where | Holds |
+| --- | --- | --- |
+| `image-resource` (one field added) | `ImageResource::Finish`, after the bytes are given to the image | `imageId`: the Blink image's own ID, or null when no image was made, as for a decode error |
+| `image-paint-image` | Blink, main thread, in `PaintImageForCurrentFrameWithInfo`, when it makes a paint image with an ID not recorded before in the renderer | `imageId`; `paintImageId`; `sequence`, `shared` or `own`; `nodeId`, the `DOMNodeId` of the node Blink caches the paint image's frames by (always for an own sequence, and for a stopped image), else null; `syncTargetPaintImageId`, or null |
+| `compositor-frame` (a change added) | the 1a hook in `DrawLayers` | for each paint image the controller holds, `{"paintImageId", "property": "image-frame", "value"}`, the active tree's frame index; null once when the image leaves the controller |
+
+So a drawn frame index is tied to its image by `paintImageId` to
+`image-paint-image`, by `imageId` to `image-resource`, and by its digest to
+the bytes. The cc side adds a recorder accessor to
+`ImageAnimationController` that lists each held ID with its
+`active_index()`, as `GatherFrameIndexes` lists pending ones. A frame
+index, like every compositor value, is recorded only when it changes.
+
+The cost measurement:
+
+- The bridge's cost lines time each bridge call, not the hooks' work
+  before it (the 1a and 1b hooks read the trees and copy values first).
+  Each hook added in sub-step 1 is therefore timed whole, as its own
+  kind in the same cost lines: the `DrawLayers` hook, the paint worklet
+  hooks, the paint worklet results hook, and the two image hooks.
+- Measured on the target machine with the fixture, which has a running
+  composited animation, a background color animation, and animated
+  images, as "To be settled" asks; the count, mean, and longest call of
+  each kind are recorded here. A pause of the renderer like the one in
+  the fixture's third recording, if the recorder caused it, shows as a
+  longest call or span of that length in the line for its interval; a
+  pause the recorder did not cause is not measured.
+
+Limits:
+
+- An image from a `data:` URL has no `image-resource` record, as before,
+  so its `image-paint-image` names an image ID with no resource; the
+  element's recorded attribute holds the URL.
+- A multipart image and an image that failed its integrity check have no
+  `image-resource` record, as before.
+- An SVG image is not a `BitmapImage`, and its animation is not the
+  controller's; it is not covered.
+
+Required tests: unit tests of each hook against copies of the target
+machine's files, applied once and in place, with a tree patched by 1a and
+1b upgraded to the same result as a fresh tree; unit tests of the new
+fields and records against the receiver's contracts and the validator;
+and, on the target machine, an integration test with the fixture: each
+animated image's `image-paint-image` and `image-resource` records linked
+as above, and its recorded frame indexes advancing through 0 to 7 at
+250 ms a frame.
+
+#### Sub-step 1c as built
+
+Built 2026-10-04 as designed above, with these details settled in the
+building:
+
+- Paint image IDs come from a sequence number that starts at 0
+  (`PaintImage::GetNextId`, `cc/paint/paint_image.cc`), and
+  `PaintImage::kInvalidId` is -2, so an ID of 0 is recorded and a
+  negative one is not.
+- `image-paint-image` is written in
+  `BitmapImage::PaintImageForCurrentFrameWithInfo` just after
+  `CreatePaintImage`, and only when it made a paint image. Its `nodeId`
+  is the `DOMNodeId` the frame is cached by: Blink passes
+  `node->GetDomNodeId()` (`CSSImageAnimations::CreateImageNodeAnimationInfo`),
+  the recorder's node ID. The bridge writes a paint image ID once per
+  renderer.
+- In `ImageResource::Finish` the bytes are copied before
+  `UpdateImage`, as before, and `image-resource` is written after it,
+  with `imageId` read from the content's image. A tree with the protocol
+  0.40 hook is upgraded in place.
+- The image frames are read in `RecorderRecordCompositorFrame`, which
+  `DrawLayers` now also passes the compositor's image animation
+  controller. An image no longer held is written once as null. The
+  change names its paint image as `paintImageId` and has no `elementId`.
+- The hooks are timed with `A11Y_RECORDER_HOOK_COST`, a kind of its own
+  in the cost lines: `hook:compositor-frame` and
+  `hook:paint-worklet-results` time the cc helpers whole, after their
+  check that the recorder is connected; `hook:background-color-painted`
+  and `hook:clip-path-painted` time the paint worklet hooks;
+  `hook:image-resource` times the copy of the bytes, whose recording is
+  timed as `RecordBlinkImageResource`; and `hook:image-paint-image` times
+  the paint image hook. A tree patched by 1a or 1b is upgraded in place.
+
+Tests run: Python tests of the hooks, including the 1b and 0.40 upgrades,
+(216 passed); the patches applied twice, with no change the second
+time, to copies of the target machine's `layer_tree_host_impl.cc` (patched
+by 1b), `image_resource.cc` (patched for 0.40), `bitmap_image.cc`, and
+`image_animation_controller.h`, and its two native paint definitions
+found to hold the 1b hooks the upgrade replaces; the standalone checks of the cost accounting; .NET tests of
+the `image-frame` change, `image-paint-image`, and `imageId` against the
+receiver's contracts and the validator (593 passed in the compositor,
+resource, and validator tests); and the full .NET suite, 1026 passed, with the four
+ChromiumLauncherTests that need Windows failing as before.
+Not done here: the instrumented Chromium build and the integration test
+with the fixture, which are for the target machine.
+
+#### Recording of the fixture with 1c (target machine, 2026-10-04)
+
+Recording `20261004-131014-0d65424b09d04391aab4ef4714aec25c`, built from
+9f075b3, of the fixture page, 110.6 s long. The page's renderer is process
+38536, with one compositor (`layerTreeHostId` 1). The main scroller's
+offset (element 452) shows the page scrolled up and down several times.
+
+The images are linked as designed:
+
+| Image | `image-resource` `imageId` | `image-paint-image` |
+| --- | --- | --- |
+| `frames.gif` | 0 | paint image 0, `shared`, `nodeId` null, no sync target |
+| `frames.webp` | 1 | paint image 1, `shared`, `nodeId` null, no sync target |
+| `frames.png` | 2 | paint image 2, `shared`, `nodeId` null, no sync target |
+
+The resources were recorded at 3.00 s and the paint images at 3.42 s. No
+`own` sequence was recorded; the fixture does not use the CSS
+`image-animation` property. The browser's own renderer (process 21976)
+recorded four SVG `image-resource` records with `imageId` 2 to 5 and no
+`image-paint-image`; IDs are per renderer process.
+
+The frames, from the `image-frame` changes:
+
+- Each of the three paint images has 173 changes, all three in the same
+  compositor frames (173 of the 5987 frames), with every index from 0 to
+  7.
+- Between consecutive changes the begin-frame times are 249.996 ms apart
+  at the median, which is the fixture's 250 ms a frame; the shortest is
+  16.674 ms.
+- The index stopped changing from 3.70 s to 24.85 s and from 49.60 s to
+  90.3 s. Each pause began as the main scroller's offset fell below about
+  700 px and ended as it rose past it. This is consistent with Chromium
+  not advancing an image that is out of view; the recording does not show
+  it directly.
+- Three changes are out of sequence: 4 to 6 on resuming after 40.7 s, 7
+  to 4 (1316.6 ms later) and 4 to 1 (1283.3 ms later), the last two
+  around jumps of the scroller to 631 px and 0 px. They are consistent with
+  the controller's resynchronisation of an image that resumes
+  (`enable_image_animation_resync`); that is not established.
+
+The cost, from the 26 cost lines in `chromium.log`, for the page's
+renderer over the whole recording (a hook's time includes its bridge
+call's):
+
+| Kind | Calls | Mean (µs) | Longest (µs) | Total (ms) |
+| --- | --- | --- | --- | --- |
+| `hook:compositor-frame` | 5856 | 77.2 | 568 | 452.3 |
+| `RecordCompositorFrame` (within it) | 5856 | 51.0 | 543 | 298.9 |
+| `RecordCompositorFramePresented` | 5853 | 15.5 | 91 | 90.5 |
+| `hook:paint-worklet-results` | 3605 | 1.6 | 15 | 5.6 |
+| `hook:background-color-painted` | 3614 | 9.4 | 184 | 34.0 |
+| `hook:clip-path-painted` | 10809 | 19.5 | 222 | 211.0 |
+| `RecordPaintWorkletPainted` (within those two) | 14423 | 14.0 | 219 | 201.2 |
+| `hook:image-resource` | 3 | 5.0 | 7 | 0.0 |
+| `RecordBlinkImageResource` | 3 | 20.7 | 26 | 0.1 |
+| `hook:image-paint-image` | 3 | 16.0 | 24 | 0.0 |
+| `RecordBlinkLayoutChanges` | 3564 | 1485.3 | 12201 | 5293.8 |
+| `span:interaction-checkpoint` | 3581 | 57.2 | 244 | 205.0 |
+| `span:layout-checkpoint` | 1 | 31343.0 | 31343 | 31.3 |
+
+On the compositor thread the sub-step 1 hooks cost about 0.55 s in
+110.6 s; on Blink's main thread the layout changes of each rendering
+update cost about 5.3 s, about 1.5 ms an update, which is the largest
+recorder cost measured on the page's threads. The writer thread's longest
+write was 26.4 ms.
+
+Pauses of the page's renderer: after the first 4.1 s, two intervals of
+more than 100 ms had no record from it, 172 ms at 9.23 s and 159 ms at
+66.11 s. Each began just after a `layout-changes-started` record; at
+66.11 s the browser's own renderer was recording DOM changes. The longest
+call or span of any measured kind on the page's renderer was 31.3 ms, so
+the measured recorder work does not account for either pause. Their cause
+is not established. Sixteen of the 5986 presentations failed: five at
+startup, and eleven between 10.46 s and 84.59 s, each within 0.52 s of a
+recorded scroll offset change; their cause is not established either.
+
+#### Sub-step 2 in parts (agreed)
+
+Proposed 2026-10-04, after the owner asked to hold the recorded image
+frames in the recreation next ("ok let's do that work"). Sub-step 2 of
+"Sub-steps" above is delivered in three parts, each tested on the target
+machine before the next, as each is a different part of Chromium:
+
+- 2a: animated images held at their recorded frame (designed below).
+- 2b: no CSS animation or transition run in the recreation, and the
+  compositor's recorded transforms, opacities, filters, backdrop filters,
+  and scroll offsets imposed.
+- 2c: the paint worklets' recorded background colors and clip paths
+  imposed.
+
+Until 2b and 2c are built, the fixture's other panels are not expected to
+match the captured frame in the recreation, and are not judged in 2a's
+test.
+
+#### Sub-step 2a design: animated images held (agreed, built)
+
+Agreed by the owner on 2026-10-04 ("yes please"), and built as "Sub-step
+2a as built" below states. The parts of sub-step 2 above were agreed with
+it.
+
+Read in the target machine's checkout before this was written.
+
+What Chromium does, from the source:
+
+- The frame drawn of an animated image is the image animation
+  controller's index for its paint image, read in three places: the tile
+  manager's raster, through `LayerTreeHostImpl::GetFrameIndexForImage`
+  (`cc/tiles/tile_manager.cc`); the picture quad's image map, from the
+  controller directly (`PictureLayerImpl::AppendQuads`,
+  `cc/layers/picture_layer_impl.cc`); and the indexes sent to the main
+  thread at commit (`GatherFrameIndexes`, from
+  `LayerTreeHostImpl::ProcessCompositorDeltas`). So the hold is made in
+  the controller, which all three read, not in one of them.
+- `LayerTreeHostImpl::GetFrameIndexForImage` gives the first frame for a
+  paint image that should not animate (`PaintImage::ShouldAnimate`: not
+  animated, no repetitions, or one frame), and the controller's index
+  otherwise. `ShouldAnimate` does not depend on whether the image's loops
+  are done, so the index recorded in 1c is the frame drawn.
+- The controller learns of an image from `UpdateAnimatedImage`, with its
+  frames, and advances it in `AnimateForSyncTree` when its own
+  `AnimationState::ShouldAnimate()` is true, which also asks for the next
+  frame at the time the image next changes.
+- An element's own sequence (the CSS `image-animation` property) is behind
+  `CSSImageAnimation`, whose status in
+  `runtime_enabled_features.json5` is "test", so it is not on in the
+  instrumented Chromium, and the recording holds only shared sequences, as
+  the fixture's did.
+
+What the app does when it opens a recreation at a frame, for each image it
+answers:
+
+1. The document's renderer and frame sink are those of its presentation
+   records (browser instance, process, and `frameSinkId`).
+2. The image's ID is the `imageId` of the latest `image-resource` for the
+   image's URL in that renderer at or before the time the document's state
+   is read at. Its paint image is the `shared` `image-paint-image` with
+   that `imageId`.
+3. The frame is the `image-frame` value for that paint image as of the
+   last `compositor-frame` of the document's frame sink whose
+   `compositor-frame-presented` was not failed and was presented at or
+   before the frame's composition: the latest change for the paint image
+   in that frame or any recorded before it, as "Which state a captured
+   frame shows" states. The presentation time is taken to recording time
+   as the presentation feedback's is (`PlaybackIndex`).
+4. The answer carries a response header of the recorder's,
+   `X-A11y-Recorder-Image-Frame`, with that index. An image with no such
+   frame (not painted animated, a null value, or a recording before
+   protocol 0.48) has no header and is held at its first frame.
+
+The header is listed with the response in DevTools' Network panel, so the
+frame imposed can be seen there. The evidence panel lists each image
+answered with a held frame: its URL, the index, and the compositor frame's
+token and presentation time; and how many images were held at their first
+frame for want of a recorded frame, with the reason.
+
+What the instrumented Chromium does, only in the recreation mode:
+
+- Blink, in `ImageResource::Finish`
+  (`third_party/blink/renderer/core/loader/resource/image_resource.cc`),
+  after the image is updated with its bytes: when the response has the
+  header, it gives the bridge the image's paint image ID
+  (`Image::paint_image_id()`, which a shared sequence's paint image uses)
+  and the index.
+- The bridge keeps these in the renderer, by paint image ID, under a lock,
+  as Blink's main thread writes them and the compositor thread reads them.
+- cc, in `ImageAnimationController::UpdateAnimatedImage`
+  (`cc/trees/image_animation_controller.cc`), after the image's metadata
+  is updated: the image's pending and active index are set to its held
+  index, or to the first frame when it has none or the index is not one
+  of its frames. A method the integration adds to `AnimationState` sets
+  them.
+- cc, in `AnimationState::ShouldAnimate()`: false, so no image is
+  advanced and no frame is asked for to advance one.
+
+Nothing is recorded for this part, and the recording protocol stays 0.48.
+
+Limits:
+
+- An image of an element's own sequence, or of a popup's compositor, is
+  held at the frame of the tab's shared sequence, or its first frame. Own
+  sequences are not on in the instrumented Chromium (above).
+- An image not fetched through the recorder, such as one with a `data:`
+  URL, has no header and is held at its first frame.
+- An image drawn by the main thread outside the compositor, such as one a
+  canvas draws, is not held by this; no page script runs in the
+  recreation to draw one.
+- The app reads the recording's compositor records up to the frame to
+  find the image frames, which takes longer the later the frame in a long
+  recording. The time is listed as a step of "Time to open the
+  recreation", and its optimization is left for later, as the owner asked.
+
+Required tests:
+
+- Unit (app): the frame chosen for an image from a sequence of compositor
+  frames and presentations, with a failed presentation, a frame presented
+  after the composition, a null value, another frame sink's frames, and
+  another renderer's `image-resource` for the same URL; the header in the
+  answer, and its absence; the panel's lines.
+- Unit (integration script): each hook against copies of the target
+  machine's files, applying once and leaving them unchanged on a second
+  run; the bridge functions' call shapes.
+- Unit (bridge): the held frames by paint image ID, read from another
+  thread.
+- System, on the target machine: the fixture recording opened at several
+  frames, chosen by the owner, while the images panel was in view; in each
+  recreation, the number drawn on each of the three images is the one on
+  the captured frame and the one in the evidence panel, and it does not
+  change while the recreation is open.
+
+#### Sub-step 2a as built
+
+Built on 2026-10-04 as designed above, with these differences and
+additions:
+
+- Blink gives the bridge the header's text, and the bridge parses it
+  (`ParseRecreationImageFrame` in `recreation_image_frames.h`): digits
+  only, with no sign, space, or overflow; any other value holds nothing.
+  The integration script's check of the bridge's call shapes allows only
+  the bridge's own entry points in a patched file, and the parsing helper
+  is not one.
+- `HoldRecreationImageFrame(paint_image_id, frame_header)` and
+  `RecreationHeldImageFrame(paint_image_id)` are the bridge's entry
+  points. The held frames are a `HeldImageFrames` (in
+  `recreation_image_frames.h`) under a `base::Lock`; both functions do
+  nothing outside the recreation mode.
+- The hold in `image_resource.cc` is added to the 1c hook in
+  `ImageResource::Finish`, after `RecordBlinkImageResource`; a checkout
+  patched with the 1c or the 0.40 hook is upgraded in place.
+- `RecorderHoldFrame`, the method added to `AnimationState` in
+  `image_animation_controller.h`, takes an index that is not one of the
+  image's frames as the first frame.
+- The frame chosen accumulates the changes of the chosen compositor
+  frame's own compositor (its `layerTreeHostId`) only, as a compositor
+  recreated for the frame sink starts with no image frames of its own.
+- The app reads the recording's presentation, lifecycle, resources, and
+  compositor records up to two seconds after the frame's composition, so
+  that a compositor frame presented by the composition has its
+  presentation record. A presentation recorded more than two seconds after
+  the composition is taken as not presented; this limit is stated here and
+  not in the evidence panel.
+- The evidence panel lists the images held at a recorded frame in one
+  note, with each URL, its index, and the compositor frame that last
+  changed it, and the compositor frame and presentation time it was
+  chosen at. Images the compositor had released at the frame (a null
+  value) are counted. Other images are not counted, as a still image and
+  an animated image with no recorded frame are both drawn at their first
+  frame; one note says so for every recreation.
+- In the recreation mode every animated image is held at its first frame
+  unless a header names another, including any on a browser page such as
+  DevTools, as `ShouldAnimate()` is false in each process of the
+  recreation's browser.
+- "Time to open the recreation" lists "Choosing the frame of each animated
+  image from the recording's compositor records" as its own step, apart
+  from reading the fonts and images.
+
+Tests run in the sandbox, 2026-10-04:
+
+- Unit (app), `RecordedImageFramesTests`: the frame chosen with a failed
+  presentation, a frame presented after the composition, a null value,
+  another frame sink's frames, and another renderer's `image-resource`; a
+  document with no presentation; the header in the answer and its absence;
+  the panel's note. All passed.
+- Unit (integration script): each hook against copies of the target
+  machine's `image_animation_controller.h`, `image_animation_controller.cc`,
+  and `image_resource.cc`, patched once and unchanged on a second run; the
+  1c hook upgraded; the bridge call shapes. All passed.
+- Unit (bridge), `recreation_image_frames_test.cc`: the parsing, and the
+  held frames by paint image ID, read from another thread. Passed.
+- The chooser was run, outside the committed tests, on the 1c fixture
+  recording ("Recording of the fixture with 1c") at 10 to 100 s, and gave
+  the same frames as a separate reading of the same records. Each choice
+  took 0.36 to 0.73 s in the sandbox, which reads the compositor records
+  from the start of the recording; the time on the target machine is not
+  measured.
+
+- The full app run in the sandbox: 1038 passed, and the 4
+  `ChromiumLauncherTests` that fail in the sandbox, as before, failed. The
+  integration script's tests: 219 passed. The bridge's other native tests
+  (full walks, recreation input, evidence cost) passed.
+
+System test on the target machine, 2026-10-04, with 6a83cf8 on a
+recording of the fixture served over http ("Images of a page recorded from
+a file" below), as the owner reported: "The animated numbers match on
+every check".
+
+#### Images of a page recorded from a file (proposed, not built)
+
+Reported by the owner on 2026-10-04, with 6a83cf8, on the fixture
+recording 20261004-131014-0d65424b09d04391aab4ef4714aec25c: "THe number
+images don't show at all". The screenshot shows the three images of the
+"Animated images" panel as broken images, with their alternative text.
+
+Cause, read in the recording and the app. The fixture was opened from a
+file, so the recorded address is
+`file:///C:/Users/Public/Downloads/animation-fixture/index.html`, and the
+three `image-resource` records are of `file:///` URLs (`frames.gif`,
+`frames.webp`, and `frames.png` in that folder), with their bytes recorded.
+`RecreationServer.IsServableAddress` accepts only http and https
+addresses, so the page is served from the recorder's loopback address, as
+the evidence panel's note says, the relative `src` of each image resolves
+to a loopback URL, and the recorder answers no image of a page not served
+at its recorded address (sub-step 3). So no image of a page recorded from
+a file has been shown in any recreation; this is not caused by 2a.
+
+Proposed fix: a page recorded at a local `file:///` address is served at a
+stand-in address of the recorder's,
+`https://file.a11y-recorder.invalid/` followed by the rest of the recorded
+address after `file:///` (for the fixture,
+`https://file.a11y-recorder.invalid/C:/Users/Public/Downloads/animation-fixture/index.html`).
+The name is under the reserved `.invalid` domain, as the font address is,
+so a request for it can only be answered by the recorder. Relative URLs
+then resolve as they did, at the same path under the stand-in address, and
+the recorder answers each image request by turning its URL back into the
+recorded `file:///` URL and answering from the recording as for an http
+page, with its held frame. Every other request stays refused, as for any
+recreation served at an address.
+
+What changes:
+
+- The recreation's tab, DevTools, and the document's `URL` show the
+  stand-in address, not the recorded one. The evidence panel says so, and
+  gives the recorded address.
+- A `file://` address naming a host (a network share) is not served this
+  way, and stays on the loopback address, as now; the evidence panel says
+  so.
+- Nothing is recorded differently, and Chromium is not rebuilt.
+
+Required tests:
+
+- Unit (app): the stand-in address of a local file address and back; a
+  file address with a host, and other schemes, not given one; the page
+  answered at its stand-in address; an image request at the stand-in
+  address answered with the recorded file image's bytes and held frame; a
+  request outside the recorded images refused; the panel's notes.
+- System, on the target machine: the fixture recording opened at several
+  frames while the images panel was in view; the three images are shown,
+  and the 2a test of "Sub-step 2a design" is run.
+
+Decision, 2026-10-04: the owner chose to re-record the fixture over http
+rather than build this. `tests/fixtures/animation/Serve-Fixture.ps1` serves
+the fixture folder at `http://127.0.0.1:8765/`, from an ordinary PowerShell,
+so a recording of it has http addresses and its recreation is served at its
+recorded address with its images. A page recorded from a file still shows
+no images in its recreation; that limit stands.
+
+#### Sub-step 2b in parts (proposed)
+
+Proposed 2026-10-04, after the owner asked to start on 2b ("Please push
+and then start on 2b"). 2b is delivered in two parts, each tested on the
+target machine before the next, because the second needs a change to
+what is recorded and the first does not:
+
+- 2b-i: no CSS animation or transition run in the recreation, and the
+  compositor's recorded transforms, opacities, filters, and backdrop
+  filters imposed (designed below).
+- 2b-ii: the compositor's recorded scroll offsets imposed. The compositor
+  names a scroller only by its compositor element ID, and nothing recorded
+  ties that ID to a node, so this part adds the ID to the scroll offset
+  record (protocol 0.49). See "Sub-step 2b-ii design" below.
+
+#### Sub-step 2b-i design: compositor values imposed (agreed, built)
+
+What the recording holds, read from the recording of the fixture with 1c
+(`20261004-131014-0d65424b09d04391aab4ef4714aec25c`):
+
+- The main thread's computed style of each composited element is recorded
+  at almost every rendering update, as CSS text with six significant
+  digits: 3,641 recorded styles of `#rotation` with 3,630 distinct
+  transforms, and 3,640 of `#fade` with 3,622 distinct opacities. The
+  recorded style therefore holds a value close to the drawn one, not the
+  drawn one.
+- Compared with the last recorded style written before it, each of the
+  5,980 compositor opacities of `#fade` differs by a median of 0.0133 and
+  at most 0.1200. This compares records by the time they were written, not
+  by presentation, so it shows the size of the difference, not its exact
+  value at a frame; at the fixture's rate of 0.4 a second, 0.0133 is about
+  two frames of the animation.
+- The skip link's recorded transform is `none` in some records, so a
+  compositor value can belong to an element whose recorded style has no
+  value for that property.
+
+Read in the target machine's checkout, 2026-10-04:
+
+- Blink makes one transform node for each of `translate`, `rotate`,
+  `scale`, and `transform`, in
+  `FragmentPaintPropertyTreeBuilder::UpdateIndividualTransform`
+  (`third_party/blink/renderer/core/paint/paint_property_tree_builder.cc`),
+  each with its matrix computed without the transform origin, and the
+  compositor element ID of its namespace. `UpdateCcTransformLocalMatrix`
+  (`platform/graphics/compositing/property_tree_manager.cc`) copies the
+  matrix to the cc transform node's `local` and the origin to its
+  `origin`. The `local` matrix the recording holds for a namespace is
+  therefore the matrix of the Blink node of that namespace, and the origin
+  is unchanged by the animation.
+- The effect node's `opacity`, `filters`, and `backdrop_filters` are
+  copied from the Blink effect nodes (`effect.Opacity()`,
+  `filter->AsCcFilterOperations()`,
+  `backdrop_filter->AsCcFilterOperations()`), which `UpdateEffect`,
+  `UpdateFilter`, and `PopulateBackdropFilterIfNeeded` make from the style.
+- Whether a node exists is decided from the style and the compositing
+  reasons (`NeedsTranslate`, `NeedsRotate`, `NeedsScale`,
+  `NeedsTransform`, `NeedsFilter`, `NeedsEffectIgnoringClipPathAnd2DScale`).
+  An element that is not animated in the recreation has no animation
+  compositing reason, so an element whose recorded style holds `none` for
+  the property would have no node of that namespace.
+- `CSSAnimations::CalculateAnimationUpdate` and
+  `CSSAnimations::CalculateTransitionUpdate`
+  (`core/animation/css/css_animations.cc`) are where style resolution
+  starts, updates, and cancels CSS animations and transitions. A CSS
+  animation of a property the recorded style imposes as important is not
+  put on the compositor (`KeyframeEffect::AffectsImportantProperty`), but
+  it still runs on the main thread (`element_animations.h`), and a
+  transition is above important declarations in the cascade.
+
+What the recreation does:
+
+- Nothing is animated. In the recreation mode, `CalculateAnimationUpdate`
+  and `CalculateTransitionUpdate` return before they make any update, so
+  no CSS animation or transition is started. The recorded computed style
+  keeps its `animation` and `transition` properties, and DevTools shows
+  them, but they are not run. Whether a CSS animation changes what the
+  recreation draws today is not established; this makes it certain that
+  none does, and stops the main thread work of running them. SVG
+  animation elements are not part of 2b.
+- The app chooses the compositor values at the frame as 2a chooses image
+  frames: for the frame sink of the document's widget, the last
+  `compositor-frame` presented at or before the frame's composition,
+  together with each earlier frame's values of the same compositor not
+  yet replaced. A value is joined to its node by its element ID, through
+  the `compositor-animation-started` records of the same renderer, which
+  name the node and the element ID's namespace. As "Which state a captured
+  frame shows" states, a value is dropped when its animation ended, by a
+  `compositor-animation-ended` record, and a later rendering update was
+  presented at or before the composition, and a null value is dropped.
+- Each node with values is given them in an attribute of its own,
+  `data-a11y-recorded-compositor`, so DevTools shows them on the element.
+  It holds, for each value, the namespace or property and the numbers as
+  the recording wrote them: a transform's 16 entries row by row, an
+  opacity, or a filter's operations with their types and numbers. The app
+  copies the recorded number text, and Blink reads it with
+  `base::StringToDouble`, so no number is rounded on the way.
+- Transforms are imposed on Blink's paint property tree, not through the
+  style: in the recreation mode, `UpdateIndividualTransform` replaces the
+  matrix of a namespace with a recorded value with that value, and keeps
+  the origin it computed from the recorded style. `NeedsTranslate`,
+  `NeedsRotate`, `NeedsScale`, and `NeedsTransform` are true for a node
+  with a recorded value of their namespace, so the node exists when the
+  recorded style holds `none`. A `rotate` matrix cannot be written as a
+  `rotate` value without recomputing it, which is why the property tree is
+  used.
+- Filters and backdrop filters are imposed on the paint property tree as
+  well: `UpdateFilter` and `PopulateBackdropFilterIfNeeded` replace the
+  operations made from the style with ones made from the recorded types
+  and numbers. A reference filter (an SVG `url()` filter) is recorded with
+  no numbers and cannot be made again, so it is not imposed, and the
+  Console names the element. `NeedsFilter` is true for a node with a
+  recorded filter.
+- Opacity is imposed through the style: the style resolution hook of
+  slice 1a adds the recorded opacity after the recorded style, as an
+  important declaration of the same origin. The opacity decides whether
+  the element is a stacking context and has an effect node, and imposing
+  it through the style keeps those decisions Blink's own; the recorded
+  value, a float, is written with enough digits to be read back as the
+  same float.
+- The evidence panel has one note listing each imposed value's node, its
+  property, the compositor frame that last changed it, and the compositor
+  frame and presentation time it was chosen at, and counts the values not
+  imposed with their reasons.
+
+Limits:
+
+- A composited animation is drawn from a layer the compositor rasterized
+  at a scale of its own choosing, and the recreation draws the element
+  without the animation, so its raster scale, and with it the pixels of
+  scaled or rotated text and images, can differ. The values are the
+  recorded ones; the pixels are not claimed equal.
+- An element whose stacking or compositing during the recording came
+  only from its running animation, with a recorded opacity of exactly 1
+  and no other reason, is not a stacking context in the recreation.
+- An animation that started before the recorder's client connected has
+  no `compositor-animation-started` record, so its values cannot be
+  joined to a node and are not imposed; the panel counts them.
+- DevTools' Computed pane shows the recorded style's transform and
+  filters, not the imposed ones; the attribute shows the imposed values.
+- Scroll offsets are 2b-ii's, background colors and clip paths 2c's.
+
+Required tests:
+
+- Unit (app): the values chosen at a frame from a sequence of compositor
+  frames and their presentations, including a failed presentation, a
+  frame presented after the composition, another frame sink's frames, a
+  null value, an ended animation before and after a later presented
+  rendering update, and an element ID with no start record; the join of a
+  value to its node and namespace through another renderer's records not
+  taken; the attribute's text, with the recorded number text unchanged;
+  the panel's note.
+- Unit (integration script): each hook against copies of the target
+  machine's `css_animations.cc`, `paint_property_tree_builder.cc`, and
+  `style_resolver.cc`, applied once and unchanged on a second run, with
+  the slice 1a style hook upgraded; the bridge call shapes.
+- Unit (bridge): the parsing of the attribute's text, with malformed text
+  imposing nothing.
+- System, on the target machine: a new recording of the fixture served
+  over http, opened at several frames; at each, the rotation, separate
+  transform properties, fade, and frosted glass panels, and the skip link
+  when it was moving, look as in the captured frame, and two screenshots
+  of the recreation taken a second apart are identical. The blur panel is
+  not composited and is drawn from the recorded style, as now.
+
+#### Sub-step 2b-i as built
+
+Built as designed, with these differences:
+
+- Time is held only in a recreation process that shows no browser page:
+  `RecreationHoldsTime()` is `IsRecreationMode()` and not a browser page
+  process, as for the refused input, so DevTools' own animations still
+  run. The transform and filter hooks read values only while it is true.
+- No node is forced. `NeedsTranslate`, `NeedsRotate`, `NeedsScale`,
+  `NeedsTransform`, and `NeedsFilter` are unchanged, because forcing a
+  node changes the element's stacking and compositing from what the
+  recorded style gives. A recorded transform of a namespace the element
+  has no node of, as when the recorded style holds `none`, or a recorded
+  filter of an element with no filter node, is not imposed, and the
+  Console of the element's document names the element and the reason.
+  Whether this leaves the skip link's motion unshown at some frames is to
+  be seen on the target machine.
+- Filters are imposed only when the recorded operations are of the same
+  number and types, in the same order, as those Blink made from the
+  recorded style, and each has the expected count of numbers; otherwise
+  none of the element's filter is imposed, and the Console says so. What
+  the record does not hold is kept from Blink's own operation: a blur's
+  tile mode, and a reference filter's image filter, so a reference filter
+  is drawn from the recorded style and the other operations of the same
+  filter are imposed.
+- A drop shadow's color passes through `AppendDropShadowFilter`, which
+  makes it from `color.Rgb()`, so it is rounded to 8 bits a channel.
+- Popups take no compositor values: only the page document's nodes are
+  given the attribute.
+- The values are read in the same pass over the compositor records as the
+  image frames, and the evidence panel's timing names both. The values
+  are given to the page whether or not it is served at its recorded
+  address.
+- The evidence panel always says that the recreation holds the recorded
+  moment and which compositor values are not imposed yet.
+
+Found while building on the target machine: the first delivery (1e0bdfd)
+called `String::FromUTF8`, which Blink does not have, and `style_resolver.cc`
+failed to compile. The style hook now makes the declaration as a
+`std::string` and converts it with `String::FromUtf8`, and a checkout
+patched with the first hook is upgraded to it.
+
+Checked in the sandbox with the fixture recording of the design, at
+frames 38.297 s, 38.492 s, and 56.697 s: 7 values were chosen for 5
+elements at each (the rotation, the three separate transform properties,
+the fade's opacity, the frosted glass panel's backdrop blur, and the web
+animation's transform), with the recorded number text unchanged. Building
+Chromium and the look of the recreation are to be checked on the target
+machine.
+
+Confirmed on the target machine, 2026-10-04, with c321322 and a new
+recording of the fixture served over http
+(`20261005-021819-4e1dd644c67646b3991e3ce1ba182f99`), as the owner
+reported: at the frames opened, the rotation, separate transform
+properties, fade, frosted glass, and skip link panels seemed correct
+against the captured frame; two screenshots of the recreation taken apart
+seemed stable; DevTools' inspection seemed correct; no Console message
+of a value not imposed was found. The evidence panel at 10.669 s listed 7
+compositor values imposed on 5 elements, as of compositor frame 288,
+including the skip link (node 25). Visual confirmation is not pixel
+equality.
+
+#### Sub-step 2b-ii design: compositor scroll offsets imposed (agreed, built)
+
+Proposed 2026-10-04, after 2b-i was confirmed and the owner asked to start
+on 2b-ii ("yes push and then start on 2b-ii").
+
+What the recording holds (protocol 0.48):
+
+- Each `compositor-frame` record holds the drawn offset of every scroll
+  node of the page's compositor that changed, as `scroll-offset` with the
+  scroll node's compositor element ID
+  (`ScrollTree::current_scroll_offset`).
+- Blink's main thread records a scroller's offset in the layout records
+  when it changes, with the node, `scrollOffset`,
+  `webExposedScrollOffset`, `scrollOrigin`, and `effectiveZoom`. Nothing
+  recorded names the scroller's compositor element ID, so a compositor
+  offset cannot be joined to a node.
+- The recreation scrolls each scroller to its main thread offset from the
+  builder, once the page is built, and the owner can then scroll it.
+
+Read in the target machine's checkout, 2026-10-04:
+
+- `PaintLayerScrollableArea` overrides `ScrollOffsetToPosition` and
+  `ScrollPositionToOffset`, so that a scroll position is the scroll offset
+  plus the scroll origin, and `ScrollableArea::DidCompositorScroll`
+  (`core/scroll/scrollable_area.cc`) turns the compositor's value into an
+  offset with `ScrollPositionToOffset`. The compositor's `scroll-offset`
+  is therefore Blink's scroll position, and the scroll offset is it less
+  the scroll origin.
+- `ScrollableArea::GetScrollElementId` names the compositor element ID of
+  a scroller (`core/scroll/scrollable_area.h`).
+
+What is recorded (protocol 0.49):
+
+- The main thread's scroll offset record gains `scrollElementId`, the
+  scroller's `GetScrollElementId()` as the decimal text the compositor
+  records use for element IDs, or null when it has none. Nothing else
+  changes, and no record is added.
+
+What the recreation does:
+
+- The app chooses each scroll node's offset as 2b-i chooses its values:
+  the last value of the same compositor as of the last `compositor-frame`
+  of the document's frame sink presented at or before the frame's
+  composition. A null value is dropped.
+- An offset is joined to a node through the latest main thread scroll
+  offset record of the node at or before the cut whose `scrollElementId`
+  is the offset's element ID. The root scroller is the document's record,
+  as now. A scroll node with no such record, such as the visual
+  viewport's, is not joined, and the panel counts it.
+- A joined node is scrolled to the compositor's offset in place of its
+  main thread one: the position less the scroll origin of the node's
+  record, divided by its effective zoom, in CSS pixels, as the builder
+  does now. The scroll origin and zoom are read from the same record, so
+  with no zoom and a scroll origin of 0 the number is the recorded one
+  unchanged.
+- The builder's step is unchanged: each scroller is scrolled once, after
+  the page is built, so the scrollbars and the wheel still scroll the
+  recreation afterwards.
+- The evidence panel has one note listing each scroller given a
+  compositor offset, its node, the compositor frame that last changed it,
+  the offset, and the main thread's offset it replaced, and counts the
+  offsets not joined.
+
+Limits:
+
+- A recording made before protocol 0.49 has no `scrollElementId`, so its
+  scrollers keep their main thread offsets, and the panel says so.
+- A scroller whose layout object was replaced after its last main thread
+  scroll offset record has a new element ID with no record, so its
+  compositor offset is not joined.
+- Where the main thread and the compositor differ, the recreation's
+  layout is still the main thread's recorded layout, so content placed
+  from the scroll offset on the main thread, such as a sticky element's
+  offset, is as of the main thread's record. Whether this shows in the
+  fixture is to be seen.
+- The visual viewport's offset, from pinch zoom, is not imposed.
+
+Required tests:
+
+- Unit (bridge and integration script): the scroll offset record's
+  `scrollElementId`, written and null; the hook applied once and
+  unchanged on a second run.
+- Unit (app): the protocol 0.49 validation of `scrollElementId`; the
+  offsets chosen at a frame, with another frame sink's frames, a null
+  value, and an element ID with no record; the join through the latest
+  record of the node; the offset less a scroll origin and divided by a
+  zoom; a recording without `scrollElementId`; the panel's note.
+- System, on the target machine: a new recording of the fixture served
+  over http, with the smooth scroll button pressed and the page scrolled
+  with the wheel during it; frames opened while each scroll was moving
+  show the scroller and the page at the offset of the captured frame.
+
+#### Sub-step 2b-ii as built
+
+Built as designed, with these differences:
+
+- The offset each scroller is scrolled to is also the root scroll offset
+  the popups are placed with, so a popup is placed in the page at the
+  drawn offset.
+- An offset the compositor drew at zero for a scroll node no record names
+  is not counted: the compositor records every scroll node's offset, and
+  those never scrolled have no main thread record. Only scroll nodes at a
+  nonzero offset with no record are counted in the panel.
+- The panel says a recording predates protocol 0.49 when none of its
+  scroll offset records has the `scrollElementId` field.
+
+Building Chromium and the look of the recreation are to be checked on the
+target machine.
+
+#### Sub-step 2b-ii on the target machine
+
+Commit 9bd42f3 built on the target machine. The owner recorded the
+animation fixture over http, scrolled the page with the wheel, pressed the
+smooth scroll button twice, and opened frames during the scrolls. The owner
+reported that the wheel scroll "seems accurate" and the smooth scroll "is
+approximate". At 15.398 s the evidence panel listed one scroller, node 5,
+the document, at (0, 367.1295166015625) in place of the main thread's
+(0, 340).
+
+The recording (20261005-121508-1d8b647fe66e4c3e89772b0dfd29721d) was then
+measured in the sandbox. For each captured frame taken during a scroll, the
+scroll offset the captured image shows was measured and compared with the
+recorded offsets:
+
+- For the document, the vertical shift of the page content between the
+  frame and a captured frame at a known, still offset (800, at 18.0 s), found
+  by the least mean absolute difference over whole-pixel shifts.
+- For `#scroller`, the edges of its alternately shaded rows in one pixel
+  column, against the rows' period of 649 / 29 CSS pixels, row 30's offset
+  divided by the 29 rows above it. The candidates were the offsets of
+  compositor frames presented within 150 ms of the frame's composition,
+  since the row pattern repeats every two rows.
+
+The display has a device pixel ratio of 1, so one CSS pixel is one captured
+pixel.
+
+| Captured frame | Composition (s) | Measured | Main thread at the cut | Imposed (9bd42f3) | Compositor frame matching the image |
+| --- | --- | --- | --- | --- | --- |
+| Document, 67 | 15.4186 | 354 | 340 | 367.13 | 452 (353.73), presented 33.2 ms before |
+| Document, 71 | 16.2185 | 488 | 465 | 494.77 | 500 (487.62), 33.2 ms before |
+| Document, 72 | 16.4185 | 599 | 590 | 600 | 512 (599.00), 33.2 ms before |
+| Document, 105 | 23.0183 | 850 | 836 | 864.53 | 908 (850.37), 33.2 ms before |
+| Document, 106 | 23.2183 | 968 | 955 | 979.63 | 920 (967.98), 33.2 ms before |
+| Document, 107 | 23.4183 | 1173 | 1152 | 1194.86 | 932 (1173.20), 33.2 ms before |
+| Document, 114 | 24.8183 | 1244 | 1290 | 1218.26 | 1003 (1243.74), 33.2 ms before |
+| Document, 115 | 25.0183 | 969 | 1003 | 952.86 | 1015 (968.89), 33.2 ms before |
+| Document, 116 | 25.2183 | 771 | 806 | 753.65 | 1027 (770.74), 33.2 ms before |
+| `#scroller`, 87 | 19.4184 | 324 | 324 | 447.81 | 691 (323.85), 49.9 ms before |
+| `#scroller`, 88 | 19.6184 | 632 | 632 | 641.33 | 703 (631.74), 49.9 ms before |
+| `#scroller`, 98 | 21.6184 | 105 to 106 | 105 | 67.87 | 823 (105.53), 49.9 ms before |
+
+Two findings follow, each limited to this recording on this machine:
+
+1. For the document, which the compositor scrolls, every one of the nine
+   images shows the compositor frame presented 33.2 ms, two refreshes of
+   the 60 Hz display, before the frame's composition time. The rule of
+   2b-i and 2b-ii, the last frame presented at or before the composition,
+   picks the frame presented one refresh (16.6 ms) before it, which is one
+   frame too late. The imposed offsets were nearer the image than the main
+   thread's in every case, but not equal to it.
+2. For `#scroller`, every one of the three images shows the main thread's
+   recorded offset at the cut, exactly, and not the compositor's. Its
+   compositor scroll offset ran ahead of what was drawn. A likely reason,
+   not yet evidenced, is that the compositor does not scroll `#scroller`
+   itself, so its content is painted by the main thread at the main
+   thread's offset. Chromium's `cc::ScrollNode` (`cc/trees/scroll_node.h`)
+   holds `is_composited` and `main_thread_repaint_reasons`, which would say
+   so, and the recording does not hold them.
+
+The same one-refresh question applies to the other compositor values of
+2b-i and to the animated image frames of 2a, which choose their frame by the
+same rule. They were not measured here: the owner's checks of them
+(animated image numbers, panel comparisons) did not test a single refresh.
+
+#### Sub-step 2b-iii design: which compositor frame an image shows (agreed, built)
+
+Two changes, each following one finding above.
+
+1. Protocol 0.50 records, with each scroll node's `scroll-offset` value in
+   `compositor-frame`, the node's `isComposited` and its
+   `mainThreadRepaintReasons` as Chromium holds them. Recreation imposes
+   the compositor's offset only on a scroller whose node was composited at
+   the chosen frame; any other scroller keeps the main thread's offset, and
+   the evidence panel lists it with the reasons recorded. This is a check
+   of the likely reason in finding 2 as much as a fix: if `#scroller` is
+   recorded as composited, the finding is not explained and is reported
+   again, not fixed by this change.
+2. The compositor frame and animated image frames are chosen from the
+   frames presented at or before the composition time less a display
+   latency. Two ways of setting it are open for the owner's choice:
+   - a fixed latency of one display refresh, measured from the recording as
+     the median interval between successive presentation times of the
+     page's frame sink, with the evidence panel saying that the latency is
+     inferred from this machine's measurements, not recorded; or
+   - no change to the rule until the latency is measured for the other
+     compositor values on the target machine, by recording the fixture and
+     comparing captured images of the moving elements as was done here.
+
+The owner agreed change 1 and chose, for change 2, to measure first: the
+selection rule is unchanged until the latency is measured for the other
+compositor values on the target machine.
+
+Required tests, at the unit level: the scroller rule with composited,
+non-composited, and pre-0.50 records; the latency rule with presentations at,
+just before, and just after the shifted time; and the protocol hook and
+serializer, applied once and unchanged on a second run. On the target
+machine, the measurement above is repeated on a new recording.
+
+#### Sub-step 2b-iii change 1 as built (withdrawn, see below)
+
+- The compositor frame hook records, with each scroll node's offset, 1 or
+  0 for `cc::ScrollNode::is_composited` and a bitmask of the four
+  `cc::MainThreadRepaintReason` values the node's
+  `main_thread_repaint_reasons` holds, in the enum's order. The bridge
+  writes the offset as `{x, y, isComposited, mainThreadRepaintReasons}`,
+  the reasons as a list of names: `has-background-attachment-fixed-objects`,
+  `not-opaque-for-text-and-lcd-text`, `prefer-non-composited-scrolling`,
+  and `background-needs-repaint-on-scroll`. A change of either is a change
+  of the value, so a frame records it.
+- The validator accepts the 0.49 offset, `{x, y}`, or the 0.50 one, with
+  each reason named once.
+- Recreation imposes the compositor's offset only where the frame that last
+  changed it says the compositor scrolled the node. A scroller it did not
+  scroll keeps the main thread's offset, and the evidence panel lists it with
+  the compositor's position and the reasons recorded. A scroller whose
+  compositor frame record does not say, as before protocol 0.50, keeps the
+  main thread's offset, and the panel names it.
+
+Building Chromium and what is recorded for `#scroller` are to be checked on
+the target machine.
+
+#### Sub-step 2b-iii change 1 on the target machine
+
+Commit 46686e0 (63864d5 with the reason names in a `std::array`, which
+Chromium's `-Wunsafe-buffer-usage` requires) built on the target machine.
+The owner recorded the fixture over http
+(20261005-143057-3ad553cfa224444292249445ab5aaa9c) with wheel scrolls of
+`#scroller` from 12.0 s to 16.1 s and the two smooth scrolls at 19.28 s and
+21.19 s. At 13.406 s the evidence panel listed node 295 as a scroller the
+compositor did not scroll itself, at the main thread's (0, 395) and not the
+compositor's (0, 400), with no repaint reason recorded. The owner reported
+that the recreation and the captured frame appeared to match there, and at
+40.133 s, after the scrolls had ended.
+
+What is recorded for `#scroller` (scroll element 1028): all 190 of its
+`scroll-offset` values have `isComposited` false and no
+`mainThreadRepaintReasons`. The document's scroller (element 452) is
+composited in 87 of 87. Why Chromium does not composite `#scroller` while
+giving none of the four reasons is not known.
+
+The recording was then measured in the sandbox. For each captured frame of
+the scrolls, the offset the image shows was measured from the edges of the
+shaded rows in one pixel column, as for 2b-ii, with the two-row ambiguity
+resolved by reading the row numbers in the image. Still frames at known
+offsets (0, 100, 200, 500, 1100, 1215) measured 0 to 0.8 px below the
+recorded offset, which bounds the method's error.
+
+| Captured frame | Composition (s) | Measured | Main thread at the cut | Last presented compositor frame | Compositor frame matching the image |
+| --- | --- | --- | --- | --- | --- |
+| 51 | 12.2238 | 51 | 78 | 77.89 | 364 (51.01), 49.9 ms before |
+| 53 | 12.6238 | 153 | 153 | 167.28 | 389 (152.88), 33.3 ms before |
+| 55 | 13.0238 | 277 | 299 | 294.53 | 412 (277.05), 49.9 ms before |
+| 57 | 13.4238 | 400 | 400 | 400.00 | 437 (400.00), 33.2 ms before |
+| 58 | 13.6238 | 425 | 425 | 438.67 | 449 (425.09), 33.2 ms before |
+| 62 | 14.4238 | 588 | 609 | 608.77 | 497 (587.67), 49.9 ms before |
+| 63 | 14.6238 | 700 | 700 | 700.00 | 508 (699.27), 49.9 ms before |
+| 64 | 14.8238 | 764 | 788 | 788.02 | 520 (764.30), 49.9 ms before |
+| 65 | 15.0238 | 900 | 919 | 918.87 | 532 (900.61), 49.9 ms before |
+| 66 | 15.2237 | 1022 | 1023 | 1034.61 | 545 (1022.62), 33.2 ms before |
+| 70 | 16.0237 | 1201 | 1202 | 1206.96 | 593 (1201.53), 33.2 ms before |
+| 87 | 19.4236 | 978 | 842 | 898.69 | 797 (979.47), 33.2 ms before |
+| 88 | 19.6236 | 668 | 658 | 657.99 | 808 (668.56), 49.9 ms before |
+| 97 | 21.4236 | 105 | 85 | 84.87 | 917 (105.45), 33.2 ms before |
+| 98 | 21.6235 | 2 | 0 | 0.08 | 928 (2.20), 49.9 ms before |
+
+"Main thread at the cut" is the last main thread scroll offset recorded at
+or before the composition time; the recreation's own basis may be an
+earlier rendering update, as at 13.406 s, where it was 395.
+
+Findings, each limited to this recording on this machine:
+
+1. In every one of the 15 frames, the image shows the offset of a recorded
+   compositor frame presented 33.2 or 49.9 ms (two or three refreshes)
+   before the composition time, to within the method's error, although the
+   compositor does not scroll `#scroller` itself.
+2. The main thread's offset at the cut matches the image only where the
+   list had stopped or was moving slowly. In fast motion it is ahead of the
+   image, by 136 px at frame 87, so change 1 does not make `#scroller`
+   match during a fast scroll.
+3. The 2b-ii finding that `#scroller`'s images matched the main thread and
+   its compositor offset "ran ahead" is not repeated here. Its comparison
+   was with the frame presented one refresh before the composition, which
+   is also ahead of the image here; that explains it without the scroller
+   being non-composited, though it was not re-measured on that recording.
+
+Not yet measured on this recording: the transforms, opacities, filters and
+animated image frames of 2a and 2b-i.
+
+#### Sub-step 2b-iii: delay of the other compositor values
+
+Measured in the sandbox on the same recording
+(20261005-143057-3ad553cfa224444292249445ab5aaa9c), at the owner's request,
+for the frames in which the document was still and the element was in view.
+For each captured frame the value the image shows was measured, and the
+recorded compositor frames presented in the 250 ms before the composition
+time whose value equals it were found. A frame counts as consistent with a
+delay when one of those frames was presented that long before.
+
+- Transforms: a rotated, scaled square was fitted to the box by least
+  squares on its anti-aliased edges, giving its angle to about 0.05 degrees
+  and its side to about 0.005 px. One refresh moves `#rotation` by 1.5
+  degrees and `#separate` by 0.75 degrees and 0.1 px of side.
+- Opacity: the mean red level of `#fade`'s interior, against
+  `255 * (1 - opacity)`.
+- Background color and clip path (paint worklet progress): the mean color of
+  `#background`'s interior, and the height of `#clip-inset`'s visible
+  rectangle, against `96 * (0.8 - 0.4 * progress)` px.
+- Animated images: the color of each image's top left corner, which names
+  its frame.
+
+| Value | Captured frames from 8.0 s | Consistent with 33.2 ms | Otherwise |
+| --- | --- | --- | --- |
+| `#rotation` transform (element 718) | 6 | 6 | none |
+| `#separate` rotate (1944) | 83 | 82 | frame 62, 49.9 ms |
+| `#separate` scale (1942) | 83 | 82 | frame 62, 49.9 ms |
+| `#fade` opacity (1676) | 83 | 73 | 10 at 16.6 or 49.9 ms, each within one 8-bit level of the 33.2 ms value |
+| `#background` color progress (972) | 141 | 137 | frame 62; frame 126; frames 188 and 189 match no frame |
+| `#clip-inset` clip path progress (2956) | 64 | 59 | frame 126; frames 180, 181, 188 and 189 match no frame |
+| Animated images, all three | 62 | 61 | frame 126 |
+
+In 12 captured frames an animated image changed frame within 50 ms of the
+composition, so the image tells some delays apart: 3 rule out 16.6 ms, 5
+rule out 49.9 ms, 4 rule out only 66.6 ms, and all 12 show the frame of
+33.2 ms.
+
+Findings, each limited to this recording on this machine:
+
+1. From 8.0 s, every compositor value measured is drawn as of the compositor
+   frame presented 33.2 ms, two refreshes, before the composition time,
+   except at captured frame 62 (14.424 s), where every value, `#scroller`
+   included, is 49.9 ms behind. Opacity cannot tell neighboring refreshes
+   apart at 8-bit color, and is consistent with 33.2 ms within one level.
+2. `#scroller`, painted by the main thread, is 49.9 ms behind in 8 of its 15
+   frames, where the compositor animations in the same images are 33.2 ms
+   behind (frames 51, 55, 63, 64, 65, 88 and 98, and 62 for all). Why its
+   drawn content is sometimes one frame behind its compositor record is not
+   known.
+3. Before 8.0 s, as the page started, the delays were 66.6 to 199.9 ms.
+4. The paint worklet progress often holds one value for two refreshes, so
+   for background color and clip paths many frames fit 16.6, 33.2 and
+   49.9 ms alike.
+5. Unexplained: frames 180, 181, 188 and 189 near the end of the recording,
+   where the measured clip path or background color matches no compositor
+   frame of the 250 ms before.
+
+Not measured: `#blur`, which has no compositor record in this recording;
+`#frost`, whose backdrop blur this method cannot measure; `#clip-circle`,
+whose progress is the same as `#clip-inset`'s; and the main thread values.
+
+#### Sub-step 2b-iii change 2 as built
+
+On 2026-10-05, after the measurement above, the owner chose to choose the
+compositor frame presented two refreshes before the captured picture. This
+replaces the one refresh the design proposed: from 8.0 s the pictures
+showed the frame presented 33.2 ms, two refreshes, before the composition,
+and the rule before this change chose the frame presented 16.6 ms before.
+
+What the recreation does now (`RecordedDisplayLatency` and
+`RecordingFileImageFrames.ReadWithCompositorValues`):
+
+- The refresh interval is the `intervalMicroseconds` Chromium recorded in
+  the document's latest `presentation-feedback` record at or before the
+  composition, not the median interval between presentations the design
+  proposed. The interval is recorded, so it is used as recorded; on the
+  target machine it is 16666.
+- The compositor frame, its compositor values and scroll positions, and the
+  animated image frames are chosen as of the composition time less one and
+  a half refreshes (25.0 ms at 16.666 ms): the last frame of the page's
+  frame sink presented at or before that time. Compositions and
+  presentations do not fall at the same instant of a refresh (the frame two
+  refreshes before was presented 33.2 ms before the composition, less than
+  two whole refreshes of 33.3 ms), so subtracting two whole refreshes would
+  choose the frame three refreshes before. Subtracting one and a half
+  chooses the frame two refreshes before while the offset between the two
+  clocks stays within half a refresh of where it was measured.
+- The evidence panel says, before the image notes, that the values are
+  those of the frame presented two refreshes before, gives the recorded
+  interval and the time subtracted, and says that the two refreshes are
+  inferred from measurements of one machine's recordings, not recorded, and
+  that a captured frame can lag by one refresh more. With no interval
+  recorded, nothing is subtracted and the panel says so.
+- Unchanged: the main thread state the recreation is built from, the
+  image resources' cut, and `#scroller` and other non-composited scrollers,
+  which keep the main thread's offset (change 1). The main thread lag of
+  finding 2 above and the startup delays of finding 3 are not addressed.
+
+Tests, at the unit level (`RecordedDisplayLatencyTests`): the latest
+recorded interval of the document is used, another document's and an
+unreadable one are not, and none before the first; a number interval is
+read; the panel text says the latency is inferred; and with compositions
+0.1 ms before and after a whole number of refreshes after a presentation,
+the frame presented two refreshes before is chosen, with presentations
+just before, at, and just after the shifted time. The full suite in the
+sandbox passed every test that does not need PostgreSQL binaries or
+Windows (58 such tests cannot run there).
+
+Checked in the sandbox against recording
+20261005-143057-3ad553cfa224444292249445ab5aaa9c: at captured frames 31,
+87, 97 and 141 the frame chosen was presented 32.9 to 33.6 ms before the
+composition, from presentation times the panel prints to the millisecond (compositor frame 797, presented at 19.390 s, for frame 87 at
+19.424 s). Not yet checked on the target machine.
+
+#### Sub-step 2b-iii change 2 on the target machine, and change 1 withdrawn (confirmed)
+
+On 2026-10-05 the owner ran 6d77b3f (restored as b4f6f1f) on the target
+machine and opened recording
+20261005-143057-3ad553cfa224444292249445ab5aaa9c at 19.407 s and 40.133 s.
+The owner reported the recreation at 19.407 s as much worse than the
+captured frame, and the frame at 40.133 s as not showing the browser.
+
+- 40.133 s is the recording's last captured frame. The browser closed when
+  the recording was stopped, between captured frames 187 and 188 (about
+  39.8 s), so frames 188 and 189 show no browser. That frame cannot test the
+  recreation; it was a wrong choice of test frame.
+- At 19.407 s the recreation open on the target machine was compared, in
+  the sandbox, with the captured frame, region by region, at 100 by 100 CSS
+  pixels. Every region matched within a mean of 1.4 grey levels except the
+  `#scroller` list (up to 24 levels) and the pointer. The list was at the
+  main thread's offset, 1149, kept by change 1 because the compositor
+  recorded the list as not scrolled by itself; the captured frame shows it
+  at about 978. The compositor frame change 2 chooses (797, presented at
+  19.390 s) drew it at 979.5.
+
+This agrees with the measurement under "Sub-step 2b-iii change 1 on the
+target machine", which had already found that the captured frames show
+`#scroller` where the compositor drew it, not at the main thread's offset.
+With the owner's agreement, change 1's rule is withdrawn: recreation imposes
+the compositor's position on every scroller whose record names its element
+ID, whether or not the compositor scrolled it. The protocol 0.50 fields are
+still recorded, and the evidence panel lists each scroller the compositor did
+not scroll itself, with its recorded repaint reasons, after the scrollers it
+imposes positions on. A scroller whose compositor frame record does not say,
+as before protocol 0.50, also takes the compositor's position, as it did in
+2b-ii.
+
+Not addressed: in 8 of the 15 captured frames measured during scrolls,
+`#scroller` was one refresh further behind (49.9 ms) than the compositor
+values in the same image, so during fast scrolling the list can still be one
+refresh away from the captured frame.
+
+Tests, at the unit level (`RecordedCompositorValuesTests`): a scroller the
+compositor did not scroll, and one whose record does not say, take the
+compositor's position, and the panel lists the first with its reasons. In the
+sandbox, the app's own code chose (0, 979.4688110351562) for node 295 at
+19.407 s in place of the main thread's (0, 1149).
+
+On 2026-10-05 the owner ran b351b87 on the target machine, opened the same
+recording at 19.407 s, and reported that the recreation appeared to work
+close enough to what is needed. This is the owner's visual
+comparison of that frame, not pixel equality, and does not test the frames in
+which `#scroller` lags one refresh further.
+
+#### Sub-step 2c design: paint worklet colors and clip paths imposed (agreed, built)
+
+Proposed 2026-10-05, after the owner asked for the design of 2c, the last
+part of sub-step 2, and agreed by the owner the same day. Built as described
+in "Sub-step 2c as built" below, and confirmed by the owner on the target
+machine on 2026-10-05 (below).
+
+What the recording holds, read from recording
+20261005-143057-3ad553cfa224444292249445ab5aaa9c (protocol 0.50):
+
+- Four elements are animated by native paint worklets, each joined to its
+  node by a `compositor-animation-started` record (target property
+  `native-property`, namespace `primary-effect`): `#background` (element
+  972, node 323, background color) and three clip paths (2956, node 367,
+  `#clip-inset`; 2700, node 411, `#clip-circle`; 2444, node 455, the shape
+  change panel).
+- The compositor frames hold 1,208 background color progress values and
+  3,618 clip path progress values. For every one of them there is a
+  `paint-worklet-painted` record of the same element and property with the
+  same progress, written at or before the compositor frame, and the records
+  so matched hold one value each. One paint with no progress (painted from
+  the main thread's value) is recorded.
+- The recorded main thread style holds a value near the drawn one, not the
+  drawn one: 1,203 background colors of node 323 with 134 distinct
+  8-bit values, and 1,207 clip paths of node 367 written to six significant
+  digits (`inset(16.2287% 8.44283%)`).
+- A recorded clip path is in the element's transform space, with the paint
+  offset added: for node 367 at progress 0.8889 the path's first point is
+  (45.111, 1422.636), and the node's recorded border box in the same
+  transform space (`geometry.localRect`) starts at (38, 1395.969). The
+  recorded `translation` is the inverse of the deferred image's own offset,
+  (-44, -1405), not the paint offset, so it cannot be used to rebase the
+  path.
+
+Read in the target machine's checkout, 2026-10-05:
+
+- `BackgroundColorPaintDefinition::Paint`
+  (`modules/csspaint/nativepaint/background_color_paint_definition.cc`)
+  fills the element's background area with `drawColor` of the color
+  sampled at the progress, as an `SkColor4f`, which the recording holds.
+- `ClipPathPaintDefinition::Paint(zoom, reference_box, clip_area_rect,
+  node, worklet_id)` builds each keyframe's path on the reference box and
+  translates it by `FirstFragment().PaintOffset()`. The worklet draws the
+  interpolated path, as a rounded rectangle when `ReduceToRRectIfPossible`
+  reduces it.
+- On the main thread, `ClipPathClipper::PathBasedClip`
+  (`core/paint/clip_path_clipper.cc`) gives the clip path of a shape as the
+  shape's path on the reference box translated by the clip offset it is
+  passed, the paint offset: the same space as the recorded path.
+  `ClipPathClipper::LocalClipPathBoundingBox` gives its bounds without the
+  paint offset. Both are used only when the style has a clip path
+  (`HasClipPath`).
+
+What the recreation would do:
+
+- The values are chosen at the same compositor frame as the other
+  compositor values (sub-step 2b-iii change 2): for each element, the
+  progress that frame and earlier frames of the same compositor last gave
+  it, and then the last `paint-worklet-painted` record of the same
+  renderer, element, property, and progress written at or before that
+  frame. A null progress takes the last record painted with no progress. A
+  value is dropped, as in 2b-i, when its animation ended and a later
+  rendering update was presented. An element with no matching painted
+  record is not given a value, and the evidence panel counts it.
+- Each node's values are written in a new attribute,
+  `data-a11y-recorded-paint-worklet`, shown in the Elements pane as the
+  others are: the background color's four floats, and the clip path's fill
+  type, verbs, points, and conic weights, with the recorded number text
+  unchanged, followed by the recorded border box origin of the node at the
+  frame (from `geometry.localRect` of its main thread state). Blink reads the
+  numbers with `base::StringToDouble`, as it does for 2b-i.
+- Background color is imposed through the style, as the opacity is: the
+  style resolution hook adds `background-color: color(srgb r g b / a)`
+  after the recorded style, as an important declaration of the same
+  origin, each float written with enough digits to be read back as the same
+  float. DevTools' Computed pane therefore shows the imposed color.
+- A clip path is imposed on paint: in the recreation mode, for a node with
+  a recorded path, `PathBasedClip` returns the recorded path, and
+  `LocalClipPathBoundingBox` returns its bounds less the recorded origin.
+  When the clip offset Blink passes equals the recorded origin, the
+  recorded points are used unchanged; when it differs, as when the
+  recreation's paint offset is not the recording's, the path is moved by
+  the difference, in floats, and the Console names the element. A node
+  whose recorded style has no clip path (`none`) has no clip path node in
+  the recreation, so its path is not imposed, and the panel names it.
+- The evidence panel's hold note no longer says that paint worklet colors
+  and clip paths are not imposed. A new note lists each imposed value: the
+  node, the property, the progress, the compositor frame that last changed
+  it, and when it was painted, and counts the values not imposed, with their
+  reasons.
+
+Limits:
+
+- A paint worklet of the CSS Painting API is not recorded (sub-step 1b), so
+  it is not imposed.
+- The worklet's output is rasterized by the compositor as a deferred image,
+  and the recreation paints the same color and path on the main thread. The
+  values are the recorded ones; anti-aliased edges are not claimed equal. A
+  path the worklet drew as a rounded rectangle is clipped as a path, which
+  Blink may also reduce to a rounded rectangle; which it does is not
+  established.
+- A node drawn in more than one fragment, as across columns, has one
+  recorded path per paint and one origin, so it is not imposed and the panel
+  names it.
+- Popups get no paint worklet values, as they get no compositor values.
+- The two-refresh choice of frame is inferred from one machine (sub-step
+  2b-iii change 2), and the paint worklet progress often holds one value for
+  two refreshes, so frames near a change can show the neighbouring value.
+- Recordings before protocol 0.48 hold no paint worklet records and keep the
+  main thread's values.
+
+No protocol change is needed, so the test can use the existing recording
+(20261005-143057) without recording again.
+
+Required tests:
+
+- Unit (app): the value chosen at a frame from compositor frames and
+  painted records, including a null progress, a progress with no painted
+  record, a painted record written after the frame, another renderer's
+  records, and an ended animation before and after a later presented
+  rendering update; the attribute's text, with the recorded number text
+  unchanged; the panel's notes.
+- Unit (integration script): the new hooks against copies of the target
+  machine's `clip_path_clipper.cc` and `style_resolver.cc`, applied once and
+  unchanged on a second run, with the earlier hooks upgraded.
+- Unit (bridge): the parsing of the attribute's text, with malformed text
+  imposing nothing.
+- System, on the target machine: recording 20261005-143057 opened at
+  several frames from 8 s on; at each, the background color panel and the
+  three clip path panels look as in the captured frame, and two screenshots
+  of the recreation a second apart are identical. The same region
+  comparison of the recreation with the captured frame as for 2b-iii
+  change 2 is repeated in the sandbox.
+
+#### Sub-step 2c as built
+
+Built 2026-10-05.
+
+- `RecordedCompositorValueChooser` (`src/Recorder.Session/RecordedCompositorValues.cs`)
+  also reads the `background-color-progress` and `clip-path-progress`
+  changes of the compositor frames and the `paint-worklet-painted` records.
+  At the chosen compositor frame it gives each element's latest progress,
+  joined to its node by the latest `compositor-animation-started` record of
+  its element ID, and the last paint of the same renderer, element,
+  property, and progress (as a double, or null) written at or before that
+  frame's record. The chosen values are in `RecordedCompositorValues.PaintWorklet`.
+  A value is not imposed, and counted in the panel, when its element ID has
+  no start record, its animation ended before a later presented rendering
+  update, its value was null (no longer drawn), it has no paint at or before
+  the frame, or its painted value is not of its property's form.
+- `RecordedPage.PaintWorkletAttributes` (`src/Recorder.Recreation/RecordedPage.cs`)
+  writes the attribute. Its entries are separated by "; ":
+  `background-color r g b a`, and `clip-path x y fill verbs`, where x and y
+  are the node's recorded `geometry.localRect` origin and each verb is
+  followed by its points and, for a conic, its weight, all as recorded. The
+  origin comes before the path, not after it as the design said, so that the
+  path can end the entry. A clip path is left out, and the panel names the
+  node, when the recorded style's `clip-path` is `none`, when the node has
+  more than one recorded box fragment, or when it has no recorded
+  `localRect`. The builder (`src/Recorder.Recreation/Builder/builder.js`)
+  sets the attribute before the element is inserted.
+- The bridge parses the attribute with `ParseRecreationPaintWorkletValues`
+  (`chromium/recorder_bridge/recreation_paint_worklet_values.h`), through
+  `RecreationPaintWorkletValuesOf`, which gives nothing outside the
+  recreation mode.
+- `chromium/integrate.py` upgrades the style resolution hook in place (the
+  previous hook is kept as `STAGE_E4C6_BLINK_RECREATION_STYLE_HOOK`) to add
+  `background-color: color(srgb r g b / a)` after the opacity, and adds
+  `patch_blink_clip_path_clipper` for `core/paint/clip_path_clipper.cc`: a
+  helper, `RecorderPaintWorkletClipPath`, builds the recorded path with
+  `SkPathBuilder`, and hooks at the start of `PathBasedClip` (at the paint
+  offset, with a Console warning when it moves the path) and
+  `LocalClipPathBoundingBox` (without the paint offset) return it. The
+  target machine's `paint_property_tree_builder.cc` then reduces a path
+  that is a rounded rectangle to a rounded rectangle clip (`PathToRRect`),
+  as the worklet does when it draws one.
+- In recording 20261005-143057, at 19.407 s, the app chooses all four values
+  at compositor frame 797: node 323's background color at progress
+  0.35021549463272095 and the three clip paths, each painted at 19.367 s.
+  At 19.001 s it chooses them at frame 773. One progress value, of an
+  element with no start record, is counted as not imposed at both.
+
+Tests run in the sandbox, 2026-10-05: the app's unit tests (1,074 pass,
+including five new ones; the 58 that need PostgreSQL or Windows fail as
+before), the integration script's unit tests (231 pass, including three new
+ones, one of which compiles and runs the bridge's parsing test), and the
+patching of copies of the target machine's `clip_path_clipper.cc` and
+already patched `style_resolver.cc`, each applied once and unchanged on a
+second run.
+
+The first Chromium build failed: the helper passed a const `Element*` to
+`DOMNodeIds::IdForNode`, which takes a `Node*`. Revision 1fb3086 passes the
+layout object's node, and the integration script replaces the helper of
+5616770 in place (`STAGE_5616_BLINK_CLIP_PATH_CLIPPER_HELPERS`).
+
+System test, on the target machine, 2026-10-05, with revision 1fb3086 and
+recording 20261005-143057: the owner reported that the background color
+panel and the three clip path panels matched the captured frame, that the
+recreation held still, and that DevTools' Console showed no warning that a
+recorded clip path was moved. This is the owner's visual comparison, not a
+pixel comparison; the sandbox region comparison was not repeated.
+
+### Slice 4c: the DOM from the start of parsing (agreed, built)
+
+Proposed and agreed 2026-10-02.
+
+#### Found on the target machine
+
+In the recording 20261002-204153, the document of
+`https://www.cnib.ca/en/event` was first recorded at 19.742 s. Its first
+DOM walk is the finished-parsing walk, at 22.630 s, of 6900 nodes. Read in
+steps of 5 ms, the frames from 20.170 s to 23.745 s take as their basis a
+presentation of the document's state at 20.072 s to 22.305 s (ten
+presentations), all before that walk; the next presentation, of its state
+at 23.722 s, is the basis from 23.750 s. Its layout records begin at
+20.350 s. At those frames the player says the page cannot be recreated.
+The owner opened the frame at 23.026 s and received that message. This is
+the gap found on 2026-09-29 ("Found while building" under "Slice 3b
+implementation"), and it breaks the requirement at the top of this
+document: the page was drawn, so it must be recreated.
+
+#### Why it happens
+
+The DOM is recorded only from the finished-parsing walk:
+`RecorderRecordsDomChanges` in the integration script is false while
+`Document::Parsing()`, so no structural change made during parsing is
+recorded, and a parser change to character data is recorded only once the
+document is no longer parsing ("Insertions and removals" in
+[change-driven recording](change-driven-recording.md)). The mutation
+delivery hook also queues a post-mutation checkpoint only for a document
+that `HasFinishedParsing()`. Layout and presentation are recorded from the
+document's first rendering update, which Blink makes while it parses, so
+the page is drawn, and its layout recorded, before its DOM is.
+
+#### What is recorded (protocol 0.42)
+
+Read against Chromium's main branch at 65f3c73 (2026-10-02); line numbers
+in the checkout on the target machine may differ.
+
+- A DOM walk when parsing starts. `Document::ImplicitOpen` creates the
+  parser and sets the parsing state to `kParsing`
+  ([document.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/document.cc;l=4131)). A hook after that call
+  requests a DOM checkpoint with `reason` `started-parsing`, which the
+  bridge always walks, as it walks `finished-parsing`. For a navigation the
+  document then holds no children, so the walk records the document node
+  alone; for `document.open()` it records what the document holds.
+- Every change made while the document parses, as after parsing. The
+  parser's insertions reach the existing hook:
+  `ContainerNode::ParserAppendChild` and `ParserInsertBefore` call
+  `NotifyNodeInserted` with `ChildrenChangeSource::kParser`
+  ([container_node.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/container_node.cc;l=1282),
+  [line 683](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/container_node.cc;l=683)), `ParserRemoveChild` calls
+  `ChildrenChanged` with a removal
+  ([line 1111](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/container_node.cc;l=1111)), and `ChildrenChanged`
+  calls `Document::NotifyChangeChildren`
+  ([line 1474](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/container_node.cc;l=1474)), where the recorder's hook
+  is. `RecorderRecordsDomChanges` drops its `!Parsing()` condition, so they
+  are recorded as `dom-node-inserted` and `dom-node-removed` with the
+  inserted subtree, as now. A node the parser builds outside the document,
+  such as a fragment, is still recorded when it is inserted.
+- Parser text appended to a connected node during parsing.
+  `CharacterData::ParserAppendData` sets the whole new value with
+  `kUpdateFromParser`
+  ([character_data.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/character_data.cc;l=77)). The character data
+  hook records it as `dom-character-data-changed` while the document parses
+  too; a node that is not connected is still skipped.
+- Post-mutation checkpoints while parsing. The mutation delivery hook
+  queues the document while it parses, so the transitions of a parse are
+  closed by checkpoints as later ones are. The document already has a walk,
+  so the bridge does not walk them, except after a loss or at the check
+  interval, as now.
+- The finished-parsing walk stays and is always walked. When the document
+  has a `started-parsing` walk, the app's check compares it with the state
+  rebuilt from that walk and the changes after it, which it does not do
+  now (`DomTreeRebuilder` takes a finished-parsing checkpoint as the state
+  without comparing it). A difference is reported as for any other walk.
+
+The recorder's validation accepts `started-parsing` as a DOM checkpoint
+`reason`. The state reader needs no new rule: the state at a frame is
+rebuilt from the latest walk at or before it and the changes after it, and
+the `started-parsing` walk is the earliest.
+
+#### Limits
+
+- Each parser append records the whole value of the text node, so a text
+  node the parser appends to n times is recorded n times. Whether that
+  matters on real pages is measured on the target machine.
+- The records made during parsing add main-thread work while the page
+  loads, about one record set for each parsed node in addition to the
+  finished-parsing walk. The cost is measured as for stage 2; optimizing it
+  stays deferred, as agreed.
+- A frame drawn before the document's `started-parsing` walk (none is
+  expected for a document that is parsed) still cannot be recreated, and
+  the player still says so.
+- Fonts and images are taken as they were at the frame's basis: an
+  image's latest image-resource record at or before it, and the faces the
+  document had loaded and not removed. An image Blink drew is decoded from
+  loaded bytes, so an image the screen shows should have its record by
+  then. Two cases may not hold, and are settled below rather than
+  accepted.
+
+#### To be settled
+
+- Whether `ImplicitOpen` is reached for every document that is parsed,
+  including the XML parser and the initial empty document, or whether the
+  walk is better made at the document's first change. Settled by reading
+  the source on the target machine before the hook is written.
+- Whether the document's token and its navigation's correlation are
+  available at `ImplicitOpen`, so the walk is joined to the committed
+  navigation as the finished-parsing walk is.
+- An image drawn while its bytes are still arriving. Blink can decode and
+  draw part of an image before it finishes loading; the recording holds
+  an image only once it has finished, so the recreation would draw
+  nothing where the screen shows part of it. Settled by reading how Blink
+  paints a partly loaded image, and what of it the recording would need.
+- Text whose web font has not loaded. During a face's block or swap
+  period Blink draws the text invisible or in a fallback font. Whether the
+  recorded glyph runs, imposed in the recreation, give what the screen
+  showed is settled by reading Blink's font loading and checked on the
+  target machine.
+
+Agreed by the owner on 2026-10-02, with these two cases added and the
+recreation compared with the screen image in the system test.
+
+#### Required tests
+
+- Unit tests: the integration script's new hook and changed conditions,
+  and the upgrade of each changed definition from the one a checkout at
+  protocol 0.41 holds; the bridge's walk schedule for `started-parsing`
+  and for post-mutation requests during parsing; the validation of the new
+  reason; the state at a time between a `started-parsing` walk and the
+  finished-parsing walk, rebuilt from parser insertions, removals, and
+  appends; the check of a finished-parsing walk against that state.
+- Integration test in the instrumented Chromium: a generated page served
+  slowly in parts, so that it is presented before parsing finishes; at a
+  presentation before the finished-parsing walk, the rebuilt DOM equals
+  the DOM Blink held, and the check of the finished-parsing walk reports
+  no difference.
+- System test on the target machine: the recording of the CNIB events
+  page is opened at frames between the document's first presentation and
+  its finished-parsing walk, and the finished-parsing check reports no
+  difference. Each recreation is compared with the captured screen image
+  of its frame, including which images are drawn, and how far, and the
+  font of each heading; a difference is reported as a defect, not
+  accepted.
+
+#### Settled before building
+
+- `ImplicitOpen` is reached for every parsed document. On the target
+  machine's checkout, `DocumentLoader::CreateParserPostCommit` calls
+  `Document::OpenForNavigation` (`core/loader/document_loader.cc`, line
+  3535), which calls `ImplicitOpen` (`core/dom/document.cc`, lines 4069 to
+  4105); `document.open()` calls it too
+  ([document.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/document.cc;l=4047)). `ImplicitOpen` creates the
+  parser with `Document::CreateParser`, an HTML parser for an HTML
+  document and an XML parser otherwise
+  ([document.cc](https://source.chromium.org/chromium/chromium/src/+/65f3c73180c4fb3d4960843c373be998b0aba64a:third_party/blink/renderer/core/dom/document.cc;l=3697)), so both start with the walk.
+- The parser is created after the navigation commits:
+  `DocumentLoader::StartLoadingResponse` checks that the loader's state is
+  at least `kCommitted` before it calls `CreateParserPostCommit`
+  (`core/loader/document_loader.cc`, lines 2189 to 2215 on the target
+  machine's checkout). The walk names the document's token, as every DOM
+  checkpoint does; whether the app joins it to its navigation is checked
+  on the target machine.
+- The exception: with `kStreamlineRendererInit`, the initial empty
+  document of a main frame is given its `html`, `head`, and `body`
+  elements without a parser (the same function, lines 2197 to 2209). It
+  has no `started-parsing` walk; its first change is walked as `first` at
+  the next mutation delivery, as before.
+- `Document::Parsing()` is true only in the state `kParsing`, and
+  `HasFinishedParsing()` only in `kFinishedParsing`; the state between
+  them is `kInDOMContentLoaded` (`core/dom/document.h`, lines 1142 to 1145
+  on the target machine's checkout). The mutation hooks no longer test
+  either.
+
+#### As built (protocol 0.42)
+
+- `patch_blink_document_started_parsing` in the integration script adds
+  the walk after `SetParsingState(kParsing)` in `ImplicitOpen`, for an
+  active document, with a declaration of the walk before `ImplicitOpen`.
+- `RecorderRecordsDomChanges` is true for an active document while the
+  recorder is connected, in every parsing state; the character data hook
+  skips a parser update only for a node that is not connected; the
+  document's change hook queues a mutation delivery in every parsing
+  state, and the delivery skips only an inactive document. A checkout
+  patched at protocol 0.41 is upgraded by replacing each changed condition.
+- `FullWalkSchedule` always walks `started-parsing`, as `finished-parsing`,
+  and names the request as its `walkReason` when it is not the document's
+  first walk, after a loss, or a check.
+- The recorder accepts `started-parsing` as the reason of a DOM checkpoint
+  and of an interaction checkpoint that follows one, and as a `walkReason`
+  only for that request. A document walked when its parser was created is
+  complete while it parses (`ParserChangesRecorded`), where before it was
+  marked as parsing, with nodes missing. `DomChangeCheck` compares a
+  finished-parsing checkpoint with the tree rebuilt from a
+  `started-parsing` walk and the changes after it.
+- Not yet done: the integration test in the instrumented Chromium, which
+  needs a Chromium build; it is replaced, for this sub-step, by the system
+  test on the target machine and by the change check run on its recording.
+
+#### On the target machine (c5bc790)
+
+The recording of 2026-10-03 02:35 UTC holds 35 `started-parsing` walks,
+and the change check compared each of the 35 finished-parsing walks with
+the tree rebuilt from its document's `started-parsing` walk: 13,642 nodes
+compared, all equal in every field. The CNIB events page has a complete
+DOM at every frame from 15.2 seconds, its first walk at 15.182 seconds.
+The owner reported that the recreated frames look correct, except those
+with a running animation or an open select, which are drawn without them
+(slices 4b and 4d).
+
+### Slice 4d: open select lists and other page popups (agreed)
+
+Proposed 2026-10-02, after the owner's report that frames with an open
+select show it closed, and agreed the same day. Slice 4d is built before slice 4b, so it takes
+protocol 0.43 and slice 4b moves to protocol 0.44. Sub-step 1b, agreed on
+2026-10-03, takes protocol 0.44, and slice 4b moves to protocol 0.45.
+
+#### What Chromium does
+
+Read in the Chromium checkout on the target machine; line numbers are
+those of that checkout, under `third_party/blink/renderer/`.
+
+- A select drawn as a menu list opens its list in a page popup, not in
+  its own document. `ChromeClientImpl::OpenPopupMenu` makes an
+  `InternalPopupMenu` unless external popup menus are used
+  (`core/page/chrome_client_impl.cc`, lines 1022 to 1031), and
+  `InternalPopupMenu::Show` opens a page popup for it
+  (`core/html/forms/internal_popup_menu.cc`, lines 711 to 714). Date,
+  time, and colour pickers are page popups too.
+- The page popup is a page of its own, with its own frame and document,
+  and its own widget. `WebPagePopupImpl` makes its frame (line 431 of
+  `core/exported/web_page_popup_impl.cc`), has its client write the
+  document (line 473), and installs it synchronously (line 475). Its
+  compositing is made on its own `WidgetBase`, with no frame widget input
+  handler (lines 508 to 522).
+- `InternalPopupMenu::WriteDocument` writes the list as a script
+  configuration: the options and their labels and styles, the selected
+  index, the select's base style, the anchor rectangle in screen
+  coordinates from the select's visible bounds in its local root, the zoom
+  factor, and the scale factor (`internal_popup_menu.cc`, from line 323).
+  The list itself is a listbox `select` of size 20 made by
+  `list_picker.js` (`core/html/forms/resources/list_picker.js`, from line
+  61).
+- The popup places its own window: `PagePopupController::setWindowRect`
+  (`core/page/page_popup_controller.cc`, line 120) reaches
+  `WebPagePopupImpl::SetWindowRect`, which sets the widget's pending window
+  rectangle and asks the browser for the popup's bounds (lines 688 to
+  721). The rectangle may extend beyond the owner's window.
+- The highlighted item is the selected option of the popup's listbox.
+  Pointer hover sets `selected` on an option (`list_picker.js`, lines 160
+  to 162 and 231 to 239), and the arrow keys move the listbox's selection; a change is
+  sent to the owner with `setValue`, which calls
+  `HTMLSelectElement::ProvisionalSelectionChanged`
+  (`internal_popup_menu.cc`, lines 672 to 678). Every change of an
+  option's selectedness, in the popup or in the page, passes through
+  `HTMLOptionElement::SetSelectedState`
+  (`core/html/forms/html_option_element.cc`, line 386), which sets no
+  attribute, so no DOM transition records it.
+- The popup is closed by `WebPagePopupImpl::ClosePopup` (line 1101), from
+  the renderer, or by `Close` (line 1069), from the browser; the owner is
+  told by `InternalPopupMenu::DidClosePopup` (`internal_popup_menu.cc`,
+  lines 680 to 685).
+
+#### What the recording already holds
+
+From the recording of 2026-10-03 02:35 UTC on the target machine, read in
+the sandbox: four popup documents, at 20.861, 22.439, 23.099, and 40.954
+seconds. Each has its DOM from a `started-parsing` walk, including the
+configuration above (for the list at 23.099 seconds: 15 options, selected
+index 0, anchor rectangle x 516, y 471, width 262, height 48, zoom and
+scale factor 1), its listeners, its input dispatches, and its focus. The
+popup open from 23.093 to 25.698 seconds also has a layout checkpoint and
+13 layout change sets. Every presentation request of a popup document is
+recorded as `no-widget`: the presentation request looks for the frame
+widget of the frame's local root (`RecorderRequestLayoutPresentation` in
+`chromium/integrate.py`), and a popup has none.
+
+So the recording holds what the popup drew, but not which select owns
+it, where its window was, which option was highlighted after it opened,
+or which captured frame shows which state.
+
+#### What is recorded (protocol 0.43)
+
+On `browser.interaction`:
+
+| Record | Where | Holds |
+| --- | --- | --- |
+| `page-popup-opened` | `WebPagePopupImpl`'s constructor, after the popup document is installed and its first window rectangle is set | the popup's document identity, its kind (`select-list`, `date-time`, `color`, or `other`, from the owner element), the owner element's node ID and its document's identity, the owner's visible bounds in its local root, the owner's local root view and the anchor rectangle in screen coordinates as `WebPagePopupImpl` computes them, the first window rectangle, and the zoom factor |
+| `page-popup-window-rect` | `WebPagePopupImpl::SetWindowRect`, at each call, and `WebPagePopupImpl::SetScreenRects`, at each call | the popup, and either the window rectangle the popup asked for (`requested`, after the emulation is reversed, and whether it was deferred until the popup was shown) or the widget and window rectangles the browser placed it at (`placed`) |
+| `page-popup-closed` | `WebPagePopupImpl::ClosePopup`, or `WebPagePopupImpl::Close` when its cancel did not reach `ClosePopup` | the popup, and whether the renderer or the browser closed it |
+| `option-selectedness-changed` | `HTMLOptionElement::SetSelectedState`, when the state changes | the option's node ID, its select's node ID when it has one, and the new state, for every document, popup or page |
+
+All rectangles are in screen DIPs, as `WebPagePopupImpl` holds them.
+
+The selectedness record also covers a closed select in the page, whose
+drawn text is its selected option's label, and a listbox select in the
+page.
+
+On `browser.presentation`: a layout checkpoint or change set of a popup
+document requests its presentation from the popup's own `WidgetBase`
+layer tree host, with a swap promise that records as a frame widget's
+does, so the popup's frames are joined to captured frames as the page's
+are. The widget identity names the popup's frame and has the new
+`widgetKind` `page-popup`; a frame widget's has `frame`. Its frame sink ID
+is null: the browser assigns a popup's frame sink, and the renderer is not
+told it (`WebPagePopupImpl` and `WidgetBase` hold no frame sink ID). The
+join to captured frames uses the request identity and presentation time,
+not the frame sink. A popup's widget is not a frame widget, so its request records
+`isMainFrameWidget` false.
+
+#### Which state a captured frame shows
+
+A popup is open at a captured frame when its `page-popup-opened` record is
+at or before the frame's composition and no `page-popup-closed` record
+is. Its state is chosen as a document's state is now: the last presented
+rendering update of the popup's widget at or before the composition. Its
+window is the last `page-popup-window-rect` at or before that update.
+
+#### What the recreation does
+
+- The page is recreated as now, with each option's recorded selectedness
+  imposed.
+- An open popup is drawn over the recreated page at its recorded window
+  rectangle, mapped into the recreation's coordinates by the owner's
+  recorded visible bounds and anchor rectangle. Its document is built
+  from the recorded DOM with recorded values imposed, as a page's is, and
+  its scripts are not run, so nothing in it changes.
+- The basis line in the evidence panel names the popup and its rendering
+  update.
+
+#### Limits
+
+- A select drawn with `appearance: base-select` puts its list in the
+  page's own top layer, not in a page popup. Whether its open state is
+  recorded is checked in the required tests.
+- With external popup menus (macOS, and Android), the list is drawn by
+  the platform; not covered. The recorder runs on Windows.
+- Part of a popup window outside the captured screen area cannot be
+  compared with the capture.
+
+#### To be settled
+
+- How the popup is drawn in the recreation: as a page popup of the
+  recreation's own, opened at the mapped rectangle, which draws it with
+  the same code as at recording, or as a layer of the recreated page,
+  which keeps the whole frame in one document that DevTools can inspect.
+- Whether the date, time, and colour pickers need anything beyond the
+  records above.
+
+#### Settled before building
+
+Read in the same checkout, 2026-10-02.
+
+- The presentation request reaches the popup's widget through its page.
+  `ChromeClient::IsPopup` (`core/page/chrome_client.h`, line 137) is
+  overridden in core only by `PagePopupChromeClient`
+  (`core/exported/web_page_popup_impl.cc`, line 203), which holds its
+  `WebPagePopupImpl` until `ChromeDestroyed` clears it. A function in
+  `web_page_popup_impl.cc` checks `IsPopup` on the frame's page, reaches
+  the `WebPagePopupImpl` through that client, and queues the swap promise
+  on its `WidgetBase` layer tree host; the request in
+  `RecorderRequestLayoutPresentation` calls it before recording
+  `no-widget`. A popup that is closing, or whose widget has no layer tree
+  host, is recorded as `no-widget` or `not-compositing` as a frame is.
+- `WebPagePopupImpl` is reference counted rather than garbage collected,
+  so the swap promise reaches the widget for presentation feedback by a
+  weak pointer to the `WidgetBase` (`platform/widget/widget_base.h`, line
+  395), used only on the main thread.
+- The popup's first window rectangle is set while the document is
+  installed, before the popup is shown, and is kept as `initial_rect_`
+  (lines 713 to 721); `page-popup-window-rect` records it with
+  `deferred` true, and `page-popup-opened` repeats it.
+- `Close` from the browser normally reaches `ClosePopup` through the
+  popup client's cancel (lines 1069 to 1099); when it does not, `Close`
+  destroys the page itself, and the closed record is written there.
+
+#### Sub-steps
+
+1. Record (protocol 0.43): the four records and the popup's
+   presentations, with the cost measured on the target machine.
+1b. Record (protocol 0.44): the popup window's bounds as the browser set
+   them, and its frame sink, from the browser process.
+2. The recreation imposes option selectedness and draws an open popup at
+   its recorded place.
+
+Each sub-step is tested on the target machine before the next.
+
+The order and scope agreed by the owner on 2026-10-03 ("Yes, I agree let's
+follow that plan"): sub-step 1b, then sub-step 2, then slice 4b, with 4b
+designed for page widgets and popup widgets alike. Anything else that the
+comparison of sub-step 2 with the captured screen finds is recorded here as
+a defect against that comparison, not added as a further step, unless it
+blocks slice 4b.
+
+#### Sub-step 1 on the target machine
+
+Built as 76c4812 (2a3939b, with the owner's input type read through
+`TextControlElement`, since `HTMLInputElement` declares
+`FormControlTypeAsString` private). The owner recorded the CNIB events page
+on 2026-10-03, recording `20261003-130512-129cb663dbd8408b9797344a44fc4a81`
+(113.5 s, 192,866 events accepted, none dropped), opening its selects and
+moving the highlight. What the recording holds:
+
+- Ten popups, each a `select-list` owned by one page document, each with
+  one `page-popup-opened`, two `page-popup-window-rect` records with
+  `source` `requested` (the first `deferred`, the second not, with the same
+  rectangle), and one `page-popup-closed`. All ten were closed by the
+  `renderer`. No `placed` rectangle was recorded (see below).
+- 193 `option-selectedness-changed` records: 154 in the ten popup
+  documents, each with the popup listbox's select, written by the picker's
+  script (`ListPicker`, `update_`, `highlightOption_`), and the rest in page
+  documents, including the owner select's change when the list closed with
+  a new value (`handleMouseUp_`). Fifteen page records state no select:
+  the option was not in a select when its selectedness changed, four with
+  no script location and eleven set by the page's script.
+- Presentations of the popup documents: 98 `presentation-requested`, all
+  queued, with `widgetKind` `page-popup`, a null `frameSinkId`, and
+  `isMainFrameWidget` false; 96 swapped with feedback, and 2 not swapped.
+  Four requests in page documents still record `no-widget`.
+
+No placed rectangle reaches a popup. `WidgetBase::SetPendingWindowRect`
+(`platform/widget/widget_base.cc`, lines 1971 to 1976) stores a popup's
+requested rectangle as its widget and window rectangles, with the comment
+"Popups don't get size updates back from the browser so just store the set
+values". `WidgetBase::UpdateScreenRects` (lines 571 to 580) sets the
+rectangles itself when its client does not handle them, and
+`WebPagePopupImpl::SetScreenRects` is not called on that path. So the
+renderer's own account of a popup's place is the requested rectangle; where
+the browser put the popup's window on screen is not in the renderer.
+Whether it differs from the request is checked against the captured screen
+images in sub-step 2.
+
+The bridge's cost lines in the Chromium log time each new call on the
+renderer's main thread (count, mean, largest):
+
+| Call | Count | Mean | Largest |
+| --- | --- | --- | --- |
+| `RecordBlinkPagePopupOpened` | 10 | 23.0 us | 32 us |
+| `RecordBlinkPagePopupWindowRect` | 20 | 13.2 us | 21 us |
+| `RecordBlinkPagePopupClosed` | 10 | 10.6 us | 19 us |
+| `RecordBlinkOptionSelectednessChanged` | 193 | 18.3 us | 124 us |
+| `BeginBlinkPresentationRequest`, all widgets | 409 | 14.2 us | 89 us |
+
+The presentation request count in the cost lines (409) is below the
+recorded count (413), as are the swap and feedback counts (376 against
+380): the last interval of each renderer is not logged before it exits. As
+before, the lines do not time Blink's work before each call.
+
+#### Sub-step 1b design (agreed)
+
+The owner, on 2026-10-03: "I want us to be as precise as we can be because
+real tests will inspect the rendered frames."
+
+What the browser does with a popup's rectangle. Read in the Chromium
+checkout on the target machine, under `content/browser/` unless named:
+
+- The renderer asks to show the popup with `ShowPopup`, and to move it
+  with `SetPopupBounds`. `RenderWidgetHostImpl::ShowPopup`
+  (`renderer_host/render_widget_host_impl.cc`, lines 2990 to 3002) passes
+  the rectangle through `ClampPopupBoundsToDisplay` (lines 383 to 413),
+  which limits its width and height to the display's work area;
+  `SetPopupBounds` (lines 2806 to 2818) does the same after
+  `ConstrainPopupBounds`, and ignores the request while a screen rectangle
+  update is unacknowledged.
+- `WebContentsImpl::ShowCreatedWidget`
+  (`web_contents/web_contents_impl.cc`, lines 6114 to 6203) transforms the
+  rectangle for nested web contents, applies `ConstrainPopupBounds`
+  (lines 6096 to 6112), which moves a popup whose top is above the top of
+  the main frame's view down to it when `kLimitPopupWidgetHostPosition` is
+  enabled, may refuse the popup, and calls
+  `RenderWidgetHostViewAura::InitAsPopup`.
+- `InitAsPopup` (`renderer_host/render_widget_host_view_aura.cc`, lines
+  454 to 530) makes a menu window, sets an owned window anchor that flips
+  in y, and parents it with `ParentWindowWithContext`. On Windows a menu
+  window gets a top-level widget of its own
+  (`ui/views/widget/desktop_aura/desktop_native_widget_aura.cc`, lines
+  257 to 269 and 108 to 160), without a standard frame but with the
+  system's drop shadow (lines 126 to 132).
+- `RenderWidgetHostImpl::SendScreenRects` (lines 700 to 736) reads the
+  view's bounds and its top-level window's bounds in screen and sends them
+  to the renderer's widget, one update at a time; the renderer's
+  `WidgetBase::UpdateScreenRects` stores them
+  (`third_party/blink/renderer/platform/widget/widget_base.cc`, lines 571
+  to 580).
+- The browser allocates the popup widget's routing ID, which the renderer
+  does not receive (`renderer_host/render_frame_host_impl.cc`, lines
+  11622 to 11629); the widget's frame sink is made from it. A web view
+  holds one page popup at a time: `WebViewImpl::OpenPagePopup` cancels the
+  open one first (`third_party/blink/renderer/core/exported/web_view_impl.cc`,
+  lines 1079 to 1087).
+
+So the browser can change the popup's size and position, and Windows draws
+a shadow outside it; only the browser process holds the result.
+
+What is recorded (protocol 0.44), from the browser process, on
+`browser.interaction`:
+
+| Record | Where | Holds |
+| --- | --- | --- |
+| `popup-widget-created` | `RenderFrameHostImpl::CreateNewPopupWidget`, after the widget is made | the renderer's process ID, the opener frame's token, and the popup widget's frame sink |
+| `popup-widget-shown` | `WebContentsImpl::ShowCreatedWidget`, after `InitAsPopup`, or where it refuses the popup | the frame sink; the rectangle and anchor as received, after the transform, and after `ConstrainPopupBounds`; whether it was refused and why |
+| `popup-widget-bounds-requested` | `RenderWidgetHostImpl::SetPopupBounds` | the frame sink, the rectangle requested, the rectangle set, or that it was ignored |
+| `popup-widget-screen-rects` | `RenderWidgetHostImpl::SendScreenRects`, for a popup widget, when it sends | the frame sink; the view and window bounds in screen, in DIPs; the native window's rectangle from `GetWindowRect`, in physical pixels; and the device scale factor |
+
+`page-popup-opened` gains `ownerFrameToken`, the token of the owner's
+frame, which the browser knows as the opener frame's token. A popup is
+joined to its widget by the renderer's process, the owner's frame token,
+and order: the opener frame's next `popup-widget-created` after the
+renderer's `page-popup-opened`, since a web view holds one popup at a
+time. A popup whose join is not one to one is reported, not guessed.
+
+The renderer's `page-popup-window-rect` record with `source` `placed`, from
+`WebPagePopupImpl::SetScreenRects`, is removed with its hook: Chromium does
+not call it on this path (see "Sub-step 1 on the target machine"), and the
+browser's record replaces it.
+
+What it gives:
+
+- The popup's place on screen is the window's bounds as the browser set
+  them, and in physical pixels as Windows holds them, which is what the
+  captured screen images are in.
+- The popup's frame sink, which its presentation records leave null, is
+  named, so slice 4b joins a popup's compositor frames as a page's are.
+
+Limits of 1b:
+
+- The system's drop shadow is drawn by Windows outside the window; it is
+  not drawn by Blink, so the recreation does not draw it. Its presence in
+  the captured image is noted in the comparison, as a difference that is
+  not the page's.
+- A popup moved by Windows after `SendScreenRects` without a bounds change
+  reaching the view would not be recorded; none is expected, and the
+  native rectangle at each send would show a difference.
+
+Required tests for 1b: unit tests of each new record against the record
+contract and of the join, including a popup without a widget and a widget
+without a popup; the integration script's tests of the browser hooks and
+of the removed hook's upgrade; and, on the target machine, a recording of
+the CNIB events page with the selects opened, in which each popup joins to
+one widget, with its screen rectangles and its cost.
+
+The owner agreed the design on 2026-10-03 ("yes please").
+
+#### Sub-step 1b as built
+
+Built as designed, with these details settled in the code:
+
+- `popup-widget-created` carries the opener frame's navigation context, as
+  the frame cookie records do. The other three records carry the browser
+  process's context, with no page, frame, or document, and are joined to the
+  created record by `frameSinkId`.
+- `popup-widget-shown` names its `outcome`: `shown`, `window-not-active`,
+  `not-visible`, or `permission-exclusion`. `ShowCreatedWidget` refuses for
+  an inactive window before it transforms the rectangle, so that refusal
+  carries only the received rectangle and anchor. It returns without a
+  record when it has no view for the widget, since there is then no widget
+  to name. The transformed rectangle is kept before `ConstrainPopupBounds`
+  replaces it, so both are recorded.
+- `popup-widget-screen-rects` records the native window's client area as
+  well as its rectangle (`nativeWindowRect`, `nativeClientRect`), both in
+  screen pixels, or both null when Windows does not answer. The bridge reads
+  them from the HWND of the view's window tree host with `GetWindowRect`,
+  `GetClientRect`, and `ClientToScreen`, when the record is made, after the
+  screen rectangles are sent. Reading them in the bridge keeps `windows.h`
+  out of `render_widget_host_impl.cc`.
+- `page-popup-window-rect` loses `source` and `widgetRect`; it is always a
+  requested rectangle. The integration script rewrites a checkout patched by
+  0.43: the owner record's helper, the requested rectangle's helper and hook,
+  and the removal of the `SetScreenRects` hook.
+
+Tests run in the sandbox: the integration script's tests, including the
+browser hooks written once, failing when an anchor is absent, recording a
+refusal before the widget is destroyed, and the 0.43 upgrade; the hooks
+applied twice to copies of the three browser files and of the 0.43-patched
+`web_page_popup_impl.cc` from the target machine, with no change on the
+second run and every bridge call matching the header; and the record
+contract tests for each new record and the changed ones. The join is not
+yet product code: it is checked by hand against the recording made on the
+target machine, which is still to be made, and its required unit tests,
+including a popup without a widget and a widget without a popup, come with
+the code that first uses it, in sub-step 2.
+
+#### Sub-step 1b on the target machine
+
+Recording `20261003-143108-ab7e18edb49d4a63bace38a455bf5c55`, made by the
+owner on 2026-10-03 with the fdb1bdb package, of the CNIB events page with
+its selects opened ten times. Read from the recording and its diagnostic
+logs:
+
+- Ten `page-popup-opened`, ten `page-popup-closed`, twenty
+  `page-popup-window-rect`, and ten of each of the four popup widget
+  records. Every `popup-widget-shown` has the outcome `shown`; none was
+  refused.
+- The join is one to one. All ten popups have the same renderer process and
+  owner frame token, and the k-th `page-popup-opened` for that pair matches
+  the k-th `popup-widget-created`, each with its own frame sink (`6:18` to
+  `6:27`).
+- The created record comes before the popup's opened record, by 24 to
+  33 ms: the browser makes the widget when the renderer asks for it, and the
+  renderer records the popup once its document is installed. The design's
+  join, "the opener frame's next `popup-widget-created` after the
+  renderer's `page-popup-opened`", has the order backwards. The join is
+  corrected to: the opener frame's last `popup-widget-created` before the
+  `page-popup-opened`, which with one popup per web view at a time is the
+  same pairing as the k-th with the k-th.
+- For every popup the rectangle the browser received, transformed,
+  constrained, and gave the view equals the renderer's first window
+  rectangle, and the received anchor equals the renderer's anchor. The one
+  bounds request per popup was set unchanged. The one screen rectangle send
+  per popup has view, window, native window, and native client rectangles
+  all equal, at a device scale factor of 1.0. On this machine, at this
+  scale, the browser did not move or resize any popup, and the native window
+  has no frame outside its client area.
+- The popups' presentation records still have a null `frameSinkId`, as in
+  0.43; slice 4b joins them through the created record's frame sink.
+
+Cost, from the browser process's lines in `diagnostics/browser-bridge.log`
+(the browser process writes its cost lines there, not to
+`diagnostics/chromium.log`):
+
+| Bridge function | Calls | Mean | Largest |
+| --- | --- | --- | --- |
+| `RecordBrowserPopupWidgetCreated` | 10 | 139.3 us | 407 us |
+| `RecordBrowserPopupWidgetShown` | 10 | 29.8 us | 31 us |
+| `RecordBrowserPopupWidgetBoundsRequested` | 10 | 19.5 us | 22 us |
+| `RecordBrowserPopupWidgetScreenRects` | 10 | 15.7 us | 22 us |
+
+The created record's cost is split: six calls took about 18 to 20 us (two of
+them known only as a sum of 40 us within one report) and four took 270 to
+407 us. The cause of the longer calls is not measured.
+
+Not tested by this recording: a refused popup, a popup the browser moved or
+clamped, a nested web contents, and a device scale factor other than 1.
+
+#### Sub-step 2 design (agreed)
+
+Agreed by the owner on 2026-10-03: "yes please".
+
+The owner, on 2026-10-03, settling how the popup is drawn: "My requirement
+is that devtools work. within the limitations of a snapshot in time. so
+right-clicking on an element or popup should allow me to inspect it in the
+elements tab. Beyond that requirement you are free to choose the
+implementation".
+
+Why a page popup of the recreation's own cannot meet it. Read in the
+Chromium checkout on the target machine: `WebPagePopupImpl` makes the
+popup's frame with an `EmptyLocalFrameClient` (line 389 of
+`core/exported/web_page_popup_impl.cc`, used at line 431) and gives its
+page a `PagePopupChromeClient`, an `EmptyChromeClient` (line 175). The
+popup's frame is therefore not a `WebLocalFrameImpl`, which is what a
+DevTools agent and a context menu are attached to, so its document is not
+in the Elements tab and a right-click in it offers no Inspect.
+
+So the popup is drawn as part of the recreated page:
+
+- The popup's document is rebuilt, by the builder as the page's is, inside
+  an `iframe` that the builder adds to the recreated page, from the popup
+  document's recorded DOM with its recorded styles, fragments, and glyphs
+  imposed, as for any document. Its scripts are not run. DevTools shows it
+  as the iframe's document, under the iframe, and a right-click on an item
+  inspects that item.
+- The iframe is the one element the recreation adds that the recording
+  does not hold. It is shown with the Popover API (`popover="manual"`,
+  `showPopover()`), so it is drawn in the page's top layer, above the page,
+  and is not a child box of any recorded box; the page's recorded layout
+  and its children matched by node are left as they are. Its inline style
+  removes the popover's user-agent border, padding, margin, and
+  background, and it carries `data-a11y-recorder-popup` with the popup's
+  kind and owner, so it is told apart from recorded nodes in the Elements
+  tab. That a top-layer element leaves the recorded boxes unchanged is
+  checked in the required tests, not assumed.
+- Its place: the recorded window rectangle, less the owner's local root
+  rectangle in screen, is the popup's position in the owner's viewport;
+  adding the root scroll offset at the frame gives its position in the
+  page, where it is set with `position: absolute`, so it stays by its
+  select when the snapshot is scrolled. Its size is the window
+  rectangle's. In the recording of 2026-10-03, the owner's visible bounds
+  plus its local root's origin equal the anchor rectangle for every popup
+  (for the first, 403 + 69 = 472 and 95 + 384 = 479), so the two records
+  agree; a popup where they do not is reported in the panel.
+- Which popup, and which of its states: as in "Which state a captured
+  frame shows". The page list in the player stops listing popup documents
+  as pages of their own; a popup is opened with its owner's page.
+- Selectedness: each option's recorded selectedness at the frame is set
+  by the builder, in the page and in the popup, so the select shows its
+  value at the frame and the popup's listbox its highlighted option.
+- The evidence panel names the popup, its owner, its rendering update,
+  and its window rectangle, and the notes say that the iframe is the
+  recreation's.
+
+Limits of sub-step 2:
+
+- The popup's window may extend beyond the owner's window on screen; in
+  the recreation it lies over the page, and where it extends past the
+  page's end it may enlarge the page's scrollable area. Whether it does is
+  checked.
+- With a zoom factor other than 1, the popup is laid out in its own zoom;
+  the size mapping is then checked against the capture before it is
+  relied on. The recording of 2026-10-03 has zoom 1 throughout.
+- The popup is placed at its window's bounds as the browser set them
+  (sub-step 1b), not at the rectangle it asked for.
+- Inspecting the popup's document shows the recorded document in an
+  iframe, not in a popup window: that is the one difference DevTools
+  shows from the page as it was.
+
+#### Required tests
+
+- Unit tests: each new record against the record contract; the
+  integration script's hooks and their upgrades; the choice of popup
+  state and window for a frame from a sequence of records; the mapping of
+  the window rectangle into the recreation's coordinates; selectedness
+  imposed on the rebuilt state.
+- Integration tests in the instrumented Chromium, on a generated page
+  with a select: the select is opened by keyboard and by pointer, the
+  highlight is moved by the arrow keys and by hover, and the list is
+  closed by Escape, by Enter, and by a click outside; the recording holds
+  each opening, window rectangle, selectedness change, presentation, and
+  closing, joined to the select; the recreation at each chosen frame
+  shows the list open or closed, with the highlighted option, at the
+  recorded place. Over the DevTools protocol, the popup's items are found in
+  the Elements tree under the added iframe, an item hit at its drawn
+  position is the recorded item, and the page's recorded boxes are
+  unchanged by the added iframe.
+- System test on the target machine: the CNIB events page is recorded
+  with each of its selects opened and the highlight moved, and the
+  recreation at frames with the list open, after the highlight moves, and
+  after it closes with a new value, is compared with the captured screen
+  image of each frame; a difference is reported as a defect.
+
+#### Sub-step 2 as built
+
+Built as designed, with these details settled in the code:
+
+- `PagePopups` (Recorder.Session) finds the popups open at a frame: those
+  whose `page-popup-opened` names the page's document as owner, at or
+  before the frame's composition, with no `page-popup-closed` of the same
+  popup document by then. Each popup is joined to the opener frame's last
+  `popup-widget-created` at or before its opening, on renderer process and
+  owner frame token, that no earlier popup joined. A widget record that no
+  popup joins is unused.
+- The popup document's state is read at the frame as any document's is,
+  so it is the state after the popup's last presented rendering update at
+  or before the frame's composition. Its window rectangle is the browser's
+  latest for the joined widget at or before the time that state is read
+  at: `popup-widget-shown` `viewBounds`, `popup-widget-bounds-requested`
+  `setRect` (an ignored request, with a null `setRect`, sets none), or
+  `popup-widget-screen-rects` `viewRect`. A popup with no joined widget
+  takes its last `page-popup-window-rect`, and before one the rectangle it
+  was opened with; the notes say so.
+- The root scroll offset added to the place is the recorded scroll offset
+  of the page's document node, the same value the builder scrolls to.
+- The playback index keeps the page popup and popup widget records with
+  their whole payloads, and its version is 2, so a recording indexed by an
+  earlier build has its index derived again when opened. The interaction
+  state keeps each option's latest selectedness for the life of the
+  document, since no checkpoint holds it, and the snapshot format is 3, so
+  snapshots of an earlier build are not used and the state is rebuilt from
+  the records.
+- The builder sets recorded unselections before selections, so that in a
+  single select, where a selection unselects the other options, the
+  result is the recorded state. An option with no record keeps the
+  selectedness its attributes give.
+- The popup's markup is served to its iframe as `srcdoc`, with the page's
+  script nonce, so the popup's builder runs under the page's content
+  security policy, which a `srcdoc` document inherits. That the policy's
+  `frame-src 'none'` does not block a `srcdoc` iframe is relied on, and is
+  to be confirmed on the target machine. The popup is given no recorded
+  font faces: its text is drawn from its recorded glyphs only where Blink
+  chooses the recorded font file for it, as for any text.
+- The evidence panel's notes name each popup's kind, owner element,
+  opening time, joined widget, document, how its state was matched, its
+  window rectangle and the record that gave it, and its place in the page.
+  They report whether the owner's visible bounds plus its local root's
+  origin are the anchor rectangle, and say that the iframe is the
+  recreation's. A popup with no DOM walk at or before the frame is named
+  and not drawn.
+
+Not built: the owner select's own drawing while its list is open is left
+as Blink draws a closed select with the recorded value.
+
+Reviewed on 2026-10-05 and closed until it is seen again. The limit above
+was stated from the design, not from a frame the owner had seen. On
+recording 20261003-143108, the day-of-week select (node 3255) whose list is
+open in the captured frame at 38.316 s differs from the same select closed,
+at 38.723 s, in its background, text, and border colors and its shadow,
+and these are values its layout records hold: from 37.962 s its recorded background
+color is rgb(255, 241, 0) and its color rgb(0, 0, 0), and from 38.161 s its
+border color is rgb(76, 161, 255) with a 3.2 px box shadow, all of which the
+recreation imposes. The owner has not seen a frame in which the select is
+drawn closed; the item is to be reopened with that frame if one appears.
+
+Found while building: the browser's `popup-widget-created` record carries
+the opener frame's navigation context, whose document token is the page's,
+so the state builder would have made a document of it, keyed by that
+token and the navigation's document identity, which the page list, matched
+by token, would have offered as a second entry for the page. Popup widget
+records, and any interaction record with a browser process context, now
+make no document. Popup documents themselves were not offered as pages,
+since the list holds only documents committed by a primary main frame's
+navigation.
+
+Also found while building: with the larger snapshots of format 3, the
+existing test that reads a recording file cut at 60 % of its bytes failed,
+because the cut file held a state index record naming a snapshot whose
+chunk was cut off. A file cut short can do this whenever an index chunk is
+written before the snapshot chunk it names. The state reader now uses the
+index only up to the first record that names a snapshot not in the file,
+and reads the documents from the records after it.
+
+Tests run in the sandbox: unit tests of which popups are open at a
+composition time; the join, including a popup without a widget, widgets
+of another frame or process, a widget created after the popup, and a
+second popup taking the next unjoined widget; the choice of window
+rectangle at a state time; the mapping into the page and the anchor
+check; selectedness kept across checkpoints and in snapshots; the tree
+data with selectedness and a popup, whose markup carries the page's
+nonce; a popup without a DOM walk; no document from a popup widget
+record; and the playback index keeping popup records whole. Read against
+the recording made on the target machine on 2026-10-03 with a measurement
+that is not committed, each of the ten popups was found open at a frame
+150 ms after its opening, joined to its own widget (6:18 to 6:27), with a
+DOM walk and a presented state, its window from a
+`popup-widget-bounds-requested` `setRect`, and the anchor check passing.
+
+Not run in the sandbox: the integration tests in the instrumented Chromium
+and the system test, which need Chromium; they are to be run on the target
+machine.
+
+#### Sub-step 2 on the target machine
+
+With revision ff7860a, as the owner reported on 2026-10-03: "The recording
+is rendering well, the selects display and I can inspect the <option>
+elements. Those options are actually selectable, so we should probably
+catch the clicks/selects like we did for the other interactive elements.
+But it works well".
+
+The read-only snapshot of 2026-09-30 refused changes from the page's own
+controls, but only navigation is refused so far (slice 3b, "Leaving the
+recreation"). A click on an option in the popup's iframe selects it, as it
+would in any listbox.
+
+#### Input refused (agreed)
+
+The owner, on 2026-10-03, replacing the read-only snapshot of 2026-09-30:
+"The point of this rendering is that it is a snapshot in time, including
+state (which should be shown including visible focus outlines). The only
+interaction that should be working on that rendering is right click for
+"inspect"".
+
+So the recreation takes no input except the right-click that opens the
+context menu with Inspect. Typing in a text field, which the read-only
+snapshot of 2026-09-30 allowed, is refused, as are clicks, keys, the wheel,
+touch, and hovering. The recorded focus, with the focus outline the
+recorded style gives, stays where it was recorded.
+
+Where it is done: in the recreation's renderer, under the recreation
+switch, where the widget receives each input event from the browser,
+before Blink's compositor-thread scrolling or the page sees it. Not with a
+listener the builder adds, which DevTools' Event Listeners pane would show
+as though recorded (the reason navigation is refused over the DevTools
+protocol in slice 3b); not with `pointer-events` or `inert`, which would
+change the imposed style or the accessibility tree; and not with the
+DevTools protocol's `Input.setIgnoreInputEvents`, which drops every event
+in the browser, the right-click with them, so no context menu opens.
+
+What passes:
+
+- Mouse events of the right button, and the context menu they open, so
+  that Inspect is offered on the element under the pointer, in the page
+  and in a recreated popup's iframe.
+- While DevTools' element picker is on, the mouse events the DevTools
+  overlay takes before the page, so that picking an element by pointer
+  still works. The overlay consumes them; none reaches the page.
+- The browser's own keys, such as the DevTools shortcuts, which the
+  browser handles before the renderer.
+
+Everything else is dropped: left and middle button events, mouse moves
+outside the picker (so no hover), the wheel, touch, gestures, and keys.
+With them go scrolling, text entry, focus changes, selection changes,
+control state changes, and links within the page. Navigation stays
+refused over the DevTools protocol, as a second guard.
+
+What DevTools does is unchanged: it acts on the snapshot as its tools
+allow, such as scrolling a node into view from the Elements tab, and its
+changes are not refused by this step.
+
+How: each place the widget receives an input event, for the main thread
+and the compositor thread, gains a check that returns the event as
+consumed without dispatching it, when the switch is on and the event is not
+one that passes. The places are found by name in the Chromium checkout on
+the target machine before the patch is written (the widget's input handler
+manager, where events from the browser arrive, and the frame widget's input
+handling, after the DevTools overlay); their lines are recorded here then.
+
+Reporting: the evidence panel's notes say that the recreation takes no
+input except the right-click and the DevTools element picker. A dropped
+event is not written to the Console, since mouse moves alone would fill
+it.
+
+Not recorded: no protocol change. The integration script gains the hooks,
+so Chromium is rebuilt.
+
+Limits:
+
+- With scrolling refused, the window shows the page at its recorded
+  scroll position only; the rest of the page is reached through DevTools.
+- Script run in DevTools' Console can still change the page, as it can
+  change any node; refusing it is not part of this step.
+
+Required tests:
+
+- Unit tests: the integration script's hooks, written once, unchanged when
+  applied twice, and failing when an anchor is absent.
+- Integration test in the instrumented Chromium, on a generated page with
+  a select, a list box, a check box, a details element, a text field, a
+  link within the page, a scrollable area, and a recorded focus,
+  recreated: trusted left clicks, keys, wheel, and mouse moves leave the
+  DOM, every control's state, the selection, the focus, and every scroll
+  offset as recorded, and no `select` popup opens; a right click opens
+  the context menu; the DevTools element picker selects the element under
+  the pointer; the same holds in a recreated popup's iframe.
+- System test on the target machine: in a recreation of the CNIB events
+  page with a list open, clicks, keys, and the wheel change nothing, the
+  recorded focus outline stays, and right-click and Inspect select the
+  element clicked.
+
+#### Input refused as built
+
+Agreed by the owner on 2026-10-03 ("yes please"). The places were read in
+the Chromium checkout on the target machine before the patch was written.
+
+Compositor thread. `InputHandlerProxy::RouteToTypeSpecificHandler`
+(`third_party/blink/renderer/platform/widget/input/input_handler_proxy.cc`,
+line 837 in the checkout) is where every event the browser sends to a
+frame widget is handled on the compositor thread, queued scroll gestures
+included, before the wheel, scroll, pinch, and touch handlers run (line
+878 onward). Under the recreation switch it now returns, before any of
+them: `DID_NOT_HANDLE` for a mouse event, so that the event goes to the
+main thread and no scrollbar is dragged on the compositor thread; and
+`DROP_EVENT` for every other event, so that keys, the wheel, touch, and
+gestures reach neither the compositor's scrolling nor the page. The
+platform component, `component("platform")` in
+`third_party/blink/renderer/platform/BUILD.gn`, which lists that file,
+gains the recorder bridge as a dependency.
+
+Main thread. `WebFrameWidgetImpl::HandleInputEvent`
+(`third_party/blink/renderer/core/frame/web_frame_widget_impl.cc`, line
+3482) first gives the event to the DevTools agent (lines 3511 to 3516),
+which takes the element picker's events and returns. The hook follows the
+point where the current input event is set (line 3530), before pointer
+lock, the mouse-down handling, and `WidgetEventHandler::HandleInputEvent`
+(line 3588). Under the recreation switch, a right-button mouse event of the
+type that shows a context menu (mouse up when the page setting
+`ShowContextMenuOnMouseUp` is true, as on Windows, otherwise mouse down,
+the rule of `HandleMouseDown` at line 1209 and `HandleMouseUp` at line
+1272) is passed to `MouseContextMenu` (line 1229), and the widget returns
+the event as handled; every other event is returned as suppressed. The
+page therefore receives no mouse down, mouse up, or mouse move: no focus,
+selection, hover, or control change.
+
+What the context menu does. `MouseContextMenu` calls
+`EventHandler::SendContextMenuEvent` (`core/input/event_handler.cc`, line
+2177), which performs an active hit test and dispatches the `contextmenu`
+event to the element under the pointer; no page script runs to see it. It
+changes no selection. The hit test can set Blink's hover and active state
+on the element under the pointer; whether that state changes what is drawn,
+under the imposed recorded style, is to be seen in the system test.
+
+Found while reading, not part of this step: text committed by an input
+method (`ImeCommitText` and `ImeSetComposition` on the frame widget)
+reaches Blink through the widget's input method interface, not as an
+input event, so these hooks do not refuse it. It inserts text only into a
+focused editable element; whether to refuse it is for the owner to decide.
+
+Tests as built:
+
+- Unit tests (`RecreationInputIntegrationTests` in
+  `chromium/test_integrate.py`): each hook is written once, a second run
+  leaves the file unchanged, and a missing anchor fails the run; the
+  compositor check precedes the scroll handling, and the main-thread check
+  follows the DevTools agent and precedes the widget's own handling. The
+  three patches were also run against copies of the target machine's files
+  and checked against the bridge's signatures.
+- Unit test: the evidence notes say the recreation takes no input except
+  the right-click.
+- Integration test (`TheRecreationTakesNoInput`, run only with the
+  instrumented Chromium): on a generated page, trusted left clicks on a
+  link, a link within the page, a check box, a select, a list box, a
+  summary, and a text field, a typed key, and the wheel over the page and
+  over a scrollable area leave the address, the DOM, every control's state,
+  the selection, the focus, and every scroll offset as built; a right click
+  dispatches the context menu event once. The navigation test,
+  `TheRecreationDoesNotLeaveThePage`, now starts its navigations by script
+  with a user gesture, since clicks are refused. The DevTools element picker
+  and the recreated popup's iframe are left to the system test, as the
+  test's DevTools client does not read protocol events.
+
+#### Input refused only in the recreation (agreed)
+
+Reported by the owner on 2026-10-03: "You have stopped user interaction on
+devtools".
+
+Cause, read in the bridge and the hooks. The recreation switch is passed
+to every renderer process (`AppendRecorderBootstrapToChildProcess`), and
+`IsRecreationMode()` is true in all of them. Both input hooks of "Input
+refused as built" test only `IsRecreationMode()`, so they refuse input in
+every renderer: the recreated page's, and also the DevTools front end's
+(a `devtools://` page), the evidence panel's (a `chrome-extension://` page
+inside DevTools), and any browser page drawn by a renderer (`chrome://`).
+
+Proposed fix: input is refused only in a widget showing recorded content,
+that is, a widget whose local root document is not a browser page. A
+browser page is one whose URL scheme is `devtools`, `chrome`,
+`chrome-untrusted`, or `chrome-extension`.
+
+- Main thread: the hook in `WebFrameWidgetImpl::HandleInputEvent` refuses
+  only when the widget's local root document is not a browser page; for a
+  browser page the event is handled as in any Chromium.
+- Compositor thread: `InputHandlerProxy` cannot read a document, so the
+  bridge keeps one flag per renderer process, set on the main thread when
+  a browser page's parser is created (`Document::ImplicitOpen`, the place
+  of protocol 0.42's walk), before the page can be drawn or take input.
+  The compositor hook drops events only in a process without the flag.
+  This rests on Chromium keeping browser pages and extensions out of web
+  content's processes. Read in the checkout on the target machine:
+  `RenderProcessHostImpl::IsSuitableHost`
+  (`content/browser/renderer_host/render_process_host_impl.cc`, line 4927)
+  refuses a process with WebUI bindings for a URL that is not WebUI ("has
+  WebUI bindings, url is non-WebUI") and a used process without them for a
+  WebUI URL, and refuses a process locked to one site for another site
+  ("locked, site should not lock"), which keeps an extension's origin out
+  of a web page's process. Whether every DevTools front end process is
+  covered by these is checked in the system test.
+- Recreation, evidence panel, and recording: unchanged.
+
+Limits:
+
+- Recorded content at a browser page's address (a recording of a
+  `chrome://` page) would take input in its recreation. Recordings are of
+  web pages, so this is stated, not handled.
+
+Required tests:
+
+- Unit tests (`chromium/test_integrate.py`): the main-thread hook tests
+  the local root's scheme; the compositor hook tests the process flag; the
+  parser hook sets it only for the four schemes; each hook is written once
+  and a missing anchor fails the run.
+- Unit test of the bridge's scheme decision, without a Chromium build.
+- Integration test (run with the instrumented Chromium, as
+  `TheRecreationTakesNoInput`): the recreated page still takes no input
+  but the right-click, as now.
+- System test on the target machine: in a recreation, DevTools' panels
+  take clicks, typing, and scrolling, the evidence panel scrolls, and the
+  page itself still takes only the right-click for Inspect.
+
+#### Input refused only in the recreation as built
+
+Agreed by the owner on 2026-10-03 ("yes please build this before we move
+to 4b"). The three places were read in the target machine's checkout,
+already patched by "Input refused as built", and the patches run against
+copies of those files: each is upgraded once and a second run leaves it
+unchanged.
+
+- Bridge: `IsRecreationBrowserPageScheme` (the four schemes, from
+  `IsBrowserPageScheme` in `recreation_input.h`),
+  `MarkRecreationBrowserPageProcess`, which sets a process flag, and
+  `RecreationRefusesCompositorInput`, true in the recreation mode in a
+  process without the flag.
+- Compositor thread: the hook in
+  `InputHandlerProxy::RouteToTypeSpecificHandler` tests
+  `RecreationRefusesCompositorInput()` in place of `IsRecreationMode()`.
+- Main thread: the hook in `WebFrameWidgetImpl::HandleInputEvent` refuses
+  only when the local root document's scheme, `Url().Protocol()`, is not a
+  browser page's.
+- Parser: `Document::ImplicitOpen`, after the protocol 0.42 walk, marks the
+  process when the document's scheme is a browser page's, in the
+  recreation mode.
+- A tree patched by "Input refused as built" has its two input hooks and
+  its parser hook replaced whole (`STAGE_045_*` in `integrate.py`).
+
+Tests run: the C++ test of `IsBrowserPageScheme` (the four schemes; http,
+https, about, file, an empty scheme, a longer scheme, and upper case not);
+Python tests that the compositor hook tests the process flag, the
+main-thread hook the local root's scheme, and the parser hook marks the
+process, that the earlier hooks are upgraded once, and that the bridge
+and build hold the new names (202 passed). The .NET suite is not changed
+by this step. Not done: the integration test was not rerun here, as it
+needs the instrumented Chromium; it and the system test are for the
+target machine.
+
+On the target machine, with 0172bbd, as the owner reported on 2026-10-03:
+"That worked".
+
+#### Scrollbars take input (owner's direction, built)
+
+Reported by the owner on 2026-10-04, with 7ec8f56, unable to run the
+sub-step 2a system test: "I can't do that test for you because you have
+blocked access to the scrollbar. The scrollbar must work. Go fix please".
+This replaces, for the scrollbars only, the refusal of scrolling in "Input
+refused (agreed)".
+
+Cause, read in the target machine's
+`third_party/blink/renderer/platform/widget/input/input_handler_proxy.cc`.
+The compositor hook of "Input refused only in the recreation as built"
+returned before the `switch` of `RouteToTypeSpecificHandler`, so cc's
+scrollbar controller (`HandlePointerDown`, `HandlePointerMove`, and
+`HandlePointerUp`, reached from the left button's mouse events) never saw a
+press on a scrollbar, and the scroll gestures it makes for one
+(`InjectScrollbarGestureScroll`, with the device
+`WebGestureDevice::kScrollbar`, from
+`WebGestureEvent::GenerateInjectedScrollbarGestureScroll` in
+`third_party/blink/common/input/web_gesture_event.cc`) would have been
+dropped by the same hook.
+
+As built:
+
+- Compositor thread: in a process that refuses input, a mouse event is
+  routed as in any Chromium, so cc's scrollbar controller sees it; it
+  still goes on to the main thread, as Chromium sends it. A scroll gesture
+  whose device is `kScrollbar` is handled as in any Chromium. Every other
+  event (the wheel, keys, touch, and other gestures) is dropped as before.
+- Main thread: a scroll gesture whose device is `kScrollbar`, which cc
+  sends on when the scroll must be made on the main thread, is handled as
+  in any Chromium. Mouse events are refused as before, apart from the
+  right-click's context menu, so the page sees no press, release, or move,
+  and focus, selection, hover, and control state stay as recorded.
+- A tree patched before this has its two input hooks replaced whole
+  (`STAGE_0172_*` in `integrate.py`).
+- The evidence panel's note on input says the scrollbars take input, and
+  that a scrollbar moved in the recreation changes that scroll offset from
+  the one the recreation opened at.
+
+Limits:
+
+- Only a scrollbar cc handles takes input. A scrollbar Blink handles on the
+  main thread, from mouse events the page would also receive, does not;
+  whether any scrollbar of a recreated page is of that kind is for the
+  system test.
+- The wheel, the keyboard, and touch still do not scroll.
+- A scroll offset moved by a scrollbar is not the recorded one; nothing of
+  it is recorded.
+
+Tests run in the sandbox, 2026-10-04: the integration script's tests, that
+the compositor hook drops only events that are neither mouse events nor
+scrollbar scroll gestures, that the main-thread hook passes scrollbar
+scroll gestures, and that the earlier hooks are upgraded once and left
+unchanged on a second run (220 passed); both patches run against copies of
+the target machine's `input_handler_proxy.cc` and
+`web_frame_widget_impl.cc`, applied once, unchanged on a second run, and
+checked against the bridge's signatures; the app's note test. Not yet run:
+the system test on the target machine, that dragging each scrollbar's
+thumb, pressing its track, and pressing its arrows scroll the recreated
+page and its scrollable areas, while clicks, keys, and the wheel still do
+nothing, and right-click and Inspect still work.
+
+#### The wheel scrolls (owner's direction, built)
+
+Reported by the owner on 2026-10-04, after "Scrollbars take input" and the
+2a system test: "You fixed the scrollbars to work, but not the scroll
+wheel". This replaces, for the wheel's scrolling, the refusal of the wheel
+in "Input refused (agreed)".
+
+How the wheel scrolls in this checkout, read in the target machine's
+`components/input/mouse_wheel_event_queue.cc` and
+`input_handler_proxy.cc`: the browser sends the wheel event to the
+renderer, and only when the renderer's answer is not "consumed" does it
+send scroll gestures, of the device `WebGestureDevice::kTouchpad`
+(`MouseWheelEventQueue`, lines 97 and 147). The compositor hook already
+dropped the wheel event, which answers "no consumer", so the browser sent
+its gestures, and the hook then dropped them too.
+
+As built:
+
+- Compositor thread: the wheel event is still dropped, so the page
+  receives no `wheel` event and the browser sends its scroll gestures. A
+  scroll gesture of the device `kTouchpad`, as of `kScrollbar` before, is
+  handled as in any Chromium.
+- Main thread: a scroll gesture of the device `kTouchpad`, which cc sends
+  on when the scroll must be made on the main thread, is handled as in any
+  Chromium, as for `kScrollbar`.
+- A tree patched before this has its two input hooks replaced whole
+  (`STAGE_6A83_*` in `integrate.py`).
+- The evidence panel's note on input says the recreation scrolls with its
+  scrollbars and the wheel, and that the page receives no wheel event.
+
+Limits:
+
+- A precision touchpad's two-finger scroll reaches the renderer as wheel
+  events and gestures of the same device, so it also scrolls; touchpad
+  pinches stay dropped.
+- The keyboard and the touchscreen still do not scroll.
+- A scroll offset moved by the wheel is not the recorded one; nothing of it
+  is recorded.
+
+Tests run in the sandbox, 2026-10-04: the integration script's tests, that
+the compositor hook passes scroll gestures of both devices and still drops
+the wheel event, that the main-thread hook passes them, and that the
+hooks of "Scrollbars take input" are upgraded once and left unchanged on a
+second run (221 passed); both patches run against copies of the target
+machine's `input_handler_proxy.cc` and `web_frame_widget_impl.cc` as
+patched by 6a83cf8, applied once, unchanged on a second run, and checked
+against the bridge's signatures; the app's note test. The system test on
+the target machine, that the wheel scrolls the recreated page and its
+scrollable areas, the scrollbars still work, and clicks and keys still do
+nothing, with 9915aa8, as the owner reported on 2026-10-04: "yes, that
+works".
+
+#### Popup on screen (agreed)
+
+Reported by the owner on 2026-10-03, with d9461fc, on recording
+20261003-143108: three of the four selects show their lists in the
+recreation, and the day-of-week select at 38.653 s does not.
+
+What the recording shows. The day-of-week list (popup document
+dom-document-11093) was opened by a mouse press at 37.849 s; its
+`page-popup-opened` record is at 37.919 s, the browser's
+`popup-widget-shown` at 37.930 s, and its first presented rendering update
+at 38.095 s. A mouse press outside the list at 38.529 s closed it:
+`page-popup-closed`, closed by the renderer, at 38.531 s. The browser
+records nothing of the popup's window after that. The captured frames
+around it:
+
+| Frame | Composed | List in the captured image | Open by the current rule |
+| --- | --- | --- | --- |
+| 180, 37.910 s | 37.929 s | no | yes |
+| 181, 38.112 s | 38.129 s | yes | yes |
+| 182, 38.316 s | 38.345 s | yes | yes |
+| 183, 38.519 s | 38.545 s | yes | no |
+| 184, 38.723 s | 38.745 s | no | no |
+
+So the current rule, an open record at or before the frame's composition
+and no close record by then (sub-step 2 as built), is wrong at both ends.
+The renderer's records are not the times the list is on the screen: the
+list is drawn after it is opened, and its window leaves the screen after
+the renderer closes it. Frame 183 was composed 14 ms after the close
+record and still shows the list; frame 180 was composed before the
+browser showed the window and does not. The position near the window's
+right edge plays no part: the list's window rectangle, (1369, 519, 263,
+242), lies inside the page's local root, (449, 87, 1240, 925). The same
+holds at the reopening: frame 187, 39.321 s, composed at 39.345 s, is
+open by the current rule with no presented rendering update of the
+popup yet.
+
+Proposed rule: a popup is shown at a captured frame when it has a
+presented rendering update at or before the frame's composition (its
+first frame on the screen) and its window had not left the screen by the
+composition.
+
+What is recorded (protocol 0.45): on `browser.interaction`, a new
+`popup-widget-hidden` record in the browser process when the popup's
+window is hidden or destroyed, with the popup's frame sink ID, so that it
+joins the widget records as `popup-widget-shown` does, and which of the
+two happened. The place is found by name in the Chromium checkout on the
+target machine before the patch is written (the popup's
+`RenderWidgetHostViewAura`, where its window is hidden or destroyed), and
+its line is recorded here then. A recording without the record, such as
+20261003-143108, closes a popup at its `page-popup-closed` record, as now,
+and the evidence panel says so.
+
+What the recreation does: unchanged, at the frames the rule chooses. The
+evidence panel's popup line names the presented update and the window
+record the choice rests on.
+
+Limits:
+
+- The Windows compositor composes on its own schedule, so a frame
+  composed within a few milliseconds of the window's removal may show
+  either state. Where the hidden record and the composition are within
+  one display interval of each other, the evidence panel says that the
+  frame is at the edge.
+
+Required tests:
+
+- Unit tests: the rule at each end (no presented update, so not shown; a
+  presented update at or before the composition, shown; hidden before the
+  composition, not shown; no hidden record, closed at the close record);
+  the new record parsed and joined on frame sink ID; the integration
+  hook written once, unchanged when applied twice, failing when its
+  anchor is absent.
+- Integration test in the instrumented Chromium: a select's list opened
+  and closed records one `popup-widget-hidden` after its
+  `page-popup-closed`, with the frame sink ID of its `popup-widget-shown`.
+- System test on the target machine: in a new recording, each frame
+  either side of a list's opening and closing shows the list in the
+  recreation when, and only when, the captured image does.
+
+#### Popup on screen as built
+
+Agreed by the owner on 2026-10-03 ("yes build it").
+
+Where the record is made. In the target machine's checkout,
+`content/browser/renderer_host/render_widget_host_view_aura.cc` hides a
+popup view's window in two places: `RenderWidgetHostViewAura::Hide`, line
+533 (`window_->Hide();`), and `RenderWidgetHostViewAura::CleanUpHostObservers`,
+line 3015, which `RenderWidgetHostViewBase::DestroyOrDefer`
+(`render_widget_host_view_base.cc`, line 845) calls before the view is
+destroyed, the path a closed popup takes. `InitAsPopup`, line 454, makes
+the window with `WINDOW_TYPE_MENU`. The integration script's
+`patch_content_render_widget_host_view` adds the bridge include, a helper
+that reads the popup's HWND from its window tree host, and a hook at each
+place: when the view is a popup (`WidgetType::kPopup`) and its window was
+shown (`TargetVisibility`), it records after `window_->Hide()`, with the
+cause `hidden` or `destroyed`. A view already hidden records nothing, so a
+popup hidden and then destroyed has one record, and the destructor's
+second clean-up, which finds no window, has none.
+
+The record (protocol 0.45): `popup-widget-hidden` on `browser.interaction`,
+with the browser process's context, `frameSinkId` written `clientId:sinkId`
+as the other popup widget records are, `cause`, and `nativeWindowVisible`,
+which `RecordBrowserPopupWidgetHidden` reads with `IsWindowVisible` on the
+HWND when the record is made, or null when there is no window. It states
+whether the native window was off the screen when the record was made,
+rather than assuming that hiding the Aura window hides it at once. The
+recorder's contract is `BrowserPopupWidgetHiddenPayload`, and its
+validator requires the browser process's context and one of the two
+causes.
+
+The rule, in the recorder:
+
+- `PagePopups.OpenAt` closes a popup at the first `popup-widget-hidden`
+  of its joined widget's frame sink after it opened; a recording without
+  one closes it at its `page-popup-closed`, as before. It keeps both times
+  and the frame's composition time with the popup.
+- `RecordingFileDocuments.Popups` keeps only the popups whose document
+  state at the frame is the one after a presented rendering update
+  (`IsDrawn`), so a popup opened but not yet drawn by the composition is
+  not shown.
+- The evidence panel's popup line adds, after the joined widget, either
+  the time the window was hidden and the composition, or that the
+  recording holds no hidden record and the popup is taken as open until
+  its close record. It still names the presented update its state follows.
+  Where the hidden record follows the composition by at most one 60 Hz
+  display interval (16.667 ms), it says that the frame is at the edge and
+  the captured image may show either state.
+
+Limits as built:
+
+- The edge interval is fixed at one 60 Hz display interval, not read from
+  the display of the recording.
+- A popup hidden shortly before a composition is not shown, and so has no
+  line in the evidence panel; the edge is stated only for a shown popup.
+- Recording 20261003-143108 has no hidden records, so its frame 183 still
+  does not show the day-of-week list; a new recording is needed.
+
+Tests run: Python unit tests of the integration script (the hooks written
+once, unchanged when applied twice, failing when an anchor is absent, the
+shown check before the hide and the record after it), 197 in all; the
+patch was also applied to a copy of the target machine's file and checked
+against the bridge's signatures. .NET unit tests (970 passed, with the 4 known ChromiumLauncherTests failures that need Windows): the rule at each end
+(`PagePopupTests`), the edge text, the drawn check, and the record's
+contract and validator. Not done: the integration test in the instrumented
+Chromium, which needs a recording run of it, as the earlier recording
+additions did; what is recorded is checked on the target machine with a
+new recording, alongside the system test.
+
+#### Layout of a walked rendering update (agreed)
+
+Reported by the owner on 2026-10-03, with 9d22e68, on recording
+20261003-193544: each list is shown, but in some frames just after a list
+opens its highlighted option is mid grey in the recreation, and it becomes
+blue a few frames later; the captured images show it blue throughout.
+
+What the recording shows. The recorded style of the highlighted option is
+blue, `rgb(25, 103, 210)`, in every record of it. The first list, popup
+document dom-document-9994, had its first rendering update walked in full
+(layout-checkpoint-12, completed at 22.6195 s), and that update's
+presentation request, at 22.6195 s, names the checkpoint. The same update
+then recorded its layout change set, layout-changes-62, from 22.633 s, with
+the list's nodes and their styles. The bridge makes no presentation request
+for a change set in a walked update (`RecordBlinkLayoutChanges` returns 0
+for it), so the update is presented through its checkpoint, and the state
+read for it is cut at the checkpoint's completion, before its change set.
+Layout state is built from change sets only, not from checkpoints, so for
+the frames at 22.697 s to 23.285 s the popup's state has its DOM and no
+layout record at all: none of its elements carries a recorded style, the
+recreation's Blink computes the styles itself. The grey is most likely the
+colour Blink gives a selected option in a list that is not focused, as
+the recreated list is not; that is inferred, not checked. The next presented update, at 23.405 s, follows a change set, and
+from there the option is blue. The list opened at 35.510 s,
+dom-document-10762, shows the same at 35.689 s.
+
+The same cut applies to every walked update of any document (its first
+update, the end of parsing, an update after a lost record, and the check
+interval): the frame presented by that update is given the layout of the
+change set before it.
+
+Proposed fix. A change set read in the same rendering update as the
+checkpoint it names is part of that update, and the presented state
+includes it:
+
+- Recording (protocol 0.46): `layout-changes-started` gains
+  `checkpointUpdate`, true when the change set is the one the bridge reads
+  for the update its named checkpoint recorded (the update state the
+  checkpoint left had not yet been read by a change set), and false
+  otherwise. The bridge already decides this: it is the condition under
+  which `RecordBlinkLayoutChanges` makes no presentation request.
+- Playback: a presented checkpoint whose update has such a change set is
+  cut at the change set's completion, not the checkpoint's; its presented
+  time is unchanged. A recording without the field is read as now.
+- Evidence panel: unchanged; the basis it states is the presented update.
+
+Limits:
+
+- A walked update whose change set the Blink hook did not record (an
+  early return in `RecorderRecordLayoutChanges`) is still presented through
+  its checkpoint alone, and the frame's state still lacks its layout; the
+  recording shows this by the absence of a change set with
+  `checkpointUpdate` true.
+- Recording 20261003-193544 has no such field, so its frames keep the grey
+  highlight; a new recording is needed.
+
+Required tests:
+
+- Unit tests: the bridge field true only for the change set of the
+  checkpoint's own update; the contract and the validator; the playback
+  index cutting a presented checkpoint at its update's change set, and at
+  the checkpoint when there is none.
+- Integration test in the instrumented Chromium: a generated page's first
+  update records a checkpoint and a change set with `checkpointUpdate`
+  true, and a later update a change set with it false.
+- System test on the target machine: in a new recording, each frame just
+  after a list opens shows its highlighted option in the colour the
+  captured image shows.
+
+#### Layout of a walked rendering update as built
+
+Agreed by the owner on 2026-10-03 ("yes please").
+
+- Bridge: `RecordBlinkLayoutChanges` writes `checkpointUpdate` on
+  `layout-changes-started` from `IsCheckpointUpdateChangeSet` in
+  `full_walks.h`, given whether the document's last update was walked and
+  not yet read by a change set (`Update::kWalked`) and the checkpoint the
+  change set names. It is the condition under which the function returns 0
+  and so makes no presentation request for the change set.
+- Contract and validator: `BrowserLayoutChangesStartedPayload` gains
+  `CheckpointUpdate`; the validator requires the field and, when it is
+  true, a named checkpoint.
+- Playback: the playback index keeps the completion time of each change
+  set marked `checkpointUpdate`, by browser instance, process, and the
+  checkpoint it names, and a presented checkpoint with one is cut at that
+  time rather than at the checkpoint's completion. Its presented time is
+  unchanged. The database playback reader, which the recreation does not
+  use, is not changed.
+
+Tests run: the C++ test of `IsCheckpointUpdateChangeSet` (true only with
+an unread walked update and a named checkpoint); .NET unit tests of the
+playback index (`WalkedUpdateLayoutTests`: cut at the change set's
+completion with the presented time unchanged; cut at the checkpoint with
+the field false, absent, or naming another checkpoint) and of the
+validator, 974 passed with the 4 known ChromiumLauncherTests failures that
+need Windows; 197 Python tests of the integration script. Not done: the
+integration test in the instrumented Chromium,
+for the reason given under "Popup on screen as built"; what is recorded is
+checked on the target machine with a new recording.
+
+#### Window fade of a popup (agreed)
+
+Reported by the owner on 2026-10-03, with 93e31d6, on recording
+20261003-203229: at 38.684 s the captured image shows the open list
+slightly translucent, with the page visible through it, and the
+recreation shows the list opaque.
+
+What the recording shows. The list's document is dom-document-10975. Its
+window was shown at 38.530 s (`popup-widget-shown`) and its first update
+was presented at 38.605 s. Opacity is among the 480 recorded style
+properties, and it is 1 in every node record of the document. The
+captured image of the frame at 38.694 s (frames/desktop/0000000183.png,
+captured in about 60 ms from about 38.66 s) shows the page's text through
+the list; the next, at 38.901 s (0000000184.png), shows the list opaque.
+
+Where the translucency comes from (read from the Chromium source, not
+measured). The list's window is a top-level Windows popup window of its
+own (`DesktopNativeWidgetTopLevelHandler::CreateParentWindow`, type menu).
+Chromium's own fade of a menu window (`wm::VisibilityController`, 150 ms
+by default for menus in `window_animations.cc`) is installed only for a
+widget created translucent (`DesktopNativeWidgetAura::InitNativeWidget`),
+which a list with an opaque background is not. Chromium leaves the
+window's DWM transitions enabled: it sets
+`DWMWA_TRANSITIONS_FORCEDISABLED` only when a widget's visibility
+animations are turned off (`HWNDMessageHandler::SetVisibilityChangedAnimationsEnabled`).
+The fade is therefore most likely a transition of the Windows desktop
+compositor, applied after Chromium presents the window. The window's
+opacity during a DWM transition is not reported to the application, and
+DWM documents the attribute only as enabling or disabling transitions
+([DWMWINDOWATTRIBUTE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)).
+
+Agreed approach (option 2, 2026-10-03): the browser under test is not
+changed, the recreation keeps drawing the list as recorded, opaque, and
+the recording and the evidence panel state what is known.
+
+- Recording (protocol 0.47): `popup-widget-shown` gains
+  `windowsAnimationSettings`, read with `SystemParametersInfo` in the
+  browser process as the window is shown: `clientAreaAnimation`
+  (`SPI_GETCLIENTAREAANIMATION`, the "Animation effects" setting),
+  `uiEffects` (`SPI_GETUIEFFECTS`), `menuAnimation`
+  (`SPI_GETMENUANIMATION`), `menuFade` (`SPI_GETMENUFADE`), and
+  `comboBoxAnimation` (`SPI_GETCOMBOBOXANIMATION`), each true, false, or
+  null when the call fails
+  ([SystemParametersInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow)).
+  Which of these governs a DWM transition is not documented, so all are
+  recorded and none is interpreted.
+- Evidence panel: for each popup drawn at a frame, the note gains how
+  long before the frame's composition its window was shown, the recorded
+  settings, and that the window's opacity at the capture is not recorded,
+  so the captured image may show the window part way through a fade that
+  the recreation, which draws the popup opaque as its recorded styles
+  state, does not show.
+- Recreation: unchanged.
+
+Limits:
+
+- No duration of the fade is recorded, so the panel cannot say which
+  frames the fade reaches; it states the interval since the window was
+  shown on every frame of an open popup, and the reader compares it with
+  the captured image.
+- A fade when the window is hidden, if there is one, is not marked; the
+  recreation stops drawing the popup at its hidden record ("Popup on
+  screen").
+- A setting changed while a popup is open is not recorded until the next
+  popup is shown.
+- Recording 20261003-203229 has no settings field; its panel states that
+  the settings were not recorded.
+
+Required tests:
+
+- Unit tests: the bridge's settings value from given call results,
+  including a failed call; the contract and the validator; the panel note
+  with settings, with the interval since showing, and for a recording
+  without the field.
+- Integration test in the instrumented Chromium: opening a list records
+  `popup-widget-shown` with the five settings.
+- System test on the target machine: in a new recording, the settings in
+  the panel match the Windows settings, and the panel note appears on the
+  frame just after a list opens.
+
+#### Window fade of a popup as built
+
+Agreed by the owner on 2026-10-03 ("yes please").
+
+- Bridge: `RecordBrowserPopupWidgetShown` sets `windowsAnimationSettings`
+  from `WindowsAnimationSettingsValue`, which reads the five settings with
+  `SystemParametersInfoW` through `ReadWindowsAnimationSettings` in
+  `animation_settings.h`; a failed call is null. The record is written for
+  every outcome, so a refused popup carries the settings too.
+- Contract and validator: `BrowserPopupWidgetShownPayload` gains
+  `WindowsAnimationSettings` (`BrowserWindowsAnimationSettings`, five
+  nullable booleans); the validator requires the object and each of its
+  fields, a boolean or null.
+- Playback: `PagePopups.OpenAt` joins each popup to the first
+  `popup-widget-shown` record of its widget with the outcome "shown" after
+  its opening, and gives `WindowShownTime`, `WindowsAnimationSettings`,
+  and `FadeBasis`, the panel text. The RecordedPage note of each drawn
+  popup includes `FadeBasis` after `OnScreenBasis`. On recording
+  20261003-203229 the note for the frame at 38.694 s reads "its window was
+  shown at 38.530 s, 191.4 ms before the frame's composition at 38.721 s;
+  the Windows animation settings were not recorded; the window's opacity
+  at the capture is not recorded, ...".
+- Recreation: unchanged.
+
+Tests run: the C++ test of `ReadWindowsAnimationSettings` (each setting
+its own field; a failed read null, the others kept), compiled and run by
+the Python suite with a test that the bridge reads the five settings and
+sets the field; .NET unit tests of the validator (the object and its
+fields required, a string rejected, null accepted) and of `PagePopups`
+(`FadeBasis` with settings and the interval, without settings, and
+without a shown record): 977 passed, with the 4 known
+ChromiumLauncherTests failures that need Windows, and 199 Python tests.
+Not done: the integration test in the instrumented Chromium, for the
+reason given under "Popup on screen as built"; what is recorded is
+checked on the target machine with a new recording.
+
+### Slice 4e: page style sheets as they arrive (agreed, built, confirmed on the target machine)
+
+Proposed 2026-10-05, at the owner's request that the page's CSS be recorded
+as it arrives, including sheets that arrive after the page has loaded, so
+that DevTools shows it in the recreation. It takes protocol 0.51.
+
+#### Why
+
+The recreation imposes each element's recorded computed style, so its
+drawing of elements does not depend on the page's style sheets. DevTools'
+Styles pane does: it lists the rules that match an element from the sheets
+the page has. Today the recreation has only the text of the page's `style`
+elements, recorded in the DOM since protocol 0.33. A sheet from a `link`
+element or an `@import` rule is refused by the recreation, since its body
+is not recorded (see "Slice 4a"), and a change script made through the
+CSSOM, a constructed sheet, and the adopted sheets of a document or shadow
+root are not recorded at all. Their rules are therefore missing from the
+Styles pane, the Sources panel, and `document.styleSheets`, and
+pseudo-elements, which take no recorded style, are drawn only as far as
+the `style` elements make them.
+
+#### What Chromium does
+
+Read in the Chromium checkout on the target machine; line numbers are
+those of that checkout, under `third_party/blink/renderer/core/`.
+
+- A sheet from a `link` element or an `@import` rule is parsed once its
+  resource has arrived, by `StyleSheetContents::ParseAuthorStyleSheet`
+  (`css/style_sheet_contents.cc`, line 435), called from
+  `html/link_style.cc` (line 130) and `css/style_rule_import.cc` (line
+  139). It decodes the resource to the sheet's text with
+  `CSSStyleSheetResource::SheetText`, and parses that text.
+- A sheet of a `style` element is parsed from the element's text, which is
+  recorded in the DOM.
+- A constructed sheet takes its text from `replace` and `replaceSync`
+  (`css/css_style_sheet.cc`, lines 556 and 574), both through
+  `CSSStyleSheet::SetText` (line 659).
+- Every change through the CSSOM, such as `insertRule`, `deleteRule`, a
+  rule's `style` or `selectorText`, or a media list, goes through
+  `CSSStyleSheet::WillMutateRules` (line 234), which copies shared
+  contents before the change, and `CSSStyleSheet::DidMutate` (line 251),
+  which marks the sheet's tree scope for an update of its active sheets.
+  `setDisabled` (line 343) also calls `DidMutate`.
+- The adopted sheets of a document or shadow root are an observable array
+  (`dom/tree_scope.cc`, from line 447), and each change is reported to the
+  sheet by `AddedAdoptedToTreeScope` and `RemovedAdoptedFromTreeScope`
+  (`css_style_sheet.cc`, lines 361 and 368).
+- Each of these changes is applied at the next
+  `StyleEngine::UpdateActiveStyleSheets` (`css/style_engine.cc`, line
+  678), which ends with `probe::ActiveStyleSheetsUpdated` (line 733). That
+  probe is what DevTools' CSS agent listens to
+  (`inspector/inspector_css_agent.cc`, line 1038) before it lists a
+  document's sheets from `StyleEngine::ActiveStyleSheetsForInspector`
+  (`css/style_engine.cc`, line 843).
+- DevTools takes a sheet's text in this order
+  (`inspector/inspector_style_sheet.cc`, `UpdateText`): a `style`
+  element's text, merged with its CSSOM rules when the sheet was changed
+  through the CSSOM (line 3011); then, for a sheet with an address, the
+  resource's content fetched by the network agent (line 2903); then the
+  CSSOM text, each rule's `cssText` on a line of its own (lines 2950 and
+  2959).
+- A sheet from another origin is not origin-clean, and its rules are
+  hidden from script (`CSSStyleSheet::CanAccessRules`, line 422) but not
+  from DevTools.
+
+So the text a sheet arrived with is known at one place for each kind, and
+every later change reaches one update, at which the sheets in effect can
+be listed as DevTools lists them.
+
+#### What is recorded (protocol 0.51)
+
+- At `ParseAuthorStyleSheet`, a `style-sheet-resource` record on
+  `browser.resources`: the document, the address requested and the
+  response's address, the response's status and MIME type, the digest of
+  the decoded text, and its length; and a `style-sheet-text` record, the
+  decoded text in UTF-8, the first time the renderer meets the digest, as
+  for font files and image bytes. A sheet that fails the MIME type check
+  is recorded with empty text, as Blink parses it.
+- At `UpdateActiveStyleSheets`, before the probe, a `style-sheets-updated`
+  record on `browser.layout` for the document: for each tree scope, the
+  document or the shadow host's node ID, its sheets in
+  `document.styleSheets` order
+  (`StyleSheetCollection::StyleSheetsForStyleSheetList`), then its adopted
+  sheets in order. Each sheet is named by a recorder sheet ID, kept on the
+  `CSSStyleSheet` for its life, and is given in full only when it is new
+  or has changed since the document's last record:
+  - its kind (`link`, `style`, `import`, `constructed`, or
+    `processing-instruction`), its owner node ID, or its parent sheet ID
+    and rule index for an import;
+  - its address, media text, title, whether it is disabled, and whether it
+    is active;
+  - its text: the digest of the text it arrived with, while it has not
+    been changed through the CSSOM; once it has, the digest of its CSSOM
+    text, built as DevTools builds it (each rule's `cssText` on a line of
+    its own), with a `style-sheet-text` record the first time the digest
+    is met.
+- A sheet is marked changed by a hook at `DidMutate` and at `SetText`, so
+  only marked sheets are serialized, once per update however many changes
+  script made.
+- A sheet no longer in a scope's list is left out of the next record; the
+  reader takes that as its removal.
+
+Sheets that arrive after the page has loaded, such as a `link` element or
+a `style` element inserted by script, a sheet built by a CSS-in-JS
+library through `insertRule`, or a constructed sheet adopted by a custom
+element, are recorded by the same hooks when they arrive.
+
+#### What the recreation does
+
+- The reader keeps, for each document, the sheets in effect at the frame:
+  the latest `style-sheets-updated` record at or before the frame's
+  composition, with each sheet's details from the record that last gave
+  them in full.
+- The recreation answers a request for a recorded sheet's address with the
+  text it arrived with, as `text/css; charset=utf-8`, from the latest
+  `style-sheet-resource` record of that document and address at or before
+  the frame. The page's `link` elements and `@import` rules therefore load
+  their sheets as they did, and DevTools fetches the same text.
+- The builder then gives each sheet that was changed through the CSSOM its
+  recorded CSSOM text: it removes the sheet's rules and inserts the
+  recorded ones, each through `insertRule`, as script did on the page, and
+  sets `disabled` and the media text where they differ. A sheet from
+  another origin is not origin-clean in the recreation either, so a
+  recreation-mode hook in `CSSStyleSheet::CanAccessRules` lets the builder
+  reach its rules; the page's own scripts do not run, so no page script
+  gains that access.
+- The builder makes each constructed sheet with `new CSSStyleSheet` and
+  `replaceSync` of its recorded text, with its media and disabled state,
+  and sets each tree scope's `adoptedStyleSheets` in the recorded order.
+- The builder waits for the `load` or `error` event of each `link` sheet,
+  and of the sheets they import, before the page is reported ready, so
+  that the first frame shown has them.
+- The evidence panel notes, for the document, how many sheets of each kind
+  were recorded, which were changed through the CSSOM, and any sheet that
+  could not be given its recorded state, such as a rule `insertRule`
+  refused, with the reason. DevTools' Console lists the same.
+
+#### What this changes in the recreation
+
+- The Styles pane lists the page's rules from every sheet, at their
+  recorded addresses, beside the recorded values the recreation imposes,
+  which keep their own source (see "Added to slice 4"). The Sources panel
+  lists the sheets.
+- Rendering of elements does not change, since their recorded computed
+  style is imposed. Pseudo-elements take their style from the sheets, as
+  they did on the page, so a `::before` from a linked sheet is drawn where
+  it was not. Rules that depend on a state the recreation does not hold,
+  such as `:hover`, still do not apply, and pseudo-elements stay
+  unchecked against the recording.
+- A font or image a sheet names is answered from the recording as before,
+  or refused when it was not recorded.
+
+#### Limits
+
+- Text is recorded decoded: the sheet's original bytes and character
+  encoding are not kept, so DevTools shows the text Blink parsed, served
+  as UTF-8.
+- The CSSOM text of a changed sheet is Blink's serialization, not the
+  script's own strings. DevTools on the page showed the same text for a
+  changed sheet without an owner element, and merged it with the
+  element's text for a `style` element, as it does in the recreation.
+- A sheet's state is recorded at style updates, not at each change. A
+  change script made and undid between two updates is not recorded; it
+  had no effect on any frame.
+- Sheets of iframes wait for slice 5, as their documents do. A sheet from
+  an `xml-stylesheet` processing instruction is listed, but its text is
+  not recorded, since it is not parsed through `ParseAuthorStyleSheet`.
+- Recordings before protocol 0.51 keep today's behaviour: `style` elements
+  only, and every other sheet refused.
+
+#### Cost
+
+Each arriving sheet's text is digested once, and a changed sheet is
+serialized once per style update. Both hooks are timed as a whole, and
+measured on the target machine on a page with a large linked sheet and on
+a page that inserts rules after load.
+
+#### Required tests
+
+- Unit tests: the record contract for the three records and the validator;
+  the reader's choice of each sheet's state at a frame, including a sheet
+  changed, removed, and adopted again; the server's answer for a sheet's
+  address, and refusal of an address with no record; the builder's data
+  for changed, constructed, and adopted sheets.
+- Integration tests in the instrumented Chromium, through `integrate.py`'s
+  test suite: each hook applied once and found again on a second pass; and
+  for a generated page with a linked sheet, an `@import`, a `style`
+  element changed through `insertRule`, a constructed sheet adopted by a
+  document and a shadow root, and a sheet inserted after load, the
+  recorded text of each equals the text DevTools reports for it.
+- System test on the target machine: a recording of a fixture page served
+  over HTTP with those sheets, where the Styles pane of chosen elements in
+  the recreation lists the same rules, with the same sources, as DevTools
+  did on the page, and the Sources panel lists the same sheets.
+
+#### Slice 4e as built
+
+Agreed by the owner on 2026-10-05 and built in `ab95625`, with the build
+fix in `33a276c`.
+
+Result on the target machine (2026-10-05): the owner recorded the fixture
+page, `tests/fixtures/style-sheets/`, served over HTTP, and recreated a
+frame before 1.5 s and a frame after 3 s, that is, before and after the
+sheet linked and the rule inserted after load. The owner reported that in
+both recreations the styles matched those DevTools showed on the page. This
+is the owner's visual comparison of the Styles and Sources panels, not a
+check of each recorded text against DevTools' text, which remains to be
+built as an integration test.
+
+What was built:
+
+- The bridge (`browser_bridge.h`, `browser_bridge.cc`) adds
+  `RecordBlinkStyleSheetResource`, `RecordBlinkStyleSheetText`,
+  `AssignStyleSheetNumber`, and `RecordBlinkStyleSheetsUpdated`. The
+  `style-sheet-text` record has the shape of `font-file` and `image-data`,
+  and is sent the first time the renderer meets a digest.
+- `integrate.py` adds five patches: `CSSStyleSheet`'s header and source
+  (the sheet's number, a changed flag set in `DidMutate` for every mutation
+  but `kSheet` and in `SetText`, the CSSOM text built as DevTools builds it,
+  and the recreation-mode `CanAccessRules`), `StyleSheetContents`'s header
+  and source (the record after `SheetText` decodes the text, before it is
+  parsed, with the digest kept on the contents, so a sheet whose parsed
+  contents are reused from the cache keeps it), and
+  `StyleEngine::UpdateActiveStyleSheets` (the record before
+  `probe::ActiveStyleSheetsUpdated`).
+- The recorder's contracts, the receiver's deserialization, and the
+  validator accept the three records. The validator checks that an import,
+  and only an import, names its parent sheet and rule index, and that
+  arrived and CSSOM text, and only those, are named by a digest.
+- `RecordedStyleSheets` (`Recorder.Session`) is the reader's choice at the
+  frame, read by `RecordingFileResources` with the fonts and images.
+- The recreation's server answers a `Stylesheet` request for an address
+  with the recorded text, as `text/css; charset=utf-8` with `nosniff` and
+  `no-store`, and the page's content security policy allows style sheets
+  at any http or https address, which the recorder answers or refuses.
+- The builder waits up to 10 s for the `load` or `error` event of each
+  linked sheet, then replaces the rules of each sheet changed through the
+  CSSOM, makes each constructed sheet, and sets each scope's adopted
+  sheets. A sheet's CSSOM text is split into rules at the ends of
+  top-level blocks and statements, outside strings and comments. Leading
+  `@import` rules the loaded sheet already has as recorded are kept, so
+  an imported sheet already loaded is not asked for again. The evidence
+  panel lists the time the sheets were loaded and applied, and the first
+  style and layout is timed from then.
+- A fixture page, `tests/fixtures/style-sheets/`, has a linked sheet, an
+  `@import`, a `style` element changed through `insertRule` and
+  `deleteRule`, constructed sheets adopted by the document and by a shadow
+  root, a sheet linked 1.5 s after load, and a `style` element and rule
+  inserted 3 s after load. It is served with
+  `tests/fixtures/animation/Serve-Fixture.ps1 -Folder <the folder>`.
+
+Differences from the design:
+
+- `style-sheets-updated` is on `browser.resources`, not `browser.layout`,
+  so that the reader reads every style sheet record in one pass with the
+  fonts and images.
+- `style-sheet-resource` records carry no document, as the image records
+  do not, and the reader keys them by address and response address, the
+  latest at or before the frame. A sheet in effect whose text arrived names
+  its own digest, which is preferred for its address.
+- A scope is named by its root node's ID, the document or the shadow root,
+  not the shadow host. The builder holds shadow roots by that ID.
+- Each record lists only the tree scopes the update touched: the document
+  scope when its collection was updated, and each connected shadow tree
+  scope that was dirty. The reader keeps each scope's latest list.
+- A changed sheet whose CSSOM text could not be recorded is given text
+  source `none`.
+- The reader takes the sheets of the latest records at or before the
+  frame's cut, as it does for fonts and images, not at the frame's
+  composition.
+
+Found on the target machine: the first build of `ab95625` failed in
+`style_sheet_contents.cc`, since `blink::String` has `FromUtf8` of a byte
+span, not `FromUTF8` of a `std::string`. The parse hook and the style
+engine helpers now pass `base::as_byte_span` of the text to
+`String::FromUtf8`, and `integrate.py` upgrades a checkout patched by
+`ab95625`.
+
+Tests run in the sandbox: the .NET suite (1096 passing; the 58 failures
+are the known tests that need PostgreSQL or Windows) with new tests of the
+three record contracts, the validator, the reader's choice, the server's
+answer and refusal, and the builder's data; and `integrate.py`'s suite (236
+tests at the time), where each new patch is applied once and found again on a second
+pass. The integration test in the instrumented Chromium, comparing each
+recorded text with the text DevTools reports, is not built; the fixture
+page and the system test on the target machine take its place for now.
+
+### Slice 4f: who scheduled each timer (agreed, built, confirmed on the target machine)
+
+Proposed 2026-10-05, at the owner's request that the evidence panel say who
+owns each pending timer: the page, the browser, an extension, or another
+party, and, for a timer the page scheduled, the path of the element whose
+script scheduled it, a `script` element or an `on...` attribute. It takes
+protocol 0.52.
+
+#### Why
+
+The panel's "Pending timers" table lists each timer's kind, delays, and
+times, but not who scheduled it. A `timer-scheduled` record has no world
+and no location: its `callbackLocation` is always null, as protocol 0.5
+states ("callback location is null until those facts have dedicated
+instrumentation", [instrumented Chromium](instrumented-chromium.md)). On
+the style sheet fixture, the two timers pending before 1.5 s are the two
+`setTimeout` calls of the page's one inline `script` element (lines 76 and
+83 of `tests/fixtures/style-sheets/index.html`), but that is known from the
+fixture's source, not from the recording.
+
+#### What Chromium does
+
+Read in the patched Chromium checkout on the target machine, under
+`third_party/blink/renderer/`.
+
+- Every `setTimeout` and `setInterval` of a window makes a `DOMTimer`
+  (`core/scheduler/dom_timer.cc`, constructor at line 316), whose
+  `ScheduledAction` holds either the callback function or the code string
+  (`core/scheduler/scheduled_action.h`, `function_` and `code_`;
+  `CallbackFunction()` returns the function, or null for a string). The
+  constructor runs inside the script call that scheduled the timer, so the
+  script's stack and world are current there. The recorder's
+  `timer-scheduled` hook is already in that constructor.
+- Blink's own internal timers are not `DOMTimer`s, so every recorded timer
+  was scheduled by script; "the browser" as owner means script Chromium
+  itself ran in the page, such as DevTools.
+- The world current at a call is `DOMWrapperWorld::Current(isolate)`: the
+  main world for the page's scripts, an isolated world for an extension's
+  content scripts, whose human-readable name and stable ID Blink keeps,
+  and the inspector's isolated world for DevTools. The recorder already
+  reads this for cookie calls (`RecorderCookieCallOrigin` in
+  `integrate.py`) and for listener registrations.
+- `v8::StackTrace::CurrentStackTrace` gives the script stack at a call:
+  for each frame, its V8 script ID, script name (URL), function name, line,
+  column, and whether it is eval code.
+- A classic or module script from a `script` element runs in
+  `PendingScript::ExecuteScriptBlockInternal` (`core/script/pending_script.cc`,
+  line 312, `script->RunScript`), which knows the element. A classic
+  script is compiled inside that call, in
+  `V8ScriptRunner::CompileAndRunScript`
+  (`bindings/core/v8/v8_script_runner.cc`, from line 534), where the
+  compiled script's ID is known (line 622).
+- An `on...` attribute's handler is compiled on first use, in
+  `JSEventHandlerForContentAttribute::GetListenerObject`
+  (`bindings/core/v8/js_event_handler_for_content_attribute.cc`), which
+  knows the element (or the window, for the body's window handlers), the
+  attribute's name, and the compiled function's script ID (line 249).
+
+So a timer's scheduling stack names V8 script IDs, and the two places a
+page's markup becomes script can name the element of each script ID.
+
+#### What is recorded (protocol 0.52)
+
+- `timer-scheduled` gains `scheduledBy`:
+  - `world`: the world current at the call, as the cookie records give it
+    (kind, Blink world ID, and, for an isolated world, its name and stable
+    ID), or null when no script was running;
+  - `stack`: up to 16 frames, innermost first, each with script ID, URL,
+    function name, line, column, and whether it is eval code; empty when no
+    script was running;
+  - `handler`: `function` or `string`.
+- `callbackLocation`, null until now, is the callback function's script
+  ID, URL, line, column, and name, from the function itself; it stays null
+  for a string handler.
+- A new `script-compiled` record on `browser.timer`, which the reader
+  already reads for the timers table:
+  - for a script run from a `script` element: the document, the script ID,
+    `kind` `classic` or `module`, the element's node ID, the script's URL
+    (null for an inline script), its start line and column, and the world;
+  - for an `on...` attribute's handler: the document, the script ID, `kind`
+    `event-handler-attribute`, the element's node ID (null for a window
+    handler), the attribute's name, the URL, and the start line and column.
+
+Script IDs are per renderer process, so the reader joins them within the
+document's process. Scripts compiled any other way, such as by `eval`, `new
+Function`, a string timer, a `javascript:` URL, an extension's content
+script, or DevTools' Console, have no `script-compiled` record; their frames
+keep their URL, which for an extension is its `chrome-extension://`
+address.
+
+#### What the panel shows
+
+The "Pending timers" table gains a "Scheduled by" column. For each timer,
+from its recorded `scheduledBy`, the panel names:
+
+- the owner, from the world and the URLs: the page (main world), an
+  extension (an isolated world with its name and ID, or a
+  `chrome-extension://` script in the main world), DevTools (the inspector
+  world), or "no script was running";
+- the element: the first frame, innermost first, whose script ID has a
+  `script-compiled` record, given as the `script` element or as the named
+  attribute of its element, with the element's path and the panel's
+  existing Select and Copy path buttons. An element removed before the
+  frame is named by its recorded node ID, as removed;
+- the direct caller, the innermost frame, as URL, line, column, and
+  function, which may be a library the element's script called;
+- where the callback is defined, from `callbackLocation`.
+
+What is shown is what was recorded at the call; the panel does not infer
+an owner the records do not give, and says "not recorded" for recordings
+before protocol 0.52.
+
+#### Limits
+
+- A timer scheduled from a callback of another timer, a listener, or a
+  promise has, on its stack, the frames of that callback only, so its
+  element is the element whose script defined the callback. The chain of
+  callbacks that led there is not recorded.
+- An `eval` or `new Function` frame has no element of its own; the panel
+  takes the element of the next frame that has one, and says so.
+- Script in iframes waits for slice 5, as their documents do. Worker
+  timers are not `DOMTimer`s of a window and are not recorded.
+- Animation frame and idle callbacks share the timer record but are not in
+  the panel's table; they are outside this slice.
+
+#### Cost
+
+The stack is captured at each `setTimeout` and `setInterval`, and a
+`script-compiled` record is written once per compiled script and once per
+compiled attribute handler. Each hook is timed as a whole, and measured on
+the target machine on a page that schedules many timers.
+
+#### Required tests
+
+- Unit tests: the record contract and validator for `scheduledBy`,
+  `callbackLocation`, and `script-compiled`; the reader's join of a
+  timer's stack to its element, including an eval frame, an attribute
+  handler, an external script, an isolated world, an empty stack, and an
+  element removed before the frame; the panel's data for each.
+- Integration tests in the instrumented Chromium, through `integrate.py`'s
+  test suite: each hook applied once and found again on a second pass.
+- System test on the target machine: a recording of a fixture page served
+  over HTTP that schedules timers from an inline script, an external
+  script, an `onclick` attribute, a listener added by script, `eval`, and a
+  string handler, with an extension's content script where one is
+  installed, where the panel's "Scheduled by" column names each as
+  scheduled.
+
+#### As built
+
+Agreed by the owner on 2026-10-05 and built in protocol 0.52. Where the build
+differs from the design above, the build is what is recorded:
+
+- Who scheduled a timer is a `timer-origin` record that follows the timer's
+  `timer-scheduled` record, with the timer's ID, the world, the stack, and the
+  handler, rather than a `scheduledBy` member of `timer-scheduled`. The
+  session database stores `timer-scheduled` in fixed columns and refuses a
+  record with a member it does not map, so a new member would have kept every
+  timer record out of it. `timer-origin` and `script-compiled`, like the slice
+  4e records, are kept in the recording file and are not stored in the
+  database. `callbackLocation`, which the database already maps, is filled in
+  `timer-scheduled`, `timer-fired`, and `timer-cancelled`.
+- A `script-compiled` record does not carry a world: a script element's
+  script and an attribute's handler run in the page's own world.
+- A window handler set by a `body` or `frameset` attribute, such as
+  `onload`, is recorded with the document's body element, which holds the
+  attribute.
+- Lines and columns are one-based throughout. V8 gives a function's own
+  position zero-based, and the hook adds one.
+- The renderer notes a classic script's element by the script's identity
+  around its run, and its compile records the element with the script ID, so
+  a script compiled during another script's run, such as one written by
+  `document.write`, is joined to its own element.
+- The state snapshot keeps each pending timer's origin and the document's
+  `script-compiled` records; a snapshot written before protocol 0.52 has
+  neither and is read as such.
+- The fixture is `tests/fixtures/timer-origins/`: an inline script with a
+  function callback, eval code, a string handler, and a timer scheduled from
+  another timer's callback; `app.js`, an external script, with a timer and a
+  listener that schedules one; an inline module script; and a button whose
+  `onclick` attribute schedules a timer. Every timer waits ten minutes. The
+  page lists what the panel is expected to name for each. An extension's
+  content script is not part of the fixture.
+
+Tests: `TimerOriginTests` (the contract, the validator, the script state and
+snapshot, and the join for an inline script, an external script, an
+attribute handler below eval code, a removed element, an isolated world, an
+extension's script in the page's world, an empty stack, and a recording
+before protocol 0.52), and five `integrate.py` tests: one for each of the
+four patched files, that its hook is applied once and found again on a
+second pass, and one that the hooks call functions the bridge declares.
+
+Result on the target machine (2026-10-06), at `3b07ab3`, which includes
+`e3bd29a`: the owner recorded the fixture, recording
+`20261006-162006-73ac3c88d7b64ce99f063cbbb1806e38`, clicked the first button,
+and opened the evidence panel at a frame of about 10.93 s. The Pending timers
+table listed seven timers, and the Scheduled by column named for each what
+the fixture's list expects: `app.js` for `externalTimer`; the inline script
+element for `inlineTimer`, for the eval code below which it was found at
+stack frame 2, for the string handler, and for `fromCallback`, scheduled from
+the callback of the 0.1 s timer, which had run; the inline module script for
+`fromModule`; and the first button's `onclick` attribute for
+`fromAttribute`. The timer the second button's listener scheduled was
+recorded at 13.081 s, after that frame. The owner had not expected so many
+timers in the fixture and, once each row was explained, accepted the result.
+
+In the same recording, the browser's toolbar, a WebUI page in another
+renderer process, scheduled timers also named `timer-1` to `timer-6` in the
+same second. Timer names are unique only within a renderer process; the
+recorder keys documents by process as well, so they were not joined to the
+fixture's document.
+
+### Slice 4g: running animations in the evidence panel (agreed, built)
+
+Proposed 2026-10-06, at the owner's request that the evidence panel's
+Evidence tab show the animations running at the frame, which the design
+(item 9 of the requirements above) lists and the panel does not: it says
+"Running animations and transitions are not yet read from the recording, so
+none are listed." It takes protocol 0.53. The recreation itself does not
+change: it still runs no animation, and holds the compositor values of
+slice 4b.
+
+#### Why
+
+The recording has no record of a Blink animation as such. Slice 4b records
+`compositor-animation-started` and `compositor-animation-ended` for
+animations started on the compositor, with the target node, element IDs,
+and target properties, but no animation name, kind, timing, start time, or
+play state. An animation run on Blink's main thread, such as one of
+`width` or `color`, has no record at all; only its effect on the recorded
+style and layout is recorded.
+
+#### What Chromium does
+
+Read in the patched Chromium checkout on the target machine, under
+`third_party/blink/renderer/core/`.
+
+- Every CSS animation, CSS transition, and Web Animation is a
+  `blink::Animation` (`animation/animation.h`). `CSSAnimation` holds the
+  `animation-name` (`css/css_animation.h`, `animationName()`), and
+  `CSSTransition` the transitioned property (`css/css_transition.h`,
+  `transitionProperty()`).
+- `Animation::NotifyProbe` (`animation/animation.cc`, line 3696) calls
+  `probe::AnimationUpdated(document_, this)` (`probe/core_probes.pidl`,
+  line 181) from `play`, `pause`, `cancel`, `finish`, `setStartTime`,
+  `setCurrentTime`, `setPlaybackRate`, `updatePlaybackRate`, `setEffect`,
+  `NotifyReady`, and, at each animation frame, `Update`
+  (`kTimingUpdateForAnimationFrame`, line 3323). DevTools' Animations
+  panel is fed from the same probe (`inspector/inspector_animation_agent.cc`,
+  `AnimationUpdated`, line 774), which compares each call with a snapshot
+  and reports only a start, a cancel, or a change.
+- The panel's description of an animation (`BuildObjectForAnimation` and
+  `BuildObjectForAnimationEffect`) is: the animation's sequence number,
+  display name (the `id`, else the animation name, else the transitioned
+  property), kind, play state, playback rate, start time, and current
+  time; and its effect's delay, end delay, iteration start, iterations,
+  duration, direction, fill, easing, and target node; and, for a scroll or
+  view timeline, its source node, axis, and offsets.
+- Times are on the animation's timeline. A document timeline's time is the
+  time since its zero time, `DocumentTimeline::CalculateZeroTime()`
+  (`animation/document_timeline.h`, line 82), a `base::TimeTicks`, the clock
+  of the bridge's other ticks.
+
+#### What is recorded (protocol 0.53)
+
+On a new channel, `browser.animation`, in the browser state stream, from
+the `AnimationUpdated` probe on the main thread:
+
+| Record | When | Holds |
+| --- | --- | --- |
+| `animation-updated` | an animation's first probe call, and each later call in which anything it holds other than its current time changed | the document, the sequence number, the kind (`css-animation`, `css-transition`, or `web-animation`), the display name, the target node and pseudo-element, the play state, whether it is pending, the playback rate, the start time and current time in milliseconds of its timeline, the timeline (document, with its zero time in bridge ticks, or scroll or view, with its source node and axis), the effect's timing as listed above, Blink's computed progress and current iteration at the call, and the compositor animation ID when it runs on the compositor |
+| `animation-removed` | the animation's target document is detached, or the animation is released | the sequence number |
+
+Like DevTools, the bridge keeps the last recorded description of each
+animation and records again only on a change, so an animation that runs
+on the main thread adds no record at each frame. Values are as Blink holds
+them; nothing is rounded.
+
+#### Which animations a frame shows
+
+At the frame's basis time, the state used for the rest of the panel, an
+animation is listed when its latest record at or before that time has a
+play state of running, paused, or pending, or finished with a fill that
+holds its effect. Its current time at the frame is computed from that
+record: for a running animation on a document timeline, the start time
+subtracted from the timeline's time at the frame, times the playback rate;
+for a paused one, the recorded current time. The current iteration and its
+progress are computed from the current time and the effect's timing by
+the Web Animations procedures
+([Web Animations, calculating the directed progress](https://www.w3.org/TR/web-animations-1/#calculating-the-directed-progress)).
+The progress is before the easing is applied; the easing is shown as
+recorded.
+
+#### What the panel shows
+
+The "Running animations and transitions" table gains its rows: kind, name
+or property, target (selecting it selects the node in the Elements panel),
+play state, start (recording time), duration, delay, iterations,
+direction, fill, easing, current time at the frame, current iteration and
+progress, and whether it runs on the compositor (joined to slice 4b's
+records by compositor animation ID). An animation on a scroll or view
+timeline is listed with its timeline and source, and its progress at its
+latest record, since its time follows the scroll position, not the clock.
+
+#### Limits
+
+- The time at the frame is the basis time of the state. Blink's own time
+  for the rendering update shown is that update's animation frame time,
+  which can differ by up to one display refresh; the panel says so.
+- The progress of an animation on a scroll or view timeline is that of its
+  latest record, not computed at the frame.
+- SVG animation elements (`animate`, `animateTransform`) are not
+  `blink::Animation`s and are not listed; the panel says so.
+- An animation created before the renderer's bridge connected is recorded
+  at its next probe call: at its next frame if it runs on the main thread,
+  at its next change of state if on the compositor.
+
+#### To be settled
+
+- Whether "released" can be observed without a new hook in
+  `Animation`'s destructor or garbage collection; if not, an animation is
+  ended by its play state and its document only. Settled while building:
+  see "As built".
+- The cost on the target machine, on the animation fixture.
+
+#### Required tests
+
+- Unit tests: the new records against the record contract; the state's
+  animations at a time from a sequence of records, including pause,
+  playback rate changes, `setCurrentTime`, cancel, finish with and without
+  fill, and a document's removal; the computed iteration and progress for
+  each direction, iteration start, and fractional iterations; the panel's
+  rows.
+- Integration tests in the instrumented Chromium, on a generated page with
+  a CSS animation, a CSS transition, a Web Animation started, paused, and
+  given a new playback rate by script, a composited and a main-thread
+  animation, and a scroll timeline: each animation is recorded once at its
+  start and once for each change, and not at each frame; at each record,
+  the app's computed progress equals Blink's recorded progress.
+- System test on the target machine: the animation fixture recorded and
+  opened at several frames, and the Evidence tab lists its animations with
+  their progress at each.
+
+#### As built
+
+Agreed by the owner on 2026-10-06 ("yes, I agree, go build it").
+
+- Blink: `chromium/integrate.py` patches `core/animation/animation.cc`.
+  After `probe::AnimationUpdated(document_, this)` in
+  `Animation::NotifyProbe`, while the recorder is connected, it fills an
+  `AnimationFacts` and calls `RecordAnimationUpdated`. The effect's delays
+  and iteration duration are read from `NormalizedTiming()`, the
+  iterations, iteration start, direction, fill, and easing from
+  `SpecifiedTiming()`, and the progress and current iteration from the
+  effect's `Progress()` and `CurrentIteration()`, which are those
+  `getComputedTiming()` gives, read only when the animation is not
+  outdated, since reading an outdated animation's timing updates it, which
+  the recorder must not cause; otherwise they are null. `Animation::Dispose`, the animation's
+  pre-finalizer, and `Animation::ContextDestroyed` call
+  `RecordAnimationRemoved`. This settles the first item of "To be settled"
+  above: release is observed through the pre-finalizer Blink already has.
+- Bridge: `RecordAnimationUpdated` keeps the last description of each
+  animation by sequence number and writes `animation-updated` only when
+  something other than the current time, progress, and current iteration
+  changed. `RecordAnimationRemoved` writes `animation-removed` only for an
+  animation it recorded. A document timeline's zero time is written in
+  counter ticks (`timeline.zeroTicks`), as presentation times are, and as
+  TimeTicks microseconds.
+- Recorder: `browser.animation` is a built-in channel of the browser
+  collector; `BrowserProtocol` and `EventPayloadValidator` hold the two
+  records' contracts. The channel is not part of the document state that
+  is rebuilt and kept in snapshots: as the compositor records are,
+  `RecordingFileAnimations` reads its records, with the browser's clock
+  synchronizations, from the recording file up to the time the state is
+  read at, the cut of the frame's basis, the same time the pending timers
+  are given at. `RecordedAnimationReader` maps the zero time to recording
+  time through the record's native timestamp and the process's clock
+  frequency, as the compositor's presentation times are mapped.
+- Panel: the table has the columns kind, name or property, target (with
+  Select and Copy buttons, and the pseudo-element), play state, start (as
+  a recording time, and on the timeline), timing (duration, delay,
+  iterations, direction, fill), easing, current time at the frame (and
+  whether computed or as recorded), iteration and progress at the frame,
+  timeline, on the compositor, and the time of the record used. Blink's own
+  progress at the record, after the easing, is shown beside the computed
+  progress. Notes under the table state how the times are found and what
+  is not listed.
+- The compositor column is from the record's own compositor animation ID,
+  which Blink gives while the animation has active animations on the
+  compositor, not from a join to the slice 4b records.
+- Fixture: the Web Animations panel of `tests/fixtures/animation/index.html`
+  names its animation `slide` and gains buttons that pause and resume it
+  and set its playback rate to 2 and back to 1, and a "Scroll timeline"
+  panel holds a bar on `scroll(nearest block)`.
+
+Tests built: `tests/Recorder.Tests/RecordedAnimationTests.cs` (the records
+as the bridge writes them against the protocol and the validator; the
+animations at a time, including a playback rate, pause, pending, a later
+record, idle, removal, another document, and finish with and without a
+fill; the directed progress for each direction, delay, fill, iteration
+start, fractional and infinite iterations; the panel's rows; and reading
+from a recording file), and two tests in `chromium/test_integrate.py` (the
+hooks are written once and after the probe, and the bridge does not compare
+the current time or progress). The integration and system tests below run
+on the target machine.
+
+First target machine run, 2026-10-06, at b90d6a6: the owner recorded the
+animation fixture, served by `Serve-Fixture.ps1`, with the instrumented
+Chromium built from this revision, and reported that the animations are
+shown in the evidence panel. The checks of each listed value against the
+values the page states, and the integration and system tests above, are
+not yet recorded.
+
+### Slice 4h: the page's script source (agreed, built)
+
+Proposed 2026-10-06, at the owner's request that the JavaScript source of
+each frame be recorded, so that when testing the exact code that ran can be
+read. It takes protocol 0.54. Agreed by the owner on 2026-10-06, with the
+two open questions settled as recorded under "Settled" below.
+
+#### Why
+
+The recording holds the text of inline `script` elements, as character
+data in the DOM, and, since protocol 0.52, the script ID, element, URL, and
+start position of each script element's script and each `on...` attribute
+handler (slice 4f). It does not hold the text of an external script, a
+module, code given to `eval` or `new Function`, a string handler of a
+timer, a `javascript:` URL, or an extension's content script. A timer's
+stack names script IDs, lines, and columns, but the code at those lines
+cannot be read from the recording.
+
+#### What Chromium does
+
+Read in the patched Chromium checkout on the target machine, under `v8/src/`
+and `third_party/blink/renderer/`; line numbers are those of that checkout.
+
+- Every top-level script and every wrapped function V8 makes is reported to
+  the debugger by `Compiler::PostInstantiation`
+  (`codegen/compiler.cc`, line 4663, `isolate->debug()->OnAfterCompile`),
+  when its function is made in a context, before it runs. A script that
+  fails to compile is reported by `Debug::OnCompileError`, from
+  `parsing/pending-compilation-error-handler.cc` (line 206). Both reach
+  `Debug::ProcessCompileEvent` (`debug/debug.cc`, line 2831). This covers
+  classic and module scripts, `eval`, `new Function`, string timers,
+  `javascript:` URLs, attribute handlers (wrapped functions), and extension
+  scripts, since all of them are V8 scripts. WebAssembly modules are
+  reported at the same place.
+- `ProcessCompileEvent` returns before it reports anything when no
+  debugger is attached: `ignore_events()` is true while `is_active_` is
+  false (`debug/debug.h`, line 521), and the delegate is checked at line
+  2841. DevTools' Sources panel is that delegate, and V8 has one. So the
+  record cannot come from the debugger interface without displacing
+  DevTools, and the hook goes before those checks.
+- `Script::IsSubjectToDebugging` (`objects/script.cc`, line 221) is true
+  for normal and WebAssembly scripts only, not for V8's native, extension,
+  and inspector-internal scripts.
+- A V8 script holds its source, as decoded text, its name (the URL), its
+  `//# sourceURL` and `//# sourceMappingURL` values, its line and column
+  offset in its resource (an inline script's place in the page), whether it
+  is eval code and the function that called `eval`, and whether it is
+  wrapped (`objects/script.h`, lines 76 to 235).
+- Blink alone does not see every script: `eval` and `new Function` reach
+  Blink's code generation callback only when the page's content security
+  policy checks eval (`bindings/core/v8/local_window_proxy.cc`, line 283,
+  and `codegen/compiler.cc`, lines 3515 to 3523), and then without a
+  script ID.
+- The instrumented build is not a component build (`out/A11yRecorder/args.gn`,
+  `is_component_build = false`), so a function V8 defines can be called
+  from Blink without changing V8's exported interface.
+
+#### What is recorded (protocol 0.54)
+
+- A patch to `Debug::ProcessCompileEvent`, before its checks, calls a hook
+  that Blink sets for the main thread's isolate (in
+  `V8Initializer::InitializeV8Common`, `v8_initializer.cc`, line 888). It
+  skips temporary scripts, scripts not subject to debugging, and
+  WebAssembly. Blink finds the document and world from the current context;
+  a script compiled with no document, such as in a worker, is not recorded.
+- The bridge keeps, per renderer process, the script IDs it has recorded,
+  so a script reported again, as V8 does each time a cached script or eval
+  code is instantiated again, is recorded once.
+- A new `browser.script` channel with two records:
+  - `script-parsed`, once per script: the document, the world (as the
+    cookie and timer records give it), the script ID, the digest and length
+    of its source, its URL, source URL, and source map URL, its start line
+    and column (one-based), its kind (`classic`, `module`, `eval`,
+    `function` for a wrapped function such as `new Function` or an
+    attribute handler), for eval code the script ID of the caller, and
+    whether it failed to compile;
+  - `script-text`: the source as UTF-8 bytes, with its digest and size, the
+    first time the renderer meets the digest, as `style-sheet-text`,
+    `font-file`, and `image-data` are, through the same queue.
+- The digest is the SHA-256 of the UTF-8 source. The same source compiled
+  many times, in many documents, or by many `eval` calls, is held once per
+  renderer process.
+
+No frame holds a copy or a list of its scripts. The scripts of a document
+at a frame are those whose `script-parsed` record is at or before the
+frame's time, read as the timers and animations at a frame are. Each
+refers to its text by digest, so the text is read only when it is shown.
+
+#### What the evidence panel shows
+
+- A "Scripts" table for the document at the frame: for each script, its
+  kind; the owner (page, extension, or DevTools, from the world, as in the
+  "Scheduled by" column); its element and path, for a script element's
+  script or an attribute handler, joined by script ID to the slice 4f
+  `script-compiled` record; its URL or source URL; for eval code, the
+  script that called `eval`; its size and lines; when it was compiled; and
+  whether it failed to compile.
+- A "View source" button for each, which opens the recorded text in a
+  read-only viewer page of the evidence panel with numbered lines, each
+  line addressable, and the browser's own find. The text is the text V8
+  compiled, shown as text, never run.
+- In the "Scheduled by" column, each stack frame and callback location
+  whose script has recorded text links to its line in the viewer.
+- For a recording before protocol 0.54 the table says the script source
+  was not recorded.
+
+DevTools' Sources panel in the recreation does not list these scripts,
+since the recreation runs no page script (see "Slice 3"). Listing them
+there, compiled but not run, is a later step, not part of this slice.
+
+#### Limits
+
+- The text is the decoded source V8 compiled, not the bytes the server
+  sent, and not the original of a minified or transpiled script; a source
+  map URL is recorded, not the map.
+- Compiled is not the same as ran: a script's top level runs after it is
+  reported, but a function in it may never have been called. A script that
+  failed to compile is listed as such and did not run.
+- Script in iframes waits for slice 5, as their documents do. Worker and
+  service worker scripts are not recorded. WebAssembly is not recorded.
+- The recording holds the page's script text, which may include values the
+  page put there, such as tokens in an inline script, as the DOM already
+  holds inline script text.
+- Script IDs are per renderer process, so joins are made within the
+  document's process, as in slice 4f.
+
+#### Cost
+
+Each new script's source is copied to UTF-8 and digested on the main
+thread when it is first instantiated; repeats cost a lookup of the script
+ID. The text is written once per digest, encoded off the main thread by
+the existing queue. The hook is timed as a whole and measured on the target
+machine on a page with large bundles and much `eval`.
+
+#### Settled (2026-10-06)
+
+- The source copy and digest are made on the main thread to start with,
+  within the limits above, and measured on the target machine; moving the
+  digest to the queue's thread is left until a measurement asks for it.
+- Nothing compiled during a DevTools protocol command is recorded. An
+  expression typed in the Console is, at most, an auditor's test code, not
+  the system under test. The bracket is
+  `DevToolsSession::DispatchProtocolCommandImpl`
+  (`core/inspector/devtools_session.cc`, lines 309 to 350), between its
+  `DebuggerTaskStarted` and `DebuggerTaskFinished` calls, on the main
+  thread. V8's own inspector scripts are not normal scripts and are not
+  reported in any case.
+
+#### Required tests
+
+- Unit tests: the two records against the record contract and the
+  validator; the scripts of a document at a time, including a script
+  compiled after the frame, another document's script, eval code with its
+  caller, a compile failure, and a recording before protocol 0.54; the join
+  to `script-compiled`; the panel's rows and the viewer's lines.
+- Integration tests in the instrumented Chromium, through `integrate.py`'s
+  test suite: the V8 and Blink hooks applied once and found again on a
+  second pass, and called with functions the bridge declares.
+- System test on the target machine: a recording of the timer origin
+  fixture, served over HTTP, extended with an external module, `new
+  Function`, a `javascript:` link, and a script that fails to compile,
+  where the Scripts table lists each with its kind, element, and text, and
+  each "View source" shows the fixture's own text, compared by the owner.
+
+#### As built
+
+Built 2026-10-06 on the `recreation` branch, protocol 0.54.
+
+- V8 (`integrate.py`, `patch_v8_debug` and `patch_v8_compile_error`):
+  `A11yRecorderReportScript`, written into `debug/debug.cc` before
+  `Debug::OnCompileError`, is called first in `Debug::OnAfterCompile` and in
+  `PendingCompilationErrorHandler::ThrowPendingError`
+  (`parsing/pending-compilation-error-handler.cc`), before
+  `OnCompileError`. It gives the hook a script whose type is normal, whose
+  ID is not the temporary ID, and whose source is a string, with its name,
+  `sourceURL`, `sourceMappingURL`, offsets, module flag, compilation kind,
+  and the script ID of the eval caller, read as `debug-interface.cc` reads
+  them. The hook's setter and getter are defined at the end of `debug.cc`
+  and declared in `chromium/recorder_bridge/v8_script_hook.h`.
+- Blink (`patch_blink_v8_initializer`): `V8Initializer::InitializeV8Common`
+  sets the hook on the main thread. The hook returns unless it is on the
+  main thread, the recorder is connected, no DevTools command is being
+  dispatched, and the current context is a window with a document; it skips
+  DevTools' isolated world, claims the script ID, reads the source and texts
+  as UTF-8 with `WriteUtf8V2` and unpaired surrogates replaced, and calls
+  `RecordScriptParsed`. `patch_blink_devtools_session` brackets the
+  dispatch with `EnterDevToolsCommand` and `LeaveDevToolsCommand`.
+- The bridge writes `script-text` through the resource bytes queue
+  (`QueueResourceBytes`, now given its channel) and `script-parsed`, both
+  on `browser.script`.
+- The recorder: `RecordedScriptReader` and `RecordedScripts`
+  (`Recorder.Session`), `RecordingFileScripts` (`Recorder.Database`), read
+  with the page's resources at the state's cut; `RecordedEvidence` lists
+  the rows and links the timer origins; `RecreationServer` answers
+  `script/<digest>` with the text, as `text/plain`, only for a listed
+  script; the evidence panel adds the Scripts table, the viewer, and the
+  "View line" buttons in "Scheduled by". The resources are kept for the
+  scripts when the page is served from the loopback address.
+- The timer origin fixture gains `module.js`, a `new Function` call, a
+  `javascript:` link, and a script that fails to compile, with a list of
+  the scripts the table is expected to show.
+
+Differences from the design:
+
+- The hook is not in `Debug::ProcessCompileEvent`. Its two callers are
+  patched instead, because `OnCompileError` is also called by the JSON
+  parser (`json/json-parser.cc`, line 572) for a `JSON.parse` error, with a
+  script holding the JSON text, which is not page code. A failed compile is
+  therefore taken from the parser's error handler only.
+- The kinds are as designed; `function` covers both a `new Function`
+  function (`kFunctionConstructor`) and a function Blink wraps, such as an
+  attribute handler (`kWrapped`). A string timer handler and a
+  `javascript:` URL are compiled as classic scripts and are listed as
+  `classic`, with no element.
+- `script-parsed` keeps the world, as the timer records give it, in a
+  `world` member, and names the eval caller in `evalFromScriptId`; the
+  validator refuses an eval caller on a script that is not eval code.
+- The table gives the size in bytes, not the line count, so that no text is
+  read until it is shown; the viewer gives the line count. Lines are split
+  as V8 counts them, at CR LF, LF, CR, U+2028, and U+2029.
+- The viewer is a view inside the evidence panel, not a separate page;
+  "Back to the evidence" returns focus to the button that opened it.
+- A callback location's line is used as recorded; a location with no line
+  opens the text at line 1.
+- Reading the scripts decodes each `script-text` record at or before the cut
+  once, to index it, since the recording file is indexed by channel, not by
+  digest. Its cost on a large recording is to be measured.
+
+Tests: `chromium/test_integrate.py` (`ScriptSourceIntegrationTests`, 5
+tests, and the existing signature and cost checks; all 249 pass), and
+`tests/Recorder.Tests/RecordedScriptTests.cs` (10 tests, 11 cases: the records as the
+bridge writes them, the validator, the scripts at a time with another
+document's script, a repeat, eval code with its caller, a compile failure,
+a text that does not match its digest, a recording before protocol 0.54,
+the join to `script-compiled`, the timer links, the recording file, the
+recorder's answer, and the panel). The full suite fails only the 59 tests
+that need PostgreSQL or Windows, as before. The V8 and Blink patches were
+applied twice, with no change on the second pass, to copies of
+`debug.cc`, `pending-compilation-error-handler.cc`, `v8_initializer.cc`,
+and `devtools_session.cc` taken from the target machine's checkout.
+
+#### On the target machine
+
+With revision f72f679, on 2026-10-06, the instrumented Chromium built with
+the V8 and Blink patches, and the owner recorded the timer origin fixture,
+served over HTTP, and reported that the Scripts table and the source viewer
+worked as described in the system test. The individual rows were not
+reported one by one, and the cost of the main-thread copy and digest, and
+of reading the scripts on a large recording, has not been measured.
+
+### To be settled
+
+- How the recorded state reaches the renderer of the recreation: over the
+  recorder's own connection to the bridge, or served on the loopback
+  interface and read by the browser process. Settled in the first step;
+  stage 3 above uses attributes on the built DOM for now.
+- The recreation mode is a switch of the instrumented Chromium that also
+  records, so that one build is kept (agreed 2026-09-30).
+
+### Required tests
+
+- Unit tests of the recording additions against the record contract, and of
+  the recorded state the recorder sends to the recreation mode.
+- Integration tests in the instrumented Chromium: for a generated page,
+  every imposed computed-style value, box fragment, fragment item, and glyph
+  run read back from Blink equals the value imposed; a change to the DOM or
+  a style is refused; typing into a text field changes only its value and
+  its own text layout; reloading returns the recorded values.
+- System test on the target machine: a recorded page is inspected, and
+  DevTools' Computed pane and box model show the recorded values of chosen
+  nodes.
+
+### Slice 5: the documents of frames (agreed)
+
+Proposed 2026-10-06 and agreed by the owner the same day, with the open
+questions settled as recorded under "Settled" below. The plan's slice 5 (decided 2026-09-29): the
+documents of `iframe`, `frame`, and `frameset` pages in the recreation, the
+check, and the evidence panel. It takes protocol 0.55, and is built and
+checked on the target machine in three steps, 5a, 5b, and 5c, each before
+the next.
+
+#### Why
+
+The recreation shows one document, a primary main frame's. An `iframe` or
+`frame` element is built with its recorded attributes, but its document is
+not: the served policy's `frame-src 'none'` and the recorder's refusal of
+any document request that is not the tab's own leave it empty
+(`RecreationServer.cs`, line 30; `RecreationControl.cs`, lines 260 to 275).
+The documents of frames are recorded, each under its own document token:
+their DOM walks, layout, styles, sheets, timers, animations, and scripts.
+The DOM walk hooks are in `Document`, so they run for every document a
+connected renderer parses, a frame's included. Session
+`20260927-140739-4a201ccaa3c142bab1a4874a289375b0` holds 12 `subframe`
+navigations, and layout checkpoints of some of their documents (see the
+rendered frame correlation evidence model). Slices 4e, 4f, and 4h leave
+the sheets and scripts of frames to this slice.
+
+What the recording does not hold is which element a frame's document is
+in. A `navigation-completed` record gives a committed document's frame
+(`context.frameId`, the frame tree node), its parent frame, and its token,
+but nothing names the `iframe` element: two `iframe` elements of one page
+with the same address cannot be told apart, and a document that was never
+committed by a navigation, such as an `iframe`'s initial `about:blank`
+document written by script, has no navigation record at all.
+
+#### What Chromium does
+
+Read in the patched Chromium checkout on the target machine; line numbers
+are those of that checkout.
+
+- Every frame, local or remote, holds a DevTools frame token,
+  `Frame::GetDevToolsFrameToken()`
+  (`third_party/blink/renderer/core/frame/frame.h`, line 305). A remote
+  frame is made with the token the browser gives it
+  (`remote_frame.h`, line 68). The browser's
+  `RenderFrameHostImpl::GetDevToolsFrameToken`
+  (`content/browser/renderer_host/render_frame_host_impl.h`, line 505) is
+  described in the same header (lines 3065 to 3067) as "a stable
+  identifier used by DevTools to identify frames and is kept constant
+  across navigations in a frame". It is the `frameId` of the DevTools
+  protocol. So the parent's renderer and
+  the child's renderer, when a frame is out of process, name the frame
+  with the same token, though each gives it a different frame token of
+  its own (`Frame::GetFrameToken()`, line 352).
+- The element that holds a frame is an `HTMLFrameOwnerElement`: `iframe`,
+  `frame`, `object`, `embed`, and `fencedframe`. Its frame is set by
+  `HTMLFrameOwnerElement::SetContentFrame`
+  (`core/html/html_frame_owner_element.h`, line 103), from
+  `Frame::Initialize` (`core/frame/frame.cc`, line 583) and from
+  `Frame::SwapImpl` when a frame is swapped between local and remote (line
+  971), and cleared by `ClearContentFrame`, from
+  `Frame::DisconnectOwnerElement` (line 198). A swap is a navigation in the
+  same frame, so the token is kept.
+- DevTools finds the element that holds a frame with `DOM.getFrameOwner`
+  (`core/inspector/inspector_dom_agent.cc`, line 3473), which walks the
+  inspected frame tree, remote frames included, so a page's session finds
+  the owner of its own out of process child.
+- The recreation's DevTools connection attaches only page targets
+  (`RecreationControl.cs`, lines 70 to 79). An `iframe`'s document request
+  is now paused in the page's session and refused there. That an out of
+  process frame's requests are also paused in the page's session, with no
+  session of its own, is expected and is checked in 5b, not assumed.
+
+#### What is recorded (protocol 0.55, step 5a)
+
+- `dom-checkpoint-started` gains `frameToken`, the DevTools frame token of
+  the walked document's frame, and `mainFrame`, whether that frame is a
+  main frame; both are null for a document with no frame.
+- A walk writes `dom-checkpoint-frame-owner` after the node record of each
+  frame owner element that holds a frame: the owner's node ID, the frame's
+  token, and whether the frame is `local` or `remote` in this renderer.
+- `dom-frame-owner-changed`, at the end of `SetContentFrame` and in
+  `ClearContentFrame` when there was a frame: the owner's node ID, the
+  frame's token, or null when cleared, and `local` or `remote`. A swap
+  writes the new state with the same token.
+- All three on `browser.dom`, in the owner's or the walked document's
+  context, as the other DOM records. Nothing is read from the child
+  document in the parent's renderer, so an out of process child adds no
+  cross-process work.
+
+#### Which document a frame shows at the frame
+
+- The owner's frame at the cut is its latest `dom-checkpoint-frame-owner`
+  or `dom-frame-owner-changed` at or before the cut, in the parent
+  document's records.
+- The documents of that frame are those whose walks name its token, in
+  any renderer process. The one shown is the document of that frame
+  committed last at or before the cut: its commit is the
+  `navigation-completed` record with its document token, and a document
+  with no such record, such as an initial `about:blank` document, counts
+  from its first record. The basis is stated, not inferred further.
+- A frame whose document has no DOM walk at or before the cut is left empty
+  and named in the notes, as a popup is.
+- Frames nest: each child's owners are resolved the same way, to a depth of
+  8 and 64 frames in one recreation; frames beyond either limit are left
+  empty and counted in the notes.
+- A recording before protocol 0.55 holds no tokens, so its frames are left
+  empty, as now, and the notes say why. No join by address is attempted.
+
+#### The recreation (step 5b)
+
+- Each child document is recreated as the top document is, by the same
+  writer and builder, from its own state at the cut, with its own nonce
+  and policy, and the policy of each document that has frames allows, in
+  `frame-src`, the exact recorded address of each of its children that is
+  served (below), and nothing else.
+- A child with an `http` or `https` address is served at that address.
+  When its owner's navigation is paused, the recorder finds the owner with
+  `DOM.getFrameOwner` in the session that paused it, takes the owner's
+  positional path (see "Paths through shadow roots") in an isolated world
+  the recorder makes with `Page.createIsolatedWorld`, so no page script is
+  run or can answer, and answers with the child recorded under the owner
+  with that path. The builder replaces the document's element only once
+  the whole tree is built (`builder.js`, lines 211 to 232), so the path is
+  final when the child is requested. The request's frame is then joined to
+  that child, and the frame's later requests, for images and fonts, are
+  answered from that child's resources. A request the recorder cannot join
+  is refused, as now.
+- Served at its recorded address, a cross-site child is put in its own
+  renderer by site isolation, as it was recorded, and DevTools shows its
+  document under its owner in the Elements panel. That the recreation's
+  process for each child matches the recording's is checked, not assumed:
+  the notes give, for each frame, whether its document was in the parent's
+  renderer process when recorded, and whether it is in the recreation.
+- A child with no request to answer, an `about:blank` or `about:srcdoc`
+  document, has its parent's origin. The parent's builder, after building
+  its own tree, builds the child's recorded tree in the child's document,
+  with the same functions, so the child keeps its address and runs no
+  script. A `srcdoc` owner first loads its recorded `srcdoc` markup, under
+  the parent's inherited policy, so none of its scripts run, and the
+  builder waits for that load before replacing it.
+- A `frameset` document is a top document with `frame` owners, and is
+  recreated the same way.
+- Not built, and named in the notes when found:
+  - a child whose owner has a `sandbox` attribute without `allow-scripts`,
+    since its builder cannot run; it is left as the served markup without
+    the recorded tree;
+  - an owner with a `csp` attribute, whose required policy the served
+    child may not meet, so Blink may refuse it;
+  - `data:` and `blob:` children, and the documents of `object`, `embed`,
+    and `fencedframe` owners;
+  - an owner with `loading="lazy"` out of view in the recreation, whose
+    child Blink may not request; the notes say whether each child was
+    requested.
+- The scroll offsets, focus, selection, and compositor values of a child
+  are applied by its own builder from its own state, where the recording
+  holds them for that document. For an out of process child, whether the
+  compositor evidence of its own compositor is joined as the top
+  document's is, is tested in 5b, not assumed.
+
+#### The evidence panel (step 5c)
+
+- A Frames table: for each frame at the frame, its owner's path, the
+  owner's element name, the document's address and origin, the basis of
+  the document's choice, whether it was in its parent's renderer process
+  when recorded and in the recreation, and whether it is recreated, with
+  the reason when it is not.
+- A choice of document, the top document first, that sets the panel's
+  other tables (timers, listeners, sheets, animations, scripts, notes) to
+  that document's evidence, as each is now for the top document.
+- A path into a frame is written as the owner's path, then
+  `/#document`, then the path in the child, and "Select in Elements"
+  selects the node in the child's document.
+- A time for each frame in the Frames table, agreed with the owner on
+  2026-10-07 after the 5b result: how long its document took to open in
+  the recreation. How it is measured is to be designed with 5c.
+
+#### Required tests
+
+- 5a: unit tests of the payload contracts and validator for the three
+  records and the two fields, including a cleared owner, a swap, and a
+  document with no frame; integration tests of the Chromium patches, their
+  signatures and cost checks, and of each patch applied twice to copies of
+  the target checkout's files with no change on the second pass;
+  integration tests reading the frames of a recording file; a system test
+  on the target machine: a recording of the frames fixture in which each
+  owner is joined to its child's document, in both renderer processes,
+  and the recording cost is measured.
+- 5b: unit tests of the frame join at a cut (owner changes, commits, an
+  initial document, nesting, the limits, a recording before 0.55), of the
+  served policies' `frame-src`, of the answers to joined and unjoined
+  frame requests, and of the builder's building of `about:blank` and
+  `srcdoc` children; integration tests writing recreations with frames
+  from recorded files; a system test on the target machine at frames of
+  the fixture's recording: the Elements panel shows each child's recorded
+  tree under its owner, a visual check of each frame's area against the
+  recorded screen frame (not pixel equality), the process of each child,
+  the time to open the recreation, and the differences found.
+- 5c: unit tests of the panel's Frames table and document choice, and of
+  paths into frames; a system test on the target machine selecting nodes
+  of each child from the panel.
+
+A new fixture, `tests/fixtures/frames/`, served on two ports, at
+`127.0.0.1` and at `localhost`, which are different sites, so that one
+child is cross-site: a same-site `iframe`, a cross-site `iframe`, an
+`iframe` in that one, two `iframe` elements with the same address, a
+`srcdoc` `iframe`, an `about:blank` `iframe` written by script, an `iframe`
+navigated by script after load, an `iframe` removed after load, a
+sandboxed `iframe` without `allow-scripts`, a lazy `iframe` out of view,
+and a `frameset` page.
+
+#### Settled (2026-10-06)
+
+- The limits are a depth of 8 and 64 frames in one recreation, to start
+  with.
+- A child whose owner is sandboxed without `allow-scripts`, or has a `csp`
+  attribute, is left out for now, and the omission is named in the notes
+  and in the Frames table. The recreation does not change the owner.
+- Step 5c is part of this slice and includes each frame's own evidence:
+  timers, listeners, sheets, animations, scripts, and notes, for the
+  document chosen in the panel.
+
+#### As built (5a, protocol 0.55; not yet run on the target machine)
+
+- Blink: the DOM walk helper in `document.cc` passes the walked
+  document's `LocalFrame`'s `GetDevToolsFrameToken().ToString()` and
+  `IsMainFrame()` to `BeginBlinkDomCheckpoint`, or an empty token when the
+  document has no frame. After each node record, an
+  `HTMLFrameOwnerElement` whose `ContentFrame()` is set is followed by
+  `dom-checkpoint-frame-owner`, with `IsRemoteFrame()` giving `remote`. The
+  record comes before the node's attribute records. A tree patched for
+  protocols 0.35 to 0.54 has its helper upgraded in place.
+- Blink: `html_frame_owner_element.cc` records
+  `dom-frame-owner-changed` at the end of `SetContentFrame` and in
+  `ClearContentFrame`, before the frame pointer is cleared, in the owner's
+  document's context. The record is not a DOM transition and takes no
+  transition ID.
+- The bridge writes `frameToken` and `mainFrame` as null together when the
+  token is empty, and `frameToken` and `frameLocation` as null together for
+  a cleared owner. The token is base's `Token::ToString()`, 32 uppercase
+  hexadecimal digits, and the validator refuses any other form, a token
+  without `mainFrame`, and a location without a token.
+- Database: migration 0017 adds `frame_token` and `main_frame` to
+  `browser_dom_checkpoint_starts`, both optional, so a walk recorded
+  before 0.55 rebuilds without them. The two new records have no evidence
+  table; a recording file holds them as recorded.
+- State: each document's state gains its frames: its own frame's token
+  and whether it is a main frame, from its latest walk, and the frame each
+  of its owners holds. A whole walk replaces the owners; a cut walk adds
+  those it reached to the others; each owner change applies at once. The
+  frames are kept in the state snapshot under `frames`, which a snapshot
+  written before 0.55 lacks, so the snapshot format version is unchanged.
+- `BrowserFrames` joins each owner to the documents whose walks name its
+  frame's token, in any renderer process, in order of their first record,
+  and finds the owners of a document's frame. Which of a frame's
+  documents is shown at a cut is left to 5b.
+- The fixture is `tests/fixtures/frames/`: `index.html` with the frames of
+  the list above, and a frame a script navigates to the other site after 3
+  seconds, so that its frame is swapped between local and remote with the
+  same token; `cross.html`, the cross-site frame holding a nested frame
+  back on the first site; `child.html`, which names each frame from its
+  address; and `frameset.html`.
+
+#### 5a results (2026-10-06)
+
+The owner built c97adfb on the target machine and recorded the frames
+fixture: session `20261007-014429-630dfafd064440d1af8fc650adf639c5`, about
+135 seconds, every browser connection at protocol 0.55, with no omission
+record. The index page was opened at about 3.8 seconds, scrolled to the
+lazy frame at about 82 seconds, and left for the frameset page at about
+124 seconds. The recording file was read in the development sandbox with
+`RecordingFileBrowserState` and `BrowserFrames` at 5, 7, 10, 90, 126, and
+135 seconds.
+
+- Every owner of the index page, eleven, and both of the frameset page
+  were joined to the documents of their frames. The main frame's renderer
+  was process 20828; the cross-site frame's documents were in process
+  19584, and the nested frame on the first site, inside it, was in process
+  20828, joined to its owner in process 19584. Each join named both
+  renderers where the frame had documents in both.
+- The parent's walk named the cross-site owner `remote`. Each swap was
+  recorded as a cleared owner then the same token `remote`: the nested
+  frame, the cross-site frame, the frame sent to the other site at 3
+  seconds (owner node 179, at 7.22 seconds), and the right frame of the
+  frameset.
+- The sandboxed frame without `allow-scripts` was swapped to `remote` 40
+  ms after the walk named it `local`, and its document was in a process of
+  its own, 10188.
+- The removed frame's owner was cleared at 8.20 seconds and was not in the
+  joins at 10 seconds. The lazy frame's document appeared at 81.70 seconds,
+  when it was scrolled to. Leaving the index page cleared all its owners at
+  124.3 seconds, and leaving or closing the frameset page cleared its two at 131.8
+  seconds.
+- A frame's token names more than one document: the initial empty
+  document in the parent's renderer, then each committed document, in
+  that renderer or another. The script-written `about:blank` frame had two
+  documents under one document token in the same process, node IDs 122
+  and 126. Choosing the document shown at a cut (5b) has to handle both.
+- Cost, from the bridge's cost lines in the Chromium log: 14
+  `RecordBlinkDomCheckpointFrameOwner` calls, mean 11.8 microseconds,
+  longest 44; 38 `RecordBlinkDomFrameOwnerChanged` calls, mean 12.8
+  microseconds, longest 56 (the recording holds 40 such records; the last
+  report interval was not written before the browser closed). The 54 new
+  records hold 21,571 bytes of payload.
+
+#### Build plan for 5b (agreed 2026-10-07)
+
+Proposed 2026-10-07, after checks in the development sandbox with stock
+Chrome for Testing 147.0.7727.15, which has no recreation mode, run with
+`--site-per-process` against two loopback servers that logged every
+request reaching them. The checks are the ones the agreed design left to
+5b; what they found changes how the recreation's requests are held.
+
+What the checks found:
+
+- An out of process frame's document request is paused in the session of
+  the page that holds its owner, and `DOM.getFrameOwner` in that session
+  gives the owner's backend node ID. A frame inside an out of process
+  frame has its document request paused in that frame's own session, and
+  `DOM.getFrameOwner` works there. This follows Chromium's choice of the
+  DevTools host for a frame's requests: the nearest frame at or above it
+  that is a local root with a host
+  (`content/browser/devtools/render_frame_devtools_agent_host.cc`, lines
+  120 to 124 and 169 to 194, on the target machine's checkout).
+- The requests of an out of process frame's own document, such as its
+  images, are paused only in that frame's own session. With only page
+  targets attached, as now, the cross-site frame's image reached the
+  network. With every frame target attached, and `Fetch.enable` sent in
+  its session before it is released, none did.
+- A `Fetch.enable` sent on the browser's own session pauses every request
+  of every frame that no frame session answered first
+  (`content/browser/devtools/devtools_instrumentation.cc`, lines 1890 to
+  1905: a frame's handler is nearer the renderer, the browser's nearer the
+  network). With frame targets not attached, it caught the out of process
+  frame's requests.
+- The owner's positional path is read from an isolated world made with
+  `Page.createIsolatedWorld` on the owner's frame, the parent of the
+  paused frame in `Page.getFrameTree`, with `DOM.resolveNode` and
+  `Runtime.callFunctionOn`. It gave the expected paths for owners in the
+  top document and in an out of process frame.
+- A paused document request answered with status 302 and a `Location`
+  header is followed, and the followed request is paused for the same
+  frame: the frame ends at the answered address.
+- A script allowed by its nonce in the parent built a tree in an empty
+  `iframe`'s document, which it can reach. A `srcdoc` frame loaded its
+  markup under the parent's inherited policy, and the markup's script did
+  not run. A `frame-src` that names only `http` addresses did not stop
+  either frame.
+
+The plan:
+
+1. Index. The playback index keeps the `dom-checkpoint-started` records
+   that name a frame token, whole, as it keeps the popup records, so that
+   the documents of a frame are found without reading every document's
+   state. The index version goes from 2 to 3; a file with an older index
+   has its index derived again when opened, as now.
+2. The frames at a frame. For the chosen top document, its state at the
+   frame gives each owner's frame token. The documents of that token are
+   those of the index's started records at or before the frame's
+   composition. The one shown is the one committed last at or before it,
+   by the `navigation-completed` record with its document token; a
+   document with no such record counts from its first started record.
+   When two document keys share the token and the commit, as the
+   script-written `about:blank` frame's did in 5a, the one with the later
+   first record is shown. The chosen document's state is read at the frame
+   as any document's is, with its own basis. Each chosen document's own
+   owners are resolved the same way, to a depth of 8 and 64 frames.
+3. The page. Each chosen child is written with its owner's recorded node
+   ID and path, and one of four ways of building:
+   - served: an `http` or `https` address, written as the top document is,
+     with its own nonce, policy, resources, and children;
+   - built in place: an `about:blank` document, including a frame's
+     initial empty document, whose recorded tree is added to the parent's
+     data, and which the parent's builder builds in the frame's document
+     after building its own tree;
+   - `srcdoc`: the builder waits for the frame's load of its recorded
+     `srcdoc` markup, at most 10 seconds, then builds the recorded tree in
+     place as for `about:blank`;
+   - not built, with the reason: an owner sandboxed without
+     `allow-scripts` or with a `csp` attribute, a `data:` or `blob:`
+     address, an `object`, `embed`, or `fencedframe` owner, a document with
+     no DOM walk at or before the frame, and frames beyond the limits.
+   The builder's functions take the document they build in, so one builder
+   builds the top document and each child built in place. A document's
+   `frame-src` lists the exact address of each of its served children, and
+   of the served children of the children it builds in place, whose policy
+   is its own; with the `https` form of each `http` address, as the top
+   document is answered.
+4. Holding the requests. Each page session and each frame session sets
+   auto-attach to frame targets, waiting for the debugger, and each frame
+   target gets `Fetch.enable` for every request before it is released, as
+   a tab does now. The browser's own session also enables `Fetch` for
+   every request, so that a request no frame session paused is refused
+   there; only DevTools, the evidence panel extension, and the recorder's
+   loopback addresses continue. A document request of a frame other than a
+   tab's main frame is joined by its owner's path, read in an isolated
+   world as above, and answered with the child recorded under that path,
+   or with a 302 to the child's recorded address when the request is for
+   another address, as when the frame was navigated after its owner's
+   `src` was set. The join is kept by frame ID, and the frame's later
+   requests are answered from that child's resources. A request that
+   cannot be joined is refused, as now.
+5. Notes. Until the Frames table of 5c, the notes name, for each owner,
+   its path, element name, the document chosen and why, its address, the
+   way it was built or why not, whether it was in its parent's renderer
+   process when recorded, whether it is out of process in the recreation
+   (a frame target was attached for it), and whether its document was
+   asked for.
+
+Required tests, as the agreed design lists them, and in addition: a test
+in the sandbox with stock Chromium, as above, that opens a recreation with
+frames through the recorder's own control and server and finds that every
+frame's requests are paused and answered or refused, that nothing reaches
+two logging servers, and that each child is built under its owner. The
+recreation mode's imposed values are not in stock Chromium, so the visual
+check stays on the target machine.
+
+#### As built (5b)
+
+The owner agreed the plan above on 2026-10-07. As built:
+
+- Index. `PlaybackIndex` version 3 keeps, in `FrameDocuments`, the first
+  `dom-checkpoint-started` record of each document key that names a frame
+  token, with its time, token, main-frame flag, and process ID. A file
+  with an index of version 2 has its index derived again when opened.
+- Choice. `BrowserFrames.Choose` takes a frame token, a time, the index's
+  frame documents, and the `navigation-completed` times by document
+  token. Of the token's documents first walked at or before the time, or
+  committed at or before it, the one committed last is shown, a document
+  with no commit counting from its first walk; of two keys under one
+  token and one commit, the later first walk is shown.
+  `RecordingFileDocuments.Frames` resolves a document's owners in
+  document order, shadow roots included, breadth first, to a depth of 8
+  and 64 frames, at the frame's composition time; a frame beyond the
+  limits is listed with the reason. The address is that of the latest
+  commit of the document token at or before the time.
+- The page. `RecordedPage.Content` takes the frames and writes each as one
+  of the four ways of the plan, with a note for each, as the plan's step 5
+  lists. A frame is not built when the page is not served at its
+  recorded address. A frame whose recorded document was `about:blank` is
+  built in place only when its owner's `src` is absent or `about:blank`:
+  a frame whose owner's `src` asks for another address while its document
+  was still the initial empty document, as the lazy frame of the fixture
+  before it was scrolled to, is not built, as the recorder does not
+  answer that address with an empty document. A served frame whose
+  owner's `src`, resolved against its parent's address, differs from its
+  recorded address is answered at the owner's address with a 302 to the
+  recorded one.
+- Builder. `builder.js` builds in a given document and window; after the
+  parent's style and layout, it builds each frame built in place in the
+  frame's own document, waiting at most 10 seconds for a `srcdoc` frame's
+  load, then records `framesBuilt`, before restoring scroll, selection,
+  and focus.
+- Holding the requests. `RecreationControl` enables `Fetch` for every
+  request in the browser's own session, and auto-attaches to frame
+  targets from each page and frame session, enabling `Fetch` in each
+  before it runs. A frame's request is joined to a frame by
+  `DOM.getFrameOwner` and `Page.getFrameTree` in the session that paused
+  it, and the owner's path, read in an isolated world; the join is kept
+  by frame ID. A main frame's own requests are never joined, as the
+  spike found `DOM.getFrameOwner` on a main frame during its navigation
+  did not answer. A joined frame's document request with no answer is
+  refused as `Aborted`, and listed as a blocked navigation unless the
+  frame is not built.
+- Server. `RecreationServer` keys each frame by its place under its
+  parent, `/0`, `/0/1`, and so on, the top document being the empty key,
+  and answers each frame's requests from its own resources, and serves
+  `frames.json` for the evidence panel.
+- App. Inspecting a page reads the frames, their states, and their fonts
+  and images as one timed step, and disposes their resources if the page
+  cannot be written.
+- Evidence panel. Until the Frames table of 5c, a Frames section lists
+  each frame's key, owner path, element and node ID, how it was built or
+  why not, its address, whether it was in its parent's process when
+  recorded, and whether it has been asked for and is out of process in
+  the recreation, read every second. The timings list the time the
+  frames built in place were built.
+
+Found while building, with Chromium 147 in the development sandbox
+(2026-10-07):
+
+- An image of a frame built in place in an `about:blank` document was
+  asked for under its parent's frame ID, not its own. A document's
+  resources are therefore answered from its own, then from those of the
+  frames it builds in place, nearest first.
+- With network prediction on, the browser opened a connection to the host
+  of each page and frame address the recorder answered, before the paused
+  request, and sent nothing on it. This was also true of a stock browser
+  with only `Fetch` interception, so it predates 5b for the top page. The
+  recreation profile now sets `net.network_prediction_options` to 2,
+  `NetworkPredictionOptions::kDisabled` in
+  `chrome/browser/preloading/preloading_prefs.h`, and no connection was
+  then made.
+- A link followed in a frame, as only DevTools could follow one in the
+  recreation, is refused by the page's exact `frame-src` before any
+  request, and the frame shows the browser's error page. A frame not
+  built whose owner's address is not in its parent's `frame-src` shows
+  the same error page. A frame not built whose address is in the
+  `frame-src`, as the sandboxed frame of the fixture is, since a source
+  expression holds no query, is refused by the control and keeps its
+  initial empty document.
+
+Tests. Unit tests cover the choice of a frame's document, the index's
+frame documents, the ways of building and their notes, the frame sources
+of a policy, and the server's answers by frame. An integration test with
+stock Chromium and `--site-per-process` opens a page with a cross-site
+frame holding a frame of its own, a frame answered with a redirect, a
+frame built in place, a `srcdoc` frame, an `object`, a sandboxed frame, a
+frame in a closed shadow root, and an explicit `about:blank` frame, at
+two loopback ports that count connections. Each frame was built under its
+owner, the cross-site frame and its frame were out of process, no
+connection was made to either port, and the browser's own session refused
+nothing. The 5a recording at 10 seconds, read and opened the same way
+through the app's frame reading, gave 11 frames: 8 served, 3 of them out
+of process, one `srcdoc`, one built in place, the sandboxed frame and the
+lazy frame not built, with no connection to either recorded port.
+Reading the frames, their states, and their fonts and images took about
+2.3 seconds there, most of it opening a resource reader for each frame.
+The full .NET suite has the same 61 failures as before 5b, from the
+sandbox's environment and stock Chromium's lack of the recreation mode,
+and the Python tests pass. The visual check of each frame's area, with
+the recorded values imposed, is on the target machine.
+
+#### 5b results (2026-10-07)
+
+The owner built b653217 on the target machine and inspected the 5a
+recording, `20261007-014429-630dfafd064440d1af8fc650adf639c5`, with no
+fixture server running and the recorded ports 8765 and 8766 watched on
+127.0.0.1 and ::1 by a listener that lists every connection. The owner
+reported:
+
+- The Elements panel showed each frame's document under its owner.
+- Each frame's area appeared to match the recording, by eye; this is a
+  visual check, not pixel equality.
+- The evidence panel's Frames section listed 11 frames, as in the
+  sandbox, except that the lazy frame (`/9`) was served at
+  `child.html?name=lazy`, as it is after its commit at about 81.7
+  seconds. The three cross-site frames (`/1`, `/1/0`, `/7`) were out of
+  process; every served frame was asked for; the `srcdoc` frame and the
+  frame built in place were not; the sandboxed frame was not built, with
+  its reason.
+- The listener listed no connection.
+- For that inspection, reading the frames, their states, and their fonts
+  and images took 1655.4 ms, the longest of the recorder's steps. The
+  other recorder steps were 497.2 ms closing the previous recreation,
+  34.4 ms reading the page's state, 68.3 ms its fonts and images, 85.8 ms
+  choosing image frames and compositor values, 15.0 ms writing the page,
+  528.8 ms starting the browser, and 614.8 ms attaching and asking for the
+  page. In the page, the first style and layout finished at 445.0 ms
+  from the start of its load, the frames built in place were built at
+  515.9 ms, and the first frame after the build was painted at 526.5 ms.
+
+The Frames section has no time for each frame; only the frame-reading
+step and the time the frames built in place were built are measured. The
+frame-reading cost, most of it opening a resource reader for each frame,
+is not yet assessed against larger pages.
+
+#### Build plan for 5c (agreed 2026-10-07)
+
+Proposed and agreed 2026-10-07, from the agreed step 5c above, the settled scope
+(each frame's own timers, listeners, sheets, animations, scripts, and
+notes, for the document chosen in the panel), and the time for each frame
+agreed after the 5b result.
+
+What was read first, in the target machine's checkout, and in this
+repository:
+
+- An extension's `chrome.devtools.inspectedWindow.eval` with `frameURL`
+  runs in the first frame, across every target DevTools has, whose `url`
+  equals the given address exactly
+  (`third_party/devtools-frontend/src/front_end/panels/common/ExtensionServer.ts`,
+  lines 1727 to 1745), in that frame's default context (lines 1784 to
+  1792). Without `frameURL` it runs in the main frame of the primary page
+  target. An out of process frame is a target of its own, so it is
+  reached this way; but of two frames with one address, only the first is.
+  The fixture's two frames at `child.html?name=twin` have one address.
+- A frame with its parent's origin is reached from its parent through its
+  owner's `contentDocument`, whatever its address, as the builder already
+  reaches a frame it builds in place.
+- `Runtime.addBinding` with no context adds a function to every context
+  of the session's target, and, while `Runtime` is enabled in that
+  session, to each context made later
+  (`v8/src/inspector/v8-runtime-agent-impl.cc`, lines 925 to 954 and 1074
+  to 1101). A call is reported as `Runtime.bindingCalled` only to a session
+  that added the binding (line 1069).
+- `performance.timeOrigin` is the document's time origin on the monotonic
+  clock plus a wall-clock offset read when the document's `Performance`
+  object is made (`third_party/blink/renderer/core/timing/performance.cc`,
+  lines 129 to 133, 303 to 304, and 350 to 356). Times within one document
+  are on one clock; the difference between two documents' origins also
+  carries any change of the wall clock between the two reads.
+- Each frame's fonts, images, sheets, animations, and scripts are already
+  read for its own document key in 5b (`RecordingFileResources.Read`), and
+  its timers, listeners, focus, and selection are in its own state, so its
+  evidence is made by `RecordedEvidence.Create` as the top document's is.
+- The panel's `findNode` reaches open shadow roots only, and the panel's
+  path tests run its own source in Chromium
+  (`RecordedPageTests.cs`, line 530; `RecreationTests.cs`, line 233).
+
+The plan:
+
+1. Each frame's evidence. `RecordedPage.Content` makes a
+   `RecreationEvidence` for every frame whose document has a DOM walk at
+   the frame, built or not, since the evidence is the recording's, not the
+   recreation's: its description (address, the choice and the basis of its
+   state), its notes, interactive elements and listeners, timers,
+   animations, scripts, and focus and selection. The resources of a frame
+   not built are kept while its evidence lists scripts, so their text can
+   be shown, as the top document's are when it is not served.
+2. Serving it. `frames.json` gives each frame, in its rows of 5b, its
+   origin, the choice and basis texts, its times (below), and, when it has
+   evidence, the address of that evidence, `evidence/<n>.json`, `n` being
+   the frame's place in the list. `script/<digest>` answers a script listed
+   in any document's evidence, read through that document's resources.
+3. The panel. A "Document shown" list, the top document first, then each
+   frame with evidence, named by its key, owner path, and address, sets
+   the per-document sections (Recreation, Notes, Interactive elements,
+   Other listeners, Timers, Animations, Scripts, Focus and selection) to
+   that document's evidence, and announces the change. The Frames,
+   Navigations blocked, and Time to open sections stay page-wide. The
+   Frames table gains the origin, the document chosen with its basis, the
+   times, the owner's Select and Copy buttons, and a "Show evidence"
+   button that sets the list. An origin is read from the address; an
+   `about:blank` or `about:srcdoc` frame is given its parent's origin, and
+   the table says it is inherited.
+4. Paths into frames. A path in a frame's evidence is written as each
+   owner's path from the top, each followed by `/#document`, then the path
+   in the frame's document. Select walks from the top document: it finds
+   each owner as now, and goes on in its `contentDocument`. Where an owner
+   has no `contentDocument`, the frame being of another origin, Select
+   goes on with `frameURL` set to that frame's recorded address, in which
+   the expression first checks that `__recorderRecreation.frameKey` is that
+   frame's key. The recorder writes each served document's key into its
+   data, and the builder exposes it, so a check cannot pass in another
+   frame. When it fails, the panel says that another frame of the
+   recreation has the same address, and that DevTools reaches a frame of
+   another origin for an extension by its address only, so this one cannot
+   be selected from the panel. Owners in closed shadow roots stay out of
+   reach, as now.
+5. A time for each frame. Each served document's builder, after its
+   first paint after the build, calls a binding the recorder adds, with
+   `Runtime.addBinding` and `Runtime.enable`, in each page and frame
+   session before the target runs. It passes its key, its
+   `performance.timeOrigin`, its builder times, and, for each frame it
+   built in place, when that build started and finished. The recorder
+   keeps them by key. The Frames table gives, in milliseconds from the top
+   document's time origin, when each frame's load started, when it was
+   built, and when its first frame after the build was painted; and how
+   long the frame took from its own load start to that paint, which is on
+   one clock. A frame built in place is given its build's start and end on
+   its parent's clock. A frame not built has no times. The panel says that
+   times of different documents are compared through each document's wall
+   clock offset, as above. The binding is called only by the builder, as
+   no page script runs; a payload that is not as described is ignored.
+
+Required tests, as the agreed design lists them, and in addition:
+
+- Unit tests: each frame's evidence, built or not, with its own timers,
+  listeners, scripts, and sheets and no other document's; `frames.json`
+  and `evidence/<n>.json`; a script of a frame answered and a script of no
+  listed document refused; a path into a frame, nested, and through an
+  in-place frame; a binding payload kept by key, and payloads not as
+  described ignored.
+- Integration tests with stock Chromium and `--site-per-process`, in the
+  sandbox, as in 5b: the panel's Select expression, taken from the
+  panel's own source and run in the contexts the extension API would
+  choose (the main frame's, and the frame target whose address matches),
+  selects a node in a same-origin frame, in a cross-site frame, in a frame
+  of that frame, and in a frame built in place; of two cross-site frames
+  with one address, the second is refused with the reason; the binding
+  reports times for every served frame and every frame built in place.
+- System test on the target machine, on the 5a recording: for each frame
+  in turn, "Show evidence" lists its own timers, listeners, sheets,
+  animations, and scripts; Select on a node of each frame's evidence
+  selects it in the Elements panel; the Frames table's times; the open
+  time compared with 5b's.
+
+Open questions:
+
+- Two cross-site frames with one address: the plan accepts that only the
+  first can be selected from the panel, and says so. A frame of the
+  fixture would test this on the target machine, but needs a new
+  recording; without it, it is tested in the sandbox only.
+- The times compare documents through the wall clock, as above, and say
+  so; no other clock is available to page script.
+
+Settled with the agreement: the case of two cross-site frames with one
+address is tested in the sandbox only for now, and the fixture is not
+extended.
+
+#### 5c as built (2026-10-07)
+
+Built as the plan above says, with these details:
+
+- `RecordedPage.Content` gives each frame its key, as the server keys it,
+  its origin (`RecordedPage.Origin`), how its document was chosen and on
+  what basis, and, for each frame whose document has a DOM walk at the
+  frame, its own `RecreationEvidence`. A frame's evidence notes are its
+  state's notes, its own note from the top document's list, and how its
+  paths are written. A frame's timers are read against its own state's
+  cut. The frames of a frame not built are not listed, as in 5b.
+- The server lists the frames, with their evidence, whether or not the
+  page is served at its recorded address; they are built only when it
+  is. `frames.json` adds, for each frame, its parent's key, its owner's
+  path with its scopes, its document key, choice, basis, origin, the
+  address of its evidence, and its times. `evidence/<n>.json` is refused
+  for any place not written as the server writes it.
+- The recorder adds the binding `__a11yRecorderBuilt` and enables
+  `Runtime` in each page and frame session it attaches, before the
+  target runs. The builder calls it after its first paint after the
+  build, with its frame key (written into a served frame's data as
+  `frameKey`), `performance.timeOrigin`, its times, and the start and end
+  of each frame it built in place, at any depth. The server keeps a
+  report only of the top document or a served frame, and of the form the
+  builder writes.
+- A frame built in place is given the end of its build and its parent's
+  first paint, on its builder's clock, with its build's start in the
+  basis text. A srcdoc frame whose build did not finish has no built
+  time.
+- The panel: a "Document shown" list sets the per-document sections,
+  headed "Evidence of" the document, and a frame's "Show evidence" button
+  sets the list and moves focus to that heading. Paths in a frame's
+  evidence have Select only when every frame on the way is built; Copy
+  scopes gives the owners' scopes and the path's. The Frames table is
+  rebuilt only when what the recorder reports changes, and the control
+  that had focus keeps it.
+
+Found while building:
+
+- The 5a recording holds each frame's own scripts and sheets: the
+  scripts note's "Scripts of iframes ... are not recorded" was wrong, and
+  is corrected. But a script is recorded once in each renderer process.
+  V8 reports a top-level script to the debugger at each instantiation
+  (`v8/src/codegen/compiler.cc`, `Compiler::PostInstantiation`, lines 4646
+  to 4663), including one reused from its per-isolate compilation cache
+  (lines 4018 to 4027), and the recorder records only the first record of
+  each script ID in a process (`chromium/recorder_bridge/browser_bridge.cc`,
+  `ClaimScriptParsed`, lines 8019 to 8025). So in the 5a recording the
+  second frame at `child.html?name=twin` has no script, though it ran the
+  same one. The scripts note now says so. Recording a script once in each
+  document would change the protocol, and is not part of this slice.
+
+Sandbox results:
+
+- Unit tests (`RecreationFrameEvidenceTests`): each frame's own timers,
+  listeners, and scripts, in its evidence only, for a frame built or not;
+  origins; keys in the served pages' data; `frames.json`,
+  `evidence/<n>.json`, and refused places; a frame's script answered,
+  built or not, and a digest no document lists refused; times from build
+  reports, and eleven reports not of the builder's form ignored.
+- Integration tests with stock Chromium and `--site-per-process`: every
+  served frame and every frame built in place reported its times; the
+  panel's own Select expression, run in the main frame and in the first
+  frame target at an address, selected a node in a cross-site frame, in
+  that frame's own frame, in a same-origin frame, in a frame built in
+  place, in a srcdoc frame, and in the top document, and was refused in
+  the closed shadow root; of two cross-site frames at one address, one
+  was selected and the other refused for its key.
+- The 5a recording at 10 s, in stock Chromium: all eleven frames have
+  evidence; all eight served frames and both frames built in place
+  reported times (served frames' loads started 177 to 447 ms after the
+  top document's, and were painted 483 to 528 ms after it); nothing
+  reached ports 8765 or 8766. The panel, rendered from that recording's
+  answers with the DevTools API stubbed, listed the documents, showed
+  the nested frame's evidence with its paths through both owners, and
+  asked for the nested frame's node in the cross-site frame, then in the
+  nested frame, by their addresses.
+- The full suite fails the same 61 tests as the 5b commit does (the
+  sandbox environment, and stock Chromium's lack of the recreation
+  mode). The Python tests pass.
+
+#### 5c results (2026-10-07)
+
+The owner ran the system test on the target machine, on the 5a
+recording at about 10 s, with the c9f2591 package, and reported that
+every check passed: the Frames table's times for each built frame and
+none for the frames not built; each frame's own evidence from its
+"Show evidence" button, the second twin with no script; Select on a node
+of each frame's evidence selecting it in the Elements panel, for the
+same-origin, cross-site, nested, srcdoc, and in-place frames; and an
+empty watch window. The open time was not reported in figures. Slice 5
+(5a, 5b, and 5c) is complete on the target machine. The case of two
+cross-site frames at one address remains tested in the sandbox only, as
+agreed.
+
+## Slice 3b implementation
+
+In progress on the `recreation` branch. This section records what is built
+so far and where it differs from the design.
+
+### Built so far
+
+- The slice 2 state (`Recorder.Session`) keeps, for each document, its
+  registered listeners, its pending timers, the latest accessibility data
+  of each DOM node, and the viewport of its latest layout checkpoint. The
+  listener, timer, and accessibility channels are state channels, written
+  to the `browser-state` stream, and the snapshot format is version 2.
+  Recordings made before are read without these parts, as the design
+  allows.
+- `InteractionDocumentState.Current()` gives the focused node, the
+  selection, and each text control's value and selection, from the latest
+  interaction checkpoint and the changes after it.
+- The recorded page (`Recorder.Recreation`): `RecordedPage` writes the
+  short document of the design, with the recorded tree as JSON in a data
+  block that cannot end early, since `<` is escaped, and the builder script
+  (`Builder\builder.js`) allowed by a nonce new for each recreation.
+  `RecordedEvidence` fills the evidence panel from the state, and
+  `RecordedPaths` gives each node's path through its shadow roots.
+- `RecordingFileDocuments` (`Recorder.Database`) lists the candidate
+  documents at a frame and reads the chosen one's state.
+- The player's "Inspect page at this frame" lists the pages at the frame
+  shown and opens the one chosen in the recreation browser of slice 3a.
+- The DevTools protocol connection (`DevToolsConnection`,
+  `RecreationControl`), as in "Leaving the recreation": navigations away
+  from the recreation are refused and listed in the panel, and the
+  recreation's tab is given the recorded viewport and focus emulation. The
+  panel's notes state the viewport used and the time of the layout
+  checkpoint it came from.
+
+Not yet built: the recreation browser with the recorder bootstrap and the
+in-memory receiver, the check, and selecting a node inside a closed shadow
+root. The check is built after slice 4 (see "The check is a background
+guard").
+
+### Differences from the design
+
+- The document's URL comes from the playback index's `navigation-completed`
+  record, which the index keeps whole, not from the state or its snapshots.
+- The accessibility records are update batches, each naming only the nodes
+  that changed (see accessibility-checkpoint-evidence-model.md), not
+  checkpoints of the whole tree. The state therefore keeps, for each DOM
+  node, the latest record that named it and the time of its batch. Removals
+  of accessibility nodes are not recorded, so a node's data can be older
+  than the frame.
+- "Focusable" is read from the FOCUSABLE state in Chromium's
+  `serializedProperties` text as recorded. That text is Chromium's
+  diagnostic form, not a field of the record contract; the panel says so.
+- Listener, timer, and accessibility records can come before the first DOM
+  record of their document: 98 listener records in the recording of
+  2026-09-29 did. They are held until that record and then applied, and
+  the document's first record time moves to the earliest of them.
+- The recording gives an attribute's namespace and local name, not its
+  prefix. The builder gives `xlink`, `xml`, and `xmlns` attributes the
+  prefixes the HTML parser gives foreign attributes
+  ([HTML standard, adjust foreign attributes](https://html.spec.whatwg.org/multipage/parsing.html#adjust-foreign-attributes)).
+- A pending timer's time remaining is counted from the recording time of
+  the state used, the cut of the frame's basis, not from the frame's time.
+- Running animations and transitions were not read from the recording
+  before protocol 0.53; for an earlier recording the panel says so rather
+  than listing none. From protocol 0.53 they are listed (slice 4g).
+- Chromium's layout zoom factor includes the device pixel ratio, so the
+  panel notes a possible browser zoom when the recorded factor differs from
+  the recorded ratio, not when it differs from 1.
+- A tab waiting for the debugger answers its release only after its first
+  request has been paused and handled, so the connection sends a new tab's
+  commands in order without waiting for their answers.
+
+### Found while building
+
+- A page can be drawn before its first DOM walk. In the recording of
+  2026-09-29, a product page's first presentation was at 65.52 s and its
+  first DOM walk, at finished parsing, at 66.13 s; its layout and
+  interaction checkpoints began at 65.42 s. At a frame between the two the
+  page cannot be recreated, and the player says so. Added to slice 4.
+- Template contents are not recorded: the records have no field for them,
+  and the six `template` elements of that recording have no recorded
+  children. Added to slice 4.
+
+### Tests
+
+- Unit tests: the listeners, timers, accessibility data, and viewport of a
+  document, including records before its first DOM record and records of
+  another document of the same process; snapshots of version 2 and the
+  records after them giving the state of every record; the tree data
+  written for the builder, including namespaces, shadow root fields, manual
+  slot assignment, cut values, and a title that holds `</script>`; paths
+  through open and closed shadow roots, SVG, text, and comments, and none
+  into a user agent shadow root; the evidence read from a state.
+- Integration test, with `RECORDER_RECREATION_CHROMIUM` set: a generated
+  tree the HTML parser cannot return (a `div` directly in a `table`, a `p`
+  in a `p`), with a document type, SVG with `xlink` attributes, an open
+  shadow root with a manually assigned slot, a closed shadow root, a
+  script, an event handler attribute, and a `javascript:` link, is built,
+  and the DOM Chromium then holds, read through every shadow root over the
+  DevTools protocol, equals the tree given. No script, handler, or link
+  runs; the value, caret, and focus of the text control are set; every
+  path in the evidence selects its node through the panel's resolver,
+  except the one inside the closed shadow root, which reports that it
+  cannot be reached. The protocol leaves out text nodes of white space
+  only, so the comparison leaves them out on both sides. On the
+  development machine this passed with a Chromium build of the test
+  framework's own.
+- On the development machine, the same comparison was run on two
+  documents of the recording of 2026-09-29, at 28.2 s and 94.0 s: the
+  built DOM equalled the recorded tree in every node compared (627 and 729
+  lines), and each of the 65 and 80 interactive element paths selected an
+  element of the recorded name. This was a measurement, not a committed
+  test.
+- Unit test: only the recreation's own address, DevTools, and a blank tab
+  may be loaded.
+- Integration test, with `RECORDER_RECREATION_CHROMIUM` set: a recreation
+  with a link, a link with `target="_blank"`, and a form is opened through
+  the recorder's own session, without a window, at a recorded viewport of
+  800 by 600. The page's inner size is 800 by 600; a real click on each
+  link and on the form's button leaves the page's address and its whole
+  markup unchanged; both links are listed as refused, the second as in a
+  new tab, and that tab is closed; the form makes no request. On the
+  development machine this passed with a Chromium build of the test
+  framework's own.
+
+### On the target machine
+
+With revision f1ea0a7, on a recording of https://cnib.ca, as reported:
+
+- Links to other pages were blocked, and links within the page, such as
+  skip links, worked. A link within the page loads no document, so it is
+  not paused.
+- The recreation's inner size and device pixel ratio were 929 by 925 and
+  1, as the panel's note gave them from the page's latest layout
+  checkpoint, recorded at 18.543 s.
+- After a click into DevTools, `document.activeElement` in the recreation
+  was the element the recording had focused.
+
+The recording has no link that opens a new tab and no form, so neither
+could be checked on it; both are covered only by the integration test on
+the development machine.
 
 ## Text by content hash (agreed, deferred)
 

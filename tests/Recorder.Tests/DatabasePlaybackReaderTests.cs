@@ -552,7 +552,8 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         long cut;
         using (var whole = RecordingFileReader.Open(path))
         {
-            var last = whole.Chunks[^1];
+            // The last chunk of events; the state thread's chunks may follow it.
+            var last = whole.Chunks.Last(chunk => chunk.Stream is not ("state" or "state-index"));
             cut = last.Offset + last.Length / 2;
         }
 
@@ -565,7 +566,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         using (var reader = RecordingFileReader.Open(path))
         {
             kept = reader.ReadAll()
-                .Where(message => message.Channel.Topic != RecordingFileBatchTarget.WriterTopic)
+                .Where(message => RecordingFileBatchTarget.IsEventTopic(message.Channel.Topic))
                 .Select(message => RecordingEventCodec.Decode(message.Data.Span).Event.EventId)
                 .ToHashSet();
         }
@@ -615,7 +616,7 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         using (var reader = RecordingFileReader.Open(derivedPath))
         {
             var messages = reader.ReadAll()
-                .Where(message => message.Channel.Topic != RecordingFileBatchTarget.WriterTopic)
+                .Where(message => RecordingFileBatchTarget.IsEventTopic(message.Channel.Topic))
                 .Select(message => RecordingEventCodec.Decode(message.Data.Span))
                 .OrderBy(item => item.EventKey)
                 .ToList();

@@ -15,6 +15,7 @@ component("recorder_bridge") {
   defines = [ "IS_RECORDER_BRIDGE_IMPL" ]
 
   sources = [
+    "animation_settings.h",
     "browser_bridge.cc",
     "browser_bridge.h",
     "evidence_cost.cc",
@@ -29,6 +30,11 @@ component("recorder_bridge") {
     "network_text.h",
     "recorder_protocol.cc",
     "recorder_protocol.h",
+    "recreation_compositor_values.h",
+    "recreation_paint_worklet_values.h",
+    "recreation_image_frames.h",
+    "recreation_input.h",
+    "v8_script_hook.h",
   ]
 
   public_deps = [ ":cookie_names" ]
@@ -36,5 +42,6 @@ component("recorder_bridge") {
   deps = [
     "//base",
     "//components/version_info",
+    "//crypto",
   ]
 }
