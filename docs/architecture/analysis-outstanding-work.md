@@ -60,6 +60,12 @@ approach agreed 2026-10-07.
   NVDA's module in the instrumented Chromium, its audio session, the
   UIAccess flag readable without elevation, and the null device handle of
   injected raw input.
+- Keys, tested 2026-10-07 in
+  [screen reader keys](../validation/screen-reader-keys-2026-10-07.md):
+  the keys NVDA keeps as commands are missing from raw input and are seen
+  only by a low-level keyboard hook installed after NVDA's; NVDA's
+  injected keys have no device handle in raw input. How the recorder
+  captures screen-reader commands is to be designed.
 - Magnification: Windows Magnifier's transform is readable from another
   process (tested 2026-10-07); a third-party magnifier is not tested.
 

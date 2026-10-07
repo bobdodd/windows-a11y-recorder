@@ -65,7 +65,7 @@ function Say([string]$text) {
 # --- The screen reader -------------------------------------------------------
 
 $screenReaders = @(Get-Process -Name 'nvda' -ErrorAction SilentlyContinue)
-if ($screenReaders.Count -eq 0 -and -not $DryRun) {
+if ($screenReaders.Count -eq 0 -and -not $DryRun -and -not $KeysPath -and -not $ScreenReaderProcessId) {
     throw 'NVDA is not running. Start NVDA first, then run this script.'
 }
 $screenReaderIds = @($screenReaders | ForEach-Object { $_.Id })
@@ -359,7 +359,7 @@ namespace ScreenReaderKeyTest
 '@
 
 $url = "http://127.0.0.1:$Port/screen-reader-keys"
-[ScreenReaderKeyTest.FixtureServer]::Start($Port, $page)
+if (-not $KeysPath) { [ScreenReaderKeyTest.FixtureServer]::Start($Port, $page) }
 
 if ($KeysPath) {
     Say "Keys: $KeysPath"
@@ -442,7 +442,9 @@ function Get-KeyName([int]$vk) {
 }
 
 # Pairs each record of $From with the first unused record of $To that has the
-# same key and direction within $WindowNs; returns, for each, the match or null.
+# same key, direction, and origin within $WindowNs; returns, for each, the
+# match or null. Raw input from injected keys has no device handle, so a
+# physical key is never paired with a key the screen reader injected.
 function Find-Matches($From, $To, [scriptblock]$TimeOfFrom, [scriptblock]$TimeOfTo, [long]$WindowNs) {
     $used = New-Object 'System.Collections.Generic.HashSet[int]'
     $matched = New-Object System.Collections.Generic.List[object]
@@ -452,7 +454,7 @@ function Find-Matches($From, $To, [scriptblock]$TimeOfFrom, [scriptblock]$TimeOf
         for ($i = 0; $i -lt $To.Count; $i++) {
             if ($used.Contains($i)) { continue }
             $b = $To[$i]
-            if ($b.Key -ne $a.Key -or $b.Up -ne $a.Up) { continue }
+            if ($b.Key -ne $a.Key -or $b.Up -ne $a.Up -or $b.Injected -ne $a.Injected) { continue }
             $tb = & $TimeOfTo $b
             if ([Math]::Abs($tb - $ta) -le $WindowNs) { $found = $b; [void]$used.Add($i); break }
         }
@@ -467,7 +469,7 @@ $hookKeys = @($hook | ForEach-Object {
     })
 $scriptRawKeys = @($raw | ForEach-Object {
         [pscustomobject]@{ Key = (Get-BaseKey $_.VirtualKey); Up = $_.Up; UtcNs = ([long]$_.UtcTicks - $unixEpochTicks) * 100
-            Device = $_.Device }
+            Device = $_.Device; Injected = ([long]$_.Device -eq 0) }
     })
 $inScriptRaw = (Find-Matches $hookKeys $scriptRawKeys { $args[0].UtcNs } { $args[0].UtcNs } 300000000)
 
@@ -533,7 +535,8 @@ foreach ($line in [IO.File]::ReadLines($eventsPath)) {
     }
     if ($e.channel -eq 'input.keyboard' -and $e.eventType -eq 'raw-keyboard') {
         $recorderRaw.Add([pscustomobject]@{ Key = (Get-BaseKey $e.payload.virtualKey); Up = (($e.payload.flags -band 1) -ne 0)
-                Ns = [long]$e.monotonicNanoseconds; Device = $e.payload.deviceHandle })
+                Ns = [long]$e.monotonicNanoseconds; Device = $e.payload.deviceHandle
+                Injected = ([long]$e.payload.deviceHandle -eq 0) })
     }
     elseif ($e.channel -eq 'browser.dispatch' -and $e.eventType -eq 'dispatch-started' -and
         (Get-Prop $e.payload 'eventName') -eq 'keydown' -and (Get-Prop $e.payload 'trusted') -eq $true) {
