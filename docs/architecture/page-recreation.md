@@ -8166,6 +8166,135 @@ step and the time the frames built in place were built are measured. The
 frame-reading cost, most of it opening a resource reader for each frame,
 is not yet assessed against larger pages.
 
+#### Build plan for 5c (proposed, not built)
+
+Proposed 2026-10-07, from the agreed step 5c above, the settled scope
+(each frame's own timers, listeners, sheets, animations, scripts, and
+notes, for the document chosen in the panel), and the time for each frame
+agreed after the 5b result.
+
+What was read first, in the target machine's checkout, and in this
+repository:
+
+- An extension's `chrome.devtools.inspectedWindow.eval` with `frameURL`
+  runs in the first frame, across every target DevTools has, whose `url`
+  equals the given address exactly
+  (`third_party/devtools-frontend/src/front_end/panels/common/ExtensionServer.ts`,
+  lines 1727 to 1745), in that frame's default context (lines 1784 to
+  1792). Without `frameURL` it runs in the main frame of the primary page
+  target. An out of process frame is a target of its own, so it is
+  reached this way; but of two frames with one address, only the first is.
+  The fixture's two frames at `child.html?name=twin` have one address.
+- A frame with its parent's origin is reached from its parent through its
+  owner's `contentDocument`, whatever its address, as the builder already
+  reaches a frame it builds in place.
+- `Runtime.addBinding` with no context adds a function to every context
+  of the session's target, and, while `Runtime` is enabled in that
+  session, to each context made later
+  (`v8/src/inspector/v8-runtime-agent-impl.cc`, lines 925 to 954 and 1074
+  to 1101). A call is reported as `Runtime.bindingCalled` only to a session
+  that added the binding (line 1069).
+- `performance.timeOrigin` is the document's time origin on the monotonic
+  clock plus a wall-clock offset read when the document's `Performance`
+  object is made (`third_party/blink/renderer/core/timing/performance.cc`,
+  lines 129 to 133, 303 to 304, and 350 to 356). Times within one document
+  are on one clock; the difference between two documents' origins also
+  carries any change of the wall clock between the two reads.
+- Each frame's fonts, images, sheets, animations, and scripts are already
+  read for its own document key in 5b (`RecordingFileResources.Read`), and
+  its timers, listeners, focus, and selection are in its own state, so its
+  evidence is made by `RecordedEvidence.Create` as the top document's is.
+- The panel's `findNode` reaches open shadow roots only, and the panel's
+  path tests run its own source in Chromium
+  (`RecordedPageTests.cs`, line 530; `RecreationTests.cs`, line 233).
+
+The plan:
+
+1. Each frame's evidence. `RecordedPage.Content` makes a
+   `RecreationEvidence` for every frame whose document has a DOM walk at
+   the frame, built or not, since the evidence is the recording's, not the
+   recreation's: its description (address, the choice and the basis of its
+   state), its notes, interactive elements and listeners, timers,
+   animations, scripts, and focus and selection. The resources of a frame
+   not built are kept while its evidence lists scripts, so their text can
+   be shown, as the top document's are when it is not served.
+2. Serving it. `frames.json` gives each frame, in its rows of 5b, its
+   origin, the choice and basis texts, its times (below), and, when it has
+   evidence, the address of that evidence, `evidence/<n>.json`, `n` being
+   the frame's place in the list. `script/<digest>` answers a script listed
+   in any document's evidence, read through that document's resources.
+3. The panel. A "Document shown" list, the top document first, then each
+   frame with evidence, named by its key, owner path, and address, sets
+   the per-document sections (Recreation, Notes, Interactive elements,
+   Other listeners, Timers, Animations, Scripts, Focus and selection) to
+   that document's evidence, and announces the change. The Frames,
+   Navigations blocked, and Time to open sections stay page-wide. The
+   Frames table gains the origin, the document chosen with its basis, the
+   times, the owner's Select and Copy buttons, and a "Show evidence"
+   button that sets the list. An origin is read from the address; an
+   `about:blank` or `about:srcdoc` frame is given its parent's origin, and
+   the table says it is inherited.
+4. Paths into frames. A path in a frame's evidence is written as each
+   owner's path from the top, each followed by `/#document`, then the path
+   in the frame's document. Select walks from the top document: it finds
+   each owner as now, and goes on in its `contentDocument`. Where an owner
+   has no `contentDocument`, the frame being of another origin, Select
+   goes on with `frameURL` set to that frame's recorded address, in which
+   the expression first checks that `__recorderRecreation.frameKey` is that
+   frame's key. The recorder writes each served document's key into its
+   data, and the builder exposes it, so a check cannot pass in another
+   frame. When it fails, the panel says that another frame of the
+   recreation has the same address, and that DevTools reaches a frame of
+   another origin for an extension by its address only, so this one cannot
+   be selected from the panel. Owners in closed shadow roots stay out of
+   reach, as now.
+5. A time for each frame. Each served document's builder, after its
+   first paint after the build, calls a binding the recorder adds, with
+   `Runtime.addBinding` and `Runtime.enable`, in each page and frame
+   session before the target runs. It passes its key, its
+   `performance.timeOrigin`, its builder times, and, for each frame it
+   built in place, when that build started and finished. The recorder
+   keeps them by key. The Frames table gives, in milliseconds from the top
+   document's time origin, when each frame's load started, when it was
+   built, and when its first frame after the build was painted; and how
+   long the frame took from its own load start to that paint, which is on
+   one clock. A frame built in place is given its build's start and end on
+   its parent's clock. A frame not built has no times. The panel says that
+   times of different documents are compared through each document's wall
+   clock offset, as above. The binding is called only by the builder, as
+   no page script runs; a payload that is not as described is ignored.
+
+Required tests, as the agreed design lists them, and in addition:
+
+- Unit tests: each frame's evidence, built or not, with its own timers,
+  listeners, scripts, and sheets and no other document's; `frames.json`
+  and `evidence/<n>.json`; a script of a frame answered and a script of no
+  listed document refused; a path into a frame, nested, and through an
+  in-place frame; a binding payload kept by key, and payloads not as
+  described ignored.
+- Integration tests with stock Chromium and `--site-per-process`, in the
+  sandbox, as in 5b: the panel's Select expression, taken from the
+  panel's own source and run in the contexts the extension API would
+  choose (the main frame's, and the frame target whose address matches),
+  selects a node in a same-origin frame, in a cross-site frame, in a frame
+  of that frame, and in a frame built in place; of two cross-site frames
+  with one address, the second is refused with the reason; the binding
+  reports times for every served frame and every frame built in place.
+- System test on the target machine, on the 5a recording: for each frame
+  in turn, "Show evidence" lists its own timers, listeners, sheets,
+  animations, and scripts; Select on a node of each frame's evidence
+  selects it in the Elements panel; the Frames table's times; the open
+  time compared with 5b's.
+
+Open questions:
+
+- Two cross-site frames with one address: the plan accepts that only the
+  first can be selected from the panel, and says so. A frame of the
+  fixture would test this on the target machine, but needs a new
+  recording; without it, it is tested in the sandbox only.
+- The times compare documents through the wall clock, as above, and say
+  so; no other clock is available to page script.
+
 ## Slice 3b implementation
 
 In progress on the `recreation` branch. This section records what is built
