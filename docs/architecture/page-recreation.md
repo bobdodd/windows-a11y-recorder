@@ -7611,9 +7611,10 @@ of reading the scripts on a large recording, has not been measured.
   DevTools' Computed pane and box model show the recorded values of chosen
   nodes.
 
-### Slice 5: the documents of frames (proposed, not built)
+### Slice 5: the documents of frames (agreed)
 
-Proposed 2026-10-06. The plan's slice 5 (decided 2026-09-29): the
+Proposed 2026-10-06 and agreed by the owner the same day, with the open
+questions settled as recorded under "Settled" below. The plan's slice 5 (decided 2026-09-29): the
 documents of `iframe`, `frame`, and `frameset` pages in the recreation, the
 check, and the evidence panel. It takes protocol 0.55, and is built and
 checked on the target machine in three steps, 5a, 5b, and 5c, each before
@@ -7816,17 +7817,16 @@ navigated by script after load, an `iframe` removed after load, a
 sandboxed `iframe` without `allow-scripts`, a lazy `iframe` out of view,
 and a `frameset` page.
 
-#### To be settled
+#### Settled (2026-10-06)
 
-- Whether the limits above (depth 8, 64 frames) are the ones to start
+- The limits are a depth of 8 and 64 frames in one recreation, to start
   with.
-- Whether a child that the recorder can recreate but whose owner is
-  sandboxed without `allow-scripts`, or has a `csp` attribute, is left out
-  as proposed, or served with the recreation's own changes to the owner,
-  which would then differ from the recording and be marked as the
-  recreation's.
-- Whether the panel's evidence for a child (5c) is wanted in this slice, or
-  the Frames table alone, with the document choice later.
+- A child whose owner is sandboxed without `allow-scripts`, or has a `csp`
+  attribute, is left out for now, and the omission is named in the notes
+  and in the Frames table. The recreation does not change the owner.
+- Step 5c is part of this slice and includes each frame's own evidence:
+  timers, listeners, sheets, animations, scripts, and notes, for the
+  document chosen in the panel.
 
 ## Slice 3b implementation
 
