@@ -207,7 +207,8 @@ public sealed class RecordedPageTests : IDisposable
         // be parsed (slice 4a).
         Assert.Contains("<script nonce=\"n0nce\">// Builds the recorded DOM tree", markup);
         Assert.Contains("document.addEventListener(\"DOMContentLoaded\", async () => {", markup);
-        Assert.EndsWith("}, { once: true });\n</script></head><body></body></html>", markup);
+        // A Windows checkout may give the builder's source CRLF line endings.
+        Assert.EndsWith("}, { once: true });\n</script></head><body></body></html>", markup.ReplaceLineEndings("\n"));
         Assert.Single(markup.Split("<script nonce=")[1..]);
         Assert.Contains("script-src 'nonce-n0nce';", RecreationServer.RecordedPageContentSecurityPolicy("n0nce"));
         Assert.DoesNotContain("unsafe-inline'; img", RecreationServer.RecordedPageContentSecurityPolicy("n0nce").Split("script-src")[1].Split(';')[0]);
