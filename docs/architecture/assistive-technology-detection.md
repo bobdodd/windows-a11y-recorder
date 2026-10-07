@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed 2026-10-07, not agreed and not built. This is the first design of
+Proposed 2026-10-07, approach agreed 2026-10-07, not built. This is the first design of
 the analysis and inference work that follows release 1.0.0. It records what
 Windows and Chromium make observable about the assistive technology running
 during a recording, what each signal establishes, what cannot be observed,
@@ -164,6 +164,11 @@ Each signal is listed with what it establishes, its source, and its limits.
 
 ### Windows accessibility settings
 
+- Revised 2026-10-07: these settings, with the other accessibility
+  preferences of Windows and the browser, are recorded at the start and on
+  each change as designed in
+  [accessibility preferences](accessibility-preferences.md); this section
+  states only why they matter here.
 - The registered `ATs` list also names Windows settings, such as sticky
   keys, filter keys, mouse keys, toggle keys, high contrast, caret width,
   and cursor scheme, with `Simple Profile` `SystemSetting` (see "The target
