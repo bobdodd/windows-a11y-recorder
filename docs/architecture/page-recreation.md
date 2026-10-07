@@ -7869,6 +7869,48 @@ and a `frameset` page.
   back on the first site; `child.html`, which names each frame from its
   address; and `frameset.html`.
 
+#### 5a results (2026-10-06)
+
+The owner built c97adfb on the target machine and recorded the frames
+fixture: session `20261007-014429-630dfafd064440d1af8fc650adf639c5`, about
+135 seconds, every browser connection at protocol 0.55, with no omission
+record. The index page was opened at about 3.8 seconds, scrolled to the
+lazy frame at about 82 seconds, and left for the frameset page at about
+124 seconds. The recording file was read in the development sandbox with
+`RecordingFileBrowserState` and `BrowserFrames` at 5, 7, 10, 90, 126, and
+135 seconds.
+
+- Every owner of the index page, eleven, and both of the frameset page
+  were joined to the documents of their frames. The main frame's renderer
+  was process 20828; the cross-site frame's documents were in process
+  19584, and the nested frame on the first site, inside it, was in process
+  20828, joined to its owner in process 19584. Each join named both
+  renderers where the frame had documents in both.
+- The parent's walk named the cross-site owner `remote`. Each swap was
+  recorded as a cleared owner then the same token `remote`: the nested
+  frame, the cross-site frame, the frame sent to the other site at 3
+  seconds (owner node 179, at 7.22 seconds), and the right frame of the
+  frameset.
+- The sandboxed frame without `allow-scripts` was swapped to `remote` 40
+  ms after the walk named it `local`, and its document was in a process of
+  its own, 10188.
+- The removed frame's owner was cleared at 8.20 seconds and was not in the
+  joins at 10 seconds. The lazy frame's document appeared at 81.70 seconds,
+  when it was scrolled to. Leaving the index page cleared all its owners at
+  124.3 seconds, and leaving or closing the frameset page cleared its two at 131.8
+  seconds.
+- A frame's token names more than one document: the initial empty
+  document in the parent's renderer, then each committed document, in
+  that renderer or another. The script-written `about:blank` frame had two
+  documents under one document token in the same process, node IDs 122
+  and 126. Choosing the document shown at a cut (5b) has to handle both.
+- Cost, from the bridge's cost lines in the Chromium log: 14
+  `RecordBlinkDomCheckpointFrameOwner` calls, mean 11.8 microseconds,
+  longest 44; 38 `RecordBlinkDomFrameOwnerChanged` calls, mean 12.8
+  microseconds, longest 56 (the recording holds 40 such records; the last
+  report interval was not written before the browser closed). The 54 new
+  records hold 21,571 bytes of payload.
+
 ## Slice 3b implementation
 
 In progress on the `recreation` branch. This section records what is built
