@@ -160,6 +160,8 @@ Each signal is listed with what it establishes, its source, and its limits.
   unmagnified and the lens and docked views as seen, so without the
   transform a recording does not show what a participant using full
   screen magnification saw. A third-party magnifier is not tested.
+- Recording the transform and showing the participant's view at playback
+  are designed in [magnified view playback](magnified-view-playback.md).
 
 ### Audio by process
 
