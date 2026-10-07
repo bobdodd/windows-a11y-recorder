@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.54"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.54"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.55"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.55"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -9449,3 +9449,134 @@ class ScriptSourceIntegrationTests(unittest.TestCase):
         ):
             with self.subTest(field=field):
                 self.assertIn(f'payload.Set("{field}",', bridge)
+
+
+class FrameOwnerIntegrationTests(unittest.TestCase):
+    """Slice 5a (protocol 0.55): which frame each owner element holds."""
+
+    def document_source(self, helper=""):
+        return (
+            '#include "third_party/blink/renderer/core/dom/document.h"\n'
+            f"{INTEGRATE.BLINK_BRIDGE_INCLUDE}\n"
+            "\n"
+            f"{helper}"
+            "void Document::FinishedParsing() {\n"
+            "  DocumentParserTiming::From(*this).MarkParserStop();\n"
+            "\n"
+            "}\n"
+            "\n"
+            "void Document::NotifyChangeChildren(\n"
+            "    const ContainerNode& container,\n"
+            "    const ContainerNode::ChildrenChange& change) {\n"
+            "}\n"
+        )
+
+    def signatures(self):
+        return INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def test_a_walk_names_its_frame_and_each_owner_s_frame(self):
+        helper = INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER
+        self.assertIn(
+            "recorder_document_frame->GetDevToolsFrameToken().ToString()", helper
+        )
+        self.assertIn(
+            "recorder_document_frame && recorder_document_frame->IsMainFrame()",
+            helper,
+        )
+        # The owner's record follows its node record, before its children
+        # are queued.
+        node = helper.index("a11y_recorder::RecordBlinkDomCheckpointNode(")
+        owner = helper.index("a11y_recorder::RecordBlinkDomCheckpointFrameOwner(")
+        children = helper.index("recorder_pending.push_back(recorder_child);")
+        self.assertLess(node, owner)
+        self.assertLess(owner, children)
+        self.assertIn("recorder_content_frame->IsRemoteFrame()", helper)
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "helper", helper, self.signatures()
+            ),
+        )
+
+    def test_upgrades_a_dom_helper_that_names_no_frame(self):
+        legacy = INTEGRATE.LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER
+        self.assertNotIn("GetDevToolsFrameToken", legacy)
+        # The superseded helper calls the started record with four
+        # arguments, which the bridge no longer declares.
+        self.assertNotEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "legacy", legacy, self.signatures()
+            ),
+        )
+        first = self.patch_twice(
+            "document.cc",
+            self.document_source(legacy),
+            INTEGRATE.patch_blink_document,
+        )
+        self.assertNotIn(legacy, first)
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_DOM_CHECKPOINT_HELPER))
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", first, self.signatures()
+            ),
+        )
+
+    def test_an_owner_records_each_frame_it_is_given_and_its_loss(self):
+        source = (
+            INTEGRATE.BLINK_FRAME_OWNER_OWN_INCLUDE
+            + "\n\nnamespace blink {\n\n"
+            "void HTMLFrameOwnerElement::SetContentFrame(Frame& frame) {\n"
+            "  content_frame_ = &frame;\n\n"
+            + INTEGRATE.BLINK_FRAME_OWNER_SET_ANCHOR
+            + "\nvoid HTMLFrameOwnerElement::ClearContentFrame() {\n"
+            "  if (!content_frame_)\n    return;\n\n"
+            + INTEGRATE.BLINK_FRAME_OWNER_CLEAR_ANCHOR
+            + "}\n\n}  // namespace blink\n"
+        )
+        first = self.patch_twice(
+            "html_frame_owner_element.cc", source, INTEGRATE.patch_blink_frame_owner
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_OWNER_SET_HOOK))
+        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_OWNER_CLEAR_HOOK))
+        # The set record is written once the owner holds the frame; the
+        # cleared record while it still does, so the order is the frame's.
+        set_record = first.index("frame.GetDevToolsFrameToken().ToString()")
+        self.assertLess(first.index("content_frame_ = &frame;"), set_record)
+        clear = first.index("GetDomNodeId(), std::string(), false);")
+        self.assertLess(clear, first.index("  content_frame_ = nullptr;"))
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", first, self.signatures()
+            ),
+        )
+
+    def test_the_bridge_writes_the_frame_records(self):
+        bridge = (
+            MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"dom-checkpoint-frame-owner"', bridge)
+        self.assertIn('"dom-frame-owner-changed"', bridge)
+        self.assertIn('payload.Set("frameToken", base::Value());', bridge)
+        self.assertIn('payload.Set("mainFrame", main_frame);', bridge)
+        self.assertIn('remote ? "remote" : "local"', bridge)
+        # The changed record is not a DOM transition.
+        start = bridge.index("void RecordBlinkDomFrameOwnerChanged(")
+        end = bridge.index("\n}\n", start)
+        self.assertNotIn("CreateDomStateChangeBasePayload", bridge[start:end])

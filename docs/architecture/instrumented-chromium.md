@@ -1163,7 +1163,15 @@ compile, in a document's main thread, and its source once per digest. The
 design is in [page recreation](page-recreation.md), "Slice 4h: the page's
 script source".
 
-Live 0.54 connections require an exact protocol-version match.
+Protocol version 0.55 adds `frameToken` and `mainFrame` to
+`dom-checkpoint-started`, and two `browser.dom` records:
+`dom-checkpoint-frame-owner`, in a walk, for each frame owner element that
+holds a frame, and `dom-frame-owner-changed`, when an owner is given a frame
+or loses it. Frames are named by their DevTools frame token, which every
+renderer gives the same frame. The design is in
+[page recreation](page-recreation.md), "Slice 5: the documents of frames".
+
+Live 0.55 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

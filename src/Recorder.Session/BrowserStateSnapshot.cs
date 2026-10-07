@@ -179,6 +179,31 @@ public static class BrowserStateSnapshot
         writer.WriteEndArray();
         writer.WriteEndObject();
 
+        // Protocol 0.55 (slice 5a); a snapshot written before it has none.
+        var frames = document.Frames;
+        writer.WriteStartObject("frames");
+        writer.WriteBoolean("recorded", frames.Recorded);
+        WriteText(writer, "frameToken", frames.FrameToken);
+        if (frames.MainFrame is { } main)
+        {
+            writer.WriteBoolean("mainFrame", main);
+        }
+        else
+        {
+            writer.WriteNull("mainFrame");
+        }
+        writer.WriteStartArray("owners");
+        foreach (var (_, owner) in frames.Owners.OrderBy(item => item.Key))
+        {
+            writer.WriteStartArray();
+            writer.WriteNumberValue(owner.OwnerNodeId);
+            writer.WriteStringValue(owner.FrameToken);
+            writer.WriteStringValue(owner.FrameLocation);
+            writer.WriteEndArray();
+        }
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+
         writer.WriteEndObject();
     }
 
@@ -282,6 +307,18 @@ public static class BrowserStateSnapshot
                 .Select(node => (node.GetProperty("record"), node.GetProperty("time").GetInt64())),
             accessibility.GetProperty("eventKey").GetInt64(),
             accessibility.GetProperty("time").GetInt64());
+
+        if (root.TryGetProperty("frames", out var frames))
+        {
+            document.Frames.Load(
+                Text(frames, "frameToken"),
+                frames.GetProperty("mainFrame").ValueKind is JsonValueKind.True or JsonValueKind.False
+                    ? frames.GetProperty("mainFrame").GetBoolean()
+                    : null,
+                frames.GetProperty("recorded").GetBoolean(),
+                frames.GetProperty("owners").EnumerateArray().Select(item =>
+                    new FrameOwnerState(item[0].GetInt64(), item[1].GetString()!, item[2].GetString()!)));
+        }
         return document;
     }
 

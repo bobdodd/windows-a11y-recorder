@@ -214,6 +214,107 @@ public sealed class InteractionDocumentState
 }
 
 /// <summary>
+/// A frame a frame owner element held (protocol 0.55, slice 5a): the frame's
+/// DevTools frame token, which every renderer gives the same frame, and
+/// whether it was "local" or "remote" in the owner's renderer.
+/// </summary>
+public sealed record FrameOwnerState(long OwnerNodeId, string FrameToken, string FrameLocation);
+
+/// <summary>
+/// The frames of one document (protocol 0.55, slice 5a): the DevTools frame
+/// token of the document's own frame and whether it is a main frame, from its
+/// latest DOM walk, and the frame each of its owner elements holds, from its
+/// latest DOM walk and each owner change after it.
+/// </summary>
+public sealed class FrameDocumentState
+{
+    private readonly Dictionary<long, FrameOwnerState> _owners = [];
+    private Dictionary<long, FrameOwnerState>? _walk;
+
+    /// <summary>The document's frame's token, or null when no walk named one.</summary>
+    public string? FrameToken { get; private set; }
+
+    /// <summary>Whether the document's frame is a main frame, or null when no walk said.</summary>
+    public bool? MainFrame { get; private set; }
+
+    /// <summary>The frame each owner element holds, by owner node.</summary>
+    public IReadOnlyDictionary<long, FrameOwnerState> Owners => _owners;
+
+    /// <summary>True once a record of protocol 0.55 or later named the document's frames.</summary>
+    public bool Recorded { get; private set; }
+
+    /// <summary>Applies one browser.dom record; returns true when it changed the frames.</summary>
+    internal bool Apply(string eventType, JsonElement payload)
+    {
+        switch (eventType)
+        {
+            case "dom-checkpoint-started":
+                _walk = null;
+                if (!payload.TryGetProperty("frameToken", out var token))
+                {
+                    return false;
+                }
+                Recorded = true;
+                FrameToken = token.ValueKind == JsonValueKind.String ? token.GetString() : null;
+                MainFrame = payload.TryGetProperty("mainFrame", out var main) && main.ValueKind is JsonValueKind.True or JsonValueKind.False
+                    ? main.GetBoolean()
+                    : null;
+                _walk = [];
+                return true;
+            case "dom-checkpoint-frame-owner" when _walk is not null && Owner(payload) is { } owner:
+                _walk[owner.OwnerNodeId] = owner;
+                return true;
+            case "dom-checkpoint-completed" when _walk is not null:
+                // A whole walk names every owner that held a frame; a cut
+                // walk only those it reached, which are added to the others.
+                if (!(payload.TryGetProperty("truncated", out var truncated) && truncated.ValueKind == JsonValueKind.True))
+                {
+                    _owners.Clear();
+                }
+                foreach (var (node, state) in _walk)
+                {
+                    _owners[node] = state;
+                }
+                _walk = null;
+                return true;
+            case "dom-frame-owner-changed" when payload.TryGetProperty("ownerNodeId", out var node) && node.TryGetInt64(out var id):
+                Recorded = true;
+                if (Owner(payload) is { } given)
+                {
+                    _owners[id] = given;
+                    _walk?.Remove(id);
+                }
+                else
+                {
+                    _owners.Remove(id);
+                    _walk?.Remove(id);
+                }
+                return true;
+        }
+        return false;
+    }
+
+    internal void Load(string? frameToken, bool? mainFrame, bool recorded, IEnumerable<FrameOwnerState> owners)
+    {
+        FrameToken = frameToken;
+        MainFrame = mainFrame;
+        Recorded = recorded;
+        _owners.Clear();
+        foreach (var owner in owners)
+        {
+            _owners[owner.OwnerNodeId] = owner;
+        }
+    }
+
+    private static FrameOwnerState? Owner(JsonElement payload) =>
+        payload.TryGetProperty("ownerNodeId", out var node) && node.TryGetInt64(out var id) &&
+        payload.TryGetProperty("frameToken", out var token) && token.ValueKind == JsonValueKind.String &&
+        payload.TryGetProperty("frameLocation", out var location) && location.ValueKind == JsonValueKind.String
+            ? new FrameOwnerState(id, token.GetString()!, location.GetString()!)
+            : null;
+}
+
+/// <summary>
 /// The recorded state of one browser document, rebuilt from its records in
 /// record order: its DOM tree, its layout state, its interaction state, its
 /// listeners and timers, and its accessibility data, with how complete each
@@ -249,6 +350,9 @@ public sealed class BrowserDocumentState(string key)
 
     /// <summary>The latest recorded accessibility data of each DOM node of the document.</summary>
     public AccessibilityDocumentState Accessibility { get; internal set; } = new();
+
+    /// <summary>The document's frame and the frames its owner elements hold (protocol 0.55).</summary>
+    public FrameDocumentState Frames { get; internal set; } = new();
 
     public BrowserStateCompleteness DomCompleteness { get; internal set; } = BrowserStateCompleteness.NotWalked;
     public BrowserStateCompleteness LayoutCompleteness { get; internal set; } = BrowserStateCompleteness.NotWalked;

@@ -99,6 +99,12 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.DomCheckpointStarted) =>
                 payload.Deserialize<BrowserDomCheckpointStartedPayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomCheckpointFrameOwner) =>
+                payload.Deserialize<BrowserDomCheckpointFrameOwnerPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
+                BrowserEvidenceEventTypes.DomFrameOwnerChanged) =>
+                payload.Deserialize<BrowserDomFrameOwnerChangedPayload>(JsonOptions) as object,
+            (BrowserEvidenceChannels.Dom,
                 BrowserEvidenceEventTypes.DomCheckpointNode) =>
                 payload.Deserialize<BrowserDomCheckpointNodePayload>(JsonOptions) as object,
             (BrowserEvidenceChannels.Dom,

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cross-site frame</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; margin: 8px; background: #f8f0e8; }
+    iframe { width: 300px; height: 60px; border: 2px solid #643; }
+  </style>
+</head>
+<body>
+  <h1>Cross-site frame</h1>
+  <iframe id="nested" title="Nested frame on the first site" src="http://127.0.0.1:8765/child.html?name=nested"></iframe>
+</body>
+</html>

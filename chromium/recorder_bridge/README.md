@@ -500,6 +500,16 @@ scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
 `scroll_element_id`, and the bridge writes it as decimal text, or null for
 zero.
 
+Protocol 0.55 (slice 5a) records frames on `browser.dom`. The DOM walk
+helper in `document.cc` passes `BeginBlinkDomCheckpoint` the walked
+document's frame's `GetDevToolsFrameToken().ToString()` and `IsMainFrame()`,
+or an empty token for a document with no frame, and follows the node record
+of each `HTMLFrameOwnerElement` with a `ContentFrame()` with
+`RecordBlinkDomCheckpointFrameOwner`. `HTMLFrameOwnerElement::SetContentFrame`
+and `ClearContentFrame` call `RecordBlinkDomFrameOwnerChanged`, with an empty
+token when the frame is cleared. `integrate.py` upgrades a helper patched for
+protocols 0.35 to 0.54 in place.
+
 Protocol 0.54 (slice 4h) adds the `browser.script` channel. `integrate.py`
 patches V8: `Debug::OnAfterCompile` and
 `PendingCompilationErrorHandler::ThrowPendingError` call

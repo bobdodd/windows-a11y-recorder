@@ -475,11 +475,41 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
 // only when the document has no walk yet, when a DOM record was lost since its
 // last walk, or at the recording's check interval. The caller still records
 // the interaction snapshot of a mutation delivery that was not walked.
+//
+// Protocol 0.55 (slice 5a): the started record also names the DevTools frame
+// token of the document's frame, and whether that frame is a main frame. An
+// empty token means the document has no frame; both are then written as null.
 COMPONENT_EXPORT(RECORDER_BRIDGE)
 uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string document_token,
                                  std::string reason,
-                                 int maximum_nodes);
+                                 int maximum_nodes,
+                                 std::string frame_token,
+                                 bool main_frame);
+
+// Protocol 0.55 (slice 5a): records, after the node record of a frame owner
+// element (iframe, frame, object, embed, or fencedframe) in the same
+// checkpoint, the DevTools frame token of the frame it holds, and whether that
+// frame is remote in this renderer. An owner that holds no frame is not
+// recorded.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomCheckpointFrameOwner(uint64_t checkpoint_sequence,
+                                        int document_node_id,
+                                        std::string document_token,
+                                        int owner_node_id,
+                                        std::string frame_token,
+                                        bool remote);
+
+// Protocol 0.55 (slice 5a): records that a frame owner element was given a
+// frame, from HTMLFrameOwnerElement::SetContentFrame, or lost it, from
+// ClearContentFrame, in which case the frame token is empty and written as
+// null. The record is not a DOM transition: it takes no transition ID.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBlinkDomFrameOwnerChanged(int document_node_id,
+                                     std::string document_token,
+                                     int owner_node_id,
+                                     std::string frame_token,
+                                     bool remote);
 
 // Records one node in preorder. The data of a character data node is recorded
 // after it by RecordBlinkDomCheckpointNodeCharacterData.

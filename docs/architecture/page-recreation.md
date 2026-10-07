@@ -7828,6 +7828,47 @@ and a `frameset` page.
   timers, listeners, sheets, animations, scripts, and notes, for the
   document chosen in the panel.
 
+#### As built (5a, protocol 0.55; not yet run on the target machine)
+
+- Blink: the DOM walk helper in `document.cc` passes the walked
+  document's `LocalFrame`'s `GetDevToolsFrameToken().ToString()` and
+  `IsMainFrame()` to `BeginBlinkDomCheckpoint`, or an empty token when the
+  document has no frame. After each node record, an
+  `HTMLFrameOwnerElement` whose `ContentFrame()` is set is followed by
+  `dom-checkpoint-frame-owner`, with `IsRemoteFrame()` giving `remote`. The
+  record comes before the node's attribute records. A tree patched for
+  protocols 0.35 to 0.54 has its helper upgraded in place.
+- Blink: `html_frame_owner_element.cc` records
+  `dom-frame-owner-changed` at the end of `SetContentFrame` and in
+  `ClearContentFrame`, before the frame pointer is cleared, in the owner's
+  document's context. The record is not a DOM transition and takes no
+  transition ID.
+- The bridge writes `frameToken` and `mainFrame` as null together when the
+  token is empty, and `frameToken` and `frameLocation` as null together for
+  a cleared owner. The token is base's `Token::ToString()`, 32 uppercase
+  hexadecimal digits, and the validator refuses any other form, a token
+  without `mainFrame`, and a location without a token.
+- Database: migration 0017 adds `frame_token` and `main_frame` to
+  `browser_dom_checkpoint_starts`, both optional, so a walk recorded
+  before 0.55 rebuilds without them. The two new records have no evidence
+  table; a recording file holds them as recorded.
+- State: each document's state gains its frames: its own frame's token
+  and whether it is a main frame, from its latest walk, and the frame each
+  of its owners holds. A whole walk replaces the owners; a cut walk adds
+  those it reached to the others; each owner change applies at once. The
+  frames are kept in the state snapshot under `frames`, which a snapshot
+  written before 0.55 lacks, so the snapshot format version is unchanged.
+- `BrowserFrames` joins each owner to the documents whose walks name its
+  frame's token, in any renderer process, in order of their first record,
+  and finds the owners of a document's frame. Which of a frame's
+  documents is shown at a cut is left to 5b.
+- The fixture is `tests/fixtures/frames/`: `index.html` with the frames of
+  the list above, and a frame a script navigates to the other site after 3
+  seconds, so that its frame is swapped between local and remote with the
+  same token; `cross.html`, the cross-site frame holding a nested frame
+  back on the first site; `child.html`, which names each frame from its
+  address; and `frameset.html`.
+
 ## Slice 3b implementation
 
 In progress on the `recreation` branch. This section records what is built

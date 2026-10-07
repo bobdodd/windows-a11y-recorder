@@ -192,6 +192,9 @@ public sealed class BrowserStateBuilder
                 _applyingTime = time;
                 _dom.Apply(eventType, payload);
                 _applying = null;
+                // Protocol 0.55 (slice 5a): the document's frame and the
+                // frames its owner elements hold.
+                document.Frames.Apply(eventType, payload);
                 document.Dom = _dom.Documents.GetValueOrDefault(key);
                 if (eventType.StartsWith("dom-", StringComparison.Ordinal) && document.Dom is not null)
                 {

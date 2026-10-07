@@ -413,6 +413,14 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.55 records the frames of each document: a DOM walk names the
+DevTools frame token of its document's frame and whether it is a main frame,
+and the frame each frame owner element (`iframe`, `frame`, `object`,
+`embed`, `fencedframe`) holds, and each change of an owner's frame is
+recorded as it happens. The token names a frame in every renderer, so an
+owner is joined to its frame's documents in the same process or in
+another. See "Slice 5" in [page recreation](docs/architecture/page-recreation.md).
+
 Protocol 0.54 records the source of each script V8 instantiates, or fails
 to compile, in a document's main thread, on a new channel, `browser.script`:
 a `script-parsed` record for each script, with its kind, world, URL, start

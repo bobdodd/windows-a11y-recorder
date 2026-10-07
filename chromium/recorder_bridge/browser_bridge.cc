@@ -2710,7 +2710,9 @@ void RecordBlinkIdleCallbackCancelled(uintptr_t callback_identity,
 uint64_t BeginBlinkDomCheckpoint(int document_node_id,
                                  std::string document_token,
                                  std::string reason,
-                                 int maximum_nodes) {
+                                 int maximum_nodes,
+                                 std::string frame_token,
+                                 bool main_frame) {
   static const int recorder_span_slot = CostSpanSlot("span:dom-checkpoint");
   BeginCostSpan(recorder_span_slot);
   A11Y_RECORDER_COST("BeginBlinkDomCheckpoint");
@@ -2731,9 +2733,65 @@ uint64_t BeginBlinkDomCheckpoint(int document_node_id,
   payload.Set("reason", std::move(reason));
   payload.Set("walkReason", std::move(walk_reason));
   payload.Set("maximumNodes", maximum_nodes);
+  if (frame_token.empty()) {
+    payload.Set("frameToken", base::Value());
+    payload.Set("mainFrame", base::Value());
+  } else {
+    payload.Set("frameToken", std::move(frame_token));
+    payload.Set("mainFrame", main_frame);
+  }
   SendBlinkEvidence("browser.dom", "dom-checkpoint-started",
                     std::move(payload));
   return checkpoint_sequence;
+}
+
+void RecordBlinkDomCheckpointFrameOwner(uint64_t checkpoint_sequence,
+                                        int document_node_id,
+                                        std::string document_token,
+                                        int owner_node_id,
+                                        std::string frame_token,
+                                        bool remote) {
+  A11Y_RECORDER_COST("RecordBlinkDomCheckpointFrameOwner");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || checkpoint_sequence == 0 || document_node_id <= 0 ||
+      document_token.empty() || owner_node_id <= 0 || frame_token.empty()) {
+    return;
+  }
+  base::DictValue payload = CreateDomCheckpointBasePayload(
+      *client, checkpoint_sequence, document_node_id,
+      std::move(document_token));
+  payload.Set("ownerNodeId", owner_node_id);
+  payload.Set("frameToken", std::move(frame_token));
+  payload.Set("frameLocation", remote ? "remote" : "local");
+  SendBlinkEvidence("browser.dom", "dom-checkpoint-frame-owner",
+                    std::move(payload));
+}
+
+void RecordBlinkDomFrameOwnerChanged(int document_node_id,
+                                     std::string document_token,
+                                     int owner_node_id,
+                                     std::string frame_token,
+                                     bool remote) {
+  A11Y_RECORDER_COST("RecordBlinkDomFrameOwnerChanged");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || document_node_id <= 0 || document_token.empty() ||
+      owner_node_id <= 0) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context",
+              CreateContext(*client, document_node_id,
+                            std::move(document_token)));
+  payload.Set("ownerNodeId", owner_node_id);
+  if (frame_token.empty()) {
+    payload.Set("frameToken", base::Value());
+    payload.Set("frameLocation", base::Value());
+  } else {
+    payload.Set("frameToken", std::move(frame_token));
+    payload.Set("frameLocation", remote ? "remote" : "local");
+  }
+  SendBlinkEvidence("browser.dom", "dom-frame-owner-changed",
+                    std::move(payload));
 }
 
 void RecordBlinkDomCheckpointNode(uint64_t checkpoint_sequence,

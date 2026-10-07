@@ -1194,6 +1194,60 @@ BLINK_DOM_CHECKPOINT_HELPER = BLINK_DOM_CHECKPOINT_HELPER.replace(
 """,
     1,
 )
+# Protocol 0.55 (slice 5a). A walk names the DevTools frame token of the
+# document's frame, and whether it is a main frame, in its started record, and
+# follows the node record of each frame owner element that holds a frame with
+# that frame's token. See docs/architecture/page-recreation.md, "Slice 5".
+LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER = BLINK_DOM_CHECKPOINT_HELPER
+BLINK_DOM_CHECKPOINT_HELPER = BLINK_DOM_CHECKPOINT_HELPER.replace(
+    """\
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_reason, kRecorderMaximumDomCheckpointNodes);
+""",
+    """\
+  LocalFrame* recorder_document_frame = recorder_document.GetFrame();
+  const uint64_t recorder_checkpoint_sequence =
+      a11y_recorder::BeginBlinkDomCheckpoint(
+          recorder_document_node_id, recorder_document_token,
+          recorder_reason, kRecorderMaximumDomCheckpointNodes,
+          recorder_document_frame
+              ? recorder_document_frame->GetDevToolsFrameToken().ToString()
+              : std::string(),
+          recorder_document_frame && recorder_document_frame->IsMainFrame());
+""",
+    1,
+).replace(
+    """\
+        recorder_node.nodeName().Utf8().c_str());
+    ++recorder_node_count;
+""",
+    """\
+        recorder_node.nodeName().Utf8().c_str());
+    ++recorder_node_count;
+    // A frame owner element that holds a frame is followed by that frame's
+    // DevTools frame token, which the frame's own renderer also records.
+    if (auto* recorder_frame_owner =
+            DynamicTo<HTMLFrameOwnerElement>(recorder_node)) {
+      if (Frame* recorder_content_frame =
+              recorder_frame_owner->ContentFrame()) {
+        a11y_recorder::RecordBlinkDomCheckpointFrameOwner(
+            recorder_checkpoint_sequence, recorder_document_node_id,
+            recorder_document_token, recorder_node.GetDomNodeId(),
+            recorder_content_frame->GetDevToolsFrameToken().ToString(),
+            recorder_content_frame->IsRemoteFrame());
+      }
+    }
+""",
+    1,
+)
+if LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER.count(
+    "a11y_recorder::RecordBlinkDomCheckpointFrameOwner"
+) or BLINK_DOM_CHECKPOINT_HELPER.count(
+    "a11y_recorder::RecordBlinkDomCheckpointFrameOwner"
+) != 1 or BLINK_DOM_CHECKPOINT_HELPER.count("GetDevToolsFrameToken()") != 2:
+    raise RuntimeError("the protocol 0.55 DOM checkpoint helper did not apply")
 # Protocol 0.34. The structural changes of a connected DOM tree, recorded in
 # the order Blink makes them. The helper is defined in document.cc beside the
 # checkpoint, since the document's mutation hook is its main caller, and is
@@ -5157,6 +5211,15 @@ def patch_blink_document(path: Path) -> None:
         text = replace_once(
             text,
             LEGACY_UNSKIPPED_BLINK_DOM_CHECKPOINT_HELPER,
+            BLINK_DOM_CHECKPOINT_HELPER,
+            path,
+        )
+    # A tree patched for protocols 0.35 to 0.54 holds a DOM helper that names
+    # no frame (slice 5a).
+    if LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER in text:
+        text = replace_once(
+            text,
+            LEGACY_UNFRAMED_BLINK_DOM_CHECKPOINT_HELPER,
             BLINK_DOM_CHECKPOINT_HELPER,
             path,
         )
@@ -19449,6 +19512,70 @@ def patch_blink_devtools_session(path: Path) -> None:
     write_patched(path, text)
 
 
+# Protocol 0.55 (slice 5a): a frame owner element records each frame it is
+# given and its loss, with the frame's DevTools frame token, which names the
+# frame in every renderer. See docs/architecture/page-recreation.md, "Slice 5".
+BLINK_FRAME_OWNER_OWN_INCLUDE = (
+    '#include "third_party/blink/renderer/core/html/html_frame_owner_element.h"'
+)
+BLINK_FRAME_OWNER_INCLUDES = (BLINK_BRIDGE_INCLUDE,)
+BLINK_FRAME_OWNER_SET_ANCHOR = """\
+  SetNeedsStyleRecalc(kLocalStyleChange, StyleChangeReasonForTracing::Create(
+                                             style_change_reason::kFrame));
+
+  for (ContainerNode* node = this; node; node = node->ParentOrShadowHostNode())
+    node->IncrementConnectedSubframeCount();
+}
+"""
+BLINK_FRAME_OWNER_SET_HOOK = """\
+  SetNeedsStyleRecalc(kLocalStyleChange, StyleChangeReasonForTracing::Create(
+                                             style_change_reason::kFrame));
+
+  for (ContainerNode* node = this; node; node = node->ParentOrShadowHostNode())
+    node->IncrementConnectedSubframeCount();
+
+  // Windows A11y Recorder (protocol 0.55, slice 5a): the owner's new frame,
+  // named by its DevTools frame token.
+  a11y_recorder::RecordBlinkDomFrameOwnerChanged(
+      GetDocument().GetDomNodeId(), GetDocument().Token().ToString(),
+      GetDomNodeId(), frame.GetDevToolsFrameToken().ToString(),
+      frame.IsRemoteFrame());
+}
+"""
+BLINK_FRAME_OWNER_CLEAR_ANCHOR = """\
+  RendererResourceCoordinator::Get()->OnBeforeContentFrameDetached(
+      *content_frame_, *this);
+
+  content_frame_ = nullptr;
+"""
+BLINK_FRAME_OWNER_CLEAR_HOOK = """\
+  RendererResourceCoordinator::Get()->OnBeforeContentFrameDetached(
+      *content_frame_, *this);
+
+  // Windows A11y Recorder (protocol 0.55, slice 5a): the owner holds no frame.
+  a11y_recorder::RecordBlinkDomFrameOwnerChanged(
+      GetDocument().GetDomNodeId(), GetDocument().Token().ToString(),
+      GetDomNodeId(), std::string(), false);
+
+  content_frame_ = nullptr;
+"""
+
+
+def patch_blink_frame_owner(path: Path) -> None:
+    """Slice 5a: a frame owner element records its frame and its loss."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, BLINK_FRAME_OWNER_OWN_INCLUDE, BLINK_FRAME_OWNER_INCLUDES, path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_FRAME_OWNER_SET_ANCHOR, BLINK_FRAME_OWNER_SET_HOOK, path
+    )
+    text = apply_cookie_hook(
+        text, BLINK_FRAME_OWNER_CLEAR_ANCHOR, BLINK_FRAME_OWNER_CLEAR_HOOK, path
+    )
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -19846,6 +19973,9 @@ def main() -> int:
     patch_blink_v8_initializer(blink_bindings_v8 / "v8_initializer.cc")
     patch_blink_devtools_session(
         blink_source / "core" / "inspector" / "devtools_session.cc"
+    )
+    patch_blink_frame_owner(
+        blink_source / "core" / "html" / "html_frame_owner_element.cc"
     )
     patch_v8_debug(source / "v8" / "src" / "debug" / "debug.cc")
     patch_v8_compile_error(

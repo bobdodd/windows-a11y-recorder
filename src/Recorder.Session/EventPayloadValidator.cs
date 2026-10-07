@@ -176,6 +176,12 @@ internal static class EventPayloadValidator
             case ("browser.dom", "dom-checkpoint-started"):
                 ValidateBrowserDomCheckpointStarted(payload, issues);
                 break;
+            case ("browser.dom", "dom-checkpoint-frame-owner"):
+                ValidateBrowserDomCheckpointFrameOwner(payload, issues);
+                break;
+            case ("browser.dom", "dom-frame-owner-changed"):
+                ValidateBrowserDomFrameOwnerChanged(payload, issues);
+                break;
             case ("browser.dom", "dom-checkpoint-node"):
                 ValidateBrowserDomCheckpointNode(payload, issues);
                 break;
@@ -6031,6 +6037,64 @@ internal static class EventPayloadValidator
         }
     }
 
+    // Protocol 0.55 (slice 5a): the frame a walked frame owner element held.
+    private static void ValidateBrowserDomCheckpointFrameOwner(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredString("checkpointId"),
+                RequiredInteger("ownerNodeId", positive: true),
+                FrameTokenRule("frameToken", required: true, nullable: false),
+                RequiredEnum("frameLocation", "local", "remote")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+    }
+
+    // Protocol 0.55 (slice 5a): a frame owner element given a frame or losing
+    // it. A lost frame has neither a token nor a location.
+    private static void ValidateBrowserDomFrameOwnerChanged(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("ownerNodeId", positive: true),
+                FrameTokenRule("frameToken", required: true, nullable: true),
+                NullableEnum("frameLocation", "local", "remote")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateRendererDocumentContext(payload, issues);
+        if (HasNonnullProperty(payload, "frameToken") != HasNonnullProperty(payload, "frameLocation"))
+        {
+            AddError(
+                issues,
+                "browser-dom-frame-owner-inconsistent",
+                "#/payload/frameLocation",
+                "An owner given a frame names its token and location; an owner that lost its frame names neither.");
+        }
+    }
+
+    // A DevTools frame token as Chromium writes base::UnguessableToken: 32
+    // uppercase hexadecimal digits.
+    private static PropertyRule FrameTokenRule(string name, bool required, bool nullable) =>
+        new(
+            name,
+            required,
+            nullable,
+            value => value.ValueKind == JsonValueKind.String &&
+                value.GetString() is { Length: 32 } token &&
+                token.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F'),
+            "must be a DevTools frame token of 32 uppercase hexadecimal digits");
+
     private static void ValidateBrowserDomCheckpointStarted(
         JsonElement payload,
         ICollection<EventValidationIssue> issues)
@@ -6044,11 +6108,22 @@ internal static class EventPayloadValidator
                 RequiredEnum(
                     "walkReason", "first", "after-loss", "check",
                     "started-parsing", "finished-parsing"),
-                RequiredInteger("maximumNodes", positive: true)
+                RequiredInteger("maximumNodes", positive: true),
+                // Protocol 0.55 (slice 5a); absent before it.
+                FrameTokenRule("frameToken", required: false, nullable: true),
+                OptionalNullableBoolean("mainFrame")
             ],
             issues);
         ValidateBrowserContextProperty(payload, issues);
         ValidateRendererDocumentContext(payload, issues);
+        if (HasNonnullProperty(payload, "frameToken") != HasNonnullProperty(payload, "mainFrame"))
+        {
+            AddError(
+                issues,
+                "browser-dom-checkpoint-frame-inconsistent",
+                "#/payload/mainFrame",
+                "A walked document with a frame names its token and whether it is a main frame; one with no frame names neither.");
+        }
         // From protocol 0.35 a document is walked at a mutation delivery only
         // for a reason of its own; only a finished parse, and from protocol
         // 0.42 the start of a parse, is always walked, and names itself.

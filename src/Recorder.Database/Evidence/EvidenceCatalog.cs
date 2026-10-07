@@ -409,7 +409,9 @@ internal static class EvidenceCatalog
         Text("checkpointId"),
         Name("reason"),
         Name("walkReason", N),
-        Int("maximumNodes"));
+        Int("maximumNodes"),
+        Text("frameToken", O),
+        Bool("mainFrame", O));
 
     public static readonly EvidenceTable DomCheckpointNodes = Evidence(
         "browser_dom_checkpoint_nodes",

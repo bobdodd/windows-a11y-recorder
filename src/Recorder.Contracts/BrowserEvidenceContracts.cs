@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.54";
+    public const string CurrentVersion = "0.55";
 }
 
 public static class BrowserEvidenceChannels
@@ -49,6 +49,8 @@ public static class BrowserEvidenceEventTypes
     public const string NavigationStarted = "navigation-started";
     public const string NavigationCompleted = "navigation-completed";
     public const string DomCheckpointStarted = "dom-checkpoint-started";
+    public const string DomCheckpointFrameOwner = "dom-checkpoint-frame-owner";
+    public const string DomFrameOwnerChanged = "dom-frame-owner-changed";
     public const string DomCheckpointNode = "dom-checkpoint-node";
     public const string DomCheckpointNodeAttribute = "dom-checkpoint-node-attribute";
     public const string DomCheckpointNodeCharacterData = "dom-checkpoint-node-character-data";
@@ -404,13 +406,42 @@ public sealed record BrowserNavigationPayload(
 // walk, "check" at the recording's full walk interval, or "started-parsing"
 // (protocol 0.42) or "finished-parsing" for the start or the end of a parse,
 // which is always walked. Reason is "started-parsing", "finished-parsing", or
-// "post-mutation".
+// "post-mutation". FrameToken (protocol 0.55, slice 5a) is the DevTools
+// frame token of the walked document's frame, 32 uppercase hexadecimal
+// digits, which every renderer gives the same frame, and MainFrame whether
+// that frame is a main frame; both are null for a document with no frame, and
+// absent before protocol 0.55.
 public sealed record BrowserDomCheckpointStartedPayload(
     BrowserContext Context,
     string CheckpointId,
     string Reason,
     string WalkReason,
-    int MaximumNodes);
+    int MaximumNodes,
+    string? FrameToken = null,
+    bool? MainFrame = null);
+
+// A frame owner element of a walked document (iframe, frame, object, embed, or
+// fencedframe) and the frame it held at the walk (protocol 0.55, slice 5a),
+// after the owner's node record in the same checkpoint. FrameLocation is
+// "local" when the frame was in the walking renderer and "remote" when it was
+// in another. An owner holding no frame has no record.
+public sealed record BrowserDomCheckpointFrameOwnerPayload(
+    BrowserContext Context,
+    string CheckpointId,
+    long OwnerNodeId,
+    string FrameToken,
+    string FrameLocation);
+
+// A frame owner element given a frame or losing it (protocol 0.55, slice 5a),
+// from HTMLFrameOwnerElement::SetContentFrame and ClearContentFrame. A lost
+// frame has null FrameToken and FrameLocation. A swap of a frame between local
+// and remote is a loss followed by the same token. Not a DOM transition: it
+// takes no transition ID.
+public sealed record BrowserDomFrameOwnerChangedPayload(
+    BrowserContext Context,
+    long OwnerNodeId,
+    string? FrameToken,
+    string? FrameLocation);
 
 public sealed record BrowserDomCheckpointNodePayload(
     BrowserContext Context,
