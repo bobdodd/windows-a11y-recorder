@@ -7911,6 +7911,118 @@ lazy frame at about 82 seconds, and left for the frameset page at about
   report interval was not written before the browser closed). The 54 new
   records hold 21,571 bytes of payload.
 
+#### Build plan for 5b (proposed, not built)
+
+Proposed 2026-10-07, after checks in the development sandbox with stock
+Chrome for Testing 147.0.7727.15, which has no recreation mode, run with
+`--site-per-process` against two loopback servers that logged every
+request reaching them. The checks are the ones the agreed design left to
+5b; what they found changes how the recreation's requests are held.
+
+What the checks found:
+
+- An out of process frame's document request is paused in the session of
+  the page that holds its owner, and `DOM.getFrameOwner` in that session
+  gives the owner's backend node ID. A frame inside an out of process
+  frame has its document request paused in that frame's own session, and
+  `DOM.getFrameOwner` works there. This follows Chromium's choice of the
+  DevTools host for a frame's requests: the nearest frame at or above it
+  that is a local root with a host
+  (`content/browser/devtools/render_frame_devtools_agent_host.cc`, lines
+  120 to 124 and 169 to 194, on the target machine's checkout).
+- The requests of an out of process frame's own document, such as its
+  images, are paused only in that frame's own session. With only page
+  targets attached, as now, the cross-site frame's image reached the
+  network. With every frame target attached, and `Fetch.enable` sent in
+  its session before it is released, none did.
+- A `Fetch.enable` sent on the browser's own session pauses every request
+  of every frame that no frame session answered first
+  (`content/browser/devtools/devtools_instrumentation.cc`, lines 1890 to
+  1905: a frame's handler is nearer the renderer, the browser's nearer the
+  network). With frame targets not attached, it caught the out of process
+  frame's requests.
+- The owner's positional path is read from an isolated world made with
+  `Page.createIsolatedWorld` on the owner's frame, the parent of the
+  paused frame in `Page.getFrameTree`, with `DOM.resolveNode` and
+  `Runtime.callFunctionOn`. It gave the expected paths for owners in the
+  top document and in an out of process frame.
+- A paused document request answered with status 302 and a `Location`
+  header is followed, and the followed request is paused for the same
+  frame: the frame ends at the answered address.
+- A script allowed by its nonce in the parent built a tree in an empty
+  `iframe`'s document, which it can reach. A `srcdoc` frame loaded its
+  markup under the parent's inherited policy, and the markup's script did
+  not run. A `frame-src` that names only `http` addresses did not stop
+  either frame.
+
+The plan:
+
+1. Index. The playback index keeps the `dom-checkpoint-started` records
+   that name a frame token, whole, as it keeps the popup records, so that
+   the documents of a frame are found without reading every document's
+   state. The index version goes from 2 to 3; a file with an older index
+   has its index derived again when opened, as now.
+2. The frames at a frame. For the chosen top document, its state at the
+   frame gives each owner's frame token. The documents of that token are
+   those of the index's started records at or before the frame's
+   composition. The one shown is the one committed last at or before it,
+   by the `navigation-completed` record with its document token; a
+   document with no such record counts from its first started record.
+   When two document keys share the token and the commit, as the
+   script-written `about:blank` frame's did in 5a, the one with the later
+   first record is shown. The chosen document's state is read at the frame
+   as any document's is, with its own basis. Each chosen document's own
+   owners are resolved the same way, to a depth of 8 and 64 frames.
+3. The page. Each chosen child is written with its owner's recorded node
+   ID and path, and one of four ways of building:
+   - served: an `http` or `https` address, written as the top document is,
+     with its own nonce, policy, resources, and children;
+   - built in place: an `about:blank` document, including a frame's
+     initial empty document, whose recorded tree is added to the parent's
+     data, and which the parent's builder builds in the frame's document
+     after building its own tree;
+   - `srcdoc`: the builder waits for the frame's load of its recorded
+     `srcdoc` markup, at most 10 seconds, then builds the recorded tree in
+     place as for `about:blank`;
+   - not built, with the reason: an owner sandboxed without
+     `allow-scripts` or with a `csp` attribute, a `data:` or `blob:`
+     address, an `object`, `embed`, or `fencedframe` owner, a document with
+     no DOM walk at or before the frame, and frames beyond the limits.
+   The builder's functions take the document they build in, so one builder
+   builds the top document and each child built in place. A document's
+   `frame-src` lists the exact address of each of its served children, and
+   of the served children of the children it builds in place, whose policy
+   is its own; with the `https` form of each `http` address, as the top
+   document is answered.
+4. Holding the requests. Each page session and each frame session sets
+   auto-attach to frame targets, waiting for the debugger, and each frame
+   target gets `Fetch.enable` for every request before it is released, as
+   a tab does now. The browser's own session also enables `Fetch` for
+   every request, so that a request no frame session paused is refused
+   there; only DevTools, the evidence panel extension, and the recorder's
+   loopback addresses continue. A document request of a frame other than a
+   tab's main frame is joined by its owner's path, read in an isolated
+   world as above, and answered with the child recorded under that path,
+   or with a 302 to the child's recorded address when the request is for
+   another address, as when the frame was navigated after its owner's
+   `src` was set. The join is kept by frame ID, and the frame's later
+   requests are answered from that child's resources. A request that
+   cannot be joined is refused, as now.
+5. Notes. Until the Frames table of 5c, the notes name, for each owner,
+   its path, element name, the document chosen and why, its address, the
+   way it was built or why not, whether it was in its parent's renderer
+   process when recorded, whether it is out of process in the recreation
+   (a frame target was attached for it), and whether its document was
+   asked for.
+
+Required tests, as the agreed design lists them, and in addition: a test
+in the sandbox with stock Chromium, as above, that opens a recreation with
+frames through the recorder's own control and server and finds that every
+frame's requests are paused and answered or refused, that nothing reaches
+two logging servers, and that each child is built under its owner. The
+recreation mode's imposed values are not in stock Chromium, so the visual
+check stays on the target machine.
+
 ## Slice 3b implementation
 
 In progress on the `recreation` branch. This section records what is built
