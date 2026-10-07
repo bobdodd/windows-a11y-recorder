@@ -8023,7 +8023,7 @@ two logging servers, and that each child is built under its owner. The
 recreation mode's imposed values are not in stock Chromium, so the visual
 check stays on the target machine.
 
-#### As built (5b; not yet run on the target machine)
+#### As built (5b)
 
 The owner agreed the plan above on 2026-10-07. As built:
 
@@ -8128,6 +8128,40 @@ The full .NET suite has the same 61 failures as before 5b, from the
 sandbox's environment and stock Chromium's lack of the recreation mode,
 and the Python tests pass. The visual check of each frame's area, with
 the recorded values imposed, is on the target machine.
+
+#### 5b results (2026-10-07)
+
+The owner built b653217 on the target machine and inspected the 5a
+recording, `20261007-014429-630dfafd064440d1af8fc650adf639c5`, with no
+fixture server running and the recorded ports 8765 and 8766 watched on
+127.0.0.1 and ::1 by a listener that lists every connection. The owner
+reported:
+
+- The Elements panel showed each frame's document under its owner.
+- Each frame's area appeared to match the recording, by eye; this is a
+  visual check, not pixel equality.
+- The evidence panel's Frames section listed 11 frames, as in the
+  sandbox, except that the lazy frame (`/9`) was served at
+  `child.html?name=lazy`, as it is after its commit at about 81.7
+  seconds. The three cross-site frames (`/1`, `/1/0`, `/7`) were out of
+  process; every served frame was asked for; the `srcdoc` frame and the
+  frame built in place were not; the sandboxed frame was not built, with
+  its reason.
+- The listener listed no connection.
+- For that inspection, reading the frames, their states, and their fonts
+  and images took 1655.4 ms, the longest of the recorder's steps. The
+  other recorder steps were 497.2 ms closing the previous recreation,
+  34.4 ms reading the page's state, 68.3 ms its fonts and images, 85.8 ms
+  choosing image frames and compositor values, 15.0 ms writing the page,
+  528.8 ms starting the browser, and 614.8 ms attaching and asking for the
+  page. In the page, the first style and layout finished at 445.0 ms
+  from the start of its load, the frames built in place were built at
+  515.9 ms, and the first frame after the build was painted at 526.5 ms.
+
+The Frames section has no time for each frame; only the frame-reading
+step and the time the frames built in place were built are measured. The
+frame-reading cost, most of it opening a resource reader for each frame,
+is not yet assessed against larger pages.
 
 ## Slice 3b implementation
 
