@@ -7611,6 +7611,223 @@ of reading the scripts on a large recording, has not been measured.
   DevTools' Computed pane and box model show the recorded values of chosen
   nodes.
 
+### Slice 5: the documents of frames (proposed, not built)
+
+Proposed 2026-10-06. The plan's slice 5 (decided 2026-09-29): the
+documents of `iframe`, `frame`, and `frameset` pages in the recreation, the
+check, and the evidence panel. It takes protocol 0.55, and is built and
+checked on the target machine in three steps, 5a, 5b, and 5c, each before
+the next.
+
+#### Why
+
+The recreation shows one document, a primary main frame's. An `iframe` or
+`frame` element is built with its recorded attributes, but its document is
+not: the served policy's `frame-src 'none'` and the recorder's refusal of
+any document request that is not the tab's own leave it empty
+(`RecreationServer.cs`, line 30; `RecreationControl.cs`, lines 260 to 275).
+The documents of frames are recorded, each under its own document token:
+their DOM walks, layout, styles, sheets, timers, animations, and scripts.
+The DOM walk hooks are in `Document`, so they run for every document a
+connected renderer parses, a frame's included. Session
+`20260927-140739-4a201ccaa3c142bab1a4874a289375b0` holds 12 `subframe`
+navigations, and layout checkpoints of some of their documents (see the
+rendered frame correlation evidence model). Slices 4e, 4f, and 4h leave
+the sheets and scripts of frames to this slice.
+
+What the recording does not hold is which element a frame's document is
+in. A `navigation-completed` record gives a committed document's frame
+(`context.frameId`, the frame tree node), its parent frame, and its token,
+but nothing names the `iframe` element: two `iframe` elements of one page
+with the same address cannot be told apart, and a document that was never
+committed by a navigation, such as an `iframe`'s initial `about:blank`
+document written by script, has no navigation record at all.
+
+#### What Chromium does
+
+Read in the patched Chromium checkout on the target machine; line numbers
+are those of that checkout.
+
+- Every frame, local or remote, holds a DevTools frame token,
+  `Frame::GetDevToolsFrameToken()`
+  (`third_party/blink/renderer/core/frame/frame.h`, line 305). A remote
+  frame is made with the token the browser gives it
+  (`remote_frame.h`, line 68). The browser's
+  `RenderFrameHostImpl::GetDevToolsFrameToken`
+  (`content/browser/renderer_host/render_frame_host_impl.h`, line 505) is
+  described in the same header (lines 3065 to 3067) as "a stable
+  identifier used by DevTools to identify frames and is kept constant
+  across navigations in a frame". It is the `frameId` of the DevTools
+  protocol. So the parent's renderer and
+  the child's renderer, when a frame is out of process, name the frame
+  with the same token, though each gives it a different frame token of
+  its own (`Frame::GetFrameToken()`, line 352).
+- The element that holds a frame is an `HTMLFrameOwnerElement`: `iframe`,
+  `frame`, `object`, `embed`, and `fencedframe`. Its frame is set by
+  `HTMLFrameOwnerElement::SetContentFrame`
+  (`core/html/html_frame_owner_element.h`, line 103), from
+  `Frame::Initialize` (`core/frame/frame.cc`, line 583) and from
+  `Frame::SwapImpl` when a frame is swapped between local and remote (line
+  971), and cleared by `ClearContentFrame`, from
+  `Frame::DisconnectOwnerElement` (line 198). A swap is a navigation in the
+  same frame, so the token is kept.
+- DevTools finds the element that holds a frame with `DOM.getFrameOwner`
+  (`core/inspector/inspector_dom_agent.cc`, line 3473), which walks the
+  inspected frame tree, remote frames included, so a page's session finds
+  the owner of its own out of process child.
+- The recreation's DevTools connection attaches only page targets
+  (`RecreationControl.cs`, lines 70 to 79). An `iframe`'s document request
+  is now paused in the page's session and refused there. That an out of
+  process frame's requests are also paused in the page's session, with no
+  session of its own, is expected and is checked in 5b, not assumed.
+
+#### What is recorded (protocol 0.55, step 5a)
+
+- `dom-checkpoint-started` gains `frameToken`, the DevTools frame token of
+  the walked document's frame, and `mainFrame`, whether that frame is a
+  main frame; both are null for a document with no frame.
+- A walk writes `dom-checkpoint-frame-owner` after the node record of each
+  frame owner element that holds a frame: the owner's node ID, the frame's
+  token, and whether the frame is `local` or `remote` in this renderer.
+- `dom-frame-owner-changed`, at the end of `SetContentFrame` and in
+  `ClearContentFrame` when there was a frame: the owner's node ID, the
+  frame's token, or null when cleared, and `local` or `remote`. A swap
+  writes the new state with the same token.
+- All three on `browser.dom`, in the owner's or the walked document's
+  context, as the other DOM records. Nothing is read from the child
+  document in the parent's renderer, so an out of process child adds no
+  cross-process work.
+
+#### Which document a frame shows at the frame
+
+- The owner's frame at the cut is its latest `dom-checkpoint-frame-owner`
+  or `dom-frame-owner-changed` at or before the cut, in the parent
+  document's records.
+- The documents of that frame are those whose walks name its token, in
+  any renderer process. The one shown is the document of that frame
+  committed last at or before the cut: its commit is the
+  `navigation-completed` record with its document token, and a document
+  with no such record, such as an initial `about:blank` document, counts
+  from its first record. The basis is stated, not inferred further.
+- A frame whose document has no DOM walk at or before the cut is left empty
+  and named in the notes, as a popup is.
+- Frames nest: each child's owners are resolved the same way, to a depth of
+  8 and 64 frames in one recreation; frames beyond either limit are left
+  empty and counted in the notes.
+- A recording before protocol 0.55 holds no tokens, so its frames are left
+  empty, as now, and the notes say why. No join by address is attempted.
+
+#### The recreation (step 5b)
+
+- Each child document is recreated as the top document is, by the same
+  writer and builder, from its own state at the cut, with its own nonce
+  and policy, and the policy of each document that has frames allows, in
+  `frame-src`, the exact recorded address of each of its children that is
+  served (below), and nothing else.
+- A child with an `http` or `https` address is served at that address.
+  When its owner's navigation is paused, the recorder finds the owner with
+  `DOM.getFrameOwner` in the session that paused it, takes the owner's
+  positional path (see "Paths through shadow roots") in an isolated world
+  the recorder makes with `Page.createIsolatedWorld`, so no page script is
+  run or can answer, and answers with the child recorded under the owner
+  with that path. The builder replaces the document's element only once
+  the whole tree is built (`builder.js`, lines 211 to 232), so the path is
+  final when the child is requested. The request's frame is then joined to
+  that child, and the frame's later requests, for images and fonts, are
+  answered from that child's resources. A request the recorder cannot join
+  is refused, as now.
+- Served at its recorded address, a cross-site child is put in its own
+  renderer by site isolation, as it was recorded, and DevTools shows its
+  document under its owner in the Elements panel. That the recreation's
+  process for each child matches the recording's is checked, not assumed:
+  the notes give, for each frame, whether its document was in the parent's
+  renderer process when recorded, and whether it is in the recreation.
+- A child with no request to answer, an `about:blank` or `about:srcdoc`
+  document, has its parent's origin. The parent's builder, after building
+  its own tree, builds the child's recorded tree in the child's document,
+  with the same functions, so the child keeps its address and runs no
+  script. A `srcdoc` owner first loads its recorded `srcdoc` markup, under
+  the parent's inherited policy, so none of its scripts run, and the
+  builder waits for that load before replacing it.
+- A `frameset` document is a top document with `frame` owners, and is
+  recreated the same way.
+- Not built, and named in the notes when found:
+  - a child whose owner has a `sandbox` attribute without `allow-scripts`,
+    since its builder cannot run; it is left as the served markup without
+    the recorded tree;
+  - an owner with a `csp` attribute, whose required policy the served
+    child may not meet, so Blink may refuse it;
+  - `data:` and `blob:` children, and the documents of `object`, `embed`,
+    and `fencedframe` owners;
+  - an owner with `loading="lazy"` out of view in the recreation, whose
+    child Blink may not request; the notes say whether each child was
+    requested.
+- The scroll offsets, focus, selection, and compositor values of a child
+  are applied by its own builder from its own state, where the recording
+  holds them for that document. For an out of process child, whether the
+  compositor evidence of its own compositor is joined as the top
+  document's is, is tested in 5b, not assumed.
+
+#### The evidence panel (step 5c)
+
+- A Frames table: for each frame at the frame, its owner's path, the
+  owner's element name, the document's address and origin, the basis of
+  the document's choice, whether it was in its parent's renderer process
+  when recorded and in the recreation, and whether it is recreated, with
+  the reason when it is not.
+- A choice of document, the top document first, that sets the panel's
+  other tables (timers, listeners, sheets, animations, scripts, notes) to
+  that document's evidence, as each is now for the top document.
+- A path into a frame is written as the owner's path, then
+  `/#document`, then the path in the child, and "Select in Elements"
+  selects the node in the child's document.
+
+#### Required tests
+
+- 5a: unit tests of the payload contracts and validator for the three
+  records and the two fields, including a cleared owner, a swap, and a
+  document with no frame; integration tests of the Chromium patches, their
+  signatures and cost checks, and of each patch applied twice to copies of
+  the target checkout's files with no change on the second pass;
+  integration tests reading the frames of a recording file; a system test
+  on the target machine: a recording of the frames fixture in which each
+  owner is joined to its child's document, in both renderer processes,
+  and the recording cost is measured.
+- 5b: unit tests of the frame join at a cut (owner changes, commits, an
+  initial document, nesting, the limits, a recording before 0.55), of the
+  served policies' `frame-src`, of the answers to joined and unjoined
+  frame requests, and of the builder's building of `about:blank` and
+  `srcdoc` children; integration tests writing recreations with frames
+  from recorded files; a system test on the target machine at frames of
+  the fixture's recording: the Elements panel shows each child's recorded
+  tree under its owner, a visual check of each frame's area against the
+  recorded screen frame (not pixel equality), the process of each child,
+  the time to open the recreation, and the differences found.
+- 5c: unit tests of the panel's Frames table and document choice, and of
+  paths into frames; a system test on the target machine selecting nodes
+  of each child from the panel.
+
+A new fixture, `tests/fixtures/frames/`, served on two ports, at
+`127.0.0.1` and at `localhost`, which are different sites, so that one
+child is cross-site: a same-site `iframe`, a cross-site `iframe`, an
+`iframe` in that one, two `iframe` elements with the same address, a
+`srcdoc` `iframe`, an `about:blank` `iframe` written by script, an `iframe`
+navigated by script after load, an `iframe` removed after load, a
+sandboxed `iframe` without `allow-scripts`, a lazy `iframe` out of view,
+and a `frameset` page.
+
+#### To be settled
+
+- Whether the limits above (depth 8, 64 frames) are the ones to start
+  with.
+- Whether a child that the recorder can recreate but whose owner is
+  sandboxed without `allow-scripts`, or has a `csp` attribute, is left out
+  as proposed, or served with the recreation's own changes to the owner,
+  which would then differ from the recording and be marked as the
+  recreation's.
+- Whether the panel's evidence for a child (5c) is wanted in this slice, or
+  the Frames table alone, with the document choice later.
+
 ## Slice 3b implementation
 
 In progress on the `recreation` branch. This section records what is built
