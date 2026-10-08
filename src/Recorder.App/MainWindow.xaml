@@ -370,6 +370,7 @@
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
           <ToggleButton x:Name="SettingsToggle"
                         Grid.Column="0"
@@ -444,6 +445,16 @@
                   IsEnabled="False"
                   AutomationProperties.HelpText="Recreates a recorded page as it was at the frame shown, in the instrumented Chromium with DevTools and the evidence panel. No page script runs."
                   Click="InspectPageButton_Click" />
+          <ToggleButton x:Name="WholeScreenToggle"
+                        Grid.Column="9"
+                        Margin="12,0,0,0"
+                        Padding="8,0"
+                        IsChecked="False"
+                        IsEnabled="False"
+                        Content="Whole screen"
+                        Click="WholeScreenToggle_Click"
+                        AutomationProperties.Name="Whole screen"
+                        AutomationProperties.HelpText="No recording is open." />
         </Grid>
 
         <Grid x:Name="VolumePanel" Grid.Row="1" Margin="0,10,0,0">

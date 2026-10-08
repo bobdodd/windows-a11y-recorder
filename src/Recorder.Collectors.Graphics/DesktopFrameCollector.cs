@@ -30,6 +30,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
     private long _gdiFallbackFrames;
     private WindowsGraphicsCaptureBackend? _windowsGraphicsCapture;
     private string? _windowsGraphicsCaptureFailure;
+    private FullscreenMagnificationReader? _magnification;
     private bool _disposed;
 
     public DesktopFrameCollector(int framesPerSecond = 5)
@@ -240,6 +241,10 @@ public sealed class DesktopFrameCollector : ICaptureCollector
     private async Task CaptureLoopAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(_frameInterval);
+        // Initialized for the frames of one recording, and closed when they
+        // end. The reader only reads the transform Windows Magnifier set.
+        using var magnification = new FullscreenMagnificationReader();
+        _magnification = magnification;
 
         do
         {
@@ -271,6 +276,8 @@ public sealed class DesktopFrameCollector : ICaptureCollector
             }
         }
         while (!cancellationToken.IsCancellationRequested);
+
+        _magnification = null;
     }
 
     private void CaptureFrame(long capturedAt, ulong sequence)
@@ -282,6 +289,9 @@ public sealed class DesktopFrameCollector : ICaptureCollector
         var stride = checked(width * 4);
         var pixels = GC.AllocateUninitializedArray<byte>(checked(stride * height));
         var startedAt = _context!.Clock.GetElapsedNanoseconds();
+        // Read as the frame is captured, in this process's DPI awareness,
+        // which the capture's coordinates also use.
+        var fullscreenMagnification = _magnification?.Read();
 
         var backend = "windows-graphics-capture";
         string[] qualityFlags = ["hardware-composed-wgc"];
@@ -358,7 +368,8 @@ public sealed class DesktopFrameCollector : ICaptureCollector
                 frameSelection = backend == "windows-graphics-capture"
                     ? "newest-arrived"
                     : null,
-                monitorFrames
+                monitorFrames,
+                fullscreenMagnification
             },
             capturedAt,
             sequence,

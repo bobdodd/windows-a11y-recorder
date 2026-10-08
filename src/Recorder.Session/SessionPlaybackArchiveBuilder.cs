@@ -331,7 +331,29 @@ public sealed class SessionPlaybackArchiveBuilder
             path!,
             absolutePath,
             ReadInt32(payload, "width") ?? 0,
-            ReadInt32(payload, "height") ?? 0));
+            ReadInt32(payload, "height") ?? 0,
+            ReadInt32(payload, "x") ?? 0,
+            ReadInt32(payload, "y") ?? 0,
+            ReadMagnification(payload)));
+    }
+
+    // A reading that failed holds no level, so the frame plays as captured.
+    private static FullscreenMagnification? ReadMagnification(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("fullscreenMagnification", out var value) ||
+            value.ValueKind != JsonValueKind.Object ||
+            !value.TryGetProperty("level", out var level) ||
+            level.ValueKind != JsonValueKind.Number ||
+            !level.TryGetDouble(out var number) ||
+            !double.IsFinite(number) ||
+            number <= 0 ||
+            ReadInt32(value, "x") is not { } x ||
+            ReadInt32(value, "y") is not { } y)
+        {
+            return null;
+        }
+
+        return new FullscreenMagnification(number, x, y);
     }
 
     private static void AddAudioTrack(

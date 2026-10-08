@@ -152,6 +152,17 @@ internal static class EvidenceSamples
             @"""pixelFormat"":""bgra8"",""encodedFormat"":""png"",""byteLength"":5,""captureDurationNanoseconds"":1," +
             @"""framesPerSecond"":5,""backend"":""windows-graphics-capture"",""monitorCount"":1,""fallbackReason"":null," +
             @"""gdiFallbackFrameCount"":0}"),
+        ("graphics.desktop.frames", "desktop-frame",
+            @"{""path"":""frames/desktop/0000000004.png"",""x"":0,""y"":0,""width"":1920,""height"":1080,""stride"":7680," +
+            @"""pixelFormat"":""bgra8"",""encodedFormat"":""png"",""byteLength"":5,""captureDurationNanoseconds"":1," +
+            @"""framesPerSecond"":5,""backend"":""windows-graphics-capture"",""monitorCount"":1,""fallbackReason"":null," +
+            @"""gdiFallbackFrameCount"":0,""fullscreenMagnification"":{""level"":2.5,""x"":3,""y"":-2,""problem"":null}}"),
+        ("graphics.desktop.frames", "desktop-frame",
+            @"{""path"":""frames/desktop/0000000005.png"",""x"":0,""y"":0,""width"":1920,""height"":1080,""stride"":7680," +
+            @"""pixelFormat"":""bgra8"",""encodedFormat"":""png"",""byteLength"":5,""captureDurationNanoseconds"":1," +
+            @"""framesPerSecond"":5,""backend"":""windows-graphics-capture"",""monitorCount"":1,""fallbackReason"":null," +
+            @"""gdiFallbackFrameCount"":0,""fullscreenMagnification"":{""level"":null,""x"":null,""y"":null," +
+            @"""problem"":""MagInitialize failed with error 5.""}}"),
         ("graphics.desktop.frames", "collector-omission", @"{""reason"":""frame-write-failed""}"),
         ("audio.microphone", "audio-stream-started",
             @"{""stream"":""microphone"",""path"":""audio/microphone.wav"",""device"":""Microphone (USB)""," +

@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed 2026-10-07, agreed 2026-10-07, not built. Listed in
+Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07, not yet run on
+the target machine. Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## Purpose
@@ -56,7 +57,24 @@ between two frames is.
   and y offsets, read with `MagGetFullscreenTransform` as the frame is
   captured, or null with the reason when the reading fails.
 - The reading uses the same DPI awareness as desktop capture, so that its
-  offsets and the frame's pixels are in the same units.
+  offsets and the frame's pixels are in the same units: both are made by
+  the recorder's process, in its frame loop.
+- Built as `FullscreenMagnificationReader`
+  (`src/Recorder.Collectors.Graphics/FullscreenMagnificationReader.cs`).
+  It calls `MagInitialize` when a recording's frame loop starts and
+  `MagUninitialize` when it ends, and only reads the transform; it never
+  sets it. The object always holds `level`, `x`, `y`, and `problem`:
+  either the three values and a null problem, or three nulls and the
+  problem. The level is rounded to six decimal places, the digits a
+  float holds.
+- The readings are made on whichever thread runs each frame, not the one
+  that called `MagInitialize`; Microsoft does not say whether that
+  matters, so the target machine test checks that the frames hold
+  readings and not problems.
+- The database's evidence tables map the object to columns of
+  `desktop_frames`, added by migration 0019, so the database writer
+  accepts every record; recordings with a recording file do not write
+  them.
 - `MagGetFullscreenColorEffect` reads the full screen color effect
   ([Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/magnification/nf-magnification-maggetfullscreencoloreffect)).
   Whether Windows Magnifier's inverted colors use it, and whether the
@@ -75,7 +93,15 @@ between two frames is.
 - The toggle is a labelled control beside the playback controls, reachable
   by keyboard, with its state announced: "Participant's view" or "Whole
   screen". When no frame of the recording holds a level above 1, the
-  toggle is disabled and says so.
+  toggle is disabled and says so. Built as the "Whole screen" toggle
+  button at the end of the transport row; on, it shows the whole screen.
+  Each recording opens in the participant's view.
+- Built in `src/Recorder.Session/MagnifiedView.cs` (the part of the
+  frame) and `src/Recorder.App/MainWindow.Magnification.cs` (drawing):
+  the part seen is drawn from the frame as captured, scaled to the video
+  area; the outline is a yellow line over a black one so it shows on
+  light and dark content. A level within 0.000001 of 1 counts as none. A
+  reading that failed plays the frame as captured.
 - The frame's help text, which already names the frame and its time,
   gains the view shown and, in the participant's view, the level and
   offset.
@@ -130,9 +156,25 @@ Designed 2026-10-07; testing waits for a setup with more than one monitor.
   a setup is available: the participant's view at each phase matches a
   GDI screenshot of the virtual screen, confirming or replacing the model
   above.
-- A system test on the target machine, extending
-  `scripts/Test-MagnifierCapture.ps1`: in a recording with Magnifier's
-  full screen view at two levels and a pan, the participant's view at each
-  phase matches the GDI screenshot of that phase within the comparison's
-  tolerance, and the whole screen view matches the captured frame; the
-  lens and docked phases are unchanged by the toggle.
+- A system test on the target machine, `scripts/Test-MagnifiedPlayback.ps1`,
+  a new script based on `scripts/Test-MagnifierCapture.ps1`, which is
+  kept as validated: in a recording with Magnifier's full screen view at
+  two levels and a pan, the participant's view at each phase matches the
+  GDI screenshot of that phase within the comparison's tolerance, and the
+  whole screen view matches the captured frame; the lens and docked
+  phases are unchanged by the toggle, their frames holding level 1. The
+  script also reads the full screen color effect during an inverted
+  colors phase, and checks that stopping a recording with the full
+  screen view on leaves Magnifier as it was. The comparison is the mean
+  absolute difference of 160 by 90 grey thumbnails, as in the capture
+  validation, where the toolbar and phase label alone gave 2.5; the
+  tolerance is 3. Its analysis was checked in Windows PowerShell on the
+  target machine against a synthetic recording with known screenshots
+  before the owner's run: the participant's views scored 0.11 and 0.04,
+  the frames as captured 13.82 and 25.6.
+
+Built tests (2026-10-07): `MagnifiedViewTests` (the part of the frame,
+including level 1, the screen's edges, a fractional level, and a monitor
+left of the primary; the payload validator), an archive builder test of
+each frame's reading and corner, the evidence samples with a reading and a
+failed one, and the migration tests.

@@ -795,9 +795,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             await CreateLegacyPartitionsAsync(dataSource, recordingId, token);
 
             // Migrations 0010 and 0011 changed how layout nodes and dispatch
-            // path scopes are stored, 0014 added columns, and 0018 added the
-            // frame owner tables, so the writer cannot store those records in
-            // the tables of version 8.
+            // path scopes are stored, 0014 and 0019 added columns, and 0018
+            // added the frame owner tables, so the writer cannot store those
+            // records in the tables of version 8.
             await WriteAsync(
                 sessionKey,
                 recordingId,
@@ -868,7 +868,10 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
             "presentation-swapped" or "presentation-feedback") &&
         !(record.Payload.TryGetProperty("pathScopes", out var scopes) &&
           scopes.ValueKind == JsonValueKind.Array &&
-          scopes.GetArrayLength() > 0);
+          scopes.GetArrayLength() > 0) &&
+        // 0019 added the columns of a desktop frame's magnification reading,
+        // which the writer fills for every desktop frame.
+        record.EventType != "desktop-frame";
 
     private static List<string> Sorted(List<string> rows)
     {

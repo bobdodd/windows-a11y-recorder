@@ -708,6 +708,7 @@ public partial class MainWindow : Window
             _recordedDocuments = opened.Documents;
             _playbackPositionNanoseconds = 0;
             _displayedFrameIndex = -1;
+            ResetFrameView();
             TimelineControl.SetSession(
                 _playbackArchive.Timeline,
                 _playbackArchive.DurationNanoseconds);
@@ -760,6 +761,7 @@ public partial class MainWindow : Window
             VideoPlaceholderTextBlock.Text = "The recording could not be opened.";
             VideoPlaceholderTextBlock.Visibility = Visibility.Visible;
             PlaybackStatusTextBlock.Text = "Recording load failed.";
+            ResetFrameView();
             ApplyLayout();
             busy.Dispose();
             MessageBox.Show(
@@ -1035,11 +1037,12 @@ public partial class MainWindow : Window
         var index = FindFrameAtOrBefore(
             _playbackArchive.Frames,
             positionNanoseconds);
-        if (index == _displayedFrameIndex)
+        if (index == _displayedFrameIndex && !_redrawFrame)
         {
             return;
         }
 
+        _redrawFrame = false;
         _displayedFrameIndex = index;
         if (index < 0)
         {
@@ -1059,11 +1062,11 @@ public partial class MainWindow : Window
         bitmap.StreamSource = stream;
         bitmap.EndInit();
         bitmap.Freeze();
-        VideoImage.Source = bitmap;
+        VideoImage.Source = FrameImage(frame, bitmap, out var view);
         AutomationProperties.SetHelpText(
             VideoImage,
             $"Desktop frame {index + 1} of {_playbackArchive.Frames.Count}, " +
-            $"{FormatTime(frame.MonotonicNanoseconds)}");
+            $"{FormatTime(frame.MonotonicNanoseconds)}{view}");
     }
 
     private async void DisplayNearestEvent(long positionNanoseconds)

@@ -192,7 +192,17 @@ internal static class EvidenceCatalog
                         Int("tryGetNextFrameAttempts", N),
                         BigInt("supersededFrameCount", O),
                         Bool("reusedPreviousImage", O)
-                    ])));
+                    ])),
+            // Added by 0019_desktop_frame_magnification.sql.
+            new InlineField(
+                "fullscreenMagnification",
+                O,
+                [
+                    Double("level", N),
+                    Int("x", N),
+                    Int("y", N),
+                    Text("problem", N)
+                ]));
 
     public static readonly EvidenceTable AudioStreams = Evidence(
         "audio_stream_events",

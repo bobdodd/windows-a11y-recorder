@@ -74,12 +74,28 @@ public sealed record SessionTimelineEvent(
     long MonotonicNanoseconds,
     string Summary);
 
+/// <param name="X">The virtual screen's left edge, which the frame's left edge shows.</param>
+/// <param name="Y">The virtual screen's top edge, which the frame's top edge shows.</param>
+/// <param name="Magnification">
+/// The full screen magnification read with the frame, or null when none was
+/// read, as in recordings made before it was recorded.
+/// </param>
 public sealed record SessionVideoFrame(
     long MonotonicNanoseconds,
     string Path,
     string AbsolutePath,
     int Width,
-    int Height);
+    int Height,
+    int X = 0,
+    int Y = 0,
+    FullscreenMagnification? Magnification = null);
+
+/// <summary>
+/// The full screen magnification transform read with a desktop frame: the
+/// level, 1 meaning none, and the offset of the magnified view's upper-left
+/// corner relative to the primary monitor's, in unmagnified coordinates.
+/// </summary>
+public sealed record FullscreenMagnification(double Level, int X, int Y);
 
 public sealed record SessionAudioTrack(
     string Stream,

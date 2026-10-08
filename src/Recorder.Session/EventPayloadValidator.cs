@@ -684,10 +684,59 @@ internal static class EventPayloadValidator
                 NullableString("fallbackReason"),
                 RequiredInteger("gdiFallbackFrameCount", nonnegative: true),
                 OptionalNullableEnum("frameSelection", "newest-arrived"),
-                OptionalObjectArray("monitorFrames")
+                OptionalObjectArray("monitorFrames"),
+                OptionalObject("fullscreenMagnification")
             ],
             issues);
         ValidateDesktopMonitorFrames(payload, issues);
+        ValidateOptionalObject(payload, "fullscreenMagnification", ValidateFullscreenMagnification, issues);
+    }
+
+    // Archives written before the transform was read with each frame omit
+    // fullscreenMagnification. When present it holds the level and offsets
+    // read with MagGetFullscreenTransform, or nulls and the problem that
+    // stopped the reading. See docs/architecture/magnified-view-playback.md.
+    private static void ValidateFullscreenMagnification(
+        JsonElement magnification,
+        ICollection<EventValidationIssue> issues,
+        string path)
+    {
+        ValidateShape(
+            magnification,
+            [
+                RequiredNullableNumber("level", nonnegative: true),
+                NullableInteger("x"),
+                NullableInteger("y"),
+                NullableString("problem")
+            ],
+            issues,
+            path);
+        var read = new[] { "level", "x", "y" }
+            .Count(name => magnification.TryGetProperty(name, out var value) &&
+                value.ValueKind != JsonValueKind.Null);
+        var problem = magnification.TryGetProperty("problem", out var problemValue) &&
+            problemValue.ValueKind == JsonValueKind.String;
+        if (problem ? read != 0 : read != 3)
+        {
+            AddError(
+                issues,
+                "desktop-frame-magnification-inconsistent",
+                path,
+                "A full screen magnification reading states its level and both offsets " +
+                "and no problem, or no level or offsets and the problem.");
+        }
+
+        if (magnification.TryGetProperty("level", out var level) &&
+            level.ValueKind == JsonValueKind.Number &&
+            level.TryGetDouble(out var number) &&
+            number <= 0)
+        {
+            AddError(
+                issues,
+                "desktop-frame-magnification-level",
+                $"{path}/level",
+                "A full screen magnification level is positive.");
+        }
     }
 
     // Archives written before per-monitor composition timing omit

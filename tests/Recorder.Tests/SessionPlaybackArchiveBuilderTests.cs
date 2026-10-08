@@ -15,6 +15,66 @@ public sealed class SessionPlaybackArchiveBuilderTests
     private readonly List<string> _events = [];
 
     [Fact]
+    public async Task LoadsEachFramesMagnificationReadingAndCorner()
+    {
+        var directory = CreateDirectory();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(directory, "frames", "desktop"));
+            foreach (var name in new[] { "0000000000.png", "0000000001.png", "0000000002.png" })
+            {
+                await File.WriteAllBytesAsync(
+                    Path.Combine(directory, "frames", "desktop", name),
+                    [1],
+                    TestContext.Current.CancellationToken);
+            }
+
+            await WriteManifestAsync(directory, 1_000_000_000);
+            await WriteEventsAsync(
+                directory,
+                [
+                    CreateEvent("graphics.desktop.frames", "desktop-frame", 100, new
+                    {
+                        path = "frames/desktop/0000000000.png",
+                        x = -1920,
+                        y = 0,
+                        width = 3840,
+                        height = 1080,
+                        fullscreenMagnification = new { level = 2.0, x = -960, y = 4, problem = (string?)null }
+                    }),
+                    CreateEvent("graphics.desktop.frames", "desktop-frame", 200, new
+                    {
+                        path = "frames/desktop/0000000001.png",
+                        x = 0,
+                        y = 0,
+                        width = 1920,
+                        height = 1080,
+                        fullscreenMagnification = new { level = (double?)null, x = (int?)null, y = (int?)null, problem = "failed" }
+                    }),
+                    CreateEvent("graphics.desktop.frames", "desktop-frame", 300, new
+                    {
+                        path = "frames/desktop/0000000002.png",
+                        width = 1920,
+                        height = 1080
+                    })
+                ]);
+
+            var frames = (await LoadAsync(directory)).Frames;
+
+            Assert.Equal(3, frames.Count);
+            Assert.Equal(new FullscreenMagnification(2, -960, 4), frames[0].Magnification);
+            Assert.Equal(-1920, frames[0].X);
+            Assert.Null(frames[1].Magnification);
+            Assert.Null(frames[2].Magnification);
+            Assert.Equal(0, frames[2].X);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task LoadsFramesAndAudio()
     {
         var directory = CreateDirectory();

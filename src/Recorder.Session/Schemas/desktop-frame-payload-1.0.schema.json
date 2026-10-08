@@ -44,6 +44,18 @@
       "description": "Which arrived WGC frame each monitor image comes from. newest-arrived: the recorder releases every arrived frame except the newest and copies that one at the poll. Absent in archives written before it was recorded, whose images are the oldest queued frame; null for GDI fallback frames.",
       "enum": ["newest-arrived", null]
     },
+    "fullscreenMagnification": {
+      "description": "The full screen magnification transform read with MagGetFullscreenTransform as the frame was captured: the level, 1 meaning none, and the offsets of the magnified view's upper-left corner relative to the primary monitor's, in unmagnified coordinates. Nulls and the problem when it could not be read. Absent in archives written before it was recorded.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "x", "y", "problem"],
+      "properties": {
+        "level": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "x": { "type": ["integer", "null"] },
+        "y": { "type": ["integer", "null"] },
+        "problem": { "type": ["string", "null"] }
+      }
+    },
     "monitorFrames": {
       "description": "Per-monitor composition timing. Absent in archives written before it was recorded; timing fields are null for GDI fallback frames.",
       "type": "array",
