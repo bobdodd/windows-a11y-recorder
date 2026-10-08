@@ -98,7 +98,31 @@ screen.
 - The player checks (the toggle, the outline, announcements and help
   text) were not reported with this run.
 
+## Player
+
+- The owner reported that the player showed the full screen, pan, and
+  inverted colors phases unmagnified, that the grid never changed size
+  except inside the lens and the docked view, and that "Whole screen"
+  stayed disabled.
+- Cause: a recording file is played through its playback index, which
+  keeps only the payload properties playback reads
+  (`SessionPlaybackArchiveBuilder.PayloadProperties`).
+  `fullscreenMagnification`, `x`, and `y` were not among them, so every
+  frame reached the player with no reading. The archive builder test fed
+  whole payloads to the builder and did not pass through the index.
+- Fix: the three properties are added, and the playback index is version
+  4, so the index stored in a recording made before it is derived again
+  when the recording is opened. Opened with the fix in the sandbox, with
+  empty files standing in for its frames, recording
+  `20261008-032022-78482e571ba348ec8bbc8032385e385f` gave 608 frames, all
+  with a reading, the toggle offered, and the part seen at full screen
+  480, 270, 960 by 540; at the pan 960, 527; zoomed 1419, 783, 480 by 270;
+  inverted 889, 500, 480 by 270; and the whole frame at level 1.
+- A test now plays frames from a recording file through its index
+  (`PlaysEachFramesMagnificationReadingFromARecordingFile`); it fails
+  without the fix.
+
 ## Open
 
 - Recording the color effect is proposed, not built.
-- The player checks.
+- The player checks with the fix.

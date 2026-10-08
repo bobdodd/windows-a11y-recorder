@@ -100,7 +100,7 @@ public sealed class RecreationFramesTests : IDisposable
         builder.Add(3, Walk(400, "dom-document-2", null));
         builder.Add(4, Walk(450, "dom-document-3", "\"frameToken\":null,\"mainFrame\":null"));
         var index = builder.Build();
-        Assert.Equal(3, index.Version);
+        Assert.Equal(PlaybackIndex.CurrentVersion, index.Version);
         var kept = Assert.Single(index.FrameDocuments);
         Assert.Equal(new FrameDocumentRecord(300, "T dom-document-1", "F", false, 7), kept);
     }

@@ -48,6 +48,9 @@ public sealed class SessionPlaybackArchiveBuilder
         "device",
         "eventName",
         "frameType",
+        // A desktop frame's Magnifier reading and its corner, for the
+        // participant's view.
+        "fullscreenMagnification",
         "height",
         "name",
         "navigationId",
@@ -65,7 +68,9 @@ public sealed class SessionPlaybackArchiveBuilder
         "title",
         "truncated",
         "url",
-        "width"
+        "width",
+        "x",
+        "y"
     ];
 
     /// <summary>

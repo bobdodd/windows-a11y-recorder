@@ -403,6 +403,46 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         }
     }
 
+    // The recorder plays a recording file through its playback index, which
+    // holds only the payload properties playback reads: each frame's
+    // Magnifier reading and corner must be among them (target machine run,
+    // 2026-10-07, where the player showed no frame as magnified).
+    [Fact]
+    public async Task PlaysEachFramesMagnificationReadingFromARecordingFile()
+    {
+        var token = TestContext.Current.CancellationToken;
+        var sessionKey = "file-magnified-" + Guid.NewGuid().ToString("N");
+        var directory = Path.Combine(_root, sessionKey);
+        var collector = Collector("test.magnified", "graphics.desktop.frames");
+        string Magnified(int index, string reading) =>
+            Frame(index, 1_000_000L * index).Replace(
+                @"""monitorFrames"":",
+                @"""fullscreenMagnification"":" + reading + @",""monitorFrames"":",
+                StringComparison.Ordinal);
+        List<RecorderEvent> events =
+        [
+            Event(sessionKey, collector, 0, 11_000_000, "graphics.desktop.frames", "desktop-frame",
+                Json(Magnified(10, @"{""level"":2,""x"":480,""y"":270,""problem"":null}"))),
+            Event(sessionKey, collector, 1, 12_000_000, "graphics.desktop.frames", "desktop-frame",
+                Json(Magnified(11, @"{""level"":null,""x"":null,""y"":null,""problem"":""failed""}"))),
+            Event(sessionKey, collector, 2, 13_000_000, "graphics.desktop.frames", "desktop-frame",
+                Json(Frame(12, 12_000_000)))
+        ];
+        await WriteSessionFilesAsync(directory, sessionKey, events, token);
+        WriteRenderedFrames(directory);
+        var path = WriteRecordingFile(directory, events, chunkBytes: 1_024);
+
+        var opened = await RecordingFilePlayback.OpenAsync(directory, path, token);
+        var archive = opened.Archive;
+        using var file = (IDisposable)archive.Timeline;
+
+        Assert.Equal(3, archive.Frames.Count);
+        Assert.Equal(new FullscreenMagnification(2, 480, 270), archive.Frames[0].Magnification);
+        Assert.Null(archive.Frames[1].Magnification);
+        Assert.Null(archive.Frames[2].Magnification);
+        Assert.True(MagnifiedView.AnyMagnified(archive.Frames));
+    }
+
     [Fact]
     public async Task AnswersTimelineLookupsFromARecordingFileAsTheInMemoryTimelineDoes()
     {

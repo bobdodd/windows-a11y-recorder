@@ -3,7 +3,8 @@
 ## Status
 
 Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07; recording and the participant's view confirmed on
-the target machine, except inverted colors
+the target machine, except inverted colors; the player, after a fix to
+the playback index, is to be checked again
 ([validation](../validation/magnified-playback-2026-10-07.md)). Listed in
 [outstanding work](analysis-outstanding-work.md).
 
@@ -104,6 +105,9 @@ between two frames is.
   toggle is disabled and says so. Built as the "Whole screen" toggle
   button at the end of the transport row; on, it shows the whole screen.
   Each recording opens in the participant's view.
+- The playback index of a recording file keeps `fullscreenMagnification`,
+  `x`, and `y` of each desktop frame, from index version 4; an older
+  stored index is derived again when the recording is opened.
 - Built in `src/Recorder.Session/MagnifiedView.cs` (the part of the
   frame) and `src/Recorder.App/MainWindow.Magnification.cs` (drawing):
   the part seen is drawn from the frame as captured, scaled to the video

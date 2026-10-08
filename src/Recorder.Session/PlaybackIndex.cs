@@ -16,8 +16,10 @@ public sealed record PlaybackIndex
 {
     // Version 2 keeps the page popup and popup widget records (protocol
     // 0.43 and 0.44) whole. Version 3 adds the frame documents (protocol
-    // 0.55, slice 5b).
-    public const int CurrentVersion = 3;
+    // 0.55, slice 5b). Version 4 keeps each desktop frame's Magnifier
+    // reading and corner (fullscreenMagnification, x, y); an older index is
+    // derived again, so recordings made before it play magnified.
+    public const int CurrentVersion = 4;
 
     public required int Version { get; init; }
 
