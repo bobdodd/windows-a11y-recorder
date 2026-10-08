@@ -1,7 +1,7 @@
 # Analysis and Inference: Outstanding Work
 
 Recorded 2026-10-07, during the planning phase that follows release 1.0.0.
-Four designs are agreed and none is built. The owner's
+Four designs are agreed, one is proposed, and none is built. The owner's
 decision is to stay in planning for now, so each item below waits for a
 decision to start building. Each names where it is designed; the accepted workflow
 applies when it is built: build, test in the sandbox, package and transfer
@@ -44,6 +44,17 @@ To test:
 - Deferred until a setup is available: two monitors, one to the left of
   the primary, to confirm or replace the model; monitors at different
   display scales.
+
+## Player layout
+
+Designed in [player layout](player-layout.md), proposed 2026-10-07, not
+agreed. Decided: the details panels are open by default, and the
+frame-only view is part of the design.
+
+- To build: the collapsible details region and its splitter, the
+  collapsible side panel, the frame-only view, the remembered layout, and
+  the selected event summary in the status line.
+- To test: as in its "Required tests".
 
 ## Screen reader activity
 
