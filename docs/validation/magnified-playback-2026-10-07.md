@@ -1,4 +1,4 @@
-# Magnified View Playback, First Run, 2026-10-07
+# Magnified View Playback, Target Machine Runs, 2026-10-07
 
 ## Question
 
@@ -66,8 +66,39 @@ screen.
 - The script moves the pointer with mouse input, which Magnifier
   follows, and uses the newest recording when no session ID is typed.
 
+## Second run
+
+- Recorder package faa2890, with the changes above. The script ran at
+  03:20 UTC during recording
+  `20261008-032022-78482e571ba348ec8bbc8032385e385f` (608 desktop frames)
+  and found the recording itself when no session ID was typed.
+- Every one of the 608 frames held a transform, and the levels in each
+  phase matched the script's samples.
+- The participant's view drawn from the frame nearest each screenshot,
+  against that screenshot, 160 by 90 grey thumbnails, tolerance 3:
+
+| Phase | Frame | Transform | Participant's view | Frame as captured |
+|---|---|---|---|---|
+| No Magnifier | 177 | level 1 | 0.41 | 0.41 |
+| Full screen | 231 | level 2 at 480, 270 | 0.11 | 17.16 |
+| Pan | 272 | level 2 at 960, 527 | 0.34 | 17.09 |
+| Zoomed | 318 | level 4 at 1419, 783 | 0.37 | 22.32 |
+| Inverted colors | 361 | level 4 at 889, 500 | 234.07 | 230.87 |
+| Lens | 410 | level 1 | 0.41 | 0.41 |
+| Docked | 454 | level 1 | 0.49 | 0.49 |
+| Closed | 508 | level 1 | 0.41 | 0.41 |
+
+- Each frame was within 95 ms of its screenshot.
+- Every phase but inverted colors is within tolerance. Inverted colors
+  fails as expected: the color effect read was not the identity and is
+  not recorded.
+- The owner reported that each phase looked as its name says and that
+  the screen stayed magnified after the recording was stopped with the
+  full screen view on.
+- The player checks (the toggle, the outline, announcements and help
+  text) were not reported with this run.
+
 ## Open
 
-- A second run with the change, for the readings, the pan and the second
-  level.
 - Recording the color effect is proposed, not built.
+- The player checks.

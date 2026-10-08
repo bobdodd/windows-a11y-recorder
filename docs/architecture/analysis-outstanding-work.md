@@ -19,7 +19,10 @@ unmagnified.
 Built 2026-10-07. The first run on the target machine
 ([validation](../validation/magnified-playback-2026-10-07.md)) found the
 readings failing on threads other than the initializing one, now fixed,
-and inverted colors missing from the capture; a second run is due.
+and inverted colors missing from the capture. The second run, with the
+fix, held a reading in every frame, and the participant's view matched
+the screen in every phase but inverted colors; the player checks are not
+yet reported.
 
 - Recorder: `desktop-frame` gains `fullscreenMagnification`, read with
   `MagGetFullscreenTransform` as each frame is captured; its payload
