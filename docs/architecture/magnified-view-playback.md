@@ -5,7 +5,8 @@
 Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07; recording and the participant's view confirmed on
 the target machine, except inverted colors; the player confirmed by the
 owner after a fix to the playback index
-([validation](../validation/magnified-playback-2026-10-07.md)). Listed in
+([validation](../validation/magnified-playback-2026-10-07.md)). The
+color effect, in "Color effect", proposed 2026-10-08, not built. Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## Purpose
@@ -88,7 +89,7 @@ between two frames is.
   matrix other than the identity, and the captured frames do not show
   them ([validation](../validation/magnified-playback-2026-10-07.md)).
   Recording the effect with each frame, and applying it in the
-  participant's view, is proposed, not built.
+  participant's view, is proposed in "Color effect", not built.
 
 ## Playback
 
@@ -163,6 +164,92 @@ Designed 2026-10-07; testing waits for a setup with more than one monitor.
 - Monitors at different display scales are not tested; the frame and the
   transform are both read in physical pixels.
 
+## Color effect
+
+Proposed 2026-10-08, not built.
+
+### What is known
+
+- `MagGetFullscreenColorEffect` gives the full screen magnifier's color
+  transformation matrix, or the identity matrix when no effect is set
+  ([Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/magnification/nf-magnification-maggetfullscreencoloreffect)).
+  The matrix is `float transform[5][5]`, whose values are "for red, blue,
+  green, alpha, and color translation"
+  ([Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/magnification/ns-magnification-magcoloreffect)).
+- Microsoft does not state how the matrix is applied. Its grayscale
+  example
+  ([Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/magnification/nf-magnification-magsetfullscreencoloreffect))
+  has the rows 0.3, 0.3, 0.3; 0.6, 0.6, 0.6; and 0.1, 0.1, 0.1 in its first
+  three columns. A grey of 0.3 red, 0.6 green, and 0.1 blue follows only
+  if a pixel is the row vector (red, green, blue, alpha, 1) multiplied by
+  the matrix, so that row i holds what input channel i adds to each
+  output, and the fifth row is the translation. This design takes that
+  reading; the target machine test confirms it with the matrix Windows
+  Magnifier sets.
+- In the second run
+  ([validation](../validation/magnified-playback-2026-10-07.md)), the
+  script read an effect other than the identity during the inverted
+  colors phase, and the participant's view of frame 361 differed from the
+  screenshot by 235.49. Inverting every channel of that view, 255 minus
+  each value, gave 0.41, and 0.42 to 0.49 for each color channel
+  compared separately. The script did not log the matrix's values.
+- The reading uses the same `MagInitialize` as the transform, so it is
+  made on the frame loop's thread, after the transform.
+
+### Recording
+
+- `desktop-frame` gains `fullscreenColorEffect`: `matrix`, the 25 values
+  of `transform` in the order Windows holds them, row by row, each
+  rounded to six decimal places; and `problem`. Either the matrix and a
+  null problem, or a null matrix and the problem. It is recorded for every
+  frame, the identity included, so that a frame without it is
+  distinguishable from a frame with no effect; at about 200 bytes a frame
+  and 5 frames a second, it adds about 3.6 MB an hour.
+- The validator requires exactly 25 finite numbers or null, and the same
+  consistency as `fullscreenMagnification`.
+- The database's evidence tables map it to columns of `desktop_frames`, a
+  double precision array and a text column, by a new migration.
+- The playback index keeps `fullscreenColorEffect`, at index version 5,
+  so an older stored index is derived again when a recording is opened.
+  A test plays it through a recording file, as for the magnification.
+
+### Playback
+
+- The participant's view applies the frame's matrix to the part of the
+  frame seen: each pixel's red, green, blue, and alpha, as 0 to 1, and 1,
+  multiplied by the matrix as above, clamped to 0 to 1. The identity, a
+  missing effect, and a failed reading leave the frame as captured.
+- The whole screen view stays the frame as captured, with the outline:
+  it is the evidence as the capture holds it.
+- The "Whole screen" toggle is offered when any frame is magnified or has
+  an effect other than the identity.
+- The frame's help text adds "colors inverted" when the matrix is the
+  one Windows Magnifier sets for inverted colors, confirmed by the test,
+  and "a color effect" for any other matrix other than the identity. The
+  properties panels logged with
+  [accessibility preferences](accessibility-preferences.md) show it
+  visibly.
+- The matrix is applied in software, to the pixels of the part seen,
+  when the frame is displayed. Its cost per frame is measured on the
+  target machine; if it is too slow for playback, a GPU effect is
+  designed then.
+
+### Open, settled by the test before playback is built
+
+- Whether the effect is set when Magnifier inverts colors in the lens and
+  docked views, which the capture already shows as seen. If it is, the
+  player cannot tell from the matrix alone whether to apply it, and the
+  rule is designed from what the test finds.
+- Whether the effect is set when inverted colors are on with the full
+  screen view at 100 percent.
+
+### Out of scope
+
+Windows color filters and high contrast are system settings, not
+Magnifier's, and belong to
+[accessibility preferences](accessibility-preferences.md), including
+whether the capture shows them.
+
 ## Required tests
 
 - Unit tests of the payload contract and validator, and of the part of
@@ -190,6 +277,21 @@ Designed 2026-10-07; testing waits for a setup with more than one monitor.
   target machine against a synthetic recording with known screenshots
   before the owner's run: the participant's views scored 0.11 and 0.04,
   the frames as captured 13.82 and 25.6.
+
+For the color effect:
+
+- Unit tests of the payload and validator; of applying a matrix to
+  pixels, with the identity, a full inversion, Microsoft's grayscale
+  example, translation, and clamping; and of playing the effect from a
+  recording file through its playback index.
+- On the target machine, `scripts/Test-MagnifiedPlayback.ps1` extended
+  to log the 25 values with each sample; to add inverted colors phases
+  in the lens view, the docked view, and the full screen view at 100
+  percent; and to compare the participant's view with the effect applied
+  against the screenshot of each phase, within the same tolerance of 3.
+  The frames' matrices must match the script's.
+- The time to apply the matrix to a frame in the player, measured on the
+  target machine.
 
 Built tests (2026-10-07): `MagnifiedViewTests` (the part of the frame,
 including level 1, the screen's edges, a fractional level, and a monitor

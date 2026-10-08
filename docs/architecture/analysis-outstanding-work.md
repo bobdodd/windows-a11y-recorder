@@ -39,8 +39,9 @@ To test, with `scripts/Test-MagnifiedPlayback.ps1` on the target machine:
 - The participant's view matches the GDI screenshot of each phase, at two
   levels and a pan, and the frames' readings match the script's.
 - Inverted colors use the full screen color effect and are missing from
-  the capture (first run); recording the effect with each frame is
-  proposed, not built.
+  the capture; recording the effect with each frame and applying it in
+  the participant's view is designed in its "Color effect", proposed
+  2026-10-08, not built.
 - That stopping a recording with the full screen view on leaves
   Magnifier as it was.
 - Whether the cursor's size in the participant's view matches
