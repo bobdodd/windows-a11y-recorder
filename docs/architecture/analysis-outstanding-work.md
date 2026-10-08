@@ -112,5 +112,9 @@ agreed 2026-10-07 with the decisions in its "Decisions".
 - Page recreation: applying the recorded preferences that change how a
   page is drawn or laid out, designed with this work, as revised in
   [page recreation](page-recreation.md), "The environment".
+- Player: properties panels for the participant's accessibility
+  settings at the current frame, including Magnifier's current level and
+  position; logged 2026-10-07, to be designed with this work. See its
+  "Showing the settings in the player".
 - To test: as in its "Required tests", including the fixture page that
   responds to the preferences.

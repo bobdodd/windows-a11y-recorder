@@ -179,6 +179,21 @@ allows, such as the Settings app in the foreground, the browser's settings
 page, or a keyboard shortcut, and to the page's response in the recorded
 style and layout changes; both are inferences with their basis.
 
+## Showing the settings in the player
+
+Logged 2026-10-07, to be designed with this work, not designed or built.
+
+- The player needs properties panels that show the participant's
+  accessibility settings at the current frame, for reviewers who do not
+  use a screen reader as well as those who do.
+- Windows Magnifier's current full screen level and position, recorded
+  with each desktop frame by
+  [magnified view playback](magnified-view-playback.md), are shown there.
+  Until then they are only in the video frame's help text, which only a
+  screen reader reports.
+- The owner decided against a line of text under the video for the level
+  and position: the properties panels are the solution.
+
 ## Decisions
 
 Agreed 2026-10-07:

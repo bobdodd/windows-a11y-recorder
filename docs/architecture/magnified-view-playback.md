@@ -105,6 +105,12 @@ between two frames is.
   toggle is disabled and says so. Built as the "Whole screen" toggle
   button at the end of the transport row; on, it shows the whole screen.
   Each recording opens in the participant's view.
+- Showing the level and position visibly is part of the properties panels
+  for accessibility settings, logged in
+  [accessibility preferences](accessibility-preferences.md), "Showing the
+  settings in the player"; the owner decided against a line of text
+  under the video (2026-10-07). Until then they are in the frame's help
+  text only.
 - The playback index of a recording file keeps `fullscreenMagnification`,
   `x`, and `y` of each desktop frame, from index version 4; an older
   stored index is derived again when the recording is opened.
