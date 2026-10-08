@@ -171,9 +171,14 @@ screen.
   for the inversion, by its per-channel path, and 23.2 ms for Microsoft's
   grayscale example, by the general path.
 
-## Open
+## The player's color effect, 2026-10-08
 
-- The player's color effect, built after the third run, to be checked on
-  the target machine.
+- Recorder package 523e905, the third run's recording opened in the
+  player. The owner reported all four cases correct: inverted at 400
+  percent shown zoomed and inverted with the help text naming inverted
+  colors; inverted at 100 percent shown inverted over the whole frame with
+  the whole screen toggle available; the inverted lens and docked views
+  shown as captured; and with the whole screen toggle on, the frame as
+  captured with the help text naming the colors the participant saw.
 - Showing the level and position visibly is part of the properties
   panels logged with [accessibility preferences](../architecture/accessibility-preferences.md).

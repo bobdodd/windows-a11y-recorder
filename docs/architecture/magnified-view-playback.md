@@ -7,8 +7,7 @@ the target machine, except inverted colors; the player confirmed by the
 owner after a fix to the playback index
 ([validation](../validation/magnified-playback-2026-10-07.md)). The
 color effect, in "Color effect", proposed and agreed 2026-10-08, built
-2026-10-08; its recording confirmed on the target machine, its playback to
-be checked there. Listed in
+2026-10-08, and confirmed on the target machine, recording and playback. Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## Purpose
