@@ -128,10 +128,16 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   and eye tracking use: agreed and built 2026-10-08; checked by the
   owner by mouse and keyboard on the target machine 2026-10-08 on
   45a500c; to check with a head pointer and eye tracking.
-- To build: the browser preference,
-  zoom, and `web-preferences-sent` records at a protocol change, with
-  the `RendererPreferences` hook point found in the checkout first; the
-  `ProfileDirectory` option offered in the session settings.
+- Stage 2, the browser preference, zoom, and `web-preferences-sent`
+  records at protocol 0.56, the `ProfileDirectory` option in the session
+  settings, and the Browser groups of the properties panel: proposed
+  2026-10-08, with the hook points found in the checkout; recording at
+  `RenderViewHostImpl` agreed, the rest not agreed. Not built.
+- Left open by the owner's decision 2026-10-08, to start stage 2 first:
+  the Magnifier change records on a real Magnifier recording
+  (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter
+  in the participant's view, and recording which filter is on; whether a
+  contrast theme is in the desktop frames.
 - Page recreation: applying the recorded preferences that change how a
   page is drawn or laid out, designed with this work, as revised in
   [page recreation](page-recreation.md), "The environment".

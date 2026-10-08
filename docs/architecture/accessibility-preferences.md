@@ -629,6 +629,111 @@ Built 2026-10-08 as proposed above, with these details and differences:
   on rows, and the splitters reached by Tab.
 
 
+## Stage 2: browser preferences
+
+Proposed 2026-10-08, not agreed, not built. The owner decided 2026-10-08
+to start stage 2 with the stage 1 gaps left open: the Magnifier change
+records on a real Magnifier recording, applying a Windows color filter in
+the participant's view (with which filter was on, which the recording does
+not say), and whether a contrast theme is in the frames. They stay listed
+in [outstanding work](analysis-outstanding-work.md). Line numbers below
+are from the owner's checkout, Chromium 156.0.8065.0.
+
+### Where the page is given its preferences
+
+Agreed 2026-10-08: the values sent to the page are recorded where
+`RenderViewHostImpl` sends them, not at
+`WebContentsImpl::SetWebPreferences` as proposed under "The effect on the
+page". `SetWebPreferences` (`web_contents_impl.cc`, lines 9189 to 9199)
+covers only later changes; a page's first values are sent when its view
+is created in a renderer, which happens again when a navigation moves the
+page to another renderer process. In
+`content/browser/renderer_host/render_view_host_impl.cc`:
+
+- `CreateRenderView` (line 410): `params->renderer_preferences` and
+  `params->web_preferences` (lines 450 to 451), the values the view starts
+  with.
+- `SendWebPreferencesToRenderer` (lines 900 to 907), the later
+  `WebPreferences`, including those of a page restored from the
+  back-forward cache, which `SetWebPreferences` passes over.
+- `SendRendererPreferencesToRenderer` (lines 909 to 916), the later
+  `RendererPreferences`, reached from `WebContentsImpl::SyncRendererPrefs`
+  (lines 4236 to 4242).
+
+### The records
+
+Protocol 0.56, on the browser channel:
+
+- `web-preferences-sent`, at each of the three points: the page
+  (`pageFrameTreeNodeId`, as the navigation records name it), the renderer
+  process, which point sent it (`view-created`, `web-preferences`, or
+  `renderer-preferences`), and the listed fields of "The effect on the
+  page". A view's first record holds every listed field; later records
+  for the same view hold the fields that differ from what that view was
+  last sent, and a record with no difference is not written.
+- `browser-preferences`, when the profile's preferences are loaded
+  (`ProfileImpl::OnPrefsLoaded`, `chrome/browser/profiles/profile_impl.cc`,
+  line 1224): the profile directory, whether the profile was new, the
+  default zoom level, and each listed preference of "The participant's
+  preferences" with its value, or that it is not set and the default
+  used. `pref_names.h` lines: font sizes 352 to 358, color scheme 704,
+  focus highlight 816, page colors 832 to 843.
+- `browser-preference-changed`, from a `PrefChangeRegistrar` on the same
+  list: the preference, its previous and new value.
+- `zoom-level-changed`, from `HostZoomMap::AddZoomLevelChangedCallback`
+  (`content/public/browser/host_zoom_map.h`, line 190): the mode of
+  `ZoomLevelChangeMode` (line 44), the host or scheme and host, the level,
+  and its percentage; and a change of the default zoom level.
+- No other preference and no browsing data is read from the profile. The
+  hooks in `chrome/browser` add a dependency on the bridge to that target,
+  as `content/browser` already has.
+
+### The recorder
+
+- Typed contracts, validation, and samples for the four records, a
+  database migration (23), and catalog entries, as for the other browser
+  records.
+- The session settings offer the existing `ProfileDirectory` option as
+  "Browser profile folder", empty for a new profile per recording, with a
+  folder picker; the recording records the folder, as
+  `browser-preferences` does.
+
+### The player
+
+- A "Browser" group in the Properties panel, after the Windows groups:
+  each listed preference and the default zoom level, set at the start or
+  at its last change, with the change buttons and counts of "Change
+  buttons and counts".
+- A "Sent to the page" group: the listed fields last sent to the page of
+  the most recent committed primary main frame navigation at or before
+  the time shown, with its address in the group's first row. A recording
+  with more than one tab shows the tab last navigated; showing the tab in
+  the foreground is left until the foreground tab is recorded.
+- The changes are events, in a timeline lane "Browser settings" with a
+  filter "Browser settings", holding `browser-preference-changed`,
+  `zoom-level-changed`, and the `web-preferences-sent` records after a
+  view's first.
+
+### Required tests
+
+- Unit tests: the contracts and validators of the four records, including
+  a record with no field, an unlisted preference, and a later record with
+  an unchanged field; the panel's values at a time from a start record and
+  changes; the Browser lane and filter.
+- Integration script tests (`chromium/test_integrate.py`): each hook
+  applied once to the checkout's code and refused on code it does not
+  match.
+- On the target machine, with a Chromium build and a fixture page that
+  responds to `prefers-color-scheme`, `prefers-reduced-motion`,
+  `forced-colors`, `prefers-contrast`, and the default font size: during
+  one recording, the browser's font size, zoom, page colors, and color
+  scheme are changed, then Windows dark mode, animation effects, and a
+  contrast theme. Each browser change gives one change record, and each
+  change that reaches the page a `web-preferences-sent` record with the
+  values the page's style changes show. Then a recording with a prepared
+  profile folder, its preferences recorded at the start and its browsing
+  data not recorded.
+
 ## Change buttons and counts
 
 Proposed by the owner 2026-10-08 after checking 7ae9f19 on the target
