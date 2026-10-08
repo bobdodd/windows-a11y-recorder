@@ -214,6 +214,22 @@ internal static class BrowserProtocol
                 BrowserEvidenceEventTypes.PagePopupClosed) =>
                 payload.Deserialize<BrowserPagePopupClosedPayload>(JsonOptions)
                     as object,
+            (BrowserEvidenceChannels.Preferences,
+                BrowserPreferenceSettings.SnapshotEventType) =>
+                payload.Deserialize<BrowserPreferencesPayload>(JsonOptions)
+                    as object,
+            (BrowserEvidenceChannels.Preferences,
+                BrowserPreferenceSettings.ChangeEventType) =>
+                payload.Deserialize<BrowserPreferenceChangedPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Preferences,
+                BrowserPreferenceSettings.SentEventType) =>
+                payload.Deserialize<BrowserWebPreferencesSentPayload>(
+                    JsonOptions) as object,
+            (BrowserEvidenceChannels.Preferences,
+                BrowserPreferenceSettings.ZoomEventType) =>
+                payload.Deserialize<BrowserZoomLevelChangedPayload>(
+                    JsonOptions) as object,
             (BrowserEvidenceChannels.Interaction,
                 BrowserEvidenceEventTypes.PopupWidgetCreated) =>
                 payload.Deserialize<BrowserPopupWidgetCreatedPayload>(
@@ -461,7 +477,8 @@ internal static class BrowserProtocol
                 BrowserEvidenceChannels.Resources or
                 BrowserEvidenceChannels.Compositor or
                 BrowserEvidenceChannels.Animation or
-                BrowserEvidenceChannels.Script,
+                BrowserEvidenceChannels.Script or
+                BrowserEvidenceChannels.Preferences,
                 BrowserEvidenceEventTypes.Omission) =>
                 payload.Deserialize<BrowserOmissionPayload>(JsonOptions)
                     as object,

@@ -49,6 +49,7 @@ public partial class MainWindow : Window
         "system.preferences",
         "graphics.desktop.frames",
         "graphics.magnifier",
+        "browser.preferences",
         "audio.microphone",
         "audio.system",
         "session.annotations",
@@ -191,6 +192,7 @@ public partial class MainWindow : Window
         if (!TryValidateBrowserCapture(
                 out var chromiumPath,
                 out var browserStartUrl,
+                out var browserProfileDirectory,
                 out var fullWalkInterval))
         {
             return;
@@ -219,6 +221,7 @@ public partial class MainWindow : Window
                 CaptureBrowserEvidence = BrowserEvidenceCheckBox.IsChecked == true,
                 ChromiumExecutablePath = chromiumPath,
                 BrowserStartUrl = browserStartUrl,
+                BrowserProfileDirectory = browserProfileDirectory,
                 BrowserFullWalkInterval = fullWalkInterval
             });
             SessionFolderTextBox.Text = status.SessionDirectory;
@@ -270,6 +273,22 @@ public partial class MainWindow : Window
                 : $"Marker added: {MarkerNoteTextBox.Text.Trim()}";
             MarkerNoteTextBox.Clear();
             MarkerNoteTextBox.Focus();
+        }
+    }
+
+    private void BrowseProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Choose browser profile folder",
+            InitialDirectory = Directory.Exists(BrowserProfileTextBox.Text.Trim())
+                ? BrowserProfileTextBox.Text.Trim()
+                : string.Empty,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            BrowserProfileTextBox.Text = dialog.FolderName;
         }
     }
 
@@ -1214,6 +1233,7 @@ public partial class MainWindow : Window
         AddVisibleChannel(FilterWindowCheckBox, "window.foreground", visibleChannels);
         AddVisibleChannel(FilterPreferencesCheckBox, "system.preferences", visibleChannels);
         AddVisibleChannel(FilterMagnifierCheckBox, "graphics.magnifier", visibleChannels);
+        AddVisibleChannel(FilterBrowserSettingsCheckBox, "browser.preferences", visibleChannels);
         AddVisibleChannel(
             FilterFramesCheckBox,
             "graphics.desktop.frames",
@@ -1268,6 +1288,7 @@ public partial class MainWindow : Window
         FilterWindowCheckBox.IsChecked = selected;
         FilterPreferencesCheckBox.IsChecked = selected;
         FilterMagnifierCheckBox.IsChecked = selected;
+        FilterBrowserSettingsCheckBox.IsChecked = selected;
         FilterFramesCheckBox.IsChecked = selected;
         FilterMicrophoneCheckBox.IsChecked = selected;
         FilterSystemAudioCheckBox.IsChecked = selected;
@@ -1465,10 +1486,12 @@ public partial class MainWindow : Window
     private bool TryValidateBrowserCapture(
         out string? chromiumPath,
         out string? browserStartUrl,
+        out string? browserProfileDirectory,
         out int fullWalkInterval)
     {
         chromiumPath = null;
         browserStartUrl = null;
+        browserProfileDirectory = null;
         fullWalkInterval = 0;
         if (BrowserEvidenceCheckBox.IsChecked != true)
         {
@@ -1518,6 +1541,33 @@ public partial class MainWindow : Window
                 "The selected instrumented Chromium executable does not exist.",
                 ChromiumPathTextBox);
             return false;
+        }
+
+        // An empty profile folder is a new profile for the recording. A
+        // folder given must exist, as it is a profile prepared beforehand.
+        var profileText = BrowserProfileTextBox.Text.Trim();
+        if (profileText.Length > 0)
+        {
+            try
+            {
+                browserProfileDirectory = Path.GetFullPath(profileText);
+            }
+            catch (Exception exception) when (
+                exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                ShowBrowserValidationError(
+                    "Enter a valid browser profile folder, or leave it empty for a new profile.",
+                    BrowserProfileTextBox);
+                return false;
+            }
+
+            if (!Directory.Exists(browserProfileDirectory))
+            {
+                ShowBrowserValidationError(
+                    "The browser profile folder does not exist. Choose a prepared profile folder, or leave it empty for a new profile.",
+                    BrowserProfileTextBox);
+                return false;
+            }
         }
 
         var startUrlText = BrowserStartUrlTextBox.Text.Trim();

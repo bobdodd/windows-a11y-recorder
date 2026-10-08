@@ -130,9 +130,15 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   45a500c; to check with a head pointer and eye tracking.
 - Stage 2, the browser preference, zoom, and `web-preferences-sent`
   records at protocol 0.56, the `ProfileDirectory` option in the session
-  settings, and the Browser groups of the properties panel: proposed
-  2026-10-08, with the hook points found in the checkout; recording at
-  `RenderViewHostImpl` agreed, the rest not agreed. Not built.
+  settings, and the Browser groups of the properties panel: proposed and
+  agreed 2026-10-08, built 2026-10-08 (see "As built" in its "Stage 2").
+  To build in the owner's checkout, and to test on the target machine
+  with `scripts/Test-BrowserPreferences.ps1` and the fixture page
+  `tests/fixtures/accessibility-preferences/index.html`, then with a
+  prepared profile folder. Open: the meaning of each stored
+  `requestedPageColors` number, shown as its number; the font families of
+  scripts other than the common one; and showing the foreground tab in the
+  "Sent to the page" group once the foreground tab is recorded.
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:
   the Magnifier change records on a real Magnifier recording
   (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter

@@ -269,7 +269,7 @@ public sealed class MagnifierChangesTests
         var builder = new PlaybackIndexBuilder(10_000_000, TimeSpan.Zero);
         builder.Add(1, record with { EventId = "e1" });
         var index = builder.Build();
-        Assert.Equal(7, PlaybackIndex.CurrentVersion);
+        Assert.True(PlaybackIndex.CurrentVersion >= 7);
         var kept = Assert.Single(index.Events, item => item.Channel == MagnifierChanges.Channel);
         Assert.Equal(record.Payload.GetRawText(), kept.Payload.GetRawText());
 

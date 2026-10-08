@@ -19576,6 +19576,479 @@ def patch_blink_frame_owner(path: Path) -> None:
     write_patched(path, text)
 
 
+# Protocol 0.56 (accessibility preferences, stage 2): the browser records.
+# The preferences a page's view is sent, the listed browser preferences of a
+# profile at load and on change, and each zoom level change. See
+# docs/architecture/accessibility-preferences.md, "Stage 2".
+CONTENT_RENDER_VIEW_HOST_OWN_INCLUDE = (
+    '#include "content/browser/renderer_host/render_view_host_impl.h"'
+)
+CONTENT_RENDER_VIEW_HOST_INCLUDES = (BRIDGE_INCLUDE,)
+CONTENT_RENDER_VIEW_HOST_HELPER_ANCHOR = (
+    "bool RenderViewHostImpl::CreateRenderView(\n"
+)
+CONTENT_RENDER_VIEW_HOST_HELPER_MARKER = "RecorderRecordPreferencesSent"
+CONTENT_RENDER_VIEW_HOST_HELPER = """\
+// Windows A11y Recorder (protocol 0.56, accessibility preferences stage 2):
+// the listed preferences a page's view is sent. See
+// docs/architecture/accessibility-preferences.md.
+namespace {
+
+// The family for the common script, Zyyy, which the font settings set; empty
+// when the map holds none.
+std::string RecorderCommonScriptFamily(
+    const blink::web_pref::ScriptFontFamilyMap& map) {
+  auto found = map.find("Zyyy");
+  return found == map.end() ? std::string()
+                            : base::UTF16ToUTF8(found->second);
+}
+
+const char* RecorderColorSchemeName(blink::mojom::PreferredColorScheme value) {
+  return value == blink::mojom::PreferredColorScheme::kDark ? "dark" : "light";
+}
+
+const char* RecorderContrastName(blink::mojom::PreferredContrast value) {
+  switch (value) {
+    case blink::mojom::PreferredContrast::kMore:
+      return "more";
+    case blink::mojom::PreferredContrast::kLess:
+      return "less";
+    case blink::mojom::PreferredContrast::kCustom:
+      return "custom";
+    case blink::mojom::PreferredContrast::kNoPreference:
+      return "no-preference";
+  }
+  return "no-preference";
+}
+
+void RecorderRecordPreferencesSent(
+    FrameTree* frame_tree,
+    RenderProcessHost* process,
+    const void* view,
+    const char* point,
+    const blink::web_pref::WebPreferences* web,
+    const blink::RendererPreferences* renderer) {
+  if (!a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  base::DictValue fields;
+  if (web) {
+    fields.Set("standardFontFamily",
+               RecorderCommonScriptFamily(web->standard_font_family_map));
+    fields.Set("fixedFontFamily",
+               RecorderCommonScriptFamily(web->fixed_font_family_map));
+    fields.Set("serifFontFamily",
+               RecorderCommonScriptFamily(web->serif_font_family_map));
+    fields.Set("sansSerifFontFamily",
+               RecorderCommonScriptFamily(web->sans_serif_font_family_map));
+    fields.Set("cursiveFontFamily",
+               RecorderCommonScriptFamily(web->cursive_font_family_map));
+    fields.Set("fantasyFontFamily",
+               RecorderCommonScriptFamily(web->fantasy_font_family_map));
+    fields.Set("mathFontFamily",
+               RecorderCommonScriptFamily(web->math_font_family_map));
+    fields.Set("defaultFontSize", web->default_font_size);
+    fields.Set("defaultFixedFontSize", web->default_fixed_font_size);
+    fields.Set("minimumFontSize", web->minimum_font_size);
+    fields.Set("minimumLogicalFontSize", web->minimum_logical_font_size);
+    fields.Set("prefersReducedMotion", web->prefers_reduced_motion);
+    fields.Set("prefersReducedTransparency",
+               web->prefers_reduced_transparency);
+    fields.Set("invertedColors", web->inverted_colors);
+    fields.Set("textTrackTextSize", web->text_track_text_size);
+    fields.Set("textTrackFontFamily", web->text_track_font_family);
+    fields.Set("inForcedColors", web->in_forced_colors);
+    fields.Set("isForcedColorsDisabled", web->is_forced_colors_disabled);
+    fields.Set("preferredRootScrollbarColorScheme",
+               RecorderColorSchemeName(
+                   web->preferred_root_scrollbar_color_scheme));
+    fields.Set("preferredColorScheme",
+               RecorderColorSchemeName(web->preferred_color_scheme));
+    fields.Set("preferredContrast",
+               RecorderContrastName(web->preferred_contrast));
+  }
+  if (renderer) {
+    fields.Set("focusRingColor",
+               base::StringPrintf("#%08X", renderer->focus_ring_color));
+    // No interval means the renderer keeps its own; the milliseconds are
+    // then zero.
+    fields.Set("hasCaretBlinkInterval",
+               renderer->caret_blink_interval.has_value());
+    fields.Set("caretBlinkIntervalMilliseconds",
+               renderer->caret_blink_interval.has_value()
+                   ? renderer->caret_blink_interval->InMillisecondsF()
+                   : 0.0);
+    fields.Set("caretBrowsingEnabled", renderer->caret_browsing_enabled);
+#if BUILDFLAG(IS_WIN)
+    fields.Set("useOverlayScrollbar", renderer->use_overlay_scrollbar);
+    fields.Set("captionFontFamily",
+               base::UTF16ToUTF8(renderer->caption_font_family_name));
+    fields.Set("captionFontHeight", renderer->caption_font_height);
+    fields.Set("smallCaptionFontFamily",
+               base::UTF16ToUTF8(renderer->small_caption_font_family_name));
+    fields.Set("smallCaptionFontHeight", renderer->small_caption_font_height);
+    fields.Set("menuFontFamily",
+               base::UTF16ToUTF8(renderer->menu_font_family_name));
+    fields.Set("menuFontHeight", renderer->menu_font_height);
+    fields.Set("statusFontFamily",
+               base::UTF16ToUTF8(renderer->status_font_family_name));
+    fields.Set("statusFontHeight", renderer->status_font_height);
+    fields.Set("messageFontFamily",
+               base::UTF16ToUTF8(renderer->message_font_family_name));
+    fields.Set("messageFontHeight", renderer->message_font_height);
+#endif
+  }
+  a11y_recorder::RecordBrowserWebPreferencesSent(
+      frame_tree ? frame_tree->root()->frame_tree_node_id().GetUnsafeValue()
+                 : -1,
+      frame_tree && frame_tree->is_primary(),
+      process ? process->GetDeprecatedID() : -1,
+      reinterpret_cast<uintptr_t>(view), point, std::move(fields));
+}
+
+}  // namespace
+
+"""
+CONTENT_RENDER_VIEW_HOST_CREATED_ANCHOR = """\
+  // The renderer process's `blink::WebView` is owned by this lifecycle of
+  // the `page_broadcast_` channel.
+  GetAgentSchedulingGroup().CreateView(std::move(params));
+"""
+CONTENT_RENDER_VIEW_HOST_CREATED_HOOK = """\
+  // Windows A11y Recorder (protocol 0.56): the preferences the new view is
+  // created with.
+  RecorderRecordPreferencesSent(frame_tree_, GetProcess(), this,
+                                "view-created", &params->web_preferences,
+                                &params->renderer_preferences);
+
+  // The renderer process's `blink::WebView` is owned by this lifecycle of
+  // the `page_broadcast_` channel.
+  GetAgentSchedulingGroup().CreateView(std::move(params));
+"""
+CONTENT_RENDER_VIEW_HOST_WEB_ANCHOR = """\
+    broadcast->UpdateWebPreferences(delegate_->GetOrCreateWebPreferences(this));
+  }
+"""
+CONTENT_RENDER_VIEW_HOST_WEB_HOOK = """\
+    broadcast->UpdateWebPreferences(delegate_->GetOrCreateWebPreferences(this));
+    // Windows A11y Recorder (protocol 0.56): the web preferences sent.
+    RecorderRecordPreferencesSent(frame_tree_, GetProcess(), this,
+                                  "web-preferences",
+                                  &delegate_->GetOrCreateWebPreferences(this),
+                                  nullptr);
+  }
+"""
+CONTENT_RENDER_VIEW_HOST_RENDERER_ANCHOR = """\
+    broadcast->UpdateRendererPreferences(preferences);
+  }
+"""
+CONTENT_RENDER_VIEW_HOST_RENDERER_HOOK = """\
+    broadcast->UpdateRendererPreferences(preferences);
+    // Windows A11y Recorder (protocol 0.56): the renderer preferences sent.
+    RecorderRecordPreferencesSent(frame_tree_, GetProcess(), this,
+                                  "renderer-preferences", nullptr,
+                                  &preferences);
+  }
+"""
+CONTENT_RENDER_VIEW_HOST_EXTRA_INCLUDES = (
+    '#include "base/strings/stringprintf.h"',
+)
+
+
+def patch_content_render_view_host(path: Path) -> None:
+    """Protocol 0.56: the preferences each page's view is sent."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CONTENT_RENDER_VIEW_HOST_OWN_INCLUDE,
+        CONTENT_RENDER_VIEW_HOST_INCLUDES
+        + CONTENT_RENDER_VIEW_HOST_EXTRA_INCLUDES,
+        path,
+    )
+    text = insert_before_once(
+        text,
+        CONTENT_RENDER_VIEW_HOST_HELPER_ANCHOR,
+        CONTENT_RENDER_VIEW_HOST_HELPER,
+        CONTENT_RENDER_VIEW_HOST_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_RENDER_VIEW_HOST_CREATED_ANCHOR,
+        CONTENT_RENDER_VIEW_HOST_CREATED_HOOK,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_RENDER_VIEW_HOST_WEB_ANCHOR,
+        CONTENT_RENDER_VIEW_HOST_WEB_HOOK,
+        path,
+    )
+    text = apply_cookie_hook(
+        text,
+        CONTENT_RENDER_VIEW_HOST_RENDERER_ANCHOR,
+        CONTENT_RENDER_VIEW_HOST_RENDERER_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+# Each zoom level change of a HostZoomMapImpl, recorded just before its
+# change callbacks run, and each change of its default level.
+CONTENT_HOST_ZOOM_MAP_OWN_INCLUDE = (
+    '#include "content/browser/host_zoom_map_impl.h"'
+)
+CONTENT_HOST_ZOOM_MAP_INCLUDES = (BRIDGE_INCLUDE,)
+CONTENT_HOST_ZOOM_MAP_HOST_ANCHOR = """\
+  change.last_modified = last_modified;
+
+  zoom_level_changed_callbacks_.Notify(change);
+"""
+CONTENT_HOST_ZOOM_MAP_HOST_HOOK = """\
+  change.last_modified = last_modified;
+
+  // Windows A11y Recorder (protocol 0.56): a host's zoom level.
+  a11y_recorder::RecordBrowserZoomLevelChanged("host", false, change.host,
+                                               change.scheme,
+                                               change.zoom_level);
+  zoom_level_changed_callbacks_.Notify(change);
+"""
+CONTENT_HOST_ZOOM_MAP_SCHEME_ANCHOR = """\
+  change.last_modified = base::Time();
+
+  zoom_level_changed_callbacks_.Notify(change);
+"""
+CONTENT_HOST_ZOOM_MAP_SCHEME_HOOK = """\
+  change.last_modified = base::Time();
+
+  // Windows A11y Recorder (protocol 0.56): a scheme and host's zoom level.
+  a11y_recorder::RecordBrowserZoomLevelChanged(
+      "scheme-and-host", false, change.host, change.scheme, change.zoom_level);
+  zoom_level_changed_callbacks_.Notify(change);
+"""
+CONTENT_HOST_ZOOM_MAP_FOLLOWS_ANCHOR = """\
+    change.zoom_level = level;
+
+    zoom_level_changed_callbacks_.Notify(change);
+"""
+CONTENT_HOST_ZOOM_MAP_FOLLOWS_HOOK = """\
+    change.zoom_level = level;
+
+    // Windows A11y Recorder (protocol 0.56): a page that uses the default
+    // level, changed with it.
+    a11y_recorder::RecordBrowserZoomLevelChanged("host", true, change.host,
+                                                 change.scheme,
+                                                 change.zoom_level);
+    zoom_level_changed_callbacks_.Notify(change);
+"""
+CONTENT_HOST_ZOOM_MAP_TEMPORARY_ANCHOR = """\
+  change.host = GetHostFromProcessFrame(rfh);
+  change.zoom_level = level;
+
+  zoom_level_changed_callbacks_.Notify(change);
+"""
+CONTENT_HOST_ZOOM_MAP_TEMPORARY_HOOK = """\
+  change.host = GetHostFromProcessFrame(rfh);
+  change.zoom_level = level;
+
+  // Windows A11y Recorder (protocol 0.56): one page's temporary zoom level.
+  a11y_recorder::RecordBrowserZoomLevelChanged("temporary", false, change.host,
+                                               change.scheme,
+                                               change.zoom_level);
+  zoom_level_changed_callbacks_.Notify(change);
+"""
+CONTENT_HOST_ZOOM_MAP_DEFAULT_ANCHOR = """\
+  default_zoom_level_ = level;
+
+  // First, remove all entries that match the new default zoom level.
+"""
+CONTENT_HOST_ZOOM_MAP_DEFAULT_HOOK = """\
+  default_zoom_level_ = level;
+  // Windows A11y Recorder (protocol 0.56): the default zoom level.
+  a11y_recorder::RecordBrowserZoomLevelChanged("default", false, std::string(),
+                                               std::string(), level);
+
+  // First, remove all entries that match the new default zoom level.
+"""
+
+
+def patch_content_host_zoom_map(path: Path) -> None:
+    """Protocol 0.56: each zoom level change and default level change."""
+    text = read_source(path)
+    text = add_includes_after(
+        text,
+        CONTENT_HOST_ZOOM_MAP_OWN_INCLUDE,
+        CONTENT_HOST_ZOOM_MAP_INCLUDES,
+        path,
+    )
+    for anchor, hook in (
+        (CONTENT_HOST_ZOOM_MAP_HOST_ANCHOR, CONTENT_HOST_ZOOM_MAP_HOST_HOOK),
+        (CONTENT_HOST_ZOOM_MAP_SCHEME_ANCHOR, CONTENT_HOST_ZOOM_MAP_SCHEME_HOOK),
+        (
+            CONTENT_HOST_ZOOM_MAP_FOLLOWS_ANCHOR,
+            CONTENT_HOST_ZOOM_MAP_FOLLOWS_HOOK,
+        ),
+        (
+            CONTENT_HOST_ZOOM_MAP_TEMPORARY_ANCHOR,
+            CONTENT_HOST_ZOOM_MAP_TEMPORARY_HOOK,
+        ),
+        (
+            CONTENT_HOST_ZOOM_MAP_DEFAULT_ANCHOR,
+            CONTENT_HOST_ZOOM_MAP_DEFAULT_HOOK,
+        ),
+    ):
+        text = apply_cookie_hook(text, anchor, hook, path)
+    write_patched(path, text)
+
+
+# The listed browser preferences of a profile as it finishes loading, and
+# each change of one of them, watched by the profile's own registrar so that
+# the observers end with the profile.
+CHROME_PROFILE_IMPL_OWN_INCLUDE = (
+    '#include "chrome/browser/profiles/profile_impl.h"'
+)
+CHROME_PROFILE_IMPL_INCLUDES = (BRIDGE_INCLUDE,)
+CHROME_PROFILE_IMPL_HELPER_ANCHOR = """\
+}  // namespace
+
+// static
+std::unique_ptr<Profile> Profile::CreateProfile("""
+CHROME_PROFILE_IMPL_HELPER_MARKER = "kRecorderBrowserPreferences"
+CHROME_PROFILE_IMPL_HELPER = """\
+// Windows A11y Recorder (protocol 0.56, accessibility preferences stage 2):
+// the browser preferences that change how pages are drawn, by their name in
+// the record. See docs/architecture/accessibility-preferences.md.
+constexpr std::pair<const char*, const char*> kRecorderBrowserPreferences[] = {
+    {"standardFontFamily", "webkit.webprefs.fonts.standard.Zyyy"},
+    {"fixedFontFamily", "webkit.webprefs.fonts.fixed.Zyyy"},
+    {"serifFontFamily", "webkit.webprefs.fonts.serif.Zyyy"},
+    {"sansSerifFontFamily", "webkit.webprefs.fonts.sansserif.Zyyy"},
+    {"cursiveFontFamily", "webkit.webprefs.fonts.cursive.Zyyy"},
+    {"fantasyFontFamily", "webkit.webprefs.fonts.fantasy.Zyyy"},
+    {"mathFontFamily", "webkit.webprefs.fonts.math.Zyyy"},
+    {"defaultFontSize", "webkit.webprefs.default_font_size"},
+    {"defaultFixedFontSize", "webkit.webprefs.default_fixed_font_size"},
+    {"minimumFontSize", "webkit.webprefs.minimum_font_size"},
+    {"minimumLogicalFontSize", "webkit.webprefs.minimum_logical_font_size"},
+    {"colorScheme", "browser.theme.color_scheme2"},
+    {"focusHighlight", "settings.a11y.focus_highlight"},
+    {"requestedPageColors", "settings.a11y.requested_page_colors"},
+    {"pageColorsOnlyOnIncreasedContrast",
+     "settings.a11y.apply_page_colors_only_on_increased_contrast"},
+    {"pageColorsBlockList", "settings.a11y.page_colors_block_list"},
+    {"caretBrowsing", "settings.a11y.caretbrowsing.enabled"},
+};
+
+base::DictValue RecorderBrowserPreferenceReading(PrefService* prefs,
+                                                 const char* preference) {
+  base::DictValue reading;
+  const PrefService::Preference* found = prefs->FindPreference(preference);
+  if (!found) {
+    reading.Set("value", base::Value());
+    reading.Set("isDefault", base::Value());
+    reading.Set("problem", "not registered");
+    return reading;
+  }
+  reading.Set("value", found->GetValue()->Clone());
+  reading.Set("isDefault", found->IsDefaultValue());
+  reading.Set("problem", base::Value());
+  return reading;
+}
+
+void RecorderBrowserPreferenceChanged(PrefService* prefs,
+                                      const std::string& profile_directory,
+                                      const std::string& name,
+                                      const std::string& preference) {
+  a11y_recorder::RecordBrowserPreferenceChanged(
+      profile_directory, name,
+      RecorderBrowserPreferenceReading(prefs, preference.c_str()));
+}
+
+void RecorderWatchBrowserPreferences(PrefService* prefs,
+                                     PrefChangeRegistrar* registrar,
+                                     const base::FilePath& path,
+                                     bool new_profile) {
+  if (!a11y_recorder::IsRecorderActive()) {
+    return;
+  }
+  const std::string profile_directory = path.AsUTF8Unsafe();
+  base::DictValue preferences;
+  for (const auto& [name, preference] : kRecorderBrowserPreferences) {
+    preferences.Set(name, RecorderBrowserPreferenceReading(prefs, preference));
+    if (prefs->FindPreference(preference)) {
+      registrar->Add(preference,
+                     base::BindRepeating(&RecorderBrowserPreferenceChanged,
+                                         base::Unretained(prefs),
+                                         profile_directory, std::string(name),
+                                         std::string(preference)));
+    }
+  }
+  a11y_recorder::RecordBrowserPreferences(profile_directory, new_profile,
+                                          std::move(preferences));
+}
+
+"""
+CHROME_PROFILE_IMPL_WATCH_ANCHOR = """\
+      base::BindRepeating(&ProfileImpl::UpdateAiSubscriptionTierInStorage,
+                          base::Unretained(this)));
+
+  base::FilePath base_cache_path;
+"""
+CHROME_PROFILE_IMPL_WATCH_HOOK = """\
+      base::BindRepeating(&ProfileImpl::UpdateAiSubscriptionTierInStorage,
+                          base::Unretained(this)));
+
+  // Windows A11y Recorder (protocol 0.56): the listed browser preferences,
+  // and each change of one of them.
+  RecorderWatchBrowserPreferences(prefs, &pref_change_registrar_, path_,
+                                  IsNewProfile());
+
+  base::FilePath base_cache_path;
+"""
+
+
+def patch_chrome_profile_impl(path: Path) -> None:
+    """Protocol 0.56: a profile's listed browser preferences and changes."""
+    text = read_source(path)
+    text = add_includes_after(
+        text, CHROME_PROFILE_IMPL_OWN_INCLUDE, CHROME_PROFILE_IMPL_INCLUDES, path
+    )
+    text = insert_before_once(
+        text,
+        CHROME_PROFILE_IMPL_HELPER_ANCHOR,
+        CHROME_PROFILE_IMPL_HELPER,
+        CHROME_PROFILE_IMPL_HELPER_MARKER,
+        path,
+    )
+    text = apply_cookie_hook(
+        text, CHROME_PROFILE_IMPL_WATCH_ANCHOR, CHROME_PROFILE_IMPL_WATCH_HOOK,
+        path,
+    )
+    write_patched(path, text)
+
+
+def patch_chrome_profiles_build(path: Path) -> None:
+    """Protocol 0.56: profile_impl.cc, in the misc target, uses the bridge."""
+    text = read_source(path)
+    target = text.find('source_set("misc") {\n')
+    if target < 0:
+        raise RuntimeError(f"{path}: the misc target was not found")
+    end = text.find("\n}\n", target)
+    if end < 0:
+        raise RuntimeError(f"{path}: the end of the misc target was not found")
+    if BRIDGE_DEP in text[target:end]:
+        return
+    if '    "profile_impl.cc",\n' not in text[target:end]:
+        raise RuntimeError(f"{path}: profile_impl.cc is not in the misc target")
+    opening = "  deps = [\n"
+    deps = text.find(opening, target, end)
+    if deps < 0:
+        raise RuntimeError(f"{path}: the misc target's deps were not found")
+    insert_at = deps + len(opening)
+    text = text[:insert_at] + f"    {BRIDGE_DEP}\n" + text[insert_at:]
+    write_patched(path, text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -19976,6 +20449,22 @@ def main() -> int:
     )
     patch_blink_frame_owner(
         blink_source / "core" / "html" / "html_frame_owner_element.cc"
+    )
+    patch_content_render_view_host(
+        source
+        / "content"
+        / "browser"
+        / "renderer_host"
+        / "render_view_host_impl.cc"
+    )
+    patch_content_host_zoom_map(
+        source / "content" / "browser" / "host_zoom_map_impl.cc"
+    )
+    patch_chrome_profile_impl(
+        source / "chrome" / "browser" / "profiles" / "profile_impl.cc"
+    )
+    patch_chrome_profiles_build(
+        source / "chrome" / "browser" / "profiles" / "BUILD.gn"
     )
     patch_v8_debug(source / "v8" / "src" / "debug" / "debug.cc")
     patch_v8_compile_error(

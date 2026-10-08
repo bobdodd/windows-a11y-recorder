@@ -1823,8 +1823,8 @@ class IntegrateTests(unittest.TestCase):
 
         # The bridge and the recorder must agree on the protocol version, or
         # every connection is refused.
-        self.assertIn('kProtocolVersion[] = "0.55"', bridge_protocol)
-        self.assertIn('CurrentVersion = "0.55"', contracts)
+        self.assertIn('kProtocolVersion[] = "0.56"', bridge_protocol)
+        self.assertIn('CurrentVersion = "0.56"', contracts)
 
     def test_validation_fails_when_the_run_lost_evidence(self):
         root = Path(__file__).parent.parent
@@ -9580,3 +9580,251 @@ class FrameOwnerIntegrationTests(unittest.TestCase):
         start = bridge.index("void RecordBlinkDomFrameOwnerChanged(")
         end = bridge.index("\n}\n", start)
         self.assertNotIn("CreateDomStateChangeBasePayload", bridge[start:end])
+
+
+class BrowserPreferencesIntegrationTests(unittest.TestCase):
+    """Protocol 0.56: the browser records of accessibility preferences."""
+
+    def signatures(self):
+        return INTEGRATE.parse_bridge_signatures(
+            (MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.h")
+            .read_text(encoding="utf-8")
+        )
+
+    def patch_twice(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            patch(path)
+            first = path.read_text(encoding="utf-8")
+            patch(path)
+            self.assertEqual(first, path.read_text(encoding="utf-8"))
+            return first
+
+    def refuses(self, name, source, patch):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / name
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                patch(path)
+
+    def render_view_host_source(self):
+        return (
+            INTEGRATE.CONTENT_RENDER_VIEW_HOST_OWN_INCLUDE
+            + "\n\nnamespace content {\n\n"
+            + INTEGRATE.CONTENT_RENDER_VIEW_HOST_HELPER_ANCHOR
+            + "    int proxy_route_id) {\n"
+            "  params->web_preferences = delegate_->GetOrCreateWebPreferences(this);\n\n"
+            + INTEGRATE.CONTENT_RENDER_VIEW_HOST_CREATED_ANCHOR
+            + "  return true;\n}\n\n"
+            "void RenderViewHostImpl::SendWebPreferencesToRenderer() {\n"
+            "  if (auto& broadcast = GetAssociatedPageBroadcast()) {\n"
+            + INTEGRATE.CONTENT_RENDER_VIEW_HOST_WEB_ANCHOR
+            + "}\n\n"
+            "void RenderViewHostImpl::SendRendererPreferencesToRenderer(\n"
+            "    const blink::RendererPreferences& preferences) {\n"
+            "  if (auto& broadcast = GetAssociatedPageBroadcast()) {\n"
+            + INTEGRATE.CONTENT_RENDER_VIEW_HOST_RENDERER_ANCHOR
+            + "}\n\n}  // namespace content\n"
+        )
+
+    def test_each_send_of_preferences_to_a_view_is_recorded(self):
+        first = self.patch_twice(
+            "render_view_host_impl.cc",
+            self.render_view_host_source(),
+            INTEGRATE.patch_content_render_view_host,
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, first.count(INTEGRATE.CONTENT_RENDER_VIEW_HOST_HELPER))
+        for hook in (
+            INTEGRATE.CONTENT_RENDER_VIEW_HOST_CREATED_HOOK,
+            INTEGRATE.CONTENT_RENDER_VIEW_HOST_WEB_HOOK,
+            INTEGRATE.CONTENT_RENDER_VIEW_HOST_RENDERER_HOOK,
+        ):
+            self.assertEqual(1, first.count(hook))
+        # The helper is defined before its first use, and the view is
+        # recorded before its parameters are moved away.
+        self.assertLess(
+            first.index("void RecorderRecordPreferencesSent("),
+            first.index("bool RenderViewHostImpl::CreateRenderView("),
+        )
+        self.assertLess(
+            first.index('"view-created"'),
+            first.index("CreateView(std::move(params));"),
+        )
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", first, self.signatures()
+            ),
+        )
+
+    def test_records_every_listed_field_of_the_preferences(self):
+        helper = INTEGRATE.CONTENT_RENDER_VIEW_HOST_HELPER
+        for field in (
+            "standardFontFamily", "fixedFontFamily", "serifFontFamily",
+            "sansSerifFontFamily", "cursiveFontFamily", "fantasyFontFamily",
+            "mathFontFamily", "defaultFontSize", "defaultFixedFontSize",
+            "minimumFontSize", "minimumLogicalFontSize",
+            "prefersReducedMotion", "prefersReducedTransparency",
+            "invertedColors", "textTrackTextSize", "textTrackFontFamily",
+            "inForcedColors", "isForcedColorsDisabled",
+            "preferredRootScrollbarColorScheme", "preferredColorScheme",
+            "preferredContrast", "focusRingColor",
+            "hasCaretBlinkInterval", "caretBlinkIntervalMilliseconds",
+            "caretBrowsingEnabled",
+            "useOverlayScrollbar", "captionFontFamily", "captionFontHeight",
+            "smallCaptionFontFamily", "smallCaptionFontHeight",
+            "menuFontFamily", "menuFontHeight", "statusFontFamily",
+            "statusFontHeight", "messageFontFamily", "messageFontHeight",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(f'"{field}"', helper)
+        # Nothing is read for a browser started without the recorder.
+        self.assertLess(
+            helper.index("if (!a11y_recorder::IsRecorderActive())"),
+            helper.index("base::DictValue fields;"),
+        )
+
+    def test_refuses_a_render_view_host_it_does_not_recognise(self):
+        source = self.render_view_host_source().replace(
+            "broadcast->UpdateRendererPreferences(preferences);",
+            "broadcast->UpdateRendererPreferences(std::move(preferences));",
+        )
+        self.refuses(
+            "render_view_host_impl.cc",
+            source,
+            INTEGRATE.patch_content_render_view_host,
+        )
+
+    def host_zoom_map_source(self):
+        return (
+            INTEGRATE.CONTENT_HOST_ZOOM_MAP_OWN_INCLUDE
+            + "\n\nnamespace content {\n\n"
+            "void HostZoomMapImpl::SetZoomLevelForHostInternal() {\n"
+            + INTEGRATE.CONTENT_HOST_ZOOM_MAP_HOST_ANCHOR
+            + "}\n\nvoid HostZoomMapImpl::SetZoomLevelForHostAndScheme() {\n"
+            + INTEGRATE.CONTENT_HOST_ZOOM_MAP_SCHEME_ANCHOR
+            + "}\n\nvoid HostZoomMapImpl::SetDefaultZoomLevelInternal() {\n"
+            "  if (uses_default_zoom) {\n"
+            + INTEGRATE.CONTENT_HOST_ZOOM_MAP_FOLLOWS_ANCHOR
+            + "  }\n}\n\nvoid HostZoomMapImpl::SetDefaultZoomLevel(double level) {\n"
+            + INTEGRATE.CONTENT_HOST_ZOOM_MAP_DEFAULT_ANCHOR
+            + "}\n\nvoid HostZoomMapImpl::SetTemporaryZoomLevel() {\n"
+            + INTEGRATE.CONTENT_HOST_ZOOM_MAP_TEMPORARY_ANCHOR
+            + "}\n\n}  // namespace content\n"
+        )
+
+    def test_each_zoom_level_change_is_recorded_before_its_callbacks(self):
+        first = self.patch_twice(
+            "host_zoom_map_impl.cc",
+            self.host_zoom_map_source(),
+            INTEGRATE.patch_content_host_zoom_map,
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(
+            5, first.count("a11y_recorder::RecordBrowserZoomLevelChanged(")
+        )
+        for mode in ('"host", false', '"scheme-and-host", false',
+                     '"host", true', '"temporary", false', '"default", false'):
+            with self.subTest(mode=mode):
+                self.assertIn(mode, first)
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", first, self.signatures()
+            ),
+        )
+
+    def test_refuses_a_zoom_map_it_does_not_recognise(self):
+        source = self.host_zoom_map_source().replace(
+            "  change.host = GetHostFromProcessFrame(rfh);\n", ""
+        )
+        self.refuses(
+            "host_zoom_map_impl.cc", source, INTEGRATE.patch_content_host_zoom_map
+        )
+
+    def profile_source(self):
+        return (
+            INTEGRATE.CHROME_PROFILE_IMPL_OWN_INCLUDE
+            + "\n\nnamespace {\n\nint unrelated = 0;\n\n"
+            + INTEGRATE.CHROME_PROFILE_IMPL_HELPER_ANCHOR
+            + "const base::FilePath& path) {\n}\n\n"
+            "void ProfileImpl::DoFinalInit(CreateMode create_mode) {\n"
+            "  PrefService* prefs = GetPrefs();\n"
+            "  pref_change_registrar_.Init(prefs);\n"
+            "  pref_change_registrar_.Add(\n"
+            "      subscription_eligibility::prefs::kAiSubscriptionTier,\n"
+            + INTEGRATE.CHROME_PROFILE_IMPL_WATCH_ANCHOR
+            + "}\n"
+        )
+
+    def test_a_profile_records_its_listed_preferences_and_their_changes(self):
+        first = self.patch_twice(
+            "profile_impl.cc", self.profile_source(),
+            INTEGRATE.patch_chrome_profile_impl,
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BRIDGE_INCLUDE + "\n"))
+        self.assertEqual(1, first.count(INTEGRATE.CHROME_PROFILE_IMPL_HELPER))
+        self.assertEqual(1, first.count(INTEGRATE.CHROME_PROFILE_IMPL_WATCH_HOOK))
+        # The watch is added once the profile's registrar is initialised.
+        self.assertLess(
+            first.index("pref_change_registrar_.Init(prefs);"),
+            first.index("RecorderWatchBrowserPreferences(prefs,"),
+        )
+        for preference in (
+            "webkit.webprefs.fonts.standard.Zyyy",
+            "webkit.webprefs.default_font_size",
+            "webkit.webprefs.minimum_font_size",
+            "browser.theme.color_scheme2",
+            "settings.a11y.focus_highlight",
+            "settings.a11y.requested_page_colors",
+            "settings.a11y.apply_page_colors_only_on_increased_contrast",
+            "settings.a11y.page_colors_block_list",
+            "settings.a11y.caretbrowsing.enabled",
+        ):
+            with self.subTest(preference=preference):
+                self.assertIn(f'"{preference}"', first)
+        self.assertEqual(
+            [],
+            INTEGRATE.describe_signature_mismatches(
+                "patched", first, self.signatures()
+            ),
+        )
+
+    def test_refuses_a_profile_it_does_not_recognise(self):
+        source = self.profile_source().replace(
+            "  base::FilePath base_cache_path;\n", ""
+        )
+        self.refuses("profile_impl.cc", source, INTEGRATE.patch_chrome_profile_impl)
+
+    def test_the_profiles_misc_target_depends_on_the_bridge(self):
+        source = (
+            'source_set("profiles") {\n  deps = [\n    "//base",\n  ]\n}\n\n'
+            'source_set("misc") {\n  sources = [\n    "profile_impl.cc",\n'
+            '    "profile_impl.h",\n  ]\n\n  deps = [\n    ":profile",\n'
+            '  ]\n}\n'
+        )
+        first = self.patch_twice(
+            "BUILD.gn", source, INTEGRATE.patch_chrome_profiles_build
+        )
+        self.assertEqual(1, first.count(INTEGRATE.BRIDGE_DEP))
+        self.assertGreater(
+            first.index(INTEGRATE.BRIDGE_DEP), first.index('source_set("misc")')
+        )
+        self.refuses(
+            "BUILD.gn",
+            source.replace('"profile_impl.cc"', '"other.cc"'),
+            INTEGRATE.patch_chrome_profiles_build,
+        )
+
+    def test_the_bridge_records_only_what_changed_for_a_view(self):
+        bridge = (
+            MODULE_PATH.parent / "recorder_bridge" / "browser_bridge.cc"
+        ).read_text(encoding="utf-8")
+        start = bridge.index("void RecordBrowserWebPreferencesSent(")
+        end = bridge.index("\n}\n", start)
+        body = bridge[start:end]
+        self.assertIn('const bool created = point == "view-created";', body)
+        self.assertIn("if (!first && changed.empty()) {", body)
+        self.assertIn('"browser.preferences", "web-preferences-sent"', body)

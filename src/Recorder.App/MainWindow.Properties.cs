@@ -8,7 +8,8 @@ using Recorder.Session;
 namespace Recorder.App;
 
 // The properties panel beside the video: the Magnifier readings of the
-// frame shown and the Windows settings in effect at its time. Its rows are
+// frame shown, the Windows settings in effect at its time, the browser
+// preferences in effect, and the values last sent to the page shown. Its rows are
 // updated in place, so the row a keyboard or screen reader user is on keeps
 // its place during playback; nothing is announced as they change. A row
 // whose setting changed during the recording ends with previous and next
@@ -48,7 +49,7 @@ public partial class MainWindow
                 ? -1
                 : FindFrameAtOrBefore(_playbackArchive.Frames, positionNanoseconds);
             var frame = index < 0 ? null : _playbackArchive.Frames[index];
-            rows = _playbackArchive.WindowsPreferences.RowsAt(positionNanoseconds, frame, _playbackArchive.MagnifierChanges);
+            rows = RowsAt(_playbackArchive, positionNanoseconds, frame);
         }
 
         if (rows.Count != _propertyRows.Count)
@@ -68,6 +69,14 @@ public partial class MainWindow
         }
     }
 
+    // Every row of the panel at a time: the Magnifier and Windows groups,
+    // then the Browser and Sent to the page groups.
+    private static IReadOnlyList<PropertyRow> RowsAt(SessionPlaybackArchive archive, long time, SessionVideoFrame? frame) =>
+    [
+        .. archive.WindowsPreferences.RowsAt(time, frame, archive.MagnifierChanges),
+        .. archive.BrowserPreferences.RowsAt(time)
+    ];
+
     // The row's place among its setting's changes, or null when it has no
     // buttons and count: the recording holds no records of it, or no change
     // of it. The times are read once per recording and row.
@@ -86,7 +95,8 @@ public partial class MainWindow
 
         if (!_propertyChangeTimes.TryGetValue(row.Key, out var times))
         {
-            times = PropertyChangeSteps.TimesOf(row, archive.WindowsPreferences, archive.MagnifierChanges);
+            times = PropertyChangeSteps.TimesOf(
+                row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences);
             _propertyChangeTimes[row.Key] = times;
         }
 
@@ -149,11 +159,16 @@ public partial class MainWindow
         }
 
         var name = char.ToLower(row.Setting[0], System.Globalization.CultureInfo.CurrentCulture) + row.Setting[1..];
-        if (PropertyChangeSteps.TimesOf(row.Row, archive.WindowsPreferences, archive.MagnifierChanges) is not { } times)
+        if (PropertyChangeSteps.TimesOf(
+                row.Row, archive.WindowsPreferences, archive.MagnifierChanges, archive.BrowserPreferences) is not { } times)
         {
-            _busy.AnnounceLayout(row.Group == WindowsPreferenceTimeline.MagnifierGroup
-                ? "This recording has no Magnifier change records."
-                : "This recording has no Windows settings records.");
+            _busy.AnnounceLayout(row.Group switch
+            {
+                WindowsPreferenceTimeline.MagnifierGroup => "This recording has no Magnifier change records.",
+                BrowserPreferenceTimeline.BrowserGroup => "This recording has no browser preference records.",
+                BrowserPreferenceTimeline.PageGroup => "The values sent to the page have no change steps.",
+                _ => "This recording has no Windows settings records."
+            });
             return;
         }
 
@@ -169,8 +184,7 @@ public partial class MainWindow
 
         SeekTo(at, synchronizeAudio: false);
         var index = archive.Frames.Count == 0 ? -1 : FindFrameAtOrBefore(archive.Frames, at);
-        var there = archive.WindowsPreferences
-            .RowsAt(at, index < 0 ? null : archive.Frames[index], archive.MagnifierChanges)
+        var there = RowsAt(archive, at, index < 0 ? null : archive.Frames[index])
             .FirstOrDefault(candidate => candidate.Key == row.Row.Key);
         _busy.AnnounceLayout(there is null
             ? $"Moved to the change of {name} at {FormatTime(at)}."

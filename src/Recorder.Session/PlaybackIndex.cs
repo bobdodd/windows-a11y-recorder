@@ -22,8 +22,10 @@ public sealed record PlaybackIndex
     // keeps its color effect (fullscreenColorEffect). Version 6 keeps the
     // Windows settings records (system.preferences) whole, for the
     // properties panel. Version 7 keeps the Magnifier change records
-    // (graphics.magnifier) whole, for the panel's Magnifier rows.
-    public const int CurrentVersion = 7;
+    // (graphics.magnifier) whole, for the panel's Magnifier rows. Version 8
+    // keeps the browser preference records (browser.preferences, protocol
+    // 0.56) whole, for the panel's Browser and Sent to the page rows.
+    public const int CurrentVersion = 8;
 
     public required int Version { get; init; }
 
@@ -221,7 +223,8 @@ public sealed class PlaybackIndexBuilder
         }
 
         if (channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
-            channel == Recorder.Contracts.MagnifierChanges.Channel)
+            channel == Recorder.Contracts.MagnifierChanges.Channel ||
+            channel == Recorder.Contracts.BrowserPreferenceSettings.Channel)
         {
             Keep(eventKey, record);
             return;
@@ -344,7 +347,8 @@ public sealed class PlaybackIndexBuilder
             record.MonotonicNanoseconds,
             (IsPopupRecord(record.Channel, record.EventType) ||
              record.Channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
-             record.Channel == Recorder.Contracts.MagnifierChanges.Channel) &&
+             record.Channel == Recorder.Contracts.MagnifierChanges.Channel ||
+             record.Channel == Recorder.Contracts.BrowserPreferenceSettings.Channel) &&
             record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : PlaybackPayload(record.Payload)));

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/component_export.h"
+#include "base/values.h"
 #include "chromium/recorder_bridge/full_walks.h"
 #include "chromium/recorder_bridge/layout_changes.h"
 #include "chromium/recorder_bridge/recorder_switches.h"
@@ -2533,6 +2534,56 @@ class HookCost {
   static const int recorder_hook_cost_slot =                        \
       ::a11y_recorder::RegisterHookCostKind(name);                  \
   const ::a11y_recorder::HookCost recorder_hook_cost(recorder_hook_cost_slot)
+
+// Protocol 0.56 (accessibility preferences, stage 2). See
+// docs/architecture/accessibility-preferences.md.
+//
+// Records the preferences a page's view is sent, on browser.preferences as
+// web-preferences-sent. The point is "view-created" (RenderViewHostImpl::
+// CreateRenderView, the full set), "web-preferences"
+// (SendWebPreferencesToRenderer) or "renderer-preferences"
+// (SendRendererPreferencesToRenderer). The fields are the listed values of
+// WebPreferences or RendererPreferences, named as in the record. The bridge
+// keeps the last fields sent to each view, by its identity, and records only
+// the fields that differ from them; a send that changes none is not recorded.
+// The view identity is the RenderViewHostImpl's address, used only to tell
+// views apart; "view-created" starts a new set for that identity.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserWebPreferencesSent(int page_frame_tree_node_id,
+                                     bool primary_page,
+                                     int renderer_process_id,
+                                     uintptr_t view_identity,
+                                     std::string point,
+                                     base::DictValue fields);
+
+// Records the listed browser preferences of a profile as it finishes loading
+// (ProfileImpl::DoFinalInit), on browser.preferences as browser-preferences.
+// Each preference is a dictionary of its value, whether that is the default,
+// and the problem that stopped its reading, keyed by its name in the record.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPreferences(std::string profile_directory,
+                              bool new_profile,
+                              base::DictValue preferences);
+
+// Records a change of one listed browser preference, read as for
+// RecordBrowserPreferences, with the reading the bridge last recorded for it
+// as the previous one. A reading equal to the previous one is not recorded.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserPreferenceChanged(std::string profile_directory,
+                                    std::string preference,
+                                    base::DictValue reading);
+
+// Records a zoom level change of a HostZoomMapImpl, just before its change
+// callbacks run. The mode is "host", "scheme-and-host", "temporary" or
+// "default"; follows_default is true for a page that uses the default level
+// and so changed with it. The level is Chromium's zoom level, of which the
+// bridge records the percentage as well.
+COMPONENT_EXPORT(RECORDER_BRIDGE)
+void RecordBrowserZoomLevelChanged(std::string mode,
+                                   bool follows_default,
+                                   std::string host,
+                                   std::string scheme,
+                                   double zoom_level);
 
 }  // namespace a11y_recorder
 

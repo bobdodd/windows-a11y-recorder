@@ -21,20 +21,22 @@ public sealed class SessionTimelineControl : FrameworkElement
             ["audio.system"] = Freeze("#6DAA45"),
             ["system.preferences"] = Freeze("#D19900"),
             ["graphics.magnifier"] = Freeze("#B5C93F"),
+            ["browser.preferences"] = Freeze("#C26BB0"),
             ["session.annotations"] = Freeze("#E8AF34")
         };
 
     // Lane 7 holds the Windows settings records (system.preferences), and
-    // lane 8 the Magnifier change records (graphics.magnifier).
-    private const int LaneCount = 10;
-    private const int OtherLane = 9;
-    private const int AnnotationSeries = 9;
-    private const int OtherSeries = 10;
-    private const int SeriesCount = 11;
+    // lane 8 the Magnifier change records (graphics.magnifier), and lane 9
+    // the browser settings records (browser.preferences).
+    private const int LaneCount = 11;
+    private const int OtherLane = 10;
+    private const int AnnotationSeries = 10;
+    private const int OtherSeries = 11;
+    private const int SeriesCount = 12;
 
     // Series are drawn in this order, so markers stay visible over other
     // channels that share their lane.
-    private static readonly int[] SeriesDrawOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8, OtherSeries, AnnotationSeries];
+    private static readonly int[] SeriesDrawOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, OtherSeries, AnnotationSeries];
 
     private static readonly Brush BackgroundBrush = Freeze("#201F1D");
     private static readonly Brush OtherChannelBrush = Freeze("#BAB9B4");
@@ -429,6 +431,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         "audio.system" => 6,
         "system.preferences" => 7,
         "graphics.magnifier" => 8,
+        "browser.preferences" => 9,
         _ => OtherLane
     };
 
@@ -457,6 +460,7 @@ public sealed class SessionTimelineControl : FrameworkElement
         6 => ChannelBrushes["audio.system"],
         7 => ChannelBrushes["system.preferences"],
         8 => ChannelBrushes["graphics.magnifier"],
+        9 => ChannelBrushes["browser.preferences"],
         AnnotationSeries => ChannelBrushes["session.annotations"],
         _ => OtherChannelBrush
     };

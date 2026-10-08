@@ -15,6 +15,10 @@ public sealed record RecordingOptions
     public bool CaptureBrowserEvidence { get; init; }
     public string? ChromiumExecutablePath { get; init; }
     public string? BrowserStartUrl { get; init; }
+
+    // A prepared browser profile folder to record with, or null for a new
+    // profile for the recording, removed after it (protocol 0.56).
+    public string? BrowserProfileDirectory { get; init; }
     public int? BrowserRemoteDebuggingPort { get; init; }
 
     // Every how many requests instrumented Chromium walks a document in full

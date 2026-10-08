@@ -182,6 +182,49 @@ internal static class EvidenceCatalog
         new InlineField("previous", R, MagnifierReadings()),
         new InlineField("current", R, MagnifierReadings()));
 
+    // Added by 0023_browser_preferences.sql (protocol 0.56). The listed
+    // browser preferences of a profile and their changes, the preferences
+    // each page's view is sent, and each zoom level change. See
+    // docs/architecture/accessibility-preferences.md, "Stage 2".
+    public static readonly EvidenceTable BrowserPreferenceSnapshots = Evidence(
+        "browser_preference_snapshots",
+        Context(),
+        Text("profileDirectory"),
+        Bool("newProfile"),
+        new InlineField("preferences", R, BrowserPreferenceReadings(R, "browser_preference_snapshot_text_lists")));
+
+    public static readonly EvidenceTable BrowserPreferenceChanges = Evidence(
+        "browser_preference_changes",
+        Context(),
+        Text("profileDirectory"),
+        Name("preference"),
+        new InlineField("previous", R, BrowserPreferenceReadings(O, "browser_preference_change_previous_text_lists")),
+        new InlineField("current", R, BrowserPreferenceReadings(O, "browser_preference_change_current_text_lists")));
+
+    public static readonly EvidenceTable BrowserWebPreferencesSent = Evidence(
+        "browser_web_preferences_sent",
+        Context(),
+        Int("pageFrameTreeNodeId"),
+        Bool("primaryPage"),
+        Int("rendererProcessId"),
+        Text("viewId"),
+        Name("point"),
+        Bool("first"),
+        new InlineField(
+            "fields",
+            R,
+            [.. Recorder.Contracts.BrowserPreferenceSettings.Page.Select(setting => BrowserPreferenceValue(setting, setting.Name, O, null))]));
+
+    public static readonly EvidenceTable BrowserZoomLevelChanges = Evidence(
+        "browser_zoom_level_changes",
+        Context(),
+        Name("mode"),
+        Bool("followsDefault"),
+        Text("host"),
+        Text("scheme"),
+        Double("zoomLevel"),
+        Double("zoomPercent"));
+
     public static readonly EvidenceTable UiaEvents = Evidence(
         "uia_events",
             Name("eventId"),
@@ -1239,7 +1282,12 @@ internal static class EvidenceCatalog
         ]),
         (18, "dom_frame_owners", [DomCheckpointFrameOwners, DomFrameOwnerChanges]),
         (21, "windows_preferences", [WindowsPreferenceSnapshots, WindowsPreferenceChanges]),
-        (22, "magnifier_changes", [MagnifierChangeRecords])
+        (22, "magnifier_changes", [MagnifierChangeRecords]),
+        (23, "browser_preferences",
+        [
+            BrowserPreferenceSnapshots, BrowserPreferenceChanges, BrowserWebPreferencesSent,
+            BrowserZoomLevelChanges
+        ])
     ];
 
     /// <summary>
@@ -1265,6 +1313,10 @@ internal static class EvidenceCatalog
             [("system.preferences", "windows-preference-changed")] = WindowsPreferenceChanges,
             [("graphics.desktop.frames", "desktop-frame")] = DesktopFrames,
             [("graphics.magnifier", "magnifier-changed")] = MagnifierChangeRecords,
+            [("browser.preferences", "browser-preferences")] = BrowserPreferenceSnapshots,
+            [("browser.preferences", "browser-preference-changed")] = BrowserPreferenceChanges,
+            [("browser.preferences", "web-preferences-sent")] = BrowserWebPreferencesSent,
+            [("browser.preferences", "zoom-level-changed")] = BrowserZoomLevelChanges,
             [("browser.lifecycle", "browser-connected")] = BrowserConnections,
             [("browser.lifecycle", "browser-exited")] = BrowserExits,
             [("browser.lifecycle", "browser-clock-synchronized")] = BrowserClockSynchronizations,
@@ -1363,7 +1415,7 @@ internal static class EvidenceCatalog
                      "browser.navigation", "browser.dom", "browser.cookie", "browser.interaction",
                      "browser.layout", "browser.presentation", "browser.network",
                      "browser.resources", "browser.compositor", "browser.animation",
-                     "browser.script"
+                     "browser.script", "browser.preferences"
                  })
         {
             map[(channel, "collector-omission")] = CollectorOmissions;
@@ -1497,6 +1549,32 @@ internal static class EvidenceCatalog
             }
         }
     }
+
+    // Each listed browser preference as {value, isDefault, problem}, the
+    // value stored by the preference's type.
+    // The one text list, the sites without page colours, is a child table.
+    private static Field[] BrowserPreferenceReadings(Presence presence, string listTable) =>
+    [
+        .. Recorder.Contracts.BrowserPreferenceSettings.Browser.Select(setting => (Field)new InlineField(
+            setting.Name,
+            presence,
+            [BrowserPreferenceValue(setting, "value", N, listTable), Bool("isDefault", N), Text("problem", N)]))
+    ];
+
+    private static Field BrowserPreferenceValue(
+        Recorder.Contracts.BrowserPreferenceSetting setting,
+        string json,
+        Presence presence,
+        string? listTable) =>
+        setting.Kind switch
+        {
+            Recorder.Contracts.BrowserPreferenceKind.Boolean => Bool(json, presence),
+            Recorder.Contracts.BrowserPreferenceKind.Integer => BigInt(json, presence),
+            Recorder.Contracts.BrowserPreferenceKind.Number => Double(json, presence),
+            Recorder.Contracts.BrowserPreferenceKind.Text => Text(json, presence),
+            _ => TextList(json, presence, listTable ??
+                throw new ArgumentException($"'{setting.Name}' is a text list and needs a table.", nameof(listTable)))
+        };
 
     // Each Windows setting as {value, problem}, the value stored by the
     // setting's type, and the monitors in a child table of their own.

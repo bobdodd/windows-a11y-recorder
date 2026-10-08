@@ -52,18 +52,24 @@ public sealed class SessionPlaybackArchiveBuilder
         "current",
         "device",
         "eventName",
+        // A browser preference record, for the properties panel.
+        "fields",
         "frameType",
         // A desktop frame's Magnifier readings and its corner, for the
         // participant's view.
         "fullscreenColorEffect",
         "fullscreenMagnification",
         "height",
+        "mode",
         "name",
         "navigationId",
         "navigationKind",
         "note",
         "outcome",
+        "pageFrameTreeNodeId",
         "path",
+        "preference",
+        "preferences",
         "primaryPage",
         "processName",
         "reason",
@@ -78,7 +84,8 @@ public sealed class SessionPlaybackArchiveBuilder
         "url",
         "width",
         "x",
-        "y"
+        "y",
+        "zoomPercent"
     ];
 
     /// <summary>
@@ -96,6 +103,8 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly List<BrowserEventProjection> _browserProjections = [];
     private readonly List<WindowsPreferenceRecord> _preferences = [];
     private readonly List<(long Time, JsonElement Payload)> _magnifierChanges = [];
+    private readonly List<BrowserPreferenceRecord> _browserPreferences = [];
+    private readonly List<BrowserPageCommit> _pageCommits = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
     private bool _built;
@@ -260,6 +269,19 @@ public sealed class SessionPlaybackArchiveBuilder
             _magnifierChanges.Add((timestamp, payload.Clone()));
         }
 
+        if (timelineEvent.Channel == BrowserPreferenceSettings.Channel &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _browserPreferences.Add(new BrowserPreferenceRecord(timestamp, timelineEvent.EventType, payload.Clone()));
+        }
+
+        if (timelineEvent.Channel == BrowserEvidenceChannels.Navigation &&
+            timelineEvent.EventType == BrowserEvidenceEventTypes.NavigationCompleted &&
+            PageCommitOf(timestamp, payload) is { } commit)
+        {
+            _pageCommits.Add(commit);
+        }
+
         if (timelineEvent.Channel.StartsWith("audio.", StringComparison.Ordinal) &&
             timelineEvent.EventType == "audio-stream-started" &&
             payload.ValueKind == JsonValueKind.Object)
@@ -323,8 +345,33 @@ public sealed class SessionPlaybackArchiveBuilder
                 : new WindowsPreferenceTimeline(_preferences),
             MagnifierChanges = _magnifierChanges.Count == 0
                 ? MagnifierChangeTimeline.Empty
-                : new MagnifierChangeTimeline(_magnifierChanges)
+                : new MagnifierChangeTimeline(_magnifierChanges),
+            BrowserPreferences = _browserPreferences.Count == 0
+                ? BrowserPreferenceTimeline.Empty
+                : new BrowserPreferenceTimeline(_browserPreferences, _pageCommits)
         };
+    }
+
+    // A committed cross-document navigation of a primary main frame, whose
+    // context names its page "frame-" and the page's frame tree node id.
+    internal static BrowserPageCommit? PageCommitOf(long timestamp, JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object ||
+            !payload.TryGetProperty("committed", out var committed) || committed.ValueKind != JsonValueKind.True ||
+            !payload.TryGetProperty("primaryPage", out var primary) || primary.ValueKind != JsonValueKind.True ||
+            !payload.TryGetProperty("frameType", out var frameType) || frameType.GetString() != "primary-main-frame" ||
+            !payload.TryGetProperty("sameDocument", out var sameDocument) || sameDocument.ValueKind != JsonValueKind.False ||
+            !payload.TryGetProperty("url", out var url) || url.ValueKind != JsonValueKind.String ||
+            !payload.TryGetProperty("context", out var context) || context.ValueKind != JsonValueKind.Object ||
+            !context.TryGetProperty("pageId", out var pageId) || pageId.ValueKind != JsonValueKind.String ||
+            pageId.GetString() is not { } page || !page.StartsWith("frame-", StringComparison.Ordinal) ||
+            !int.TryParse(page.AsSpan("frame-".Length), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var pageFrameTreeNodeId))
+        {
+            return null;
+        }
+
+        return new BrowserPageCommit(timestamp, pageFrameTreeNodeId, url.GetString()!);
     }
 
     private void ThrowIfBuilt()
@@ -405,6 +452,44 @@ public sealed class SessionPlaybackArchiveBuilder
         return new FullscreenColorEffect(values);
     }
 
+    // A browser preference change with its new value, a zoom change with its
+    // mode and percentage, and a send with the point it was sent at and the
+    // fields it holds.
+    private static string BrowserPreferenceSummary(string eventType, JsonElement payload)
+    {
+        switch (eventType)
+        {
+            case BrowserPreferenceSettings.ChangeEventType:
+                var preference = ReadString(payload, "preference");
+                if (preference is not null &&
+                    BrowserPreferenceSettings.FindBrowser(preference) is { } known &&
+                    payload.TryGetProperty("current", out var current) &&
+                    current.ValueKind == JsonValueKind.Object &&
+                    current.TryGetProperty(preference, out var reading))
+                {
+                    return JoinSummary(eventType, preference, BrowserPreferenceTimeline.DescribeReading(known, reading));
+                }
+
+                return JoinSummary(eventType, preference);
+            case BrowserPreferenceSettings.ZoomEventType:
+                var percent = payload.TryGetProperty("zoomPercent", out var value) && value.TryGetDouble(out var number)
+                    ? $"{number.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}%"
+                    : null;
+                var host = ReadString(payload, "host");
+                return JoinSummary(eventType, ReadString(payload, "mode"), string.IsNullOrEmpty(host) ? null : host, percent);
+            case BrowserPreferenceSettings.SentEventType:
+                var fields = payload.TryGetProperty("fields", out var sent) && sent.ValueKind == JsonValueKind.Object
+                    ? string.Join(" ", sent.EnumerateObject().Select(field => field.Name))
+                    : null;
+                var isFirst = payload.TryGetProperty("first", out var first) && first.ValueKind == JsonValueKind.True;
+                return JoinSummary(eventType, ReadString(payload, "point"), isFirst ? "all fields" : fields);
+            case BrowserPreferenceSettings.SnapshotEventType:
+                return JoinSummary(eventType, ReadString(payload, "profileDirectory"));
+            default:
+                return JoinSummary(eventType, ReadString(payload, "reason"));
+        }
+    }
+
     // A reading that failed holds no level, so the frame plays as captured.
     private static FullscreenMagnification? ReadMagnification(JsonElement payload)
     {
@@ -480,6 +565,11 @@ public sealed class SessionPlaybackArchiveBuilder
             }
 
             return JoinSummary(eventType, setting ?? ReadString(payload, "reason"));
+        }
+
+        if (channel == BrowserPreferenceSettings.Channel)
+        {
+            return BrowserPreferenceSummary(eventType, payload);
         }
 
         if (channel == MagnifierChanges.Channel &&

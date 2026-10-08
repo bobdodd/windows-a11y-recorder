@@ -33,7 +33,8 @@ internal static class EventPayloadValidator
         "browser.resources",
         "browser.compositor",
         "browser.animation",
-        "browser.script"
+        "browser.script",
+        "browser.preferences"
     ];
 
     /// <summary>Whether the recorder defines the channel.</summary>
@@ -92,6 +93,18 @@ internal static class EventPayloadValidator
             case ("accessibility.uia.events", "structure-changed"):
             case ("accessibility.uia.events", "property-changed"):
                 ValidateUiaEvent(payload, issues);
+                break;
+            case ("browser.preferences", "browser-preferences"):
+                ValidateBrowserPreferences(payload, issues);
+                break;
+            case ("browser.preferences", "browser-preference-changed"):
+                ValidateBrowserPreferenceChange(payload, issues);
+                break;
+            case ("browser.preferences", "web-preferences-sent"):
+                ValidateWebPreferencesSent(payload, issues);
+                break;
+            case ("browser.preferences", "zoom-level-changed"):
+                ValidateZoomLevelChange(payload, issues);
                 break;
             case ("graphics.magnifier", "magnifier-changed"):
                 ValidateMagnifierChange(payload, issues);
@@ -522,6 +535,7 @@ internal static class EventPayloadValidator
             case ("browser.compositor", "collector-omission"):
             case ("browser.animation", "collector-omission"):
             case ("browser.script", "collector-omission"):
+            case ("browser.preferences", "collector-omission"):
                 ValidateBrowserOmission(payload, issues);
                 break;
             default:
@@ -652,6 +666,234 @@ internal static class EventPayloadValidator
             settings.ValueKind == JsonValueKind.Object)
         {
             ValidateWindowsSettings(settings, null, issues, "#/payload/settings");
+        }
+    }
+
+    // Protocol 0.56 (accessibility preferences, stage 2). The listed browser
+    // preferences of a profile, each a reading of its value, whether that is
+    // the default, and the problem that stopped the reading.
+    private static void ValidateBrowserPreferences(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredText("profileDirectory"),
+                RequiredBoolean("newProfile"),
+                RequiredObject("preferences")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues, "browser-preference-context-invalid", "Browser preference evidence");
+        if (payload.TryGetProperty("preferences", out var preferences) &&
+            preferences.ValueKind == JsonValueKind.Object)
+        {
+            ValidateBrowserPreferenceReadings(preferences, null, issues, "#/payload/preferences");
+        }
+    }
+
+    private static void ValidateBrowserPreferenceChange(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredText("profileDirectory"),
+                RequiredString("preference"),
+                RequiredObject("previous"),
+                RequiredObject("current")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues, "browser-preference-context-invalid", "Browser preference evidence");
+        var preference = payload.TryGetProperty("preference", out var name) && name.ValueKind == JsonValueKind.String
+            ? name.GetString()!
+            : null;
+        if (preference is not null && Recorder.Contracts.BrowserPreferenceSettings.FindBrowser(preference) is null)
+        {
+            AddError(
+                issues,
+                "browser-preference-unknown",
+                "#/payload/preference",
+                $"'{preference}' is not a recorded browser preference.");
+            return;
+        }
+
+        if (preference is null)
+        {
+            return;
+        }
+
+        // The previous reading is absent when none was recorded before.
+        if (payload.TryGetProperty("previous", out var previous) && previous.ValueKind == JsonValueKind.Object &&
+            previous.EnumerateObject().Any())
+        {
+            ValidateBrowserPreferenceReadings(previous, preference, issues, "#/payload/previous");
+        }
+
+        if (payload.TryGetProperty("current", out var current) && current.ValueKind == JsonValueKind.Object)
+        {
+            ValidateBrowserPreferenceReadings(current, preference, issues, "#/payload/current");
+        }
+    }
+
+    // Every listed preference when only is null; otherwise exactly that one.
+    private static void ValidateBrowserPreferenceReadings(
+        JsonElement readings,
+        string? only,
+        ICollection<EventValidationIssue> issues,
+        string path)
+    {
+        var expected = only is null
+            ? Recorder.Contracts.BrowserPreferenceSettings.Browser
+            : [Recorder.Contracts.BrowserPreferenceSettings.FindBrowser(only)!];
+        ValidateShape(readings, [.. expected.Select(setting => RequiredObject(setting.Name))], issues, path);
+        foreach (var setting in expected)
+        {
+            if (!readings.TryGetProperty(setting.Name, out var reading) || reading.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var readingPath = $"{path}/{setting.Name}";
+            ValidateShape(
+                reading,
+                [
+                    new PropertyRule(
+                        "value",
+                        true,
+                        true,
+                        value => BrowserPreferenceValueIsValid(setting.Kind, value),
+                        $"must be a {setting.Kind} value or null"),
+                    NullableBoolean("isDefault"),
+                    NullableString("problem")
+                ],
+                issues,
+                readingPath);
+            var hasValue = reading.TryGetProperty("value", out var value) && value.ValueKind != JsonValueKind.Null;
+            var hasDefault = reading.TryGetProperty("isDefault", out var isDefault) &&
+                isDefault.ValueKind != JsonValueKind.Null;
+            var hasProblem = reading.TryGetProperty("problem", out var problem) && problem.ValueKind != JsonValueKind.Null;
+            if (hasValue == hasProblem || hasDefault != hasValue)
+            {
+                AddError(
+                    issues,
+                    "browser-preference-reading-inconsistent",
+                    readingPath,
+                    "A reading holds a value, whether it is the default, and no problem, or only the problem.");
+            }
+        }
+    }
+
+    private static bool BrowserPreferenceValueIsValid(Recorder.Contracts.BrowserPreferenceKind kind, JsonElement value) =>
+        kind switch
+        {
+            Recorder.Contracts.BrowserPreferenceKind.Boolean => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+            Recorder.Contracts.BrowserPreferenceKind.Integer => value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _),
+            Recorder.Contracts.BrowserPreferenceKind.Number => value.ValueKind == JsonValueKind.Number &&
+                value.TryGetDouble(out var number) && double.IsFinite(number),
+            Recorder.Contracts.BrowserPreferenceKind.Text => value.ValueKind == JsonValueKind.String,
+            Recorder.Contracts.BrowserPreferenceKind.TextList => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String),
+            _ => false
+        };
+
+    // The preferences sent to a page's view. A first record holds every
+    // field; a later one at least one, each of its listed type.
+    private static void ValidateWebPreferencesSent(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredInteger("pageFrameTreeNodeId"),
+                RequiredBoolean("primaryPage"),
+                RequiredInteger("rendererProcessId"),
+                RequiredDecimalText("viewId"),
+                RequiredEnum("point", [.. Recorder.Contracts.BrowserPreferenceSettings.SendPoints]),
+                RequiredBoolean("first"),
+                RequiredObject("fields")
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues, "browser-preference-context-invalid", "Browser preference evidence");
+        if (!payload.TryGetProperty("fields", out var fields) || fields.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        ValidateShape(
+            fields,
+            [
+                .. Recorder.Contracts.BrowserPreferenceSettings.Page.Select(setting => new PropertyRule(
+                    setting.Name,
+                    false,
+                    false,
+                    value => BrowserPreferenceValueIsValid(setting.Kind, value),
+                    $"must be a {setting.Kind} value"))
+            ],
+            issues,
+            "#/payload/fields");
+        var first = payload.TryGetProperty("first", out var firstValue) && firstValue.ValueKind == JsonValueKind.True;
+        if (!first && !fields.EnumerateObject().Any())
+        {
+            AddError(
+                issues,
+                "browser-web-preferences-sent-empty",
+                "#/payload/fields",
+                "A record after the first holds at least one changed field.");
+        }
+
+        if (first)
+        {
+            var missing = Recorder.Contracts.BrowserPreferenceSettings.Page
+                .Where(setting => !fields.TryGetProperty(setting.Name, out _))
+                .Select(setting => setting.Name)
+                .ToList();
+            if (missing.Count > 0)
+            {
+                AddError(
+                    issues,
+                    "browser-web-preferences-sent-incomplete",
+                    "#/payload/fields",
+                    $"A view's first record holds every listed field; it lacks {string.Join(", ", missing)}.");
+            }
+        }
+    }
+
+    private static void ValidateZoomLevelChange(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredObject("context"),
+                RequiredEnum("mode", [.. Recorder.Contracts.BrowserPreferenceSettings.ZoomModes]),
+                RequiredBoolean("followsDefault"),
+                RequiredText("host"),
+                RequiredText("scheme"),
+                RequiredNumber("zoomLevel"),
+                RequiredNumber("zoomPercent", positive: true)
+            ],
+            issues);
+        ValidateBrowserContextProperty(payload, issues);
+        ValidateBrowserProcessContext(payload, false, issues, "browser-preference-context-invalid", "Browser preference evidence");
+        if (payload.TryGetProperty("zoomLevel", out var level) && level.TryGetDouble(out var zoomLevel) &&
+            payload.TryGetProperty("zoomPercent", out var percent) && percent.TryGetDouble(out var zoomPercent) &&
+            Math.Abs(Math.Pow(1.2, zoomLevel) * 100.0 - zoomPercent) > 1e-6 * Math.Max(1.0, zoomPercent))
+        {
+            AddError(
+                issues,
+                "browser-zoom-percent-inconsistent",
+                "#/payload/zoomPercent",
+                "The percentage is 1.2 to the power of the zoom level, times 100.");
         }
     }
 
@@ -2165,7 +2407,9 @@ internal static class EventPayloadValidator
     private static void ValidateBrowserProcessContext(
         JsonElement payload,
         bool requiresFrame,
-        ICollection<EventValidationIssue> issues)
+        ICollection<EventValidationIssue> issues,
+        string code = "browser-popup-widget-context-invalid",
+        string subject = "Popup widget evidence")
     {
         if (!payload.TryGetProperty("context", out var context) ||
             context.ValueKind != JsonValueKind.Object)
@@ -2178,13 +2422,12 @@ internal static class EventPayloadValidator
         {
             AddError(
                 issues,
-                "browser-popup-widget-context-invalid",
+                code,
                 "#/payload/context",
                 requiresFrame
                     ? "A created popup widget must have browser-process " +
                         "provenance and name its opener's page and frame."
-                    : "Popup widget evidence must have browser-process " +
-                        "provenance.");
+                    : $"{subject} must have browser-process provenance.");
         }
     }
 

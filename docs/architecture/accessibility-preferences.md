@@ -631,8 +631,10 @@ Built 2026-10-08 as proposed above, with these details and differences:
 
 ## Stage 2: browser preferences
 
-Proposed 2026-10-08, not agreed, not built. The owner decided 2026-10-08
-to start stage 2 with the stage 1 gaps left open: the Magnifier change
+Proposed 2026-10-08 and agreed the same day, with the "Sent to the page"
+group following the tab last navigated and the hooks in `chrome/browser`
+agreed; built 2026-10-08 (see "As built" below), not yet checked on the
+target machine. The owner decided 2026-10-08 to start stage 2 with the stage 1 gaps left open: the Magnifier change
 records on a real Magnifier recording, applying a Windows color filter in
 the participant's view (with which filter was on, which the recording does
 not say), and whether a contrast theme is in the frames. They stay listed
@@ -733,6 +735,122 @@ Protocol 0.56, on the browser channel:
   values the page's style changes show. Then a recording with a prepared
   profile folder, its preferences recorded at the start and its browsing
   data not recorded.
+
+### As built
+
+Built 2026-10-08 to the design above, with these differences and limits.
+
+- The records are on a channel of their own, `browser.preferences`, not
+  on `browser.navigation`, so that the timeline lane and filter
+  "Browser settings" hold them alone. The lane therefore also holds the
+  `browser-preferences` record and each view's first `web-preferences-sent`
+  record, not only the changes; the design listed only the changes.
+- `browser-preferences` is recorded from `ProfileImpl::DoFinalInit`, which
+  `OnPrefsLoaded` reaches once the profile's preferences are read, just
+  after the profile's own `PrefChangeRegistrar` is given its first
+  preference. The same registrar watches the listed preferences, so the
+  watching ends with the profile. A listed preference the build does not
+  register is recorded with the problem "not registered" and not watched.
+- The default zoom level is not in `browser-preferences`, as it is not a
+  preference of the listed store but of the zoom map: each change of the
+  default, including the profile's own default as Chromium applies it, is
+  a `zoom-level-changed` record with the mode `default`. The zoom map
+  starts at 100 percent and records no change when the level set is the
+  one it has, so a recording with no such record had a default of 100
+  percent. The player shows "100% (no default set)" for it.
+- A font family is recorded for the common script, `Zyyy`, only; the
+  per-script families are not recorded.
+- The caret blink interval is recorded as two fields,
+  `hasCaretBlinkInterval` and `caretBlinkIntervalMilliseconds`, the
+  second 0 when the first is false, as `RendererPreferences` holds an
+  optional interval.
+- A view is identified by the address of its `RenderViewHostImpl`, as
+  decimal text (`viewId`), which is unique while the view exists and may
+  be reused after it is destroyed; the bridge forgets a view's last values
+  when it is created again, as its first record then holds every field.
+- A view's first record holds every listed field, and the validator
+  refuses one that does not. Whether a later record holds only the fields
+  that differ is the bridge's comparison with the view's last values,
+  checked by the integration script tests and the target machine check,
+  not by the recorder's validation, which sees one record at a time.
+- The Windows font fields (`captionFontFamily` to `messageFontHeight`)
+  are read under `BUILDFLAG(IS_WIN)`, as `RendererPreferences` holds them
+  only on Windows.
+- `requestedPageColors` is shown as its stored number, "value 1" for
+  example, as the meaning of each number was not confirmed in the
+  owner's checkout. `colorScheme` is shown as system, light, or dark,
+  from `ThemeService::BrowserColorScheme`
+  (`chrome/browser/themes/theme_service.h`: `kSystem` 0, `kLight` 1,
+  `kDark` 2).
+- The "Sent to the page" group's rows have no change buttons: its page
+  changes with each navigation, so a row's changes are not one setting's
+  changes through the recording. Its Page row shows the address of the
+  page and when it was loaded; a field not yet sent to that page reads
+  "not sent yet". The group always has the same rows, so the rows do not
+  move as playback crosses a navigation.
+- A recording with no browser preference records, made before protocol
+  0.56 or without the browser, shows one Browser row, "Browser
+  preferences", "not recorded".
+- The session settings' "Browser profile folder" must name an existing
+  folder; empty is a new profile for the recording, removed after it, as
+  before. A folder given is kept.
+- The playback index is version 8, keeping the `browser.preferences`
+  records whole; an older index is derived again.
+
+Where each part is:
+
+- Bridge: `RecordBrowserWebPreferencesSent`, `RecordBrowserPreferences`,
+  `RecordBrowserPreferenceChanged`, and `RecordBrowserZoomLevelChanged`
+  in `chromium/recorder_bridge/browser_bridge.cc`.
+- Hooks, by `chromium/integrate.py`: `render_view_host_impl.cc`
+  (`CreateRenderView`, before `CreateView`; `SendWebPreferencesToRenderer`
+  and `SendRendererPreferencesToRenderer`, after each send),
+  `host_zoom_map_impl.cc` (each of the four places that notify the zoom
+  level change callbacks, for a host, a scheme and host, a page that uses
+  the default level in `SetDefaultZoomLevelInternal`, and a temporary
+  level, each just before the callbacks run; and `SetDefaultZoomLevel`,
+  after its level is set),
+  `profile_impl.cc` (`DoFinalInit`), and the dependency of
+  `source_set("misc")` in `chrome/browser/profiles/BUILD.gn` on the
+  bridge.
+- Recorder: `BrowserPreferenceSettings`
+  (`src/Recorder.Contracts/BrowserPreferenceSettings.cs`), the payload
+  records in `BrowserEvidenceContracts.cs`, their validators in
+  `EventPayloadValidator.cs`, migration
+  `0023_browser_preferences.sql`, and the catalog entries.
+- Player: `BrowserPreferenceTimeline`
+  (`src/Recorder.Session/BrowserPreferenceTimeline.cs`), the page commits
+  read by `SessionPlaybackArchiveBuilder.PageCommitOf`, and the Browser
+  rows' change times through `PropertyChangeSteps.TimesOf`.
+
+Checks in the sandbox:
+
+- Unit tests (`tests/Recorder.Tests/BrowserPreferencesTests.cs`): the
+  samples valid; refused, a change of an unlisted preference, a
+  preferences record with an unlisted preference, a later send with no
+  field, a first send without every field, an unlisted field or send
+  point, and an unknown zoom mode; the Browser rows at the start and
+  after changes, the default zoom row, the Sent to the page rows before a
+  page, after its first send, after a later send of one field, and after
+  a second page; the same number of rows at every time; the change times
+  of a row and its count; a page commit read only from a committed
+  cross-document primary main frame navigation; the summaries; and the
+  playback index keeping the records whole. The database tests, run
+  against PostgreSQL 18, store and read back every sample through the
+  new tables.
+- Integration script tests: each hook applied once to copies of the
+  owner's checkout files and refused on code it does not match.
+- Not checked in the sandbox: the bridge and hooks compiled, which needs
+  the owner's build; the Browser settings lane and filter, which are in
+  the player, not in the test project; and the panel's rendering.
+
+To check on the target machine, with the fixture page
+`tests/fixtures/accessibility-preferences/index.html` and
+`scripts/Test-BrowserPreferences.ps1`: the recording of "Required tests"
+above, then the prepared profile recording (`-ProfileFolder`), and in
+the player the Browser and Sent to the page rows following playback,
+the Browser rows' change buttons by mouse, and the Browser settings lane
+and filter.
 
 ## Change buttons and counts
 

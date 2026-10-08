@@ -415,6 +415,22 @@ Protocol 0.46 marks the layout change set of a walked rendering update
 includes the update's own layout and styles. See "Layout of a walked
 rendering update" in [page recreation](docs/architecture/page-recreation.md).
 
+Protocol 0.56 records the browser's accessibility preferences, on a new
+channel, `browser.preferences`: the listed preferences of the profile as
+it loads (fonts and font sizes, the browser's color mode, focus
+highlight, page colors, caret browsing) and each change of one, each zoom
+level change including the default level, and the values each page's view
+is sent (`web-preferences-sent`): its first values in full and later only
+those that changed, such as the color scheme, reduced motion, forced
+colors, contrast, and the default font size. No other preference and no
+browsing data is read from the profile. The session settings offer a
+"Browser profile folder", empty for a new profile per recording, for a
+profile prepared for a test account. The player's Properties panel shows
+the preferences in a "Browser" group, with change buttons and counts, and
+the values last sent to the page in a "Sent to the page" group. See
+"Stage 2" in
+[accessibility preferences](docs/architecture/accessibility-preferences.md).
+
 Protocol 0.55 records the frames of each document: a DOM walk names the
 DevTools frame token of its document's frame and whether it is a main frame,
 and the frame each frame owner element (`iframe`, `frame`, `object`,

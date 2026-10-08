@@ -138,6 +138,38 @@ internal static class EvidenceSamples
             """
             {"setting":"colorFilterActive","previous":{"colorFilterActive":{"value":null,"problem":"The key HKCU\\Software\\Microsoft\\ColorFiltering does not exist."}},"current":{"colorFilterActive":{"value":true,"problem":null}},"notice":{"kind":"registry","uiAction":null,"area":"ImmersiveColorSet","source":"HKCU\\Software\\Microsoft\\ColorFiltering"}}
             """),
+        // Added with 0023_browser_preferences.sql (protocol 0.56): a profile's
+        // preferences, a change and a change with no reading before it, a
+        // view's first and a later send, and a host and default zoom change.
+        ("browser.preferences", "browser-preferences",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"profileDirectory":"C:\\Users\\User\\AppData\\Local\\A11yRecorder\\Profile 1","newProfile":false,"preferences":{"standardFontFamily":{"value":"Times New Roman","isDefault":true,"problem":null},"fixedFontFamily":{"value":"Consolas","isDefault":true,"problem":null},"serifFontFamily":{"value":"Times New Roman","isDefault":true,"problem":null},"sansSerifFontFamily":{"value":"Arial","isDefault":true,"problem":null},"cursiveFontFamily":{"value":"Comic Sans MS","isDefault":true,"problem":null},"fantasyFontFamily":{"value":"Impact","isDefault":true,"problem":null},"mathFontFamily":{"value":"Cambria Math","isDefault":true,"problem":null},"defaultFontSize":{"value":20,"isDefault":false,"problem":null},"defaultFixedFontSize":{"value":13,"isDefault":true,"problem":null},"minimumFontSize":{"value":0,"isDefault":true,"problem":null},"minimumLogicalFontSize":{"value":6,"isDefault":true,"problem":null},"colorScheme":{"value":0,"isDefault":true,"problem":null},"focusHighlight":{"value":false,"isDefault":true,"problem":null},"requestedPageColors":{"value":0,"isDefault":true,"problem":null},"pageColorsOnlyOnIncreasedContrast":{"value":true,"isDefault":true,"problem":null},"pageColorsBlockList":{"value":["example.org"],"isDefault":false,"problem":null},"caretBrowsing":{"value":null,"isDefault":null,"problem":"not registered"}}}
+            """),
+        ("browser.preferences", "browser-preference-changed",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"profileDirectory":"C:\\Users\\User\\AppData\\Local\\A11yRecorder\\Profile 1","preference":"focusHighlight","previous":{"focusHighlight":{"value":false,"isDefault":true,"problem":null}},"current":{"focusHighlight":{"value":true,"isDefault":false,"problem":null}}}
+            """),
+        ("browser.preferences", "browser-preference-changed",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"profileDirectory":"C:\\Users\\User\\AppData\\Local\\A11yRecorder\\Profile 1","preference":"pageColorsBlockList","previous":{},"current":{"pageColorsBlockList":{"value":["example.org","example.com"],"isDefault":false,"problem":null}}}
+            """),
+        ("browser.preferences", "web-preferences-sent",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"pageFrameTreeNodeId":12,"primaryPage":true,"rendererProcessId":7,"viewId":"2199023255552","point":"view-created","first":true,"fields":{"standardFontFamily":"Times New Roman","fixedFontFamily":"Consolas","serifFontFamily":"Times New Roman","sansSerifFontFamily":"Arial","cursiveFontFamily":"Comic Sans MS","fantasyFontFamily":"Impact","mathFontFamily":"Cambria Math","defaultFontSize":20,"defaultFixedFontSize":13,"minimumFontSize":0,"minimumLogicalFontSize":6,"prefersReducedMotion":false,"prefersReducedTransparency":false,"invertedColors":false,"textTrackTextSize":"","textTrackFontFamily":"","inForcedColors":false,"isForcedColorsDisabled":false,"preferredRootScrollbarColorScheme":"light","preferredColorScheme":"light","preferredContrast":"no-preference","focusRingColor":"#FFE59700","hasCaretBlinkInterval":true,"caretBlinkIntervalMilliseconds":530,"caretBrowsingEnabled":false,"useOverlayScrollbar":false,"captionFontFamily":"Segoe UI","captionFontHeight":-12,"smallCaptionFontFamily":"Segoe UI","smallCaptionFontHeight":-12,"menuFontFamily":"Segoe UI","menuFontHeight":-12,"statusFontFamily":"Segoe UI","statusFontHeight":-12,"messageFontFamily":"Segoe UI","messageFontHeight":-12}}
+            """),
+        ("browser.preferences", "web-preferences-sent",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"pageFrameTreeNodeId":12,"primaryPage":true,"rendererProcessId":7,"viewId":"2199023255552","point":"web-preferences","first":false,"fields":{"preferredColorScheme":"dark","inForcedColors":true}}
+            """),
+        ("browser.preferences", "zoom-level-changed",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"mode":"host","followsDefault":false,"host":"example.org","scheme":"","zoomLevel":1,"zoomPercent":120}
+            """),
+        ("browser.preferences", "zoom-level-changed",
+            """
+            {"context":{"browserInstanceId":"browser-1","processId":4000,"processType":"browser","profileId":null,"browserContextId":null,"pageId":null,"frameId":null,"documentId":null,"executionWorldId":null,"documentToken":null},"mode":"default","followsDefault":false,"host":"","scheme":"","zoomLevel":2.223901085741545,"zoomPercent":150}
+            """),
+        ("browser.preferences", "collector-omission", J("{'reason':'browser-queue-full','count':1}")),
         // Added with 0022_magnifier_changes.sql: a level and position change,
         // a pan, a color effect turned on, and readings that failed.
         ("graphics.magnifier", "magnifier-changed",

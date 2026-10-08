@@ -8090,4 +8090,161 @@ bool InDevToolsCommand() {
   return DevToolsCommandDepth().load(std::memory_order_relaxed) > 0;
 }
 
+// Protocol 0.56 (accessibility preferences, stage 2).
+namespace {
+
+struct BrowserPreferenceStorage {
+  base::Lock lock;
+  // The fields last sent to each view, by the view's identity.
+  std::unordered_map<uintptr_t, base::DictValue> view_fields;
+  // The reading last recorded for each preference, by profile and name.
+  std::map<std::pair<std::string, std::string>, base::DictValue> readings;
+};
+
+BrowserPreferenceStorage& GetBrowserPreferenceStorage() {
+  static base::NoDestructor<BrowserPreferenceStorage> storage;
+  return *storage;
+}
+
+}  // namespace
+
+void RecordBrowserWebPreferencesSent(int page_frame_tree_node_id,
+                                     bool primary_page,
+                                     int renderer_process_id,
+                                     uintptr_t view_identity,
+                                     std::string point,
+                                     base::DictValue fields) {
+  A11Y_RECORDER_COST("RecordBrowserWebPreferencesSent");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || view_identity == 0 ||
+      !IsOneOf(point,
+               {"view-created", "web-preferences", "renderer-preferences"})) {
+    return;
+  }
+  const bool created = point == "view-created";
+  base::DictValue changed;
+  bool first = false;
+  {
+    BrowserPreferenceStorage& storage = GetBrowserPreferenceStorage();
+    base::AutoLock lock(storage.lock);
+    auto existing = storage.view_fields.find(view_identity);
+    if (created || existing == storage.view_fields.end()) {
+      first = true;
+      storage.view_fields[view_identity] = fields.Clone();
+      changed = std::move(fields);
+    } else {
+      base::DictValue& last = existing->second;
+      for (auto [name, value] : fields) {
+        const base::Value* previous = last.Find(name);
+        if (!previous || *previous != value) {
+          changed.Set(name, value.Clone());
+          last.Set(name, value.Clone());
+        }
+      }
+    }
+  }
+  if (!first && changed.empty()) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("pageFrameTreeNodeId", page_frame_tree_node_id);
+  payload.Set("primaryPage", primary_page);
+  payload.Set("rendererProcessId", renderer_process_id);
+  payload.Set("viewId", base::NumberToString(view_identity));
+  payload.Set("point", std::move(point));
+  payload.Set("first", first);
+  payload.Set("fields", std::move(changed));
+  SendBlinkEvidence("browser.preferences", "web-preferences-sent",
+                    std::move(payload));
+}
+
+void RecordBrowserPreferences(std::string profile_directory,
+                              bool new_profile,
+                              base::DictValue preferences) {
+  A11Y_RECORDER_COST("RecordBrowserPreferences");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client) {
+    return;
+  }
+  {
+    BrowserPreferenceStorage& storage = GetBrowserPreferenceStorage();
+    base::AutoLock lock(storage.lock);
+    for (auto [name, reading] : preferences) {
+      if (reading.is_dict()) {
+        storage.readings[{profile_directory, name}] =
+            reading.GetDict().Clone();
+      }
+    }
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("profileDirectory", std::move(profile_directory));
+  payload.Set("newProfile", new_profile);
+  payload.Set("preferences", std::move(preferences));
+  SendBlinkEvidence("browser.preferences", "browser-preferences",
+                    std::move(payload));
+}
+
+void RecordBrowserPreferenceChanged(std::string profile_directory,
+                                    std::string preference,
+                                    base::DictValue reading) {
+  A11Y_RECORDER_COST("RecordBrowserPreferenceChanged");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || preference.empty()) {
+    return;
+  }
+  base::Value previous;
+  {
+    BrowserPreferenceStorage& storage = GetBrowserPreferenceStorage();
+    base::AutoLock lock(storage.lock);
+    auto existing = storage.readings.find({profile_directory, preference});
+    if (existing != storage.readings.end()) {
+      if (existing->second == reading) {
+        return;
+      }
+      previous = base::Value(existing->second.Clone());
+    }
+    storage.readings[{profile_directory, preference}] = reading.Clone();
+  }
+  base::DictValue previous_preferences;
+  if (!previous.is_none()) {
+    previous_preferences.Set(preference, std::move(previous));
+  }
+  base::DictValue current_preferences;
+  current_preferences.Set(preference, std::move(reading));
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("profileDirectory", std::move(profile_directory));
+  payload.Set("preference", std::move(preference));
+  payload.Set("previous", std::move(previous_preferences));
+  payload.Set("current", std::move(current_preferences));
+  SendBlinkEvidence("browser.preferences", "browser-preference-changed",
+                    std::move(payload));
+}
+
+void RecordBrowserZoomLevelChanged(std::string mode,
+                                   bool follows_default,
+                                   std::string host,
+                                   std::string scheme,
+                                   double zoom_level) {
+  A11Y_RECORDER_COST("RecordBrowserZoomLevelChanged");
+  RecorderPipeClient* client = GetProcessRecorderClient();
+  if (!client || !std::isfinite(zoom_level) ||
+      !IsOneOf(mode, {"host", "scheme-and-host", "temporary", "default"})) {
+    return;
+  }
+  base::DictValue payload;
+  payload.Set("context", CreateContext(*client, 0));
+  payload.Set("mode", std::move(mode));
+  payload.Set("followsDefault", follows_default);
+  payload.Set("host", std::move(host));
+  payload.Set("scheme", std::move(scheme));
+  payload.Set("zoomLevel", zoom_level);
+  // blink::ZoomLevelToZoomFactor: each level is a factor of 1.2.
+  payload.Set("zoomPercent", std::pow(1.2, zoom_level) * 100.0);
+  SendBlinkEvidence("browser.preferences", "zoom-level-changed",
+                    std::move(payload));
+}
+
 }  // namespace a11y_recorder

@@ -27,6 +27,13 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public MagnifierChangeTimeline MagnifierChanges { get; init; } = MagnifierChangeTimeline.Empty;
 
+    /// <summary>
+    /// The browser preferences of the recording and those sent to its pages,
+    /// for the properties panel; empty for a recording made before they were
+    /// recorded or without a browser.
+    /// </summary>
+    public BrowserPreferenceTimeline BrowserPreferences { get; init; } = BrowserPreferenceTimeline.Empty;
+
     private ISessionTimeline? _timeline;
 
     /// <summary>

@@ -172,6 +172,21 @@
                         HorizontalAlignment="Left"
                         Content="_Browse for Chromium..."
                         Click="BrowseChromiumButton_Click" />
+                <Label Target="{Binding ElementName=BrowserProfileTextBox}"
+                       Content="Browser _profile folder:" />
+                <TextBox x:Name="BrowserProfileTextBox"
+                         Margin="0,0,0,8"
+                         AutomationProperties.Name="Browser profile folder"
+                         AutomationProperties.HelpText="Leave empty for a new profile for each recording, removed after it. Choose a prepared profile folder, such as one for a test account, to record with it. Only the listed accessibility preferences are recorded from it, not its browsing data." />
+                <TextBlock Margin="0,0,0,8"
+                           Foreground="{StaticResource MutedText}"
+                           TextWrapping="Wrap"
+                           Text="Empty for a new profile for each recording. A prepared folder is kept, and only its accessibility preferences are recorded." />
+                <Button x:Name="BrowseProfileButton"
+                        Margin="0,0,0,8"
+                        HorizontalAlignment="Left"
+                        Content="Browse for p_rofile folder..."
+                        Click="BrowseProfileButton_Click" />
                 <Label Target="{Binding ElementName=BrowserStartUrlTextBox}"
                        Content="Starting _website:" />
                 <TextBox x:Name="BrowserStartUrlTextBox"
@@ -231,6 +246,11 @@
                   <CheckBox x:Name="FilterMagnifierCheckBox"
                             IsChecked="True"
                             Content="Magnifier changes"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterBrowserSettingsCheckBox"
+                            IsChecked="True"
+                            Content="Browser settings"
                             Checked="TimelineFilter_Changed"
                             Unchecked="TimelineFilter_Changed" />
                   <CheckBox x:Name="FilterFramesCheckBox"

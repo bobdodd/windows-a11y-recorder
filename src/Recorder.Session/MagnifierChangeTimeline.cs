@@ -65,15 +65,23 @@ public static class PropertyChangeSteps
     /// The times of a panel row's changes, or null when the recording has no
     /// records of them: a Magnifier row of a recording without Magnifier
     /// change records, or a settings row of one without settings records.
+    /// A browser row's times are those of <see cref="BrowserPreferenceTimeline.ChangeTimesOf"/>.
     /// </summary>
     public static IReadOnlyList<long>? TimesOf(
         PropertyRow row,
         WindowsPreferenceTimeline settings,
-        MagnifierChangeTimeline magnifier)
+        MagnifierChangeTimeline magnifier,
+        BrowserPreferenceTimeline? browser = null)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(magnifier);
+        if (row.Key.StartsWith(BrowserPreferenceTimeline.BrowserKeyPrefix, StringComparison.Ordinal) ||
+            row.Key.StartsWith(BrowserPreferenceTimeline.PageKeyPrefix, StringComparison.Ordinal))
+        {
+            return (browser ?? BrowserPreferenceTimeline.Empty).ChangeTimesOf(row.Key);
+        }
+
         if (row.Key.StartsWith(WindowsPreferenceTimeline.MagnifierKeyPrefix, StringComparison.Ordinal))
         {
             return magnifier.Recorded

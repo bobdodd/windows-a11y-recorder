@@ -1171,7 +1171,19 @@ or loses it. Frames are named by their DevTools frame token, which every
 renderer gives the same frame. The design is in
 [page recreation](page-recreation.md), "Slice 5: the documents of frames".
 
-Live 0.55 connections require an exact protocol-version match.
+Protocol version 0.56 adds the `browser.preferences` channel and its four
+records: `browser-preferences`, the listed preferences of a profile as it
+loads; `browser-preference-changed`, a change of one, with the reading
+before it; `zoom-level-changed`, a change of a host's, a scheme and host's,
+a page's temporary, or the default zoom level; and `web-preferences-sent`,
+the values a page's view is sent when it is created and after each later
+send of `WebPreferences` or `RendererPreferences`, every listed field in a
+view's first record and only those that changed in later ones. The hooks
+are in `content/browser` and in `chrome/browser/profiles`, whose `misc`
+target gains a dependency on the bridge. The design is in
+[accessibility preferences](accessibility-preferences.md), "Stage 2".
+
+Live 0.56 connections require an exact protocol-version match.
 
 The recorder's managed payload contracts are part of the protocol surface, not a
 convenience. Evidence ingest deserializes every payload into a typed record and

@@ -181,11 +181,12 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         var (sessionKey, recordingId) = await CreateRecordingAsync();
 
         // One window with a process and one without, one monitor, two UI
-        // Automation elements, eight browser contexts, two audio paths and
+        // Automation elements, nine browser contexts (the ninth that of the
+        // browser preference samples, protocol 0.56), two audio paths and
         // two navigation URLs, three foreground windows, eight event
         // targets, two script locations, one world and two scopes.
         await WriteAsync(sessionKey, recordingId, SampleEvents(sessionKey));
-        long[] once = [2, 1, 2, 8, 4, 3, 8, 2, 1, 2];
+        long[] once = [2, 1, 2, 9, 4, 3, 8, 2, 1, 2];
         Assert.Equal(once, await IdentityCountsAsync(recordingId));
 
         // A resumed recording has a new writer, which does not look up the
@@ -876,7 +877,9 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // 0021 added the tables of the Windows settings.
         record.Channel != "system.preferences" &&
         // 0022 added the table of the Magnifier changes.
-        record.Channel != "graphics.magnifier";
+        record.Channel != "graphics.magnifier" &&
+        // 0023 added the tables of the browser preferences.
+        record.Channel != "browser.preferences";
 
     private static List<string> Sorted(List<string> rows)
     {

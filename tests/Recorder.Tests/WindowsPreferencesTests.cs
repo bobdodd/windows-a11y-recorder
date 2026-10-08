@@ -250,7 +250,7 @@ public sealed class WindowsPreferencesTests
         }
 
         var index = builder.Build();
-        Assert.Equal(7, PlaybackIndex.CurrentVersion);
+        Assert.True(PlaybackIndex.CurrentVersion >= 7);
         var kept = index.Events.Where(item => item.Channel == WindowsPreferenceSettings.Channel).ToList();
         Assert.Equal(2, kept.Count);
         Assert.Equal(snapshot.ToJsonString(), JsonNode.Parse(kept[0].Payload.GetRawText())!.ToJsonString());

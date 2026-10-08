@@ -500,6 +500,32 @@ scroller's `GetScrollElementId()` into `LayoutScrollOffset`'s
 `scroll_element_id`, and the bridge writes it as decimal text, or null for
 zero.
 
+Protocol 0.56 (accessibility preferences, stage 2) adds the
+`browser.preferences` channel, written from the browser process.
+`RenderViewHostImpl` calls `RecordBrowserWebPreferencesSent` through a
+helper `integrate.py` adds, `RecorderRecordPreferencesSent`: in
+`CreateRenderView`, before `CreateView`, with the point `view-created`,
+and after each send in `SendWebPreferencesToRenderer` (`web-preferences`)
+and `SendRendererPreferencesToRenderer` (`renderer-preferences`). The
+helper reads the listed fields of `WebPreferences` and
+`RendererPreferences`, a font family for the common script `Zyyy`, the
+caret blink interval as `hasCaretBlinkInterval` and
+`caretBlinkIntervalMilliseconds`, and the Windows font fields under
+`BUILDFLAG(IS_WIN)`. The bridge keeps each view's last values, by the
+view's address, and writes a later record only with the fields that
+differ; a view created again starts again with every field.
+`HostZoomMapImpl` calls `RecordBrowserZoomLevelChanged` just before each
+notification of its zoom level change callbacks and in
+`SetDefaultZoomLevel`; the bridge adds the percentage, 1.2 to the power
+of the level, times 100. `ProfileImpl::DoFinalInit` reads the listed
+preferences into `RecordBrowserPreferences`, with the profile's directory
+and whether it was new, and adds each registered one to the profile's
+`pref_change_registrar_`, whose callback calls
+`RecordBrowserPreferenceChanged`; the bridge keeps each preference's last
+reading, for the record's `previous`, and writes no record when the
+reading is unchanged. `chrome/browser/profiles/BUILD.gn` gains the bridge
+dependency in `source_set("misc")`.
+
 Protocol 0.55 (slice 5a) records frames on `browser.dom`. The DOM walk
 helper in `document.cc` passes `BeginBlinkDomCheckpoint` the walked
 document's frame's `GetDevToolsFrameToken().ToString()` and `IsMainFrame()`,

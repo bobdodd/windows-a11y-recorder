@@ -2,7 +2,7 @@ namespace Recorder.Contracts;
 
 public static class BrowserEvidenceProtocol
 {
-    public const string CurrentVersion = "0.55";
+    public const string CurrentVersion = "0.56";
 }
 
 public static class BrowserEvidenceChannels
@@ -24,6 +24,7 @@ public static class BrowserEvidenceChannels
     public const string Compositor = "browser.compositor";
     public const string Animation = "browser.animation";
     public const string Script = "browser.script";
+    public const string Preferences = BrowserPreferenceSettings.Channel;
 }
 
 public static class BrowserEvidenceEventTypes
@@ -2216,3 +2217,55 @@ public sealed record BrowserNetworkWebTransportClosedPayload(
     bool Abrupt,
     double? Code,
     BrowserNetworkText? Reason);
+
+// Protocol 0.56 (accessibility preferences, stage 2). See
+// docs/architecture/accessibility-preferences.md, "Stage 2", and
+// BrowserPreferenceSettings for the names and types of the values.
+
+// A browser preference as read from the profile's preference store: its
+// value, whether that is the default, and the problem that stopped its
+// reading ("not registered"), with the value and default null then.
+public sealed record BrowserPreferenceReading(
+    System.Text.Json.JsonElement Value,
+    bool? IsDefault,
+    string? Problem);
+
+// The listed browser preferences of a profile as it finished loading.
+public sealed record BrowserPreferencesPayload(
+    BrowserContext Context,
+    string ProfileDirectory,
+    bool NewProfile,
+    IReadOnlyDictionary<string, BrowserPreferenceReading> Preferences);
+
+// A change of one listed browser preference. Previous holds the reading
+// last recorded for it, or nothing when none was; current holds the new one.
+public sealed record BrowserPreferenceChangedPayload(
+    BrowserContext Context,
+    string ProfileDirectory,
+    string Preference,
+    IReadOnlyDictionary<string, BrowserPreferenceReading> Previous,
+    IReadOnlyDictionary<string, BrowserPreferenceReading> Current);
+
+// Preferences sent to a page's view. A first record holds every field of the
+// send; a later one only the fields that differ from the last sent to the
+// same view. The view id tells views apart and has no other meaning.
+public sealed record BrowserWebPreferencesSentPayload(
+    BrowserContext Context,
+    int PageFrameTreeNodeId,
+    bool PrimaryPage,
+    int RendererProcessId,
+    string ViewId,
+    string Point,
+    bool First,
+    IReadOnlyDictionary<string, System.Text.Json.JsonElement> Fields);
+
+// A zoom level change of the browser's zoom map. The percentage is
+// 1.2 to the power of the level, times 100.
+public sealed record BrowserZoomLevelChangedPayload(
+    BrowserContext Context,
+    string Mode,
+    bool FollowsDefault,
+    string Host,
+    string Scheme,
+    double ZoomLevel,
+    double ZoomPercent);

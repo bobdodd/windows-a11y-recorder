@@ -60,6 +60,7 @@ public static class WindowsCollectorFactory
                             "browser",
                             "chrome.exe"),
                     StartUrl = options.BrowserStartUrl,
+                    ProfileDirectory = options.BrowserProfileDirectory,
                     RemoteDebuggingPort = options.BrowserRemoteDebuggingPort,
                     FullWalkInterval = options.BrowserFullWalkInterval
                 }));
