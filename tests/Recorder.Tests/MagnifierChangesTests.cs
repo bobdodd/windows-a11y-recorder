@@ -142,9 +142,10 @@ public sealed class MagnifierChangesTests
         Assert.Equal(2 * Second, PropertyChangeSteps.InEffect(times, 2 * Second));
         Assert.Null(PropertyChangeSteps.Previous(times, 2 * Second));
 
-        // Between changes: the previous is before the one in effect.
+        // Between changes: the previous is the one in effect, the nearest
+        // strictly before the playhead.
         Assert.Equal(5 * Second, PropertyChangeSteps.InEffect(times, 7 * Second));
-        Assert.Equal(2 * Second, PropertyChangeSteps.Previous(times, 7 * Second));
+        Assert.Equal(5 * Second, PropertyChangeSteps.Previous(times, 7 * Second));
         Assert.Equal(9 * Second, PropertyChangeSteps.Next(times, 7 * Second));
 
         // At a change, the next is the one after it, so pressing again moves on.
@@ -154,12 +155,58 @@ public sealed class MagnifierChangesTests
         // Two changes at the same time are one change.
         long[] tied = [2 * Second, 2 * Second, 5 * Second];
         Assert.Equal(2 * Second, PropertyChangeSteps.Previous(tied, 5 * Second));
-        Assert.Null(PropertyChangeSteps.Previous(tied, 3 * Second));
+        Assert.Null(PropertyChangeSteps.Previous(tied, 2 * Second));
         Assert.Equal(5 * Second, PropertyChangeSteps.Next(tied, 2 * Second));
 
         // At or after the last change: nothing later.
         Assert.Null(PropertyChangeSteps.Next(times, 9 * Second));
-        Assert.Equal(5 * Second, PropertyChangeSteps.Previous(times, 10 * Second));
+        Assert.Equal(9 * Second, PropertyChangeSteps.Previous(times, 10 * Second));
+        Assert.Equal(5 * Second, PropertyChangeSteps.Previous(times, 9 * Second));
+    }
+
+    [Fact]
+    public void TheCountShowsTheChangeInEffectOfAllTheChanges()
+    {
+        long[] times = [2 * Second, 5 * Second, 9 * Second, 12 * Second];
+
+        // No change: nothing to count or move to.
+        Assert.Equal(new PropertyChangePosition(0, 0, null, null), PropertyChangeSteps.Locate([], 4 * Second));
+
+        // Before the first change: 0 of n, only a next change.
+        var before = PropertyChangeSteps.Locate(times, Second);
+        Assert.Equal(new PropertyChangePosition(0, 4, null, 2 * Second), before);
+        Assert.Equal("0/4", before.Shown);
+        Assert.Equal("before the first of 4 changes", before.Spoken);
+
+        // At the first change: 1 of n, nothing earlier.
+        Assert.Equal(new PropertyChangePosition(1, 4, null, 5 * Second), PropertyChangeSteps.Locate(times, 2 * Second));
+
+        // After the second change, before the third: 2 of 4; previous goes
+        // back to the second, next on to the third.
+        var between = PropertyChangeSteps.Locate(times, 7 * Second);
+        Assert.Equal(new PropertyChangePosition(2, 4, 5 * Second, 9 * Second), between);
+        Assert.Equal("2/4", between.Shown);
+        Assert.Equal("change 2 of 4", between.Spoken);
+
+        // At the second change: previous goes to the first.
+        Assert.Equal(new PropertyChangePosition(2, 4, 2 * Second, 9 * Second), PropertyChangeSteps.Locate(times, 5 * Second));
+
+        // At and after the last change: n of n, nothing later.
+        Assert.Equal(new PropertyChangePosition(4, 4, 9 * Second, null), PropertyChangeSteps.Locate(times, 12 * Second));
+        Assert.Equal(new PropertyChangePosition(4, 4, 12 * Second, null), PropertyChangeSteps.Locate(times, 20 * Second));
+
+        // Changes at the same time are one change.
+        long[] tied = [2 * Second, 2 * Second, 5 * Second];
+        Assert.Equal(new PropertyChangePosition(1, 2, 2 * Second, 5 * Second), PropertyChangeSteps.Locate(tied, 3 * Second));
+        Assert.Equal(new PropertyChangePosition(1, 2, null, 5 * Second), PropertyChangeSteps.Locate(tied, 2 * Second));
+
+        // A single change: 0/1 before it, 1/1 at and after it.
+        long[] one = [3 * Second];
+        var beforeOnly = PropertyChangeSteps.Locate(one, Second);
+        Assert.Equal(new PropertyChangePosition(0, 1, null, 3 * Second), beforeOnly);
+        Assert.Equal("before its only change", beforeOnly.Spoken);
+        Assert.Equal(new PropertyChangePosition(1, 1, null, null), PropertyChangeSteps.Locate(one, 3 * Second));
+        Assert.Equal(new PropertyChangePosition(1, 1, 3 * Second, null), PropertyChangeSteps.Locate(one, 4 * Second));
     }
 
     [Fact]
@@ -203,7 +250,8 @@ public sealed class MagnifierChangesTests
 
         var times = PropertyChangeSteps.TimesOf(level, WindowsPreferenceTimeline.Empty, magnifier)!;
         Assert.Equal(6 * Second, PropertyChangeSteps.Next(times, 5 * Second));
-        Assert.Null(PropertyChangeSteps.Previous(times, 5 * Second));
+        Assert.Equal(2 * Second, PropertyChangeSteps.Previous(times, 5 * Second));
+        Assert.Null(PropertyChangeSteps.Previous(times, 2 * Second));
 
         // Without change records the rows are set with the frame, and have none to step through.
         var older = WindowsPreferenceTimeline.MagnifierRows(frame, MagnifierChangeTimeline.Empty, 5 * Second);
@@ -265,8 +313,10 @@ public sealed class MagnifierChangesTests
         Assert.Equal("textScaleFactor", row.Key);
         var times = PropertyChangeSteps.TimesOf(row, timeline, MagnifierChangeTimeline.Empty)!;
         Assert.Equal([2 * Second, 5 * Second], times);
-        Assert.Null(PropertyChangeSteps.Previous(times, 4 * Second));
+        Assert.Equal(2 * Second, PropertyChangeSteps.Previous(times, 4 * Second));
+        Assert.Null(PropertyChangeSteps.Previous(times, 2 * Second));
         Assert.Equal(5 * Second, PropertyChangeSteps.Next(times, 4 * Second));
+        Assert.Equal(new PropertyChangePosition(1, 2, 2 * Second, 5 * Second), PropertyChangeSteps.Locate(times, 4 * Second));
         Assert.Null(PropertyChangeSteps.TimesOf(row, WindowsPreferenceTimeline.Empty, MagnifierChangeTimeline.Empty));
     }
 }

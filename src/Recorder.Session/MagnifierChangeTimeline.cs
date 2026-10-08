@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Recorder.Contracts;
 
@@ -53,8 +54,10 @@ public sealed class MagnifierChangeTimeline
 /// <summary>
 /// Moving through one property's changes from the properties panel: the
 /// change in effect at a time is its last change at or before it; the
-/// previous change is the one before that, and the next the first after the
-/// time. Changes at the same time are one change.
+/// previous change is the last strictly before the time, and the next the
+/// first strictly after it. Changes at the same time are one change. See
+/// docs/architecture/accessibility-preferences.md, "Change buttons and
+/// counts".
 /// </summary>
 public static class PropertyChangeSteps
 {
@@ -100,20 +103,18 @@ public static class PropertyChangeSteps
     }
 
     /// <summary>
-    /// The change before the one in effect at <paramref name="time"/>, or
-    /// null when none is: there is no change in effect, or it is the first.
+    /// The last change strictly before <paramref name="time"/>, or null.
+    /// Between two changes it is the change in effect, so the playhead
+    /// goes back to the start of the value shown; at a change it is the
+    /// one before.
     /// </summary>
     public static long? Previous(IReadOnlyList<long> times, long time)
     {
-        if (InEffect(times, time) is not { } current)
-        {
-            return null;
-        }
-
+        ArgumentNullException.ThrowIfNull(times);
         long? found = null;
         foreach (var at in times)
         {
-            if (at >= current)
+            if (at >= time)
             {
                 break;
             }
@@ -138,4 +139,52 @@ public static class PropertyChangeSteps
 
         return null;
     }
+
+    /// <summary>
+    /// Where <paramref name="time"/> is among a property's changes: which
+    /// change is in effect, counted from the start of the recording, of how
+    /// many, and the previous and next change to move to.
+    /// </summary>
+    public static PropertyChangePosition Locate(IReadOnlyList<long> times, long time)
+    {
+        ArgumentNullException.ThrowIfNull(times);
+        var count = 0;
+        var inEffect = 0;
+        long? last = null;
+        foreach (var at in times)
+        {
+            if (last == at)
+            {
+                continue;
+            }
+
+            last = at;
+            count++;
+            if (at <= time)
+            {
+                inEffect = count;
+            }
+        }
+
+        return new PropertyChangePosition(inEffect, count, Previous(times, time), Next(times, time));
+    }
+}
+
+/// <summary>
+/// A property row's place among its changes: <see cref="Index"/> is the
+/// change in effect, counted from 1 at the start of the recording, or 0
+/// before the first; <see cref="Count"/> is how many changes the recording
+/// holds. The value at the start of the recording is not a change.
+/// </summary>
+public sealed record PropertyChangePosition(int Index, int Count, long? Previous, long? Next)
+{
+    /// <summary>The count as the row shows it, for example "2/4".</summary>
+    public string Shown => string.Create(CultureInfo.CurrentCulture, $"{Index}/{Count}");
+
+    /// <summary>The count as a screen reader reads it.</summary>
+    public string Spoken => Index == 0
+        ? Count == 1
+            ? "before its only change"
+            : string.Create(CultureInfo.CurrentCulture, $"before the first of {Count} changes")
+        : string.Create(CultureInfo.CurrentCulture, $"change {Index} of {Count}");
 }

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
 using Recorder.Session;
@@ -9,11 +10,16 @@ namespace Recorder.App;
 // The properties panel beside the video: the Magnifier readings of the
 // frame shown and the Windows settings in effect at its time. Its rows are
 // updated in place, so the row a keyboard or screen reader user is on keeps
-// its place during playback; nothing is announced as they change. See
-// docs/architecture/accessibility-preferences.md, "The properties panel".
+// its place during playback; nothing is announced as they change. A row
+// whose setting changed during the recording ends with previous and next
+// change buttons and a count of its changes. See
+// docs/architecture/accessibility-preferences.md, "The properties panel" and
+// "Change buttons and counts".
 public partial class MainWindow
 {
     private readonly ObservableCollection<PropertyRowView> _propertyRows = [];
+    private readonly Dictionary<string, IReadOnlyList<long>?> _propertyChangeTimes = new(StringComparer.Ordinal);
+    private SessionPlaybackArchive? _propertyChangeTimesArchive;
     private bool _propertiesBound;
 
     private void DisplayPropertiesAt(long positionNanoseconds)
@@ -50,7 +56,7 @@ public partial class MainWindow
             _propertyRows.Clear();
             foreach (var row in rows)
             {
-                _propertyRows.Add(new PropertyRowView(row));
+                _propertyRows.Add(new PropertyRowView(row, ChangePositionOf(row, positionNanoseconds)));
             }
 
             return;
@@ -58,7 +64,58 @@ public partial class MainWindow
 
         for (var i = 0; i < rows.Count; i++)
         {
-            _propertyRows[i].Update(rows[i]);
+            _propertyRows[i].Update(rows[i], ChangePositionOf(rows[i], positionNanoseconds));
+        }
+    }
+
+    // The row's place among its setting's changes, or null when it has no
+    // buttons and count: the recording holds no records of it, or no change
+    // of it. The times are read once per recording and row.
+    private PropertyChangePosition? ChangePositionOf(PropertyRow row, long positionNanoseconds)
+    {
+        if (_playbackArchive is not { } archive)
+        {
+            return null;
+        }
+
+        if (!ReferenceEquals(archive, _propertyChangeTimesArchive))
+        {
+            _propertyChangeTimes.Clear();
+            _propertyChangeTimesArchive = archive;
+        }
+
+        if (!_propertyChangeTimes.TryGetValue(row.Key, out var times))
+        {
+            times = PropertyChangeSteps.TimesOf(row, archive.WindowsPreferences, archive.MagnifierChanges);
+            _propertyChangeTimes[row.Key] = times;
+        }
+
+        if (times is null || times.Count == 0)
+        {
+            return null;
+        }
+
+        return PropertyChangeSteps.Locate(times, positionNanoseconds);
+    }
+
+    // The previous and next change buttons at the end of a row. They act on
+    // their own row, without selecting it first, and do not take keyboard
+    // focus, so a pointer, head pointer, or eye tracking user can step
+    // through a setting's changes by clicking alone; Ctrl+Left and
+    // Ctrl+Right do the same from the keyboard.
+    private void PropertyPreviousChange_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: PropertyRowView row })
+        {
+            StepProperty(row, forward: false);
+        }
+    }
+
+    private void PropertyNextChange_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: PropertyRowView row })
+        {
+            StepProperty(row, forward: true);
         }
     }
 
@@ -143,8 +200,13 @@ public partial class MainWindow
     public sealed class PropertyRowView : INotifyPropertyChanged
     {
         private PropertyRow _row;
+        private PropertyChangePosition? _changes;
 
-        public PropertyRowView(PropertyRow row) => _row = row;
+        public PropertyRowView(PropertyRow row, PropertyChangePosition? changes)
+        {
+            _row = row;
+            _changes = changes;
+        }
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -154,22 +216,54 @@ public partial class MainWindow
         public string WhenSetShown => _row.WhenSetShown;
         public long? SetAt => _row.SetAt;
         public bool Changed => _row.Changed;
-        public string Spoken => _row.Spoken;
         public PropertyRow Row => _row;
 
-        public void Update(PropertyRow row)
+        /// <summary>What a screen reader reads for the row, with its count.</summary>
+        public string Spoken => _changes is { } changes ? $"{_row.Spoken}, {changes.Spoken}" : _row.Spoken;
+
+        /// <summary>Whether the row shows change buttons and a count.</summary>
+        public bool HasChanges => _changes is not null;
+        public bool CanGoPrevious => _changes?.Previous is not null;
+        public bool CanGoNext => _changes?.Next is not null;
+        public string CountShown => _changes?.Shown ?? string.Empty;
+        public string CountSpoken => _changes is { } changes ? Capitalize(changes.Spoken) : string.Empty;
+
+        // The setting's name as it reads within a sentence.
+        private string SettingInSentence =>
+            char.ToLower(Setting[0], System.Globalization.CultureInfo.CurrentCulture) + Setting[1..];
+
+        public string PreviousName => $"Previous {SettingInSentence} change";
+        public string NextName => $"Next {SettingInSentence} change";
+
+        public void Update(PropertyRow row, PropertyChangePosition? changes)
         {
-            if (row == _row)
+            if (row == _row && changes == _changes)
             {
                 return;
             }
 
+            var hadChanges = HasChanges;
             _row = row;
+            _changes = changes;
             // The group and setting of a row do not change.
-            foreach (var name in new[] { nameof(Value), nameof(WhenSetShown), nameof(SetAt), nameof(Changed), nameof(Spoken) })
+            foreach (var name in new[]
+            {
+                nameof(Value), nameof(WhenSetShown), nameof(SetAt), nameof(Changed), nameof(Spoken),
+                nameof(CanGoPrevious), nameof(CanGoNext), nameof(CountShown), nameof(CountSpoken)
+            })
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
             }
+
+            if (hadChanges != HasChanges)
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasChanges)));
+            }
         }
+
+        private static string Capitalize(string text) =>
+            text.Length == 0
+                ? text
+                : char.ToUpper(text[0], System.Globalization.CultureInfo.CurrentCulture) + text[1..];
     }
 }

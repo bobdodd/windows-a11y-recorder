@@ -121,6 +121,12 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   focus: agreed and built 2026-10-08; to test on the target machine with
   `scripts/Test-MagnifierChanges.ps1` and by keyboard with no screen
   reader.
+- The owner's check of 7ae9f19 on the target machine (2026-10-08): the
+  stepping keys work, but the panel did not show how many changes a
+  setting has, and stepping needed the keyboard. Previous and next change
+  buttons and a count on each row with changes, for pointer, head pointer,
+  and eye tracking use: agreed and built 2026-10-08; to test on the
+  target machine by mouse alone.
 - To build: the browser preference,
   zoom, and `web-preferences-sent` records at a protocol change, with
   the `RendererPreferences` hook point found in the checkout first; the

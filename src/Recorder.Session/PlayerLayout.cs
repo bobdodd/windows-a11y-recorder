@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Recorder.Session;
 
@@ -24,8 +25,12 @@ public sealed record PlayerLayout
 
     /// <summary>
     /// The width in device-independent pixels of the properties panel, or
-    /// null for the player's default.
+    /// null for the player's default. Saved as <c>propertiesPanelWidth</c>:
+    /// a width saved as <c>propertiesWidth</c>, before the panel's rows had
+    /// change buttons, was chosen for a narrower panel, and is read as the
+    /// default, so the buttons are not left out of sight.
     /// </summary>
+    [JsonPropertyName("propertiesPanelWidth")]
     public double? PropertiesWidth { get; init; }
 
     /// <summary>

@@ -115,4 +115,17 @@ public sealed class PlayerLayoutTests : IDisposable
         Assert.False(PlayerLayout.Default.TrySave(LayoutPath));
         Assert.False(File.Exists(LayoutPath + ".partial"));
     }
+
+    [Fact]
+    public void APropertiesWidthSavedBeforeTheChangeButtonsIsReadAsTheDefault()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(LayoutPath, "{\"propertiesOpen\": true, \"propertiesWidth\": 320}");
+        Assert.Null(PlayerLayout.Load(LayoutPath).PropertiesWidth);
+
+        var layout = new PlayerLayout { PropertiesWidth = 512 };
+        Assert.True(layout.TrySave(LayoutPath));
+        Assert.Contains("\"propertiesPanelWidth\"", File.ReadAllText(LayoutPath), StringComparison.Ordinal);
+        Assert.Equal(512, PlayerLayout.Load(LayoutPath).PropertiesWidth);
+    }
 }

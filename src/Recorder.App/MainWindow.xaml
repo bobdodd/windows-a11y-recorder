@@ -35,6 +35,20 @@
          naming the keys (docs/architecture/accessibility-preferences.md,
          "Visible focus and the Enter key"). The size and margin give the
          same layout size focused or not, so nothing moves. -->
+    <BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
+    <!-- A previous or next change button of a properties row: a 44 by 44
+         pixel target, the WCAG 2.5.5 size, for head pointer and eye
+         tracking use. It does not take focus, so clicking it leaves the
+         keyboard focus where it was. -->
+    <Style x:Key="PropertyChangeButton" TargetType="Button">
+      <Setter Property="MinWidth" Value="44" />
+      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontFamily" Value="Segoe UI Symbol" />
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+    </Style>
     <Style x:Key="ColumnSplitter" TargetType="GridSplitter">
       <Setter Property="Width" Value="5" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -372,7 +386,7 @@
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" MinWidth="240" />
           <ColumnDefinition x:Name="PropertiesSplitterColumn" Width="5" />
-          <ColumnDefinition x:Name="PropertiesColumn" Width="320" MinWidth="220" MaxWidth="640" />
+          <ColumnDefinition x:Name="PropertiesColumn" Width="480" MinWidth="220" MaxWidth="800" />
         </Grid.ColumnDefinitions>
       <Border Grid.Column="0"
               Background="Black"
@@ -409,14 +423,14 @@
                      Margin="2,6,2,0"
                      TextWrapping="Wrap"
                      Foreground="{StaticResource MutedText}"
-                     Text="Enter: the change that set the value. Ctrl+Left and Ctrl+Right: the setting's previous and next change." />
+                     Text="The buttons at the end of a row step through that setting's changes. The count is the change in effect, of all its changes from the start. Keys: Ctrl+Left and Ctrl+Right step; Enter goes to the change that set the value." />
           <ListView x:Name="PropertiesListView"
                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
                     VirtualizingPanel.IsVirtualizingWhenGrouping="True"
                     PreviewKeyDown="PropertiesListView_PreviewKeyDown"
                     MouseDoubleClick="PropertiesListView_MouseDoubleClick"
                     AutomationProperties.Name="Properties at the frame shown"
-                    AutomationProperties.HelpText="Each row reads setting, value, and when it was set. Enter: the change that set the value. Ctrl+Left and Ctrl+Right: the setting's previous and next change.">
+                    AutomationProperties.HelpText="Each row reads setting, value, when it was set, and, for a setting that changed during the recording, which of its changes is in effect. Its previous and next change buttons, or Ctrl+Left and Ctrl+Right, move to the setting's previous and next change. Enter: the change that set the value.">
             <ListView.ItemContainerStyle>
               <Style TargetType="ListViewItem">
                 <Setter Property="AutomationProperties.Name" Value="{Binding Spoken}" />
@@ -459,6 +473,42 @@
                   <GridViewColumn.CellTemplate>
                     <DataTemplate>
                       <TextBlock Text="{Binding WhenSetShown}" TextWrapping="Wrap" />
+                    </DataTemplate>
+                  </GridViewColumn.CellTemplate>
+                </GridViewColumn>
+                <!-- Previous and next change buttons and the count, on a
+                     row whose setting changed during the recording. The
+                     buttons are 44 by 44 pixels for head pointer and eye
+                     tracking use, act on their own row, and do not take
+                     focus; their keyboard equivalents are Ctrl+Left and
+                     Ctrl+Right on the row. A disabled button still shows its
+                     tooltip. The count has a fixed width, so the buttons do
+                     not move as it changes. -->
+                <GridViewColumn Header="Changes" Width="150">
+                  <GridViewColumn.CellTemplate>
+                    <DataTemplate>
+                      <StackPanel Orientation="Horizontal"
+                                  Visibility="{Binding HasChanges, Converter={StaticResource BooleanToVisibility}}">
+                        <Button Style="{StaticResource PropertyChangeButton}"
+                                Content="&#x25C0;"
+                                IsEnabled="{Binding CanGoPrevious}"
+                                Click="PropertyPreviousChange_Click"
+                                ToolTip="{Binding PreviousName}"
+                                AutomationProperties.Name="{Binding PreviousName}" />
+                        <Button Style="{StaticResource PropertyChangeButton}"
+                                Margin="4,0,0,0"
+                                Content="&#x25B6;"
+                                IsEnabled="{Binding CanGoNext}"
+                                Click="PropertyNextChange_Click"
+                                ToolTip="{Binding NextName}"
+                                AutomationProperties.Name="{Binding NextName}" />
+                        <TextBlock Margin="8,0,0,0"
+                                   MinWidth="48"
+                                   VerticalAlignment="Center"
+                                   Text="{Binding CountShown}"
+                                   ToolTip="{Binding CountSpoken}"
+                                   AutomationProperties.Name="{Binding CountSpoken}" />
+                      </StackPanel>
                     </DataTemplate>
                   </GridViewColumn.CellTemplate>
                 </GridViewColumn>

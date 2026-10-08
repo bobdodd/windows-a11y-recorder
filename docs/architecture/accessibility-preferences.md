@@ -11,7 +11,11 @@ agreed 2026-10-08, and the properties panel as proposed later that day.
 Stage 1, the Windows settings and the properties panel, was built
 2026-10-08 (see "Stage 1 as built"), and the Magnifier change records,
 stepping, and visible splitter focus the same day, not yet tested on the
-target machine (see "Visible focus and stepping as built"); stages 2 and 3 are not built. Listed in
+target machine (see "Visible focus and stepping as built"); stages 2 and 3 are not built.
+The owner checked the stepping keys on the target machine 2026-10-08, and
+change buttons and counts on the panel's rows were agreed and built the
+same day, not yet tested on the target machine (see "Change buttons and
+counts"). Listed in
 [outstanding work](analysis-outstanding-work.md). It accompanies
 [assistive technology detection](assistive-technology-detection.md), whose
 approach was agreed on 2026-10-07, and takes over that design's Windows
@@ -623,6 +627,97 @@ Built 2026-10-08 as proposed above, with these details and differences:
   reader, the Magnifier lane and filter, Enter, Ctrl+Left and Ctrl+Right
   on rows, and the splitters reached by Tab.
 
+
+## Change buttons and counts
+
+Proposed by the owner 2026-10-08 after checking 7ae9f19 on the target
+machine, refined and agreed the same day; built 2026-10-08, not yet
+tested on the target machine.
+
+### The owner's check of 7ae9f19
+
+- The player running was the 7ae9f19 build, from its package folder.
+- A single click on a row selects it and does nothing more, as built;
+  this was taken at first for a fault, as the panel did not say that the
+  keys act on the selected row.
+- Ctrl+Left and Ctrl+Right step through a selected row's changes as
+  designed.
+- The owner found the panel not intuitive: it does not show how many
+  changes a setting has, and stepping needs the keyboard. The panel must
+  work by mouse alone, for head pointer and eye tracking use.
+
+### The design
+
+- A row whose setting has no change in the recording is shown as before,
+  with no buttons and no count. This includes every row of a recording
+  with no records for its group, such as the Magnifier rows of a
+  recording made before the Magnifier change records.
+- A row whose setting has one change or more ends with a previous change
+  button, a next change button, and a count, `i/n`, in a column of its
+  own, "Changes". The owner proposed buttons for more than one change;
+  showing them for a single change as well, so that the sole change can
+  be reached by mouse, was agreed.
+- `n` is the number of changes of that setting in the recording, from its
+  start; the value at the start is not a change, and changes at the same
+  time are one change. `i` is the change in effect at the playhead, its
+  last change at or before it, counted from 1; before the first change it
+  is 0, so `0/n`, and at or after the last, `n/n`.
+- Previous moves the playhead to the nearest change strictly before it,
+  and Next to the nearest strictly after it. Between the second and third
+  of four changes the row shows `2/4`, Previous moves to the second
+  change, and Next to the third; at the second change, Previous moves to
+  the first. A button with no change in its direction is disabled.
+- Ctrl+Left and Ctrl+Right move the same way. This changes Ctrl+Left
+  from the earlier design, in which it moved to the change before the one
+  in effect, so that the keys and the buttons agree. Enter and a double
+  click still move to the change in effect.
+- Each move is announced as before, with the value and the time.
+
+### As built
+
+- The count and the moves come from `PropertyChangeSteps.Locate`
+  (`src/Recorder.Session/MagnifierChangeTimeline.cs`), which gives a
+  `PropertyChangePosition`: the change in effect, the count, and the
+  previous and next change. `PropertyChangeSteps.Previous` now gives the
+  last change strictly before the time.
+- The buttons are 44 by 44 pixels, the target size of WCAG 2.5.5, and
+  show the Segoe UI Symbol triangles. They are named, and have tooltips,
+  "Previous color filter change" and "Next color filter change", for
+  example; a disabled button still shows its tooltip. The count has a
+  fixed minimum width, so the buttons stay in place as it changes, and
+  reads in full as "Change 2 of 4", or "Before the first of 4 changes";
+  the row's name ends with the same words, for example "Color filter, on,
+  00:00:12.000, change 2 of 4".
+- Each button acts on its own row, without the row being selected, and
+  does not take keyboard focus, so a click leaves the focus and the
+  selection where they were. They are therefore not Tab stops: from the
+  keyboard the same moves are Ctrl+Left and Ctrl+Right on the row, and
+  speech and screen reader users can still invoke the buttons through UI
+  Automation.
+- The rows with buttons are taller than the others. Whether a row has
+  buttons is fixed for a recording, so rows do not move during playback;
+  the buttons are enabled and disabled in place.
+- The panel's default width is 480 pixels, up from 320, so the new column
+  is in view without scrolling sideways, and its largest width 800. The
+  layout file holds the width as `propertiesPanelWidth`; a width saved as
+  `propertiesWidth` by an earlier build is read as the default.
+- The hint under the list reads: "The buttons at the end of a row step
+  through that setting's changes. The count is the change in effect, of
+  all its changes from the start. Keys: Ctrl+Left and Ctrl+Right step;
+  Enter goes to the change that set the value." The list's help text says
+  the same.
+- Checks in the sandbox: unit tests of the count and moves with no
+  change, before the first change, at the first, between changes, at a
+  change, at and after the last, ties, and a single change; the stepping
+  tests updated to the new previous change; a layout test that an earlier
+  saved width is read as the default and the new one is kept. The player
+  is built with the Windows targeting pack; its rendering cannot be
+  checked in the sandbox.
+- To check by the owner, by mouse alone, on a recording with settings
+  and Magnifier changes: the buttons and counts on the rows with changes
+  and none on the others; `0/n` before a first change; Previous and Next
+  at each end disabled; the counts following playback; and the moves
+  announced with a screen reader.
 
 ## Decisions
 

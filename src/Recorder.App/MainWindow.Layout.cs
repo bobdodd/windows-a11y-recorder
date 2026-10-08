@@ -35,7 +35,9 @@ public partial class MainWindow
 
     private bool PropertiesShown => !_frameOnly && _layout.PropertiesOpen;
 
-    private const double DefaultPropertiesWidth = 320;
+    // Wide enough for the setting, value, and when set columns and the
+    // change buttons and count, without scrolling sideways.
+    private const double DefaultPropertiesWidth = 480;
 
     private void LoadLayout()
     {
