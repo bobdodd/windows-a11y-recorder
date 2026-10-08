@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed 2026-10-07, not agreed, not built. Listed in
+Proposed 2026-10-07, agreed 2026-10-07, not built. Listed in
 [outstanding work](analysis-outstanding-work.md). The owner accepted a
 low-level keyboard hook for recording on 2026-10-07. This design follows
 [assistive technology detection](assistive-technology-detection.md), which

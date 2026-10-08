@@ -1,7 +1,7 @@
 # Analysis and Inference: Outstanding Work
 
 Recorded 2026-10-07, during the planning phase that follows release 1.0.0.
-Three designs are agreed, one is proposed, and none is built. The owner's
+Four designs are agreed and none is built. The owner's
 decision is to stay in planning for now, so each item below waits for a
 decision to start building. Each names where it is designed; the accepted workflow
 applies when it is built: build, test in the sandbox, package and transfer
@@ -47,8 +47,8 @@ To test:
 
 ## Screen reader activity
 
-Designed in [screen reader activity](screen-reader-activity.md), proposed
-2026-10-07, not agreed. The owner accepted a low-level keyboard hook on
+Designed in [screen reader activity](screen-reader-activity.md), agreed
+2026-10-07. The owner accepted a low-level keyboard hook on
 2026-10-07.
 
 - To build: the keyboard hook collector, with reinstalling when a screen
