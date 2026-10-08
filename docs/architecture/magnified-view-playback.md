@@ -67,19 +67,26 @@ between two frames is.
   either the three values and a null problem, or three nulls and the
   problem. The level is rounded to six decimal places, the digits a
   float holds.
-- The readings are made on whichever thread runs each frame, not the one
-  that called `MagInitialize`; Microsoft does not say whether that
-  matters, so the target machine test checks that the frames hold
-  readings and not problems.
+- The frame loop runs on one dedicated thread, which calls
+  `MagInitialize`, reads every frame's transform, and calls
+  `MagUninitialize`. Microsoft does not state a thread rule, but on the
+  target machine the API answered only on the thread that called
+  `MagInitialize` and failed with error 21 on any other, including a
+  thread that called `MagInitialize` itself; the first build read on pool
+  threads and 790 of 837 frames held that problem
+  ([validation](../validation/magnified-playback-2026-10-07.md)). The
+  reader refuses a reading on another thread, as a problem.
 - The database's evidence tables map the object to columns of
   `desktop_frames`, added by migration 0019, so the database writer
   accepts every record; recordings with a recording file do not write
   them.
 - `MagGetFullscreenColorEffect` reads the full screen color effect
   ([Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/magnification/nf-magnification-maggetfullscreencoloreffect)).
-  Whether Windows Magnifier's inverted colors use it, and whether the
-  capture shows them, is to be tested first; if they do and it does not,
-  the effect is added to the frame in the same way.
+  On the target machine, Windows Magnifier's inverted colors set it to a
+  matrix other than the identity, and the captured frames do not show
+  them ([validation](../validation/magnified-playback-2026-10-07.md)).
+  Recording the effect with each frame, and applying it in the
+  participant's view, is proposed, not built.
 
 ## Playback
 

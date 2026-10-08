@@ -5,11 +5,15 @@ namespace Recorder.Collectors.Graphics;
 /// <summary>
 /// Reads the full screen magnification transform with each desktop frame,
 /// so playback can show the part of the screen the participant saw. It only
-/// reads the transform; it never sets it. See
+/// reads the transform; it never sets it. It must be created, read, and
+/// disposed on one thread: the API answers only on the thread that called
+/// MagInitialize, and fails with error 21 on any other, including one that
+/// called MagInitialize itself (target machine, 2026-10-07). See
 /// docs/architecture/magnified-view-playback.md.
 /// </summary>
 internal sealed class FullscreenMagnificationReader : IDisposable
 {
+    private readonly int _threadId = Environment.CurrentManagedThreadId;
     private readonly bool _initialized;
     private readonly string? _initializationProblem;
     private bool _disposed;
@@ -49,6 +53,12 @@ internal sealed class FullscreenMagnificationReader : IDisposable
         if (!_initialized)
         {
             return Unavailable(_initializationProblem ?? "MagInitialize failed.");
+        }
+
+        if (Environment.CurrentManagedThreadId != _threadId)
+        {
+            return Unavailable(
+                "The transform was to be read on a thread other than the one that called MagInitialize.");
         }
 
         try

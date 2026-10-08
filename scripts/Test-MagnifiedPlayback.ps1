@@ -58,6 +58,7 @@ Add-Type -Namespace MagPlayTest -Name Native -MemberDefinition @'
 [DllImport("Magnification.dll")] public static extern bool MagGetFullscreenColorEffect([Out] float[] effect);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 '@
@@ -258,8 +259,17 @@ function Export-Events([string]$session, [string]$results) {
     return $path
 }
 
+# A session ID or folder; when none is given, the newest recording.
 function Resolve-Session([string]$id) {
-    $id = $id.Trim().Trim('"')
+    $id = ([string]$id).Trim().Trim('"')
+    if (-not $id) {
+        $newest = Get-ChildItem -LiteralPath $SessionsRoot -Directory |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'recording.mcap') } |
+            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+        if (-not $newest) { throw "No recording found in $SessionsRoot" }
+        Say "No session ID given; using the newest recording, $($newest.Name)"
+        return $newest.FullName
+    }
     if (Test-Path -LiteralPath $id) { return $id }
     return Join-Path $SessionsRoot $id
 }
@@ -389,6 +399,17 @@ function Save-GdiShot([string]$name) {
     return $path
 }
 
+# Moves the pointer with mouse input, which Magnifier's full screen view
+# follows; SetCursorPos alone did not pan it (run of 2026-10-07).
+function Move-Pointer([int]$x, [int]$y) {
+    if ($DryRun) { [void][MagPlayTest.Native]::SetCursorPos($x, $y); return }
+    $virtual = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $nx = [int][math]::Round(($x - $virtual.X) * 65535.0 / ($virtual.Width - 1))
+    $ny = [int][math]::Round(($y - $virtual.Y) * 65535.0 / ($virtual.Height - 1))
+    # MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+    [MagPlayTest.Native]::mouse_event(0xC001, $nx, $ny, 0, [UIntPtr]::Zero)
+}
+
 function Wait-Phase([string]$name, [int]$cursorX, [int]$cursorY) {
     $script:phaseName = $name
     $form.Invalidate()
@@ -399,7 +420,7 @@ function Wait-Phase([string]$name, [int]$cursorX, [int]$cursorY) {
     $shot = $null; $shotUtc = $null; $shotSample = $null
     while ([DateTime]::UtcNow -lt $end) {
         [System.Windows.Forms.Application]::DoEvents()
-        [void][MagPlayTest.Native]::SetCursorPos($cursorX, $cursorY)
+        Move-Pointer $cursorX $cursorY
         $sample = Read-Transform $name
         if ($null -eq $shot -and [DateTime]::UtcNow -ge $mid) {
             $shotUtc = [DateTime]::UtcNow.ToString('o')
@@ -474,7 +495,7 @@ if ($DryRun -and -not $SessionId -and -not $SessionFolder) {
 }
 
 if (-not $SessionFolder) {
-    if (-not $SessionId) { $SessionId = Read-Host 'Type or paste the session ID shown by the recorder' }
+    if (-not $SessionId) { $SessionId = Read-Host 'Type or paste the session ID shown by the recorder, or press Enter for the newest recording' }
     $SessionFolder = Resolve-Session $SessionId
 }
 Say "Session folder: $SessionFolder"

@@ -156,9 +156,15 @@ public sealed class DesktopFrameCollector : ICaptureCollector
             LifecycleState = CollectorLifecycleState.Starting;
             _captureCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken);
-            _captureTask = Task.Run(
-                () => CaptureLoopAsync(_captureCancellation.Token),
-                CancellationToken.None);
+            // One dedicated thread for the whole loop: the magnification API
+            // answers only on the thread that called MagInitialize, and
+            // fails with error 21 on any other (target machine, 2026-10-07).
+            var token = _captureCancellation.Token;
+            _captureTask = Task.Factory.StartNew(
+                () => CaptureLoop(token),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
             LifecycleState = CollectorLifecycleState.Running;
         }
 
@@ -238,7 +244,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
         LifecycleState = CollectorLifecycleState.Disposed;
     }
 
-    private async Task CaptureLoopAsync(CancellationToken cancellationToken)
+    private void CaptureLoop(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(_frameInterval);
         // Initialized for the frames of one recording, and closed when they
@@ -265,7 +271,9 @@ public sealed class DesktopFrameCollector : ICaptureCollector
 
             try
             {
-                if (!await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+                // Waited for on this thread, so every frame is captured, and
+                // its magnification read, on the thread that initialized it.
+                if (!timer.WaitForNextTickAsync(cancellationToken).AsTask().GetAwaiter().GetResult())
                 {
                     break;
                 }

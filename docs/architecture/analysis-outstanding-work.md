@@ -16,7 +16,10 @@ Designed in [magnified view playback](magnified-view-playback.md), agreed
 showed that desktop frames hold Windows Magnifier's full screen view
 unmagnified.
 
-Built 2026-10-07, not yet run on the target machine:
+Built 2026-10-07. The first run on the target machine
+([validation](../validation/magnified-playback-2026-10-07.md)) found the
+readings failing on threads other than the initializing one, now fixed,
+and inverted colors missing from the capture; a second run is due.
 
 - Recorder: `desktop-frame` gains `fullscreenMagnification`, read with
   `MagGetFullscreenTransform` as each frame is captured; its payload
@@ -31,9 +34,9 @@ To test, with `scripts/Test-MagnifiedPlayback.ps1` on the target machine:
 
 - The participant's view matches the GDI screenshot of each phase, at two
   levels and a pan, and the frames' readings match the script's.
-- Whether Windows Magnifier's inverted colors use the full screen color
-  effect and are missing from the capture; if so, the effect is added to
-  the frame.
+- Inverted colors use the full screen color effect and are missing from
+  the capture (first run); recording the effect with each frame is
+  proposed, not built.
 - That stopping a recording with the full screen view on leaves
   Magnifier as it was.
 - Whether the cursor's size in the participant's view matches
