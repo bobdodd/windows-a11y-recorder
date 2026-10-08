@@ -19,18 +19,22 @@ public sealed class SessionTimelineControl : FrameworkElement
             ["graphics.desktop.frames"] = Freeze("#797876"),
             ["audio.microphone"] = Freeze("#DD6974"),
             ["audio.system"] = Freeze("#6DAA45"),
+            ["system.preferences"] = Freeze("#D19900"),
+            ["graphics.magnifier"] = Freeze("#B5C93F"),
             ["session.annotations"] = Freeze("#E8AF34")
         };
 
-    private const int LaneCount = 8;
-    private const int OtherLane = 7;
-    private const int AnnotationSeries = 7;
-    private const int OtherSeries = 8;
-    private const int SeriesCount = 9;
+    // Lane 7 holds the Windows settings records (system.preferences), and
+    // lane 8 the Magnifier change records (graphics.magnifier).
+    private const int LaneCount = 10;
+    private const int OtherLane = 9;
+    private const int AnnotationSeries = 9;
+    private const int OtherSeries = 10;
+    private const int SeriesCount = 11;
 
     // Series are drawn in this order, so markers stay visible over other
     // channels that share their lane.
-    private static readonly int[] SeriesDrawOrder = [0, 1, 2, 3, 4, 5, 6, OtherSeries, AnnotationSeries];
+    private static readonly int[] SeriesDrawOrder = [0, 1, 2, 3, 4, 5, 6, 7, 8, OtherSeries, AnnotationSeries];
 
     private static readonly Brush BackgroundBrush = Freeze("#201F1D");
     private static readonly Brush OtherChannelBrush = Freeze("#BAB9B4");
@@ -423,6 +427,8 @@ public sealed class SessionTimelineControl : FrameworkElement
         "graphics.desktop.frames" => 4,
         "audio.microphone" => 5,
         "audio.system" => 6,
+        "system.preferences" => 7,
+        "graphics.magnifier" => 8,
         _ => OtherLane
     };
 
@@ -449,6 +455,8 @@ public sealed class SessionTimelineControl : FrameworkElement
         4 => ChannelBrushes["graphics.desktop.frames"],
         5 => ChannelBrushes["audio.microphone"],
         6 => ChannelBrushes["audio.system"],
+        7 => ChannelBrushes["system.preferences"],
+        8 => ChannelBrushes["graphics.magnifier"],
         AnnotationSeries => ChannelBrushes["session.annotations"],
         _ => OtherChannelBrush
     };

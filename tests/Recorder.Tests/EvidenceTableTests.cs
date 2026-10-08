@@ -872,7 +872,11 @@ public sealed class EvidenceTableTests(EmbeddedPostgresFixture fixture)
         // 0019 and 0020 added the columns of a desktop frame's magnification
         // and color effect readings, which the writer fills for every
         // desktop frame.
-        record.EventType != "desktop-frame";
+        record.EventType != "desktop-frame" &&
+        // 0021 added the tables of the Windows settings.
+        record.Channel != "system.preferences" &&
+        // 0022 added the table of the Magnifier changes.
+        record.Channel != "graphics.magnifier";
 
     private static List<string> Sorted(List<string> rows)
     {

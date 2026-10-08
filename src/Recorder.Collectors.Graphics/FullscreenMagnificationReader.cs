@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Recorder.Contracts;
 
 namespace Recorder.Collectors.Graphics;
 
@@ -43,7 +44,7 @@ internal sealed class FullscreenMagnificationReader : IDisposable
     /// offsets of the magnified view's upper-left corner, or nulls and the
     /// problem when it could not be read.
     /// </summary>
-    public object Read()
+    public MagnificationReading Read()
     {
         if (ReadProblem("transform") is { } problem)
         {
@@ -67,13 +68,7 @@ internal sealed class FullscreenMagnificationReader : IDisposable
             // A float has about seven significant digits; rounding keeps the
             // recorded level to the digits Windows gave, so 1.038 is not
             // written as 1.0379999876.
-            return new
-            {
-                level = Math.Round((double)level, 6),
-                x = (int?)x,
-                y = (int?)y,
-                problem = (string?)null
-            };
+            return new MagnificationReading(Math.Round((double)level, 6), x, y, null);
         }
         catch (Exception exception) when (
             exception is DllNotFoundException or EntryPointNotFoundException)
@@ -90,7 +85,7 @@ internal sealed class FullscreenMagnificationReader : IDisposable
     /// identity is recorded too, so a frame with no effect is told from a
     /// frame with no reading.
     /// </summary>
-    public object ReadColorEffect()
+    public ColorEffectReading ReadColorEffect()
     {
         if (ReadProblem("color effect") is { } problem)
         {
@@ -111,11 +106,9 @@ internal sealed class FullscreenMagnificationReader : IDisposable
                 return NoColorEffect("MagGetFullscreenColorEffect returned a value that is not finite.");
             }
 
-            return new
-            {
-                matrix = Array.ConvertAll(matrix, value => Math.Round((double)value, 6)),
-                problem = (string?)null
-            };
+            return new ColorEffectReading(
+                Array.ConvertAll(matrix, value => Math.Round((double)value, 6)),
+                null);
         }
         catch (Exception exception) when (
             exception is DllNotFoundException or EntryPointNotFoundException)
@@ -133,11 +126,7 @@ internal sealed class FullscreenMagnificationReader : IDisposable
             ? $"The {what} was to be read on a thread other than the one that called MagInitialize."
             : null;
 
-    private static object NoColorEffect(string problem) => new
-    {
-        matrix = (double[]?)null,
-        problem
-    };
+    private static ColorEffectReading NoColorEffect(string problem) => new(null, problem);
 
     public void Dispose()
     {
@@ -153,13 +142,7 @@ internal sealed class FullscreenMagnificationReader : IDisposable
         }
     }
 
-    private static object Unavailable(string problem) => new
-    {
-        level = (double?)null,
-        x = (int?)null,
-        y = (int?)null,
-        problem
-    };
+    private static MagnificationReading Unavailable(string problem) => new(null, null, null, problem);
 
     [DllImport("Magnification.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -145,6 +145,43 @@ internal static class EvidenceCatalog
         IntegerRectangle("bounds", N),
         new IdentityField("monitor", N, Monitors));
 
+    // Added by 0021_windows_preferences.sql. The Windows settings at the
+    // start and stop of a recording, and each change, one setting a record.
+    // See docs/architecture/accessibility-preferences.md.
+    public static readonly EvidenceTable WindowsPreferenceSnapshots = Evidence(
+        "windows_preference_snapshots",
+        Name("reason"),
+        new InlineField(
+            "uiSettingsEvents",
+            R,
+            [.. Recorder.Contracts.WindowsPreferenceSettings.UiSettingsEvents.Select(name => Bool(name))]),
+        new InlineField("settings", R, WindowsSettings(R, "windows_preference_snapshot_monitors")));
+
+    public static readonly EvidenceTable WindowsPreferenceChanges = Evidence(
+        "windows_preference_changes",
+        Name("setting"),
+        new InlineField("previous", R, WindowsSettings(O, "windows_preference_change_previous_monitors")),
+        new InlineField("current", R, WindowsSettings(O, "windows_preference_change_current_monitors")),
+        new InlineField(
+            "notice",
+            R,
+            [Name("kind"), BigInt("uiAction", N), Text("area", N), Text("source", N)]));
+
+    // Added by 0022_magnifier_changes.sql. A change of the Magnifier's
+    // readings between two desktop frames, with both frames' readings as a
+    // desktop frame holds them. See
+    // docs/architecture/accessibility-preferences.md.
+    public static readonly EvidenceTable MagnifierChangeRecords = Evidence(
+        "magnifier_changes",
+        BigInt("frameSequence"),
+        BigInt("previousFrameAt"),
+        new InlineField(
+            "changed",
+            R,
+            [.. Recorder.Contracts.MagnifierChanges.Parts.Select(part => Bool(part))]),
+        new InlineField("previous", R, MagnifierReadings()),
+        new InlineField("current", R, MagnifierReadings()));
+
     public static readonly EvidenceTable UiaEvents = Evidence(
         "uia_events",
             Name("eventId"),
@@ -1200,7 +1237,9 @@ internal static class EvidenceCatalog
             EventSourceMessages, WebTransportCreations, WebTransportEstablishments,
             WebTransportCloseRequests, WebTransportClosures
         ]),
-        (18, "dom_frame_owners", [DomCheckpointFrameOwners, DomFrameOwnerChanges])
+        (18, "dom_frame_owners", [DomCheckpointFrameOwners, DomFrameOwnerChanges]),
+        (21, "windows_preferences", [WindowsPreferenceSnapshots, WindowsPreferenceChanges]),
+        (22, "magnifier_changes", [MagnifierChangeRecords])
     ];
 
     /// <summary>
@@ -1222,7 +1261,10 @@ internal static class EvidenceCatalog
             [("input.keyboard", "raw-keyboard")] = RawKeyboard,
             [("input.mouse", "raw-mouse")] = RawMouse,
             [("window.foreground", "foreground-window")] = ForegroundWindows,
+            [("system.preferences", "windows-preferences")] = WindowsPreferenceSnapshots,
+            [("system.preferences", "windows-preference-changed")] = WindowsPreferenceChanges,
             [("graphics.desktop.frames", "desktop-frame")] = DesktopFrames,
+            [("graphics.magnifier", "magnifier-changed")] = MagnifierChangeRecords,
             [("browser.lifecycle", "browser-connected")] = BrowserConnections,
             [("browser.lifecycle", "browser-exited")] = BrowserExits,
             [("browser.lifecycle", "browser-clock-synchronized")] = BrowserClockSynchronizations,
@@ -1455,6 +1497,52 @@ internal static class EvidenceCatalog
             }
         }
     }
+
+    // Each Windows setting as {value, problem}, the value stored by the
+    // setting's type, and the monitors in a child table of their own.
+    private static Field[] WindowsSettings(Presence presence, string monitorsTable) =>
+    [
+        .. Recorder.Contracts.WindowsPreferenceSettings.All.Select(setting => (Field)new InlineField(
+            setting.Name,
+            presence,
+            [
+                setting.Kind switch
+                {
+                    Recorder.Contracts.WindowsPreferenceKind.Boolean => Bool("value", N),
+                    Recorder.Contracts.WindowsPreferenceKind.Integer => BigInt("value", N),
+                    Recorder.Contracts.WindowsPreferenceKind.Number => Double("value", N),
+                    Recorder.Contracts.WindowsPreferenceKind.Text => Text("value", N),
+                    _ => new ListField(
+                        "value",
+                        N,
+                        new EvidenceTable(
+                            monitorsTable,
+                            TableKind.Child,
+                            [
+                                Text("deviceName"),
+                                IntegerRectangle("bounds", R),
+                                Bool("isPrimary"),
+                                BigInt("dpiX", N),
+                                BigInt("dpiY", N)
+                            ]))
+                },
+                Text("problem", N)
+            ]))
+    ];
+
+    // A frame's Magnifier readings, as the desktop frame columns of 0019 and
+    // 0020 store them.
+    private static Field[] MagnifierReadings() =>
+    [
+        new InlineField(
+            "fullscreenMagnification",
+            R,
+            [Double("level", N), Int("x", N), Int("y", N), Text("problem", N)]),
+        new InlineField(
+            "fullscreenColorEffect",
+            R,
+            [new ArrayField("matrix", N, ScalarType.Double), Text("problem", N)])
+    ];
 
     private static EvidenceTable Evidence(string name, params Field[] fields) =>
         new(name, TableKind.Evidence, fields);

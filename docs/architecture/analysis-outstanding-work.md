@@ -106,8 +106,22 @@ approach agreed 2026-10-07.
 Designed in [accessibility preferences](accessibility-preferences.md),
 agreed 2026-10-07 with the decisions in its "Decisions".
 
-- To build: the `system.preferences` collector, reading through
-  `UISettings` where it provides a setting; the browser preference,
+- Stage 1, the `system.preferences` collector and the properties panel,
+  built 2026-10-08; to test on the target machine with
+  `scripts/Test-AccessibilityPreferences.ps1` in the owner's account, and
+  the panel by keyboard and screen reader. First run 2026-10-08: every
+  change recorded except the color filter, whose key is created during
+  the recording; the fix, watching the missing key's parent, built
+  2026-10-08. The rerun recorded the color filter on and off; the
+  contrast theme card remains untested. The panel on the target machine:
+  values follow playback; the splitters showed no focus.
+- Magnifier change records (`graphics.magnifier`, with a timeline lane
+  and filter), stepping through a row's changes with Ctrl+Left and
+  Ctrl+Right, a hint under the Properties list, and visible splitter
+  focus: agreed and built 2026-10-08; to test on the target machine with
+  `scripts/Test-MagnifierChanges.ps1` and by keyboard with no screen
+  reader.
+- To build: the browser preference,
   zoom, and `web-preferences-sent` records at a protocol change, with
   the `RendererPreferences` hook point found in the checkout first; the
   `ProfileDirectory` option offered in the session settings.
@@ -116,7 +130,10 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   [page recreation](page-recreation.md), "The environment".
 - Player: properties panels for the participant's accessibility
   settings at the current frame, including Magnifier's current level and
-  position; logged 2026-10-07, to be designed with this work. See its
-  "Showing the settings in the player".
+  position and color effect; designed 2026-10-08 in its "The properties
+  panel", agreed 2026-10-08, built 2026-10-08 with the Windows settings.
+- Build order: three stages, Windows settings with the properties panel,
+  then browser preferences, then the recreation, agreed 2026-10-08 in
+  its "Build stages".
 - To test: as in its "Required tests", including the fixture page that
   responds to the preferences.

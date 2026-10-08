@@ -18,6 +18,17 @@ public sealed record PlayerLayout
     public bool DetailsOpen { get; init; } = true;
 
     /// <summary>
+    /// Whether the properties panel, beside the video, is shown.
+    /// </summary>
+    public bool PropertiesOpen { get; init; } = true;
+
+    /// <summary>
+    /// The width in device-independent pixels of the properties panel, or
+    /// null for the player's default.
+    /// </summary>
+    public double? PropertiesWidth { get; init; }
+
+    /// <summary>
     /// The height in device-independent pixels of the region under the video
     /// while the details are shown, or null for the player's default.
     /// </summary>
@@ -63,9 +74,15 @@ public sealed record PlayerLayout
                 return Default;
             }
 
-            return layout.LowerRegionHeight is { } height &&
-                (!double.IsFinite(height) || height <= 0)
-                ? layout with { LowerRegionHeight = null }
+            if (layout.LowerRegionHeight is { } height &&
+                (!double.IsFinite(height) || height <= 0))
+            {
+                layout = layout with { LowerRegionHeight = null };
+            }
+
+            return layout.PropertiesWidth is { } width &&
+                (!double.IsFinite(width) || width <= 0)
+                ? layout with { PropertiesWidth = null }
                 : layout;
         }
         catch (Exception exception) when (

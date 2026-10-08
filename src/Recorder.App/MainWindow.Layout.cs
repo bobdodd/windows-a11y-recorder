@@ -33,6 +33,10 @@ public partial class MainWindow
 
     private bool DetailsShown => !_frameOnly && _layout.DetailsOpen;
 
+    private bool PropertiesShown => !_frameOnly && _layout.PropertiesOpen;
+
+    private const double DefaultPropertiesWidth = 320;
+
     private void LoadLayout()
     {
         _layout = PlayerLayout.Load(PlayerLayout.DefaultPath);
@@ -45,6 +49,11 @@ public partial class MainWindow
         if (DetailsShown && LowerRegionRow.ActualHeight > 0)
         {
             _layout = _layout with { LowerRegionHeight = LowerRegionRow.ActualHeight };
+        }
+
+        if (PropertiesShown && PropertiesColumn.ActualWidth > 0)
+        {
+            _layout = _layout with { PropertiesWidth = PropertiesColumn.ActualWidth };
         }
 
         _layout.TrySave(PlayerLayout.DefaultPath);
@@ -83,6 +92,30 @@ public partial class MainWindow
         SidePanel.Visibility = settingsShown ? Visibility.Visible : Visibility.Collapsed;
         SidePanelSplitter.Visibility = SidePanel.Visibility;
 
+        // A width set from the keyboard raises no drag event, so the width
+        // shown is kept before the column is set again.
+        if (PropertiesRegion.Visibility == Visibility.Visible && PropertiesColumn.ActualWidth > 0)
+        {
+            _layout = _layout with { PropertiesWidth = PropertiesColumn.ActualWidth };
+        }
+
+        var propertiesShown = PropertiesShown;
+        if (propertiesShown)
+        {
+            PropertiesColumn.MinWidth = 220;
+            PropertiesColumn.Width = new GridLength(_layout.PropertiesWidth ?? DefaultPropertiesWidth);
+            PropertiesSplitterColumn.Width = new GridLength(5);
+        }
+        else
+        {
+            PropertiesColumn.MinWidth = 0;
+            PropertiesColumn.Width = new GridLength(0);
+            PropertiesSplitterColumn.Width = new GridLength(0);
+        }
+
+        PropertiesRegion.Visibility = propertiesShown ? Visibility.Visible : Visibility.Collapsed;
+        PropertiesSplitter.Visibility = PropertiesRegion.Visibility;
+
         var detailsShown = DetailsShown;
         DetailsRegion.Visibility = detailsShown ? Visibility.Visible : Visibility.Collapsed;
         LowerSplitter.Visibility = DetailsRegion.Visibility;
@@ -103,6 +136,8 @@ public partial class MainWindow
         SettingsToggle.IsEnabled = !_frameOnly && !SettingsRequired;
         DetailsToggle.IsChecked = detailsShown;
         DetailsToggle.IsEnabled = !_frameOnly;
+        PropertiesToggle.IsChecked = propertiesShown;
+        PropertiesToggle.IsEnabled = !_frameOnly;
         FrameOnlyToggle.IsChecked = _frameOnly;
         FrameOnlyToggle.IsEnabled = _playbackArchive is not null && !IsRecording;
     }
@@ -188,6 +223,36 @@ public partial class MainWindow
         _busy.AnnounceLayout(open ? "Details shown." : "Details hidden.");
     }
 
+    private void SetPropertiesOpen(bool open)
+    {
+        if (_frameOnly || open == _layout.PropertiesOpen)
+        {
+            ApplyLayout();
+            return;
+        }
+
+        var focusInside = PropertiesRegion.IsKeyboardFocusWithin;
+        if (!open)
+        {
+            SaveLayout();
+        }
+
+        _layout = _layout with { PropertiesOpen = open };
+        ApplyLayout();
+        if (focusInside && !open)
+        {
+            PropertiesToggle.Focus();
+        }
+
+        SaveLayout();
+        if (open)
+        {
+            DisplayPropertiesAt(_playbackPositionNanoseconds);
+        }
+
+        _busy.AnnounceLayout(open ? "Properties shown." : "Properties hidden.");
+    }
+
     private void SetFrameOnly(bool frameOnly)
     {
         if (frameOnly == _frameOnly ||
@@ -236,6 +301,12 @@ public partial class MainWindow
     private void DetailsToggle_Click(object sender, RoutedEventArgs e) =>
         SetDetailsOpen(((ToggleButton)sender).IsChecked == true);
 
+    private void PropertiesToggle_Click(object sender, RoutedEventArgs e) =>
+        SetPropertiesOpen(((ToggleButton)sender).IsChecked == true);
+
+    private void PropertiesSplitter_DragCompleted(object sender, DragCompletedEventArgs e) =>
+        SaveLayout();
+
     private void FrameOnlyToggle_Click(object sender, RoutedEventArgs e) =>
         SetFrameOnly(((ToggleButton)sender).IsChecked == true);
 
@@ -270,6 +341,12 @@ public partial class MainWindow
             if (key == Key.D)
             {
                 SetDetailsOpen(!DetailsShown);
+                return true;
+            }
+
+            if (key == Key.P)
+            {
+                SetPropertiesOpen(!PropertiesShown);
                 return true;
             }
 

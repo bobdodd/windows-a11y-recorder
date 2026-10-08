@@ -19,9 +19,11 @@ public sealed class SessionPlaybackArchiveBuilder
     public static IReadOnlyList<string> PayloadChannels { get; } =
     [
         "window.foreground",
+        "system.preferences",
         "accessibility.uia.events",
         "session.annotations",
-        "graphics.desktop.frames"
+        "graphics.desktop.frames",
+        "graphics.magnifier"
     ];
 
     /// <summary>
@@ -45,6 +47,9 @@ public sealed class SessionPlaybackArchiveBuilder
         "committed",
         "context",
         "controlType",
+        // A Windows setting's change, and every setting at the start and
+        // stop, for the properties panel.
+        "current",
         "device",
         "eventName",
         "frameType",
@@ -65,6 +70,8 @@ public sealed class SessionPlaybackArchiveBuilder
         "registrationKind",
         "rendererProcessId",
         "sameDocument",
+        "setting",
+        "settings",
         "stream",
         "title",
         "truncated",
@@ -87,6 +94,8 @@ public sealed class SessionPlaybackArchiveBuilder
     private readonly Dictionary<string, SessionAudioTrack> _audioTracks =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly List<BrowserEventProjection> _browserProjections = [];
+    private readonly List<WindowsPreferenceRecord> _preferences = [];
+    private readonly List<(long Time, JsonElement Payload)> _magnifierChanges = [];
     private readonly bool _retainEvents;
     private long _maximumTimestamp;
     private bool _built;
@@ -112,6 +121,8 @@ public sealed class SessionPlaybackArchiveBuilder
     /// </summary>
     public static bool BuildsFrom(string channel) =>
         channel == "graphics.desktop.frames" ||
+        channel == WindowsPreferenceSettings.Channel ||
+        channel == MagnifierChanges.Channel ||
         channel.StartsWith("audio.", StringComparison.Ordinal) ||
         channel.StartsWith("browser.", StringComparison.Ordinal);
 
@@ -236,6 +247,19 @@ public sealed class SessionPlaybackArchiveBuilder
             AddFrame(_root, timestamp, payload, _frames);
         }
 
+        if (timelineEvent.Channel == WindowsPreferenceSettings.Channel &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _preferences.Add(new WindowsPreferenceRecord(timestamp, timelineEvent.EventType, payload.Clone()));
+        }
+
+        if (timelineEvent.Channel == MagnifierChanges.Channel &&
+            timelineEvent.EventType == MagnifierChanges.ChangeEventType &&
+            payload.ValueKind == JsonValueKind.Object)
+        {
+            _magnifierChanges.Add((timestamp, payload.Clone()));
+        }
+
         if (timelineEvent.Channel.StartsWith("audio.", StringComparison.Ordinal) &&
             timelineEvent.EventType == "audio-stream-started" &&
             payload.ValueKind == JsonValueKind.Object)
@@ -292,7 +316,15 @@ public sealed class SessionPlaybackArchiveBuilder
             _audioTracks.Values
                 .OrderBy(track => track.Stream, StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
-            browserNavigations);
+            browserNavigations)
+        {
+            WindowsPreferences = _preferences.Count == 0
+                ? WindowsPreferenceTimeline.Empty
+                : new WindowsPreferenceTimeline(_preferences),
+            MagnifierChanges = _magnifierChanges.Count == 0
+                ? MagnifierChangeTimeline.Empty
+                : new MagnifierChangeTimeline(_magnifierChanges)
+        };
     }
 
     private void ThrowIfBuilt()
@@ -433,6 +465,55 @@ public sealed class SessionPlaybackArchiveBuilder
             var title = ReadString(payload, "title");
             var process = ReadString(payload, "processName");
             return JoinSummary(eventType, process, title);
+        }
+
+        if (channel == WindowsPreferenceSettings.Channel)
+        {
+            var setting = ReadString(payload, "setting");
+            if (setting is not null &&
+                WindowsPreferenceSettings.Find(setting) is { } known &&
+                payload.TryGetProperty("current", out var current) &&
+                current.ValueKind == JsonValueKind.Object &&
+                current.TryGetProperty(setting, out var reading))
+            {
+                return JoinSummary(eventType, setting, WindowsPreferenceTimeline.Describe(known, reading));
+            }
+
+            return JoinSummary(eventType, setting ?? ReadString(payload, "reason"));
+        }
+
+        if (channel == MagnifierChanges.Channel &&
+            payload.TryGetProperty("changed", out var changed) && changed.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("current", out var now) && now.ValueKind == JsonValueKind.Object)
+        {
+            bool Changed(string part) => changed.TryGetProperty(part, out var flag) && flag.ValueKind == JsonValueKind.True;
+            var magnification = ReadMagnification(now);
+            var effect = ReadColorEffect(now);
+            var culture = System.Globalization.CultureInfo.CurrentCulture;
+            var parts = new List<string>();
+            if (Changed(MagnifierChanges.Level))
+            {
+                parts.Add(magnification is { } read
+                    ? $"level {Math.Round(read.Level * 100).ToString(culture)} percent"
+                    : "level not read");
+            }
+
+            if (Changed(MagnifierChanges.Position))
+            {
+                parts.Add(magnification is { } read
+                    ? string.Create(culture, $"position {read.X}, {read.Y}")
+                    : "position not read");
+            }
+
+            if (Changed(MagnifierChanges.ColorEffect))
+            {
+                parts.Add(effect is null ? "color effect not read"
+                    : ColorEffect.IsIdentity(effect) ? "color effect none"
+                    : ColorEffect.IsInversion(effect) ? "color effect inverted colors"
+                    : "a color effect");
+            }
+
+            return JoinSummary(eventType, string.Join("; ", parts));
         }
 
         if (channel == "accessibility.uia.events")

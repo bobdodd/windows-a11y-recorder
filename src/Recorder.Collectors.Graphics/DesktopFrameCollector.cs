@@ -31,6 +31,9 @@ public sealed class DesktopFrameCollector : ICaptureCollector
     private WindowsGraphicsCaptureBackend? _windowsGraphicsCapture;
     private string? _windowsGraphicsCaptureFailure;
     private FullscreenMagnificationReader? _magnification;
+    // The previous frame's Magnifier readings and time, for its change
+    // records; touched only by the capture thread.
+    private readonly MagnifierChangeTracker _magnifierChanges = new();
     private bool _disposed;
 
     public DesktopFrameCollector(int framesPerSecond = 5)
@@ -43,7 +46,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
             "windows.desktop-frames",
             nameof(DesktopFrameCollector),
             typeof(DesktopFrameCollector).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-            ["graphics.desktop.frames"],
+            ["graphics.desktop.frames", MagnifierChanges.Channel],
             "windows-graphics-capture-with-gdi-fallback");
     }
 
@@ -251,6 +254,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
         // end. The reader only reads the transform Windows Magnifier set.
         using var magnification = new FullscreenMagnificationReader();
         _magnification = magnification;
+        _magnifierChanges.Reset();
 
         do
         {
@@ -384,6 +388,33 @@ public sealed class DesktopFrameCollector : ICaptureCollector
             capturedAt,
             sequence,
             qualityFlags);
+        EmitMagnifierChange(capturedAt, sequence, fullscreenMagnification, fullscreenColorEffect);
+    }
+
+    // A record when this frame's Magnifier readings differ from the previous
+    // frame's, at this frame's time and with its sequence number: the change
+    // was made between the two frames and seen with this one.
+    private void EmitMagnifierChange(
+        long capturedAt,
+        ulong sequence,
+        MagnificationReading? magnification,
+        ColorEffectReading? colorEffect)
+    {
+        var payload = _magnifierChanges.Observe(capturedAt, sequence, magnification, colorEffect);
+        var context = _context;
+        if (payload is null || context is null)
+        {
+            return;
+        }
+
+        context.EventSink.TryWrite(RecorderEventFactory.Create(
+            context.SessionId,
+            Descriptor,
+            MagnifierChanges.Channel,
+            sequence,
+            capturedAt,
+            MagnifierChanges.ChangeEventType,
+            payload));
     }
 
     // One entry per monitor. A WGC frame carries the compositor's render time

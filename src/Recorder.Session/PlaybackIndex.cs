@@ -19,8 +19,11 @@ public sealed record PlaybackIndex
     // 0.55, slice 5b). Version 4 keeps each desktop frame's Magnifier
     // reading and corner (fullscreenMagnification, x, y); an older index is
     // derived again, so recordings made before it play magnified. Version 5
-    // keeps its color effect (fullscreenColorEffect).
-    public const int CurrentVersion = 5;
+    // keeps its color effect (fullscreenColorEffect). Version 6 keeps the
+    // Windows settings records (system.preferences) whole, for the
+    // properties panel. Version 7 keeps the Magnifier change records
+    // (graphics.magnifier) whole, for the panel's Magnifier rows.
+    public const int CurrentVersion = 7;
 
     public required int Version { get; init; }
 
@@ -217,6 +220,13 @@ public sealed class PlaybackIndexBuilder
             return;
         }
 
+        if (channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
+            channel == Recorder.Contracts.MagnifierChanges.Channel)
+        {
+            Keep(eventKey, record);
+            return;
+        }
+
         if (!channel.StartsWith("browser.", StringComparison.Ordinal) ||
             payload.ValueKind != JsonValueKind.Object)
         {
@@ -332,7 +342,10 @@ public sealed class PlaybackIndexBuilder
             record.Channel,
             record.EventType,
             record.MonotonicNanoseconds,
-            IsPopupRecord(record.Channel, record.EventType) && record.Payload.ValueKind == JsonValueKind.Object
+            (IsPopupRecord(record.Channel, record.EventType) ||
+             record.Channel == Recorder.Contracts.WindowsPreferenceSettings.Channel ||
+             record.Channel == Recorder.Contracts.MagnifierChanges.Channel) &&
+            record.Payload.ValueKind == JsonValueKind.Object
                 ? record.Payload.Clone()
                 : PlaybackPayload(record.Payload)));
 

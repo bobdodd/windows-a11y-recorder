@@ -15,6 +15,18 @@ public sealed record SessionPlaybackArchive(
     /// </summary>
     public ISessionEventRecordSource? RecordSource { get; init; }
 
+    /// <summary>
+    /// The Windows settings of the recording, for the properties panel;
+    /// empty for a recording made before they were recorded.
+    /// </summary>
+    public WindowsPreferenceTimeline WindowsPreferences { get; init; } = WindowsPreferenceTimeline.Empty;
+
+    /// <summary>
+    /// The Magnifier change records of the recording, for the properties
+    /// panel; empty for a recording made before they were recorded.
+    /// </summary>
+    public MagnifierChangeTimeline MagnifierChanges { get; init; } = MagnifierChangeTimeline.Empty;
+
     private ISessionTimeline? _timeline;
 
     /// <summary>

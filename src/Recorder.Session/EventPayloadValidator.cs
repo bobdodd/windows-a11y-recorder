@@ -11,8 +11,10 @@ internal static class EventPayloadValidator
         "input.keyboard",
         "input.mouse",
         "window.foreground",
+        "system.preferences",
         "accessibility.uia.events",
         "graphics.desktop.frames",
+        "graphics.magnifier",
         "audio.microphone",
         "audio.system",
         "browser.lifecycle",
@@ -79,11 +81,20 @@ internal static class EventPayloadValidator
             case ("window.foreground", "foreground-window"):
                 ValidateForegroundWindow(payload, issues);
                 break;
+            case ("system.preferences", "windows-preferences"):
+                ValidateWindowsPreferences(payload, issues);
+                break;
+            case ("system.preferences", "windows-preference-changed"):
+                ValidateWindowsPreferenceChange(payload, issues);
+                break;
             case ("accessibility.uia.events", "focus-changed"):
             case ("accessibility.uia.events", "automation-event"):
             case ("accessibility.uia.events", "structure-changed"):
             case ("accessibility.uia.events", "property-changed"):
                 ValidateUiaEvent(payload, issues);
+                break;
+            case ("graphics.magnifier", "magnifier-changed"):
+                ValidateMagnifierChange(payload, issues);
                 break;
             case ("graphics.desktop.frames", "desktop-frame"):
                 ValidateDesktopFrame(payload, issues);
@@ -613,6 +624,176 @@ internal static class EventPayloadValidator
         ValidateOptionalObject(payload, "monitor", ValidateMonitor, issues);
     }
 
+    // The Windows settings at the start or stop of a recording. See
+    // docs/architecture/accessibility-preferences.md, "Windows settings".
+    private static void ValidateWindowsPreferences(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredEnum("reason", "start", "stop"),
+                RequiredObject("uiSettingsEvents"),
+                RequiredObject("settings")
+            ],
+            issues);
+        if (payload.TryGetProperty("uiSettingsEvents", out var events) &&
+            events.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                events,
+                [.. Recorder.Contracts.WindowsPreferenceSettings.UiSettingsEvents.Select(RequiredBoolean)],
+                issues,
+                "#/payload/uiSettingsEvents");
+        }
+
+        if (payload.TryGetProperty("settings", out var settings) &&
+            settings.ValueKind == JsonValueKind.Object)
+        {
+            ValidateWindowsSettings(settings, null, issues, "#/payload/settings");
+        }
+    }
+
+    // One setting's change, with its reading before and after and the notice
+    // that led to the reading.
+    private static void ValidateWindowsPreferenceChange(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredString("setting"),
+                RequiredObject("previous"),
+                RequiredObject("current"),
+                RequiredObject("notice")
+            ],
+            issues);
+        var setting = payload.TryGetProperty("setting", out var name) && name.ValueKind == JsonValueKind.String
+            ? name.GetString()!
+            : null;
+        if (setting is not null &&
+            (Recorder.Contracts.WindowsPreferenceSettings.Find(setting) is null ||
+                setting == Recorder.Contracts.WindowsPreferenceSettings.CaretBlinkTime))
+        {
+            AddError(
+                issues,
+                "windows-preference-unknown",
+                "#/payload/setting",
+                $"'{setting}' is not a Windows setting recorded as a change.");
+            setting = null;
+        }
+
+        foreach (var side in new[] { "previous", "current" })
+        {
+            if (setting is not null &&
+                payload.TryGetProperty(side, out var readings) &&
+                readings.ValueKind == JsonValueKind.Object)
+            {
+                ValidateWindowsSettings(readings, setting, issues, $"#/payload/{side}");
+            }
+        }
+
+        if (payload.TryGetProperty("notice", out var notice) && notice.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                notice,
+                [
+                    RequiredEnum("kind", "setting-change", "registry", "ui-settings", "display-change", "dpi-changed", "stop"),
+                    NullableInteger("uiAction", nonnegative: true),
+                    NullableString("area"),
+                    NullableString("source")
+                ],
+                issues,
+                "#/payload/notice");
+        }
+    }
+
+    // Every setting when only is null; otherwise exactly that one. Each is
+    // {value, problem}: a value of the setting's type and no problem, or a
+    // null value and the problem. Only a text value may be null without a
+    // problem, as the contrast theme's name is when Windows gives none.
+    private static void ValidateWindowsSettings(
+        JsonElement settings,
+        string? only,
+        ICollection<EventValidationIssue> issues,
+        string path)
+    {
+        var expected = only is null
+            ? Recorder.Contracts.WindowsPreferenceSettings.All
+            : [Recorder.Contracts.WindowsPreferenceSettings.Find(only)!];
+        ValidateShape(settings, [.. expected.Select(setting => RequiredObject(setting.Name))], issues, path);
+        foreach (var setting in expected)
+        {
+            if (!settings.TryGetProperty(setting.Name, out var reading) || reading.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var readingPath = $"{path}/{setting.Name}";
+            ValidateShape(
+                reading,
+                [
+                    new PropertyRule(
+                        "value",
+                        true,
+                        true,
+                        value => WindowsSettingValueIsValid(setting.Kind, value),
+                        $"must be a {setting.Kind} value or null"),
+                    NullableString("problem")
+                ],
+                issues,
+                readingPath);
+            var hasValue = reading.TryGetProperty("value", out var value) && value.ValueKind != JsonValueKind.Null;
+            var hasProblem = reading.TryGetProperty("problem", out var problem) && problem.ValueKind != JsonValueKind.Null;
+            if (hasValue && hasProblem ||
+                !hasValue && !hasProblem && setting.Kind != Recorder.Contracts.WindowsPreferenceKind.Text)
+            {
+                AddError(
+                    issues,
+                    "windows-preference-reading-inconsistent",
+                    readingPath,
+                    "A reading holds a value and no problem, or a null value and the problem.");
+            }
+        }
+    }
+
+    private static bool WindowsSettingValueIsValid(Recorder.Contracts.WindowsPreferenceKind kind, JsonElement value) =>
+        value.ValueKind == JsonValueKind.Null || kind switch
+        {
+            Recorder.Contracts.WindowsPreferenceKind.Boolean => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+            Recorder.Contracts.WindowsPreferenceKind.Integer => value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _),
+            Recorder.Contracts.WindowsPreferenceKind.Number => value.ValueKind == JsonValueKind.Number &&
+                value.TryGetDouble(out var number) && double.IsFinite(number),
+            Recorder.Contracts.WindowsPreferenceKind.Text => value.ValueKind == JsonValueKind.String,
+            Recorder.Contracts.WindowsPreferenceKind.Monitors => value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().All(MonitorReadingIsValid),
+            _ => false
+        };
+
+    private static bool MonitorReadingIsValid(JsonElement monitor)
+    {
+        if (monitor.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var issues = new List<EventValidationIssue>();
+        ValidateShape(
+            monitor,
+            [
+                RequiredString("deviceName"),
+                RequiredObject("bounds"),
+                RequiredBoolean("isPrimary"),
+                NullableInteger("dpiX", nonnegative: true),
+                NullableInteger("dpiY", nonnegative: true)
+            ],
+            issues);
+        ValidateOptionalObject(monitor, "bounds", ValidateIntegerRectangle, issues);
+        return issues.Count == 0;
+    }
+
     private static void ValidateUiaEvent(
         JsonElement payload,
         ICollection<EventValidationIssue> issues)
@@ -692,6 +873,108 @@ internal static class EventPayloadValidator
         ValidateDesktopMonitorFrames(payload, issues);
         ValidateOptionalObject(payload, "fullscreenMagnification", ValidateFullscreenMagnification, issues);
         ValidateOptionalObject(payload, "fullscreenColorEffect", ValidateFullscreenColorEffect, issues);
+    }
+
+    // A change of the Magnifier's readings between two desktop frames, at the
+    // later frame's time: what changed, from the readings of both frames,
+    // which are as a desktop frame holds them. See
+    // docs/architecture/accessibility-preferences.md.
+    private static void ValidateMagnifierChange(
+        JsonElement payload,
+        ICollection<EventValidationIssue> issues)
+    {
+        ValidateShape(
+            payload,
+            [
+                RequiredInteger("frameSequence", nonnegative: true),
+                RequiredInteger("previousFrameAt", nonnegative: true),
+                RequiredObject("changed"),
+                RequiredObject("previous"),
+                RequiredObject("current")
+            ],
+            issues);
+        List<string>? named = null;
+        if (payload.TryGetProperty("changed", out var changed) && changed.ValueKind == JsonValueKind.Object)
+        {
+            ValidateShape(
+                changed,
+                [.. Recorder.Contracts.MagnifierChanges.Parts.Select(RequiredBoolean)],
+                issues,
+                "#/payload/changed");
+            if (Recorder.Contracts.MagnifierChanges.Parts.All(part =>
+                    changed.TryGetProperty(part, out var flag) && flag.ValueKind is JsonValueKind.True or JsonValueKind.False))
+            {
+                named = [.. Recorder.Contracts.MagnifierChanges.Parts.Where(part => changed.GetProperty(part).GetBoolean())];
+                if (named.Count == 0)
+                {
+                    AddError(
+                        issues,
+                        "magnifier-change-empty",
+                        "#/payload/changed",
+                        "A Magnifier change has at least one of level, position, and colorEffect changed.");
+                    named = null;
+                }
+            }
+        }
+
+        foreach (var side in new[] { "previous", "current" })
+        {
+            if (payload.TryGetProperty(side, out var readings) && readings.ValueKind == JsonValueKind.Object)
+            {
+                var path = $"#/payload/{side}";
+                ValidateShape(
+                    readings,
+                    [RequiredObject("fullscreenMagnification"), RequiredObject("fullscreenColorEffect")],
+                    issues,
+                    path);
+                ValidateOptionalObject(readings, "fullscreenMagnification", ValidateFullscreenMagnification, issues, path);
+                ValidateOptionalObject(readings, "fullscreenColorEffect", ValidateFullscreenColorEffect, issues, path);
+            }
+        }
+
+        if (named is not null &&
+            MagnifierReadings(payload, "previous") is { } before &&
+            MagnifierReadings(payload, "current") is { } after)
+        {
+            var expected = Recorder.Contracts.MagnifierChanges.Compare(before.Magnification, before.ColorEffect, after.Magnification, after.ColorEffect);
+            if (!expected.SequenceEqual(named))
+            {
+                AddError(
+                    issues,
+                    "magnifier-change-inconsistent",
+                    "#/payload/changed",
+                    $"The readings before and after differ in {(expected.Count == 0 ? "nothing" : string.Join(", ", expected))}.");
+            }
+        }
+    }
+
+    // The two readings of one side of a Magnifier change, or null when either
+    // is not of the shape a desktop frame holds.
+    internal static (Recorder.Contracts.MagnificationReading Magnification, Recorder.Contracts.ColorEffectReading ColorEffect)? MagnifierReadings(
+        JsonElement payload,
+        string side)
+    {
+        if (!payload.TryGetProperty(side, out var readings) || readings.ValueKind != JsonValueKind.Object ||
+            !readings.TryGetProperty("fullscreenMagnification", out var magnification) || magnification.ValueKind != JsonValueKind.Object ||
+            !readings.TryGetProperty("fullscreenColorEffect", out var effect) || effect.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        static double? Number(JsonElement parent, string name) =>
+            parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetDouble() : null;
+        static int? Integer(JsonElement parent, string name) =>
+            parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : null;
+        static string? Text(JsonElement parent, string name) =>
+            parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+        double[]? matrix = effect.TryGetProperty("matrix", out var values) && values.ValueKind == JsonValueKind.Array &&
+            values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.Number)
+            ? [.. values.EnumerateArray().Select(item => item.GetDouble())]
+            : null;
+        return (
+            new Recorder.Contracts.MagnificationReading(Number(magnification, "level"), Integer(magnification, "x"), Integer(magnification, "y"), Text(magnification, "problem")),
+            new Recorder.Contracts.ColorEffectReading(matrix, Text(effect, "problem")));
     }
 
     // Archives written before the color effect was read with each frame omit

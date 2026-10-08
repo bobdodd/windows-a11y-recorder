@@ -46,7 +46,9 @@ public partial class MainWindow : Window
         "input.mouse",
         "accessibility.uia.events",
         "window.foreground",
+        "system.preferences",
         "graphics.desktop.frames",
+        "graphics.magnifier",
         "audio.microphone",
         "audio.system",
         "session.annotations",
@@ -763,6 +765,7 @@ public partial class MainWindow : Window
             PlaybackStatusTextBlock.Text = "Recording load failed.";
             ResetFrameView();
             ApplyLayout();
+            DisplayPropertiesAt(0);
             busy.Dispose();
             MessageBox.Show(
                 this,
@@ -925,6 +928,7 @@ public partial class MainWindow : Window
             $"{FormatTime(positionNanoseconds)} of " +
             $"{FormatTime(_playbackArchive.DurationNanoseconds)}");
         DisplayFrameAt(positionNanoseconds);
+        DisplayPropertiesAt(positionNanoseconds);
         DisplayNearestEvent(positionNanoseconds);
         DisplayBrowserCorrelationAt(positionNanoseconds);
     }
@@ -1208,6 +1212,8 @@ public partial class MainWindow : Window
             "accessibility.uia.events",
             visibleChannels);
         AddVisibleChannel(FilterWindowCheckBox, "window.foreground", visibleChannels);
+        AddVisibleChannel(FilterPreferencesCheckBox, "system.preferences", visibleChannels);
+        AddVisibleChannel(FilterMagnifierCheckBox, "graphics.magnifier", visibleChannels);
         AddVisibleChannel(
             FilterFramesCheckBox,
             "graphics.desktop.frames",
@@ -1260,6 +1266,8 @@ public partial class MainWindow : Window
         FilterMouseCheckBox.IsChecked = selected;
         FilterAutomationCheckBox.IsChecked = selected;
         FilterWindowCheckBox.IsChecked = selected;
+        FilterPreferencesCheckBox.IsChecked = selected;
+        FilterMagnifierCheckBox.IsChecked = selected;
         FilterFramesCheckBox.IsChecked = selected;
         FilterMicrophoneCheckBox.IsChecked = selected;
         FilterSystemAudioCheckBox.IsChecked = selected;

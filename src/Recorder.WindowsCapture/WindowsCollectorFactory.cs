@@ -31,6 +31,11 @@ public static class WindowsCollectorFactory
             collectors.Add(new ForegroundWindowCollector());
         }
 
+        // The Windows accessibility settings are always recorded: reading
+        // them changes nothing and costs little. See
+        // docs/architecture/accessibility-preferences.md.
+        collectors.Add(new WindowsPreferencesCollector());
+
         if (options.CaptureDesktopFrames)
         {
             collectors.Add(new DesktopFrameCollector(options.FramesPerSecond));

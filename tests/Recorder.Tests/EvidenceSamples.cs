@@ -112,6 +112,50 @@ internal static class EvidenceSamples
             @"""processId"":0,""threadId"":0,""processName"":null,""processPath"":null,""title"":null,""className"":null," +
             @"""isVisible"":false,""isMinimized"":false,""isMaximized"":false,""isCloaked"":null,""dpi"":null," +
             @"""bounds"":null,""monitor"":null}"),
+        // Added with 0021_windows_preferences.sql; the first is as read on the
+        // target machine on 2026-10-08.
+        ("system.preferences", "windows-preferences",
+            """
+            {"reason":"start","uiSettingsEvents":{"advancedEffectsEnabledChanged":true,"animationsEnabledChanged":true,"autoHideScrollBarsChanged":true,"textScaleFactorChanged":true,"colorValuesChanged":true},"settings":{"monitors":{"value":[{"deviceName":"\\\\.\\DISPLAY1","bounds":{"x":0,"y":0,"width":1920,"height":1080},"isPrimary":true,"dpiX":96,"dpiY":96}],"problem":null},"textScaleFactor":{"value":1,"problem":null},"appsUseLightTheme":{"value":null,"problem":"The key HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize does not exist."},"transparencyEffects":{"value":false,"problem":null},"colorFilterActive":{"value":null,"problem":"The key HKCU\\Software\\Microsoft\\ColorFiltering does not exist."},"colorFilterType":{"value":null,"problem":"The key HKCU\\Software\\Microsoft\\ColorFiltering does not exist."},"highContrast":{"value":false,"problem":null},"highContrastScheme":{"value":"","problem":null},"accentColor":{"value":"#0078D7","problem":null},"animationsEnabled":{"value":true,"problem":null},"uiEffects":{"value":true,"problem":null},"menuAnimation":{"value":true,"problem":null},"menuFade":{"value":true,"problem":null},"comboBoxAnimation":{"value":true,"problem":null},"cursorWidth":{"value":32,"problem":null},"cursorHeight":{"value":32,"problem":null},"caretWidth":{"value":1,"problem":null},"caretBlinkTime":{"value":530,"problem":null},"focusBorderWidth":{"value":1,"problem":null},"focusBorderHeight":{"value":1,"problem":null},"keyboardCues":{"value":false,"problem":null},"autoHideScrollBars":{"value":true,"problem":null},"messageDuration":{"value":5,"problem":null},"stickyKeys":{"value":false,"problem":null},"filterKeys":{"value":false,"problem":null},"toggleKeys":{"value":false,"problem":null},"mouseKeys":{"value":false,"problem":null}}}
+            """),
+        ("system.preferences", "windows-preferences",
+            """
+            {"reason":"stop","uiSettingsEvents":{"advancedEffectsEnabledChanged":true,"animationsEnabledChanged":false,"autoHideScrollBarsChanged":true,"textScaleFactorChanged":true,"colorValuesChanged":true},"settings":{"monitors":{"value":[{"deviceName":"\\\\.\\DISPLAY1","bounds":{"x":0,"y":0,"width":1920,"height":1080},"isPrimary":true,"dpiX":96,"dpiY":96},{"deviceName":"\\\\.\\DISPLAY2","bounds":{"x":1920,"y":-120,"width":2560,"height":1440},"isPrimary":false,"dpiX":144,"dpiY":null}],"problem":null},"textScaleFactor":{"value":1.25,"problem":null},"appsUseLightTheme":{"value":null,"problem":"The key HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize does not exist."},"transparencyEffects":{"value":false,"problem":null},"colorFilterActive":{"value":null,"problem":"The key HKCU\\Software\\Microsoft\\ColorFiltering does not exist."},"colorFilterType":{"value":null,"problem":"The key HKCU\\Software\\Microsoft\\ColorFiltering does not exist."},"highContrast":{"value":false,"problem":null},"highContrastScheme":{"value":null,"problem":null},"accentColor":{"value":"#0078D7","problem":null},"animationsEnabled":{"value":true,"problem":null},"uiEffects":{"value":true,"problem":null},"menuAnimation":{"value":true,"problem":null},"menuFade":{"value":true,"problem":null},"comboBoxAnimation":{"value":true,"problem":null},"cursorWidth":{"value":32,"problem":null},"cursorHeight":{"value":32,"problem":null},"caretWidth":{"value":1,"problem":null},"caretBlinkTime":{"value":530,"problem":null},"focusBorderWidth":{"value":1,"problem":null},"focusBorderHeight":{"value":1,"problem":null},"keyboardCues":{"value":false,"problem":null},"autoHideScrollBars":{"value":true,"problem":null},"messageDuration":{"value":5,"problem":null},"stickyKeys":{"value":false,"problem":null},"filterKeys":{"value":false,"problem":null},"toggleKeys":{"value":false,"problem":null},"mouseKeys":{"value":false,"problem":null}}}
+            """),
+        ("system.preferences", "windows-preference-changed",
+            """
+            {"setting":"textScaleFactor","previous":{"textScaleFactor":{"value":1,"problem":null}},"current":{"textScaleFactor":{"value":1.25,"problem":null}},"notice":{"kind":"ui-settings","uiAction":null,"area":null,"source":"textScaleFactorChanged"}}
+            """),
+        ("system.preferences", "windows-preference-changed",
+            """
+            {"setting":"highContrast","previous":{"highContrast":{"value":false,"problem":null}},"current":{"highContrast":{"value":true,"problem":null}},"notice":{"kind":"setting-change","uiAction":67,"area":null,"source":null}}
+            """),
+        ("system.preferences", "windows-preference-changed",
+            """
+            {"setting":"monitors","previous":{"monitors":{"value":[{"deviceName":"\\\\.\\DISPLAY1","bounds":{"x":0,"y":0,"width":1920,"height":1080},"isPrimary":true,"dpiX":96,"dpiY":96}],"problem":null}},"current":{"monitors":{"value":null,"problem":"GetDpiForMonitor failed with 0x80070057."}},"notice":{"kind":"display-change","uiAction":null,"area":null,"source":null}}
+            """),
+        ("system.preferences", "windows-preference-changed",
+            """
+            {"setting":"colorFilterActive","previous":{"colorFilterActive":{"value":null,"problem":"The key HKCU\\Software\\Microsoft\\ColorFiltering does not exist."}},"current":{"colorFilterActive":{"value":true,"problem":null}},"notice":{"kind":"registry","uiAction":null,"area":"ImmersiveColorSet","source":"HKCU\\Software\\Microsoft\\ColorFiltering"}}
+            """),
+        // Added with 0022_magnifier_changes.sql: a level and position change,
+        // a pan, a color effect turned on, and readings that failed.
+        ("graphics.magnifier", "magnifier-changed",
+            """
+            {"frameSequence":12,"previousFrameAt":2200000000,"changed":{"level":true,"position":true,"colorEffect":false},"previous":{"fullscreenMagnification":{"level":1,"x":0,"y":0,"problem":null},"fullscreenColorEffect":{"matrix":[1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1],"problem":null}},"current":{"fullscreenMagnification":{"level":2,"x":480,"y":270,"problem":null},"fullscreenColorEffect":{"matrix":[1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1],"problem":null}}}
+            """),
+        ("graphics.magnifier", "magnifier-changed",
+            """
+            {"frameSequence":13,"previousFrameAt":2400000000,"changed":{"level":false,"position":true,"colorEffect":false},"previous":{"fullscreenMagnification":{"level":2,"x":480,"y":270,"problem":null},"fullscreenColorEffect":{"matrix":[1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1],"problem":null}},"current":{"fullscreenMagnification":{"level":2,"x":500,"y":270,"problem":null},"fullscreenColorEffect":{"matrix":[1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1],"problem":null}}}
+            """),
+        ("graphics.magnifier", "magnifier-changed",
+            """
+            {"frameSequence":30,"previousFrameAt":6000000000,"changed":{"level":false,"position":false,"colorEffect":true},"previous":{"fullscreenMagnification":{"level":2,"x":500,"y":270,"problem":null},"fullscreenColorEffect":{"matrix":[1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1],"problem":null}},"current":{"fullscreenMagnification":{"level":2,"x":500,"y":270,"problem":null},"fullscreenColorEffect":{"matrix":[-1,0,0,0,0,0,-1,0,0,0,0,0,-1,0,0,0,0,0,0,0,1,1,1,0,1],"problem":null}}}
+            """),
+        ("graphics.magnifier", "magnifier-changed",
+            """
+            {"frameSequence":31,"previousFrameAt":6200000000,"changed":{"level":true,"position":true,"colorEffect":true},"previous":{"fullscreenMagnification":{"level":2,"x":500,"y":270,"problem":null},"fullscreenColorEffect":{"matrix":[-1,0,0,0,0,0,-1,0,0,0,0,0,-1,0,0,0,0,0,0,0,1,1,1,0,1],"problem":null}},"current":{"fullscreenMagnification":{"level":null,"x":null,"y":null,"problem":"MagGetFullscreenTransform failed with error 21."},"fullscreenColorEffect":{"matrix":null,"problem":"MagGetFullscreenColorEffect failed with error 21."}}}
+            """),
         ("accessibility.uia.events", "focus-changed",
             @"{""eventId"":""UIA_AutomationFocusChangedEventId"",""changeType"":null,""runtimeId"":[42,1311000,-4]," +
             @"""newValue"":null,""element"":" + Element + "}"),

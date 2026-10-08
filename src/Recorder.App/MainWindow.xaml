@@ -30,6 +30,48 @@
       <Setter Property="Margin" Value="0,4" />
       <Setter Property="MinHeight" Value="24" />
     </Style>
+    <!-- The splitters show keyboard focus: drawn in the highlight color,
+         2 pixels wider on each side over their neighbours, with a tip
+         naming the keys (docs/architecture/accessibility-preferences.md,
+         "Visible focus and the Enter key"). The size and margin give the
+         same layout size focused or not, so nothing moves. -->
+    <Style x:Key="ColumnSplitter" TargetType="GridSplitter">
+      <Setter Property="Width" Value="5" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Background" Value="#393836" />
+      <Setter Property="ResizeDirection" Value="Columns" />
+      <Setter Property="ResizeBehavior" Value="PreviousAndNext" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="ToolTip" Value="Arrow keys resize" />
+      <Setter Property="ToolTipService.ShowsToolTipOnKeyboardFocus" Value="True" />
+      <Style.Triggers>
+        <Trigger Property="IsKeyboardFocused" Value="True">
+          <Setter Property="Width" Value="9" />
+          <Setter Property="Margin" Value="-2,0" />
+          <Setter Property="Panel.ZIndex" Value="1" />
+          <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="RowSplitter" TargetType="GridSplitter">
+      <Setter Property="Height" Value="8" />
+      <Setter Property="Margin" Value="0,4,0,0" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Background" Value="#393836" />
+      <Setter Property="ResizeDirection" Value="Rows" />
+      <Setter Property="ResizeBehavior" Value="PreviousAndNext" />
+      <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+      <Setter Property="ToolTip" Value="Arrow keys resize" />
+      <Setter Property="ToolTipService.ShowsToolTipOnKeyboardFocus" Value="True" />
+      <Style.Triggers>
+        <Trigger Property="IsKeyboardFocused" Value="True">
+          <Setter Property="Height" Value="12" />
+          <Setter Property="Margin" Value="0,2,0,-2" />
+          <Setter Property="Panel.ZIndex" Value="1" />
+          <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
   </Window.Resources>
 
   <Grid>
@@ -167,6 +209,16 @@
                             Content="_Window"
                             Checked="TimelineFilter_Changed"
                             Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterPreferencesCheckBox"
+                            IsChecked="True"
+                            Content="Windows settings"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
+                  <CheckBox x:Name="FilterMagnifierCheckBox"
+                            IsChecked="True"
+                            Content="Magnifier changes"
+                            Checked="TimelineFilter_Changed"
+                            Unchecked="TimelineFilter_Changed" />
                   <CheckBox x:Name="FilterFramesCheckBox"
                             IsChecked="True"
                             Content="_Frames"
@@ -298,11 +350,7 @@
 
     <GridSplitter x:Name="SidePanelSplitter"
                   Grid.Column="1"
-                  Width="5"
-                  HorizontalAlignment="Stretch"
-                  Background="#393836"
-                  ResizeDirection="Columns"
-                  ResizeBehavior="PreviousAndNext"
+                  Style="{StaticResource ColumnSplitter}"
                   AutomationProperties.Name="Resize recorder controls and playback" />
 
     <!-- The player: the video, then the region under it. While the details
@@ -316,7 +364,17 @@
         <RowDefinition x:Name="LowerRegionRow" Height="Auto" />
       </Grid.RowDefinitions>
 
-      <Border Grid.Row="0"
+      <!-- The video and, to its right, the properties panel: the Magnifier
+           readings of the frame shown and the Windows settings in effect.
+           See docs/architecture/accessibility-preferences.md, "The
+           properties panel". -->
+      <Grid Grid.Row="0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" MinWidth="240" />
+          <ColumnDefinition x:Name="PropertiesSplitterColumn" Width="5" />
+          <ColumnDefinition x:Name="PropertiesColumn" Width="320" MinWidth="220" MaxWidth="640" />
+        </Grid.ColumnDefinitions>
+      <Border Grid.Column="0"
               Background="Black"
               BorderBrush="{StaticResource PanelBorder}"
               BorderThickness="1">
@@ -334,14 +392,86 @@
         </Grid>
       </Border>
 
+        <GridSplitter x:Name="PropertiesSplitter"
+                      Grid.Column="1"
+                      Style="{StaticResource ColumnSplitter}"
+                      KeyboardIncrement="20"
+                      DragCompleted="PropertiesSplitter_DragCompleted"
+                      LostKeyboardFocus="PropertiesSplitter_LostKeyboardFocus"
+                      AutomationProperties.Name="Resize video and properties" />
+
+        <GroupBox x:Name="PropertiesRegion"
+                  Grid.Column="2"
+                  Padding="4"
+                  Header="Properties">
+          <DockPanel>
+          <TextBlock DockPanel.Dock="Bottom"
+                     Margin="2,6,2,0"
+                     TextWrapping="Wrap"
+                     Foreground="{StaticResource MutedText}"
+                     Text="Enter: the change that set the value. Ctrl+Left and Ctrl+Right: the setting's previous and next change." />
+          <ListView x:Name="PropertiesListView"
+                    ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                    VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                    PreviewKeyDown="PropertiesListView_PreviewKeyDown"
+                    MouseDoubleClick="PropertiesListView_MouseDoubleClick"
+                    AutomationProperties.Name="Properties at the frame shown"
+                    AutomationProperties.HelpText="Each row reads setting, value, and when it was set. Enter: the change that set the value. Ctrl+Left and Ctrl+Right: the setting's previous and next change.">
+            <ListView.ItemContainerStyle>
+              <Style TargetType="ListViewItem">
+                <Setter Property="AutomationProperties.Name" Value="{Binding Spoken}" />
+                <Setter Property="ToolTip" Value="{Binding Spoken}" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding Changed}" Value="True">
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.GroupStyle>
+              <GroupStyle>
+                <GroupStyle.HeaderTemplate>
+                  <DataTemplate>
+                    <TextBlock Margin="0,6,0,2"
+                               FontWeight="SemiBold"
+                               Text="{Binding Name}" />
+                  </DataTemplate>
+                </GroupStyle.HeaderTemplate>
+              </GroupStyle>
+            </ListView.GroupStyle>
+            <ListView.View>
+              <GridView AllowsColumnReorder="False">
+                <GridViewColumn Header="Setting" Width="120">
+                  <GridViewColumn.CellTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Setting}" TextWrapping="Wrap" />
+                    </DataTemplate>
+                  </GridViewColumn.CellTemplate>
+                </GridViewColumn>
+                <GridViewColumn Header="Value" Width="110">
+                  <GridViewColumn.CellTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Value}" TextWrapping="Wrap" />
+                    </DataTemplate>
+                  </GridViewColumn.CellTemplate>
+                </GridViewColumn>
+                <GridViewColumn Header="When set" Width="80">
+                  <GridViewColumn.CellTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding WhenSetShown}" TextWrapping="Wrap" />
+                    </DataTemplate>
+                  </GridViewColumn.CellTemplate>
+                </GridViewColumn>
+              </GridView>
+            </ListView.View>
+          </ListView>
+          </DockPanel>
+        </GroupBox>
+      </Grid>
+
       <GridSplitter x:Name="LowerSplitter"
                     Grid.Row="1"
-                    Height="8"
-                    Margin="0,4,0,0"
-                    HorizontalAlignment="Stretch"
-                    Background="#393836"
-                    ResizeDirection="Rows"
-                    ResizeBehavior="PreviousAndNext"
+                    Style="{StaticResource RowSplitter}"
                     Visibility="Collapsed"
                     DragCompleted="LowerSplitter_DragCompleted"
                     AutomationProperties.Name="Resize video and details" />
@@ -392,8 +522,17 @@
                         AutomationProperties.Name="Details"
                         AutomationProperties.AcceleratorKey="Ctrl+Shift+D"
                         AutomationProperties.HelpText="Shows or hides the browser navigation and selected event values under the timeline." />
+          <StackPanel Grid.Column="2" Orientation="Horizontal">
+          <ToggleButton x:Name="PropertiesToggle"
+                        Margin="0,0,8,0"
+                        Padding="8,0"
+                        IsChecked="True"
+                        Content="Properties"
+                        Click="PropertiesToggle_Click"
+                        AutomationProperties.Name="Properties"
+                        AutomationProperties.AcceleratorKey="Ctrl+Shift+P"
+                        AutomationProperties.HelpText="Shows or hides the Magnifier readings and Windows settings at the frame shown, beside the video." />
           <ToggleButton x:Name="FrameOnlyToggle"
-                        Grid.Column="2"
                         Margin="0,0,16,0"
                         Padding="8,0"
                         IsChecked="False"
@@ -403,6 +542,7 @@
                         AutomationProperties.Name="Frame only"
                         AutomationProperties.AcceleratorKey="F11"
                         AutomationProperties.HelpText="Shows only the video, the playback controls, and the timeline. Press F11 or Escape to return." />
+          </StackPanel>
           <Button x:Name="PreviousFrameButton"
                   Grid.Column="3"
                   Margin="0,0,8,0"
