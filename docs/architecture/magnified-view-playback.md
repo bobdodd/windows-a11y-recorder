@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07, not yet run on
-the target machine. Listed in
+Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07; recording and the participant's view confirmed on
+the target machine, except inverted colors
+([validation](../validation/magnified-playback-2026-10-07.md)). Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## Purpose
