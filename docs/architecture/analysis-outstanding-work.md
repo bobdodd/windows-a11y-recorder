@@ -125,8 +125,9 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   stepping keys work, but the panel did not show how many changes a
   setting has, and stepping needed the keyboard. Previous and next change
   buttons and a count on each row with changes, for pointer, head pointer,
-  and eye tracking use: agreed and built 2026-10-08; to test on the
-  target machine by mouse alone.
+  and eye tracking use: agreed and built 2026-10-08; checked by the
+  owner by mouse and keyboard on the target machine 2026-10-08 on
+  45a500c; to check with a head pointer and eye tracking.
 - To build: the browser preference,
   zoom, and `web-preferences-sent` records at a protocol change, with
   the `RendererPreferences` hook point found in the checkout first; the

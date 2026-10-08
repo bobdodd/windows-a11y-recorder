@@ -14,8 +14,9 @@ stepping, and visible splitter focus the same day, not yet tested on the
 target machine (see "Visible focus and stepping as built"); stages 2 and 3 are not built.
 The owner checked the stepping keys on the target machine 2026-10-08, and
 change buttons and counts on the panel's rows were agreed and built the
-same day, not yet tested on the target machine (see "Change buttons and
-counts"). Listed in
+same day; the owner checked them by mouse and keyboard on the target
+machine 2026-10-08, and they remain to check with a head pointer and eye
+tracking (see "Change buttons and counts"). Listed in
 [outstanding work](analysis-outstanding-work.md). It accompanies
 [assistive technology detection](assistive-technology-detection.md), whose
 approach was agreed on 2026-10-07, and takes over that design's Windows
@@ -631,8 +632,9 @@ Built 2026-10-08 as proposed above, with these details and differences:
 ## Change buttons and counts
 
 Proposed by the owner 2026-10-08 after checking 7ae9f19 on the target
-machine, refined and agreed the same day; built 2026-10-08, not yet
-tested on the target machine.
+machine, refined and agreed the same day; built 2026-10-08 and checked
+by the owner by mouse and keyboard on the target machine the same day
+(see "The owner's check of 45a500c").
 
 ### The owner's check of 7ae9f19
 
@@ -718,6 +720,16 @@ tested on the target machine.
   and none on the others; `0/n` before a first change; Previous and Next
   at each end disabled; the counts following playback; and the moves
   announced with a screen reader.
+
+### The owner's check of 45a500c
+
+Checked by the owner 2026-10-08 on 45a500c.
+
+- The previous and next change buttons work with the mouse.
+- Ctrl+Left and Ctrl+Right work from the keyboard.
+- Not yet checked: use with a head pointer and with eye tracking, as the
+  equipment was not available. The details of the check, such as each
+  item of "To check by the owner" above, were not reported separately.
 
 ## Decisions
 
