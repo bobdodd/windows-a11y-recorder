@@ -2,8 +2,11 @@
 
 ## Status
 
-Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07, not yet run on
-the target machine. Listed in
+Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07 at a9d4ba3. On
+2026-10-07 the owner ran it on the target machine (Windows 10 Pro 22H2,
+build 19045) and reported that it appears to work. No individual results
+from the test list were reported, so measured video sizes and screen-reader
+announcements are not recorded. Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## The problem

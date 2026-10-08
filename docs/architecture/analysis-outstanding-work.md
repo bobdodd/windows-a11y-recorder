@@ -54,7 +54,9 @@ frame-only view is part of the design.
 - Built 2026-10-07: the collapsible details region and its splitter, the
   collapsible side panel, the frame-only view, the remembered layout, and
   the selected event summary in the status line.
-- To test: on the target machine, as in its "Required tests".
+- Run on the target machine 2026-10-07: the owner reported that it
+  appears to work. Individual results from its "Required tests" were not
+  reported.
 
 ## Screen reader activity
 
