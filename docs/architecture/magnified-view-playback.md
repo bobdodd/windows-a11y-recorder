@@ -3,8 +3,8 @@
 ## Status
 
 Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07; recording and the participant's view confirmed on
-the target machine, except inverted colors; the player, after a fix to
-the playback index, is to be checked again
+the target machine, except inverted colors; the player confirmed by the
+owner after a fix to the playback index
 ([validation](../validation/magnified-playback-2026-10-07.md)). Listed in
 [outstanding work](analysis-outstanding-work.md).
 

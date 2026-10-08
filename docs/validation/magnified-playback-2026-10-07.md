@@ -122,7 +122,15 @@ screen.
   (`PlaysEachFramesMagnificationReadingFromARecordingFile`); it fails
   without the fix.
 
+- With package 9ce9cc0, the owner reported on the same recording that the
+  full screen, pan, and zoomed phases show the grid magnified; that
+  "Whole screen" is enabled and shows the frame as captured with the
+  yellow outline; and that the lens and docked phases look as recorded.
+  The owner's summary: it appears correct. The help text was not checked
+  with a screen reader in this run.
+
 ## Open
 
 - Recording the color effect is proposed, not built.
-- The player checks with the fix.
+- Showing the level and position visibly is part of the properties
+  panels logged with [accessibility preferences](../architecture/accessibility-preferences.md).

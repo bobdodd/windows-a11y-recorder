@@ -22,8 +22,8 @@ readings failing on threads other than the initializing one, now fixed,
 and inverted colors missing from the capture. The second run, with the
 fix, held a reading in every frame, and the participant's view matched
 the screen in every phase but inverted colors. The player showed no frame
-magnified, because the playback index dropped the readings; fixed, and to
-be checked again.
+magnified, because the playback index dropped the readings; after the fix
+the owner confirmed the player.
 
 - Recorder: `desktop-frame` gains `fullscreenMagnification`, read with
   `MagGetFullscreenTransform` as each frame is captured; its payload
