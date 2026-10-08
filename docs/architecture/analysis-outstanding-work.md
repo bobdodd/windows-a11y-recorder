@@ -1,9 +1,9 @@
 # Analysis and Inference: Outstanding Work
 
 Recorded 2026-10-07, during the planning phase that follows release 1.0.0.
-Three designs are agreed and none is built. The owner's decision is to
-stay in planning for now, so each item below waits for a decision to
-start building. Each names where it is designed; the accepted workflow
+Three designs are agreed, one is proposed, and none is built. The owner's
+decision is to stay in planning for now, so each item below waits for a
+decision to start building. Each names where it is designed; the accepted workflow
 applies when it is built: build, test in the sandbox, package and transfer
 to the target machine, run there, record the result, and push on
 approval.
@@ -45,6 +45,19 @@ To test:
   the primary, to confirm or replace the model; monitors at different
   display scales.
 
+## Screen reader activity
+
+Designed in [screen reader activity](screen-reader-activity.md), proposed
+2026-10-07, not agreed. The owner accepted a low-level keyboard hook on
+2026-10-07.
+
+- To build: the keyboard hook collector, with reinstalling when a screen
+  reader starts and when the hook is lost; the key dispositions; the
+  screen reader window episodes; the command data for NVDA; the player's
+  screen reader lane.
+- To settle: the items in its "Questions to settle".
+- To test: as in its "Required tests".
+
 ## Assistive technology detection
 
 Designed in [assistive technology detection](assistive-technology-detection.md),
@@ -64,8 +77,8 @@ approach agreed 2026-10-07.
   [screen reader keys](../validation/screen-reader-keys-2026-10-07.md):
   the keys NVDA keeps as commands are missing from raw input and are seen
   only by a low-level keyboard hook installed after NVDA's; NVDA's
-  injected keys have no device handle in raw input. How the recorder
-  captures screen-reader commands is to be designed.
+  injected keys have no device handle in raw input. Designed in
+  [screen reader activity](screen-reader-activity.md).
 - Magnification: Windows Magnifier's transform is readable from another
   process (tested 2026-10-07); a third-party magnifier is not tested.
 

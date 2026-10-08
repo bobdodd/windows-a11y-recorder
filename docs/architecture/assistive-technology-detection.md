@@ -288,9 +288,11 @@ changes), each as an inference with its basis.
 
 ## Questions to settle
 
-- Whether a low-level keyboard and mouse hook is added for the injected
-  flags, given its cost on every input event, or the null device handle of
-  raw input is enough once confirmed.
+- Settled 2026-10-07: a low-level keyboard hook is acceptable, and is
+  designed in [screen reader activity](screen-reader-activity.md); the null
+  device handle of injected raw input was confirmed on the target machine
+  ([screen reader keys](../validation/screen-reader-keys-2026-10-07.md)).
+  Whether a mouse hook is added is a question of that design.
 - How often modules of watched processes are listed, and the cost.
 - Whether Chromium's detection and accessibility mode are recorded over
   the bridge, at a protocol change.
