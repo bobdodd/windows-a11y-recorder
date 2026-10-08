@@ -129,8 +129,51 @@ screen.
   The owner's summary: it appears correct. The help text was not checked
   with a screen reader in this run.
 
+## Third run: the color effect, 2026-10-08
+
+- Recorder package 799b744, recording the color effect with each frame.
+  The extended script ran during recording
+  `20261008-133442-7062eda5083c42e3b3940a50ff9bb5a2` (764 frames, every one
+  with a transform and a color effect), with inverted colors phases at
+  level 4, at 100 percent, in the lens view, and in the docked view.
+- Every frame's matrix matched the script's samples in its phase.
+- The matrix Windows Magnifier set for inverted colors, read by the
+  script and recorded in the frames, was
+  -1 0 0 0 0 / 0 -1 0 0 0 / 0 0 -1 0 0 / 0 0 0 1 0 / 1 1 1 0 1: each color
+  channel 1 less itself, alpha kept, under the row vector reading.
+- The participant's view against each screenshot, without and with the
+  frame's color effect applied (160 by 90 grey thumbnails, tolerance 3):
+
+| Phase | Level | Effect in the frame | Without | With | Frame as captured |
+|---|---|---|---|---|---|
+| Inverted | 4 | inversion | 234.07 | 0.32 | 230.87 |
+| Inverted at 100 percent | 1 | inversion | 230.79 | 0.41 | 230.79 |
+| Inverted in the lens view | 1 | identity | 0.41 | 0.41 | 0.41 |
+| Inverted in the docked view | 1 | identity | 0.49 | 0.49 | 0.49 |
+
+- Full screen, pan, zoomed, lens, docked, closed and no Magnifier were
+  within tolerance, with the identity in every frame; the frames before
+  the inverted phases matched as in the second run (0.11 to 0.41).
+- In the lens and docked views Magnifier left the full screen effect at
+  the identity, and the capture showed the inversion: the screenshots of
+  those phases had 21.12 and 23.71 percent of sampled pixels dark,
+  against 13.12 and 12.87 without inversion, and the frames as captured
+  matched them.
+- The owner reported that every phase looked as its name says and that
+  the screen stayed magnified after stopping.
+- Answers to the design's open questions: the effect is set only by the
+  full screen view, at any level including 100 percent, and the capture
+  does not show it; in the lens and docked views it is not set and the
+  capture shows the inversion. The player therefore applies an effect
+  other than the identity whenever a frame holds one.
+- Applying the matrix to a 1920 by 1080 frame, timed on the target
+  machine with a self-contained build of `ColorEffect.ApplyBgra`: 3.6 ms
+  for the inversion, by its per-channel path, and 23.2 ms for Microsoft's
+  grayscale example, by the general path.
+
 ## Open
 
-- Recording the color effect is proposed, not built.
+- The player's color effect, built after the third run, to be checked on
+  the target machine.
 - Showing the level and position visibly is part of the properties
   panels logged with [accessibility preferences](../architecture/accessibility-preferences.md).

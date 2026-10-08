@@ -40,9 +40,9 @@ To test, with `scripts/Test-MagnifiedPlayback.ps1` on the target machine:
   levels and a pan, and the frames' readings match the script's.
 - Inverted colors use the full screen color effect and are missing from
   the capture; recording the effect with each frame and applying it in
-  the participant's view is designed in its "Color effect", agreed
-  2026-10-08; the recording is built, and applying it in the player waits
-  for the target machine test.
+  the participant's view is designed in its "Color effect", agreed and
+  built 2026-10-08; the recording is confirmed on the target machine, and
+  the player's color effect is to be checked there.
 - That stopping a recording with the full screen view on leaves
   Magnifier as it was.
 - Whether the cursor's size in the participant's view matches

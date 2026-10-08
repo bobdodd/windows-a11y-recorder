@@ -6,9 +6,9 @@ Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07; recording and the part
 the target machine, except inverted colors; the player confirmed by the
 owner after a fix to the playback index
 ([validation](../validation/magnified-playback-2026-10-07.md)). The
-color effect, in "Color effect", proposed and agreed 2026-10-08; its
-recording built 2026-10-08, its playback waiting for the target machine
-test. Listed in
+color effect, in "Color effect", proposed and agreed 2026-10-08, built
+2026-10-08; its recording confirmed on the target machine, its playback to
+be checked there. Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## Purpose
@@ -173,8 +173,9 @@ validator, the database columns (migration 0020, with number arrays added
 to the evidence catalog), the playback index (version 5), the frame's
 effect in the playback archive, and the matrix applied to pixels
 (`ColorEffect` in `src/Recorder.Session/MagnifiedView.cs`), with their unit
-tests. Not built: applying it in the player and the help text, which wait
-for the questions under "Open" to be settled by the test.
+tests. The questions under "Open" were settled on the target machine
+([validation](../validation/magnified-playback-2026-10-07.md), "Third
+run"), and the player's part was then built.
 
 ### What is known
 
@@ -238,18 +239,27 @@ for the questions under "Open" to be settled by the test.
   [accessibility preferences](accessibility-preferences.md) show it
   visibly.
 - The matrix is applied in software, to the pixels of the part seen,
-  when the frame is displayed. Its cost per frame is measured on the
-  target machine; if it is too slow for playback, a GPU effect is
-  designed then.
+  when the frame is displayed. A matrix in which each output channel
+  depends only on its own input, as inversion does, is applied through a
+  table of 256 values per channel. On the target machine a 1920 by 1080
+  frame took 3.6 ms inverted and 23.2 ms with Microsoft's grayscale
+  example, within the 200 ms between frames at 5 frames a second, so no
+  GPU effect is needed.
+- The help text names "colors inverted" for the matrix Windows Magnifier
+  set, recorded on 2026-10-08, and "with a color effect" for any other.
 
 ### Open, settled by the test before playback is built
 
 - Whether the effect is set when Magnifier inverts colors in the lens and
-  docked views, which the capture already shows as seen. If it is, the
-  player cannot tell from the matrix alone whether to apply it, and the
-  rule is designed from what the test finds.
+  docked views, which the capture already shows as seen. Settled
+  2026-10-08: it is not set (the identity), and the capture shows the
+  inversion.
 - Whether the effect is set when inverted colors are on with the full
-  screen view at 100 percent.
+  screen view at 100 percent. Settled 2026-10-08: it is set, and the
+  capture does not show it.
+- The rule that follows, built: the player applies any effect other than
+  the identity, whatever the level, to the part seen, which is the whole
+  frame at level 1.
 
 ### Out of scope
 

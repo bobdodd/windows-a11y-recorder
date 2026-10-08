@@ -209,4 +209,17 @@ public sealed class MagnifiedViewTests
         Assert.Throws<ArgumentException>(() => Effect(1, 0, 0));
         Assert.Throws<ArgumentException>(() => Effect([.. Enumerable.Repeat(0.0, 24), double.NaN]));
     }
+
+    [Fact]
+    public void AColorEffectAloneChangesTheParticipantsView()
+    {
+        var inversion = Effect(-1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1);
+        var identity = Effect(1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1);
+        var level1 = new FullscreenMagnification(1, 0, 0);
+
+        Assert.False(MagnifiedView.AnyChanged([Frame(level1) with { ColorEffect = identity }, Frame(null)]));
+        Assert.True(MagnifiedView.AnyChanged([Frame(level1) with { ColorEffect = inversion }]));
+        Assert.True(MagnifiedView.AnyChanged([Frame(new FullscreenMagnification(2, 0, 0))]));
+        Assert.False(MagnifiedView.AnyMagnified([Frame(level1) with { ColorEffect = inversion }]));
+    }
 }

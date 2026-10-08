@@ -22,6 +22,17 @@ public static class MagnifiedView
             frame.Height > 0;
     }
 
+    /// <summary>
+    /// Whether any frame was read with a level above 1 or a color effect
+    /// other than the identity: whether the participant's view differs from
+    /// the frame as captured anywhere in the recording.
+    /// </summary>
+    public static bool AnyChanged(IEnumerable<SessionVideoFrame> frames)
+    {
+        ArgumentNullException.ThrowIfNull(frames);
+        return frames.Any(frame => IsMagnified(frame) || !ColorEffect.IsIdentity(frame.ColorEffect));
+    }
+
     /// <summary>Whether any frame was read with a level above 1.</summary>
     public static bool AnyMagnified(IEnumerable<SessionVideoFrame> frames)
     {
@@ -122,6 +133,12 @@ public static class ColorEffect
         }
 
         var m = effect.Matrix;
+        if (IsPerChannel(m))
+        {
+            ApplyPerChannel(m, pixels);
+            return;
+        }
+
         // Each output channel of a byte input is a sum of one term per
         // input channel and the translation, so the terms are tabled once.
         Span<float> table = new float[4 * 4 * 256];
@@ -161,6 +178,51 @@ public static class ColorEffect
             pixels[index + 1] = result[1];
             pixels[index] = result[2];
             pixels[index + 3] = result[3];
+        }
+    }
+
+    // Whether each output channel depends only on its own input channel, as
+    // in inversion: no input adds to another channel's output.
+    private static bool IsPerChannel(IReadOnlyList<double> m)
+    {
+        for (var input = 0; input < 4; input++)
+        {
+            for (var output = 0; output < 4; output++)
+            {
+                if (input != output && m[(input * 5) + output] != 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    // One table of 256 results per channel, in blue, green, red, alpha
+    // order as the pixels hold them.
+    private static void ApplyPerChannel(IReadOnlyList<double> m, Span<byte> pixels)
+    {
+        var tables = new byte[4 * 256];
+        ReadOnlySpan<int> channelOfByte = [2, 1, 0, 3];
+        for (var position = 0; position < 4; position++)
+        {
+            var channel = channelOfByte[position];
+            var weight = (float)m[(channel * 5) + channel];
+            var translation = (float)m[20 + channel] * 255;
+            for (var value = 0; value < 256; value++)
+            {
+                tables[(position * 256) + value] =
+                    (byte)Math.Clamp((int)MathF.Round((weight * value) + translation), 0, 255);
+            }
+        }
+
+        for (var index = 0; index < pixels.Length; index += 4)
+        {
+            pixels[index] = tables[pixels[index]];
+            pixels[index + 1] = tables[256 + pixels[index + 1]];
+            pixels[index + 2] = tables[512 + pixels[index + 2]];
+            pixels[index + 3] = tables[768 + pixels[index + 3]];
         }
     }
 
