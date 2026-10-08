@@ -132,9 +132,9 @@ internal sealed class ListField(string json, Presence presence, EvidenceTable ch
 internal sealed class ArrayField(string json, Presence presence, ScalarType element, string? column = null)
     : Field(json, presence)
 {
-    public ScalarType Element { get; } = element is ScalarType.Integer or ScalarType.BigInt
+    public ScalarType Element { get; } = element is ScalarType.Integer or ScalarType.BigInt or ScalarType.Double
         ? element
-        : throw new ArgumentOutOfRangeException(nameof(element), "An array column holds integers.");
+        : throw new ArgumentOutOfRangeException(nameof(element), "An array column holds integers or numbers.");
 
     public override string Column { get; } = column ?? EvidenceNaming.Snake(json);
 }

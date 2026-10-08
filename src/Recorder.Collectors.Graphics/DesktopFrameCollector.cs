@@ -300,6 +300,7 @@ public sealed class DesktopFrameCollector : ICaptureCollector
         // Read as the frame is captured, in this process's DPI awareness,
         // which the capture's coordinates also use.
         var fullscreenMagnification = _magnification?.Read();
+        var fullscreenColorEffect = _magnification?.ReadColorEffect();
 
         var backend = "windows-graphics-capture";
         string[] qualityFlags = ["hardware-composed-wgc"];
@@ -377,7 +378,8 @@ public sealed class DesktopFrameCollector : ICaptureCollector
                     ? "newest-arrived"
                     : null,
                 monitorFrames,
-                fullscreenMagnification
+                fullscreenMagnification,
+                fullscreenColorEffect
             },
             capturedAt,
             sequence,

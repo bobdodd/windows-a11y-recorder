@@ -18,8 +18,9 @@ public sealed record PlaybackIndex
     // 0.43 and 0.44) whole. Version 3 adds the frame documents (protocol
     // 0.55, slice 5b). Version 4 keeps each desktop frame's Magnifier
     // reading and corner (fullscreenMagnification, x, y); an older index is
-    // derived again, so recordings made before it play magnified.
-    public const int CurrentVersion = 4;
+    // derived again, so recordings made before it play magnified. Version 5
+    // keeps its color effect (fullscreenColorEffect).
+    public const int CurrentVersion = 5;
 
     public required int Version { get; init; }
 

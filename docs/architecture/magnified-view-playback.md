@@ -6,7 +6,9 @@ Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07; recording and the part
 the target machine, except inverted colors; the player confirmed by the
 owner after a fix to the playback index
 ([validation](../validation/magnified-playback-2026-10-07.md)). The
-color effect, in "Color effect", proposed 2026-10-08, not built. Listed in
+color effect, in "Color effect", proposed and agreed 2026-10-08; its
+recording built 2026-10-08, its playback waiting for the target machine
+test. Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## Purpose
@@ -166,7 +168,13 @@ Designed 2026-10-07; testing waits for a setup with more than one monitor.
 
 ## Color effect
 
-Proposed 2026-10-08, not built.
+Proposed and agreed 2026-10-08. Built 2026-10-08: the recording, the
+validator, the database columns (migration 0020, with number arrays added
+to the evidence catalog), the playback index (version 5), the frame's
+effect in the playback archive, and the matrix applied to pixels
+(`ColorEffect` in `src/Recorder.Session/MagnifiedView.cs`), with their unit
+tests. Not built: applying it in the player and the help text, which wait
+for the questions under "Open" to be settled by the test.
 
 ### What is known
 
@@ -285,11 +293,17 @@ For the color effect:
   example, translation, and clamping; and of playing the effect from a
   recording file through its playback index.
 - On the target machine, `scripts/Test-MagnifiedPlayback.ps1` extended
-  to log the 25 values with each sample; to add inverted colors phases
+  (built 2026-10-08) to log the 25 values with each sample; to add inverted colors phases
   in the lens view, the docked view, and the full screen view at 100
   percent; and to compare the participant's view with the effect applied
   against the screenshot of each phase, within the same tolerance of 3.
-  The frames' matrices must match the script's.
+  The frames' matrices must match the script's. The script draws each
+  phase's participant's view both without and with the frame's effect,
+  applied with a GDI+ color matrix, which takes the same row vector
+  reading, and reports which matched; its analysis was checked in Windows
+  PowerShell on the target machine against synthetic frames, where the
+  effect applied gave 0.03 and 0 for inverted phases missing from the
+  capture, and was not needed where the capture already showed it.
 - The time to apply the matrix to a frame in the player, measured on the
   target machine.
 

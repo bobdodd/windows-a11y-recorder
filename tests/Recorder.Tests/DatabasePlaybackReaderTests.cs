@@ -422,9 +422,11 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         List<RecorderEvent> events =
         [
             Event(sessionKey, collector, 0, 11_000_000, "graphics.desktop.frames", "desktop-frame",
-                Json(Magnified(10, @"{""level"":2,""x"":480,""y"":270,""problem"":null}"))),
+                Json(Magnified(10, @"{""level"":2,""x"":480,""y"":270,""problem"":null}," +
+                    @"""fullscreenColorEffect"":{""matrix"":[-1,0,0,0,0,0,-1,0,0,0,0,0,-1,0,0,0,0,0,1,0,1,1,1,0,1],""problem"":null}"))),
             Event(sessionKey, collector, 1, 12_000_000, "graphics.desktop.frames", "desktop-frame",
-                Json(Magnified(11, @"{""level"":null,""x"":null,""y"":null,""problem"":""failed""}"))),
+                Json(Magnified(11, @"{""level"":null,""x"":null,""y"":null,""problem"":""failed""}," +
+                    @"""fullscreenColorEffect"":{""matrix"":null,""problem"":""failed""}"))),
             Event(sessionKey, collector, 2, 13_000_000, "graphics.desktop.frames", "desktop-frame",
                 Json(Frame(12, 12_000_000)))
         ];
@@ -441,6 +443,9 @@ public sealed class DatabasePlaybackReaderTests(EmbeddedPostgresFixture fixture)
         Assert.Null(archive.Frames[1].Magnification);
         Assert.Null(archive.Frames[2].Magnification);
         Assert.True(MagnifiedView.AnyMagnified(archive.Frames));
+        Assert.True(ColorEffect.IsInversion(archive.Frames[0].ColorEffect));
+        Assert.Null(archive.Frames[1].ColorEffect);
+        Assert.Null(archive.Frames[2].ColorEffect);
     }
 
     [Fact]

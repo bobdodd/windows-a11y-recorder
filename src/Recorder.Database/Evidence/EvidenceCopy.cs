@@ -198,6 +198,7 @@ internal static class EvidenceCopy
                 "smallint" => NpgsqlDbType.Smallint,
                 "integer[]" => NpgsqlDbType.Array | NpgsqlDbType.Integer,
                 "bigint[]" => NpgsqlDbType.Array | NpgsqlDbType.Bigint,
+                "double precision[]" => NpgsqlDbType.Array | NpgsqlDbType.Double,
                 _ => throw new InvalidOperationException($"Unknown column type {column.SqlType}.")
             });
         }
@@ -241,6 +242,9 @@ internal static class EvidenceCopy
                 break;
             case long[] bigints:
                 importer.Write(bigints, type);
+                break;
+            case double[] doubles:
+                importer.Write(doubles, type);
                 break;
             default:
                 throw new InvalidOperationException($"Cannot write a {value.GetType().Name} evidence value.");

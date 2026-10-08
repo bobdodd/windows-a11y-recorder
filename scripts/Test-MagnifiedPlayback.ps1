@@ -13,13 +13,17 @@
 #   fullscreen   Magnifier full screen view, cursor at the centre
 #   pan          cursor held near the bottom-right corner, so the view pans
 #   zoomed       two steps of Win+Plus, cursor still near the corner
-#   inverted     Ctrl+Alt+I (colors inverted), then inverted back
-#   lens         Ctrl+Alt+L
-#   docked       Ctrl+Alt+D
-#   closed       Win+Esc
+#   inverted         Ctrl+Alt+I (colors inverted), still zoomed
+#   inverted-100     still inverted, three steps of Win+Minus to 100 percent
+#   inverted-lens    Win+Plus back to 200 percent, then Ctrl+Alt+L
+#   inverted-docked  Ctrl+Alt+D
+#   docked           Ctrl+Alt+I, colors inverted back
+#   lens             Ctrl+Alt+L
+#   closed           Win+Esc
 # In each phase it samples MagGetFullscreenTransform and
-# MagGetFullscreenColorEffect from its own process every 250 ms, and takes
-# a GDI screenshot halfway through, which shows the screen as magnified.
+# MagGetFullscreenColorEffect (all 25 values) from its own process every
+# 250 ms, and takes a GDI screenshot halfway through, which shows the
+# screen as magnified.
 #
 # It then turns the full screen view on again and asks you to stop the
 # recording, to check that the recorder's reading does not change
@@ -120,9 +124,53 @@ function Get-SeenRegion($payload) {
     }
 }
 
+# The frame's color effect matrix, 25 numbers row by row, or null.
+function Get-FrameMatrix($payload) {
+    if ($null -eq $payload.PSObject.Properties['fullscreenColorEffect']) { return $null }
+    $e = $payload.fullscreenColorEffect
+    if ($null -eq $e -or $null -eq $e.matrix) { return $null }
+    return @($e.matrix | ForEach-Object { [double]$_ })
+}
+
+function Test-Matrix($values, [double[]]$expected) {
+    if ($null -eq $values) { return $false }
+    for ($i = 0; $i -lt 25; $i++) { if ([math]::Abs($values[$i] - $expected[$i]) -gt 0.000001) { return $false } }
+    return $true
+}
+
+$IdentityMatrix = [double[]](1,0,0,0,0, 0,1,0,0,0, 0,0,1,0,0, 0,0,0,1,0, 0,0,0,0,1)
+$InversionMatrix = [double[]](-1,0,0,0,0, 0,-1,0,0,0, 0,0,-1,0,0, 0,0,0,1,0, 1,1,1,0,1)
+
+function Get-MatrixKind($payload) {
+    if ($null -eq $payload.PSObject.Properties['fullscreenColorEffect']) { return 'not recorded' }
+    $e = $payload.fullscreenColorEffect
+    if ($null -eq $e) { return 'not recorded' }
+    if ($null -eq $e.matrix) { return 'problem' }
+    $values = Get-FrameMatrix $payload
+    if (Test-Matrix $values $IdentityMatrix) { return 'identity' }
+    if (Test-Matrix $values $InversionMatrix) { return 'inversion' }
+    return 'other'
+}
+
+# GDI+ applies a ColorMatrix to the row vector (red, green, blue, alpha, 1),
+# the fifth row being the translation, and clamps: the reading the design
+# takes of Windows' matrix (docs/architecture/magnified-view-playback.md,
+# "Color effect").
+function New-ImageAttributes($values) {
+    $rows = New-Object 'single[][]' 5
+    for ($r = 0; $r -lt 5; $r++) {
+        $rows[$r] = New-Object 'single[]' 5
+        for ($c = 0; $c -lt 5; $c++) { $rows[$r][$c] = [single]$values[$r * 5 + $c] }
+    }
+    $attributes = New-Object System.Drawing.Imaging.ImageAttributes
+    $attributes.SetColorMatrix((New-Object System.Drawing.Imaging.ColorMatrix(,$rows)))
+    return $attributes
+}
+
 # The participant's view of a frame, drawn at the frame's size, black where
-# the part seen extends beyond the frame.
-function New-ParticipantView([string]$framePath, $payload) {
+# the part seen extends beyond the frame; with -ApplyEffect, the frame's
+# color effect applied, whatever the level.
+function New-ParticipantView([string]$framePath, $payload, [switch]$ApplyEffect) {
     $source = [System.Drawing.Image]::FromFile($framePath)
     try {
         $view = New-Object System.Drawing.Bitmap($source.Width, $source.Height)
@@ -132,7 +180,21 @@ function New-ParticipantView([string]$framePath, $payload) {
         $g.PixelOffsetMode = 'Half'
         $region = Get-SeenRegion $payload
         $destination = New-Object System.Drawing.Rectangle(0, 0, $source.Width, $source.Height)
-        if ($null -eq $region) {
+        $values = Get-FrameMatrix $payload
+        $attributes = if ($ApplyEffect -and $null -ne $values -and -not (Test-Matrix $values $IdentityMatrix)) { New-ImageAttributes $values } else { $null }
+        if ($null -ne $attributes) {
+            $sx = 0.0; $sy = 0.0; $sw = [double]$source.Width; $sh = [double]$source.Height
+            if ($null -ne $region) {
+                $scaleX = $source.Width / [double]$payload.width
+                $scaleY = $source.Height / [double]$payload.height
+                $sx = $region.X * $scaleX; $sy = $region.Y * $scaleY
+                $sw = $region.Width * $scaleX; $sh = $region.Height * $scaleY
+            }
+            $g.DrawImage($source, $destination, [single]$sx, [single]$sy, [single]$sw, [single]$sh,
+                [System.Drawing.GraphicsUnit]::Pixel, $attributes)
+            $attributes.Dispose()
+        }
+        elseif ($null -eq $region) {
             $g.DrawImage($source, $destination)
         }
         else {
@@ -210,7 +272,8 @@ function Invoke-Analysis([string]$results, [string]$session, [string]$events) {
         $row = [ordered]@{
             phase = $p.phase; frame = $null; frameMinusShotMs = $null
             level = $null; x = $null; y = $null; problem = $null
-            participantVsShot = $null; capturedVsShot = $null; withinTolerance = $null
+            participantVsShot = $null; withEffectVsShot = $null; capturedVsShot = $null; withinTolerance = $null; matchedBy = $null
+            frameEffect = $null; frameEffectMatchesScript = $null; scriptEffects = $null
             frameLevelsInPhase = $frameLevels; scriptLevelsInPhase = $scriptLevels
             colorEffectIdentity = $effects }
         if ($p.gdiShot -and (Test-Path -LiteralPath $p.gdiShot)) {
@@ -228,21 +291,43 @@ function Invoke-Analysis([string]$results, [string]$session, [string]$events) {
             $view.Save((Join-Path $viewDir ("{0}-{1}" -f $p.phase, $nearest.Name)), [System.Drawing.Imaging.ImageFormat]::Png)
             $row.participantVsShot = Get-Diff (Get-Thumb $view) $shotThumb
             $view.Dispose()
+            $row.frameEffect = Get-MatrixKind $nearest.Payload
+            $effectView = New-ParticipantView $nearest.Path $nearest.Payload -ApplyEffect
+            $effectView.Save((Join-Path $viewDir ("{0}-{1}-effect.png" -f $p.phase, $nearest.Name)), [System.Drawing.Imaging.ImageFormat]::Png)
+            $row.withEffectVsShot = Get-Diff (Get-Thumb $effectView) $shotThumb
+            $effectView.Dispose()
+            $frameValues = Get-FrameMatrix $nearest.Payload
+            $phaseSamples = @($samples | Where-Object { $_.phase -eq $p.phase -and $_.effectOk -eq 'True' -and $_.effect })
+            $row.scriptEffects = (@($phaseSamples | ForEach-Object { $_.effect } | Sort-Object -Unique)) -join ' | '
+            if ($null -ne $frameValues) {
+                $row.frameEffectMatchesScript = [bool](@($phaseSamples | Where-Object {
+                    Test-Matrix @($_.effect -split ' ' | ForEach-Object { [double]::Parse($_, [Globalization.CultureInfo]::InvariantCulture) }) $frameValues
+                }).Count)
+            }
             $captured = [System.Drawing.Image]::FromFile($nearest.Path)
             $row.capturedVsShot = Get-Diff (Get-Thumb $captured) $shotThumb
             $captured.Dispose()
-            $row.withinTolerance = $row.participantVsShot -le $Tolerance
+            # Within tolerance drawn either way; matchedBy says which way, so
+            # the inverted phases show whether the effect is to be applied.
+            $best = [math]::Min([double]$row.participantVsShot, [double]$row.withEffectVsShot)
+            $row.withinTolerance = $best -le $Tolerance
+            $row.matchedBy = if (-not $row.withinTolerance) { 'neither' }
+                elseif ($row.participantVsShot -le $Tolerance -and $row.withEffectVsShot -le $Tolerance) { 'both' }
+                elseif ($row.participantVsShot -le $Tolerance) { 'without effect' } else { 'with effect' }
         }
         $rows.Add([pscustomobject]$row)
     }
 
     $rows | Export-Csv -LiteralPath (Join-Path $results 'summary.csv') -NoTypeInformation
-    $rows | Format-Table phase, frame, frameMinusShotMs, level, x, y, participantVsShot, capturedVsShot, withinTolerance -AutoSize |
+    $rows | Format-Table phase, frame, frameMinusShotMs, level, x, y, participantVsShot, withEffectVsShot, capturedVsShot, withinTolerance, matchedBy -AutoSize |
         Out-String -Width 220 | Tee-Object -FilePath (Join-Path $results 'summary.txt') | Write-Host
-    $rows | Format-Table phase, frameLevelsInPhase, scriptLevelsInPhase, colorEffectIdentity, problem -AutoSize |
+    $rows | Format-Table phase, frameLevelsInPhase, scriptLevelsInPhase, colorEffectIdentity, frameEffect, frameEffectMatchesScript, problem -AutoSize |
         Out-String -Width 220 | Tee-Object -FilePath (Join-Path $results 'summary.txt') -Append | Write-Host
-    Say ("participantVsShot: the participant's view drawn from the recorded frame against the screenshot; " +
-        "within tolerance at {0} or less. capturedVsShot: the frame as captured against the screenshot." -f $Tolerance)
+    $rows | Where-Object { $_.scriptEffects } | Format-List phase, scriptEffects |
+        Out-String -Width 400 | Tee-Object -FilePath (Join-Path $results 'summary.txt') -Append | Write-Host
+    Say (("participantVsShot: the participant's view drawn from the recorded frame against the screenshot; " +
+        "within tolerance at {0} or less. withEffectVsShot: the same view with the frame's color effect applied. " +
+        "capturedVsShot: the frame as captured against the screenshot.") -f $Tolerance)
 }
 
 function Export-Events([string]$session, [string]$results) {
@@ -369,12 +454,13 @@ $phases = New-Object System.Collections.Generic.List[object]
 
 function Read-Transform([string]$phase) {
     $lvl = 0.0; $ox = 0; $oy = 0
-    $ok = $false; $effectOk = $false; $identity = $null
+    $ok = $false; $effectOk = $false; $identity = $null; $values = $null
     if ($magOk) {
         $ok = [MagPlayTest.Native]::MagGetFullscreenTransform([ref]$lvl, [ref]$ox, [ref]$oy)
         $effect = New-Object 'float[]' 25
         $effectOk = [MagPlayTest.Native]::MagGetFullscreenColorEffect($effect)
         if ($effectOk) {
+            $values = ($effect | ForEach-Object { $_.ToString('R', [Globalization.CultureInfo]::InvariantCulture) }) -join ' '
             $identity = $true
             for ($i = 0; $i -lt 25; $i++) {
                 $expected = if (($i % 6) -eq 0) { 1.0 } else { 0.0 }
@@ -384,7 +470,7 @@ function Read-Transform([string]$phase) {
     }
     $sample = [pscustomobject]@{
         utc = [DateTime]::UtcNow.ToString('o'); phase = $phase; ok = $ok; level = $lvl
-        xOffset = $ox; yOffset = $oy; effectOk = $effectOk; effectIdentity = $identity }
+        xOffset = $ox; yOffset = $oy; effectOk = $effectOk; effectIdentity = $identity; effect = $values }
     $samples.Add($sample)
     return $sample
 }
@@ -450,13 +536,23 @@ Send-Keys @($VK_LWIN, $VK_PLUS)
 Wait-Phase 'zoomed' $cornerX $cornerY
 Send-Keys @($VK_CONTROL, $VK_MENU, $VK_I)
 Wait-Phase 'inverted' $cx $cy
+# Inverted colors at 100 percent, then back to the starting 200 percent
+# while inverted, so Magnifier is left at the level it started at.
+Send-Keys @($VK_LWIN, $VK_MINUS)
+Send-Keys @($VK_LWIN, $VK_MINUS)
+Send-Keys @($VK_LWIN, $VK_MINUS)
+Wait-Phase 'inverted-100' $cx $cy
+Send-Keys @($VK_LWIN, $VK_PLUS)
+Send-Keys @($VK_CONTROL, $VK_MENU, $VK_L)
+Wait-Phase 'inverted-lens' $cx $cy
+Send-Keys @($VK_CONTROL, $VK_MENU, $VK_D)
+Wait-Phase 'inverted-docked' $cx $cy
+# Inverted colors off before Magnifier closes, so it does not start
+# inverted next time.
 Send-Keys @($VK_CONTROL, $VK_MENU, $VK_I)
-Send-Keys @($VK_LWIN, $VK_MINUS)
-Send-Keys @($VK_LWIN, $VK_MINUS)
+Wait-Phase 'docked' $cx $cy
 Send-Keys @($VK_CONTROL, $VK_MENU, $VK_L)
 Wait-Phase 'lens' $cx $cy
-Send-Keys @($VK_CONTROL, $VK_MENU, $VK_D)
-Wait-Phase 'docked' $cx $cy
 Stop-Magnifier
 Wait-Phase 'closed' $cx $cy
 
@@ -483,7 +579,7 @@ if ($magOk) { [void][MagPlayTest.Native]::MagUninitialize() }
 $samples | Export-Csv -LiteralPath (Join-Path $out 'script-samples.csv') -NoTypeInformation
 
 $seen = [ordered]@{}
-foreach ($p in 'fullscreen', 'pan', 'zoomed', 'inverted', 'lens', 'docked') {
+foreach ($p in 'fullscreen', 'pan', 'zoomed', 'inverted', 'inverted-100', 'inverted-lens', 'inverted-docked', 'docked', 'lens') {
     $seen[$p] = Read-Host "Did the '$p' phase look as its name says? (y/n)"
 }
 $seen['stillMagnifiedAfterStop'] = $stillMagnified

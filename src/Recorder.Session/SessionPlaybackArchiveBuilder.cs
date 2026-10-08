@@ -48,8 +48,9 @@ public sealed class SessionPlaybackArchiveBuilder
         "device",
         "eventName",
         "frameType",
-        // A desktop frame's Magnifier reading and its corner, for the
+        // A desktop frame's Magnifier readings and its corner, for the
         // participant's view.
+        "fullscreenColorEffect",
         "fullscreenMagnification",
         "height",
         "name",
@@ -339,7 +340,37 @@ public sealed class SessionPlaybackArchiveBuilder
             ReadInt32(payload, "height") ?? 0,
             ReadInt32(payload, "x") ?? 0,
             ReadInt32(payload, "y") ?? 0,
-            ReadMagnification(payload)));
+            ReadMagnification(payload),
+            ReadColorEffect(payload)));
+    }
+
+    // A reading that failed holds no matrix, so the frame plays as captured.
+    private static FullscreenColorEffect? ReadColorEffect(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("fullscreenColorEffect", out var value) ||
+            value.ValueKind != JsonValueKind.Object ||
+            !value.TryGetProperty("matrix", out var matrix) ||
+            matrix.ValueKind != JsonValueKind.Array ||
+            matrix.GetArrayLength() != 25)
+        {
+            return null;
+        }
+
+        var values = new double[25];
+        var index = 0;
+        foreach (var item in matrix.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Number ||
+                !item.TryGetDouble(out var number) ||
+                !double.IsFinite(number))
+            {
+                return null;
+            }
+
+            values[index++] = number;
+        }
+
+        return new FullscreenColorEffect(values);
     }
 
     // A reading that failed holds no level, so the frame plays as captured.

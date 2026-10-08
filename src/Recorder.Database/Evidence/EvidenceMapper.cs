@@ -446,6 +446,7 @@ internal sealed class EvidenceMapper
         var length = value.GetArrayLength();
         var integers = element == ScalarType.Integer ? new int[length] : null;
         var bigints = element == ScalarType.BigInt ? new long[length] : null;
+        var doubles = element == ScalarType.Double ? new double[length] : null;
         var ordinal = 0;
         foreach (var item in value.EnumerateArray())
         {
@@ -460,6 +461,10 @@ internal sealed class EvidenceMapper
             {
                 integers[ordinal] = (int)read;
             }
+            else if (doubles is not null)
+            {
+                doubles[ordinal] = (double)read;
+            }
             else
             {
                 bigints![ordinal] = (long)read;
@@ -468,7 +473,7 @@ internal sealed class EvidenceMapper
             ordinal++;
         }
 
-        return (object?)integers ?? bigints!;
+        return (object?)integers ?? (object?)doubles ?? bigints!;
     }
 
     private static string ReadText(JsonElement value, string path)

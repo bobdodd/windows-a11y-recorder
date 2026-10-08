@@ -685,11 +685,56 @@ internal static class EventPayloadValidator
                 RequiredInteger("gdiFallbackFrameCount", nonnegative: true),
                 OptionalNullableEnum("frameSelection", "newest-arrived"),
                 OptionalObjectArray("monitorFrames"),
-                OptionalObject("fullscreenMagnification")
+                OptionalObject("fullscreenMagnification"),
+                OptionalObject("fullscreenColorEffect")
             ],
             issues);
         ValidateDesktopMonitorFrames(payload, issues);
         ValidateOptionalObject(payload, "fullscreenMagnification", ValidateFullscreenMagnification, issues);
+        ValidateOptionalObject(payload, "fullscreenColorEffect", ValidateFullscreenColorEffect, issues);
+    }
+
+    // Archives written before the color effect was read with each frame omit
+    // fullscreenColorEffect. When present it holds the 25 values of the
+    // matrix read with MagGetFullscreenColorEffect, row by row, or a null
+    // matrix and the problem. See docs/architecture/magnified-view-playback.md,
+    // "Color effect".
+    private static void ValidateFullscreenColorEffect(
+        JsonElement effect,
+        ICollection<EventValidationIssue> issues,
+        string path)
+    {
+        ValidateShape(
+            effect,
+            [
+                new PropertyRule(
+                    "matrix",
+                    true,
+                    true,
+                    value => value.ValueKind == JsonValueKind.Array &&
+                        value.GetArrayLength() == 25 &&
+                        value.EnumerateArray().All(item =>
+                            item.ValueKind == JsonValueKind.Number &&
+                            item.TryGetDouble(out var number) &&
+                            double.IsFinite(number)),
+                    "must be an array of 25 finite numbers or null"),
+                NullableString("problem")
+            ],
+            issues,
+            path);
+        var read = effect.TryGetProperty("matrix", out var matrix) &&
+            matrix.ValueKind != JsonValueKind.Null;
+        var problem = effect.TryGetProperty("problem", out var problemValue) &&
+            problemValue.ValueKind == JsonValueKind.String;
+        if (read == problem)
+        {
+            AddError(
+                issues,
+                "desktop-frame-color-effect-inconsistent",
+                path,
+                "A full screen color effect reading states its matrix and no problem, " +
+                "or no matrix and the problem.");
+        }
     }
 
     // Archives written before the transform was read with each frame omit

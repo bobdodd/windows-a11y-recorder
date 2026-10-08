@@ -202,6 +202,14 @@ internal static class EvidenceCatalog
                     Int("x", N),
                     Int("y", N),
                     Text("problem", N)
+                ]),
+            // Added by 0020_desktop_frame_color_effect.sql.
+            new InlineField(
+                "fullscreenColorEffect",
+                O,
+                [
+                    new ArrayField("matrix", N, ScalarType.Double),
+                    Text("problem", N)
                 ]));
 
     public static readonly EvidenceTable AudioStreams = Evidence(

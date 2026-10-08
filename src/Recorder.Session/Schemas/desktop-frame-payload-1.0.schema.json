@@ -56,6 +56,21 @@
         "problem": { "type": ["string", "null"] }
       }
     },
+    "fullscreenColorEffect": {
+      "description": "The full screen color effect read with MagGetFullscreenColorEffect as the frame was captured: the 25 values of the 5 by 5 matrix, row by row as Windows holds them, the identity meaning none. A null matrix and the problem when it could not be read. Absent in archives written before it was recorded.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix", "problem"],
+      "properties": {
+        "matrix": {
+          "type": ["array", "null"],
+          "items": { "type": "number" },
+          "minItems": 25,
+          "maxItems": 25
+        },
+        "problem": { "type": ["string", "null"] }
+      }
+    },
     "monitorFrames": {
       "description": "Per-monitor composition timing. Absent in archives written before it was recorded; timing fields are null for GDI fallback frames.",
       "type": "array",

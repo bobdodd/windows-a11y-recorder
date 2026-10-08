@@ -88,7 +88,8 @@ public sealed record SessionVideoFrame(
     int Height,
     int X = 0,
     int Y = 0,
-    FullscreenMagnification? Magnification = null);
+    FullscreenMagnification? Magnification = null,
+    FullscreenColorEffect? ColorEffect = null);
 
 /// <summary>
 /// The full screen magnification transform read with a desktop frame: the
@@ -96,6 +97,44 @@ public sealed record SessionVideoFrame(
 /// corner relative to the primary monitor's, in unmagnified coordinates.
 /// </summary>
 public sealed record FullscreenMagnification(double Level, int X, int Y);
+
+/// <summary>
+/// The full screen color effect read with a desktop frame: the 25 values of
+/// Windows' 5 by 5 color matrix, row by row. See
+/// docs/architecture/magnified-view-playback.md, "Color effect".
+/// </summary>
+public sealed class FullscreenColorEffect
+{
+    public FullscreenColorEffect(IReadOnlyList<double> matrix)
+    {
+        ArgumentNullException.ThrowIfNull(matrix);
+        if (matrix.Count != 25 || matrix.Any(value => !double.IsFinite(value)))
+        {
+            throw new ArgumentException("A color matrix holds 25 finite values.", nameof(matrix));
+        }
+
+        Matrix = [.. matrix];
+    }
+
+    /// <summary>The values, row by row.</summary>
+    public IReadOnlyList<double> Matrix { get; }
+
+    public override bool Equals(object? obj) =>
+        obj is FullscreenColorEffect other && Matrix.SequenceEqual(other.Matrix);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        foreach (var value in Matrix)
+        {
+            hash.Add(value);
+        }
+
+        return hash.ToHashCode();
+    }
+
+    public override string ToString() => string.Join(", ", Matrix);
+}
 
 public sealed record SessionAudioTrack(
     string Stream,
