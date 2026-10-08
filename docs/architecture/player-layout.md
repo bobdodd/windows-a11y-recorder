@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed 2026-10-07, agreed 2026-10-07, not built. Listed in
+Proposed 2026-10-07, agreed 2026-10-07. Built 2026-10-07, not yet run on
+the target machine. Listed in
 [outstanding work](analysis-outstanding-work.md).
 
 ## The problem
@@ -37,25 +38,33 @@ when built.
 - A toggle button labelled "Details" sits at the start of the transport
   row, so it stays visible in every layout. Ctrl+Shift+D toggles it.
 - While it is open, a horizontal splitter between the video and the
-  timeline region lets the auditor give the details more or less height;
-  the panels' fixed maximum heights are removed so that the space goes to
-  their lists and text.
-- While it is collapsed, the status line shows a one-line summary of the
-  selected timeline event (its time, lane, and type); selecting an event
+  region under it (the transport, timeline, details, and status line)
+  lets the auditor give the details more or less height; the panels'
+  fixed maximum heights are removed so that the space goes to their lists
+  and text. The video keeps at least 160 pixels and the details at least
+  120 where the window allows. With no saved height, the details get 250
+  pixels, close to their fixed height before.
+- While it is collapsed, selecting a timeline event shows a one-line
+  summary of it in the status line (its time, channel, type, and
+  summary), in place of the event at the playhead; selecting an event
   does not open the region.
 
 ### The side panel
 
-- The side panel collapses to a narrow strip holding one button,
-  "Settings", that opens it again. Ctrl+Shift+S toggles it.
-- It is open when no recording is loaded and while recording, as now,
-  since its controls are needed then. Opening a recording for playback
-  leaves it as the auditor last set it.
+- The side panel collapses entirely. Its toggle, "Settings", sits at the
+  start of the transport row beside "Details", so no strip is kept for
+  it. Ctrl+Shift+S toggles it.
+- It is shown when no recording is loaded and while recording, as now,
+  since its controls are needed then; its toggle is unavailable then, and
+  its shortcut says why. Opening a recording for playback leaves it as the
+  auditor last set it.
 
 ### The frame-only view
 
-- F11 shows only the video, the transport row, and the timeline with its
-  zoom and pan bars. The side panel, the details region, the volume row,
+- F11, or the "Frame only" toggle in the transport row, shows only the
+  video, the transport row, and the timeline with its zoom and pan bars.
+  It is available while a recording is open for playback and not while
+  recording. The side panel, the details region, the volume row,
   and the status line are hidden. F11 or Escape returns to the layout as
   it was.
 - The window keeps its title bar and the taskbar stays visible; the view
@@ -82,9 +91,9 @@ when built.
   to its toggle. Entering the frame-only view keeps focus where it was if
   that control is still shown, and otherwise moves it to the video's
   play button; leaving it restores the previous focus where possible.
-- Each change of layout is announced through the existing polite status
-  text, for example "Details hidden" or "Frame only view. Press F11 or
-  Escape to return".
+- Each change of layout is announced with a UI Automation notification,
+  as the player's other announcements are, for example "Details hidden."
+  or "Frame only view. Press F11 or Escape to return."
 - The shortcuts do not clash with the player's existing keys: Space for
   play and pause, Ctrl with plus, minus, and 0 for the timeline zoom
   (`MainWindow.xaml.cs`, lines 538 to 580), the timeline's arrow, Home,
@@ -95,7 +104,7 @@ when built.
 ## Required tests
 
 - Unit tests of reading and writing the layout file, including a missing,
-  empty, and malformed file, and of the toggles' state and names.
+  empty, and malformed file (`PlayerLayoutTests`, built).
 - UI tests on Windows of each toggle by mouse and by its shortcut; of
   focus moving out of a collapsing region; of the frame-only view entered
   and left with F11 and with Escape, during playback and paused; and of

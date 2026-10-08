@@ -21,6 +21,7 @@ namespace Recorder.App;
 internal sealed class BusyIndicator
 {
     private const string BusyActivityId = "Recorder.App.Busy";
+    private const string LayoutActivityId = "Recorder.App.Layout";
     private const string CollectorHealthActivityId =
         "Recorder.App.CollectorHealth";
 
@@ -78,6 +79,13 @@ internal sealed class BusyIndicator
             message,
             AutomationNotificationKind.Other,
             CollectorHealthActivityId);
+
+    /// <summary>
+    /// Speaks a change of the player's layout the user asked for, such as
+    /// the details being hidden.
+    /// </summary>
+    public void AnnounceLayout(string message) =>
+        Announce(message, AutomationNotificationKind.ActionCompleted, LayoutActivityId);
 
     private void End()
     {

@@ -51,10 +51,10 @@ Designed in [player layout](player-layout.md), agreed 2026-10-07.
 Decided: the details panels are open by default, and the
 frame-only view is part of the design.
 
-- To build: the collapsible details region and its splitter, the
+- Built 2026-10-07: the collapsible details region and its splitter, the
   collapsible side panel, the frame-only view, the remembered layout, and
   the selected event summary in the status line.
-- To test: as in its "Required tests".
+- To test: on the target machine, as in its "Required tests".
 
 ## Screen reader activity
 

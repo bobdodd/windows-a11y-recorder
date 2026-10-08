@@ -125,6 +125,7 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
+        LoadLayout();
         _transitioning = true;
         StartButton.IsEnabled = false;
         OpenRecordingButton.IsEnabled = false;
@@ -223,6 +224,7 @@ public partial class MainWindow : Window
             StopButton.IsEnabled = true;
             MarkerButton.IsEnabled = true;
             OpenFolderButton.IsEnabled = true;
+            ApplyLayout();
             _statusTimer.Start();
             RefreshStatus();
             busy.Dispose();
@@ -446,6 +448,19 @@ public partial class MainWindow : Window
 
         PausePlayback();
         SeekTo(e.TimelineEvent.MonotonicNanoseconds, synchronizeAudio: false);
+        if (!DetailsShown)
+        {
+            // With the details hidden, the status line names the selected
+            // event, in place of the event at the playhead the seek looked
+            // up; the lookup's result is discarded.
+            _nearestVersion++;
+            _pendingNearestPosition = null;
+            PlaybackStatusTextBlock.Text =
+                $"Selected {FormatTime(e.TimelineEvent.MonotonicNanoseconds)} | " +
+                $"{e.TimelineEvent.Channel} | {e.TimelineEvent.EventType} | " +
+                e.TimelineEvent.Summary;
+        }
+
         try
         {
             var rawJson = _playbackArchive?.ReadEventJson(e.TimelineEvent) ??
@@ -537,6 +552,12 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (HandleLayoutKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (Keyboard.FocusedElement is System.Windows.Controls.TextBox)
         {
             return;
@@ -637,7 +658,15 @@ public partial class MainWindow : Window
             OpenFolderButton.IsEnabled =
                 Directory.Exists(SessionFolderTextBox.Text);
             _transitioning = false;
-            StartButton.Focus();
+            ApplyLayout();
+            if (SidePanel.IsVisible)
+            {
+                StartButton.Focus();
+            }
+            else
+            {
+                SettingsToggle.Focus();
+            }
         }
 
         if (Directory.Exists(completedSession))
@@ -712,6 +741,7 @@ public partial class MainWindow : Window
                 $"{_playbackArchive.AudioTracks.Count} audio tracks | " +
                 $"Read {source}";
             _nearestVersion++;
+            ApplyLayout();
             busy.Dispose();
             _busy.AnnounceCompleted(
                 $"Recording loaded {source}. " +
@@ -730,6 +760,7 @@ public partial class MainWindow : Window
             VideoPlaceholderTextBlock.Text = "The recording could not be opened.";
             VideoPlaceholderTextBlock.Visibility = Visibility.Visible;
             PlaybackStatusTextBlock.Text = "Recording load failed.";
+            ApplyLayout();
             busy.Dispose();
             MessageBox.Show(
                 this,
@@ -1536,6 +1567,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        SaveLayout();
         eventArgs.Cancel = true;
         if (_transitioning)
         {
