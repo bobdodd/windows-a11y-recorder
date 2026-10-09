@@ -1315,6 +1315,46 @@ Built 2026-10-08 to the design above, with these decisions and limits.
   `%LOCALAPPDATA%\Windows A11y Recorder\recreations\logs`, named for the
   recreation and kept after it closes (the newest 20), so a failed check
   is reported with its file, line, and stack.
+- The log of the next try (2026-10-09) gave the cause. The renderer
+  stopped at `DCHECK_EQ(box_fragment->Size(), Size())` in
+  `FragmentItem::RecalcInkOverflow` (`fragment_item.cc:1049`), with an
+  inline box's item 1440 by 1781.89 and its box fragment 720 by 1781.89.
+  The recorded geometry is Blink's own layout units
+  (`RectInContainerFragment`), which include the layout zoom factor:
+  the screen's scale factor, here multiplied by the text size, times the
+  browser zoom (`WebFrameWidgetImpl::SetZoomInternal`). The recreation's
+  device scale factor is set through DevTools' emulation, which Blink
+  applies as an inspector override on top of the layout zoom
+  (`LocalFrame::DevicePixelRatio`), not as the layout zoom itself. So
+  where the participant's layout zoom differs from the viewing machine's,
+  as at 200 percent text size, the recorded rectangles are in other units
+  from the recreation's own layout: the fragment items hook gives an
+  inline box's item its recorded size while its box keeps Blink's, which
+  the check refuses. The same holds for any recording made at a screen
+  scale other than the viewing machine's. A fix is proposed in "Proposed:
+  the recorded layout zoom" below, not agreed.
+
+### Proposed: the recorded layout zoom
+
+Proposed 2026-10-09, for agreement before it is built.
+
+1. A recreation is laid out at the recorded layout zoom factor. The
+   builder adds the layout checkpoint's `layoutZoomFactor` to the root
+   attribute (`layoutZoom FACTOR`), and in recreation mode
+   `SetZoomInternal` uses it as the layout zoom factor in place of the one
+   it works out, so Blink's layout units, font sizes, and glyph advances
+   are those recorded. The browser zoom entry stays, for what the page
+   and DevTools report of it.
+2. The recorder emulates the viewport so the page has the recorded CSS
+   size and `devicePixelRatio` at that layout zoom. How DevTools'
+   emulated width and device scale factor combine with an imposed layout
+   zoom is measured first, on the target machine, and the recorder then
+   reads `innerWidth`, `innerHeight`, and `devicePixelRatio` from the
+   recreation after it loads and lists any difference from the recorded
+   values in the evidence panel.
+3. Whatever the zoom, an inline box's item keeps its box fragment's size,
+   with the recorded offset, and the console says when the recorded size
+   differs, so a mismatch is reported, not a renderer crash.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the
