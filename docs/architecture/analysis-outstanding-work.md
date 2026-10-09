@@ -145,6 +145,10 @@ agreed 2026-10-07 with the decisions in its "Decisions".
   `requestedPageColors` numbers, now known, in the player; the font families of
   scripts other than the common one; and showing the foreground tab in the
   "Sent to the page" group once the foreground tab is recorded.
+- Stage 3, the recorded preferences applied to the recreation, with a
+  `color-maps-sent` record at protocol 0.57: proposed 2026-10-08, not
+  agreed (see "Stage 3: the recreation" in
+  [accessibility preferences](accessibility-preferences.md)).
 - Left open by the owner's decision 2026-10-08, to start stage 2 first:
   the Magnifier change records on a real Magnifier recording
   (`scripts/Test-MagnifierChanges.ps1`); applying a Windows color filter

@@ -11,7 +11,8 @@ agreed 2026-10-08, and the properties panel as proposed later that day.
 Stage 1, the Windows settings and the properties panel, was built
 2026-10-08 (see "Stage 1 as built"), and the Magnifier change records,
 stepping, and visible splitter focus the same day, not yet tested on the
-target machine (see "Visible focus and stepping as built"); stages 2 and 3 are not built.
+target machine (see "Visible focus and stepping as built"); stages 2 and
+3 were then not built.
 The owner checked the stepping keys on the target machine 2026-10-08, and
 change buttons and counts on the panel's rows were agreed and built the
 same day; the owner checked them by mouse and keyboard on the target
