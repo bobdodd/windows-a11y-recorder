@@ -16,7 +16,9 @@ The owner checked the stepping keys on the target machine 2026-10-08, and
 change buttons and counts on the panel's rows were agreed and built the
 same day; the owner checked them by mouse and keyboard on the target
 machine 2026-10-08, and they remain to check with a head pointer and eye
-tracking (see "Change buttons and counts"). Listed in
+tracking (see "Change buttons and counts"). Stage 2 was built and
+checked on the target machine 2026-10-08, and stage 3 proposed the same
+day, not agreed (see "Stage 3: the recreation"). Listed in
 [outstanding work](analysis-outstanding-work.md). It accompanies
 [assistive technology detection](assistive-technology-detection.md), whose
 approach was agreed on 2026-10-07, and takes over that design's Windows
@@ -1072,6 +1074,139 @@ Checked by the owner 2026-10-08 on 45a500c.
 - Not yet checked: use with a head pointer and with eye tracking, as the
   equipment was not available. The details of the check, such as each
   item of "To check by the owner" above, were not reported separately.
+
+## Stage 3: the recreation (proposed)
+
+Proposed 2026-10-08, for agreement before it is built. Stage 3 applies
+the recorded preferences to the recreation, as "Build stages" and
+[page recreation](page-recreation.md), "The environment", require: every
+recorded preference that changes how the page is drawn or laid out is
+applied as the page was given it at the instant, and one that cannot be
+is listed as a difference.
+
+### What the recreation already shows
+
+The recreation draws each recorded node from its recorded computed style
+and recorded boxes, lines, and glyphs (see
+[page recreation](page-recreation.md), "Slice 3 revision"). Those values
+were worked out by Chromium with the participant's preferences, so the
+recorded nodes already have the font sizes and families the settings
+gave them, their colors as resolved under the color scheme and forced
+colors in effect, and their geometry at the zoom in effect.
+
+### What it does not
+
+1. Media queries. Blink evaluates `@media` rules in the recreation with
+   the recreation's own values, so DevTools' Styles pane can show a
+   `prefers-color-scheme: dark` rule as not applying to a node whose
+   recorded style is dark, and `matchMedia()` in the Console answers for
+   the recreation, not the participant.
+2. What Blink draws from the preferences rather than from a computed
+   style: native form controls and scroll bars (the color scheme, the
+   root scroll bar's color scheme, overlay scroll bars), the system
+   colors of forced colors mode where Blink resolves them itself, the
+   backplate it draws behind text in forced colors mode, the color of an
+   `outline-style: auto` focus ring, and caret browsing.
+3. The zoom factor. The recreation emulates the recorded viewport and
+   device pixel ratio only, so `devicePixelRatio`, the `resolution` media
+   feature, and whatever layout Blink still works out itself, such as
+   SVG, are at the recreation's zoom.
+4. The recreation browser gives the page the viewing machine's own
+   preferences today: an auditor whose Windows is in dark mode opens a
+   recreation that is given dark, whatever the participant had.
+
+### Which values
+
+- The page's values at the instant: the first `web-preferences-sent`
+  record of the recorded page's view, with each later one for it merged
+  over it, up to the frame's basis. The document's page is the frame tree
+  node of its primary main frame navigation, as the panel's "Sent to the
+  page" group finds it.
+- The zoom: the latest `zoom-level-changed` record at or before the
+  instant for the tab (`temporary`), else for the page's host or scheme
+  and host, else for the default, else 100 percent.
+- The color maps, recorded from this stage (below).
+
+### The color maps (a new record)
+
+Chromium gives each page three maps of 67 colors, light, dark, and forced
+colors (`RendererColorId`, `ui/color/color_id.mojom`): the CSS system
+colors, such as `Canvas` and `ButtonText`, and the colors of native
+controls and scroll bars. It sends them when a view is created
+(`render_view_host_impl.cc`, line 573) and when they change
+(`WebContentsImpl::HandleColorRelatedStateChanges`,
+`web_contents_impl.cc`, lines 13075 to 13110), after the web preferences.
+The forced colors map holds the participant's contrast theme colors.
+
+They are not recorded today, so a recreation in forced colors can only
+take another palette: the recreation browser's own, from the viewing
+machine, or the generic one DevTools' forced colors emulation draws
+(`Page::EmulateForcedColors`, `page.cc`, line 592). Proposed: a record
+`color-maps-sent` on `browser.preferences` at protocol 0.57, at those two
+points, holding each map that differs from the view's last, as
+`web-preferences-sent` holds the fields that differ.
+
+### How they are applied
+
+In the recreation mode of the instrumented Chromium, in the renderer, as
+the recorded styles and geometry are:
+
+- The values are carried on the recreated document's root element in a
+  `data-a11y-recorded-preferences` attribute, as the other recorded
+  values are carried on their elements; DevTools' Elements pane shows it,
+  and the evidence panel says it was not an attribute of the recorded
+  page.
+- `WebViewImpl::UpdateWebPreferences` (`web_view_impl.cc`, line 3927)
+  and `WebViewImpl::UpdateRendererPreferences` (line 3789) replace each
+  recorded field with its recorded value before applying the
+  preferences, at the first application and at every later send from the
+  recreation browser, so a change on the viewing machine cannot undo it.
+- `Page::UpdateColorProviders` (`page.cc`) takes the recorded maps in
+  place of those sent.
+- The page's zoom is set to the recorded level; the place Blink takes the
+  zoom level from the browser is found in the checkout when this is
+  built.
+
+Media queries, `matchMedia()`, DevTools' rule matching, native controls,
+scroll bars, the focus ring, and the system colors then follow the
+participant's values. DevTools' emulation (`Emulation.setEmulatedMedia`)
+is not used: it sets media features only, its forced colors are the
+generic palette, and it has no font, focus ring, caret, or zoom setting.
+
+A child frame's document shares its page's values, as in Chromium. A
+popup's page, such as an open select list, is given its owner page's
+values.
+
+### The evidence panel
+
+The panel lists the values applied and the time of the record each came
+from. A recording made before protocol 0.56, or without the browser,
+says the page's preferences were not recorded and the recreation's own
+were used; one made before 0.57 says the same of the color maps.
+
+### Limits
+
+- Only the listed fields are applied; a preference Chromium gives the
+  page outside them is the recreation's.
+- Windows-level effects on the screen, such as Magnifier and color
+  filters, are not part of the page; the participant's view shows them.
+
+### Required tests
+
+- Unit tests: the page's values at a time, from its first send and later
+  ones; a document's page; the zoom chosen from host, temporary, and
+  default records; the `color-maps-sent` contract and validator; the
+  attribute written; the panel's lines, including a recording before
+  0.56 and one before 0.57.
+- Integration script tests (`chromium/test_integrate.py`): each new hook
+  applied once and refused on code it does not match.
+- On the target machine: a recording of the fixture page with the font
+  size, dark mode, a contrast theme, reduced motion, and a zoom of 125
+  percent each changed in turn, then a recreation at a frame after each,
+  with the viewing machine's settings the opposite: `matchMedia()` in the
+  Console answers as recorded, the scroll bars and controls have the
+  recorded scheme or contrast colors, and the Styles pane shows the
+  matching `@media` rules applying.
 
 ## Decisions
 
