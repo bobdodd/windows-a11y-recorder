@@ -934,7 +934,10 @@ record held `requestedPageColors` 2, not the default, with
 what the page showed, as the script does not ask, and a page colors
 change during a recording, which the build cannot make.
 
-Not checked yet: the player.
+The player, checked by the owner 2026-10-08 on the first recording: the
+Browser rows follow playback, with their change buttons and counts. On
+the page colors recording the Browser rows have no buttons, as designed,
+as nothing changed during it; the prepared values are its start.
 
 ### Page colors
 
