@@ -314,7 +314,12 @@ inline bool IsMapName(std::string_view name) {
 
 // Percent-encodes a text value as the attribute holds it.
 inline std::string EncodeRecreationPreferenceText(std::string_view text) {
-  static constexpr char kDigits[] = "0123456789ABCDEF";
+  // Each digit is worked out rather than looked up in a table, as
+  // Chromium's -Wunsafe-buffer-usage refuses indexing a C array (build of
+  // 2026-10-09).
+  const auto digit = [](unsigned value) {
+    return static_cast<char>(value < 10 ? '0' + value : 'A' + (value - 10));
+  };
   std::string encoded;
   for (const char character : text) {
     if (recreation_preferences_internal::IsUnreserved(character)) {
@@ -322,8 +327,8 @@ inline std::string EncodeRecreationPreferenceText(std::string_view text) {
     } else {
       const auto byte = static_cast<unsigned char>(character);
       encoded.push_back('%');
-      encoded.push_back(kDigits[byte / 16]);
-      encoded.push_back(kDigits[byte % 16]);
+      encoded.push_back(digit(byte / 16u));
+      encoded.push_back(digit(byte % 16u));
     }
   }
   return encoded;

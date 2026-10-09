@@ -1287,9 +1287,15 @@ Built 2026-10-08 to the design above, with these decisions and limits.
   bridge header's own test, `recreation_preferences_test.cc`; and
   `RecreationPreferencesIntegrationTests` in
   `chromium/test_integrate.py`, each hook applied once and refused on
-  code it does not match. Not yet run: the build in the owner's checkout
-  and the check on the target machine, with
-  `scripts/Test-RecreationPreferences.ps1`.
+  code it does not match. Not yet run: the check on the target machine,
+  with `scripts/Test-RecreationPreferences.ps1`.
+- The first build in the owner's checkout (9971bbb, 2026-10-09) stopped
+  in `recreation_preferences.h`: Chromium's `-Wunsafe-buffer-usage`
+  refuses indexing a C array, which its percent-encoding did with a table
+  of hexadecimal digits. The digits are now worked out instead. The header
+  is now also checked with clang and `-Wunsafe-buffer-usage -Werror`
+  before a package is made, which reproduced the two errors on the old
+  header and passes on the new one.
 
 ### The check on the target machine
 
