@@ -242,12 +242,14 @@ public sealed class RecreationPreferencesTests
         var notes = RecordedPreferences.Notes(values);
         Assert.Contains(notes, note => note.Contains("before protocol 0.57", StringComparison.Ordinal));
         Assert.Contains(notes, note => note.StartsWith("The page is given the recorded values of the", StringComparison.Ordinal));
-        Assert.Contains(notes, note => note.Contains("100 percent zoom", StringComparison.Ordinal));
+        // A zoom of 100 percent from no record is not noted, as nothing of
+        // it is applied.
+        Assert.DoesNotContain(notes, note => note.Contains("recorded zoom", StringComparison.Ordinal));
         Assert.DoesNotContain("color ", RecordedPreferences.AttributeText(values), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheAttributeHoldsEachFieldTheZoomAndEachColor()
+    public void TheAttributeHoldsEachFieldAndEachColorButNotTheZoom()
     {
         var values = Recording().PageValuesAt(12, "https://example.org/", 7 * Second);
         var text = RecordedPreferences.AttributeText(values);
@@ -259,10 +261,11 @@ public sealed class RecreationPreferencesTests
         Assert.Contains("field standardFontFamily t Times%20New%20Roman", entries);
         Assert.Contains("field textTrackTextSize t ", entries);
         Assert.Contains("field focusRingColor t %23FFE59700", entries);
-        Assert.Contains("zoom 2", entries);
+        // The zoom level is not given: its effect is in the layout zoom.
+        Assert.DoesNotContain(entries, entry => entry.StartsWith("zoom ", StringComparison.Ordinal));
         Assert.Contains("color light kColorCssSystemWindow FFFFFFFF", entries);
         Assert.Contains("color forcedColors kColorCssSystemWindow FFFFFF00", entries);
-        Assert.Equal(BrowserPreferenceSettings.Page.Count + 1 + 3 * 67, entries.Length);
+        Assert.Equal(BrowserPreferenceSettings.Page.Count + 3 * 67, entries.Length);
         Assert.Equal(entries.Length, entries.Distinct().Count());
     }
 
@@ -295,7 +298,7 @@ public sealed class RecreationPreferencesTests
         var fields = Assert.Single(notes, note => note.StartsWith("The page is given the recorded values of", StringComparison.Ordinal));
         Assert.Contains("from the record at 6.000 s", fields, StringComparison.Ordinal);
         Assert.Contains("from the record at 2.000 s", fields, StringComparison.Ordinal);
-        Assert.Contains(notes, note => note.Contains("host's recorded zoom, 144 percent, zoom level 2, from the host record at 4.000 s", StringComparison.Ordinal));
+        Assert.Contains(notes, note => note.Contains("recorded zoom at the frame was 144 percent, from the record at 4.000 s. It is not applied as a zoom level", StringComparison.Ordinal));
         Assert.Contains(notes, note => note == "The page is given the recorded forced colors color map, 67 colors, from the record at 6.000 s.");
         Assert.Contains(notes, note => note.Contains("was not an attribute of the recorded page", StringComparison.Ordinal));
         Assert.Contains(notes, note => note.Contains("a renderer process of its own", StringComparison.Ordinal));
@@ -303,82 +306,53 @@ public sealed class RecreationPreferencesTests
     }
 
     [Fact]
-    public void TheViewportIsEmulatedAtTheZoomedSize()
-    {
-        var viewport = new RecreationViewport(800, 600, 1.8, 1.8) { BrowserZoomFactor = 1.2 };
-        Assert.Equal(960, viewport.EmulatedWidth, 9);
-        Assert.Equal(720, viewport.EmulatedHeight, 9);
-        Assert.Equal(1.5, viewport.EmulatedDeviceScaleFactor, 9);
-        Assert.Equal((976, 800), RecreationControl.WindowSize(viewport, 16, 80));
-
-        Assert.Equal(800, viewport.ShownWidth, 9);
-        Assert.Equal(1.8, viewport.ShownDevicePixelRatio, 9);
-
-        // Zoomed to 125 percent after a checkpoint at 100 percent: the same
-        // window, so a narrower page and a larger devicePixelRatio.
-        var later = new RecreationViewport(800, 600, 1.5, 1.5) { BrowserZoomFactor = 1.25, CheckpointZoomFactor = 1.0 };
-        Assert.Equal(800, later.EmulatedWidth, 9);
-        Assert.Equal(600, later.EmulatedHeight, 9);
-        Assert.Equal(1.5, later.EmulatedDeviceScaleFactor, 9);
-        Assert.Equal(640, later.ShownWidth, 9);
-        Assert.Equal(480, later.ShownHeight, 9);
-        Assert.Equal(1.875, later.ShownDevicePixelRatio, 9);
-        Assert.Equal((816, 680), RecreationControl.WindowSize(later, 16, 80));
-
-        var plain = new RecreationViewport(800, 600, 1.5, 1.5);
-        Assert.Equal((816, 680), RecreationControl.WindowSize(plain, 16, 80));
-        Assert.Equal(1.5, plain.EmulatedDeviceScaleFactor, 9);
-    }
-
-    [Fact]
-    public void TheViewportFollowsTheLayoutZoomOfTheLatestChangeSet()
+    public void TheFrameIsItsRecordedSizeInScreenPixels()
     {
         // The owner's recording of 2026-10-09: a checkpoint at 200 percent
-        // text size, 932 by 409 CSS pixels at a ratio of 2, then Windows'
-        // text size set back to 100 percent, after which every change set
-        // names a layout zoom of 1 and no checkpoint was recorded.
+        // text size, 932 by 409 CSS pixels at a ratio of 2, so 1864 by 818
+        // screen pixels; then Windows' text size set back to 100 percent,
+        // after which every change set names a layout zoom of 1 and no
+        // checkpoint was recorded. The frame keeps its size in screen pixels.
+        var before = new RecreationViewport(932, 409, 2, 2) { FrameLayoutZoomFactor = 2 };
         var after = new RecreationViewport(932, 409, 2, 2) { FrameLayoutZoomFactor = 1 };
-        Assert.Equal(2, after.CheckpointScaleFactor, 9);
-        Assert.Equal(1, after.FrameScaleFactor, 9);
-        Assert.Equal(1864, after.EmulatedWidth, 9);
-        Assert.Equal(818, after.EmulatedHeight, 9);
-        Assert.Equal(1, after.EmulatedDeviceScaleFactor, 9);
+        foreach (var viewport in new[] { before, after })
+        {
+            Assert.Equal(1864, viewport.ScreenWidth, 9);
+            Assert.Equal(818, viewport.ScreenHeight, 9);
+            // On the owner's screen, at a scale factor of 1.
+            Assert.Equal(1864, viewport.WindowWidthAt(1), 9);
+            Assert.Equal(818, viewport.WindowHeightAt(1), 9);
+            Assert.Equal((1880, 898), RecreationControl.WindowSize(viewport, 16, 80, 1));
+        }
+        Assert.Equal(2, before.ShownLayoutZoomFactor, 9);
+        Assert.Equal(932, before.ShownWidth, 9);
+        Assert.Equal(409, before.ShownHeight, 9);
+        Assert.Equal(2, before.ShownDevicePixelRatio, 9);
+        Assert.Equal(1, after.ShownLayoutZoomFactor, 9);
         Assert.Equal(1864, after.ShownWidth, 9);
         Assert.Equal(818, after.ShownHeight, 9);
         Assert.Equal(1, after.ShownDevicePixelRatio, 9);
-        Assert.Equal(1, after.ShownLayoutZoomFactor, 9);
 
-        // Before the change, the change sets give the checkpoint's zoom.
-        var before = new RecreationViewport(932, 409, 2, 2) { FrameLayoutZoomFactor = 2 };
-        Assert.Equal(932, before.EmulatedWidth, 9);
-        Assert.Equal(2, before.EmulatedDeviceScaleFactor, 9);
-        Assert.Equal(2, before.ShownLayoutZoomFactor, 9);
-
-        // With a browser zoom, the frame's scale factor is its layout zoom
-        // over the zoom: 2.5 at 125 percent is a scale factor of 2.
-        var zoomed = new RecreationViewport(800, 600, 2.5, 2.5) { BrowserZoomFactor = 1.25, CheckpointZoomFactor = 1.25, FrameLayoutZoomFactor = 2.5 };
-        Assert.Equal(2, zoomed.FrameScaleFactor, 9);
-        Assert.Equal(1000, zoomed.EmulatedWidth, 9);
-        Assert.Equal(800, zoomed.ShownWidth, 9);
-        Assert.Equal(2.5, zoomed.ShownLayoutZoomFactor, 9);
-
-        // On the owner's screen, at a scale factor of 1, the page is sized
-        // in screen pixels, 1864 wide, both before and after the change,
-        // as the window kept its size; at 1.5 it is 1242.67.
-        Assert.Equal(1864, before.WindowWidthAt(1), 9);
-        Assert.Equal(818, before.WindowHeightAt(1), 9);
-        Assert.Equal(1864, after.WindowWidthAt(1), 9);
-        Assert.Equal(818, after.WindowHeightAt(1), 9);
+        // On a screen at 1.5, the same frame is fewer device-independent
+        // pixels; a scale factor that is not above 0 is taken as 1.
         Assert.Equal(1864 / 1.5, before.WindowWidthAt(1.5), 9);
-        Assert.Equal((1880, 898), RecreationControl.WindowSize(before, 16, 80, 1));
-        // A scale factor that is not above 0 is taken as the frame's.
-        Assert.Equal(932, before.WindowWidthAt(0), 9);
-        Assert.Equal(before.EmulatedWidth, before.WindowWidthAt(before.FrameScaleFactor), 9);
+        Assert.Equal(1864, before.WindowWidthAt(0), 9);
+        Assert.Equal(1864, before.WindowWidthAt(double.NaN), 9);
 
-        // With no change set, the checkpoint's.
+        // A page zoomed to 125 percent on a screen at 1.5: the window is
+        // the same, and the page is laid out at the change set's 1.875.
+        var zoomed = new RecreationViewport(800, 600, 1.5, 1.5) { FrameLayoutZoomFactor = 1.875 };
+        Assert.Equal(1200, zoomed.ScreenWidth, 9);
+        Assert.Equal(640, zoomed.ShownWidth, 9);
+        Assert.Equal(480, zoomed.ShownHeight, 9);
+        Assert.Equal(1.875, zoomed.ShownDevicePixelRatio, 9);
+        Assert.Equal((816, 680), RecreationControl.WindowSize(zoomed, 16, 80, 1.5));
+
+        // With no change set, the checkpoint's layout zoom.
         var none = new RecreationViewport(800, 600, 1.5, 1.5);
         Assert.Equal(1.5, none.ShownLayoutZoomFactor, 9);
-        Assert.Equal(800, none.EmulatedWidth, 9);
+        Assert.Equal(800, none.ShownWidth, 9);
+        Assert.Equal((816, 680), RecreationControl.WindowSize(none, 16, 80, 1.5));
     }
 
     [Fact]

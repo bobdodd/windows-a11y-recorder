@@ -20693,19 +20693,27 @@ std::optional<double> RecorderRecordedZoomLevel(WebLocalFrameImpl* frame);
 """
 
 
-def patch_blink_frame_widget_zoom(path: Path) -> None:
-    """Stage 3: a recreated page takes the recorded zoom level."""
+def remove_blink_frame_widget_zoom(path: Path) -> None:
+    """Removes the stage 3 zoom level hook from a checkout that holds it.
+
+    Revised with the owner on 2026-10-09 ("The recorded layout zoom" in
+    docs/architecture/accessibility-preferences.md): the recorded browser
+    zoom level is not applied, as its effect on the page is in the recorded
+    layout zoom factor, which the layout zoom hook applies. The hook is
+    restored to its anchor and its declaration removed, so a checkout patched
+    by an earlier revision is left as a fresh one is. RecorderRecordedZoomLevel
+    stays defined in web_view_impl.cc, called by nothing.
+    """
     text = read_source(path)
-    text = insert_before_once(
-        text,
-        BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR,
-        BLINK_FRAME_WIDGET_ZOOM_DECLARATION,
-        BLINK_FRAME_WIDGET_ZOOM_DECLARATION_MARKER,
-        path,
-    )
-    text = apply_cookie_hook(
-        text, BLINK_FRAME_WIDGET_ZOOM_ANCHOR, BLINK_FRAME_WIDGET_ZOOM_HOOK, path
-    )
+    if text.count(BLINK_FRAME_WIDGET_ZOOM_HOOK) > 1:
+        raise RuntimeError(f"{path}: the zoom level hook is present more than once")
+    text = text.replace(BLINK_FRAME_WIDGET_ZOOM_HOOK, BLINK_FRAME_WIDGET_ZOOM_ANCHOR, 1)
+    text = text.replace(BLINK_FRAME_WIDGET_ZOOM_DECLARATION, "", 1)
+    if "RecorderRecordedZoomLevel(" in text:
+        raise RuntimeError(
+            f"{path}: a zoom level hook remains that is not the one written by "
+            "stage 3"
+        )
     write_patched(path, text)
 
 
@@ -21256,7 +21264,7 @@ def main() -> int:
         blink_core / "exported" / "web_view_impl.cc"
     )
     patch_blink_page_color_maps(blink_core / "page" / "page.cc")
-    patch_blink_frame_widget_zoom(
+    remove_blink_frame_widget_zoom(
         blink_core / "frame" / "web_frame_widget_impl.cc"
     )
     patch_blink_web_view_layout_zoom(

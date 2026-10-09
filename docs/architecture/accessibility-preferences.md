@@ -1389,6 +1389,39 @@ machine.
    inline box it lays out was recorded at another size, so a mismatch is
    reported, not a renderer crash. `integrate.py` upgrades a checkout that
    holds the earlier fragment items hook.
+
+Revised with the owner on 2026-10-09, after the check of ae9f785 was set
+aside: the frame is exactly its recorded size, and the page is the page.
+
+1. The frame. The recreation's page area is the recorded frame's size in
+   screen pixels, the latest layout checkpoint's CSS size times its
+   `devicePixelRatio`, in the viewing machine's device-independent pixels
+   at its own scale factor (the blank tab's `devicePixelRatio`). Windows'
+   text size and the browser zoom do not change the window's size, only
+   how the page inside it is laid out, so nothing else scales it.
+2. Nothing is emulated: `Emulation.setDeviceMetricsOverride` is no longer
+   sent, and the recorded browser zoom level is no longer applied. Its
+   effect on the page is in the recorded layout zoom factor, which the
+   renderer is still given, as the recorded geometry is in its units. The
+   page's CSS size is the frame's screen size over that layout zoom, and
+   its `devicePixelRatio` that layout zoom. `integrate.py` removes the zoom
+   level hook from `WebFrameWidgetImpl::SetZoomInternal` in a checkout that
+   holds it (`remove_blink_frame_widget_zoom`), and the builder no longer
+   writes the `zoom` entry; the renderer still reads one, from older
+   recreations, and `RecorderRecordedZoomLevel` stays defined, called by
+   nothing. The evidence panel notes the recorded zoom, and that it is not
+   applied as a zoom level.
+3. A frame the screen cannot hold. It was proposed that the page then keep
+   its recorded size and the window scroll. Without emulation the page's
+   size is the window's, so a window the screen cannot hold gives a
+   smaller page, which the Viewport as shown section reports as a
+   difference. Keeping the recorded size there would need the size alone
+   to be emulated; that is not built, and is for the owner to decide.
+
+The target machine script (`scripts/Test-RecreationPreferences.ps1`) now
+expects, at each step, the latest layout change set's layout zoom as the
+page's `devicePixelRatio` and the frame's screen size over it as its
+`innerWidth` and `innerHeight`, which its Console line reads.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the
@@ -1446,7 +1479,9 @@ Agreed 2026-10-07:
    preference that changes how the page is drawn or laid out, such as the
    value of a media query, forced colors, a font family or size, or the
    zoom level, is applied to the recreation as the page was given it at
-   that instant. Applying them is a change to
+   that instant. Revised 2026-10-09: the zoom level is applied through its
+   effect on layout, the recorded layout zoom factor, not as a zoom level
+   ("The recorded layout zoom"). Applying them is a change to
    [page recreation](page-recreation.md), designed with the browser part
    of this work; a preference the recreation cannot apply is listed as a
    difference, not left at the recreation browser's value.

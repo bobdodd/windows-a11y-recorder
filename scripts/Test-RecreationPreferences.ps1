@@ -170,6 +170,7 @@ function Invoke-Analysis([string]$results, [string]$events) {
     $allMaps = @($records | Where-Object { $_.EventType -eq 'color-maps-sent' })
     $zooms = @($records | Where-Object { $_.EventType -eq 'zoom-level-changed' })
     $layouts = @($records | Where-Object { $_.EventType -eq 'layout-checkpoint-started' -and $tokens -contains [string]$_.Payload.context.documentToken })
+    $changeSets = @($records | Where-Object { $_.EventType -eq 'layout-changes-started' -and $tokens -contains [string]$_.Payload.context.documentToken })
     Say ("Records: {0} color-maps-sent ({1} to the fixture page), {2} sends to it, {3} zoom changes, {4} layout walks of it" -f
         $allMaps.Count, $maps.Count, $sends.Count, $zooms.Count, $layouts.Count)
     $firstMaps = @($maps | Where-Object { $_.Payload.first })
@@ -199,7 +200,7 @@ function Invoke-Analysis([string]$results, [string]$events) {
         if ($last.Count -eq 0) { continue }
         $time = $last[0].Time
         # The values at that time: the fields last sent, the latest maps,
-        # and the latest layout walk's device pixel ratio.
+        # the latest layout walk, and the latest layout change set.
         $fields = @{}
         foreach ($send in @($sends | Where-Object { $_.Time -le $time })) {
             foreach ($field in $send.Payload.fields.PSObject.Properties) { $fields[$field.Name] = $field.Value }
@@ -209,16 +210,29 @@ function Invoke-Analysis([string]$results, [string]$events) {
             foreach ($map in $record.Payload.maps.PSObject.Properties) { $mapAt[$map.Name] = $map.Value }
         }
         $layout = @($layouts | Where-Object { $_.Time -le $time } | Select-Object -Last 1)
-        # The participant's devicePixelRatio: a layout walk records it with
-        # the zoom of its own time, which may be older than the step's, so
-        # the screen's scale factor is the walk's ratio over the zoom then,
-        # and the ratio at the step is that times the zoom now. The fixture
-        # page is a file, so only the default zoom applies to it.
+        # The page as the recreation shows it ("The recorded layout zoom" in
+        # docs/architecture/accessibility-preferences.md, as revised on
+        # 2026-10-09): the frame is the latest layout walk's size in screen
+        # pixels, its CSS size times its devicePixelRatio, and the page is
+        # laid out at the layout zoom of the latest layout change set, which
+        # follows the zoom and text size, or the walk's when there is none.
+        # Nothing is emulated, so the page's devicePixelRatio is that layout
+        # zoom and its CSS size the screen size over it. The fixture page is
+        # a file, so only the default zoom applies to it; it is listed for
+        # reference, and is not applied as a zoom level.
         $zoomNow = Get-DefaultZoomFactor $zooms $time
+        $changeSet = @($changeSets | Where-Object { $_.Time -le $time } | Select-Object -Last 1)
+        $layoutZoom = ''
         $expectedDpr = ''
-        if ($layout.Count) {
-            $zoomAtWalk = Get-DefaultZoomFactor $zooms $layout[0].Time
-            $expectedDpr = [Math]::Round([double]$layout[0].Payload.devicePixelRatio / $zoomAtWalk * $zoomNow, 4)
+        $expectedWidth = ''
+        $expectedHeight = ''
+        if ($changeSet.Count -and $null -ne $changeSet[0].Payload.layoutZoomFactor) { $layoutZoom = [double]$changeSet[0].Payload.layoutZoomFactor }
+        elseif ($layout.Count) { $layoutZoom = [double]$layout[0].Payload.layoutZoomFactor }
+        if ($layout.Count -and $layoutZoom) {
+            $walkDpr = [double]$layout[0].Payload.devicePixelRatio
+            $expectedDpr = [Math]::Round($layoutZoom, 4)
+            $expectedWidth = [Math]::Round([double]$layout[0].Payload.viewport.width * $walkDpr / $layoutZoom, 2)
+            $expectedHeight = [Math]::Round([double]$layout[0].Payload.viewport.height * $walkDpr / $layoutZoom, 2)
         }
         $dark = [string]$fields['preferredColorScheme'] -eq 'dark'
         $forced = [bool]$fields['inForcedColors']
@@ -234,7 +248,10 @@ function Invoke-Analysis([string]$results, [string]$events) {
             fontSize = "$($fields['defaultFontSize'])px"
             canvas = $canvas
             zoomPercent = [Math]::Round($zoomNow * 100, 2)
+            layoutZoom = $layoutZoom
             dpr = $expectedDpr
+            width = $expectedWidth
+            height = $expectedHeight
             layoutWalk = if ($layout.Count) { Format-Time $layout[0].Time } else { '' }
             walkDpr = if ($layout.Count) { [double]$layout[0].Payload.devicePixelRatio } else { '' }
             sendsInStep = $sendsIn.Count
@@ -284,7 +301,7 @@ function Resolve-Session([string]$id) {
 $ConsoleLine = "(()=>{const d=document.createElement('div');d.style.cssText='position:absolute;font-size:medium;background:Canvas';" +
     "document.documentElement.append(d);const s=getComputedStyle(d);const r={dark:matchMedia('(prefers-color-scheme: dark)').matches," +
     "forced:matchMedia('(forced-colors: active)').matches,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches," +
-    "fontSize:s.fontSize,canvas:s.backgroundColor,dpr:devicePixelRatio," +
+    "fontSize:s.fontSize,canvas:s.backgroundColor,dpr:devicePixelRatio,width:innerWidth,height:innerHeight," +
     "attribute:document.documentElement.hasAttribute('data-a11y-recorded-preferences')};d.remove();copy(JSON.stringify(r));return r})()"
 
 function Invoke-Recreations([string]$results) {
@@ -324,6 +341,8 @@ function Invoke-Recreations([string]$results) {
             if ([string]$answer.fontSize -ne $item.fontSize) { $differences.Add("font size $($answer.fontSize), recorded $($item.fontSize)") }
             if ($item.canvas -and [string]$answer.canvas -ne $item.canvas) { $differences.Add("Canvas $($answer.canvas), recorded $($item.canvas)") }
             if ($item.dpr -and [Math]::Abs([double]$answer.dpr - [double]$item.dpr) -gt 0.001) { $differences.Add("devicePixelRatio $($answer.dpr), recorded $($item.dpr)") }
+            if ($item.width -and [Math]::Abs([double]$answer.width - [double]$item.width) -gt 1) { $differences.Add("innerWidth $($answer.width), recorded $($item.width)") }
+            if ($item.height -and [Math]::Abs([double]$answer.height - [double]$item.height) -gt 1) { $differences.Add("innerHeight $($answer.height), recorded $($item.height)") }
             if (-not [bool]$answer.attribute) { $differences.Add('the root has no data-a11y-recorded-preferences attribute') }
             $styles = Read-Host ("In DevTools' Elements pane, select the body element. Does the Styles pane show the @media rules that " +
                 "match the recorded values applying, and not the others (for example @media (prefers-color-scheme: dark) applying " +

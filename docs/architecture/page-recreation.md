@@ -948,6 +948,13 @@ viewport is emulated at the recorded CSS size times the zoom factor and a
 device scale factor of the recorded device pixel ratio over it, and the
 layout zoom factor is no longer listed as a difference.
 
+Revised 2026-10-09 ("The recorded layout zoom" in
+[accessibility preferences](accessibility-preferences.md)): the frame is
+its recorded size in screen pixels, nothing is emulated, and the zoom level
+is not applied as a zoom level. The page is laid out at the recorded layout
+zoom factor at the frame, which the renderer is given in the same
+attribute, so that the recorded geometry is in its own layout units.
+
 ### Leaving the recreation
 
 A recreation is a static copy of a recorded page, but its links and forms
@@ -2535,6 +2542,11 @@ Built on 2026-10-01, not yet run on the target machine.
   window the screen cannot hold keeps the recorded layout. The owner
   reported on 2026-10-01 that with revision 2fa7988 the window shows the
   whole page.
+  Revised 2026-10-09: the viewport is no longer emulated; the window's
+  page area is the recorded frame's size in screen pixels, at the viewing
+  machine's scale factor, so a window the screen cannot hold gives a
+  smaller page, which the evidence panel's Viewport as shown section
+  reports.
 
 Tests at this stage:
 

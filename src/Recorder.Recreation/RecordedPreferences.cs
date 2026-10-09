@@ -19,8 +19,8 @@ public static class RecordedPreferences
     public const string AttributeName = "data-a11y-recorded-preferences";
 
     /// <summary>
-    /// The attribute's text: each field as "field NAME TYPE VALUE", the zoom
-    /// as "zoom LEVEL", and each color as "color MAP NAME AARRGGBB",
+    /// The attribute's text: each field as "field NAME TYPE VALUE" and each
+    /// color as "color MAP NAME AARRGGBB",
     /// separated by "; ". A value not of its field's kind, and a color not
     /// written "#AARRGGBB", is left out. Empty when there is nothing to
     /// apply.
@@ -47,10 +47,9 @@ public static class RecordedPreferences
             }
         }
 
-        if (values?.Zoom is { } zoom && double.IsFinite(zoom.ZoomLevel))
-        {
-            entries.Add("zoom " + zoom.ZoomLevel.ToString("R", CultureInfo.InvariantCulture));
-        }
+        // The recorded browser zoom level is not given (revised with the
+        // owner on 2026-10-09): its effect on the page is in the recorded
+        // layout zoom factor.
 
         if (layoutZoomFactor is { } layoutZoom && double.IsFinite(layoutZoom) && layoutZoom > 0)
         {
@@ -131,7 +130,7 @@ public static class RecordedPreferences
         {
             return
             [
-                "The page's preferences were not recorded, as in a recording made before protocol 0.56 or without the browser, so the recreation is given the recreation browser's own preferences, color maps, and zoom, those of the viewing machine: its media queries, native controls, scroll bars, and system colors may differ from the participant's."
+                "The page's preferences were not recorded, as in a recording made before protocol 0.56 or without the browser, so the recreation is given the recreation browser's own preferences and color maps, those of the viewing machine: its media queries, native controls, scroll bars, and system colors may differ from the participant's."
             ];
         }
 
@@ -161,18 +160,10 @@ public static class RecordedPreferences
             }
         }
 
-        if (values.Zoom is { } zoom)
+        if (values.Zoom is { } zoom && zoom.Source != "none")
         {
             var percent = (zoom.Factor * 100).ToString("0.#", CultureInfo.InvariantCulture);
-            var level = zoom.ZoomLevel.ToString("0.###", CultureInfo.InvariantCulture);
-            notes.Add(zoom.Source switch
-            {
-                "none" => "The page is shown at 100 percent zoom, zoom level 0: no zoom record named its host and no default zoom was recorded by the frame.",
-                "default" => $"The page is shown at the recorded default zoom, {percent} percent, zoom level {level}, from the record at {Seconds(zoom.Time)} s; no zoom record set its host's own level.",
-                "temporary" => $"The page is shown at the tab's recorded zoom, {percent} percent, zoom level {level}, from the record at {Seconds(zoom.Time)} s. The record names the page's host but not its tab, so it is taken only when made after the page was committed.",
-                _ => $"The page is shown at its host's recorded zoom, {percent} percent, zoom level {level}, from the {zoom.Source} record at {Seconds(zoom.Time)} s."
-            });
-            notes.Add("The recreation's viewport is emulated at the recorded CSS size times the zoom factor and a device scale factor of the recorded device pixel ratio over it, so the page has the recorded CSS size and devicePixelRatio.");
+            notes.Add($"The page's recorded zoom at the frame was {percent} percent, from the record at {Seconds(zoom.Time)} s. It is not applied as a zoom level: its effect on the page's layout is in the recorded layout zoom factor the page is laid out at, and the page reports the recreation browser's own zoom level.");
         }
 
         if (!values.ColorMapsRecorded)

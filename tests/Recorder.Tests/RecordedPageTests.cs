@@ -853,8 +853,8 @@ public sealed class RecreationControlTests : IDisposable
     [Fact]
     public void TheWindowIsSizedSoItsPageAreaIsTheRecordedViewport()
     {
-        Assert.Equal((1266, 795), RecreationControl.WindowSize(new RecreationViewport(1250, 712, 1.5, 1.5), 16, 82.4));
-        Assert.Equal((800, 600), RecreationControl.WindowSize(new RecreationViewport(800, 600, 1, 1), -2, 0));
+        Assert.Equal((1266, 795), RecreationControl.WindowSize(new RecreationViewport(1250, 712, 1.5, 1.5), 16, 82.4, 1.5));
+        Assert.Equal((800, 600), RecreationControl.WindowSize(new RecreationViewport(800, 600, 1, 1), -2, 0, 1));
     }
 
     [Fact]

@@ -10107,8 +10107,10 @@ class RecreationPreferencesIntegrationTests(unittest.TestCase):
             INTEGRATE.patch_blink_page_color_maps,
         )
 
-    def test_a_recreated_page_takes_the_recorded_zoom_level(self):
-        source = (
+    def test_the_zoom_level_hook_is_removed_from_a_checkout_that_holds_it(self):
+        # Revised with the owner on 2026-10-09: the recorded zoom level is
+        # not applied, its effect being in the recorded layout zoom.
+        fresh = (
             "namespace blink {\n\n"
             + INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR
             + "  SetZoomInternal(zoom_level, css_zoom_factor_);\n}\n\n"
@@ -10118,24 +10120,27 @@ class RecreationPreferencesIntegrationTests(unittest.TestCase):
             + "  bool zoom_changed = zoom_level != zoom_level_;\n}\n\n"
             "}  // namespace blink\n"
         )
-        first = self.patch_twice(
-            "web_frame_widget_impl.cc", source, INTEGRATE.patch_blink_frame_widget_zoom
+        patched = fresh.replace(
+            INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR,
+            INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION
+            + INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION_ANCHOR,
+        ).replace(
+            INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_ANCHOR,
+            INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_HOOK,
         )
-        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_HOOK))
-        self.assertEqual(1, first.count(INTEGRATE.BLINK_FRAME_WIDGET_ZOOM_DECLARATION))
-        # The recorded level wins over the one sent and the testing one.
-        self.assertLess(
-            first.index("zoom_level = zoom_level_for_testing_;"),
-            first.index("zoom_level = *recorder_zoom;"),
-        )
-        self.assertLess(
-            first.index("zoom_level = *recorder_zoom;"),
-            first.index("bool zoom_changed"),
-        )
+        self.assertIn("RecorderRecordedZoomLevel(", patched)
+        for source in (patched, fresh):
+            with self.subTest(fresh=source == fresh):
+                result = self.patch_twice(
+                    "web_frame_widget_impl.cc",
+                    source,
+                    INTEGRATE.remove_blink_frame_widget_zoom,
+                )
+                self.assertEqual(fresh, result)
         self.refuses(
             "web_frame_widget_impl.cc",
-            source.replace("zoom_level_for_testing_ != -INFINITY", "HasZoomLevelForTesting()"),
-            INTEGRATE.patch_blink_frame_widget_zoom,
+            patched.replace("zoom_level = *recorder_zoom;", "zoom_level = *recorder_zoom + 0;"),
+            INTEGRATE.remove_blink_frame_widget_zoom,
         )
 
     def test_a_recreated_page_is_laid_out_at_the_recorded_layout_zoom(self):
@@ -10155,7 +10160,7 @@ class RecreationPreferencesIntegrationTests(unittest.TestCase):
         )
 
         def both(path):
-            INTEGRATE.patch_blink_frame_widget_zoom(path)
+            INTEGRATE.remove_blink_frame_widget_zoom(path)
             INTEGRATE.patch_blink_frame_widget_layout_zoom(path)
 
         first = self.patch_twice("web_frame_widget_impl.cc", source, both)
@@ -10250,7 +10255,7 @@ class RecreationPreferencesIntegrationTests(unittest.TestCase):
             "patch_content_web_contents_color_maps(",
             "patch_blink_web_view_preferences(",
             "patch_blink_page_color_maps(",
-            "patch_blink_frame_widget_zoom(",
+            "remove_blink_frame_widget_zoom(",
             "patch_blink_web_view_layout_zoom(",
             "patch_blink_frame_widget_layout_zoom(",
             "patch_blink_html_element_preferences(",

@@ -1805,12 +1805,7 @@ public partial class MainWindow : Window
                             documents.PageFrameTreeNodeIdOf(chosen.Key),
                             chosen.Url,
                             found.Basis.CutTime);
-                        // The zoom at the layout checkpoint the viewport
-                        // comes from, which may be older than the frame's.
-                        var checkpointZoom = found.State.Viewport is { } checkpoint
-                            ? browserPreferences.PageValuesAt(documents.PageFrameTreeNodeIdOf(chosen.Key), chosen.Url, checkpoint.Time).Zoom
-                            : null;
-                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames, preferences: pageValues, checkpointZoom: checkpointZoom);
+                        var written = RecordedPage.Content(found.State, chosen.Url, frame, found.Basis.CutTime, basis, resources, popups, frames: frames, preferences: pageValues);
                         timings.Add(new RecreationTiming("Writing the page", Math.Round(clock.Elapsed.TotalMilliseconds, 1)));
                         return written;
                     }
