@@ -1301,6 +1301,20 @@ Built 2026-10-08 to the design above, with these decisions and limits.
   `chromium/test_integrate.py`, each hook applied once and refused on
   code it does not match. Not yet run: the check on the target machine,
   with `scripts/Test-RecreationPreferences.ps1`.
+- The owner's recording of 2026-10-09, with Windows text size at 200
+  percent and then 100 percent, played correctly, but a recreation at a
+  frame at 200 percent ended in Chromium's "Aw, Snap!" page with
+  `STATUS_BREAKPOINT`, a renderer stopping on a failed check. The build's
+  checks include DCHECKs (`is_debug = false` without `is_official_build`).
+  In this Chromium the text size multiplies the device scale factor
+  (`GetScaleFactorsForDPI` in `ui/display/win/screen_win.cc`), so a page
+  at 200 percent records twice the `devicePixelRatio`, and Windows' system
+  font heights, recorded in `RendererPreferences`, change too. The cause is
+  not yet known. Each recreation browser now writes Chromium's log
+  (`--enable-logging --log-file`) to
+  `%LOCALAPPDATA%\Windows A11y Recorder\recreations\logs`, named for the
+  recreation and kept after it closes (the newest 20), so a failed check
+  is reported with its file, line, and stack.
 - The script's first analysis (2026-10-09) stopped formatting a time:
   Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
   recording's nanoseconds overflow. Both arguments are now `long`, and the

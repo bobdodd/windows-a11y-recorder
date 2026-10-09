@@ -198,6 +198,35 @@ public sealed class RecreationTests : IDisposable
     }
 
     [Fact]
+    public void TheRecreationBrowsersLogIsKeptBesideItsDirectory()
+    {
+        var recreations = Path.Combine(_directory, "recreations");
+        var log = RecreationBrowser.LogPathFor(Path.Combine(recreations, "abc"));
+        Assert.Equal(Path.Combine(Path.GetFullPath(recreations), RecreationBrowser.LogFolder, "abc.log"), log);
+        Assert.True(Directory.Exists(Path.GetDirectoryName(log)));
+
+        var arguments = RecreationBrowser.CreateStartInfo("chrome.exe", "profile", "extension", logPath: log).ArgumentList.ToArray();
+        Assert.Contains("--enable-logging", arguments);
+        Assert.Contains($"--log-file={log}", arguments);
+        Assert.Equal("about:blank", arguments[^1]);
+        Assert.DoesNotContain("--enable-logging", RecreationBrowser.CreateStartInfo("chrome.exe", "profile", "extension").ArgumentList);
+
+        // Only the newest logs are kept.
+        var logs = Path.GetDirectoryName(log)!;
+        for (var index = 0; index < 25; index++)
+        {
+            var path = Path.Combine(logs, $"old{index}.log");
+            File.WriteAllText(path, "log");
+            File.SetLastWriteTimeUtc(path, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMinutes(index));
+        }
+        RecreationBrowser.LogPathFor(Path.Combine(recreations, "def"));
+        var kept = Directory.GetFiles(logs, "*.log");
+        Assert.Equal(19, kept.Length);
+        Assert.Contains(Path.Combine(logs, "old24.log"), kept);
+        Assert.DoesNotContain(Path.Combine(logs, "old0.log"), kept);
+    }
+
+    [Fact]
     public async Task ARecreationIsNotOpenedWithoutTheBrowser()
     {
         await Assert.ThrowsAsync<FileNotFoundException>(async () =>

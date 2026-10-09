@@ -88,11 +88,41 @@ public sealed class RecreationBrowser : IAsyncDisposable
 
     public const string DevToolsPortFile = "DevToolsActivePort";
 
+    public const string LogFolder = "logs";
+
+    private const int KeptLogs = 20;
+
+    // A recreation's Chromium log, kept after its directory is removed: in
+    // a "logs" folder beside it, named for it. The newest logs are kept.
+    public static string LogPathFor(string directory)
+    {
+        var full = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var logs = Path.Combine(Path.GetDirectoryName(full) ?? full, LogFolder);
+        Directory.CreateDirectory(logs);
+        foreach (var old in new DirectoryInfo(logs).GetFiles("*.log")
+                     .OrderByDescending(file => file.LastWriteTimeUtc)
+                     .Skip(KeptLogs - 1))
+        {
+            try
+            {
+                old.Delete();
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+        return Path.Combine(logs, Path.GetFileName(full) + ".log");
+    }
+
     public static ProcessStartInfo CreateStartInfo(
         string executablePath,
         string profileDirectory,
         string extensionDirectory,
-        IEnumerable<string>? extraArguments = null)
+        IEnumerable<string>? extraArguments = null,
+        string? logPath = null)
     {
         var result = new ProcessStartInfo
         {
@@ -119,6 +149,14 @@ public sealed class RecreationBrowser : IAsyncDisposable
         // Slice 4a: a page recorded at an http address is served at that
         // address, so the browser is kept from upgrading it to https first.
         result.ArgumentList.Add("--disable-features=HttpsUpgrades");
+        // Chromium's own log, renderers' included, so a renderer that stops
+        // on a failed check says which (a recreation's "Aw, Snap!" with
+        // STATUS_BREAKPOINT on the target machine, 2026-10-09).
+        if (!string.IsNullOrWhiteSpace(logPath))
+        {
+            result.ArgumentList.Add("--enable-logging");
+            result.ArgumentList.Add($"--log-file={Path.GetFullPath(logPath)}");
+        }
         foreach (var argument in extraArguments ?? [])
         {
             result.ArgumentList.Add(argument);
@@ -152,7 +190,8 @@ public sealed class RecreationBrowser : IAsyncDisposable
         var extension = Path.Combine(directory, ExtensionFolder);
         WriteProfile(profile);
         WriteExtension(extension, server.EvidenceAddress);
-        var process = Process.Start(CreateStartInfo(executablePath, profile, extension, extraArguments))
+        var log = LogPathFor(directory);
+        var process = Process.Start(CreateStartInfo(executablePath, profile, extension, extraArguments, log))
             ?? throw new InvalidOperationException("The instrumented Chromium did not start.");
         return new RecreationBrowser(process, directory);
     }
