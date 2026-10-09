@@ -1268,6 +1268,18 @@ Built 2026-10-08 to the design above, with these decisions and limits.
   sized for that, so the zoomed page has the recorded CSS size and
   `devicePixelRatio`. The note that browser zoom is not set is written
   only when no zoom was recorded.
+- Corrected 2026-10-09, found by reviewing the target machine script after
+  the owner's first recording: Chromium's `devicePixelRatio` includes the
+  browser zoom (`LocalFrame::DevicePixelRatio` is the layout zoom factor),
+  so a layout checkpoint's size and ratio are those of the zoom at the
+  checkpoint, which may be older than the frame's. The viewport is now
+  emulated at the checkpoint's CSS size times the zoom at the checkpoint,
+  with a device scale factor of its ratio over that zoom, and the
+  renderer's zoom at the frame then gives the page the CSS size and
+  `devicePixelRatio` it had, as the same window zoomed. A checkpoint before
+  any zoom record counts as 100 percent. The evidence panel says when the
+  two zooms differ, with the size and ratio shown. The script's expected
+  `devicePixelRatio` is worked out the same way.
 - The evidence panel lists each value with the time of its record, the
   zoom and where it came from, each map, that the attribute was not part
   of the recorded page, and the limits: a recording before 0.56, or before
@@ -1289,6 +1301,10 @@ Built 2026-10-08 to the design above, with these decisions and limits.
   `chromium/test_integrate.py`, each hook applied once and refused on
   code it does not match. Not yet run: the check on the target machine,
   with `scripts/Test-RecreationPreferences.ps1`.
+- The script's first analysis (2026-10-09) stopped formatting a time:
+  Windows PowerShell chose `Math.Max(int, int)` for a literal 0, which a
+  recording's nanoseconds overflow. Both arguments are now `long`, and the
+  analysis can be run again on exported events with `-EventsPath` alone.
 - The first build in the owner's checkout (9971bbb, 2026-10-09) stopped
   in `recreation_preferences.h`: Chromium's `-Wunsafe-buffer-usage`
   refuses indexing a C array, which its percent-encoding did with a table

@@ -644,23 +644,42 @@ public sealed class RecreationControl : IAsyncDisposable
     }
 }
 
-// The recorded viewport the recreation is shown at, in CSS pixels. From
-// accessibility preferences stage 3 the instrumented renderer zooms the page
-// by the recorded browser zoom factor, so the viewport is emulated at the
-// CSS size times the factor in device-independent pixels, at a device scale
-// factor of the recorded device pixel ratio over the factor: the page then
-// has the recorded CSS size and devicePixelRatio.
+// The recorded viewport the recreation is shown at, in CSS pixels, from the
+// page's latest layout checkpoint. From accessibility preferences stage 3
+// the instrumented renderer zooms the page by the recorded browser zoom
+// factor at the frame. Chromium's devicePixelRatio includes the browser
+// zoom (LocalFrame::DevicePixelRatio), so the checkpoint's size and ratio
+// are those of the zoom at the checkpoint: the window's size in
+// device-independent pixels is the CSS size times that zoom, and the
+// screen's scale factor the ratio over it. The viewport is emulated at those,
+// and the renderer's zoom at the frame then gives the page the CSS size and
+// devicePixelRatio it had at the frame, also when the zoom changed after the
+// checkpoint (found in the owner's check of 2026-10-09).
 public sealed record RecreationViewport(double Width, double Height, double DevicePixelRatio, double LayoutZoomFactor)
 {
     /// <summary>The recorded browser zoom factor the page is shown at; 1 when none is applied.</summary>
     public double BrowserZoomFactor { get; init; } = 1.0;
 
+    /// <summary>The recorded browser zoom factor at the checkpoint; when none is given, that of the frame.</summary>
+    public double? CheckpointZoomFactor { get; init; }
+
+    private double AtCheckpoint => CheckpointZoomFactor ?? BrowserZoomFactor;
+
     /// <summary>The emulated width, in device-independent pixels.</summary>
-    public double EmulatedWidth => Width * BrowserZoomFactor;
+    public double EmulatedWidth => Width * AtCheckpoint;
 
     /// <summary>The emulated height, in device-independent pixels.</summary>
-    public double EmulatedHeight => Height * BrowserZoomFactor;
+    public double EmulatedHeight => Height * AtCheckpoint;
 
     /// <summary>The emulated device scale factor.</summary>
-    public double EmulatedDeviceScaleFactor => DevicePixelRatio / BrowserZoomFactor;
+    public double EmulatedDeviceScaleFactor => DevicePixelRatio / AtCheckpoint;
+
+    /// <summary>The page's CSS width once the renderer zooms it.</summary>
+    public double ShownWidth => EmulatedWidth / BrowserZoomFactor;
+
+    /// <summary>The page's CSS height once the renderer zooms it.</summary>
+    public double ShownHeight => EmulatedHeight / BrowserZoomFactor;
+
+    /// <summary>The page's devicePixelRatio once the renderer zooms it.</summary>
+    public double ShownDevicePixelRatio => EmulatedDeviceScaleFactor * BrowserZoomFactor;
 }

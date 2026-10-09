@@ -119,7 +119,8 @@ public static class RecordedPage
         RecordedPageResources? resources = null,
         IReadOnlyList<RecordedPopup>? popups = null,
         IReadOnlyList<RecordedFrame>? frames = null,
-        BrowserPageValues? preferences = null)
+        BrowserPageValues? preferences = null,
+        BrowserPageZoom? checkpointZoom = null)
     {
         var tree = state.Dom ?? throw new InvalidOperationException("The document has no DOM state.");
         var nonce = RecreationServer.NewToken();
@@ -160,8 +161,15 @@ public static class RecordedPage
             viewport = new RecreationViewport(recorded.Width, recorded.Height, recorded.DevicePixelRatio, recorded.LayoutZoomFactor)
             {
                 BrowserZoomFactor = zoomFactor,
+                // The zoom at the checkpoint, when zoom was recorded; a
+                // checkpoint before any zoom record was at 100 percent.
+                CheckpointZoomFactor = preferences?.Zoom is null ? null : checkpointZoom?.Factor ?? 1.0,
             };
             notes.Add($"The viewport is shown at {recorded.Width.ToString(CultureInfo.InvariantCulture)} by {recorded.Height.ToString(CultureInfo.InvariantCulture)} CSS pixels and a device pixel ratio of {recorded.DevicePixelRatio.ToString(CultureInfo.InvariantCulture)}, from the page's latest layout checkpoint, recorded at {(recorded.Time / 1e9).ToString("0.000", CultureInfo.InvariantCulture)} s. The window may have been resized after it.");
+            if (Math.Abs(viewport.ShownWidth - recorded.Width) > 1e-6 || Math.Abs(viewport.ShownDevicePixelRatio - recorded.DevicePixelRatio) > 1e-6)
+            {
+                notes.Add($"The page's zoom at the frame, {(zoomFactor * 100).ToString("0.##", CultureInfo.InvariantCulture)} percent, differs from its zoom at that checkpoint, {((viewport.CheckpointZoomFactor ?? zoomFactor) * 100).ToString("0.##", CultureInfo.InvariantCulture)} percent, so the page is shown at {viewport.ShownWidth.ToString("0.##", CultureInfo.InvariantCulture)} by {viewport.ShownHeight.ToString("0.##", CultureInfo.InvariantCulture)} CSS pixels and a device pixel ratio of {viewport.ShownDevicePixelRatio.ToString("0.####", CultureInfo.InvariantCulture)}, as the same window zoomed to the frame's zoom.");
+            }
             // Chromium's layout zoom factor includes the device pixel ratio,
             // so a factor other than the ratio means the page was zoomed.
             if (preferences?.Zoom is null && Math.Abs(recorded.LayoutZoomFactor - recorded.DevicePixelRatio) > 1e-6)

@@ -311,6 +311,20 @@ public sealed class RecreationPreferencesTests
         Assert.Equal(1.5, viewport.EmulatedDeviceScaleFactor, 9);
         Assert.Equal((976, 800), RecreationControl.WindowSize(viewport, 16, 80));
 
+        Assert.Equal(800, viewport.ShownWidth, 9);
+        Assert.Equal(1.8, viewport.ShownDevicePixelRatio, 9);
+
+        // Zoomed to 125 percent after a checkpoint at 100 percent: the same
+        // window, so a narrower page and a larger devicePixelRatio.
+        var later = new RecreationViewport(800, 600, 1.5, 1.5) { BrowserZoomFactor = 1.25, CheckpointZoomFactor = 1.0 };
+        Assert.Equal(800, later.EmulatedWidth, 9);
+        Assert.Equal(600, later.EmulatedHeight, 9);
+        Assert.Equal(1.5, later.EmulatedDeviceScaleFactor, 9);
+        Assert.Equal(640, later.ShownWidth, 9);
+        Assert.Equal(480, later.ShownHeight, 9);
+        Assert.Equal(1.875, later.ShownDevicePixelRatio, 9);
+        Assert.Equal((816, 680), RecreationControl.WindowSize(later, 16, 80));
+
         var plain = new RecreationViewport(800, 600, 1.5, 1.5);
         Assert.Equal((816, 680), RecreationControl.WindowSize(plain, 16, 80));
         Assert.Equal(1.5, plain.EmulatedDeviceScaleFactor, 9);

@@ -29,8 +29,9 @@
 #    It compares the Console's answer with the recorded values and puts the
 #    settings back.
 #
-# -ResultsPath with -SessionFolder or -SessionId and no -Recreation
-# analyses run 1 again. -EventsPath uses events already exported.
+# -ResultsPath with -EventsPath, -SessionFolder, or -SessionId and no
+# -Recreation analyses run 1 again; -EventsPath uses events already
+# exported.
 
 param(
     [int]$StepSeconds = 4,
@@ -81,8 +82,11 @@ function Read-Utc([string]$text) {
         [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
 }
 
+# The player's time format. Windows PowerShell picks Math.Max(int, int) for
+# a literal 0, which a recording's nanoseconds overflow (run of 2026-10-09),
+# so both arguments are long, and the ticks are whole.
 function Format-Time([long]$nanoseconds) {
-    $value = [TimeSpan]::FromTicks([Math]::Max(0, $nanoseconds) / 100)
+    $value = [TimeSpan]::FromTicks([long][Math]::Floor([Math]::Max([long]0, $nanoseconds) / 100))
     return '{0:00}:{1:00}:{2:00}.{3:000}' -f [int][Math]::Floor($value.TotalHours), $value.Minutes, $value.Seconds, $value.Milliseconds
 }
 
@@ -138,6 +142,14 @@ function Get-CssColor([string]$argb) {
     $g = [Convert]::ToInt32($argb.Substring(5, 2), 16)
     $b = [Convert]::ToInt32($argb.Substring(7, 2), 16)
     return "rgb($r, $g, $b)"
+}
+
+# The default zoom at a time, as a factor: the last default zoom record at
+# or before it, else 100 percent.
+function Get-DefaultZoomFactor($zooms, [long]$time) {
+    $last = @($zooms | Where-Object { $_.Payload.mode -eq 'default' -and $_.Time -le $time } | Select-Object -Last 1)
+    if ($last.Count -eq 0) { return 1.0 }
+    return [double]$last[0].Payload.zoomPercent / 100
 }
 
 function Invoke-Analysis([string]$results, [string]$events) {
@@ -197,6 +209,17 @@ function Invoke-Analysis([string]$results, [string]$events) {
             foreach ($map in $record.Payload.maps.PSObject.Properties) { $mapAt[$map.Name] = $map.Value }
         }
         $layout = @($layouts | Where-Object { $_.Time -le $time } | Select-Object -Last 1)
+        # The participant's devicePixelRatio: a layout walk records it with
+        # the zoom of its own time, which may be older than the step's, so
+        # the screen's scale factor is the walk's ratio over the zoom then,
+        # and the ratio at the step is that times the zoom now. The fixture
+        # page is a file, so only the default zoom applies to it.
+        $zoomNow = Get-DefaultZoomFactor $zooms $time
+        $expectedDpr = ''
+        if ($layout.Count) {
+            $zoomAtWalk = Get-DefaultZoomFactor $zooms $layout[0].Time
+            $expectedDpr = [Math]::Round([double]$layout[0].Payload.devicePixelRatio / $zoomAtWalk * $zoomNow, 4)
+        }
         $dark = [string]$fields['preferredColorScheme'] -eq 'dark'
         $forced = [bool]$fields['inForcedColors']
         $canvasMap = if ($forced) { 'forcedColors' } elseif ($dark) { 'dark' } else { 'light' }
@@ -210,7 +233,10 @@ function Invoke-Analysis([string]$results, [string]$events) {
             reduced = [bool]$fields['prefersReducedMotion']
             fontSize = "$($fields['defaultFontSize'])px"
             canvas = $canvas
-            dpr = if ($layout.Count) { [double]$layout[0].Payload.devicePixelRatio } else { '' }
+            zoomPercent = [Math]::Round($zoomNow * 100, 2)
+            dpr = $expectedDpr
+            layoutWalk = if ($layout.Count) { Format-Time $layout[0].Time } else { '' }
+            walkDpr = if ($layout.Count) { [double]$layout[0].Payload.devicePixelRatio } else { '' }
             sendsInStep = $sendsIn.Count
             mapsInStep = $mapsIn.Count })
     }
@@ -332,11 +358,13 @@ if ($Recreation) {
 
 if ($ResultsPath) {
     $script:log = Join-Path $ResultsPath 'analysis-log.txt'
-    if (-not $SessionFolder) {
-        if (-not $SessionId) { throw 'Give -SessionFolder or -SessionId with -ResultsPath.' }
-        $SessionFolder = Resolve-Session $SessionId
+    if (-not $EventsPath) {
+        if (-not $SessionFolder) {
+            if (-not $SessionId) { throw 'Give -EventsPath, -SessionFolder, or -SessionId with -ResultsPath.' }
+            $SessionFolder = Resolve-Session $SessionId
+        }
+        $EventsPath = Export-Events $SessionFolder $ResultsPath
     }
-    if (-not $EventsPath) { $EventsPath = Export-Events $SessionFolder $ResultsPath }
     Invoke-Analysis $ResultsPath $EventsPath
     return
 }
